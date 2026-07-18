@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   redisGet: vi.fn(),
   redisSet: vi.fn(),
   redisDel: vi.fn(),
+  dbUpdate: vi.fn(),
+  dbSet: vi.fn(),
+  dbWhere: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -16,6 +19,32 @@ vi.mock('@roomote/redis', () => ({
     get: mocks.redisGet,
     set: mocks.redisSet,
     del: mocks.redisDel,
+  }),
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {
+    update: (...args: unknown[]) => {
+      mocks.dbUpdate(...args);
+      return {
+        set: (...setArgs: unknown[]) => {
+          mocks.dbSet(...setArgs);
+          return {
+            where: (...whereArgs: unknown[]) => {
+              mocks.dbWhere(...whereArgs);
+              return Promise.resolve();
+            },
+          };
+        },
+      };
+    },
+  },
+  environments: { id: 'id' },
+  taskRuns: { id: 'id', payload: 'payload' },
+  eq: (...values: unknown[]) => values,
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings,
+    values,
   }),
 }));
 
@@ -222,11 +251,72 @@ describe('launchDiscordTask', () => {
             communicationThreadId: 'message-1',
             communicationMessageId: 'message-1',
             discordTaskThread: true,
+            discordReactionChannelId: 'channel-1',
+            discordReactionMessageId: 'message-1',
           }),
         },
       }),
       expect.anything(),
     );
+  });
+
+  it('persists the acknowledgement message as the reaction target for interaction launches', async () => {
+    const provider = {
+      reserveTaskThread: vi.fn(),
+      createThreadFromMessage: vi.fn(),
+      completeTaskThread: vi.fn(),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-dm-1' }),
+      addReaction: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Build a fresh dashboard',
+        user: 'Matt',
+        userId: 'user-1',
+        // Interaction snowflake — not a valid Discord reaction target.
+        ts: 'interaction-new',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'interaction-new',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+      forceNewThread: true,
+    });
+
+    // No origin message id yet at enqueue; reaction coordinates arrive after ack.
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: {
+          type: 'standard',
+          payload: expect.not.objectContaining({
+            discordReactionMessageId: 'interaction-new',
+          }),
+        },
+      }),
+      expect.anything(),
+    );
+    expect(mocks.dbUpdate).toHaveBeenCalled();
+    expect(provider.addReaction).toHaveBeenCalledWith({
+      channelId: 'dm-1',
+      messageId: 'ack-dm-1',
+      name: '👀',
+    });
   });
 
   it('falls back to a detached thread when the anchor message was deleted', async () => {

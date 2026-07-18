@@ -786,9 +786,24 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     messageId: string;
     name: string;
   }): Promise<CommunicationReactionResult> {
-    const emoji = encodeURIComponent(input.name.replace(/^:|:$/gu, ''));
+    const emoji = encodeURIComponent(resolveDiscordReactionEmoji(input.name));
     await this.request(
       'PUT',
+      `/channels/${input.channelId}/messages/${input.messageId}/reactions/${emoji}/@me`,
+      undefined,
+      { retryNetworkErrors: true, retryServerErrors: true },
+    );
+    return { provider: 'discord', ...input };
+  }
+
+  async removeReaction(input: {
+    channelId: string;
+    messageId: string;
+    name: string;
+  }): Promise<CommunicationReactionResult> {
+    const emoji = encodeURIComponent(resolveDiscordReactionEmoji(input.name));
+    await this.request(
+      'DELETE',
       `/channels/${input.channelId}/messages/${input.messageId}/reactions/${emoji}/@me`,
       undefined,
       { retryNetworkErrors: true, retryServerErrors: true },
@@ -1348,4 +1363,65 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     }
     throw lastError ?? new Error(`Discord ${method} ${path} failed.`);
   }
+}
+
+/**
+ * Map Slack-style reaction names used by the agent tooling onto Discord
+ * unicode emoji. Discord's reaction API expects encoded unicode (or custom
+ * emoji names), not Slack `:eyes:`-style aliases.
+ */
+const DISCORD_REACTION_EMOJI_BY_NAME: Record<string, string> = {
+  eyes: '👀',
+  thumbsup: '👍',
+  '+1': '👍',
+  like: '👍',
+  thumbsdown: '👎',
+  '-1': '👎',
+  white_check_mark: '✅',
+  heavy_check_mark: '✔️',
+  checkered_flag: '🏁',
+  x: '❌',
+  negative_squared_cross_mark: '❎',
+  no_entry_sign: '🚫',
+  tada: '🎉',
+  heart: '❤️',
+  fire: '🔥',
+  clap: '👏',
+  think: '🤔',
+  thinking_face: '🤔',
+  ok_hand: '👌',
+  pray: '🙏',
+  '100': '💯',
+  wave: '👋',
+  trophy: '🏆',
+  handshake: '🤝',
+  saluting_face: '🫡',
+  rocket: '🚀',
+  joy: '😆',
+  laugh: '😆',
+  smile: '😄',
+  open_mouth: '😮',
+  surprised: '😮',
+  scream: '😱',
+  sad: '😢',
+  cry: '😢',
+  angry: '😠',
+  rage: '😡',
+  ghost: '👻',
+  hourglass: '⏳',
+  hourglass_flowing_sand: '⏳',
+};
+
+function resolveDiscordReactionEmoji(name: string): string {
+  const cleaned = name.replace(/^:|:$/gu, '').trim();
+  if (!cleaned) {
+    return cleaned;
+  }
+
+  const mapped = DISCORD_REACTION_EMOJI_BY_NAME[cleaned.toLowerCase()];
+  if (mapped) {
+    return mapped;
+  }
+
+  return cleaned;
 }

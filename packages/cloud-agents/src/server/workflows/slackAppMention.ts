@@ -174,14 +174,14 @@ export function buildChatProviderMessageInstructions(
 
   <${tag}_visibility_contract>
     <context>Treat the originating ${label} thread as the user-facing conversation for this task.</context>
-    <rule>Task UI commentary, todo updates, internal reasoning, and ordinary tool results are not visible in ${label}. ${label}-visible lifecycle replies use \`send_chat_reply\`.</rule>
+    <rule>Task UI commentary, todo updates, internal reasoning, and ordinary tool results are not visible in ${label}. ${label}-visible lifecycle replies use \`send_chat_reply\`. Lightweight emoji acks use \`send_chat_reaction_emoji\` when reactions are allowed for the current turn.</rule>
     <rule>Before calling \`send_chat_reply\`, choose the current lifecycle purpose: \`ack\`, \`progress\`, \`closeout\`, or \`clarification\`. The message content should match that purpose.</rule>
     <rule>\`ack\`, \`progress\`, and \`clarification\` replies keep the ${label} turn open. Before finalizing the task, use \`send_chat_reply\` with \`purpose\` set to \`closeout\`.</rule>
     <rule>Use \`request_user_input\` only when structured or private input is genuinely required. It does not replace a ${label}-visible closeout.</rule>
   </${tag}_visibility_contract>
 
   <${tag}_turn_lifecycle>
-    <rule>\`ack\`: Send one early ${label}-visible acknowledgement before substantial work that will not otherwise post to ${label} when the answer is not immediate.</rule>
+    <rule>\`ack\`: Send one early ${label}-visible acknowledgement before substantial work that will not otherwise post to ${label} when the answer is not immediate. When the current turn allows emoji reactions (see an optional \`<${tag}_turn_policy prefer_emoji_ack="true">\` block, or \`reactions_allowed="true"\` on the inbound message policy) and a lightweight acknowledgement is enough, prefer \`send_chat_reaction_emoji\` over a short text ack. When the ack needs words, reactions are not allowed, or this is the first chat turn of a task, use \`send_chat_reply\`.</rule>
     <rule>\`progress\`: After an acknowledgement, send progress only when the update adds decision-useful state, reports a blocker, asks for input, changes approach, or prevents more than 10 minutes of ${label}-visible silence during active work.</rule>
     <rule>\`closeout\`: Send one ${label}-visible closeout when the turn has an answer, completed result, explicit blocker, or a paused-waiting state that you explain in prose.</rule>
     <rule>\`clarification\`: Ask lightweight non-secret questions with \`send_chat_reply\` only when thread context and available tools do not already resolve the question well enough to continue.</rule>
@@ -195,8 +195,9 @@ export function buildChatProviderMessageInstructions(
 
   <${tag}_response_delivery>
     <rule>Use \`send_chat_reply\` for lifecycle replies in the originating ${label} thread when the reply needs words: early acknowledgements, useful progress, closeouts, and lightweight clarifications.</rule>
-    <rule>Do not use Slack-only tools such as \`send_chat_reaction_emoji\` or \`post_to_slack_channel\` for ${label} turns.</rule>
-    <rule>Every new directed ${label} user turn that you answer still needs its own fresh ${label}-visible \`send_chat_reply\`.</rule>
+    <rule>Use \`send_chat_reaction_emoji\` for lightweight acknowledgements, confirmations, or emoji-only answers when the current turn allows reactions. Choose the reaction that best matches the intent: \`eyes\` for taking a look, \`thumbsup\` for acknowledgement/go-ahead, \`white_check_mark\` for completed work, \`x\` or \`thumbsdown\` for rejection/failure, and another mapped reaction when it fits better.</rule>
+    <rule>Do not use Slack-only tools such as \`post_to_slack_channel\` for ${label} turns.</rule>
+    <rule>Every new directed ${label} user turn that you answer still needs its own fresh ${label}-visible response. A prior turn's reply or reaction does not satisfy a later turn. An emoji reaction only satisfies a lightweight ack when the current policy allows reactions; a first-turn or closeout still needs \`send_chat_reply\`.</rule>
   </${tag}_response_delivery>
 </${tag}_message_instructions>
 `.trim();

@@ -5,7 +5,10 @@ import {
 } from '@roomote/types';
 import type { ResolvedTaskCommitAuthor } from '../../commit-author';
 
-import { slackAppMention } from '../slackAppMention';
+import {
+  buildChatProviderMessageInstructions,
+  slackAppMention,
+} from '../slackAppMention';
 
 function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
@@ -599,4 +602,23 @@ describe('slackAppMention', () => {
       'Built-in visual proof for the current proof milestone is already posted back to the originating Slack thread by the worker when trusted Slack context exists.',
     );
   });
+});
+
+describe('buildChatProviderMessageInstructions', () => {
+  it.each(['discord', 'teams', 'telegram'] as const)(
+    'allows send_chat_reaction_emoji for %s turns (not Slack-only)',
+    (provider) => {
+      const instructions = buildChatProviderMessageInstructions(provider);
+
+      expect(instructions).toContain('send_chat_reaction_emoji');
+      expect(instructions).toContain('white_check_mark');
+      expect(instructions).toContain('thumbsdown');
+      expect(instructions).toContain(
+        'Do not use Slack-only tools such as `post_to_slack_channel`',
+      );
+      expect(instructions).not.toContain(
+        'Do not use Slack-only tools such as `send_chat_reaction_emoji`',
+      );
+    },
+  );
 });

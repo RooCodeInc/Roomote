@@ -364,6 +364,11 @@ describe('Discord Gateway event handler', () => {
       eventId: 'message-1',
       token: 'claim-token',
     });
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'dm-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         requesterDiscordUserId: 'discord-user-1',
@@ -380,6 +385,26 @@ describe('Discord Gateway event handler', () => {
           // A real channel message carries an anchor for its task thread.
           communicationAnchorMessageId: 'message-1',
         },
+      }),
+    );
+  });
+
+  it('still launches when the initial eyes reaction fails', async () => {
+    mocks.addReaction.mockRejectedValueOnce(new Error('rate limited'));
+
+    const response = await postEvent(envelope(message()));
+
+    expect(response.status).toBe(200);
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'dm-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
+    expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        status: 'started',
       }),
     );
   });
@@ -644,6 +669,9 @@ describe('Discord Gateway event handler', () => {
     expect(response.status).toBe(200);
     expect(mocks.findActiveRun).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
+    // Interaction ids are not reaction targets; eyes belong to message launches
+    // or the post-launch acknowledgement path.
+    expect(mocks.addReaction).not.toHaveBeenCalled();
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         queuedMessage: expect.objectContaining({
