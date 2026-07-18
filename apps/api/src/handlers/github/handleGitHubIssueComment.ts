@@ -254,6 +254,23 @@ async function waitForTaskToAcceptMessages({
   return null;
 }
 
+function isRetryableSandboxBootError(result: {
+  success: boolean;
+  status?: number;
+  error?: string;
+}): boolean {
+  if (result.success || result.status !== 409) {
+    return false;
+  }
+
+  const error = result.error ?? '';
+
+  return (
+    error.includes('no active sandbox') ||
+    error.includes('sandbox is still booting')
+  );
+}
+
 async function deliverIssueFollowUpToExistingTask({
   taskId,
   userId,
@@ -296,26 +313,41 @@ async function deliverIssueFollowUpToExistingTask({
             : {}),
         });
 
-  const initialAttempt = await deliver({ status, taskPhase });
+  let attempt = await deliver({ status, taskPhase });
 
-  if (
-    initialAttempt.success ||
-    initialAttempt.status !== 409 ||
-    !initialAttempt.error.includes('no active sandbox')
-  ) {
-    return initialAttempt;
+  if (!isRetryableSandboxBootError(attempt)) {
+    return attempt;
   }
 
-  const readyRun = await waitForTaskToAcceptMessages({ taskId });
+  const deadline = Date.now() + EXISTING_TASK_WAIT_TIMEOUT_MS;
 
-  if (!readyRun) {
-    return initialAttempt;
+  while (Date.now() < deadline && isRetryableSandboxBootError(attempt)) {
+    // Prefer waiting until a sandbox URL is recorded, then keep retrying while
+    // delivery still reports sandbox-boot 409s (URL present, RPC not ready).
+    const readyRun = await waitForTaskToAcceptMessages({
+      taskId,
+      timeoutMs: Math.max(0, deadline - Date.now()),
+    });
+
+    if (!readyRun) {
+      return attempt;
+    }
+
+    attempt = await deliver({
+      status: readyRun.status,
+      taskPhase: readyRun.taskPhase,
+    });
+
+    if (!isRetryableSandboxBootError(attempt)) {
+      return attempt;
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, EXISTING_TASK_WAIT_POLL_MS),
+    );
   }
 
-  return deliver({
-    status: readyRun.status,
-    taskPhase: readyRun.taskPhase,
-  });
+  return attempt;
 }
 
 /**

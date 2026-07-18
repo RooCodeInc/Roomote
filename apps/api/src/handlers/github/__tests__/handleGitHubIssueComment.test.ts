@@ -307,6 +307,43 @@ describe('handleGitHubIssueComment', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
+  it('retries when sandbox URL exists but the RPC is still booting', async () => {
+    vi.useFakeTimers();
+    mockFindReusableGitHubIssueTaskOwner.mockResolvedValue({
+      runId: 9,
+      taskId: 'task-existing',
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      delivery: 'attach',
+    });
+    mockSteerMessageToTask
+      .mockResolvedValueOnce({
+        success: false,
+        error:
+          "The task hasn't started yet — the sandbox is still booting. Try again in a few seconds.",
+        status: 409,
+      })
+      .mockResolvedValueOnce({ success: true, result: {} });
+    mockFindLatestTaskRun.mockResolvedValue({
+      id: 9,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      sandboxServerUrl: 'https://sandbox.example',
+    });
+
+    const resultPromise = handleGitHubIssueComment(makePayload());
+    await vi.advanceTimersByTimeAsync(500);
+    const result = await resultPromise;
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'active_issue_owner_routed',
+    });
+    expect(mockSteerMessageToTask).toHaveBeenCalledTimes(2);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('falls back to starting a new task when follow-up delivery fails', async () => {
     mockFindReusableGitHubIssueTaskOwner.mockResolvedValue({
       runId: 9,
