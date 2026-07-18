@@ -425,7 +425,7 @@ describe('SourceControl settings', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows create and manual GitHub App paths when GitHub is not configured', () => {
+  it('shows the create GitHub App path when GitHub is not configured', () => {
     state.gitHubInstallations = [];
     state.gitHubRepositories = [];
     state.configProviders = [
@@ -444,25 +444,14 @@ describe('SourceControl settings', () => {
       screen.getByRole('button', { name: 'Create GitHub App' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Enter values manually' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Enter values manually' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Connect GitHub' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('source-control-config-github'),
     ).not.toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Enter values manually' }),
-    );
-
-    expect(
-      screen.getByTestId('source-control-config-github'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Paste the app slug, App ID, private key/i),
-    ).toBeInTheDocument();
   });
 
   it('shows the recommendation highlight copy when targeted from a setup link', () => {

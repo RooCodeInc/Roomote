@@ -173,8 +173,8 @@ describe('StepSourceControlConfig', () => {
       screen.getByRole('button', { name: 'Create GitHub App' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Enter values manually' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Enter values manually' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText('GitHub organization'),
     ).not.toBeInTheDocument();
@@ -224,7 +224,7 @@ describe('StepSourceControlConfig', () => {
     });
   });
 
-  it('reveals the existing GitHub field form from the manual path', () => {
+  it('keeps the GitHub field form hidden without a manual entry path', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildSourceControlSetup()}
@@ -233,15 +233,11 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Enter values manually' }),
-    );
-
-    expect(screen.getByText('GitHub App Slug')).toBeInTheDocument();
-    expect(screen.getByText('GitHub App ID')).toBeInTheDocument();
+    expect(screen.queryByText('GitHub App Slug')).not.toBeInTheDocument();
+    expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /Save and continue/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /Save and continue/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('guides GitLab OAuth application setup', () => {
