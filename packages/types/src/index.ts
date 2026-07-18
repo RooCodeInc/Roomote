@@ -10,6 +10,7 @@ export * from './cloud-agents';
 export * from './task-runs';
 export * from './chatgpt-subscription';
 export * from './communication';
+export * from './communication-message-prompt';
 export * from './identity-display-name';
 export * from './compute-provider-usage';
 export * from './conflict-resolution-comments';

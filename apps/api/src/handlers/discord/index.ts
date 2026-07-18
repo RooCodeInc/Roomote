@@ -37,6 +37,10 @@ import {
   findCommunicationTaskRunBySourceEvent,
 } from '../tasks/communication-task-run-lookup.js';
 import { resumeCommunicationTaskFromSnapshot } from '../tasks/communication-snapshot-resume.js';
+import {
+  attachOutOfBandContextToCommunicationMessage,
+  releaseCommunicationOutOfBandClaim,
+} from '../tasks/communication-out-of-band-context.js';
 import { processDiscordAttachments } from './attachments.js';
 import {
   DISCORD_GATEWAY_SECRET_HEADER,
@@ -456,7 +460,30 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       runId: activeRun.id,
       senderUserId,
     });
-    await queueCommunicationMessageOnce('discord', activeRun.id, queuedMessage);
+    // Mirror Slack: out-of-band PR review/status notifications are posted
+    // outside the harness session and must be re-surfaced on the next user
+    // turn so the agent knows what the user is replying to.
+    const { message: messageWithOutOfBand, claim: outOfBandClaim } =
+      await attachOutOfBandContextToCommunicationMessage({
+        taskId: activeRun.taskId,
+        provider: 'discord',
+        message: queuedMessage,
+      });
+    try {
+      const queued = await queueCommunicationMessageOnce(
+        'discord',
+        activeRun.id,
+        messageWithOutOfBand,
+      );
+      // Dedupe hit: nothing new will be delivered, so put claimed OOB
+      // messages back for a later real follow-up.
+      if (!queued) {
+        await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+      }
+    } catch (error) {
+      await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+      throw error;
+    }
     await setLatestInboundMessageId('discord', activeRun.id, queuedMessage.ts);
     try {
       await resolved.provider.addReaction({
