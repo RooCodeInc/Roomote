@@ -234,6 +234,82 @@ describe('startNewDiscordTask', () => {
     expect(agentPrompt).not.toContain('@Roomote investigate the flaky build');
   });
 
+  it('does not inherit prior thread context for /new (forceNewThread)', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          {
+            id: '100',
+            user: 'u-alice',
+            username: 'Alice',
+            text: 'Should not leak into the fresh task',
+            files: [
+              {
+                id: 'att-1',
+                name: 'old.txt',
+                mimeType: 'text/plain',
+                size: 12,
+                url: 'https://cdn.discordapp.com/attachments/old.txt',
+              },
+            ],
+          },
+        ],
+      }),
+    };
+
+    const result = await startNewDiscordTask({
+      provider: provider as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Start something unrelated',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'interaction-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'old-thread',
+        communicationMessageId: 'interaction-1',
+      },
+      channel: {
+        channelId: 'old-thread',
+        channelName: 'Old task',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      forceNewThread: true,
+    });
+
+    expect(result.status).toBe('started');
+    expect(provider.fetchChannelMessages).not.toHaveBeenCalled();
+    expect(mocks.processAttachments).not.toHaveBeenCalled();
+    expect(mocks.buildRoutingContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskDescription: 'Start something unrelated',
+        threadMessages: [{ user: 'Matt', text: 'Start something unrelated' }],
+      }),
+    );
+    expect(mocks.launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forceNewThread: true,
+        queuedMessage: expect.objectContaining({
+          text: 'Start something unrelated',
+        }),
+      }),
+    );
+    const launchArgs = mocks.launchTask.mock.calls[0]?.[0] as {
+      agentPromptText?: string;
+    };
+    expect(launchArgs.agentPromptText).toBeUndefined();
+  });
+
   it('stores thread context on routing confirmation for later launch', async () => {
     mocks.shouldAutoConfirm.mockReturnValue(false);
     mocks.requestConfirmation.mockResolvedValue({

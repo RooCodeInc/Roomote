@@ -212,11 +212,20 @@ export async function startNewDiscordTask(input: {
     };
   }
 
+  // Full transcript + prior attachments belong on task start only when the
+  // launch already lives inside a Discord thread and is not /new (or another
+  // forced sibling). Matching Slack: continue-in-thread gets history; a fresh
+  // task must start clean. Top-level channel launches never dump unrelated
+  // channel history into the agent prompt.
+  const includeFullThreadContext =
+    input.channel.isThread && !input.forceNewThread;
   const [history, installation] = await Promise.all([
-    fetchThreadHistoryBestEffort({
-      provider: input.provider,
-      channelId: input.channel.channelId,
-    }),
+    includeFullThreadContext
+      ? fetchThreadHistoryBestEffort({
+          provider: input.provider,
+          channelId: input.channel.channelId,
+        })
+      : Promise.resolve([] as DiscordThreadHistoryMessage[]),
     input.channel.guildId
       ? findDiscordInstallationByGuildId(input.channel.guildId)
       : Promise.resolve(null),
@@ -232,18 +241,19 @@ export async function startNewDiscordTask(input: {
   )
     ? history
     : [...history, triggeringMessage];
-  // Router keeps its own last-N budgetary slice; pass the full reconstructed
-  // transcript so routing still sees the same shape as Slack thread messages.
-  const routingThreadMessages = historyWithTrigger.map((message) => ({
-    user: message.username ?? message.user,
-    text: message.text,
-  }));
-
-  // Full transcript + prior attachments belong on task start only when the
-  // launch already lives inside a Discord thread (Slack parity). Top-level
-  // channel launches should not dump unrelated channel history into the
-  // agent prompt.
-  const includeFullThreadContext = input.channel.isThread;
+  // Router keeps its own last-N budgetary slice; pass the reconstructed
+  // transcript only when this launch inherits the thread.
+  const routingThreadMessages = includeFullThreadContext
+    ? historyWithTrigger.map((message) => ({
+        user: message.username ?? message.user,
+        text: message.text,
+      }))
+    : [
+        {
+          user: triggeringMessage.user,
+          text: triggeringMessage.text,
+        },
+      ];
   const historyAttachments = includeFullThreadContext
     ? toDiscordAttachmentsFromHistory(history, {
         excludeMessageId: input.queuedMessage.ts,
