@@ -64,6 +64,10 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
+import {
+  attachOutOfBandContextToCommunicationMessage,
+  releaseCommunicationOutOfBandClaim,
+} from '../tasks/communication-out-of-band-context.js';
 import { verifyBotFrameworkJwt } from './bot-framework-auth.js';
 import {
   findActiveTeamsTaskRun,
@@ -954,6 +958,28 @@ async function resumeTeamsTaskFromSnapshot(input: {
         typeof completedPayload.environmentId === 'string'
           ? completedPayload.environmentId
           : undefined;
+
+      // Teams has its own snapshot-resume path and does not go through the
+      // shared Discord/Telegram helper, so re-surface out-of-band PR
+      // review/status notifications here the same way.
+      let resumeQueuedMessage: QueuedTeamsCommunicationMessage = {
+        ...queuedMessage,
+        provider: 'teams',
+      };
+      let outOfBandClaim: { messageIds: string[] } | null = null;
+      if (completedRun.taskId) {
+        const attached = await attachOutOfBandContextToCommunicationMessage({
+          taskId: completedRun.taskId,
+          provider: 'teams',
+          message: resumeQueuedMessage,
+        });
+        resumeQueuedMessage = {
+          ...attached.message,
+          provider: 'teams',
+        };
+        outOfBandClaim = attached.claim;
+      }
+
       const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> =
         {
           repo,
@@ -961,7 +987,7 @@ async function resumeTeamsTaskFromSnapshot(input: {
           ...(completedRun.port ? { port: completedRun.port } : {}),
           sourceSnapshotId,
           sourceRunId: completedRun.id,
-          queuedCommunicationMessages: [queuedMessage],
+          queuedCommunicationMessages: [resumeQueuedMessage],
         };
 
       populateSnapshotResumeCommunicationMetadata(resumePayload, {
@@ -982,30 +1008,35 @@ async function resumeTeamsTaskFromSnapshot(input: {
 
       // Resumes never create tasks and never re-attribute; the resuming
       // human becomes the new run's acting user.
-      const resumeLaunch = await enqueueTask(
-        {
-          task: {
-            type: TaskPayloadKind.SnapshotResume,
-            sourceSnapshotId,
-            sourceRunId: completedRun.id,
-            payload: resumePayload,
+      try {
+        const resumeLaunch = await enqueueTask(
+          {
+            task: {
+              type: TaskPayloadKind.SnapshotResume,
+              sourceSnapshotId,
+              sourceRunId: completedRun.id,
+              payload: resumePayload,
+            },
+            actingUserId: resumeUserId,
           },
-          actingUserId: resumeUserId,
-        },
-        {
-          launchClass: resumeUserId ? 'human' : 'automation',
-        },
-      );
+          {
+            launchClass: resumeUserId ? 'human' : 'automation',
+          },
+        );
 
-      apiLogger.debug(
-        `✅ Created SnapshotResume task run ${resumeLaunch.id} for Teams conversation ${metadata.communicationChannelId}`,
-      );
+        apiLogger.debug(
+          `✅ Created SnapshotResume task run ${resumeLaunch.id} for Teams conversation ${metadata.communicationChannelId}`,
+        );
 
-      return {
-        mode: 'leader',
-        runId: resumeLaunch.id,
-        taskId: resumeLaunch.taskId,
-      };
+        return {
+          mode: 'leader',
+          runId: resumeLaunch.id,
+          taskId: resumeLaunch.taskId,
+        };
+      } catch (error) {
+        await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+        throw error;
+      }
     },
     onContended: async () => {
       // Another handler is already creating the resume task run. Poll for the new
@@ -1020,7 +1051,30 @@ async function resumeTeamsTaskFromSnapshot(input: {
         return undefined;
       }
 
-      await queueCommunicationMessage('teams', resumeRun.id, queuedMessage);
+      let followUpMessage: QueuedTeamsCommunicationMessage = queuedMessage;
+      let outOfBandClaim: { messageIds: string[] } | null = null;
+      // Prefer the completed source task id so notifications recorded against
+      // that task still re-surface if the leader resume is still settling.
+      const claimTaskId = completedRun.taskId ?? resumeRun.taskId;
+      if (claimTaskId) {
+        const attached = await attachOutOfBandContextToCommunicationMessage({
+          taskId: claimTaskId,
+          provider: 'teams',
+          message: followUpMessage,
+        });
+        followUpMessage = {
+          ...attached.message,
+          provider: 'teams',
+        };
+        outOfBandClaim = attached.claim;
+      }
+
+      try {
+        await queueCommunicationMessage('teams', resumeRun.id, followUpMessage);
+      } catch (error) {
+        await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+        throw error;
+      }
 
       apiLogger.debug(
         `[teams] Queued contended Teams follow-up ${queuedMessage.ts} for resume task run ${resumeRun.id}`,
@@ -1387,11 +1441,26 @@ async function resumePendingTeamsAuthToken(
       runId: activeRun.id,
       senderUserId: mappedUserId,
     });
-    await queueCommunicationMessage(
-      'teams',
-      activeRun.id,
-      queuedMessageWithImages,
-    );
+    let authFollowUp: QueuedTeamsCommunicationMessage = queuedMessageWithImages;
+    let outOfBandClaim: { messageIds: string[] } | null = null;
+    if (activeRun.taskId) {
+      const attached = await attachOutOfBandContextToCommunicationMessage({
+        taskId: activeRun.taskId,
+        provider: 'teams',
+        message: authFollowUp,
+      });
+      authFollowUp = {
+        ...attached.message,
+        provider: 'teams',
+      };
+      outOfBandClaim = attached.claim;
+    }
+    try {
+      await queueCommunicationMessage('teams', activeRun.id, authFollowUp);
+    } catch (error) {
+      await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+      throw error;
+    }
 
     apiLogger.debug(
       `[teams] Queued pending Teams auth activity ${queuedMessage.ts} for task run ${activeRun.id}`,
@@ -1815,7 +1884,26 @@ teams.post('/', async (c) => {
     runId: activeRun.id,
     senderUserId: mappedUserId,
   });
-  await queueCommunicationMessage('teams', activeRun.id, queuedMessage);
+  let activeFollowUp: QueuedTeamsCommunicationMessage = queuedMessage;
+  let outOfBandClaim: { messageIds: string[] } | null = null;
+  if (activeRun.taskId) {
+    const attached = await attachOutOfBandContextToCommunicationMessage({
+      taskId: activeRun.taskId,
+      provider: 'teams',
+      message: activeFollowUp,
+    });
+    activeFollowUp = {
+      ...attached.message,
+      provider: 'teams',
+    };
+    outOfBandClaim = attached.claim;
+  }
+  try {
+    await queueCommunicationMessage('teams', activeRun.id, activeFollowUp);
+  } catch (error) {
+    await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+    throw error;
+  }
 
   apiLogger.debug(
     `[teams] Queued Teams activity ${queuedMessage.ts} for task run ${activeRun.id}`,

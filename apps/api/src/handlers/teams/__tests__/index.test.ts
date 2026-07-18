@@ -33,6 +33,8 @@ const {
   usersFindFirstMock,
   verifyBotFrameworkJwtMock,
   withContentionMock,
+  claimPendingOutOfBandMock,
+  releaseClaimedOutOfBandMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
@@ -85,6 +87,8 @@ const {
   usersFindFirstMock: vi.fn(),
   verifyBotFrameworkJwtMock: vi.fn(),
   withContentionMock: vi.fn(),
+  claimPendingOutOfBandMock: vi.fn(),
+  releaseClaimedOutOfBandMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -103,6 +107,8 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   setTrustedRunActingUser: setTrustedRunActingUserMock,
+  claimPendingOutOfBandTaskMessages: claimPendingOutOfBandMock,
+  releaseClaimedOutOfBandTaskMessages: releaseClaimedOutOfBandMock,
   resolveTeamsBotRuntimeCredentials: vi.fn(async () => ({
     botAppId: envMock.R_TEAMS_BOT_APP_ID?.trim() || null,
     botAppPassword: envMock.R_TEAMS_BOT_APP_PASSWORD?.trim() || null,
@@ -329,6 +335,8 @@ describe('Teams webhook handler', () => {
       payload: {},
     });
     queueCommunicationMessageMock.mockResolvedValue(undefined);
+    claimPendingOutOfBandMock.mockResolvedValue([]);
+    releaseClaimedOutOfBandMock.mockResolvedValue(undefined);
     buildTeamsRoutingContextMock.mockResolvedValue({ context: true });
     routeTaskMock.mockResolvedValue({
       status: 'routed',
@@ -1407,6 +1415,58 @@ describe('Teams webhook handler', () => {
           sourceRunId: 77,
         }),
         actingUserId: 'mapped-user-1',
+      }),
+      expect.objectContaining({ launchClass: 'human' }),
+    );
+  });
+
+  it('includes claimed out-of-band review context on Teams snapshot resume', async () => {
+    findFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 77,
+      userId: 'user-1',
+      type: 'standard.task',
+      status: 'completed',
+      taskId: 'task-1',
+      payload: { repo: 'org/repo', environmentId: 'env-1' },
+      port: 3000,
+      snapshotId: 'snap-1',
+      snapshotCreatedAt: new Date(),
+    });
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    claimPendingOutOfBandMock.mockResolvedValueOnce([
+      {
+        id: 'oob-1',
+        ts: 1_720_000_000_000,
+        text: 'I left two review comments on PR #42',
+      },
+    ]);
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    expect(response.status).toBe(200);
+    expect(claimPendingOutOfBandMock).toHaveBeenCalledWith('task-1');
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            queuedCommunicationMessages: [
+              expect.objectContaining({
+                formattedPrompt: expect.stringContaining(
+                  'I left two review comments on PR #42',
+                ),
+              }),
+            ],
+          }),
+        }),
       }),
       expect.objectContaining({ launchClass: 'human' }),
     );
