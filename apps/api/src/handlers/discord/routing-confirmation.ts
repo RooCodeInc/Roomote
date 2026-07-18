@@ -72,6 +72,11 @@ type PendingDiscordRoute = {
    * and the card is a plain menu. Only a suggestion may be auto-confirmed.
    */
   suggestedIndex: number | null;
+  /**
+   * Router free-form kickoff for the suggested workspace only. Used when the
+   * launch keeps that workspace; manual picks fall back to the static text.
+   */
+  kickoffMessage?: string;
   forceNewThread?: boolean;
 };
 
@@ -417,6 +422,10 @@ export async function requestDiscordRoutingConfirmation(input: {
   const cardChannel = thread
     ? taskThreadChannelContext({ channel: input.channel, thread })
     : null;
+  const kickoffMessage =
+    input.routingDecision.status === 'routed'
+      ? input.routingDecision.result.kickoffMessage?.trim()
+      : undefined;
   const pending: PendingDiscordRoute = {
     requesterDiscordUserId: input.requesterDiscordUserId,
     launchOwnerUserId: input.launchOwnerUserId,
@@ -427,6 +436,7 @@ export async function requestDiscordRoutingConfirmation(input: {
     ...(cardChannel ? { cardChannel } : {}),
     options,
     suggestedIndex,
+    ...(kickoffMessage ? { kickoffMessage } : {}),
     ...(input.forceNewThread ? { forceNewThread: true } : {}),
   };
   await storePendingRoute(pendingRouteId, pending);
@@ -566,6 +576,17 @@ async function launchPendingDiscordRoute(input: {
     return { status: 'unavailable' as const };
   }
 
+  const suggestedWorkspace =
+    input.pending.suggestedIndex === null
+      ? null
+      : (input.pending.options[input.pending.suggestedIndex]?.workspace ??
+        null);
+  const kickoffMessage =
+    suggestedWorkspace &&
+    sameWorkspace(input.option.workspace, suggestedWorkspace)
+      ? input.pending.kickoffMessage
+      : undefined;
+
   const launched = await launchDiscordTask({
     provider: input.provider,
     launchOwnerUserId: input.pending.launchOwnerUserId,
@@ -574,6 +595,7 @@ async function launchPendingDiscordRoute(input: {
     channel: input.pending.channel,
     workspace,
     ...(input.pending.forceNewThread ? { forceNewThread: true } : {}),
+    ...(kickoffMessage ? { kickoffMessage } : {}),
     ...(input.replaceMessage
       ? { replaceMessage: input.replaceMessage }
       : input.pending.cardChannel && input.pending.cardMessageId
@@ -753,10 +775,15 @@ export async function handleDiscordRoutingReply(input: {
       : null;
     const nextSuggestedOption =
       suggestedIndex === null ? null : (options[suggestedIndex] ?? null);
+    const nextKickoffMessage = routed?.kickoffMessage?.trim();
+    // Drop the prior suggestion's kickoff so a correction never posts stale
+    // workspace copy; only a non-empty re-routed kickoff is keepable.
+    const { kickoffMessage: _priorKickoff, ...pendingWithoutKickoff } = pending;
     const nextPending: PendingDiscordRoute = {
-      ...pending,
+      ...pendingWithoutKickoff,
       options,
       suggestedIndex,
+      ...(nextKickoffMessage ? { kickoffMessage: nextKickoffMessage } : {}),
     };
 
     if (nextSuggestedOption && autoConfirmDelayMs === 0) {

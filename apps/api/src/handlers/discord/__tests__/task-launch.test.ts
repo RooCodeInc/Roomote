@@ -878,4 +878,50 @@ describe('launchDiscordTask', () => {
       }),
     );
   });
+
+  it('posts the router free-form kickoff as the acknowledgement text', async () => {
+    const provider = {
+      reserveTaskThread: vi.fn(),
+      createThreadFromMessage: vi.fn(),
+      completeTaskThread: vi.fn(),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn(),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'dm',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+      kickoffMessage: 'Digging into the flaky tests in Acme.',
+    });
+
+    expect(provider.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-1',
+        text: 'Digging into the flaky tests in Acme.',
+      }),
+    );
+  });
 });

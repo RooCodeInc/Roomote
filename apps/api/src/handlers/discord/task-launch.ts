@@ -276,6 +276,11 @@ export async function launchDiscordTask(input: {
    * a message that lives where the acknowledgement would have gone.
    */
   replaceMessage?: DiscordMessageToReplace;
+  /**
+   * Router free-form kickoff sentence (Slack parity). When set and normalizable,
+   * it becomes the Discord acknowledgement text instead of the static template.
+   */
+  kickoffMessage?: string | null;
 }) {
   let createdThread: DiscordTaskThread | null = null;
   const parentId = taskThreadParentId(input);
@@ -382,6 +387,7 @@ export async function launchDiscordTask(input: {
     text: discordTaskAcknowledgementText({
       workspaceDisplayName: input.workspace.workspaceDisplayName,
       taskUrl,
+      ...(input.kickoffMessage ? { kickoffMessage: input.kickoffMessage } : {}),
     }),
     buttons: discordTaskButtons({ runId: launchResult.id, taskUrl }),
   };
