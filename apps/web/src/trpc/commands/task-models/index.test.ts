@@ -14,6 +14,7 @@ const {
   mockGetPersistedEnvironmentVariableValues,
   mockUpsertDeploymentEnvironmentVariables,
   mockIsChatGptSubscriptionConnected,
+  mockIsGitHubCopilotSubscriptionConnected,
 } = vi.hoisted(() => ({
   mockFindDeploymentSettings: vi.fn(),
   mockInsertDeploymentSettings: vi.fn(),
@@ -25,6 +26,7 @@ const {
   mockGetPersistedEnvironmentVariableValues: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockIsChatGptSubscriptionConnected: vi.fn(),
+  mockIsGitHubCopilotSubscriptionConnected: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -52,6 +54,8 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn(),
   inArray: vi.fn((column, values) => ({ column, values })),
   isChatGptSubscriptionConnected: mockIsChatGptSubscriptionConnected,
+  isGitHubCopilotSubscriptionConnected:
+    mockIsGitHubCopilotSubscriptionConnected,
   isNull: vi.fn((column) => ({ isNull: column })),
 }));
 
@@ -201,6 +205,7 @@ describe('lookupTaskModelCommand', () => {
     delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
     delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+    mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
@@ -1382,6 +1387,7 @@ describe('task model provider commands', () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+    mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
     mockPersistedSetupNewState({});
   });
 
@@ -1761,6 +1767,7 @@ describe('task model provider commands', () => {
     // last-provider guard, so removing the only saved API-key provider is
     // allowed because the subscription keeps the deployment usable.
     mockIsChatGptSubscriptionConnected.mockResolvedValue(true);
+    mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'ANTHROPIC_API_KEY',
     ]);

@@ -83,6 +83,20 @@ async function postMessages(
   path = '/api/inference/anthropic/v1/messages',
   headers: Record<string, string> = {},
 ) {
+  return appRequest(
+    app,
+    path,
+    { model: 'claude-sonnet-5', max_tokens: 16 },
+    headers,
+  );
+}
+
+async function appRequest(
+  app: Hono<{ Variables: Variables }>,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
   return app.request(path, {
     method: 'POST',
     headers: {
@@ -90,7 +104,7 @@ async function postMessages(
       authorization: 'Bearer run-token-value',
       ...headers,
     },
-    body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 16 }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -329,6 +343,61 @@ describe('inference gateway', () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(new Headers(init.headers).get('x-initiator')).toBe('agent');
+  });
+
+  it('sets Copilot-Vision-Request when the body carries image content', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+      {
+        model: 'claude-sonnet-5',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What is in this image?' },
+              {
+                type: 'image_url',
+                image_url: { url: 'data:image/png;base64,abc' },
+              },
+            ],
+          },
+        ],
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('copilot-vision-request')).toBe(
+      'true',
+    );
+  });
+
+  it('does not set Copilot-Vision-Request for text-only Copilot requests', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('copilot-vision-request')).toBeNull();
+  });
+
+  it('ignores client-supplied Copilot-Vision-Request when the body is text-only', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+      { 'copilot-vision-request': 'true' },
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('copilot-vision-request')).toBeNull();
   });
 
   it('allows nested paths under the Vercel AI Gateway protocol base', async () => {

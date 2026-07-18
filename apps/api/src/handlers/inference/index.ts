@@ -34,6 +34,7 @@ const REQUEST_HEADER_DENYLIST = new Set([
   // Copilot request classification is set authoritatively by the gateway.
   'openai-intent',
   'x-initiator',
+  'copilot-vision-request',
   'cookie',
   'host',
   'connection',
@@ -166,6 +167,109 @@ function extractUpstreamPath(pathname: string, providerId: string): string {
 }
 
 /**
+ * Mirror OpenCode's GitHub Copilot vision detection so gateway-mode requests
+ * set `Copilot-Vision-Request` when the body carries image content across the
+ * common OpenAI, Responses, and Anthropic-compatible shapes.
+ */
+function copilotRequestBodyHasVisionContent(bodyText: string): boolean {
+  if (!bodyText.trim()) {
+    return false;
+  }
+
+  let body: unknown;
+
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return false;
+  }
+
+  if (!body || typeof body !== 'object') {
+    return false;
+  }
+
+  const record = body as {
+    messages?: unknown;
+    input?: unknown;
+  };
+
+  if (
+    Array.isArray(record.messages) &&
+    messagesContainVisionContent(record.messages)
+  ) {
+    return true;
+  }
+
+  if (Array.isArray(record.input) && inputContainsVisionContent(record.input)) {
+    return true;
+  }
+
+  return false;
+}
+
+function messagesContainVisionContent(messages: unknown[]): boolean {
+  return messages.some((message) => {
+    if (!message || typeof message !== 'object') {
+      return false;
+    }
+
+    const content = (message as { content?: unknown }).content;
+
+    if (!Array.isArray(content)) {
+      return false;
+    }
+
+    return content.some((part) => {
+      if (!part || typeof part !== 'object') {
+        return false;
+      }
+
+      const typed = part as {
+        type?: unknown;
+        content?: unknown;
+      };
+
+      if (typed.type === 'image_url' || typed.type === 'image') {
+        return true;
+      }
+
+      // Anthropic-style images can nest under tool_result content.
+      if (typed.type === 'tool_result' && Array.isArray(typed.content)) {
+        return typed.content.some(
+          (nested) =>
+            nested &&
+            typeof nested === 'object' &&
+            (nested as { type?: unknown }).type === 'image',
+        );
+      }
+
+      return false;
+    });
+  });
+}
+
+function inputContainsVisionContent(input: unknown[]): boolean {
+  return input.some((item) => {
+    if (!item || typeof item !== 'object') {
+      return false;
+    }
+
+    const content = (item as { content?: unknown }).content;
+
+    if (!Array.isArray(content)) {
+      return false;
+    }
+
+    return content.some(
+      (part) =>
+        part &&
+        typeof part === 'object' &&
+        (part as { type?: unknown }).type === 'input_image',
+    );
+  });
+}
+
+/**
  * Inference gateway: forwards LLM API traffic from task sandboxes to model
  * providers, injecting the deployment's provider key server-side. Sandboxes
  * authenticate with their run-scoped token and never hold the key itself.
@@ -261,6 +365,22 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       c.req.header('x-initiator') === 'agent' ? 'agent' : 'user';
   }
 
+  // GitHub Copilot's OAuth path normally labels vision traffic. Gateway mode
+  // holds that token server-side, so inspect the request body here and restore
+  // the same header OpenCode would have set.
+  let requestBody: BodyInit | null = c.req.raw.body;
+  let useDuplexHalf = Boolean(c.req.raw.body);
+
+  if (providerId === 'github-copilot' && method === 'POST') {
+    const bodyText = await c.req.text();
+    requestBody = bodyText;
+    useDuplexHalf = false;
+
+    if (copilotRequestBodyHasVisionContent(bodyText)) {
+      injectedHeaders['Copilot-Vision-Request'] = 'true';
+    }
+  }
+
   try {
     const upstreamResponse = await fetchWithLongLivedStreamDispatcher(
       upstreamUrl,
@@ -270,10 +390,10 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
           c.req.raw.headers,
           injectedHeaders,
         ),
-        body: c.req.raw.body,
+        body: requestBody,
         signal: c.req.raw.signal,
         // Required by undici when streaming a request body.
-        ...(c.req.raw.body ? { duplex: 'half' as const } : {}),
+        ...(useDuplexHalf ? { duplex: 'half' as const } : {}),
       },
     );
 
