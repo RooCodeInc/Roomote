@@ -403,7 +403,7 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
                   Slack Apps portal
                   <ExternalLink className="inline size-3 -mt-1 ml-1" />
                 </a>{' '}
-                → Your App Configuration Tokens →{' '}
+                → Your App Configuration Tokens (at the bottom of the page) →{' '}
                 <span className="font-semibold">Generate Token</span>, picking
                 the workspace you want to connect.
               </p>
