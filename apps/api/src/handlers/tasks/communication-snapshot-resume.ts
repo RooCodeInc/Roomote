@@ -9,8 +9,14 @@ import {
   type TaskPayload,
 } from '@roomote/types';
 
+import {
+  attachOutOfBandContextToCommunicationMessage,
+  releaseCommunicationOutOfBandClaim,
+} from './communication-out-of-band-context.js';
+
 type CompletedCommunicationTaskRun = {
   id: number;
+  taskId?: string;
   payload: unknown;
   port: number | null;
   snapshotId: string | null;
@@ -44,6 +50,25 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
     typeof completedPayload.environmentId === 'string'
       ? completedPayload.environmentId
       : undefined;
+
+  // Slack resumes build their own `<replying_to>` / thread context. Non-Slack
+  // providers need the out-of-band claim path so background PR review
+  // notifications re-enter the next turn.
+  let queuedMessage: QueuedCommunicationMessage = {
+    ...input.queuedMessage,
+    provider: input.provider,
+  };
+  let outOfBandClaim: { messageIds: string[] } | null = null;
+  if (input.provider !== 'slack' && input.completedRun.taskId) {
+    const attached = await attachOutOfBandContextToCommunicationMessage({
+      taskId: input.completedRun.taskId,
+      provider: input.provider,
+      message: queuedMessage,
+    });
+    queuedMessage = attached.message;
+    outOfBandClaim = attached.claim;
+  }
+
   const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
     ...(environmentId ? { environmentId } : {}),
@@ -51,10 +76,12 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
     sourceSnapshotId: input.completedRun.snapshotId,
     sourceRunId: input.completedRun.id,
     queuedCommunicationMessages: [
-      { ...input.queuedMessage, provider: input.provider },
+      {
+        ...queuedMessage,
+        provider: input.provider,
+      },
     ],
   };
-
   populateSnapshotResumeCommunicationMetadata(resumePayload, {
     provider: input.provider,
     sourcePayload: completedPayload,
@@ -73,16 +100,21 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
   }
   restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
-  return enqueueTask(
-    {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: input.completedRun.snapshotId,
-        sourceRunId: input.completedRun.id,
-        payload: resumePayload,
+  try {
+    return await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: input.completedRun.snapshotId,
+          sourceRunId: input.completedRun.id,
+          payload: resumePayload,
+        },
+        actingUserId: input.queuedMessage.userId ?? null,
       },
-      actingUserId: input.queuedMessage.userId ?? null,
-    },
-    { launchClass: 'human' },
-  );
+      { launchClass: 'human' },
+    );
+  } catch (error) {
+    await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+    throw error;
+  }
 }

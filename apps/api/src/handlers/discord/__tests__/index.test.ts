@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   channelAutoStart: vi.fn(),
   findPendingRoutingReply: vi.fn(),
   handleRoutingReply: vi.fn(),
+  attachOutOfBand: vi.fn(),
+  releaseOutOfBand: vi.fn(),
 }));
 
 vi.mock('../event-gate.js', () => ({
@@ -87,6 +89,11 @@ vi.mock('../../tasks/acting-user-sync.js', () => ({
 
 vi.mock('../../tasks/communication-snapshot-resume.js', () => ({
   resumeCommunicationTaskFromSnapshot: mocks.resumeTask,
+}));
+
+vi.mock('../../tasks/communication-out-of-band-context.js', () => ({
+  attachOutOfBandContextToCommunicationMessage: mocks.attachOutOfBand,
+  releaseCommunicationOutOfBandClaim: mocks.releaseOutOfBand,
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -193,6 +200,14 @@ describe('Discord Gateway event handler', () => {
     mocks.channelAutoStart.mockResolvedValue(false);
     mocks.findPendingRoutingReply.mockResolvedValue(null);
     mocks.handleRoutingReply.mockResolvedValue(false);
+    mocks.attachOutOfBand.mockImplementation(
+      async ({ message }: { message: Record<string, unknown> }) => ({
+        message,
+        claim: null,
+      }),
+    );
+    mocks.releaseOutOfBand.mockResolvedValue(undefined);
+    mocks.queueMessage.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -430,6 +445,7 @@ describe('Discord Gateway event handler', () => {
     });
     mocks.findActiveRun.mockResolvedValue({
       id: 23,
+      taskId: 'task-23',
       actingUserId: 'roomote-user-1',
     });
 
@@ -444,6 +460,13 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.attachOutOfBand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-23',
+        provider: 'discord',
+        message: expect.objectContaining({ text: 'Also fix the type error' }),
+      }),
+    );
     expect(mocks.queueMessage).toHaveBeenCalledWith(
       'discord',
       23,
@@ -455,6 +478,47 @@ describe('Discord Gateway event handler', () => {
       'message-1',
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('releases claimed out-of-band context when the queue duplicates', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'Fix tests',
+      type: 11,
+    });
+    mocks.findActiveRun.mockResolvedValue({
+      id: 23,
+      taskId: 'task-23',
+      actingUserId: 'roomote-user-1',
+    });
+    mocks.attachOutOfBand.mockResolvedValue({
+      message: {
+        text: 'yes fix those',
+        user: 'matt',
+        ts: 'message-1',
+        formattedPrompt:
+          '<out_of_band_context>\nnotice\n</out_of_band_context>',
+      },
+      claim: { messageIds: ['oob-1'] },
+    });
+    mocks.queueMessage.mockResolvedValue(false);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'yes fix those',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.releaseOutOfBand).toHaveBeenCalledWith({
+      messageIds: ['oob-1'],
+    });
   });
 
   it('does not redeliver a DM launch request as a follow-up after task creation', async () => {
