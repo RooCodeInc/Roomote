@@ -45,6 +45,7 @@ type ScheduledTriageAutomationConfig = {
     | 'dependabot_triage'
     | 'codeql_triage'
     | 'ci_failure_triage';
+
   /**
    * Builds the scan task payload for the deployment, or skips with a logged
    * reason (missing credentials, no eligible repositories, ...).

@@ -4,6 +4,7 @@ export { codeQualityAuditorJob } from './code-quality-auditor';
 export { codeqlTriageJob } from './codeql-triage';
 export { conflictScanJob } from './conflict-scan';
 export { dependabotTriageJob } from './dependabot-triage';
+export { issueFixerJob } from './issue-fixer';
 export { managerStatsJob, formatManagerStatsMessage } from './manager-stats';
 export { securityAuditorJob } from './security-auditor';
 export { sentryTriageJob } from './sentry-triage';

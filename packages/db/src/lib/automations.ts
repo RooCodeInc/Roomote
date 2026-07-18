@@ -10,6 +10,7 @@ import {
   type CodeQualityAuditorFrequency,
   type CodeqlTriageFrequency,
   type ConflictResolverFrequency,
+  type IssueFixerFrequency,
   type ConflictResolverMaxPrAgeDays,
   type DependabotTriageFrequency,
   type ManagerStatsFrequency,
@@ -77,6 +78,9 @@ export const DEPENDABOT_TRIAGE_FREQUENCIES =
 
 export const CODEQL_TRIAGE_FREQUENCIES =
   getScheduleModes<CodeqlTriageFrequency>('codeql_triage');
+
+export const ISSUE_FIXER_FREQUENCIES =
+  getScheduleModes<IssueFixerFrequency>('issue_fixer');
 
 export const SECURITY_AUDITOR_FREQUENCIES =
   getScheduleModes<SecurityAuditorFrequency>('security_auditor');
@@ -679,6 +683,7 @@ export function normalizeBackgroundAgentSettings(
   const sentryTriage = automationMap.get('sentry_triage');
   const dependabotTriage = automationMap.get('dependabot_triage');
   const codeqlTriage = automationMap.get('codeql_triage');
+  const issueFixer = automationMap.get('issue_fixer');
   const securityAuditor = automationMap.get('security_auditor');
   const codeQualityAuditor = automationMap.get('code_quality_auditor');
   const ciFailureTriage = automationMap.get('ci_failure_triage');
@@ -780,6 +785,13 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(CODEQL_TRIAGE_FREQUENCIES),
     ),
     codeqlTriageLastRunAt: codeqlTriage?.lastRunAt ?? null,
+
+    issueFixerFrequency: getAutomationFrequency(
+      issueFixer,
+      isFrequencyOf(ISSUE_FIXER_FREQUENCIES),
+    ),
+    issueFixerLastRunAt: issueFixer?.lastRunAt ?? null,
+    issueFixerScanCursor: issueFixer?.scanCursor ?? null,
 
     securityAuditorFrequency: getAutomationFrequency(
       securityAuditor,

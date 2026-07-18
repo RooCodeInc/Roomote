@@ -760,6 +760,7 @@ export async function updateBackgroundAgentSettingsCommand(
   const sentryTriageFrequency = input.sentryTriageFrequency ?? 'off';
   const dependabotTriageFrequency = input.dependabotTriageFrequency ?? 'off';
   const codeqlTriageFrequency = input.codeqlTriageFrequency ?? 'off';
+  const issueFixerFrequency = input.issueFixerFrequency ?? 'off';
   const securityAuditorFrequency = input.securityAuditorFrequency ?? 'off';
   const codeQualityAuditorFrequency =
     input.codeQualityAuditorFrequency ?? 'off';
@@ -932,6 +933,18 @@ export async function updateBackgroundAgentSettingsCommand(
     fieldErrors.general =
       fieldErrors.general ||
       'Add at least one active repository before enabling Triage CodeQL Alerts.';
+  }
+
+  if (issueFixerFrequency !== 'off' && !(await hasActiveGitHubInstallation())) {
+    fieldErrors.general =
+      fieldErrors.general ||
+      'Connect GitHub before enabling Triage GitHub Issues.';
+  }
+
+  if (issueFixerFrequency !== 'off' && !(await hasActiveRepository())) {
+    fieldErrors.general =
+      fieldErrors.general ||
+      'Add at least one active repository before enabling Triage GitHub Issues.';
   }
   if (Object.keys(fieldErrors).length > 0) {
     return {
@@ -1115,6 +1128,13 @@ export async function updateBackgroundAgentSettingsCommand(
       enabled: codeqlTriageFrequency !== 'off',
       schedule: { mode: codeqlTriageFrequency },
       ...destinationUpsertFields('codeqlTriage'),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'issue_fixer',
+      enabled: issueFixerFrequency !== 'off',
+      schedule: { mode: issueFixerFrequency },
       updatedAt: now,
     });
 
