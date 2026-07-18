@@ -108,14 +108,11 @@ type TelegramTarget = {
 type DiscordTarget = {
   channelId: string;
   threadId?: string;
-  /** Originating user message used for eyes / terminal reactions. */
-  originMessageId?: string;
-  /**
-   * True when Roomote created a dedicated task thread for this launch, so the
-   * origin reaction lands on a parent-channel message rather than inside the
-   * task thread.
-   */
-  taskThreadOrigin?: boolean;
+  /** Valid Discord message+channel for platform reactions when present. */
+  reaction?: {
+    channelId: string;
+    messageId: string;
+  };
 };
 
 function getTeamsTarget(payload: unknown): TeamsTarget | null {
@@ -184,19 +181,26 @@ function getDiscordTarget(payload: unknown): DiscordTarget | null {
   }
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
-  const originMessageId =
-    getNonEmptyPayloadString(payload, 'communicationSourceEventId') ??
-    getCommunicationMessageIdFromTaskPayload(payload);
-  const taskThreadOrigin =
-    Boolean(
-      (payload as { discordTaskThread?: unknown }).discordTaskThread === true,
-    ) && Boolean(threadId);
+  const reactionChannelId = getNonEmptyPayloadString(
+    payload,
+    'discordReactionChannelId',
+  );
+  const reactionMessageId = getNonEmptyPayloadString(
+    payload,
+    'discordReactionMessageId',
+  );
 
   return {
     channelId,
     ...(threadId ? { threadId } : {}),
-    ...(originMessageId ? { originMessageId } : {}),
-    ...(taskThreadOrigin ? { taskThreadOrigin: true } : {}),
+    ...(reactionChannelId && reactionMessageId
+      ? {
+          reaction: {
+            channelId: reactionChannelId,
+            messageId: reactionMessageId,
+          },
+        }
+      : {}),
   };
 }
 
@@ -209,27 +213,6 @@ function getNonEmptyPayloadString(
   }
   const value = (payload as Record<string, unknown>)[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function getDiscordOriginReactionTarget(target: DiscordTarget): {
-  channelId: string;
-  messageId: string;
-} | null {
-  if (!target.originMessageId) {
-    return null;
-  }
-
-  // Parent-channel launches pin 👀 on the origin parent message, then continue
-  // work in a sibling task thread. Thread/DM launches pin 👀 on the conversation
-  // channel that received the request.
-  const channelId = target.taskThreadOrigin
-    ? target.channelId
-    : (target.threadId ?? target.channelId);
-
-  return {
-    channelId,
-    messageId: target.originMessageId,
-  };
 }
 
 async function resolveLinearClient() {
@@ -565,7 +548,7 @@ async function deliverDiscordTerminalStatus({
         textFormat: 'markdown',
       });
 
-      const originReaction = getDiscordOriginReactionTarget(target);
+      const originReaction = target.reaction;
       if (originReaction && provider.addReaction) {
         await Promise.all([
           provider.addReaction({

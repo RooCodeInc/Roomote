@@ -926,6 +926,16 @@ const sharedTaskPayloadSchema = z.object({
   communicationMessageId: z.string().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
+  /**
+   * Discord channel hosting the origin reaction target. Always a channel that
+   * contains `discordReactionMessageId` (never an interaction id).
+   */
+  discordReactionChannelId: z.string().optional(),
+  /**
+   * Discord message id that platform reactions (👀 / terminal / cancel) target.
+   * Must be a real message id, never an interaction id.
+   */
+  discordReactionMessageId: z.string().optional(),
   /** True when the Telegram topic was created specifically for this task. */
   telegramTaskTopic: z.boolean().optional(),
   /** True when the Discord thread/forum post was created for this task. */

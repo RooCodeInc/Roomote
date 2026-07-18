@@ -126,7 +126,8 @@ const discordPayload = {
   communicationProvider: 'discord',
   communicationChannelId: 'channel-1',
   communicationThreadId: 'discord-thread-1',
-  communicationSourceEventId: 'origin-msg-1',
+  discordReactionChannelId: 'channel-1',
+  discordReactionMessageId: 'origin-msg-1',
   discordTaskThread: true,
 };
 

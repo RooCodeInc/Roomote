@@ -5,7 +5,7 @@ import {
   type TaskInitiator,
   type TaskSpec,
 } from '@roomote/types';
-import { db, environments, eq } from '@roomote/db/server';
+import { db, environments, eq, sql, taskRuns } from '@roomote/db/server';
 import {
   enqueueTask,
   getTaskUrl,
@@ -36,6 +36,48 @@ const DISCORD_ROOT_TASK_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
 const DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES = new Set([0, 5]);
 const DISCORD_PENDING_TASK_THREAD_PREFIX = 'discord:pending_task_thread:';
 const DISCORD_PENDING_TASK_THREAD_TTL_SECONDS = 24 * 60 * 60;
+
+type DiscordReactionTarget = {
+  channelId: string;
+  messageId: string;
+};
+
+/**
+ * Real MESSAGE_CREATE launches pin 👀 on the triggering message. Interaction
+ * launches (`/new`) have no message target at intake, so they permanently
+ * record the acknowledgement / thread-starter message as the reaction target
+ * after launch.
+ */
+function resolveDiscordOriginReactionTarget(input: {
+  channel: DiscordChannelContext;
+  metadata: DiscordEventCommunicationMetadata;
+}): DiscordReactionTarget | null {
+  const messageId = input.metadata.communicationAnchorMessageId;
+  if (!messageId) {
+    return null;
+  }
+  return {
+    // Intake uses channel.channelId for eyes (thread or parent DM/channel).
+    channelId: input.channel.channelId,
+    messageId,
+  };
+}
+
+async function persistDiscordReactionTarget(input: {
+  runId: number;
+  reaction: DiscordReactionTarget;
+}): Promise<void> {
+  const patch = JSON.stringify({
+    discordReactionChannelId: input.reaction.channelId,
+    discordReactionMessageId: input.reaction.messageId,
+  });
+  await db
+    .update(taskRuns)
+    .set({
+      payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${patch}::jsonb`,
+    })
+    .where(eq(taskRuns.id, input.runId));
+}
 
 export type DiscordChannelContext = {
   channelId: string;
@@ -314,6 +356,20 @@ export async function launchDiscordTask(input: {
     createdThread?.channelId ?? input.metadata.communicationThreadId;
   const communicationMessageId =
     createdThread?.messageId ?? input.metadata.communicationMessageId;
+  const originReaction = resolveDiscordOriginReactionTarget({
+    channel: input.channel,
+    metadata: input.metadata,
+  });
+  // Prefer a real origin message when present. For interaction launches the
+  // thread starter (if any) is a valid target until the acknowledgement posts.
+  let reactionTarget: DiscordReactionTarget | null =
+    originReaction ??
+    (createdThread?.messageId
+      ? {
+          channelId: createdThread.channelId,
+          messageId: createdThread.messageId,
+        }
+      : null);
   const task: Extract<TaskSpec, { type: typeof TaskPayloadKind.StandardTask }> =
     {
       type: TaskPayloadKind.StandardTask,
@@ -338,6 +394,12 @@ export async function launchDiscordTask(input: {
         ...(communicationMessageId ? { communicationMessageId } : {}),
         communicationSourceEventId: input.queuedMessage.ts,
         ...(createdThread ? { discordTaskThread: true } : {}),
+        ...(reactionTarget
+          ? {
+              discordReactionChannelId: reactionTarget.channelId,
+              discordReactionMessageId: reactionTarget.messageId,
+            }
+          : {}),
       },
     };
 
@@ -404,6 +466,35 @@ export async function launchDiscordTask(input: {
         ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
         ...acknowledgementMessage,
       });
+
+  // Interaction launches (`/new`) have no MESSAGE_CREATE origin. Persist the
+  // real acknowledgement (or thread-starter) message so terminal/cancel
+  // reactions have a valid Discord reaction target.
+  if (!originReaction && acknowledgement.messageId) {
+    reactionTarget = {
+      channelId: communicationThreadId ?? communicationChannelId,
+      messageId: acknowledgement.messageId,
+    };
+    await persistDiscordReactionTarget({
+      runId: launchResult.id,
+      reaction: reactionTarget,
+    }).catch((error) => {
+      console.warn(
+        `[discord] Failed to persist reaction target for run ${launchResult.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+    try {
+      await input.provider.addReaction({
+        channelId: reactionTarget.channelId,
+        messageId: reactionTarget.messageId,
+        name: '👀',
+      });
+    } catch {
+      // Soft ack only — the launch already succeeded.
+    }
+  }
 
   if (createdThread) {
     await forgetPendingTaskThread(input.queuedMessage.ts).catch((error) => {

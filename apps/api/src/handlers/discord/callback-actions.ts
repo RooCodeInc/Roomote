@@ -1,8 +1,5 @@
 import {
   activeRunStatuses,
-  getCommunicationChannelFromTaskPayload,
-  getCommunicationMessageIdFromTaskPayload,
-  getCommunicationThreadIdFromTaskPayload,
   type QueuedCommunicationMessage,
 } from '@roomote/types';
 import {
@@ -84,31 +81,26 @@ function getDiscordCancelReactionTarget(payload: unknown): {
     return null;
   }
 
-  const channelId = getCommunicationChannelFromTaskPayload(payload);
-  const threadId = getCommunicationThreadIdFromTaskPayload(payload);
-  const messageId =
-    (typeof (payload as { communicationSourceEventId?: unknown })
-      .communicationSourceEventId === 'string' &&
-    (
-      payload as { communicationSourceEventId: string }
-    ).communicationSourceEventId.trim()
+  const channelId =
+    typeof (payload as { discordReactionChannelId?: unknown })
+      .discordReactionChannelId === 'string'
       ? (
-          payload as { communicationSourceEventId: string }
-        ).communicationSourceEventId.trim()
-      : null) ?? getCommunicationMessageIdFromTaskPayload(payload);
+          payload as { discordReactionChannelId: string }
+        ).discordReactionChannelId.trim()
+      : '';
+  const messageId =
+    typeof (payload as { discordReactionMessageId?: unknown })
+      .discordReactionMessageId === 'string'
+      ? (
+          payload as { discordReactionMessageId: string }
+        ).discordReactionMessageId.trim()
+      : '';
 
   if (!channelId || !messageId) {
     return null;
   }
 
-  const taskThreadOrigin =
-    (payload as { discordTaskThread?: unknown }).discordTaskThread === true &&
-    Boolean(threadId);
-
-  return {
-    channelId: taskThreadOrigin ? channelId : (threadId ?? channelId),
-    messageId,
-  };
+  return { channelId, messageId };
 }
 
 async function addDiscordCancelReactionBestEffort(input: {

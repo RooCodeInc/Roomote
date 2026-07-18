@@ -479,15 +479,18 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   }
 
   // Match Slack intake: ack the origin message with 👀 before launch work.
-  // Failures are non-fatal — the task launch still proceeds.
-  try {
-    await resolved.provider.addReaction({
-      channelId: channel.channelId,
-      messageId: queuedMessage.ts,
-      name: '👀',
-    });
-  } catch {
-    // Soft ack only.
+  // Only real MESSAGE_CREATE messages can receive Discord reactions; slash-
+  // command interaction ids are not message targets and would 404.
+  if (message?.id) {
+    try {
+      await resolved.provider.addReaction({
+        channelId: channel.channelId,
+        messageId: message.id,
+        name: '👀',
+      });
+    } catch {
+      // Soft ack only.
+    }
   }
 
   const started = await startNewDiscordTask({

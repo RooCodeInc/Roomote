@@ -669,6 +669,9 @@ describe('Discord Gateway event handler', () => {
     expect(response.status).toBe(200);
     expect(mocks.findActiveRun).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
+    // Interaction ids are not reaction targets; eyes belong to message launches
+    // or the post-launch acknowledgement path.
+    expect(mocks.addReaction).not.toHaveBeenCalled();
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         queuedMessage: expect.objectContaining({
