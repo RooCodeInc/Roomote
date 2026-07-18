@@ -17,6 +17,7 @@ import {
 } from './utils';
 import { isRecognizedInitialSkillInvocation } from './skillInvocationRouting';
 import { renderLinkedWorkItemsSection } from './pr-linked-work-items';
+import { buildGitHubMessageInstructions } from '../github-message-instructions';
 
 const DEFAULT_ATTRIBUTION: ResolvedTaskCommitAuthor = {
   kind: 'roomote',
@@ -283,7 +284,8 @@ export function standardTask({
   <task_surface_context>
     <rule>This run was launched from a GitHub conversation surface and also has a Roomote web task view.</rule>
     <rule>If a workflow or packaged skill distinguishes GitHub-started tasks from other surfaces, treat this run as GitHub-started rather than as a generic web dashboard task.</rule>
-  </task_surface_context>`
+  </task_surface_context>
+${buildGitHubMessageInstructions()}`
                 : taskSurface === 'gitlab'
                   ? `
   <task_surface_context>

@@ -4,6 +4,7 @@ const {
   registeredHandlers,
   mockHandleInstallationCreated,
   mockHandlePrComment,
+  mockHandleGitHubIssueComment,
   mockHandlePrMerge,
   mockHandlePrOpen,
   mockHandlePrReadyForReview,
@@ -34,6 +35,7 @@ const {
   >(),
   mockHandleInstallationCreated: vi.fn(),
   mockHandlePrComment: vi.fn(),
+  mockHandleGitHubIssueComment: vi.fn(),
   mockHandlePrMerge: vi.fn(),
   mockHandlePrOpen: vi.fn(),
   mockHandlePrReadyForReview: vi.fn(),
@@ -128,6 +130,10 @@ vi.mock('../handlePrComment', () => ({
   handlePrComment: mockHandlePrComment,
 }));
 
+vi.mock('../handleGitHubIssueComment', () => ({
+  handleGitHubIssueComment: mockHandleGitHubIssueComment,
+}));
+
 vi.mock('../handlePrMerge', () => ({
   handlePrMerge: mockHandlePrMerge,
 }));
@@ -175,6 +181,7 @@ describe('github webhook router', () => {
     webhooksConstructorParams.length = 0;
     mockHandleInstallationCreated.mockReset();
     mockHandlePrComment.mockReset();
+    mockHandleGitHubIssueComment.mockReset();
     mockHandlePrMerge.mockReset();
     mockHandlePrOpen.mockReset();
     mockHandlePrReadyForReview.mockReset();
@@ -199,6 +206,7 @@ describe('github webhook router', () => {
     mockIsFromKnownInstallation.mockResolvedValue(true);
     mockVerify.mockResolvedValue(true);
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
+    mockHandleGitHubIssueComment.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -278,6 +286,79 @@ describe('github webhook router', () => {
     );
     expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
     expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(payload);
+  });
+
+  it('routes plain issue comments through handleGitHubIssueComment', async () => {
+    const payload = {
+      action: 'created',
+      installation: { id: 1 },
+      repository: {
+        id: 10,
+        full_name: 'test-org/test-repo',
+      },
+      issue: {
+        number: 42,
+        title: 'Bug report',
+        body: 'Something is broken',
+      },
+      comment: {
+        id: 7,
+        body: '@roomote please fix this',
+        user: { login: 'alice' },
+      },
+      sender: { login: 'alice' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-issue-1',
+        'x-github-event': 'issue_comment',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandleGitHubIssueComment).toHaveBeenCalledWith(payload);
+    expect(mockHandlePrComment).not.toHaveBeenCalled();
+    expect(mockQueuePrReviewSummaryNotification).not.toHaveBeenCalled();
+  });
+
+  it('routes opened issues with body mentions through handleGitHubIssueComment', async () => {
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: {
+        id: 10,
+        full_name: 'test-org/test-repo',
+      },
+      issue: {
+        number: 43,
+        title: 'Please help',
+        body: '@roomote fix the checkout crash',
+      },
+      sender: { login: 'alice' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-issue-2',
+        'x-github-event': 'issues',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandleGitHubIssueComment).toHaveBeenCalledWith({
+      installation: payload.installation,
+      repository: payload.repository,
+      sender: payload.sender,
+      issue: payload.issue,
+      mentionBody: payload.issue.body,
+    });
   });
 
   it('routes edited PR issue comments to the review-summary notifier without starting tasks', async () => {
