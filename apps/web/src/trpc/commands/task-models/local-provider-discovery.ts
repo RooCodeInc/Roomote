@@ -83,7 +83,7 @@ export type TaskModelLookupResult = {
   metadata: TaskModelMetadata | null;
 };
 
-export type LocalProviderDiscoveryResult = {
+type LocalProviderDiscoveryResult = {
   models: TaskModelLookupResult[];
   modelCount: number;
   recommendedModels: TaskModelLookupResult[];
@@ -319,7 +319,7 @@ function buildLocalProviderModel(
   };
 }
 
-export async function fetchLocalProviderModels(
+async function fetchLocalProviderModels(
   provider: LocalTaskModelProviderId,
   connection: LocalProviderConnection,
 ): Promise<LocalProviderDiscoveryResult> {

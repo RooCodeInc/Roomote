@@ -71,8 +71,6 @@ import {
 } from './local-provider-discovery';
 import type { UserAuthSuccess } from '@/types';
 
-export { getRecommendedLocalProviderModels } from './local-provider-discovery';
-
 const DEFAULT_DEPLOYMENT_ID = 'default';
 const MODEL_METADATA_FETCH_TIMEOUT_MS = 10_000;
 
