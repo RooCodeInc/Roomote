@@ -101,14 +101,18 @@ const DAILY_WEEKLY_SCHEDULE_MODES = [
   | SentryTriageFrequency
   | DependabotTriageFrequency
   | CodeqlTriageFrequency
-  | IssueFixerFrequency
 )[];
 
-// CI failure triage is webhook-driven; 'daily' only means enabled.
+// Webhook-driven automations; 'daily' only means enabled.
 const CI_FAILURE_TRIAGE_SCHEDULE_MODES = [
   'off',
   'daily',
 ] as const satisfies readonly CiFailureTriageFrequency[];
+
+const ISSUE_FIXER_SCHEDULE_MODES = [
+  'off',
+  'daily',
+] as const satisfies readonly IssueFixerFrequency[];
 
 const HOURLY_AUDIT_SCHEDULE_MODES = [
   'off',
@@ -214,8 +218,9 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     automationKey: 'issue_fixer',
     label: 'Issue Fixer',
     availability: 'stable',
-    scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
-    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
+    // Webhook-driven on new GitHub issues; Run now can still launch manually.
+    manualTriggerRequirements: ['github', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: ['github'],

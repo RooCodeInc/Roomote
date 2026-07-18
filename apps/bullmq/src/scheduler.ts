@@ -6,7 +6,6 @@ import {
   codeqlTriageJob,
   conflictScanJob,
   dependabotTriageJob,
-  issueFixerJob,
   managerStatsJob,
   securityAuditorJob,
   sentryTriageJob,
@@ -64,7 +63,6 @@ const AUTOMATION_JOBS: Record<
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
   codeql_triage: codeqlTriageJob,
-  issue_fixer: issueFixerJob,
   security_auditor: securityAuditorJob,
   code_quality_auditor: codeQualityAuditorJob,
 };
@@ -132,11 +130,6 @@ async function createJobs(queue: Queue): Promise<void> {
 
   await queue.upsertJobScheduler(
     'codeql_triage' satisfies ScheduledAutomationJobName,
-    { every: 60 * 60 * 1000 }, // Every 60 minutes.
-  );
-
-  await queue.upsertJobScheduler(
-    'issue_fixer' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 

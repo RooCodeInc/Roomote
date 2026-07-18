@@ -92,7 +92,7 @@ manager-facing updates and suggestions.
 | **Triage Sentry Issues**     | Prioritized Sentry follow-up work                                | Daily or weekly                             |
 | **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts             | Daily or weekly                             |
 | **Triage CodeQL Alerts**     | Remediation follow-up tasks for open code-scanning / CodeQL alerts | Daily or weekly                           |
-| **Issue Fixer**              | Focused fix follow-up tasks for open GitHub issues                 | Daily or weekly                           |
+| **Issue Fixer**              | Immediate fix task when a GitHub issue is opened or reopened      | Immediate via webhook                       |
 | **Security Auditor**         | Security follow-up work from recently merged PRs                 | Every hour, every 6 hours, daily, or weekly |
 | **Code Quality Auditor**     | Code quality follow-up work from recently merged PRs             | Every hour, every 6 hours, daily, or weekly |
 | **Suggest Ideas**            | Useful coding work Roomote thinks the team could do              | Daily or weekly                             |
@@ -118,7 +118,8 @@ with. Triage Dependabot Alerts, Triage CodeQL Alerts, Issue Fixer, and CI Failur
 GitHub-only by nature. Security Auditor, Code Quality Auditor, Weekly Manager
 Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
 any connected source-control provider. Resolve PR Conflicts supports GitHub,
-GitLab, and Azure DevOps.
+GitLab, and Azure DevOps. Issue Fixer and CI Failure Triage react immediately
+to GitHub webhooks rather than running on a daily or weekly schedule.
 
 **Code Quality Auditor** inspects recently merged PR diffs and only posts
 high-confidence maintainability issues worth a real follow-up task. It is
@@ -139,9 +140,10 @@ CodeQL findings) across your active repositories and launches tightly scoped
 remediation follow-up tasks. It does not open PRs directly from the scheduled
 scan.
 
-**Issue Fixer** scans open GitHub issues across your active repositories and
-launches tightly scoped implement-changes follow-up tasks for clear,
-high-confidence fixes. It does not open PRs directly from the scheduled scan.
+**Issue Fixer** starts a focused implement-changes task the moment a GitHub
+issue is opened or reopened on a repository covered by a configured Roomote
+environment. It opens a PR that references the issue when the fix is clear and
+high-confidence, rather than waiting for a scheduled batch scan.
 
 **Security Auditor** reviews recently merged PRs for concrete security issues
 and secure-by-default gaps that are worth a real follow-up task.

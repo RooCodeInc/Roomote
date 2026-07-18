@@ -366,7 +366,6 @@ const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   'sentryTriage',
   'dependabotTriage',
   'codeqlTriage',
-  'issueFixer',
   ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   'announcer',
   'platformIssueAlerts',
@@ -505,7 +504,6 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
-        issueFixerFrequency: z.enum(['off', 'daily', 'weekly']).optional(),
         issueFixerSlackChannel: z
           .string()
           .trim()

@@ -19,7 +19,7 @@ export enum ScheduledJobName {
  */
 export type ScheduledAutomationJobName = Exclude<
   TriggerableBackgroundAutomationKey,
-  'ci_failure_triage'
+  'ci_failure_triage' | 'issue_fixer'
 >;
 
 export type SchedulerJobName = ScheduledJobName | ScheduledAutomationJobName;

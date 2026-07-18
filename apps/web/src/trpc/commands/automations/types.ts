@@ -7,7 +7,6 @@ import type {
   ConflictResolverFrequency,
   DependabotTriageFrequency,
   CodeqlTriageFrequency,
-  IssueFixerFrequency,
   ManagerStatsFrequency,
   PrReviewSettings,
   ScheduleOnlyBackgroundAutomationFrequency,
@@ -233,7 +232,6 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'sentryTriage'
     | 'dependabotTriage'
     | 'codeqlTriage'
-    | 'issueFixer'
     | ScheduleOnlyBackgroundAutomationId
     | 'announcer'
     | 'platformIssueAlerts';
@@ -275,7 +273,6 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   codeqlTriageFrequency?: CodeqlTriageFrequency;
   codeqlTriageSlackChannel?: string | null;
   codeqlTriageDiscordChannel?: string | null;
-  issueFixerFrequency?: IssueFixerFrequency;
   issueFixerSlackChannel?: string | null;
   issueFixerDiscordChannel?: string | null;
   suggesterFrequency: SuggesterFrequency;

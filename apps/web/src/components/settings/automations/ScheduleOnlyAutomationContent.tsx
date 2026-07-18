@@ -73,6 +73,20 @@ export const SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS = {
       enabledLabel: 'Investigate CI failures as they happen',
     },
   },
+  issueFixer: {
+    description:
+      'When a GitHub issue is opened or reopened, start a focused fix task immediately and open a pull request.',
+    details: [
+      'Runs immediately from the GitHub issue webhook — not on a daily or weekly batch schedule.',
+      'Only repositories covered by a configured Roomote environment are eligible.',
+    ],
+    icon: Wrench,
+    control: {
+      kind: 'toggle',
+      enabledFrequency: 'daily',
+      enabledLabel: 'Fix open GitHub issues as they happen',
+    },
+  },
 } as const satisfies Record<string, ScheduleOnlyAutomationUiDefinition>;
 
 type ScheduleOnlyAutomationContentProps = {
