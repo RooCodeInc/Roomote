@@ -541,6 +541,68 @@ describe('enqueueTaskRelaunch failed start', () => {
     ).rejects.toThrow('Only failed task starts can be retried');
   });
 
+  it('drops Discord source-event ids so failed-start retry does not hit the unique index', async () => {
+    const userId = await createUser();
+    const sourceEventId = 'discord-source-event-retry-1';
+
+    const failedRun = await enqueueTask(
+      {
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'discord',
+        trigger: 'message',
+        task: standardTaskInput({
+          payload: {
+            repo: 'acme/widgets',
+            description: 'Do the thing',
+            communicationProvider: 'discord',
+            communicationSourceEventId: sourceEventId,
+            communicationChannelId: 'channel-1',
+            communicationThreadId: 'thread-1',
+          },
+        }),
+      } as FreshTaskLaunch,
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(failedRun.taskId);
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: 'secretOrPrivateKey must be an asymmetric key when using ES256',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    await db
+      .update(tasks)
+      .set({ state: 'failed' })
+      .where(eq(tasks.id, failedRun.taskId));
+
+    const relaunchRun = await enqueueTaskRelaunch(
+      {
+        sourceRunId: failedRun.id,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(relaunchRun.taskId).toBe(failedRun.taskId);
+    expect(relaunchRun.id).not.toBe(failedRun.id);
+    expect(relaunchRun.payload).toMatchObject({
+      communicationProvider: 'discord',
+      communicationChannelId: 'channel-1',
+      communicationThreadId: 'thread-1',
+    });
+    expect(relaunchRun.payload).not.toHaveProperty(
+      'communicationSourceEventId',
+    );
+    expect(failedRun.payload).toMatchObject({
+      communicationSourceEventId: sourceEventId,
+    });
+  });
+
   it('allows relaunch when only a provider kickoff message exists', async () => {
     const userId = await createUser();
 
