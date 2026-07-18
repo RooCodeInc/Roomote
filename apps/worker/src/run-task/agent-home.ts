@@ -70,6 +70,13 @@ export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
 const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+  'openai-compatible': {
+    name: 'OpenAI-compatible',
+    baseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+    fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
+    apiKeyEnvVarName: 'OPENAI_COMPATIBLE_API_KEY',
+    keyless: false,
+  },
   ollama: {
     name: 'Ollama',
     baseUrlEnvVarName: 'OLLAMA_BASE_URL',

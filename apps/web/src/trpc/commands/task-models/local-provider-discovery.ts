@@ -27,10 +27,13 @@ const LOCAL_ENDPOINT_PROVIDER_CATALOG = SETUP_MODEL_PROVIDER_CATALOG.filter(
 );
 
 export const LOCAL_TASK_MODEL_PROVIDER_IDS =
-  LOCAL_ENDPOINT_PROVIDER_CATALOG.map((provider) => provider.id);
+  LOCAL_ENDPOINT_PROVIDER_CATALOG.map((provider) => provider.id) as [
+    (typeof LOCAL_ENDPOINT_PROVIDER_CATALOG)[number]['id'],
+    ...(typeof LOCAL_ENDPOINT_PROVIDER_CATALOG)[number]['id'][],
+  ];
 
 export type LocalTaskModelProviderId =
-  (typeof LOCAL_ENDPOINT_PROVIDER_CATALOG)[number]['id'];
+  (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number];
 
 export type LocalProviderConnectionInput = {
   baseUrl?: string;

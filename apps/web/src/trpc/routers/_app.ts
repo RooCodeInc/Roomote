@@ -307,6 +307,7 @@ import {
   suggestTaskModelsCommand,
   updateTaskModelSettingsCommand,
 } from '../commands/task-models';
+import { LOCAL_TASK_MODEL_PROVIDER_IDS } from '../commands/task-models/local-provider-discovery';
 import {
   disconnectChatGptSubscriptionCommand,
   getChatGptSubscriptionStatusCommand,
@@ -1708,7 +1709,7 @@ export const appRouter = createRouter({
     discoverProviderModels: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(['ollama', 'vllm', 'litellm']),
+          provider: z.enum(LOCAL_TASK_MODEL_PROVIDER_IDS),
           baseUrl: z.string().trim().optional(),
           apiKey: z.string().trim().optional(),
         }),
@@ -1720,7 +1721,7 @@ export const appRouter = createRouter({
     qualifyProviderModel: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(['ollama', 'vllm', 'litellm']),
+          provider: z.enum(LOCAL_TASK_MODEL_PROVIDER_IDS),
           modelId: z.string().trim().min(1),
           baseUrl: z.string().trim().optional(),
           apiKey: z.string().trim().optional(),

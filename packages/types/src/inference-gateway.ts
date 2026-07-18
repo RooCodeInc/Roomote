@@ -341,6 +341,20 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       openCodeBaseUrlSuffix: '/v1',
     },
     {
+      id: 'openai-compatible',
+      name: 'OpenAI-compatible',
+      envVarNames: ['OPENAI_COMPATIBLE_API_KEY'],
+      gatewayEnvVarNames: [
+        'OPENAI_COMPATIBLE_BASE_URL',
+        'OPENAI_COMPATIBLE_API_KEY',
+      ],
+      upstreamBaseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      optionalApiKey: true,
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
       id: 'litellm',
       name: 'LiteLLM',
       envVarNames: ['LITELLM_API_KEY'],

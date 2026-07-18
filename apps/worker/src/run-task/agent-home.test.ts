@@ -319,10 +319,13 @@ describe('generateOpenCodeConfig provider support', () => {
         R_MODEL: 'ollama/qwen3-coder',
         R_SMALL_MODEL: 'vllm/meta-llama/Llama-3.3-70B-Instruct',
         R_VISION_MODEL: 'litellm/gpt-4.1-mini',
+        R_CODE_REVIEW_MODEL: 'openai-compatible/gpt-4o',
         VLLM_BASE_URL: 'https://vllm.example.com/v1',
         VLLM_API_KEY: 'vllm-key',
         LITELLM_BASE_URL: 'https://litellm.example.com/v1',
         LITELLM_API_KEY: 'litellm-key',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'compat-key',
       },
     });
     const config = JSON.parse(result.configContent) as {
@@ -346,6 +349,14 @@ describe('generateOpenCodeConfig provider support', () => {
         baseURL: 'https://litellm.example.com/v1',
         apiKey: '{env:LITELLM_API_KEY}',
       },
+    });
+    expect(config.provider['openai-compatible']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+        apiKey: '{env:OPENAI_COMPATIBLE_API_KEY}',
+      },
+      models: { 'gpt-4o': { name: 'gpt-4o' } },
     });
   });
 
