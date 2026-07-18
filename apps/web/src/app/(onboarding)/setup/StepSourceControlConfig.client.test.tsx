@@ -173,8 +173,8 @@ describe('StepSourceControlConfig', () => {
       screen.getByRole('button', { name: 'Create GitHub App' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Enter values manually' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Enter values manually' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByLabelText('GitHub organization'),
     ).not.toBeInTheDocument();
@@ -182,6 +182,22 @@ describe('StepSourceControlConfig', () => {
       screen.getByRole('button', { name: 'Show advanced config' }),
     ).toBeInTheDocument();
     expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
+  });
+
+  it('shows Back on the GitHub create screen when a previous step exists', () => {
+    const onBack = vi.fn();
+
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildSourceControlSetup()}
+        selectedProviderId="github"
+        onContinue={vi.fn()}
+        onBack={onBack}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Back$/i }));
+    expect(onBack).toHaveBeenCalledOnce();
   });
 
   it('creates the app on the personal account when no organization is entered', () => {
@@ -224,7 +240,7 @@ describe('StepSourceControlConfig', () => {
     });
   });
 
-  it('reveals the existing GitHub field form from the manual path', () => {
+  it('keeps the GitHub field form hidden without a manual entry path', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildSourceControlSetup()}
@@ -233,15 +249,11 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Enter values manually' }),
-    );
-
-    expect(screen.getByText('GitHub App Slug')).toBeInTheDocument();
-    expect(screen.getByText('GitHub App ID')).toBeInTheDocument();
+    expect(screen.queryByText('GitHub App Slug')).not.toBeInTheDocument();
+    expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /Save and continue/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /Save and continue/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('guides GitLab OAuth application setup', () => {

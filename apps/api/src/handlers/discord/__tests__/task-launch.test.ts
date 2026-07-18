@@ -1,18 +1,23 @@
 const mocks = vi.hoisted(() => ({
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
+  selectDiscordForumTag: vi.fn(),
   redisGet: vi.fn(),
   redisSet: vi.fn(),
   redisDel: vi.fn(),
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
-  syncTaskThreadTitle: vi.fn(),
+  dbSelect: vi.fn(),
+  dbFrom: vi.fn(),
+  dbSelectWhere: vi.fn(),
+  dbLimit: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mocks.enqueueTask,
   getTaskUrl: mocks.getTaskUrl,
+  selectDiscordForumTag: mocks.selectDiscordForumTag,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -39,18 +44,31 @@ vi.mock('@roomote/db/server', () => ({
         },
       };
     },
+    select: (...args: unknown[]) => {
+      mocks.dbSelect(...args);
+      return {
+        from: (...fromArgs: unknown[]) => {
+          mocks.dbFrom(...fromArgs);
+          return {
+            where: (...whereArgs: unknown[]) => {
+              mocks.dbSelectWhere(...whereArgs);
+              return {
+                limit: (...limitArgs: unknown[]) => mocks.dbLimit(...limitArgs),
+              };
+            },
+          };
+        },
+      };
+    },
   },
   environments: { id: 'id' },
   taskRuns: { id: 'id', payload: 'payload' },
+  tasks: { id: 'id', title: 'title' },
   eq: (...values: unknown[]) => values,
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
     strings,
     values,
   }),
-}));
-
-vi.mock('@roomote/sdk/server', () => ({
-  syncTaskCommunicationThreadTitleBestEffort: mocks.syncTaskThreadTitle,
 }));
 
 import { DiscordApiError } from '@roomote/communication/discord-provider';
@@ -65,10 +83,16 @@ describe('launchDiscordTask', () => {
     mocks.redisDel.mockResolvedValue(1);
     mocks.enqueueTask.mockResolvedValue({ id: 41, taskId: 'task-41' });
     mocks.getTaskUrl.mockReturnValue('https://roomote.example/tasks/task-41');
-    mocks.syncTaskThreadTitle.mockResolvedValue(undefined);
+    mocks.selectDiscordForumTag.mockResolvedValue({
+      tagId: 'tag-bug',
+      reasoning: 'The request describes a defect.',
+    });
+    mocks.dbLimit.mockResolvedValue([
+      { title: 'Repair flaky authentication tests' },
+    ]);
   });
 
-  it('creates a public task thread and synchronizes its canonical title', async () => {
+  it('creates a public task thread and renames it with the generated title', async () => {
     const reservedThread = {
       channelId: 'thread-41',
       parentChannelId: 'channel-1',
@@ -124,6 +148,25 @@ describe('launchDiscordTask', () => {
       channelId: 'channel-1',
       name: 'Fix the flaky tests',
       initialText: 'Task request from Matt:\n\nFix the flaky tests',
+      selectForumTag: expect.any(Function),
+    });
+    const selectForumTag = provider.reserveTaskThread.mock.calls[0]?.[0]
+      .selectForumTag as (tags: unknown[]) => Promise<string | null>;
+    await expect(
+      selectForumTag([
+        {
+          id: 'tag-bug',
+          name: 'Bug',
+          moderated: false,
+          emojiId: null,
+          emojiName: null,
+        },
+      ]),
+    ).resolves.toBe('tag-bug');
+    expect(mocks.selectDiscordForumTag).toHaveBeenCalledWith({
+      taskDescription: 'Fix the flaky tests',
+      availableTags: [expect.objectContaining({ id: 'tag-bug' })],
+      tracking: { userId: 'user-1' },
     });
     expect(provider.completeTaskThread).toHaveBeenCalledWith({
       thread: reservedThread,
@@ -161,9 +204,11 @@ describe('launchDiscordTask', () => {
       taskRun: { taskId: 'task-41' },
       title: 'Repair flaky authentication tests',
     });
-    expect(mocks.syncTaskThreadTitle).toHaveBeenCalledWith({
-      taskId: 'task-41',
+    expect(provider.editChannel).toHaveBeenCalledWith({
+      channelId: 'thread-41',
+      name: 'Repair flaky authentication tests',
     });
+    expect(provider.editChannel).toHaveBeenCalledTimes(1);
     expect(provider.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'channel-1',
@@ -200,6 +245,83 @@ describe('launchDiscordTask', () => {
     expect(mocks.redisDel).toHaveBeenCalledWith(
       'discord:pending_task_thread:message-1',
     );
+  });
+
+  it('reapplies a newer canonical title when the early rename race loses', async () => {
+    const reservedThread = {
+      channelId: 'thread-41',
+      parentChannelId: 'channel-1',
+      name: 'Fix the flaky tests',
+      kind: 'thread' as const,
+    };
+    const provider = {
+      reserveTaskThread: vi.fn().mockResolvedValue(reservedThread),
+      completeTaskThread: vi.fn().mockResolvedValue({
+        ...reservedThread,
+        messageId: 'thread-message-1',
+      }),
+      postMessage: vi.fn().mockResolvedValue({
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-41',
+        messageId: 'ack-1',
+      }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+    mocks.dbLimit
+      .mockResolvedValueOnce([{ title: 'Manual override title' }])
+      .mockResolvedValueOnce([{ title: 'Manual override title' }]);
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-race',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-race',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    const enqueueOptions = mocks.enqueueTask.mock.calls[0]?.[1] as {
+      onEarlyTitleGenerated: (input: {
+        taskRun: { taskId: string };
+        title: string;
+      }) => Promise<void>;
+    };
+    await enqueueOptions.onEarlyTitleGenerated({
+      taskRun: { taskId: 'task-41' },
+      title: 'Repair flaky authentication tests',
+    });
+
+    expect(provider.editChannel).toHaveBeenNthCalledWith(1, {
+      channelId: 'thread-41',
+      name: 'Repair flaky authentication tests',
+    });
+    expect(provider.editChannel).toHaveBeenNthCalledWith(2, {
+      channelId: 'thread-41',
+      name: 'Manual override title',
+    });
+    expect(provider.editChannel).toHaveBeenCalledTimes(2);
   });
 
   it('anchors the task thread to the triggering channel message', async () => {
@@ -519,6 +641,7 @@ describe('launchDiscordTask', () => {
       channelId: 'channel-1',
       name: 'Fix the flaky tests',
       initialText: 'Task request from Matt:\n\nFix the flaky tests',
+      selectForumTag: expect.any(Function),
     });
   });
 

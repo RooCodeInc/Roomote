@@ -340,8 +340,9 @@ export function SourceControl() {
         </>
       ) : (
         <>
-          Create a GitHub App for this deployment, or enter an existing
-          app&apos;s credentials, then connect it to select repositories.
+          Create a GitHub App for this deployment, then connect it to select
+          repositories. Existing apps can be configured with deployment
+          environment variables.
         </>
       ),
       adminHelp: isAdmin
@@ -622,18 +623,15 @@ function SourceControlProviderBlock({
 }: SourceControlProviderBlockProps) {
   const [isRepositoryListOpen, setIsRepositoryListOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(isConfigured);
-  const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
   const repositoryCount = repositories?.length ?? 0;
   const shouldShowSetup = !isPending && !isConfigured && !isExpanded;
   const isGitHubUnconfigured =
     provider === 'github' && !isConfigured && Boolean(githubSetup);
-  const shouldShowGitHubManualForm =
-    !isGitHubUnconfigured || showManualGitHubValues;
+  const shouldShowGitHubConfigForm = !isGitHubUnconfigured;
 
   useEffect(() => {
     if (isConfigured) {
       setIsExpanded(true);
-      setShowManualGitHubValues(false);
     }
   }, [isConfigured]);
 
@@ -669,17 +667,12 @@ function SourceControlProviderBlock({
         <div className="space-y-8">
           {!isConfigured ? (
             isGitHubUnconfigured ? (
-              <GitHubAppSettingsSetupPanel
-                setup={githubSetup}
-                showManualValues={showManualGitHubValues}
-                onShowManualValues={() => setShowManualGitHubValues(true)}
-                onHideManualValues={() => setShowManualGitHubValues(false)}
-              />
+              <GitHubAppSettingsSetupPanel setup={githubSetup} />
             ) : (
               <ProviderSetupInstructions provider={provider} title={title} />
             )
           ) : null}
-          {shouldShowGitHubManualForm ? configForm : null}
+          {shouldShowGitHubConfigForm ? configForm : null}
           {isPending ? null : repositoryCount > 0 && repositories ? (
             <div>
               <RepositoryLinks
@@ -766,9 +759,8 @@ function GitHubAppSettingsSetup({
         </p>
         <p className="text-sm text-muted-foreground">
           Self-hosted Roomote needs its own GitHub App. Create one
-          automatically, or enter values manually if you already have an app.
-          You&apos;ll pick the account or organization to install it on during
-          the GitHub install step.
+          automatically. You&apos;ll pick the account or organization to install
+          it on during the GitHub install step.
         </p>
       </div>
       <div className="space-y-2">
@@ -848,60 +840,17 @@ function GitHubAppSettingsSetup({
   );
 }
 
-function GitHubAppSettingsSetupPanel({
-  setup,
-  showManualValues,
-  onShowManualValues,
-  onHideManualValues,
-}: {
-  setup: ReactNode;
-  showManualValues: boolean;
-  onShowManualValues: () => void;
-  onHideManualValues: () => void;
-}) {
+function GitHubAppSettingsSetupPanel({ setup }: { setup: ReactNode }) {
   return (
     <div className="space-y-4">
-      {!showManualValues ? setup : null}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        {!showManualValues ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onShowManualValues}
-          >
-            <Pencil />
-            Enter values manually
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onHideManualValues}
-          >
-            Create GitHub App instead
-          </Button>
-        )}
+      {setup}
+      <div className="space-y-1">
+        <p className="text-sm font-semibold">Then install the app.</p>
+        <p className="text-sm text-muted-foreground">
+          After credentials are saved, Connect GitHub installs the app for the
+          repositories Roomote should work with.
+        </p>
       </div>
-      {showManualValues ? (
-        <div className="space-y-1">
-          <p className="text-sm font-semibold">Enter GitHub App credentials.</p>
-          <p className="text-sm text-muted-foreground">
-            Paste the app slug, App ID, private key, OAuth client credentials,
-            and webhook secret from your existing GitHub App, then install it
-            with Connect GitHub.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-1">
-          <p className="text-sm font-semibold">Then install the app.</p>
-          <p className="text-sm text-muted-foreground">
-            After credentials are saved, Connect GitHub installs the app for the
-            repositories Roomote should work with.
-          </p>
-        </div>
-      )}
     </div>
   );
 }

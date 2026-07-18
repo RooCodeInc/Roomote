@@ -9,6 +9,7 @@ const {
   redisSetMock,
   reserveTaskThreadMock,
   resolveProviderMock,
+  selectDiscordForumTagMock,
   selectLimitMock,
 } = vi.hoisted(() => ({
   completeTaskThreadMock: vi.fn(),
@@ -19,7 +20,12 @@ const {
   redisSetMock: vi.fn(),
   reserveTaskThreadMock: vi.fn(),
   resolveProviderMock: vi.fn(),
+  selectDiscordForumTagMock: vi.fn(),
   selectLimitMock: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  selectDiscordForumTag: selectDiscordForumTagMock,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -95,6 +101,10 @@ describe('Discord automation work-item delivery', () => {
     redisGetMock.mockResolvedValue(null);
     redisSetMock.mockResolvedValue('OK');
     reserveTaskThreadMock.mockResolvedValue(reservedThread);
+    selectDiscordForumTagMock.mockResolvedValue({
+      tagId: 'tag-bug',
+      reasoning: 'The work item describes a defect.',
+    });
     completeTaskThreadMock.mockResolvedValue({
       ...reservedThread,
       messageId: 'message-1',
@@ -169,6 +179,24 @@ describe('Discord automation work-item delivery', () => {
       channelId: 'channel-1',
       name: 'Fix the flaky test',
       initialText: '**Fix the flaky test**\nInvestigate and fix it.',
+      selectForumTag: expect.any(Function),
+    });
+    const selectForumTag = reserveTaskThreadMock.mock.calls[0]?.[0]
+      .selectForumTag as (tags: unknown[]) => Promise<string | null>;
+    await expect(
+      selectForumTag([
+        {
+          id: 'tag-bug',
+          name: 'Bug',
+          moderated: false,
+          emojiId: null,
+          emojiName: null,
+        },
+      ]),
+    ).resolves.toBe('tag-bug');
+    expect(selectDiscordForumTagMock).toHaveBeenCalledWith({
+      taskDescription: 'Fix the flaky test\n\nInvestigate and fix it.',
+      availableTags: [expect.objectContaining({ id: 'tag-bug' })],
     });
     expect(completeTaskThreadMock).toHaveBeenCalledWith({
       thread: {

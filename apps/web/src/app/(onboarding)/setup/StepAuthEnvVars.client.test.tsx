@@ -417,46 +417,14 @@ describe('StepAuthEnvVars', () => {
     ).toBeDisabled();
 
     expect(
-      screen.getByRole('button', { name: /create app manually/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /create app manually/i }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByPlaceholderText('Slack Client ID'),
     ).not.toBeInTheDocument();
-  });
-
-  it('shows the manual value form after opening the prefilled-manifest flow', () => {
-    render(
-      <StepAuthEnvVars
-        authSetup={buildAuthSetup('slack')}
-        onContinue={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(
-      screen.getByRole('button', { name: /create app manually/i }),
-    );
-
-    const link = screen.getByRole('link', { name: /prefilled manifest/i });
-    const url = new URL(link.getAttribute('href') ?? '');
-    expect(url.origin + url.pathname).toBe('https://api.slack.com/apps');
-    expect(url.searchParams.get('new_app')).toBe('1');
     expect(
-      JSON.parse(url.searchParams.get('manifest_json') ?? '{}'),
-    ).toMatchObject({
-      settings: {
-        event_subscriptions: {
-          request_url: 'https://roomote.example.com/api/webhooks/slack',
-        },
-      },
-    });
-
-    expect(screen.getByPlaceholderText('Slack Client ID')).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText('Slack Client Secret'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /create slack app/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole('link', { name: /slack apps portal/i }),
+    ).toHaveAttribute('href', 'https://api.slack.com/apps');
   });
 
   it('creates the Slack app from a config token, shows optional icon guidance, and continues setup', async () => {
@@ -588,30 +556,6 @@ describe('StepAuthEnvVars', () => {
       'Slack rejected the app configuration token.',
     );
     expect(mutateAsync).not.toHaveBeenCalled();
-  });
-
-  it('reveals existing Slack inputs when entering values manually', () => {
-    render(
-      <StepAuthEnvVars
-        authSetup={buildAuthSetup('slack')}
-        onContinue={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(
-      screen.getByRole('button', { name: /create app manually/i }),
-    );
-
-    expect(screen.getByPlaceholderText('Slack Client ID')).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText('Slack Client Secret'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText('Slack Signing Secret'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: /download here/i }),
-    ).toHaveAttribute('href', '/api/setup/roomote-logo');
   });
 
   it('offers a continue action when a saved Slack config is revisited', () => {
@@ -1016,48 +960,23 @@ describe('StepAuthEnvVars', () => {
     ).toHaveAttribute('href', '/api/teams/app-package');
   });
 
-  it('starts bootstrap Slack sign-in after manual credentials are saved', async () => {
-    const mutateAsync = setupMutationMock();
+  it('shows Back on the Slack config-token screen when a previous step exists', () => {
+    const onBack = vi.fn();
 
     render(
       <StepAuthEnvVars
         authSetup={buildAuthSetup('slack')}
         selectedProviderId="slack"
         onContinue={vi.fn()}
-        bootstrapMode
+        onBack={onBack}
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole('button', { name: /create app manually/i }),
-    );
-    fireEvent.change(screen.getByPlaceholderText('Slack Client ID'), {
-      target: { value: 'client-id' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('Slack Client Secret'), {
-      target: { value: 'client-secret' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('Slack Signing Secret'), {
-      target: { value: 'signing-secret' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /save and sign in/i }));
-
-    await waitFor(() => {
-      expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'slack',
-        callbackURL: '/api/slack/install-after-auth?redirect=%2Fsetup',
-        disableRedirect: true,
-      });
-    });
-    expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
-    expect(mutateAsync).toHaveBeenCalledWith({
-      provider: 'slack',
-      values: expect.objectContaining({
-        R_SLACK_CLIENT_ID: 'client-id',
-        R_SLACK_CLIENT_SECRET: 'client-secret',
-        R_SLACK_SIGNING_SECRET: 'signing-secret',
-      }),
-    });
+    fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole('button', { name: /create app manually/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('starts bootstrap Microsoft sign-in with setup flow continuation callback', async () => {

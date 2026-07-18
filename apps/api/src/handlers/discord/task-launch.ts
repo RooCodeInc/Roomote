@@ -5,10 +5,11 @@ import {
   type TaskInitiator,
   type TaskSpec,
 } from '@roomote/types';
-import { db, environments, eq, sql, taskRuns } from '@roomote/db/server';
+import { db, environments, eq, sql, taskRuns, tasks } from '@roomote/db/server';
 import {
   enqueueTask,
   getTaskUrl,
+  selectDiscordForumTag,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 import {
@@ -18,7 +19,6 @@ import {
 } from '@roomote/communication/discord-provider';
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { getRedis } from '@roomote/redis';
-import { syncTaskCommunicationThreadTitleBestEffort } from '@roomote/sdk/server';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -386,6 +386,14 @@ export async function launchDiscordTask(input: {
         channelId: parentId,
         name: buildCommunicationTaskThreadName(input.queuedMessage.text),
         initialText,
+        selectForumTag: async (availableTags) =>
+          (
+            await selectDiscordForumTag({
+              taskDescription: input.queuedMessage.text,
+              availableTags,
+              tracking: { userId: input.launchOwnerUserId },
+            })
+          )?.tagId ?? null,
       });
       // Persist the external coordinate before the public-thread starter is
       // sent, so a failed send can resume in this exact thread on redelivery.
@@ -466,7 +474,7 @@ export async function launchDiscordTask(input: {
     );
   }
 
-  const taskThreadChannelId = createdThread?.channelId;
+  const titleThreadId = createdThread?.channelId;
 
   const launchResult = await enqueueTask(
     {
@@ -482,12 +490,48 @@ export async function launchDiscordTask(input: {
       ...(initiator.kind === 'automation'
         ? {}
         : { launchClass: 'human' as const }),
-      ...(taskThreadChannelId
+      // Mirror Telegram: apply the early LLM title directly onto the task-
+      // owned thread with the same provider credentials that reserved it.
+      // Going through runtime-credential sync can skip the rename when this
+      // request already holds a working Discord provider.
+      // Re-read the canonical task title after each provider call so a concurrent
+      // manual rename that lands later cannot be overwritten by this older
+      // early-title request.
+      ...(titleThreadId
         ? {
-            onEarlyTitleGenerated: async ({ taskRun }) => {
-              await syncTaskCommunicationThreadTitleBestEffort({
-                taskId: taskRun.taskId,
-              });
+            onEarlyTitleGenerated: async ({
+              taskRun,
+              title,
+            }: {
+              taskRun: { taskId: string };
+              title: string;
+            }) => {
+              let canonicalTitle = title;
+              for (let attempt = 0; attempt < 2; attempt += 1) {
+                try {
+                  await input.provider.editChannel({
+                    channelId: titleThreadId,
+                    name: buildCommunicationTaskThreadName(canonicalTitle),
+                  });
+                } catch (error) {
+                  console.warn(
+                    `[discord] Failed to rename task thread ${titleThreadId} with generated title: ${
+                      error instanceof Error ? error.message : String(error)
+                    }`,
+                  );
+                  return;
+                }
+
+                const [latestTask] = await db
+                  .select({ title: tasks.title })
+                  .from(tasks)
+                  .where(eq(tasks.id, taskRun.taskId))
+                  .limit(1);
+                if (!latestTask || latestTask.title === canonicalTitle) {
+                  return;
+                }
+                canonicalTitle = latestTask.title;
+              }
             },
           }
         : {}),

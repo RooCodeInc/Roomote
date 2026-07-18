@@ -56,6 +56,7 @@ vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
 
 import {
   findDiscordPendingRoutingReply,
+  hasPendingDiscordRouteCallback,
   handleDiscordRoutingReply,
   handleDiscordRoutingCallback,
   requestDiscordRoutingConfirmation,
@@ -119,6 +120,50 @@ describe('Discord routing confirmation', () => {
       launchResult: { id: 42, taskId: 'task-1' },
     });
     mocks.reply.mockResolvedValue({ messageId: 'confirmation-1' });
+  });
+
+  it('checks whether a routing button still has pending state', async () => {
+    mocks.redisGet
+      .mockResolvedValueOnce(JSON.stringify({ options: [] }))
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      hasPendingDiscordRouteCallback('discord:route:abcdefghijkl:0'),
+    ).resolves.toBe(true);
+    await expect(
+      hasPendingDiscordRouteCallback('discord:route:mnopqrstuvwx:cancel'),
+    ).resolves.toBe(false);
+    await expect(
+      hasPendingDiscordRouteCallback('discord:cancel:17'),
+    ).resolves.toBeNull();
+
+    expect(mocks.redisGet.mock.calls).toEqual([
+      ['discord:pending_route:abcdefghijkl'],
+      ['discord:pending_route:mnopqrstuvwx'],
+    ]);
+  });
+
+  it('treats an expired routing choice reply as best effort', async () => {
+    mocks.redisGetdel.mockResolvedValue(null);
+    mocks.reply.mockRejectedValueOnce(new Error('interaction expired'));
+
+    await expect(
+      handleDiscordRoutingCallback({
+        provider: {} as never,
+        applicationId: 'app-1',
+        interaction: {
+          id: 'interaction-1',
+          application_id: 'app-1',
+          type: 3,
+          token: 'token-1',
+          channel_id: 'channel-1',
+          user: { id: 'discord-user-1', username: 'matt' },
+          data: { custom_id: 'discord:route:abcdefghijkl:0' },
+        },
+        interactionDeferred: true,
+        callback: { pendingRouteId: 'abcdefghijkl', selection: 0 },
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it('auto-confirms only high-confidence, unremapped routes', () => {
