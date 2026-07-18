@@ -773,8 +773,16 @@ export async function selectDiscordDestinationCommand(
   }
   const permissions = await diagnoseDiscordPermissionsCommand(auth, input);
   if (!permissions.canUseChannel) {
+    const missing = permissions.missingPermissions
+      .map((name) =>
+        name
+          .split('_')
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' '),
+      )
+      .join(', ');
     throw new Error(
-      `Roomote is missing required permissions in #${channel.name}: ${permissions.missingPermissions.join(', ')}.`,
+      `Roomote is missing required permissions in #${channel.name}: ${missing}.`,
     );
   }
   return captureDiscordDefaultDestination({
