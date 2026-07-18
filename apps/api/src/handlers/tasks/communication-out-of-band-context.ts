@@ -20,7 +20,7 @@ import {
   type QueuedCommunicationMessage,
 } from '@roomote/types';
 
-export type ClaimedCommunicationOutOfBandContext = {
+type ClaimedCommunicationOutOfBandContext = {
   messageIds: string[];
 };
 
