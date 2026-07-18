@@ -680,6 +680,47 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
+  it('does not public-fallback on a non-blocked Discord 403 when opening the account-link DM', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.createDirectMessage.mockRejectedValue(
+      new DiscordApiError({
+        method: 'POST',
+        path: '/users/@me/channels',
+        status: 403,
+        code: 50001,
+        message: 'Missing Access',
+      }),
+    );
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: 'discord_resource_unavailable',
+      }),
+    );
+    expect(mocks.reply).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
   it('keeps the full link prompt in the existing DM for unlinked DM senders', async () => {
     mocks.findMappedUserId.mockResolvedValue(null);
     mocks.getChannel.mockResolvedValue({

@@ -16,9 +16,13 @@ const DISCORD_ACCOUNT_LINK_FALLBACK_INSTRUCTION =
   'Generate a code under **Settings → Personal → Linked Accounts**, then DM me with `/link code:<code>`.';
 
 function isDmBlockedError(error: unknown): boolean {
+  // Discord API error 50007 is the only code that means "Cannot send messages
+  // to this user" (recipient blocked DMs). A bare 403 also covers unrelated
+  // auth failures such as Missing Access (50001), which must not trigger the
+  // public account-link fallback.
   return (
     error instanceof DiscordApiError &&
-    (error.code === 50007 || error.code === '50007' || error.status === 403)
+    (error.code === 50007 || error.code === '50007')
   );
 }
 
