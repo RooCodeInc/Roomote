@@ -1,4 +1,7 @@
-import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
+} from '@roomote/types';
 
 import type { TaskArtifact } from '@/types';
 
@@ -25,6 +28,39 @@ function textBlock(id: string, ts: number): AcpRenderBlock {
       updateType: 'roomote_runtime.assistant_message',
       text: id,
       data: {},
+    },
+  };
+}
+
+function providerRetryBlock(params: {
+  id: string;
+  ts: number;
+  retryAtMs?: number;
+  partial?: boolean;
+}): AcpRenderBlock {
+  return {
+    kind: 'message',
+    msg: {
+      id: params.id,
+      ts: params.ts,
+      role: 'assistant',
+      kind: 'text',
+      partial: params.partial === true,
+      sessionId: 'session-1',
+      updateType: 'roomote_runtime.assistant_message',
+      text: 'Provider retry',
+      data: {
+        [PROVIDER_RETRY_NOTICE_PAYLOAD_KEY]: {
+          kind: 'opencode_retry',
+          attemptNumber: 1,
+          maxAttempts: 3,
+          showAttempt: false,
+          errorSummary: 'Connection reset by server',
+          ...(params.retryAtMs !== undefined
+            ? { retryAtMs: params.retryAtMs }
+            : {}),
+        },
+      },
     },
   };
 }
@@ -255,6 +291,67 @@ describe('buildAcpActivityRenderBlocks', () => {
       'message',
       'tool_group',
     ]);
+  });
+
+  it('collapses settled provider retry notices with neighboring activity', () => {
+    const entries = buildAcpActivityRenderBlocks([
+      textBlock('text-1', 1_000),
+      messageBlock('reasoning-1', 2_000, 'reasoning'),
+      providerRetryBlock({ id: 'retry-1', ts: 3_000, retryAtMs: 2_500 }),
+      toolGroupBlock({
+        id: 'group-1',
+        ts: 4_000,
+        items: [buildToolResult({ id: 'tool-1', ts: 4_000 })],
+      }),
+      textBlock('text-2', 10_000),
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'activity_group',
+      'message',
+    ]);
+
+    if (entries[1]?.kind !== 'activity_group') {
+      throw new Error('Expected activity group');
+    }
+
+    expect(entries[1].blocks.map((block) => block.kind)).toEqual([
+      'message',
+      'message',
+      'tool_group',
+    ]);
+    expect(
+      entries[1].blocks.map((block) =>
+        block.kind === 'message' ? block.msg.id : block.id,
+      ),
+    ).toEqual(['reasoning-1', 'retry-1', 'group-1']);
+  });
+
+  it('keeps trailing provider retry notices expanded until a later text boundary', () => {
+    const liveRetry = providerRetryBlock({
+      id: 'retry-live',
+      ts: 3_000,
+      retryAtMs: Date.now() + 30_000,
+    });
+    const entries = buildAcpActivityRenderBlocks([
+      textBlock('text-1', 1_000),
+      messageBlock('reasoning-1', 2_000, 'reasoning'),
+      liveRetry,
+    ]);
+
+    // Without a following narrative text turn, activity stays expanded so the
+    // live retry status remains visible.
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+    ]);
+    expect(entries[2]).toMatchObject({
+      kind: 'message',
+      msg: { id: 'retry-live' },
+    });
+    expect(isActivityCollapsibleBlock(liveRetry)).toBe(true);
   });
 
   it('keeps todo section markers visible and starts a new activity boundary after them', () => {
