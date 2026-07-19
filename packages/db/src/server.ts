@@ -24,6 +24,7 @@ export {
   lt,
   lte,
   count,
+  exists,
   max,
   isNotNull,
   isNull,
