@@ -22,6 +22,7 @@ export * from './file-attachments';
 export * from './fast-agent';
 export * from './github-message-instructions';
 export * from './github-pr-follow-up-context';
+export * from './untrusted-content';
 export * from './workflows/githubPrReviewComment';
 export * from './linked-task-relay';
 export * from './llm-task-title';
