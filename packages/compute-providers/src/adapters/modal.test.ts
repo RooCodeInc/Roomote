@@ -874,6 +874,7 @@ describe('ModalClient', () => {
     expect(dockerfile).toContain(
       'ENV AGENT_BROWSER_EXECUTABLE_PATH="/opt/agent-browser/chrome"',
     );
+    expect(dockerfile).toContain('chmod o+x /home/roomote');
     expect(dockerfile).toContain('libatk1.0-0t64');
     expect(dockerfile).toContain('libatspi2.0-0t64');
     expect(dockerfile).toContain('libcups2t64');
@@ -885,6 +886,10 @@ describe('ModalClient', () => {
     expect(installBrowserAgentScript).toContain(
       'agent-browser@${AGENT_BROWSER_VERSION}',
     );
+    expect(installBrowserAgentScript).toContain(
+      'ensure_home_dir_traversable_for_gpu_process',
+    );
+    expect(installBrowserAgentScript).toContain('chmod o+x "$home_dir"');
     expect(installBrowserAgentScript).toContain('collect_cli_browser_args()');
     expect(installBrowserAgentScript).toContain(
       'AGENT_BROWSER_FORWARD_ARGS=()',
