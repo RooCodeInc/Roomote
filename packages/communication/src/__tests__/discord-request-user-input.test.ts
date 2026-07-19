@@ -20,7 +20,7 @@ const sampleQuestion = {
     { label: 'patch', description: 'Bug fixes only' },
     { label: 'major', description: 'Breaking change' },
   ],
-} as const;
+};
 
 describe('discord request_user_input helpers', () => {
   it('round-trips compact answer callback ids', () => {
