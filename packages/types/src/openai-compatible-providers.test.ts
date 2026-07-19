@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  OPENAI_COMPATIBLE_CONNECTION_NAME_MAX_LENGTH,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
@@ -22,6 +23,14 @@ describe('openai-compatible multiple connections', () => {
     expect(normalizeOpenAiCompatibleConnectionSlug('')).toBeNull();
     expect(
       normalizeOpenAiCompatibleConnectionSlug(OPENAI_COMPATIBLE_PROVIDER_ID),
+    ).toBeNull();
+  });
+
+  it('rejects overlong connection names without scanning unbounded input', () => {
+    const overlong = `a${'-'.repeat(OPENAI_COMPATIBLE_CONNECTION_NAME_MAX_LENGTH)}a`;
+    expect(normalizeOpenAiCompatibleConnectionSlug(overlong)).toBeNull();
+    expect(
+      normalizeOpenAiCompatibleConnectionSlug(`a${'-'.repeat(25_000)}a`),
     ).toBeNull();
   });
 

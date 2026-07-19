@@ -479,50 +479,51 @@ export async function saveTaskModelProviderCommand(
     providerId === OPENAI_COMPATIBLE_PROVIDER_ID ||
     isOpenAiCompatibleProviderId(providerId)
   ) {
-    // Editing an existing named connection keeps its id. Adding always goes
-    // through the catalog template id and a required connection name.
+    // Adding a new named connection goes through the catalog template id plus
+    // a connection name. Editing an existing bare `openai-compatible` row
+    // (or saving without a name) keeps the default env vars. Named id edits
+    // keep their existing id/env mapping as-is.
     if (providerId === OPENAI_COMPATIBLE_PROVIDER_ID) {
       const slug = normalizeOpenAiCompatibleConnectionSlug(
         input.connectionName,
       );
-      if (!slug) {
+
+      if (slug) {
+        providerId = buildOpenAiCompatibleProviderId(
+          slug,
+        ) as SetupModelProviderId;
+
+        const instance = buildOpenAiCompatibleProviderInstance(slug, {
+          label: input.connectionName?.trim() || slug,
+        });
+        // Remap values submitted against the catalog template env names onto
+        // the named instance env vars.
+        const template = getSetupModelProvider(OPENAI_COMPATIBLE_PROVIDER_ID);
+        const remappedAdditional: Record<string, string> = {};
+        if (instance.labelEnvVarName && input.connectionName?.trim()) {
+          remappedAdditional[instance.labelEnvVarName] =
+            input.connectionName.trim();
+        }
+        for (const [name, value] of Object.entries(
+          input.additionalEnvValues ?? {},
+        )) {
+          if (name === 'OPENAI_COMPATIBLE_API_KEY') {
+            remappedAdditional[instance.apiKeyEnvVarName] = value;
+            continue;
+          }
+          if (template.envVarName && name === template.envVarName) {
+            continue;
+          }
+          remappedAdditional[name] = value;
+        }
+        suppliedAdditionalEnvValues = remappedAdditional;
+      } else if (input.connectionName?.trim()) {
         throw new Error(
-          'Enter a connection name for the OpenAI-compatible endpoint.',
+          'Enter a valid connection name for the OpenAI-compatible endpoint.',
         );
       }
-      providerId = buildOpenAiCompatibleProviderId(
-        slug,
-      ) as SetupModelProviderId;
-
-      const instance = buildOpenAiCompatibleProviderInstance(slug, {
-        label: input.connectionName?.trim() || slug,
-      });
-      // Remap values submitted against the catalog template env names onto the
-      // named instance env vars.
-      const template = getSetupModelProvider(OPENAI_COMPATIBLE_PROVIDER_ID);
-      const remappedAdditional: Record<string, string> = {};
-      if (instance.labelEnvVarName && input.connectionName?.trim()) {
-        remappedAdditional[instance.labelEnvVarName] =
-          input.connectionName.trim();
-      }
-      for (const [name, value] of Object.entries(
-        input.additionalEnvValues ?? {},
-      )) {
-        if (name === 'OPENAI_COMPATIBLE_API_KEY') {
-          remappedAdditional[instance.apiKeyEnvVarName] = value;
-          continue;
-        }
-        if (template.envVarName && name === template.envVarName) {
-          continue;
-        }
-        remappedAdditional[name] = value;
-      }
-      suppliedAdditionalEnvValues = remappedAdditional;
-
-      // Primary credential is the base URL for endpoint providers.
-      if (input.apiKey?.trim()) {
-        // keep apiKey as-is; collectSetup uses provider.envVarName after remap
-      }
+      // No connection name: keep the bare openai-compatible connection so
+      // edit/save of the default endpoint still works.
     }
   }
 

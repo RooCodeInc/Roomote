@@ -13,12 +13,8 @@ export const OPENAI_COMPATIBLE_PROVIDER_ID = 'openai-compatible' as const;
 
 const OPENAI_COMPATIBLE_NAMED_ID_PREFIX = `${OPENAI_COMPATIBLE_PROVIDER_ID}-`;
 
-/** Lowercase hyphenated connection slug used in provider ids. */
-export const OPENAI_COMPATIBLE_CONNECTION_SLUG_PATTERN =
-  /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
-
-const OPENAI_COMPATIBLE_NAMED_ENV_SLUG_PATTERN =
-  /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*$/u;
+/** Max characters accepted for a user-entered connection name before normalize. */
+export const OPENAI_COMPATIBLE_CONNECTION_NAME_MAX_LENGTH = 64;
 
 const OPENAI_COMPATIBLE_BASE_URL_ENV_SUFFIX = '_BASE_URL';
 const OPENAI_COMPATIBLE_API_KEY_ENV_SUFFIX = '_API_KEY';
@@ -51,8 +47,94 @@ function humanizeSlug(slug: string): string {
 }
 
 /**
+ * Linear validation for lowercase hyphenated slugs. Avoids backtracking-prone
+ * regular expressions so request validation stays O(n).
+ */
+export function isOpenAiCompatibleConnectionSlug(slug: string): boolean {
+  if (
+    slug.length === 0 ||
+    slug.length > OPENAI_COMPATIBLE_CONNECTION_NAME_MAX_LENGTH
+  ) {
+    return false;
+  }
+
+  const first = slug.charCodeAt(0);
+  if (first < 97 || first > 122) {
+    return false;
+  }
+
+  let previousWasHyphen = false;
+  for (let index = 0; index < slug.length; index += 1) {
+    const code = slug.charCodeAt(index);
+    const isLower = code >= 97 && code <= 122;
+    const isDigit = code >= 48 && code <= 57;
+    const isHyphen = code === 45;
+
+    if (!(isLower || isDigit || isHyphen)) {
+      return false;
+    }
+
+    if (isHyphen) {
+      if (previousWasHyphen || index === slug.length - 1) {
+        return false;
+      }
+      previousWasHyphen = true;
+      continue;
+    }
+
+    previousWasHyphen = false;
+  }
+
+  return true;
+}
+
+/**
+ * Linear validation for UPPER_SNAKE env-name middle segments.
+ */
+function isOpenAiCompatibleNamedEnvSlug(segment: string): boolean {
+  if (
+    segment.length === 0 ||
+    segment.length > OPENAI_COMPATIBLE_CONNECTION_NAME_MAX_LENGTH
+  ) {
+    return false;
+  }
+
+  const first = segment.charCodeAt(0);
+  if (first < 65 || first > 90) {
+    return false;
+  }
+
+  let previousWasUnderscore = false;
+  for (let index = 0; index < segment.length; index += 1) {
+    const code = segment.charCodeAt(index);
+    const isUpper = code >= 65 && code <= 90;
+    const isDigit = code >= 48 && code <= 57;
+    const isUnderscore = code === 95;
+
+    if (!(isUpper || isDigit || isUnderscore)) {
+      return false;
+    }
+
+    if (isUnderscore) {
+      if (previousWasUnderscore || index === segment.length - 1) {
+        return false;
+      }
+      previousWasUnderscore = true;
+      continue;
+    }
+
+    previousWasUnderscore = false;
+  }
+
+  return true;
+}
+
+/**
  * Normalize a user-entered connection name into a stable slug, or null when
  * the value is empty or cannot form a valid id segment.
+ *
+ * Intentionally uses a linear character scan (no global regex) so pathological
+ * hyphen/underscore sequences cannot turn request validation quadratic.
  */
 export function normalizeOpenAiCompatibleConnectionSlug(
   value: string | null | undefined,
@@ -61,17 +143,42 @@ export function normalizeOpenAiCompatibleConnectionSlug(
     return null;
   }
 
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/gu, '-')
-    .replaceAll(/^-+|-+$/gu, '')
-    .replaceAll(/-{2,}/gu, '-');
-
+  const trimmed = value.trim();
   if (
-    !normalized ||
-    !OPENAI_COMPATIBLE_CONNECTION_SLUG_PATTERN.test(normalized)
+    trimmed.length === 0 ||
+    trimmed.length > OPENAI_COMPATIBLE_CONNECTION_NAME_MAX_LENGTH
   ) {
+    return null;
+  }
+
+  let normalized = '';
+  let lastWasHyphen = false;
+
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const code = trimmed.charCodeAt(index);
+    const lowerCode = code >= 65 && code <= 90 ? code + 32 : code;
+    const isLower = lowerCode >= 97 && lowerCode <= 122;
+    const isDigit = lowerCode >= 48 && lowerCode <= 57;
+
+    if (isLower || isDigit) {
+      normalized += String.fromCharCode(lowerCode);
+      lastWasHyphen = false;
+      continue;
+    }
+
+    // Collapse any non-alphanumeric run into a single hyphen once content has
+    // started.
+    if (normalized.length > 0 && !lastWasHyphen) {
+      normalized += '-';
+      lastWasHyphen = true;
+    }
+  }
+
+  if (lastWasHyphen) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  if (!isOpenAiCompatibleConnectionSlug(normalized)) {
     return null;
   }
 
@@ -80,11 +187,11 @@ export function normalizeOpenAiCompatibleConnectionSlug(
     return null;
   }
 
-  if (normalized.startsWith(`${OPENAI_COMPATIBLE_PROVIDER_ID}-`)) {
+  if (normalized.startsWith(OPENAI_COMPATIBLE_NAMED_ID_PREFIX)) {
     const withoutPrefix = normalized.slice(
-      OPENAI_COMPATIBLE_PROVIDER_ID.length + 1,
+      OPENAI_COMPATIBLE_NAMED_ID_PREFIX.length,
     );
-    return OPENAI_COMPATIBLE_CONNECTION_SLUG_PATTERN.test(withoutPrefix)
+    return isOpenAiCompatibleConnectionSlug(withoutPrefix)
       ? withoutPrefix
       : null;
   }
@@ -116,7 +223,7 @@ export function isOpenAiCompatibleProviderId(
   }
 
   const slug = providerId.slice(OPENAI_COMPATIBLE_NAMED_ID_PREFIX.length);
-  return OPENAI_COMPATIBLE_CONNECTION_SLUG_PATTERN.test(slug);
+  return isOpenAiCompatibleConnectionSlug(slug);
 }
 
 export function getOpenAiCompatibleProviderSlug(
@@ -131,7 +238,7 @@ export function getOpenAiCompatibleProviderSlug(
   }
 
   const slug = providerId.slice(OPENAI_COMPATIBLE_NAMED_ID_PREFIX.length);
-  return OPENAI_COMPATIBLE_CONNECTION_SLUG_PATTERN.test(slug) ? slug : null;
+  return isOpenAiCompatibleConnectionSlug(slug) ? slug : null;
 }
 
 export function buildOpenAiCompatibleProviderInstance(
@@ -199,14 +306,14 @@ export function parseOpenAiCompatibleBaseUrlEnvVarName(
     envVarName.length - OPENAI_COMPATIBLE_BASE_URL_ENV_SUFFIX.length,
   );
 
-  if (!OPENAI_COMPATIBLE_NAMED_ENV_SLUG_PATTERN.test(middle)) {
+  if (!isOpenAiCompatibleNamedEnvSlug(middle)) {
     return null;
   }
 
   // Avoid treating OPENAI_COMPATIBLE_API_KEY as a base-url env by requiring
   // the middle segment (already needed for named env vars).
   const slug = envSegmentToSlug(middle);
-  if (!OPENAI_COMPATIBLE_CONNECTION_SLUG_PATTERN.test(slug)) {
+  if (!isOpenAiCompatibleConnectionSlug(slug)) {
     return null;
   }
 
@@ -271,8 +378,8 @@ export function isOpenAiCompatibleProviderEnvVarName(
       rest.length - OPENAI_COMPATIBLE_API_KEY_ENV_SUFFIX.length,
     );
     return (
-      OPENAI_COMPATIBLE_NAMED_ENV_SLUG_PATTERN.test(middle) &&
-      OPENAI_COMPATIBLE_CONNECTION_SLUG_PATTERN.test(envSegmentToSlug(middle))
+      isOpenAiCompatibleNamedEnvSlug(middle) &&
+      isOpenAiCompatibleConnectionSlug(envSegmentToSlug(middle))
     );
   }
 
@@ -282,8 +389,8 @@ export function isOpenAiCompatibleProviderEnvVarName(
       rest.length - OPENAI_COMPATIBLE_LABEL_ENV_SUFFIX.length,
     );
     return (
-      OPENAI_COMPATIBLE_NAMED_ENV_SLUG_PATTERN.test(middle) &&
-      OPENAI_COMPATIBLE_CONNECTION_SLUG_PATTERN.test(envSegmentToSlug(middle))
+      isOpenAiCompatibleNamedEnvSlug(middle) &&
+      isOpenAiCompatibleConnectionSlug(envSegmentToSlug(middle))
     );
   }
 
