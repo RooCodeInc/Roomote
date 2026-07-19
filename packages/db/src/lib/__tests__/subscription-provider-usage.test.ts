@@ -390,7 +390,7 @@ describe('getSubscriptionProviderUsage', () => {
     } as never;
 
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
-      if (String(url).includes('api.kimi.com')) {
+      if (new URL(String(url)).hostname === 'api.kimi.com') {
         return jsonResponse({
           data: [{ model_name: 'all', limit: 100, used: 10 }],
         });
