@@ -18,6 +18,7 @@ import { apiLogger } from '../../logging.js';
 import { checkAutoStartChannelCache } from '../shared/auto-start-cache.js';
 import { evaluateChannelLaunchGate } from '../shared/channel-launch-gate.js';
 import {
+  buildDiscordChannelAutoStartLinkMessage,
   claimAccountLinkDmSlot,
   isDiscordDmBlockedError,
   markAccountLinkDmSent,
@@ -75,10 +76,7 @@ async function sendLinkNudgeBestEffort(input: {
     );
     await input.provider.postMessage({
       channelId: dmChannel.id,
-      text: [
-        `Roomote watches **#${input.channelName}** and starts a task for each new message, but your Discord account is not linked to a Roomote account yet, so your message did not start one.`,
-        'Generate a code under **Settings → Personal → Linked Accounts** in Roomote, then reply here with `/link code:<code>`.',
-      ].join('\n\n'),
+      text: buildDiscordChannelAutoStartLinkMessage(input.channelName),
     });
     await markAccountLinkDmSent(input.discordUserId);
   } catch (error) {
