@@ -9,6 +9,7 @@ import {
   type SuggestedTaskModel,
 } from './recommended-task-models';
 import {
+  applyImplicitLiteLlmModelPrefix,
   DEFAULT_TASK_MODEL_ID,
   ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   getTaskModelProviderId,
@@ -1371,17 +1372,36 @@ export function buildSetupModelStatus(input: {
   const persistedModelConfig = normalizeDeploymentModelConfig(
     input.persistedModelConfig,
   );
-  const runtimeRoomoteModel = normalizeOptionalString(runtimeEnv.R_MODEL);
+  const persistedEnvVarNameSet = new Set(
+    Array.from(input.persistedEnvVarNames ?? []).map((name) => name.trim()),
+  );
+  // Bare R_MODEL / saved coding models are LiteLLM route names when a LiteLLM
+  // endpoint is present; rewrite before provider resolution so setup status
+  // matches task runtime resolution.
+  const isLiteLlmConfigured =
+    isConfiguredEnvValue(runtimeEnv.LITELLM_BASE_URL) ||
+    persistedEnvVarNameSet.has('LITELLM_BASE_URL') ||
+    isConfiguredEnvValue(input.persistedEnvVarValues?.LITELLM_BASE_URL);
+  const runtimeRoomoteModelRaw = normalizeOptionalString(runtimeEnv.R_MODEL);
+  const runtimeRoomoteModel = runtimeRoomoteModelRaw
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeRoomoteModelRaw,
+        isLiteLlmConfigured,
+      )
+    : null;
   const runtimeRoomoteModelSatisfied = runtimeRoomoteModel !== null;
   const runtimeProviderId =
     resolveModelProviderIdFromModel(runtimeRoomoteModel);
   const runtimeKnownProviderId =
     resolveSetupModelProviderIdFromModel(runtimeRoomoteModel);
+  const persistedRoomoteModel = persistedModelConfig.roomoteModel
+    ? applyImplicitLiteLlmModelPrefix(
+        persistedModelConfig.roomoteModel,
+        isLiteLlmConfigured,
+      )
+    : null;
   const persistedProviderId = resolveSetupModelProviderIdFromModel(
-    persistedModelConfig.roomoteModel,
-  );
-  const persistedEnvVarNameSet = new Set(
-    Array.from(input.persistedEnvVarNames ?? []).map((name) => name.trim()),
+    persistedRoomoteModel,
   );
 
   const preselectedProvider =
@@ -1558,10 +1578,21 @@ export function buildSetupModelStatus(input: {
   // model runtime env resolves keys runtime-first with a DB fallback, so a
   // saved model choice plus a runtime-env key is a complete setup. A
   // ChatGPT subscription also satisfies persisted openai/ models.
+  // Symmetric: a runtime env model plus a saved provider key is also complete,
+  // because task runtime resolution layer loads keys the same way.
+  const setupSatisfiedByRuntimeModelAndSavedKey =
+    runtimeRoomoteModelSatisfied &&
+    Boolean(
+      runtimeProviderStatus &&
+      (runtimeProviderStatus.id === 'openai'
+        ? runtimeProviderStatus.savedApiKeySatisfied || chatgptCoversOpenAi
+        : runtimeProviderStatus.savedApiKeySatisfied),
+    );
   const setupSatisfied =
     setupSatisfiedByRuntimeEnv ||
+    setupSatisfiedByRuntimeModelAndSavedKey ||
     Boolean(
-      persistedModelConfig.roomoteModel &&
+      persistedRoomoteModel &&
       (openaiPersistedSatisfied ||
         (persistedProviderStatus?.id !== 'openai' &&
           (persistedProviderStatus?.savedApiKeySatisfied ||
@@ -1581,7 +1612,7 @@ export function buildSetupModelStatus(input: {
     runtimeRoomoteModel,
     runtimeRoomoteModelSatisfied,
     runtimeProviderId,
-    persistedRoomoteModel: persistedModelConfig.roomoteModel,
+    persistedRoomoteModel,
     persistedProviderId,
     preselectedProvider,
     providers,
