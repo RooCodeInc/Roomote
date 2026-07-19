@@ -96,7 +96,7 @@ type LocalProviderDiscoveryResult = {
   error: string | null;
 };
 
-export function isLocalTaskModelProviderId(
+function isLocalTaskModelProviderId(
   providerId: string,
 ): providerId is LocalTaskModelProviderId {
   if (

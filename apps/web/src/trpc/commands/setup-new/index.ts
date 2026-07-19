@@ -1519,7 +1519,7 @@ export async function saveSetupNewModelConfigCommand(
   const { userId } = auth;
   let providerId = input.provider;
   let additionalEnvValues = input.additionalEnvValues;
-  let apiKey = input.apiKey;
+  const apiKey = input.apiKey;
 
   if (providerId === OPENAI_COMPATIBLE_PROVIDER_ID) {
     const slug = normalizeOpenAiCompatibleConnectionSlug(input.connectionName);
