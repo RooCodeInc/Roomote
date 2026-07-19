@@ -49,7 +49,7 @@ deployment.
 
 | Provider | Best for | Setup |
 | --- | --- | --- |
-| [OpenAI-compatible](/providers/inference/openai-compatible) | Any OpenAI API endpoint (LiteLLM, vLLM, custom proxies, local servers) | Endpoint URL and optional API key |
+| [OpenAI-compatible](/providers/inference/openai-compatible) | Any OpenAI API endpoint (LiteLLM, vLLM, custom proxies, local servers); multiple named connections supported | Connection name, endpoint URL, and optional API key |
 | [LiteLLM](/providers/inference/litellm) | A single gateway that routes to one or more model vendors | Endpoint URL and required API key |
 | [Ollama](/providers/inference/ollama) | Local or private model serving without provider API keys | Endpoint URL |
 | [vLLM](/providers/inference/vllm) | Serving OpenAI-compatible models on your own GPU infrastructure | Endpoint URL and optional API key |

@@ -35,6 +35,7 @@ export * from './logging';
 export * from './llm-usage';
 export * from './inference-gateway';
 export * from './model-provider-config';
+export * from './openai-compatible-providers';
 export * from './recommended-task-models';
 export * from './opencode-openrouter-variants';
 export * from './opencode-reasoning';

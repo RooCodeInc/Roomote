@@ -4,6 +4,8 @@ import {
   getModelProviderLabel,
   getSetupModelProvider,
   getSetupModelProviderAdditionalEnvFields,
+  isOpenAiCompatibleProviderId,
+  isSetupModelProviderId,
   type SetupModelProviderId,
   type TaskModelMetadata,
 } from '@roomote/types';
@@ -33,7 +35,8 @@ export const LOCAL_TASK_MODEL_PROVIDER_IDS =
   ];
 
 export type LocalTaskModelProviderId =
-  (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number];
+  | (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number]
+  | `openai-compatible-${string}`;
 
 export type LocalProviderConnectionInput = {
   baseUrl?: string;
@@ -93,12 +96,18 @@ type LocalProviderDiscoveryResult = {
   error: string | null;
 };
 
-function isLocalTaskModelProviderId(
+export function isLocalTaskModelProviderId(
   providerId: string,
 ): providerId is LocalTaskModelProviderId {
-  return LOCAL_TASK_MODEL_PROVIDER_IDS.includes(
-    providerId as LocalTaskModelProviderId,
-  );
+  if (
+    LOCAL_TASK_MODEL_PROVIDER_IDS.includes(
+      providerId as (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number],
+    )
+  ) {
+    return true;
+  }
+
+  return isOpenAiCompatibleProviderId(providerId);
 }
 
 export function getLocalTaskModelProviderIdFromModelId(
@@ -114,7 +123,11 @@ function getLocalProviderConnectionEnv(provider: LocalTaskModelProviderId): {
   baseUrl: string;
   apiKey?: string;
 } {
-  const descriptor = getSetupModelProvider(provider as SetupModelProviderId);
+  const descriptor = getSetupModelProvider(
+    isSetupModelProviderId(provider)
+      ? provider
+      : (provider as SetupModelProviderId),
+  );
   const baseUrl = descriptor.envVarName;
   if (!baseUrl) {
     throw new Error(`Endpoint provider ${provider} is missing envVarName`);

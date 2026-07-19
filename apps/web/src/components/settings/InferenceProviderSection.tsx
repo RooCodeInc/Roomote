@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
   getModelProviderLabel,
 } from '@roomote/types';
 import type {
@@ -222,6 +223,7 @@ function ProviderCredentialsDialog({
     providerId: SetupModelProviderId,
     apiKey: string,
     additionalEnvValues?: Record<string, string>,
+    connectionName?: string,
   ) => Promise<void>;
   onOpenChange: (open: boolean) => void;
   onConnectOAuth: (providerId: SetupModelProviderId) => void;
@@ -231,6 +233,7 @@ function ProviderCredentialsDialog({
   const [apiKey, setApiKey] = useState(() =>
     getInitialPrimaryCredential(providers[0] ?? null),
   );
+  const [connectionName, setConnectionName] = useState('');
   const [providerSelectOpen, setProviderSelectOpen] = useState(false);
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
@@ -256,6 +259,7 @@ function ProviderCredentialsDialog({
     const provider = providers[0] ?? null;
     setSelectedProviderId(provider?.id ?? null);
     setApiKey(getInitialPrimaryCredential(provider));
+    setConnectionName('');
     setAdditionalEnvValues(getInitialAdditionalEnvValues(provider));
   }, [open, providers, selectedProviderId]);
 
@@ -293,6 +297,13 @@ function ProviderCredentialsDialog({
   const hasMissingPrimaryCredential =
     !hasExistingPrimaryCredential && apiKey.trim().length === 0;
 
+  const requiresConnectionName =
+    mode === 'add' &&
+    (selectedProvider?.id === OPENAI_COMPATIBLE_PROVIDER_ID ||
+      selectedProvider?.allowMultipleConnections === true);
+  const hasMissingConnectionName =
+    requiresConnectionName && connectionName.trim().length === 0;
+
   const handleSaveClick = async () => {
     if (!selectedProvider) {
       return;
@@ -303,8 +314,10 @@ function ProviderCredentialsDialog({
         selectedProvider.id,
         apiKey.trim(),
         getSubmitAdditionalEnvValues(selectedProvider, additionalEnvValues),
+        requiresConnectionName ? connectionName.trim() : undefined,
       );
       setApiKey('');
+      setConnectionName('');
       setAdditionalEnvValues({});
     } catch {
       // The mutation surfaces failures via toast; keep the typed key so the
@@ -350,6 +363,7 @@ function ProviderCredentialsDialog({
                       ) ?? null;
                     setSelectedProviderId(providerId);
                     setApiKey(getInitialPrimaryCredential(provider));
+                    setConnectionName('');
                     setAdditionalEnvValues(
                       getInitialAdditionalEnvValues(provider),
                     );
@@ -383,6 +397,28 @@ function ProviderCredentialsDialog({
                 </div>
               ) : (
                 <>
+                  {requiresConnectionName ? (
+                    <div className={PROVIDER_GRID_ROW_CLASS}>
+                      <span className="text-sm font-medium">
+                        Connection name
+                      </span>
+                      <div className="space-y-1.5">
+                        <Input
+                          value={connectionName}
+                          onChange={(event) =>
+                            setConnectionName(event.target.value)
+                          }
+                          placeholder="e.g. company-proxy"
+                          disabled={isSaving}
+                          aria-label="Connection name for OpenAI-compatible endpoint"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Used to tell multiple OpenAI-compatible endpoints
+                          apart in Models settings.
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className={PROVIDER_GRID_ROW_CLASS}>
                     <span className="text-sm font-medium">
                       {primaryCredentialLabel}
@@ -490,7 +526,8 @@ function ProviderCredentialsDialog({
                 isSaving ||
                 !selectedProvider ||
                 hasMissingPrimaryCredential ||
-                hasMissingRequiredFields
+                hasMissingRequiredFields ||
+                hasMissingConnectionName
               }
             >
               {isSaving ? (
@@ -806,12 +843,14 @@ export function InferenceProviderSection({
     providerId: SetupModelProviderId,
     apiKey: string,
     additionalEnvValues?: Record<string, string>,
+    connectionName?: string,
   ) => {
     setSavingProviderId(providerId);
     await saveProvider.mutateAsync({
       provider: providerId,
       ...(apiKey && { apiKey }),
       ...(additionalEnvValues && { additionalEnvValues }),
+      ...(connectionName && { connectionName }),
     });
   };
 

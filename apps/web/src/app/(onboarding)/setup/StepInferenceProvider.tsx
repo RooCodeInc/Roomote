@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
@@ -80,6 +81,7 @@ export function StepInferenceProvider({
   const [selectedProvider, setSelectedProvider] =
     useState<SetupModelProviderId>(modelSetup.preselectedProvider);
   const [apiKey, setApiKey] = useState('');
+  const [connectionName, setConnectionName] = useState('');
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
   >({});
@@ -125,6 +127,7 @@ export function StepInferenceProvider({
           ? 'http://localhost:8000/v1'
           : '',
     );
+    setConnectionName('');
     setAdditionalEnvValues({});
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
@@ -190,11 +193,17 @@ export function StepInferenceProvider({
         field.required &&
         (additionalEnvValues[field.envVarName]?.trim() ?? '').length === 0,
     );
+  const requiresConnectionName =
+    selectedProvider === OPENAI_COMPATIBLE_PROVIDER_ID ||
+    selectedProviderStatus?.allowMultipleConnections === true;
+  const hasMissingConnectionName =
+    requiresConnectionName && connectionName.trim().length === 0;
   const isActionDisabled =
     saveModelConfig.isPending ||
     discoverProviderModels.isPending ||
     qualifyProviderModel.isPending ||
     hasMissingRequiredFields ||
+    hasMissingConnectionName ||
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
   const isCheckingEndpoint =
     isEndpointProvider &&
@@ -262,6 +271,9 @@ export function StepInferenceProvider({
       provider: selectedProvider,
       apiKey: submittedCredential,
       ...(additionalEnvFields.length > 0 && { additionalEnvValues }),
+      ...(requiresConnectionName && {
+        connectionName: connectionName.trim(),
+      }),
       ...(modelId && { modelId }),
     });
     if (endpointConnectionMessage) {
@@ -328,6 +340,21 @@ export function StepInferenceProvider({
 
         {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
       </div>
+
+      {requiresConnectionName && !hasRuntimeProviderKey ? (
+        <div className="flex max-w-lg items-center gap-2">
+          <span className="w-48 shrink-0 text-sm text-muted-foreground">
+            Connection name
+          </span>
+          <Input
+            value={connectionName}
+            onChange={(event) => setConnectionName(event.target.value)}
+            placeholder="e.g. company-proxy"
+            disabled={saveModelConfig.isPending}
+            aria-label="Connection name for OpenAI-compatible endpoint"
+          />
+        </div>
+      ) : null}
 
       {selectedProviderStatus?.credentialHelp && !hasRuntimeProviderKey ? (
         <p className="max-w-lg text-xs text-muted-foreground">
