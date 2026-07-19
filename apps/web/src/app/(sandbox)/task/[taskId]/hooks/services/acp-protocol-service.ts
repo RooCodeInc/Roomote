@@ -19,6 +19,7 @@ import {
   formatRequestUserInputResponseText,
   getAcpLogicalEventId,
   getImageUrisFromContentBlocks,
+  getProviderRetryNoticeFromMessageData,
   inferAcpMessageKind,
   normalizeTranscriptUserText,
   normalizePlanPayload,
@@ -1608,6 +1609,19 @@ export class AcpProtocolService {
       return this.applyPlanUiMessage(nextMessages, planMessage, sessionId);
     }
 
+    if (
+      eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+      candidate.kind === 'text' &&
+      getProviderRetryNoticeFromMessageData(candidate.data)
+    ) {
+      return {
+        acpMessages: this.appendPersistedMessage(nextMessages, {
+          ...candidate,
+          isTurnCompletion: true,
+        }),
+      };
+    }
+
     return {
       acpMessages: this.appendPersistedMessage(nextMessages, candidate),
     };
@@ -1747,6 +1761,20 @@ export class AcpProtocolService {
 
         if (envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) {
           finalizePendingCompletion(message.sessionId);
+        }
+
+        if (
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          getProviderRetryNoticeFromMessageData(
+            asRecord(envelope.payload) ?? {},
+          )
+        ) {
+          acpMessages = this.appendPersistedMessage(acpMessages, {
+            ...message,
+            isTurnCompletion: true,
+          });
+          clearPendingCompletion(message.sessionId);
+          continue;
         }
 
         acpMessages = this.appendPersistedMessage(acpMessages, message);

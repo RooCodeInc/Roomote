@@ -16,9 +16,8 @@ import {
 } from './task-models';
 
 /**
- * The ChatGPT subscription provider id. It is the only OAuth-backed model
- * provider in the catalog: instead of an API-key env var, an operator
- * connects a ChatGPT Plus/Pro account through OpenAI's device-code flow and
+ * The ChatGPT subscription provider id. Instead of an API-key env var, an
+ * operator connects a ChatGPT Plus/Pro account through OpenAI's device-code flow and
  * Roomote stores the OAuth record. Subscription models keep the `openai/`
  * id prefix (opencode's Codex plugin registers OAuth auth under provider id
  * `openai`), so this id is a configuration/connect surface only — it is not
@@ -37,8 +36,7 @@ export type SetupModelProviderId = (typeof SETUP_MODEL_PROVIDER_IDS)[number];
 
 /**
  * How a model provider is authenticated. API-key providers read a single env
- * var (`envVarName`); OAuth providers are connected through a dedicated flow
- * and carry no env var.
+ * var (`envVarName`); OAuth providers are connected through a dedicated flow.
  */
 export type SetupModelProviderAuthKind = 'api-key' | 'endpoint' | 'oauth';
 
@@ -483,6 +481,56 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
   },
   {
+    // Provider id matches models.dev / OpenCode (`github-copilot`).
+    // Connections use OpenCode's GitHub device-code OAuth flow.
+    id: 'github-copilot',
+    label: 'GitHub Copilot',
+    envVarName: undefined,
+    credentialHelp: {
+      text: 'Connect a GitHub account with an active Copilot plan.',
+      href: 'https://docs.github.com/en/copilot',
+      linkLabel: 'GitHub Copilot docs',
+    },
+    defaultRoomoteModel: 'github-copilot/claude-sonnet-5',
+    authKind: 'oauth',
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5': 'github-copilot/claude-fable-5',
+      'claude-haiku-4-5': 'github-copilot/claude-haiku-4.5',
+      'claude-opus-4-8': 'github-copilot/claude-opus-4.8',
+      'claude-sonnet-5': 'github-copilot/claude-sonnet-5',
+      'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
+      'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
+      'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
+      'gemini-3-1-pro': 'github-copilot/gemini-3.1-pro-preview',
+      'gemini-3-5-flash': 'github-copilot/gemini-3.5-flash',
+      'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
+    }),
+    recommendedRoleModels: {
+      helper: 'github-copilot/claude-haiku-4.5',
+      codeReview: 'github-copilot/claude-opus-4.8',
+      explore: 'github-copilot/claude-haiku-4.5',
+      planning: 'github-copilot/claude-opus-4.8',
+    },
+  },
+  {
+    id: 'openai-compatible',
+    label: 'OpenAI-compatible',
+    envVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    additionalEnvFields: [
+      {
+        envVarName: 'OPENAI_COMPATIBLE_API_KEY',
+        label: 'API key (optional)',
+        secret: true,
+        required: false,
+      },
+    ],
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    dynamicModels: true,
+  },
+  {
     id: 'litellm',
     label: 'LiteLLM',
     envVarName: 'LITELLM_BASE_URL',
@@ -747,6 +795,8 @@ export type SetupModelStatus = {
    * usable even when `OPENAI_API_KEY` is not configured.
    */
   chatgptConnected: boolean;
+  /** Whether a GitHub Copilot subscription OAuth record is connected. */
+  githubCopilotConnected?: boolean;
   /**
    * True when both `OPENAI_API_KEY` and a ChatGPT subscription are
    * configured. opencode's Codex plugin prefers OAuth auth when both are
@@ -1182,9 +1232,11 @@ export function buildSetupModelStatus(input: {
    * models that can run on the subscription instead of an API key.
    */
   chatgptConnected?: boolean;
+  githubCopilotConnected?: boolean;
 }): SetupModelStatus {
   const runtimeEnv = input.runtimeEnv ?? {};
   const chatgptConnected = Boolean(input.chatgptConnected);
+  const githubCopilotConnected = Boolean(input.githubCopilotConnected);
   const persistedModelConfig = normalizeDeploymentModelConfig(
     input.persistedModelConfig,
   );
@@ -1210,13 +1262,17 @@ export function buildSetupModelStatus(input: {
   const providers = SETUP_MODEL_PROVIDER_CATALOG.map(
     (provider): SetupModelProviderStatus => {
       if (provider.authKind === 'oauth') {
-        // OAuth providers carry no env var. Satisfaction comes from the
-        // connection flag passed in by the caller (chatgptConnected).
+        const oauthConnected =
+          provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
+            ? chatgptConnected
+            : provider.id === 'github-copilot'
+              ? githubCopilotConnected
+              : false;
         return {
           ...provider,
           additionalEnvValues: {},
           runtimeApiKeySatisfied: false,
-          savedApiKeySatisfied: chatgptConnected,
+          savedApiKeySatisfied: oauthConnected,
         };
       }
 
@@ -1339,6 +1395,7 @@ export function buildSetupModelStatus(input: {
     setupSatisfied,
     setupSatisfiedByRuntimeEnv,
     chatgptConnected,
+    githubCopilotConnected,
     openaiAndChatGptBothConfigured,
   };
 }

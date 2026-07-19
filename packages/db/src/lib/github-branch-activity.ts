@@ -22,12 +22,17 @@ export interface ActiveGitHubBranchWork {
   type: TaskPayloadKind;
   status: RunStatus;
   taskPhase: string | null;
-  match: 'task_pull_request' | 'branch';
+  match: 'task_pull_request' | 'branch' | 'linked_work_item';
 }
 
 export interface ReusableGitHubPrFollowUpOwner extends ActiveGitHubBranchWork {
   delivery: 'attach' | 'resume';
 }
+
+export type ReusableGitHubIssueTaskOwner = Omit<
+  ReusableGitHubPrFollowUpOwner,
+  'match'
+>;
 
 const ACTIVE_WORK_STATUSES = [
   ...bootingRunStatuses,
@@ -291,6 +296,57 @@ export async function findReusableGitHubPrFollowUpOwner({
     .orderBy(desc(taskRuns.createdAt));
 
   return pickReusableFollowUpOwner(branchRows, 'branch');
+}
+
+/**
+ * Returns the newest reusable Roomote task started from a GitHub issue
+ * @mention (payload `linkedWorkItems` entry) so a second issue comment can
+ * continue the original task instead of launching a sibling.
+ */
+export async function findReusableGitHubIssueTaskOwner({
+  repoFullName,
+  issueNumber,
+}: {
+  repoFullName: string;
+  issueNumber: number;
+}): Promise<ReusableGitHubIssueTaskOwner | null> {
+  const issueIdentifier = String(issueNumber);
+  const linkedWorkItemMatch = JSON.stringify([
+    {
+      provider: 'github',
+      identifier: issueIdentifier,
+      repository: repoFullName,
+    },
+  ]);
+
+  const rows = await db
+    .select(REUSABLE_FOLLOW_UP_OWNER_COLUMNS)
+    .from(taskRuns)
+    .where(
+      and(
+        isNull(taskRuns.canceledAt),
+        inArray(taskRuns.payloadKind, [...REUSABLE_FOLLOW_UP_OWNER_TYPES]),
+        payloadProviderCondition('github'),
+        sql`${taskRuns.payload}->>'repo' = ${repoFullName}`,
+        sql`${taskRuns.payload}->'linkedWorkItems' @> ${linkedWorkItemMatch}::jsonb`,
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt));
+
+  const owner = await pickReusableFollowUpOwner(rows, 'linked_work_item');
+
+  if (!owner) {
+    return null;
+  }
+
+  return {
+    runId: owner.runId,
+    taskId: owner.taskId,
+    type: owner.type,
+    status: owner.status,
+    taskPhase: owner.taskPhase,
+    delivery: owner.delivery,
+  };
 }
 
 /**

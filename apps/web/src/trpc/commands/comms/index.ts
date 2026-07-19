@@ -733,6 +733,8 @@ export async function listDiscordChannelsCommand(
     return {
       channels: channels.map((channel) => {
         const requiresTag = discordChannelRequiresTag(channel);
+        const requiredTagUnavailable =
+          requiresTag && (channel.availableTags?.length ?? 0) === 0;
         return {
           id: channel.id,
           name: channel.name,
@@ -743,7 +745,7 @@ export async function listDiscordChannelsCommand(
           flags: channel.flags ?? 0,
           availableTags: channel.availableTags ?? [],
           requiresTag,
-          supported: !requiresTag,
+          supported: !requiredTagUnavailable,
         };
       }),
     };
@@ -771,8 +773,16 @@ export async function selectDiscordDestinationCommand(
   }
   const permissions = await diagnoseDiscordPermissionsCommand(auth, input);
   if (!permissions.canUseChannel) {
+    const missing = permissions.missingPermissions
+      .map((name) =>
+        name
+          .split('_')
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' '),
+      )
+      .join(', ');
     throw new Error(
-      `Roomote is missing required permissions in #${channel.name}: ${permissions.missingPermissions.join(', ')}.`,
+      `Roomote is missing required permissions in #${channel.name}: ${missing}.`,
     );
   }
   return captureDiscordDefaultDestination({

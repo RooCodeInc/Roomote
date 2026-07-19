@@ -1,4 +1,5 @@
 import { Env } from '@roomote/env';
+import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   buildDiscordRoutingContext,
   getTaskUrl,
@@ -15,6 +16,7 @@ import {
 
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { findCommunicationTaskRunBySourceEvent } from '../tasks/communication-task-run-lookup.js';
+import { processDiscordAttachments } from './attachments.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
   requestDiscordRoutingConfirmation,
@@ -25,26 +27,13 @@ import {
   resolveDiscordWorkspace,
   type DiscordChannelContext,
 } from './task-launch.js';
-
-async function fetchThreadHistoryBestEffort(input: {
-  provider: DiscordCommunicationProvider;
-  channelId: string;
-}): Promise<Array<{ user: string; text: string }>> {
-  try {
-    const result = await input.provider.fetchChannelMessages({
-      channelId: input.channelId,
-    });
-    return result.messages
-      .filter((message) => message.text.trim())
-      .slice(-5)
-      .map((message) => ({
-        user: message.username ?? message.user,
-        text: message.text,
-      }));
-  } catch {
-    return [];
-  }
-}
+import {
+  fetchDiscordThreadHistoryBestEffort,
+  formatDiscordThreadContext,
+  markDiscordThreadHistoryDelivered,
+  toDiscordAttachmentsFromHistory,
+  type DiscordThreadHistoryMessage,
+} from './thread-context.js';
 
 export async function startNewDiscordTask(input: {
   provider: DiscordCommunicationProvider;
@@ -99,35 +88,90 @@ export async function startNewDiscordTask(input: {
     };
   }
 
+  // Full transcript + prior attachments belong on task start only when the
+  // launch already lives inside a Discord thread and is not /new (or another
+  // forced sibling). Matching Slack: continue-in-thread gets history; a fresh
+  // task must start clean. Top-level channel launches never dump unrelated
+  // channel history into the agent prompt.
+  const includeFullThreadContext =
+    input.channel.isThread && !input.forceNewThread;
   const [history, installation] = await Promise.all([
-    fetchThreadHistoryBestEffort({
-      provider: input.provider,
-      channelId: input.channel.channelId,
-    }),
+    includeFullThreadContext
+      ? fetchDiscordThreadHistoryBestEffort({
+          provider: input.provider,
+          channelId: input.channel.channelId,
+        })
+      : Promise.resolve([] as DiscordThreadHistoryMessage[]),
     input.channel.guildId
       ? findDiscordInstallationByGuildId(input.channel.guildId)
       : Promise.resolve(null),
   ]);
-  const triggeringMessage = {
+  const triggeringMessage: DiscordThreadHistoryMessage = {
+    id: input.queuedMessage.ts,
     user: input.queuedMessage.user,
     text: input.queuedMessage.text,
+    attachments: [],
   };
-  const threadMessages = history.some(
-    (message) =>
-      message.user === triggeringMessage.user &&
-      message.text === triggeringMessage.text,
+  const historyWithTrigger = history.some(
+    (message) => message.id === triggeringMessage.id,
   )
     ? history
-    : [...history, triggeringMessage].slice(-5);
+    : [...history, triggeringMessage];
+  // Router keeps its own last-N budgetary slice; pass the reconstructed
+  // transcript only when this launch inherits the thread.
+  const routingThreadMessages = includeFullThreadContext
+    ? historyWithTrigger.map((message) => ({
+        user: message.username ?? message.user,
+        text: message.text,
+      }))
+    : [
+        {
+          user: triggeringMessage.user,
+          text: triggeringMessage.text,
+        },
+      ];
+  const historyAttachments = includeFullThreadContext
+    ? toDiscordAttachmentsFromHistory(history, {
+        excludeMessageId: input.queuedMessage.ts,
+      })
+    : [];
+  const threadAttachments = historyAttachments.length
+    ? await processDiscordAttachments(historyAttachments)
+    : { images: [], attachmentTexts: [], warnings: [] };
+  for (const warning of threadAttachments.warnings) {
+    console.warn(`[discord] Thread attachment warning: ${warning}`);
+  }
+
+  const taskDescriptionWithAttachments = appendAttachmentTextsToPromptText({
+    text: input.queuedMessage.text,
+    attachmentTexts: threadAttachments.attachmentTexts,
+  });
+  const allImages = [
+    ...(input.queuedMessage.images ?? []),
+    ...threadAttachments.images,
+  ];
+  const threadContext = includeFullThreadContext
+    ? formatDiscordThreadContext({
+        messages: historyWithTrigger,
+        currentMessageId: input.queuedMessage.ts,
+      })
+    : undefined;
+  const agentPromptPrefix = input.channelAutoStart?.agentPromptPrefix?.trim();
+  const agentPromptBody = [threadContext, taskDescriptionWithAttachments]
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join('\n\n');
+  const agentPromptText = agentPromptPrefix
+    ? `${agentPromptPrefix}\n\n${agentPromptBody}`
+    : agentPromptBody !== input.queuedMessage.text
+      ? agentPromptBody
+      : undefined;
   const routingContext = await buildDiscordRoutingContext({
     userId: input.launchOwnerUserId,
-    taskDescription: input.queuedMessage.text,
+    taskDescription: taskDescriptionWithAttachments,
     guildName: installation?.guildName ?? undefined,
     channelName: input.channel.channelName,
-    threadMessages,
-    ...(input.queuedMessage.images?.length
-      ? { images: input.queuedMessage.images }
-      : {}),
+    threadMessages: routingThreadMessages,
+    ...(allImages.length ? { images: allImages } : {}),
     apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
   });
   const routingDecision = await routeTask(routingContext);
@@ -161,13 +205,23 @@ export async function startNewDiscordTask(input: {
       ...(input.interaction ? { interaction: input.interaction } : {}),
       requesterDiscordUserId: input.requesterDiscordUserId,
       launchOwnerUserId: input.launchOwnerUserId,
-      queuedMessage: input.queuedMessage,
+      queuedMessage: {
+        ...input.queuedMessage,
+        ...(allImages.length ? { images: allImages } : {}),
+      },
       metadata: input.metadata,
       routingContext,
       channel: input.channel,
       routingDecision,
       forceNewThread: input.forceNewThread,
+      ...(agentPromptText ? { agentPromptText } : {}),
     });
+    if (includeFullThreadContext) {
+      await markDiscordThreadHistoryDelivered({
+        channelId: input.channel.channelId,
+        messageIds: historyWithTrigger.map((message) => message.id),
+      });
+    }
     return {
       status: 'confirmation_pending' as const,
       routingDecision,
@@ -185,7 +239,6 @@ export async function startNewDiscordTask(input: {
   if (!workspace) {
     throw new Error('Discord task routing selected an unavailable workspace.');
   }
-  const agentPromptPrefix = input.channelAutoStart?.agentPromptPrefix?.trim();
   const kickoffMessage =
     routingDecision.status === 'routed'
       ? routingDecision.result.kickoffMessage
@@ -196,18 +249,23 @@ export async function startNewDiscordTask(input: {
     ...(input.channelAutoStart
       ? { initiator: input.channelAutoStart.initiator }
       : {}),
-    ...(agentPromptPrefix
-      ? {
-          agentPromptText: `${agentPromptPrefix}\n\n${input.queuedMessage.text}`,
-        }
-      : {}),
-    queuedMessage: input.queuedMessage,
+    ...(agentPromptText ? { agentPromptText } : {}),
+    queuedMessage: {
+      ...input.queuedMessage,
+      ...(allImages.length ? { images: allImages } : {}),
+    },
     metadata: input.metadata,
     channel: input.channel,
     workspace,
     forceNewThread: input.forceNewThread,
     ...(kickoffMessage ? { kickoffMessage } : {}),
   });
+  if (includeFullThreadContext) {
+    await markDiscordThreadHistoryDelivered({
+      channelId: input.channel.channelId,
+      messageIds: historyWithTrigger.map((message) => message.id),
+    });
+  }
   if (input.interaction) {
     await replyToDiscordEvent({
       provider: input.provider,

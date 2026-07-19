@@ -365,6 +365,36 @@ export function stripDiscordBotMention(
     .trim();
 }
 
+function formatDiscordMentionLabel(user: DiscordUser): string | null {
+  const label = user.global_name?.trim() || user.username?.trim();
+  return label || null;
+}
+
+/**
+ * Turn raw Discord mention tokens into readable @names using the message's
+ * resolved mention metadata. Unknown leftover mention markup is dropped so
+ * thread titles and agent prompts do not surface snowflake ids.
+ */
+export function expandDiscordUserMentions(
+  text: string,
+  mentions: DiscordUser[],
+): string {
+  if (!text) return text;
+  const byId = new Map<string, string>();
+  for (const mention of mentions) {
+    const label = formatDiscordMentionLabel(mention);
+    if (label) byId.set(mention.id, label);
+  }
+  return text
+    .replace(/<@!?(\d+)>/gu, (_match, id: string) => {
+      const label = byId.get(id);
+      return label ? `@${label}` : ' ';
+    })
+    .replace(/[^\S\r\n]+/gu, ' ')
+    .replace(/ *\r?\n */gu, '\n')
+    .trim();
+}
+
 function findInteractionOption(
   options: DiscordInteractionOption[] | undefined,
   name: string,
@@ -445,9 +475,9 @@ export function discordEventToQueuedCommunicationMessage(
     const attachmentSummary = formatDiscordAttachmentSummary(
       message.attachments,
     );
-    const strippedText = stripDiscordBotMention(
-      message.content,
-      options.botUserId,
+    const strippedText = expandDiscordUserMentions(
+      stripDiscordBotMention(message.content, options.botUserId),
+      message.mentions,
     );
     const extractedText = (options.attachmentText ?? [])
       .map((text) => text.trim())

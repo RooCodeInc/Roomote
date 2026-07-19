@@ -7,11 +7,13 @@ const {
   mockFindTaskRun,
   mockResolveModelProviderEnvValue,
   mockGetFreshChatGptAccessToken,
+  mockGetGitHubCopilotAccessToken,
   mockRecordLlmUsage,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetFreshChatGptAccessToken: vi.fn(),
+  mockGetGitHubCopilotAccessToken: vi.fn(),
   mockRecordLlmUsage: vi.fn(),
 }));
 
@@ -25,6 +27,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
   getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
+  getGitHubCopilotAccessToken: mockGetGitHubCopilotAccessToken,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -80,6 +83,20 @@ async function postMessages(
   path = '/api/inference/anthropic/v1/messages',
   headers: Record<string, string> = {},
 ) {
+  return appRequest(
+    app,
+    path,
+    { model: 'claude-sonnet-5', max_tokens: 16 },
+    headers,
+  );
+}
+
+async function appRequest(
+  app: Hono<{ Variables: Variables }>,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) {
   return app.request(path, {
     method: 'POST',
     headers: {
@@ -87,7 +104,7 @@ async function postMessages(
       authorization: 'Bearer run-token-value',
       ...headers,
     },
-    body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 16 }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -96,6 +113,7 @@ describe('inference gateway', () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
+    mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockResolveModelProviderEnvValue.mockImplementation(
       async (names: string | readonly string[]) => {
         const nameList = typeof names === 'string' ? [names] : names;
@@ -261,6 +279,125 @@ describe('inference gateway', () => {
     expect(new Headers(init.headers).get('x-api-key')).toBe(
       'provider-secret-key',
     );
+  });
+
+  it('proxies GitHub Copilot without a /v1 base-path suffix', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.githubcopilot.com/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer github-oauth-token',
+    );
+  });
+
+  it('proxies GitHub Copilot responses path', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/responses',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.githubcopilot.com/responses');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer github-oauth-token',
+    );
+  });
+
+  it('prefers the connected GitHub Copilot OAuth token and adds Copilot headers', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+      { 'x-initiator': 'attacker' },
+    );
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer github-oauth-token');
+    expect(headers.get('openai-intent')).toBe('conversation-edits');
+    expect(headers.get('x-initiator')).toBe('user');
+  });
+
+  it('preserves OpenCode agent-initiated Copilot classification', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+      { 'x-initiator': 'agent' },
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('x-initiator')).toBe('agent');
+  });
+
+  it('sets Copilot-Vision-Request when the body carries image content', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+      {
+        model: 'claude-sonnet-5',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What is in this image?' },
+              {
+                type: 'image_url',
+                image_url: { url: 'data:image/png;base64,abc' },
+              },
+            ],
+          },
+        ],
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('copilot-vision-request')).toBe(
+      'true',
+    );
+  });
+
+  it('does not set Copilot-Vision-Request for text-only Copilot requests', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('copilot-vision-request')).toBeNull();
+  });
+
+  it('ignores client-supplied Copilot-Vision-Request when the body is text-only', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+      { 'copilot-vision-request': 'true' },
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('copilot-vision-request')).toBeNull();
   });
 
   it('allows nested paths under the Vercel AI Gateway protocol base', async () => {

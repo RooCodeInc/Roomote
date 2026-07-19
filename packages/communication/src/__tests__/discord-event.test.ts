@@ -161,6 +161,27 @@ describe('Discord Gateway event normalization', () => {
     ).not.toContain('signed-secret');
   });
 
+  it('expands user mentions to readable @names and drops unresolved snowflakes', () => {
+    const event = messageEvent({
+      content: '<@bot-1> please fix this for <@589419970627239947> and <@!999>',
+      guildId: 'guild-1',
+      mentions: [
+        { id: 'bot-1', username: 'Roomote', bot: true },
+        {
+          id: '589419970627239947',
+          username: 'sky.relifer',
+          global_name: 'Sky Relifer',
+        },
+      ],
+    });
+
+    expect(
+      discordEventToQueuedCommunicationMessage(event, {
+        botUserId: 'bot-1',
+      })?.text,
+    ).toBe('please fix this for @Sky Relifer and');
+  });
+
   it('normalizes /new slash interactions', () => {
     const event = parse({
       op: 0,

@@ -172,7 +172,7 @@ vi.mock('@roomote/communication/discord-provider', () => ({
     (channel.type === 15 || channel.type === 16) &&
     ((channel.flags ?? 0) & (1 << 4)) !== 0,
   DISCORD_REQUIRED_TAG_FORUM_ERROR:
-    'Roomote does not yet support Discord forum or media channels that require a tag. Turn off Require Tag in Discord or choose another channel.',
+    'Discord requires a tag for new posts in this forum, but no tag is available for Roomote to select.',
 }));
 
 vi.mock('@/lib/server/env', () => ({
@@ -302,7 +302,7 @@ describe('comms commands', () => {
       });
     });
 
-    it('retains forum flags and tags while marking required-tag forums unsupported', async () => {
+    it('retains forum flags and tags while supporting required-tag forums', async () => {
       mockDiscordListGuildChannels.mockResolvedValue([
         {
           id: 'forum-1',
@@ -331,7 +331,7 @@ describe('comms commands', () => {
             id: 'forum-1',
             flags: 1 << 4,
             requiresTag: true,
-            supported: false,
+            supported: true,
             availableTags: [expect.objectContaining({ id: 'tag-1' })],
           }),
         ],
@@ -339,7 +339,7 @@ describe('comms commands', () => {
       expect(mockSyncDiscordInstallationChannels).toHaveBeenCalledOnce();
     });
 
-    it('rejects a required-tag forum before checking permissions or saving it', async () => {
+    it('rejects a required-tag forum only when no tag is available', async () => {
       mockDiscordListGuildChannels.mockResolvedValue([
         {
           id: 'forum-1',
@@ -357,7 +357,7 @@ describe('comms commands', () => {
           channelId: 'forum-1',
         }),
       ).rejects.toThrow(
-        'Roomote does not yet support Discord forum or media channels that require a tag.',
+        'Discord requires a tag for new posts in this forum, but no tag is available for Roomote to select.',
       );
       expect(mockDiscordDiagnoseChannelPermissions).not.toHaveBeenCalled();
       expect(mockCaptureDiscordDefaultDestination).not.toHaveBeenCalled();

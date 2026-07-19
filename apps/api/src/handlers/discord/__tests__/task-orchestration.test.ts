@@ -2,8 +2,14 @@ const mocks = vi.hoisted(() => ({
   buildRoutingContext: vi.fn(),
   findSourceRun: vi.fn(),
   getTaskUrl: vi.fn(),
+  launchTask: vi.fn(),
+  processAttachments: vi.fn(),
   reply: vi.fn(),
+  requestConfirmation: vi.fn(),
+  resolveWorkspace: vi.fn(),
   routeTask: vi.fn(),
+  shouldAutoConfirm: vi.fn(),
+  findInstallation: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -13,7 +19,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  findDiscordInstallationByGuildId: vi.fn(),
+  findDiscordInstallationByGuildId: mocks.findInstallation,
 }));
 
 vi.mock('../../tasks/communication-task-run-lookup.js', () => ({
@@ -22,13 +28,61 @@ vi.mock('../../tasks/communication-task-run-lookup.js', () => ({
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
 
+vi.mock('../routing-confirmation.js', () => ({
+  requestDiscordRoutingConfirmation: mocks.requestConfirmation,
+  shouldAutoConfirmDiscordRoute: mocks.shouldAutoConfirm,
+}));
+
+vi.mock('../task-launch.js', () => ({
+  launchDiscordTask: mocks.launchTask,
+  resolveDiscordWorkspace: mocks.resolveWorkspace,
+}));
+
+vi.mock('../attachments.js', () => ({
+  processDiscordAttachments: mocks.processAttachments,
+}));
+
+vi.mock('../thread-delivery.js', () => ({
+  markDiscordThreadMessagesDelivered: vi.fn().mockResolvedValue(undefined),
+  claimUndeliveredDiscordThreadMessages: vi.fn(
+    async (_channelId: string, ids: string[]) => ids,
+  ),
+  releaseClaimedDiscordThreadMessages: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { startNewDiscordTask } from '../task-orchestration.js';
 
-describe('startNewDiscordTask idempotency', () => {
+describe('startNewDiscordTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getTaskUrl.mockReturnValue('https://roomote.example/task/task-1');
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
+    mocks.findSourceRun.mockResolvedValue(null);
+    mocks.findInstallation.mockResolvedValue(null);
+    mocks.shouldAutoConfirm.mockReturnValue(true);
+    mocks.buildRoutingContext.mockResolvedValue({ source: 'discord' });
+    mocks.routeTask.mockResolvedValue({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-1' },
+        kickoffMessage: 'On it.',
+      },
+    });
+    mocks.resolveWorkspace.mockResolvedValue({
+      environmentId: 'env-1',
+      repoForPayload: 'acme/repo',
+      workspaceDisplayName: 'Acme',
+    });
+    mocks.launchTask.mockResolvedValue({
+      launchResult: { id: 9, taskId: 'task-1' },
+      taskUrl: 'https://roomote.example/task/task-1',
+      createdThread: null,
+    });
+    mocks.processAttachments.mockResolvedValue({
+      images: [],
+      attachmentTexts: [],
+      warnings: [],
+    });
   });
 
   it('does not route or launch a second task for a retried source event', async () => {
@@ -77,5 +131,252 @@ describe('startNewDiscordTask idempotency', () => {
         text: expect.stringContaining('already started'),
       }),
     );
+  });
+
+  it('launches in-thread with full history and attachment context (Slack parity)', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          {
+            id: '100',
+            user: 'u-alice',
+            username: 'Alice',
+            text: 'Deploy failed on main',
+            files: [
+              {
+                id: 'att-1',
+                name: 'log.txt',
+                mimeType: 'text/plain',
+                size: 12,
+                url: 'https://cdn.discordapp.com/attachments/log.txt',
+              },
+            ],
+          },
+          {
+            id: '200',
+            user: 'u-matt',
+            username: 'Matt',
+            text: '@Roomote investigate the flaky build',
+          },
+        ],
+      }),
+    };
+    mocks.processAttachments.mockResolvedValue({
+      images: ['data:image/png;base64,thread'],
+      attachmentTexts: ['log.txt contents'],
+      warnings: [],
+    });
+
+    const result = await startNewDiscordTask({
+      provider: provider as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'investigate the flaky build',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: '200',
+        images: ['data:image/png;base64,current'],
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'discussion-thread',
+        communicationMessageId: '200',
+      },
+      channel: {
+        channelId: 'discussion-thread',
+        channelName: 'General discussion',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      forceNewThread: false,
+    });
+
+    expect(result.status).toBe('started');
+    expect(provider.fetchChannelMessages).toHaveBeenCalledWith({
+      channelId: 'discussion-thread',
+    });
+    expect(mocks.processAttachments).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 'att-1',
+        filename: 'log.txt',
+        url: 'https://cdn.discordapp.com/attachments/log.txt',
+      }),
+    ]);
+    expect(mocks.buildRoutingContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskDescription: expect.stringContaining('log.txt contents'),
+        threadMessages: [
+          { user: 'Alice', text: 'Deploy failed on main' },
+          { user: 'Matt', text: '@Roomote investigate the flaky build' },
+        ],
+        images: [
+          'data:image/png;base64,current',
+          'data:image/png;base64,thread',
+        ],
+      }),
+    );
+    expect(mocks.launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forceNewThread: false,
+        agentPromptText: expect.stringContaining('<thread_context>'),
+        queuedMessage: expect.objectContaining({
+          images: [
+            'data:image/png;base64,current',
+            'data:image/png;base64,thread',
+          ],
+        }),
+      }),
+    );
+    const agentPrompt = mocks.launchTask.mock.calls[0]?.[0]
+      .agentPromptText as string;
+    expect(agentPrompt).toContain('Alice: Deploy failed on main');
+    expect(agentPrompt).toContain('investigate the flaky build');
+    expect(agentPrompt).toContain('log.txt contents');
+    expect(agentPrompt).not.toContain('@Roomote investigate the flaky build');
+  });
+
+  it('does not inherit prior thread context for /new (forceNewThread)', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          {
+            id: '100',
+            user: 'u-alice',
+            username: 'Alice',
+            text: 'Should not leak into the fresh task',
+            files: [
+              {
+                id: 'att-1',
+                name: 'old.txt',
+                mimeType: 'text/plain',
+                size: 12,
+                url: 'https://cdn.discordapp.com/attachments/old.txt',
+              },
+            ],
+          },
+        ],
+      }),
+    };
+
+    const result = await startNewDiscordTask({
+      provider: provider as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Start something unrelated',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'interaction-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'old-thread',
+        communicationMessageId: 'interaction-1',
+      },
+      channel: {
+        channelId: 'old-thread',
+        channelName: 'Old task',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      forceNewThread: true,
+    });
+
+    expect(result.status).toBe('started');
+    expect(provider.fetchChannelMessages).not.toHaveBeenCalled();
+    expect(mocks.processAttachments).not.toHaveBeenCalled();
+    expect(mocks.buildRoutingContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskDescription: 'Start something unrelated',
+        threadMessages: [{ user: 'Matt', text: 'Start something unrelated' }],
+      }),
+    );
+    expect(mocks.launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forceNewThread: true,
+        queuedMessage: expect.objectContaining({
+          text: 'Start something unrelated',
+        }),
+      }),
+    );
+    const launchArgs = mocks.launchTask.mock.calls[0]?.[0] as {
+      agentPromptText?: string;
+    };
+    expect(launchArgs.agentPromptText).toBeUndefined();
+  });
+
+  it('stores thread context on routing confirmation for later launch', async () => {
+    mocks.shouldAutoConfirm.mockReturnValue(false);
+    mocks.requestConfirmation.mockResolvedValue({
+      pendingRouteId: 'pending-1',
+    });
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          {
+            id: '100',
+            user: 'u-alice',
+            username: 'Alice',
+            text: 'Earlier detail',
+          },
+          {
+            id: '200',
+            user: 'u-matt',
+            username: 'Matt',
+            text: 'please fix it',
+          },
+        ],
+      }),
+    };
+
+    const result = await startNewDiscordTask({
+      provider: provider as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'please fix it',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: '200',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'discussion-thread',
+        communicationMessageId: '200',
+      },
+      channel: {
+        channelId: 'discussion-thread',
+        channelName: 'General discussion',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+    });
+
+    expect(result.status).toBe('confirmation_pending');
+    expect(mocks.requestConfirmation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentPromptText: expect.stringContaining('Alice: Earlier detail'),
+      }),
+    );
+    expect(mocks.launchTask).not.toHaveBeenCalled();
   });
 });

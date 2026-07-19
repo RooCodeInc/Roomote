@@ -1,4 +1,5 @@
 import { buildGitHubMessageInstructions } from './github-message-instructions';
+import { buildUntrustedContentPolicy } from './untrusted-content';
 import { escapeTaskContextText } from './workflows/utils';
 
 export type GitHubTaskContextValue =
@@ -56,6 +57,8 @@ export function buildGitHubMentionFollowUpRequest({
     '',
     buildGitHubTaskContextBlock(taskContext),
     '',
+    buildUntrustedContentPolicy(),
+    '',
     buildGitHubMessageInstructions(),
   ].join('\n');
 }
@@ -87,6 +90,8 @@ Execution rules:
 
 ${buildGitHubTaskContextBlock(taskContext)}
 </github-pr-follow-up>
+
+${buildUntrustedContentPolicy()}
 
 ${buildGitHubMessageInstructions()}`;
 }

@@ -17,6 +17,7 @@ const CORE_PACKAGED_SKILL_INVOCATIONS = [
   'debug-reported-bug',
   'dependabot-triage',
   'codeql-triage',
+  'issue-fixer',
   'environment-setup',
   'explain-repo-code',
   'fix-pr',

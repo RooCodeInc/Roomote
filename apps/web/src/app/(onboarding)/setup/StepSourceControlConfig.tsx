@@ -126,7 +126,6 @@ export function StepSourceControlConfig({
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
-  const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
   const [showAdoAdvancedConfig, setShowAdoAdvancedConfig] = useState(false);
   const [showGitlabAdvancedConfig, setShowGitlabAdvancedConfig] =
     useState(false);
@@ -230,7 +229,6 @@ export function StepSourceControlConfig({
   useEffect(() => {
     setValues(nonSecretInitialValues);
     setEditingSavedValues({});
-    setShowManualGitHubValues(false);
     setShowAdoAdvancedConfig(false);
     setShowGitlabAdvancedConfig(false);
     setShowGiteaAdvancedConfig(false);
@@ -354,14 +352,11 @@ export function StepSourceControlConfig({
         : undefined
       : providerSetupCopy?.creationHref;
 
-  if (selectedProvider?.provider === 'github' && !showManualGitHubValues) {
+  if (selectedProvider?.provider === 'github') {
     return (
       <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
         <StepTitle text="Create GitHub App" />
-        <GitHubSourceControlConfig
-          onBack={onBack}
-          onManualValues={() => setShowManualGitHubValues(true)}
-        />
+        <GitHubSourceControlConfig onBack={onBack} />
       </div>
     );
   }

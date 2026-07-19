@@ -73,6 +73,7 @@ describe('background agent helpers', () => {
       'securityAuditorFrequency',
       'codeQualityAuditorFrequency',
       'ciFailureTriageFrequency',
+      'issueFixerFrequency',
     ]);
   });
 });

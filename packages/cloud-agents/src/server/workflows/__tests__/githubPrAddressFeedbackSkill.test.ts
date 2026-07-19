@@ -28,6 +28,9 @@ describe('address-pr-feedback skill', () => {
       'Post a reply on every thread you handled with `mcp__roomote__manage_source_control` `action: "reply_to_pull_request_comment"`',
     );
     expect(standardSkill).toContain(
+      'Do not manually edit previous review comments. Replying or adding new comments is ok; leave original review comments unchanged.',
+    );
+    expect(standardSkill).toContain(
       'Resolve only the review threads that are fully handled by the pushed fix, using `action: "resolve_pull_request_thread"` with `resolved: true`',
     );
 

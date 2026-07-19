@@ -59,7 +59,7 @@ import {
 } from '@/components/tasks/taskTypeFilter';
 
 export const Tasks = () => {
-  const { userId } = useAuthorizedUser();
+  const { userId, isAdmin } = useAuthorizedUser();
   const { isDebugUIVisible } = useShowDebugUI();
   const showTaskTypeFilter = isDebugUIVisible;
 
@@ -111,7 +111,8 @@ export const Tasks = () => {
     () => getTaskCategoryById(category),
     [category],
   );
-  const defaultsToAnyUser = selectedCategory?.isAutonomous ?? false;
+  const defaultsToAnyUser =
+    isAdmin || (selectedCategory?.isAutonomous ?? false);
   const effectiveFilterUserId =
     filterUserId ?? (defaultsToAnyUser ? 'all' : null);
 

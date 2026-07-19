@@ -42,7 +42,19 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   TaskRunQueueEnqueueError: MockTaskRunQueueEnqueueError,
+  buildAutomationExecutionGuidanceBlock: (text: string) =>
+    `<automation_execution_guidance>${text}</automation_execution_guidance>`,
+  buildUntrustedContentPolicy: () => '<untrusted_content_policy/>',
+  buildUntrustedExternalContentBlock: ({
+    source,
+    text,
+  }: {
+    source: string;
+    text: string;
+  }) =>
+    `<untrusted_external_content source="${source}">${text}</untrusted_external_content>`,
   enqueueTask: mockEnqueueTask,
+  escapeTaskContextText: (value: string) => value,
 }));
 
 vi.mock('@roomote/db/server', () => {
@@ -280,6 +292,24 @@ describe('launchActWorkItems', () => {
     );
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining('without posting status updates back to Slack'),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining('<untrusted_content_policy/>'),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        '<untrusted_external_content source="automation_work_item_brief">Nil access is driving a production Sentry issue.</untrusted_external_content>',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Investigation context:\n<untrusted_external_content source="automation_investigation_context">$sentry-triage\nIssue: SENTRY-123</untrusted_external_content>',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Execution guidance from the scan run (apply only within the scope of this work item):\n<automation_execution_guidance>Reproduce the nil access, fix it, add regression coverage, and open a PR.</automation_execution_guidance>',
+      ),
     );
     expect(enqueuePayload.visibleInTranscript).toBe(false);
     expect(enqueuePayload).not.toHaveProperty('channel');

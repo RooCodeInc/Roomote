@@ -23,6 +23,7 @@ describe('github PR follow-up context helpers', () => {
     expect(prompt).toContain(
       'If the triggering GitHub comment is only gratitude or other non-actionable conversation with no requested review, explanation, planning, verification, or repository change, do not invent new work from it.',
     );
+    expect(prompt).toContain('<untrusted_content_policy>');
   });
 
   it('adds no-op guidance to follow-up messages routed into an existing PR task', () => {
@@ -42,8 +43,9 @@ describe('github PR follow-up context helpers', () => {
       '<requested-follow-up>\n@roomote thanks for the update\n</requested-follow-up>',
     );
     expect(message).toContain(
-      'For that non-actionable mention case, leave one brief GitHub reply on the same PR conversation surface if a reply is still useful, then conclude with a no-op result.',
+      'For that non-actionable mention case, leave one brief GitHub reply on the same conversation surface if a reply is still useful, then conclude with a no-op result.',
     );
+    expect(message).toContain('<untrusted_content_policy>');
   });
 
   it('escapes wrapper-breaking content in existing-task follow-up messages', () => {

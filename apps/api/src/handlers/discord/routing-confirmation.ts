@@ -78,6 +78,12 @@ type PendingDiscordRoute = {
    */
   kickoffMessage?: string;
   forceNewThread?: boolean;
+  /**
+   * Agent-facing prompt with thread history / attachment context when the launch
+   * continues an existing Discord thread. Stored through confirmation so the
+   * later button / reply path still receives the full Slack-style transcript.
+   */
+  agentPromptText?: string;
 };
 
 function pendingRouteKey(id: string): string {
@@ -390,6 +396,7 @@ export async function requestDiscordRoutingConfirmation(input: {
   channel: DiscordChannelContext;
   routingDecision: RoutingDecision;
   forceNewThread?: boolean;
+  agentPromptText?: string;
 }): Promise<{ pendingRouteId: string }> {
   const pendingRouteId = randomBytes(9).toString('base64url');
   const suggestedWorkspace =
@@ -438,6 +445,9 @@ export async function requestDiscordRoutingConfirmation(input: {
     suggestedIndex,
     ...(kickoffMessage ? { kickoffMessage } : {}),
     ...(input.forceNewThread ? { forceNewThread: true } : {}),
+    ...(input.agentPromptText?.trim()
+      ? { agentPromptText: input.agentPromptText.trim() }
+      : {}),
   };
   await storePendingRoute(pendingRouteId, pending);
   // Only name a best match when the router actually picked one. Without a
@@ -595,6 +605,9 @@ async function launchPendingDiscordRoute(input: {
     channel: input.pending.channel,
     workspace,
     ...(input.pending.forceNewThread ? { forceNewThread: true } : {}),
+    ...(input.pending.agentPromptText?.trim()
+      ? { agentPromptText: input.pending.agentPromptText.trim() }
+      : {}),
     ...(kickoffMessage ? { kickoffMessage } : {}),
     ...(input.replaceMessage
       ? { replaceMessage: input.replaceMessage }
@@ -851,6 +864,22 @@ export function parseDiscordRouteCallbackData(
   };
 }
 
+/**
+ * Check whether a component interaction still points at actionable routing
+ * state. The Gateway delivers events in order, so an expired button must be
+ * acknowledged before any Discord API lookup can let it poison the queue.
+ * `null` means the component is not a routing callback.
+ */
+export async function hasPendingDiscordRouteCallback(
+  value: string | undefined,
+): Promise<boolean | null> {
+  const callback = parseDiscordRouteCallbackData(value);
+  if (!callback) return null;
+  return Boolean(
+    await getRedis().get(pendingRouteKey(callback.pendingRouteId)),
+  );
+}
+
 export async function handleDiscordRoutingCallback(input: {
   provider: DiscordCommunicationProvider;
   applicationId: string;
@@ -872,6 +901,9 @@ export async function handleDiscordRoutingCallback(input: {
     isThread: false,
   };
   if (!pending) {
+    // Another delivery may have claimed the route after the intake preflight.
+    // The click is terminal once its state is gone; an expired interaction
+    // token or inaccessible fallback channel must not block newer events.
     await replyToDiscordEvent({
       provider: input.provider,
       applicationId: input.applicationId,
@@ -881,6 +913,10 @@ export async function handleDiscordRoutingCallback(input: {
         interactionDeferred: input.interactionDeferred,
       },
       text: 'That routing choice is no longer available.',
+    }).catch((error) => {
+      apiLogger.warn(
+        `[discord] Could not acknowledge expired routing choice ${input.callback.pendingRouteId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     });
     return;
   }

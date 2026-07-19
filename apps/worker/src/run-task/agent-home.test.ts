@@ -248,6 +248,40 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases GitHub Copilot onto its OAuth-backed gateway segment', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'github-copilot/claude-haiku-4.5',
+        R_MODEL_REASONING_EFFORT: 'medium',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_GITHUB_COPILOT: '1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['github-copilot']?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/github-copilot',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+    expect(config.provider['github-copilot']).toMatchObject({
+      models: {
+        'claude-haiku-4.5': {
+          options: { thinking_budget: 8_000 },
+        },
+      },
+    });
+    expect(
+      (
+        config.provider['github-copilot'] as {
+          models: Record<string, { options: Record<string, unknown> }>;
+        }
+      ).models['claude-haiku-4.5']?.options.reasoningEffort,
+    ).toBeUndefined();
+  });
+
   it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
@@ -285,10 +319,13 @@ describe('generateOpenCodeConfig provider support', () => {
         R_MODEL: 'ollama/qwen3-coder',
         R_SMALL_MODEL: 'vllm/meta-llama/Llama-3.3-70B-Instruct',
         R_VISION_MODEL: 'litellm/gpt-4.1-mini',
+        R_CODE_REVIEW_MODEL: 'openai-compatible/gpt-4o',
         VLLM_BASE_URL: 'https://vllm.example.com/v1',
         VLLM_API_KEY: 'vllm-key',
         LITELLM_BASE_URL: 'https://litellm.example.com/v1',
         LITELLM_API_KEY: 'litellm-key',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'compat-key',
       },
     });
     const config = JSON.parse(result.configContent) as {
@@ -312,6 +349,58 @@ describe('generateOpenCodeConfig provider support', () => {
         baseURL: 'https://litellm.example.com/v1',
         apiKey: '{env:LITELLM_API_KEY}',
       },
+    });
+    expect(config.provider['openai-compatible']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+        apiKey: '{env:OPENAI_COMPATIBLE_API_KEY}',
+      },
+      models: { 'gpt-4o': { name: 'gpt-4o' } },
+    });
+  });
+
+  it('does not fall back openai-compatible to OPENAI_* credentials', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/gpt-4o',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_API_KEY: 'sk-openai-should-not-leak',
+        OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+      },
+      models: { 'gpt-4o': { name: 'gpt-4o' } },
+    });
+    expect(
+      config.provider['openai-compatible']?.options.apiKey,
+    ).toBeUndefined();
+  });
+
+  it('rebases gateway-backed openai-compatible providers with the run token', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/gpt-4o',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible']?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/openai-compatible/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
   });
 

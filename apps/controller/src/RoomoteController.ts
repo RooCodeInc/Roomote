@@ -139,6 +139,9 @@ export class RoomoteController extends BaseController {
           modalVmMemoryMiB: Env.MODAL_VM_MEMORY_MIB,
           modalTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
+          onWorkerExit: ({ exitCode }) =>
+            this.handleWorkerExitBeforeStart(taskRun, exitCode),
+          onWorkerRestart: () => this.scheduleWorkerBootstrapRestart(taskRun),
         });
         return;
       }

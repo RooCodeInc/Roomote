@@ -6,6 +6,7 @@ import {
 } from '@roomote/types';
 import {
   getFreshChatGptAccessToken,
+  getGitHubCopilotAccessToken,
   resolveModelProviderEnvValue,
 } from '@roomote/db/server';
 
@@ -41,6 +42,10 @@ export async function resolveGatewayUpstream(
     return resolveChatGptUpstream(provider);
   }
 
+  if (provider.authStrategy === 'github-copilot-oauth') {
+    return resolveGitHubCopilotUpstream(provider, upstreamPath, search);
+  }
+
   const [apiKey, upstreamBaseUrl] = await Promise.all([
     resolveModelProviderEnvValue(provider.envVarNames),
     resolveProviderUpstreamBaseUrl(provider),
@@ -67,6 +72,35 @@ export async function resolveGatewayUpstream(
               ),
             }
           : {},
+    },
+  };
+}
+
+async function resolveGitHubCopilotUpstream(
+  provider: InferenceGatewayProvider,
+  upstreamPath: string,
+  search: string,
+): Promise<GatewayUpstreamResolution> {
+  const token = await getGitHubCopilotAccessToken();
+
+  if (!token) {
+    return {
+      ok: false,
+      status: 404,
+      error: 'No connected GitHub Copilot subscription is available',
+    };
+  }
+
+  return {
+    ok: true,
+    resolved: {
+      upstreamUrl: `${provider.upstreamBaseUrl!}${upstreamPath}${search}`,
+      headers: {
+        authorization: `Bearer ${token}`,
+        'User-Agent': 'roomote',
+        'Openai-Intent': 'conversation-edits',
+        'x-initiator': 'user',
+      },
     },
   };
 }

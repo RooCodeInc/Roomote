@@ -14,6 +14,7 @@ import {
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
+  PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
   TaskEventName,
 } from '@roomote/types';
 import type {
@@ -24,6 +25,7 @@ import type {
   AcpRequestUserInputQuestion,
   AcpRequestUserInputResponsePayload,
   AcpTurnCompletedEvent,
+  ProviderRetryNotice,
   TaskEvent,
 } from '@roomote/types';
 
@@ -78,6 +80,7 @@ import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
   isOpenCodeTerminalProviderError,
+  summarizeOpenCodeProviderError,
   type OpenCodeProviderErrorRecovery,
 } from './provider-error-recovery';
 import type {
@@ -1536,6 +1539,8 @@ export class OpenCodeServerHarness
     null;
   private providerRateLimitRetryCount = 0;
   private providerErrorRecoveryCount = 0;
+  private openCodeInternalRetryCount = 0;
+  private lastOpenCodeRetryStatusMessage: string | null = null;
   private providerErrorRecoveryQueuedPromptId: string | null = null;
   private ignoreNextProviderRecoverySessionIdle = false;
   private currentWorkflowPhase: string | null = null;
@@ -3524,6 +3529,38 @@ export class OpenCodeServerHarness
         return;
       }
 
+      // OpenCode's internal provider retry loop used to leave the chat blank.
+      // Surface the status message so users can see the error and that a retry
+      // is in progress. Deduplicate identical messages to avoid spam.
+      if (
+        sessionId &&
+        message &&
+        this.lastOpenCodeRetryStatusMessage !== message
+      ) {
+        this.lastOpenCodeRetryStatusMessage = message;
+        this.openCodeInternalRetryCount += 1;
+        const errorSummary = summarizeOpenCodeProviderError({ message });
+        const notice: ProviderRetryNotice = {
+          kind: 'opencode_retry',
+          attemptNumber: this.openCodeInternalRetryCount,
+          maxAttempts: Math.max(this.openCodeInternalRetryCount, 1),
+          showAttempt: false,
+          errorSummary,
+        };
+
+        this.emitProviderRetryNotice({
+          sessionId,
+          notice,
+          text: formatOpenCodeProviderErrorRetryNoticeText({
+            kind: 'opencode_retry',
+            attemptNumber: notice.attemptNumber,
+            maxAttempts: notice.maxAttempts,
+            errorSummary,
+            showAttempt: false,
+          }),
+        });
+      }
+
       // Retry transitions prove the session is alive, but not that the turn's
       // loop advanced. Keep the stall watchdog armed during transient backoff.
       this.ignoreNextProviderRecoverySessionIdle = false;
@@ -3689,6 +3726,33 @@ export class OpenCodeServerHarness
    * OpenCode session. Retry them in-place with a bounded invisible continue so
    * a transient provider response cannot abort the enclosing Roomote task.
    */
+  private emitProviderRetryNotice(options: {
+    sessionId: string;
+    notice: ProviderRetryNotice;
+    text: string;
+  }): void {
+    // Unique turn ids keep each notice a stable transcript row — notices used to
+    // share `session:no-turn:...` and could replace earlier ones in the UI.
+    const messageId = [
+      'provider-retry',
+      options.notice.kind,
+      String(options.notice.attemptNumber),
+      String(Date.now()),
+    ].join('-');
+
+    this.runtimeEvents.assistantMessage({
+      sessionId: options.sessionId,
+      messageId,
+      text: options.text,
+      metadata: {
+        [PROVIDER_RETRY_NOTICE_PAYLOAD_KEY]: options.notice,
+      },
+      payload: {
+        [PROVIDER_RETRY_NOTICE_PAYLOAD_KEY]: options.notice,
+      },
+    });
+  }
+
   private async recoverProviderSessionError(
     sessionId: string,
     error: unknown,
@@ -3696,17 +3760,26 @@ export class OpenCodeServerHarness
   ): Promise<void> {
     this.providerErrorRecoveryCount += 1;
     const attemptNumber = this.providerErrorRecoveryCount;
+    const errorSummary = summarizeOpenCodeProviderError(error);
+    const notice: ProviderRetryNotice = {
+      kind: recovery.kind,
+      attemptNumber,
+      maxAttempts: recovery.maxRetries,
+      errorSummary,
+    };
 
     this.logger.warn(
       `OpenCode recoverable provider error kind=${recovery.kind} sessionId=${sessionId} attempt=${attemptNumber}/${recovery.maxRetries}: ${JSON.stringify(error ?? {})}`,
     );
 
-    this.runtimeEvents.assistantMessage({
+    this.emitProviderRetryNotice({
       sessionId,
+      notice,
       text: formatOpenCodeProviderErrorRetryNoticeText({
         kind: recovery.kind,
         attemptNumber,
         maxAttempts: recovery.maxRetries,
+        errorSummary,
       }),
     });
 
@@ -3744,17 +3817,29 @@ export class OpenCodeServerHarness
       baseDelayMs: this.providerRateLimitBaseDelayMs,
       maxDelayMs: this.providerRateLimitMaxDelayMs,
     });
+    const errorSummary = summarizeOpenCodeProviderError(error);
+    const retryAtMs = Date.now() + delayMs;
+    const notice: ProviderRetryNotice = {
+      kind: 'rate_limit',
+      attemptNumber,
+      maxAttempts: this.providerRateLimitMaxRetries,
+      delayMs,
+      retryAtMs,
+      errorSummary,
+    };
 
     this.logger.warn(
       `OpenCode provider rate limit sessionId=${sessionId} attempt=${attemptNumber}/${this.providerRateLimitMaxRetries} delayMs=${delayMs}: ${JSON.stringify(error ?? {})}`,
     );
 
-    this.runtimeEvents.assistantMessage({
+    this.emitProviderRetryNotice({
       sessionId,
+      notice,
       text: formatOpenCodeRateLimitRetryNoticeText({
         attemptNumber,
         maxAttempts: this.providerRateLimitMaxRetries,
         delayMs,
+        errorSummary,
       }),
     });
 
@@ -3800,6 +3885,8 @@ export class OpenCodeServerHarness
     this.clearProviderRateLimitRetryTimer();
     this.providerRateLimitRetryCount = 0;
     this.providerErrorRecoveryCount = 0;
+    this.openCodeInternalRetryCount = 0;
+    this.lastOpenCodeRetryStatusMessage = null;
     this.providerErrorRecoveryQueuedPromptId = null;
     this.ignoreNextProviderRecoverySessionIdle = false;
   }
@@ -4235,6 +4322,8 @@ export class OpenCodeServerHarness
     // automatic-retry budget.
     this.providerRateLimitRetryCount = 0;
     this.providerErrorRecoveryCount = 0;
+    this.openCodeInternalRetryCount = 0;
+    this.lastOpenCodeRetryStatusMessage = null;
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
 
     if (sessionId) {

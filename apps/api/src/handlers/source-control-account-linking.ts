@@ -11,7 +11,7 @@ type SourceControlCommentProvider =
 const sourceControlCommentProviderCopy = {
   github: {
     accountLabel: 'GitHub',
-    commentSurface: 'PR comments',
+    commentSurface: 'issue and PR comments',
     settingsQuery: 'github',
   },
   gitlab: {

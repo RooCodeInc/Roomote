@@ -839,6 +839,35 @@ export type TaskChannelBindings = {
   linearOrganizationId?: string | null;
 };
 
+export async function persistEarlyGeneratedTaskTitle(input: {
+  taskId: string;
+  generatedTitle: string;
+}): Promise<boolean> {
+  // Do not advance the checkpoint on fallback titles. Checkpoint 1 is the
+  // first-message refresh gate; locking it without a real title prevents the
+  // transcript path from producing a nicer title on the opening user prompt.
+  if (isFallbackTaskTitle(input.generatedTitle)) {
+    return false;
+  }
+  const [updatedTask] = await db
+    .update(tasks)
+    .set({
+      llmTitleCheckpoint: 1,
+      updatedAt: new Date(),
+      title: input.generatedTitle,
+    })
+    .where(
+      and(
+        eq(tasks.id, input.taskId),
+        isNull(tasks.titleEditedByUserAt),
+        lt(tasks.llmTitleCheckpoint, 1),
+      ),
+    )
+    .returning({ id: tasks.id });
+
+  return Boolean(updatedTask);
+}
+
 /**
  * PR linkage persisted as a task_pull_requests row inside the create
  * transaction. Required for 'pr_review' and 'pr_conflict_resolve' launches;
@@ -1516,25 +1545,12 @@ async function enqueueFreshLaunch(
           taskId: taskRun.taskId,
           messages: [{ role: 'user', text: description }],
         });
-        const shouldPersistGeneratedTitle =
-          !isFallbackTaskTitle(generatedTitle);
+        const persistedGeneratedTitle = await persistEarlyGeneratedTaskTitle({
+          taskId: taskRun.taskId,
+          generatedTitle,
+        });
 
-        await db
-          .update(tasks)
-          .set({
-            llmTitleCheckpoint: 1,
-            updatedAt: new Date(),
-            ...(shouldPersistGeneratedTitle ? { title: generatedTitle } : {}),
-          })
-          .where(
-            and(
-              eq(tasks.id, taskRun.taskId),
-              isNull(tasks.titleEditedByUserAt),
-              lt(tasks.llmTitleCheckpoint, 1),
-            ),
-          );
-
-        if (shouldPersistGeneratedTitle && options.onEarlyTitleGenerated) {
+        if (persistedGeneratedTitle && options.onEarlyTitleGenerated) {
           try {
             await options.onEarlyTitleGenerated({
               taskRun,
@@ -1583,11 +1599,22 @@ export function isRelaunchableFailedStartPayloadKind(
 }
 
 function reconstructFreshTaskFromFailedRun(sourceRun: TaskRun): FreshTask {
+  const payload = {
+    ...(sourceRun.payload as Record<string, unknown>),
+  };
+
+  // Discord launch idempotency keys the original gateway event on the first
+  // run via task_runs_discord_source_event_unique (uncanceled rows only). A
+  // failed-start relaunch creates another uncanceled run on the same task and
+  // must not re-claim that source event, or Postgres rejects the insert with
+  // 23505 and the UI surfaces a raw Failed query / stuck Booting state.
+  delete payload.communicationSourceEventId;
+
   return {
     type: sourceRun.payloadKind,
     harness: sourceRun.harness ?? undefined,
     computeProvider: sourceRun.vendor ?? undefined,
-    payload: { ...(sourceRun.payload as object) },
+    payload,
   } as FreshTask;
 }
 

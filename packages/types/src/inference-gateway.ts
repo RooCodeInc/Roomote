@@ -56,6 +56,10 @@ export const CHATGPT_ACCOUNT_ID_HEADER = 'ChatGPT-Account-Id';
 export const INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME =
   'R_INFERENCE_GATEWAY_CHATGPT';
 
+/** Marker indicating that the gateway holds a GitHub Copilot OAuth token. */
+export const INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME =
+  'R_INFERENCE_GATEWAY_GITHUB_COPILOT';
+
 interface InferenceGatewayAuthHeader {
   name: string;
   scheme?: 'bearer';
@@ -67,7 +71,10 @@ interface InferenceGatewayAuthHeader {
  * - `chatgpt-oauth`: mint a fresh ChatGPT-subscription access token
  *   server-side and add the account-id header; the sandbox holds no key.
  */
-export type InferenceGatewayAuthStrategy = 'api-key' | 'chatgpt-oauth';
+export type InferenceGatewayAuthStrategy =
+  | 'api-key'
+  | 'chatgpt-oauth'
+  | 'github-copilot-oauth';
 
 export interface InferenceGatewayProvider {
   /**
@@ -155,12 +162,11 @@ const ANTHROPIC_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
 ];
 
 /**
- * Providers reachable through the inference gateway. Key-authenticated
- * HTTP-proxyable providers only. Google Vertex is disabled while its
- * service-account request signing cannot stay on the control plane; ChatGPT
- * subscription OAuth is handled by its dedicated gateway route. Upstream
- * bases follow models.dev, the registry OpenCode itself resolves providers
- * from.
+ * Providers reachable through the inference gateway. HTTP-proxyable providers
+ * whose API-key or OAuth credential can stay on the control plane. Google
+ * Vertex is disabled while its service-account request signing cannot stay on
+ * the control plane. Upstream bases follow models.dev, the registry OpenCode
+ * itself resolves providers from.
  */
 export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
   [
@@ -303,6 +309,25 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       openCodeBaseUrlSuffix: '/v1',
     },
     {
+      // GitHub Copilot's OpenCode SDK hits /chat/completions and /responses
+      // under https://api.githubcopilot.com (no /v1 prefix on the base URL).
+      id: 'github-copilot',
+      name: 'GitHub Copilot',
+      authStrategy: 'github-copilot-oauth',
+      envVarNames: [],
+      upstreamBaseUrl: 'https://api.githubcopilot.com',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: [
+        '/chat/completions',
+        '/responses',
+        '/v1/chat/completions',
+        '/v1/responses',
+        '/models',
+        '/v1/models',
+      ],
+      openCodeBaseUrlSuffix: '',
+    },
+    {
       id: BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
       name: 'Amazon Bedrock',
       envVarNames: ['AWS_BEARER_TOKEN_BEDROCK'],
@@ -313,6 +338,20 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       },
       authHeader: { name: 'x-api-key' },
       allowedPaths: ANTHROPIC_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'openai-compatible',
+      name: 'OpenAI-compatible',
+      envVarNames: ['OPENAI_COMPATIBLE_API_KEY'],
+      gatewayEnvVarNames: [
+        'OPENAI_COMPATIBLE_BASE_URL',
+        'OPENAI_COMPATIBLE_API_KEY',
+      ],
+      upstreamBaseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      optionalApiKey: true,
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
     },
     {

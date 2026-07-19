@@ -230,6 +230,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'amazon-bedrock',
         'google',
         'xai',
+        'github-copilot',
+        'openai-compatible',
         'litellm',
         'ollama',
         'vllm',
@@ -515,6 +517,37 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       authKind: 'api-key',
     });
   });
+
+  it('registers GitHub Copilot as an OAuth provider with github-copilot/ models', () => {
+    const copilotProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+      (provider) => provider.id === 'github-copilot',
+    );
+
+    expect(copilotProvider).toMatchObject({
+      label: 'GitHub Copilot',
+      defaultRoomoteModel: 'github-copilot/claude-sonnet-5',
+      authKind: 'oauth',
+    });
+    expect(copilotProvider?.envVarName).toBeUndefined();
+    expect(
+      copilotProvider?.suggestedTaskModels.some(
+        (suggestion) => suggestion.id === 'github-copilot/claude-sonnet-5',
+      ),
+    ).toBe(true);
+  });
+
+  it('marks GitHub Copilot connected only from its OAuth record', () => {
+    const oauthStatus = buildSetupModelStatus({
+      githubCopilotConnected: true,
+    }).providers.find((provider) => provider.id === 'github-copilot');
+    expect(oauthStatus?.savedApiKeySatisfied).toBe(true);
+
+    const disconnected = buildSetupModelStatus({}).providers.find(
+      (provider) => provider.id === 'github-copilot',
+    );
+    expect(disconnected?.runtimeApiKeySatisfied).toBe(false);
+    expect(disconnected?.savedApiKeySatisfied).toBe(false);
+  });
 });
 
 describe('buildRecommendedDeploymentModelConfig', () => {
@@ -715,6 +748,9 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(getModelProviderEnvKeyCandidates({ providerId: 'mistral' })).toEqual(
       [],
     );
+    expect(
+      getModelProviderEnvKeyCandidates({ providerId: 'github-copilot' }),
+    ).toEqual([]);
   });
 
   it('merges catalog and extra env keys for the google provider', () => {
@@ -747,6 +783,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     );
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('MISTRAL_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GEMINI_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('GITHUB_TOKEN');
     // Ambient AWS access keys are intentionally NOT forwarded by default so a
     // controller's own infrastructure credentials never leak into sandboxes;
     // operators opt in with R_MODEL_ENV_KEYS.

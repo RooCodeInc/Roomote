@@ -6,6 +6,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_LIVE_EVENT_TYPES,
   TaskEventName,
+  asRecord,
   type AcpMessage,
   type AcpPersistedEnvelope,
   type AcpTurnCompletedEvent,
@@ -2174,8 +2175,11 @@ describe('OpenCodeServerHarness', () => {
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
             String(envelope.payload.text ?? '').includes(
-              'Provider safety refusal; automatically retrying the turn',
-            ),
+              'Provider safety refusal',
+            ) &&
+            String(envelope.payload.text ?? '').includes('Retrying now') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'policy_refusal',
         ),
       ).toBe(true);
       expect(
@@ -2189,8 +2193,12 @@ describe('OpenCodeServerHarness', () => {
   it('retries an unknown provider error once before aborting', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
     harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -2220,6 +2228,18 @@ describe('OpenCodeServerHarness', () => {
       });
 
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'Upstream connection closed unexpectedly.',
+            ) &&
+            String(envelope.payload.text ?? '').includes('Retrying now') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'provider_error',
+        ),
+      ).toBe(true);
 
       await client.emit({
         type: 'session.idle',
@@ -2318,9 +2338,9 @@ describe('OpenCodeServerHarness', () => {
         persistedEnvelopes.some(
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-            String(envelope.payload.text ?? '').includes(
-              'automatically retrying',
-            ),
+            String(envelope.payload.text ?? '').includes('Retrying in') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'rate_limit',
         ),
       ).toBe(true);
       // Invisible continue prompt stays out of the user-visible queue, while

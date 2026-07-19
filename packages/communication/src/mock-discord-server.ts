@@ -138,6 +138,8 @@ export class MockDiscordServer {
     flags: number;
   };
   readonly guildId: string;
+  /** Permission bitfield granted to the bot role for channel diagnostics tests. */
+  botRolePermissions: bigint;
   private nextId = 1_000;
   private readonly failures: QueuedFailure[] = [];
   private server: Server | null = null;
@@ -160,6 +162,15 @@ export class MockDiscordServer {
       flags: 1 << 18,
     };
     this.guildId = options.guildId ?? '300000000000000001';
+    this.botRolePermissions =
+      (1n << 6n) |
+      (1n << 10n) |
+      (1n << 11n) |
+      (1n << 14n) |
+      (1n << 15n) |
+      (1n << 16n) |
+      (1n << 35n) |
+      (1n << 38n);
     this.addChannel({
       id: '400000000000000001',
       guild_id: this.guildId,
@@ -423,20 +434,11 @@ export class MockDiscordServer {
       return jsonResponse({ user: this.bot, roles: ['role-roomote'] });
     }
     if (method === 'GET' && path === `/guilds/${this.guildId}/roles`) {
-      const allNeeded =
-        (1n << 6n) |
-        (1n << 10n) |
-        (1n << 11n) |
-        (1n << 14n) |
-        (1n << 15n) |
-        (1n << 16n) |
-        (1n << 35n) |
-        (1n << 38n);
       return jsonResponse([
         { id: this.guildId, permissions: '0' },
         {
           id: 'role-roomote',
-          permissions: String(allNeeded),
+          permissions: String(this.botRolePermissions),
           tags: { bot_id: this.bot.id },
         },
       ]);

@@ -48,11 +48,15 @@ For tasks started in a server, the bot needs these permissions:
 - create public threads
 - send messages in threads
 - add reactions
+- manage threads (only when a required-tag forum has no unmoderated tags)
 
 A task started from a normal text or announcement channel runs in a public
 thread started on the message that requested it — like a threaded reply — so
 the conversation stays anchored where it began. A task started in a forum gets
-its own forum post, and `/new` starts a fresh, separate task thread.
+its own forum post, and `/new` starts a fresh, separate task thread. When a
+forum requires a tag, Roomote applies an available unmoderated tag
+automatically. If every tag is moderated, the bot needs Manage Threads to
+apply one.
 
 <Warning>
   Unlike a Slack workspace, a Discord server can be public or shared with
@@ -92,7 +96,8 @@ messages that are not replies to an existing conversation) to a default
 channel you pick. Choose it in the Discord section of Roomote's comms settings:
 select a server and a text or forum channel where the bot has permission to
 post and create threads. Replies always stay in the conversation they started
-in. Forum channels that require a tag are not supported as the default channel.
+in. Required-tag forums work when Roomote can apply a usable tag — an
+unmoderated tag, or a moderated tag when the bot has Manage Threads.
 
 Individual automations can also report to their own Discord channel instead of
 the default: pick a Discord channel in that automation's destination selector
@@ -101,6 +106,8 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 ## Start and continue tasks
 
 - mention the bot with a request in a server channel
+- mention the bot in a thread reply to start work in that same thread (Slack-
+  style), with earlier thread messages and supported attachments as context
 - send the bot a direct message
 - use `/new request:<request>` to force a fresh task instead of continuing the
   current one
@@ -108,13 +115,23 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   same thread or DM; `yes`, `never mind`, and `use API instead` confirm, cancel,
   or revise the pending route
 - reply naturally inside a task thread, forum post, or DM to continue it
+  (same Slack-style rules: after someone else posts or is @mentioned in the
+  thread since Roomote's last reply, tag Roomote again to keep going)
 - use `/help` to see the available commands
 
 Roomote does not quote every message it answers. In a task thread, the
-conversation itself supplies the context. Image attachments are passed to the
-task as image input, and supported documents are downloaded and added to the
-request. Attachment downloads are size-limited and restricted to Discord's
-media hosts.
+conversation itself supplies the context. When you start a task by tagging
+Roomote in an existing thread, Roomote reads earlier messages in that thread
+(including supported attachments, up to a few hundred recent thread messages) so the agent
+has that background. Follow-ups in an active or resumed task thread also carry
+undelivered earlier Discord messages the same way Slack does, so the agent keeps
+full thread context across turns. Natural follow-ups without an @mention work
+for people already in the conversation with Roomote (the task owner, the thread
+starter, or anyone who tagged Roomote earlier). If somebody else posts or is
+mentioned after Roomote's last reply, tag Roomote again so side chat is not
+treated as a new instruction. Image attachments are passed to the task as
+image input, and supported documents are downloaded and added to the request.
+Attachment downloads are size-limited and restricted to Discord's media hosts.
 
 ## Self-hosted configuration
 

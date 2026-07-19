@@ -8,6 +8,8 @@ export type CommunicationMessageAttachment = {
   name: string;
   mimeType: string;
   size: number;
+  /** Signed CDN URL when the provider can still materialize the file. */
+  url?: string;
 };
 
 export type CommunicationMessage = {

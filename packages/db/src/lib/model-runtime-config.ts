@@ -7,6 +7,7 @@ import {
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
@@ -19,6 +20,7 @@ import {
 
 import { decryptSecrets } from '../encryption';
 import { resolveOpenCodeAuthContent } from './chatgpt-subscription';
+import { resolveGitHubCopilotOpenCodeAuthContent } from './github-copilot-subscription';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
@@ -404,6 +406,24 @@ async function resolveModelRuntimeEnv(
     : null;
   const routeChatGptThroughGateway =
     inferenceGateway && injectedOpenCodeAuthContent != null;
+  const usesGitHubCopilotModel = [
+    ...resolvedRoleModels,
+    ...gatewaySwitchableModelIds,
+  ].some(
+    (modelId) =>
+      typeof modelId === 'string' && modelId.startsWith('github-copilot/'),
+  );
+  const githubCopilotAuthContent = usesGitHubCopilotModel
+    ? await resolveGitHubCopilotOpenCodeAuthContent(executor)
+    : null;
+  const routeGitHubCopilotThroughGateway =
+    inferenceGateway && githubCopilotAuthContent != null;
+  const directOpenCodeAuthContent = [
+    injectedOpenCodeAuthContent,
+    githubCopilotAuthContent,
+  ].reduce<Record<string, unknown>>((merged, content) => {
+    return content ? { ...merged, ...JSON.parse(content) } : merged;
+  }, {});
 
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
@@ -453,8 +473,14 @@ async function resolveModelRuntimeEnv(
     }),
     ...(routeChatGptThroughGateway
       ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }
-      : injectedOpenCodeAuthContent
-        ? { OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent }
-        : {}),
+      : {}),
+    ...(routeGitHubCopilotThroughGateway
+      ? { [INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME]: '1' }
+      : {}),
+    ...(!routeChatGptThroughGateway &&
+    !routeGitHubCopilotThroughGateway &&
+    Object.keys(directOpenCodeAuthContent).length > 0
+      ? { OPENCODE_AUTH_CONTENT: JSON.stringify(directOpenCodeAuthContent) }
+      : {}),
   };
 }

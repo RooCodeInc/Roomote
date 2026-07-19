@@ -11,9 +11,12 @@ import { LLM_TITLE_LOCKED_CHECKPOINT } from '@roomote/cloud-agents/server';
 
 import { refreshTaskTitleOnCompletion } from '../record-task-message-envelope';
 
-const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
-  mockGenerateLlmTaskTitle: vi.fn(),
-}));
+const { mockGenerateLlmTaskTitle, mockSyncTaskThreadTitle } = vi.hoisted(
+  () => ({
+    mockGenerateLlmTaskTitle: vi.fn(),
+    mockSyncTaskThreadTitle: vi.fn(),
+  }),
+);
 
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
   const actual =
@@ -24,6 +27,10 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
     generateLlmTaskTitle: mockGenerateLlmTaskTitle,
   };
 });
+
+vi.mock('../../task-thread-title-sync', () => ({
+  syncTaskCommunicationThreadTitleBestEffort: mockSyncTaskThreadTitle,
+}));
 
 async function seedTaskWithPrompt({
   taskId,
@@ -78,8 +85,10 @@ async function seedTaskWithPrompt({
 
 describe('task title refresh', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockGenerateLlmTaskTitle.mockReset();
     mockGenerateLlmTaskTitle.mockResolvedValue('Generated summary title');
+    mockSyncTaskThreadTitle.mockResolvedValue(undefined);
   });
 
   it('regenerates the title from the transcript when the job completes', async () => {
@@ -101,6 +110,9 @@ describe('task title refresh', () => {
 
     expect(task?.title).toBe('Generated summary title');
     expect(task?.llmTitleCheckpoint).toBe(LLM_TITLE_LOCKED_CHECKPOINT);
+    expect(mockSyncTaskThreadTitle).toHaveBeenCalledWith({
+      taskId: 'task-title-final',
+    });
   });
 
   it('never rewrites a locked deterministic title', async () => {

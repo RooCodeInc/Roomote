@@ -320,8 +320,10 @@ async function materializeOpenCodeAuthJson(options: {
   const { commandEnv, homeDir, logger } = options;
   const routeChatGptThroughGateway =
     commandEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
+  const routeGitHubCopilotThroughGateway =
+    commandEnv.R_INFERENCE_GATEWAY_GITHUB_COPILOT === '1';
 
-  if (routeChatGptThroughGateway) {
+  if (routeChatGptThroughGateway || routeGitHubCopilotThroughGateway) {
     // Defense in depth: dequeue and run-task already omit this value, but a
     // conflicting deployment env must not survive into the OpenCode process.
     delete commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];

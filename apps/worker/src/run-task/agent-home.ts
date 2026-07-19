@@ -14,6 +14,7 @@ import {
   getInferenceGatewayProviderByEnvVarName,
   getMcpIntegration,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
@@ -69,26 +70,40 @@ export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
 const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+  'openai-compatible': {
+    name: 'OpenAI-compatible',
+    baseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+    fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
+    apiKeyEnvVarName: 'OPENAI_COMPATIBLE_API_KEY' as string | undefined,
+    keyless: false,
+    // Arbitrary endpoints must not inherit OPENAI_* credentials. When the
+    // optional dedicated key is blank, omit the API key entirely so keyless
+    // servers that reject bearer auth match setup qualification behavior.
+    allowOpenAiEnvFallback: false,
+  },
   ollama: {
     name: 'Ollama',
     baseUrlEnvVarName: 'OLLAMA_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnvVarName: undefined,
+    apiKeyEnvVarName: undefined as string | undefined,
     keyless: true,
+    allowOpenAiEnvFallback: false,
   },
   vllm: {
     name: 'vLLM',
     baseUrlEnvVarName: 'VLLM_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:8000/v1',
-    apiKeyEnvVarName: 'VLLM_API_KEY',
+    apiKeyEnvVarName: 'VLLM_API_KEY' as string | undefined,
     keyless: false,
+    allowOpenAiEnvFallback: true,
   },
   litellm: {
     name: 'LiteLLM',
     baseUrlEnvVarName: 'LITELLM_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
-    apiKeyEnvVarName: 'LITELLM_API_KEY',
+    apiKeyEnvVarName: 'LITELLM_API_KEY' as string | undefined,
     keyless: false,
+    allowOpenAiEnvFallback: true,
   },
 } as const;
 
@@ -705,6 +720,19 @@ function mergeOpenAiCompatibleProviderConfig(
     const directApiKey = provider.apiKeyEnvVarName
       ? runtimeEnv[provider.apiKeyEnvVarName]?.trim()
       : undefined;
+    const baseURL =
+      runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
+      (provider.allowOpenAiEnvFallback
+        ? runtimeEnv.OPENAI_BASE_URL?.trim()
+        : '') ||
+      provider.fallbackBaseUrl;
+    const apiKeyOptions = directApiKey
+      ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
+      : provider.keyless
+        ? { apiKey: 'ollama' }
+        : provider.allowOpenAiEnvFallback && runtimeEnv.OPENAI_API_KEY?.trim()
+          ? { apiKey: '{env:OPENAI_API_KEY}' }
+          : {};
 
     merged = {
       ...merged,
@@ -714,19 +742,10 @@ function mergeOpenAiCompatibleProviderConfig(
         name: provider.name,
         options: {
           ...existingOptions,
-          baseURL:
-            runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
-            (!provider.keyless ? runtimeEnv.OPENAI_BASE_URL?.trim() : '') ||
-            provider.fallbackBaseUrl,
+          baseURL,
           // OpenAI-compatible clients require an API key even though Ollama
           // itself accepts unauthenticated requests.
-          ...(directApiKey
-            ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
-            : provider.keyless
-              ? { apiKey: 'ollama' }
-              : runtimeEnv.OPENAI_API_KEY?.trim()
-                ? { apiKey: '{env:OPENAI_API_KEY}' }
-                : {}),
+          ...apiKeyOptions,
         },
         models: {
           ...existingModels,
@@ -765,6 +784,8 @@ function mergeInferenceGatewayProviderConfig(
   );
   const routeChatGptThroughGateway =
     runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
+  const routeGitHubCopilotThroughGateway =
+    runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME] === '1';
 
   if (!gatewayUrl) {
     return providerConfig;
@@ -817,6 +838,19 @@ function mergeInferenceGatewayProviderConfig(
         CHATGPT_OPENCODE_PROVIDER_ID,
         gatewayUrl,
         chatGptProvider,
+      );
+    }
+  }
+
+  if (routeGitHubCopilotThroughGateway) {
+    const copilotProvider = getInferenceGatewayProvider('github-copilot');
+
+    if (copilotProvider) {
+      merged = rebaseProviderOntoGateway(
+        merged,
+        'github-copilot',
+        gatewayUrl,
+        copilotProvider,
       );
     }
   }

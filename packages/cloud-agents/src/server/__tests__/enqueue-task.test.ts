@@ -45,6 +45,7 @@ import {
   TaskRunQueue,
   enqueueTask,
   enqueueTaskRelaunch,
+  persistEarlyGeneratedTaskTitle,
   resolveFreshTaskComputeProvider,
   resolveQueueScope,
   type FreshTaskLaunch,
@@ -139,6 +140,75 @@ afterAll(async () => {
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('rejects an early generated title after a user edit wins the database race', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const editedAt = new Date();
+
+    await db
+      .update(tasks)
+      .set({
+        title: 'Manual title',
+        titleEditedByUserAt: editedAt,
+      })
+      .where(eq(tasks.id, run.taskId));
+
+    await expect(
+      persistEarlyGeneratedTaskTitle({
+        taskId: run.taskId,
+        generatedTitle: 'Rejected generated title',
+      }),
+    ).resolves.toBe(false);
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: {
+        title: true,
+        titleEditedByUserAt: true,
+        llmTitleCheckpoint: true,
+      },
+    });
+
+    expect(task).toEqual({
+      title: 'Manual title',
+      titleEditedByUserAt: editedAt,
+      llmTitleCheckpoint: 0,
+    });
+  });
+
+  it('does not lock the first-message title checkpoint on a fallback title', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    await expect(
+      persistEarlyGeneratedTaskTitle({
+        taskId: run.taskId,
+        generatedTitle: 'Untitled task',
+      }),
+    ).resolves.toBe(false);
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: {
+        title: true,
+        llmTitleCheckpoint: true,
+      },
+    });
+
+    expect(task?.llmTitleCheckpoint).toBe(0);
+    expect(task?.title).not.toBe('Untitled task');
+  });
+
   it('persists an intentional pre-dispatch phase and error', async () => {
     const userId = await createUser();
 
@@ -497,6 +567,68 @@ describe('enqueueTaskRelaunch failed start', () => {
         { enqueue: false },
       ),
     ).rejects.toThrow('Only failed task starts can be retried');
+  });
+
+  it('drops Discord source-event ids so failed-start retry does not hit the unique index', async () => {
+    const userId = await createUser();
+    const sourceEventId = 'discord-source-event-retry-1';
+
+    const failedRun = await enqueueTask(
+      {
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'discord',
+        trigger: 'message',
+        task: standardTaskInput({
+          payload: {
+            repo: 'acme/widgets',
+            description: 'Do the thing',
+            communicationProvider: 'discord',
+            communicationSourceEventId: sourceEventId,
+            communicationChannelId: 'channel-1',
+            communicationThreadId: 'thread-1',
+          },
+        }),
+      } as FreshTaskLaunch,
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(failedRun.taskId);
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: 'secretOrPrivateKey must be an asymmetric key when using ES256',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    await db
+      .update(tasks)
+      .set({ state: 'failed' })
+      .where(eq(tasks.id, failedRun.taskId));
+
+    const relaunchRun = await enqueueTaskRelaunch(
+      {
+        sourceRunId: failedRun.id,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(relaunchRun.taskId).toBe(failedRun.taskId);
+    expect(relaunchRun.id).not.toBe(failedRun.id);
+    expect(relaunchRun.payload).toMatchObject({
+      communicationProvider: 'discord',
+      communicationChannelId: 'channel-1',
+      communicationThreadId: 'thread-1',
+    });
+    expect(relaunchRun.payload).not.toHaveProperty(
+      'communicationSourceEventId',
+    );
+    expect(failedRun.payload).toMatchObject({
+      communicationSourceEventId: sourceEventId,
+    });
   });
 
   it('allows relaunch when only a provider kickoff message exists', async () => {
