@@ -2,6 +2,17 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.14.0 (2026-07-19)
+
+### Minor changes
+
+- Handle @roomote mentions on GitLab issues (not only merge requests): the first mention starts a linked task and later mentions on the same issue resume that task.
+- Show ChatGPT, GitHub Copilot, and Kimi for Coding plan usage on Settings > Models, including remaining premium requests or rate-limit window percent used and reset times.
+
+### Patch changes
+
+- Apply the untrusted-content prompt framing to GitLab, Bitbucket, Azure DevOps, and Gitea comment follow-up messages, wrapping the triggering comment in a mention-request block and appending the shared injection-resistance policy
+
 ## 0.13.0 (2026-07-19)
 
 ### Minor changes
