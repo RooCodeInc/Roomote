@@ -85,8 +85,13 @@ type PrReviewTriageDecision =
   | { post: false; reason: 'not_worth_notifying' };
 
 export type PreparedPrReviewNotification =
-  | { post: true; route: PrReviewNotificationRoute; text: string }
-  | { post: false; reason: 'no_conversation_route' | 'not_worth_notifying' };
+  | {
+      post: true;
+      /** Null when the owning task has no chat surface; history still records. */
+      route: PrReviewNotificationRoute | null;
+      text: string;
+    }
+  | { post: false; reason: 'not_worth_notifying' };
 
 function mapCheckRunToStatus({
   status,
@@ -736,11 +741,6 @@ export async function preparePrReviewNotificationDelivery({
   events: PrReviewActivityEvent[];
 }): Promise<PreparedPrReviewNotification> {
   const route = await resolvePrReviewNotificationRoute(taskRun);
-
-  if (!route) {
-    return { post: false, reason: 'no_conversation_route' };
-  }
-
   const context = await gatherPrReviewTriageContext({
     taskRun,
     repository: request.repository,
@@ -761,6 +761,11 @@ export async function preparePrReviewNotificationDelivery({
     return triage;
   }
 
+  // Prefer the chat provider's link syntax when a conversation route exists.
+  // For web-only tasks (no chat route), keep markdown so the task transcript
+  // renders links cleanly in the web UI.
+  const formatProvider = route?.provider ?? 'teams';
+
   return {
     post: true,
     route,
@@ -768,7 +773,7 @@ export async function preparePrReviewNotificationDelivery({
       repository: request.repository,
       prNumber: request.prNumber,
       prUrl: request.prUrl,
-      provider: route.provider,
+      provider: formatProvider,
       summary: triage.summary,
     }),
   };
@@ -787,14 +792,11 @@ function slackMessageTsToTaskMessageTs(ts: string): number | null {
 export async function recordPrReviewNotificationDeliveryBestEffort(params: {
   runId: number;
   taskId: string;
-  route: PrReviewNotificationRoute;
   text: string;
+  route?: PrReviewNotificationRoute | null;
   messageTs?: string | null;
 }): Promise<void> {
-  if (params.route.provider === 'slack' && !params.messageTs) {
-    return;
-  }
-
+  const route = params.route ?? null;
   const operations: Array<{ label: string; promise: Promise<unknown> }> = [
     {
       label: 'persist task history',
@@ -803,7 +805,7 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
         taskId: params.taskId,
         envelope: {
           ts:
-            params.route.provider === 'slack' && params.messageTs
+            route?.provider === 'slack' && params.messageTs
               ? (slackMessageTsToTaskMessageTs(params.messageTs) ?? Date.now())
               : Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
@@ -824,21 +826,21 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
     },
   ];
 
-  if (params.route.provider === 'slack' && params.messageTs) {
+  if (route?.provider === 'slack' && params.messageTs) {
     operations.push(
       {
         label: 'track Slack bot reply',
         promise: trackSlackBotReply(
-          params.route.channelId,
-          params.route.threadId,
+          route.channelId,
+          route.threadId,
           params.messageTs,
         ),
       },
       {
         label: 'persist latest Slack reply',
         promise: setLatestSlackBotReply(
-          params.route.channelId,
-          params.route.threadId,
+          route.channelId,
+          route.threadId,
           params.messageTs,
           params.text,
           { outOfBand: true },
