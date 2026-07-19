@@ -302,7 +302,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
 
     await expect(runHandler({})).resolves.toBe(true);
     expect(mocks.redis.del).toHaveBeenCalledWith(
-      'discord:auto-start-link-nudge:discord-user-1',
+      'discord:account-link-dm:discord-user-1',
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
