@@ -40,6 +40,7 @@ import {
   getDockerTaskDaemonContainerName,
   getDockerTaskWorkspaceVolumeName,
   getDockerWorkerContainerName,
+  isAbortError,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
   processListIncludesDockerWorkerRun,
@@ -462,6 +463,8 @@ export async function spawnDockerWorker(
 
     return { containerId: containerName };
   } catch (error) {
+    const aborted = config.signal?.aborted || isAbortError(error);
+
     if (isStandbyResume && containerId) {
       await docker(['stop', '--time', '10', containerName], {
         allowFailure: true,
@@ -475,7 +478,15 @@ export async function spawnDockerWorker(
           allowFailure: true,
         });
       }
-    } else if (resolveAppEnv(process.env) === 'development' && containerId) {
+    } else if (
+      shouldPreserveFailedDockerWorkerContainer({
+        aborted,
+        appEnv: resolveAppEnv(process.env),
+        hasContainerId: Boolean(containerId),
+      })
+    ) {
+      // Keep ordinary local spawn failures for debugging, but never retain a
+      // canceled or timed-out partial provision (autoRemove is false).
       console.error(
         `[spawnDockerWorker] Preserving failed Docker worker container ${containerName} for local debugging`,
       );
@@ -487,6 +498,21 @@ export async function spawnDockerWorker(
     }
     throw error;
   }
+}
+
+/**
+ * Development preserves non-abort fresh-spawn failures for inspection. Cancel
+ * and timeout must always tear down partial sandboxes because workers are not
+ * auto-removed.
+ */
+export function shouldPreserveFailedDockerWorkerContainer(params: {
+  aborted: boolean;
+  appEnv: string;
+  hasContainerId: boolean;
+}): boolean {
+  return (
+    !params.aborted && params.appEnv === 'development' && params.hasContainerId
+  );
 }
 
 export async function resumeDockerTaskDaemon(

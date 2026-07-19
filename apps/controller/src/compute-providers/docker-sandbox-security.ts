@@ -102,7 +102,7 @@ export async function docker(
   }
 }
 
-function isAbortError(error: unknown): boolean {
+export function isAbortError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }

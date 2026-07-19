@@ -7,6 +7,7 @@ import {
   getDockerWorkerCommand,
   resolveDockerWorkerOwnershipTargetFromLookup,
   resumeDockerTaskDaemon,
+  shouldPreserveFailedDockerWorkerContainer,
   shouldRetryDockerWorkerWithoutDiskLimit,
   shouldAutoRemoveDockerWorkerContainer,
   toContainerReachableUrl,
@@ -69,6 +70,38 @@ describe('getDockerWorkerCommand', () => {
 describe('DOCKER_SPAWN_TIMEOUT_MS', () => {
   it('caps provisioning well below the full sandbox lifetime', () => {
     expect(DOCKER_SPAWN_TIMEOUT_MS).toBe(15 * 60 * 1_000);
+  });
+});
+
+describe('shouldPreserveFailedDockerWorkerContainer', () => {
+  it('preserves ordinary development spawn failures for local debugging', () => {
+    expect(
+      shouldPreserveFailedDockerWorkerContainer({
+        aborted: false,
+        appEnv: 'development',
+        hasContainerId: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('cleans up canceled or timed-out partial provisions even in development', () => {
+    expect(
+      shouldPreserveFailedDockerWorkerContainer({
+        aborted: true,
+        appEnv: 'development',
+        hasContainerId: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('always cleans up outside development', () => {
+    expect(
+      shouldPreserveFailedDockerWorkerContainer({
+        aborted: false,
+        appEnv: 'production',
+        hasContainerId: true,
+      }),
+    ).toBe(false);
   });
 });
 
