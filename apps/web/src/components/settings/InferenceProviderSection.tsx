@@ -65,7 +65,51 @@ type ProviderCredentialsDialogState =
 function getInitialAdditionalEnvValues(
   provider: SetupModelProviderStatus | null,
 ) {
-  return provider?.additionalEnvValues ?? {};
+  if (!provider) {
+    return {};
+  }
+
+  // Endpoint providers expose the primary base URL in additionalEnvValues for
+  // list display, but save only accepts declared additional fields.
+  const declaredNames = new Set(
+    (provider.additionalEnvFields ?? []).map((field) => field.envVarName),
+  );
+
+  return Object.fromEntries(
+    Object.entries(provider.additionalEnvValues ?? {}).filter(([name]) =>
+      declaredNames.has(name),
+    ),
+  );
+}
+
+function getInitialPrimaryCredential(
+  provider: SetupModelProviderStatus | null,
+) {
+  if (provider?.authKind !== 'endpoint' || !provider.envVarName) {
+    return '';
+  }
+
+  return provider.additionalEnvValues[provider.envVarName] ?? '';
+}
+
+function getSubmitAdditionalEnvValues(
+  provider: SetupModelProviderStatus,
+  additionalEnvValues: Record<string, string>,
+) {
+  const additionalEnvFields = provider.additionalEnvFields ?? [];
+  if (additionalEnvFields.length === 0) {
+    return undefined;
+  }
+
+  const declaredNames = new Set(
+    additionalEnvFields.map((field) => field.envVarName),
+  );
+
+  return Object.fromEntries(
+    Object.entries(additionalEnvValues).filter(([name]) =>
+      declaredNames.has(name),
+    ),
+  );
 }
 
 function ConnectedProviderRow({
@@ -184,7 +228,9 @@ function ProviderCredentialsDialog({
 }) {
   const [selectedProviderId, setSelectedProviderId] =
     useState<SetupModelProviderId | null>(providers[0]?.id ?? null);
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState(() =>
+    getInitialPrimaryCredential(providers[0] ?? null),
+  );
   const [providerSelectOpen, setProviderSelectOpen] = useState(false);
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
@@ -209,7 +255,7 @@ function ProviderCredentialsDialog({
     // dialog. Only initialize values when the selection is no longer valid.
     const provider = providers[0] ?? null;
     setSelectedProviderId(provider?.id ?? null);
-    setApiKey('');
+    setApiKey(getInitialPrimaryCredential(provider));
     setAdditionalEnvValues(getInitialAdditionalEnvValues(provider));
   }, [open, providers, selectedProviderId]);
 
@@ -256,7 +302,7 @@ function ProviderCredentialsDialog({
       await onSave(
         selectedProvider.id,
         apiKey.trim(),
-        additionalEnvFields.length > 0 ? additionalEnvValues : undefined,
+        getSubmitAdditionalEnvValues(selectedProvider, additionalEnvValues),
       );
       setApiKey('');
       setAdditionalEnvValues({});
@@ -303,7 +349,7 @@ function ProviderCredentialsDialog({
                         (candidate) => candidate.id === providerId,
                       ) ?? null;
                     setSelectedProviderId(providerId);
-                    setApiKey('');
+                    setApiKey(getInitialPrimaryCredential(provider));
                     setAdditionalEnvValues(
                       getInitialAdditionalEnvValues(provider),
                     );
@@ -343,6 +389,21 @@ function ProviderCredentialsDialog({
                     </span>
                     <div className="space-y-1.5">
                       <Input
+                        type={
+                          selectedProvider.authKind === 'endpoint'
+                            ? 'url'
+                            : undefined
+                        }
+                        inputMode={
+                          selectedProvider.authKind === 'endpoint'
+                            ? 'url'
+                            : undefined
+                        }
+                        autoComplete={
+                          selectedProvider.authKind === 'endpoint'
+                            ? 'url'
+                            : undefined
+                        }
                         secret={selectedProvider.authKind !== 'endpoint'}
                         className="font-mono"
                         value={apiKey}

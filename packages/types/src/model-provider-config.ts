@@ -520,7 +520,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     additionalEnvFields: [
       {
         envVarName: 'OPENAI_COMPATIBLE_API_KEY',
-        label: 'API key (optional)',
+        label: 'API key',
         secret: true,
         required: false,
       },
@@ -1178,6 +1178,12 @@ export function collectSetupModelProviderCredentialValues(options: {
   );
 
   for (const name of Object.keys(options.additionalEnvValues ?? {})) {
+    // Endpoint providers sometimes surface the primary base URL in UI-side
+    // additionalEnvValues for display; ignore that key instead of rejecting.
+    if (provider.authKind === 'endpoint' && name === providerEnvVarName) {
+      continue;
+    }
+
     if (!declaredEnvVarNames.has(name)) {
       throw new Error(`${provider.label} does not accept a ${name} value.`);
     }
