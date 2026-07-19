@@ -49,7 +49,7 @@ type DockerContainerInspect = {
 
 export type DockerCommand = (
   args: string[],
-  options?: { allowFailure?: boolean },
+  options?: { allowFailure?: boolean; signal?: AbortSignal },
 ) => Promise<string>;
 
 export type DockerWorkerEgressPolicy = 'internet' | 'none';
@@ -77,22 +77,42 @@ const BLOCKED_PRIVATE_ROUTES = [
 
 export async function docker(
   args: string[],
-  options: { allowFailure?: boolean } = {},
+  options: { allowFailure?: boolean; signal?: AbortSignal } = {},
 ): Promise<string> {
   try {
     const { stdout } = await execFileAsync('docker', args, {
       cwd: resolveFromWorkspaceRoot('.'),
       maxBuffer: 10 * 1024 * 1024,
+      signal: options.signal,
     });
 
     return stdout;
   } catch (error) {
+    // Cancellation must not be treated as a soft failure; allowFailure only
+    // covers Docker CLI / object-state errors, not AbortSignal abort.
+    if (options.signal?.aborted || isAbortError(error)) {
+      throw error;
+    }
+
     if (options.allowFailure) {
       return '';
     }
 
     throw error;
   }
+}
+
+export function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === 'AbortError' ||
+    error.name === 'TimeoutError' ||
+    // Node's aborted execFile errors use this code.
+    ('code' in error && error.code === 'ABORT_ERR')
+  );
 }
 
 export function getDockerTaskNetworkName(taskRunId: number): string {
@@ -273,7 +293,8 @@ export async function prepareDockerTaskNetwork(
       );
     }
   } catch (error) {
-    await removeDockerTaskNetwork(taskNetwork, runDocker);
+    // Network teardown must not share a possibly-aborted spawn signal.
+    await removeDockerTaskNetwork(taskNetwork, docker);
     throw error;
   }
 

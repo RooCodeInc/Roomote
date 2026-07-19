@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { processListIncludesDockerWorkerRun } from '../docker-sandbox-security';
 import {
   buildDockerSandboxServerUrl,
+  DOCKER_SPAWN_TIMEOUT_MS,
   getDockerWorkerCommand,
+  resolveDockerSpawnCleanupMode,
   resolveDockerWorkerOwnershipTargetFromLookup,
   resumeDockerTaskDaemon,
+  shouldPreserveFailedDockerWorkerContainer,
   shouldRetryDockerWorkerWithoutDiskLimit,
   shouldAutoRemoveDockerWorkerContainer,
   toContainerReachableUrl,
@@ -62,6 +65,68 @@ describe('getDockerWorkerCommand', () => {
       'resume',
     );
     expect(getDockerWorkerCommand(TaskPayloadKind.StandardTask)).toBe('run');
+  });
+});
+
+describe('DOCKER_SPAWN_TIMEOUT_MS', () => {
+  it('caps provisioning well below the full sandbox lifetime', () => {
+    expect(DOCKER_SPAWN_TIMEOUT_MS).toBe(15 * 60 * 1_000);
+  });
+});
+
+describe('shouldPreserveFailedDockerWorkerContainer', () => {
+  it('preserves ordinary development spawn failures for local debugging', () => {
+    expect(
+      shouldPreserveFailedDockerWorkerContainer({
+        aborted: false,
+        appEnv: 'development',
+        hasContainerId: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('cleans up canceled or timed-out partial provisions even in development', () => {
+    expect(
+      shouldPreserveFailedDockerWorkerContainer({
+        aborted: true,
+        appEnv: 'development',
+        hasContainerId: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('always cleans up outside development', () => {
+    expect(
+      shouldPreserveFailedDockerWorkerContainer({
+        aborted: false,
+        appEnv: 'production',
+        hasContainerId: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('resolveDockerSpawnCleanupMode', () => {
+  it('never deletes a retained snapshot on standby resume abort', () => {
+    expect(
+      resolveDockerSpawnCleanupMode({
+        isStandbyResume: true,
+        aborted: true,
+        appEnv: 'production',
+        hasContainerId: false,
+      }),
+    ).toBe('stop-retained');
+  });
+
+  it('removes fresh spawn resources when canceled', () => {
+    expect(
+      resolveDockerSpawnCleanupMode({
+        isStandbyResume: false,
+        aborted: true,
+        appEnv: 'development',
+        hasContainerId: true,
+      }),
+    ).toBe('remove');
   });
 });
 
