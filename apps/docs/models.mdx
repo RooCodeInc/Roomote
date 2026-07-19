@@ -137,6 +137,13 @@ list.
 - **Models** controls the provider/model pairs that are available, the default
   model, and specialized model roles.
 
+For subscription-based providers (ChatGPT, GitHub Copilot, and Kimi for
+Coding), the provider row also shows current plan usage when the provider
+reports it, such as remaining Copilot premium requests or the percent used of
+the ChatGPT 5-hour and weekly limits. These numbers come from unofficial
+provider endpoints, so the usage line is hidden whenever the provider does not
+return usable data.
+
 Admins can enable or disable models from the task model list. The default model
 must stay enabled, because Roomote uses it when a task does not request a
 specific model.
