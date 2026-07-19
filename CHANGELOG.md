@@ -9,8 +9,10 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 - Quote web UI follow-ups into Discord-linked task threads (name + text blockquote) before the agent's next reply, matching Slack behavior and preserving quotes across web snapshot resume.
 - Stop stacking a second empty Discord question shell when request_user_input enriches options; edit the existing prompt so users see one question with real choices.
 - Support structured request_user_input on Discord end-to-end: post option buttons, accept button or text answers, and resume the paused agent so answering no longer leaves the run waiting.
+- Back off transient provider retry attempts with exponential delay (1s, 2s, 4s) instead of retrying immediately after capacity failures.
 - Fix sandbox WebGL by making the home directory traversable for Chromium's GPU process
 - Show self-review and PR review feedback summaries in the task web view for web-only tasks by always writing the summary into task message history, not only when a chat route exists.
+- Fix controller recovery scans for persisted worker-bootstrap restarts so the query no longer references invalid table aliases and bootstrap recovery can continue.
 
 ## 0.14.0 (2026-07-19)
 
