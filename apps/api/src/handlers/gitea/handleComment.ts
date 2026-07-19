@@ -1,4 +1,10 @@
-import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
+import {
+  buildMentionRequestBlock,
+  buildUntrustedContentPolicy,
+  enqueueTask,
+  escapeTaskContextText,
+  getTaskUrl,
+} from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
@@ -184,14 +190,6 @@ function buildTaskStartFailedComment(): string {
   return 'I saw the mention, but I could not start a task for this pull request right now. Please try again in a moment.';
 }
 
-function formatQuotedText(text: string): string {
-  return text
-    .trim()
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n');
-}
-
 function buildExistingTaskFollowUpMessage({
   repoFullName,
   pullRequest,
@@ -204,8 +202,7 @@ function buildExistingTaskFollowUpMessage({
   commentBody: string;
 }): string {
   const lines = [
-    `${commenter} mentioned Roomote in a comment on Gitea pull request #${pullRequest.number} (${pullRequest.title}) in ${repoFullName}:`,
-    formatQuotedText(commentBody),
+    `${commenter} mentioned Roomote in a comment on Gitea pull request #${pullRequest.number} (${escapeTaskContextText(pullRequest.title)}) in ${repoFullName}.`,
     '',
     'Please act on this comment as a follow-up to your existing work on this pull request.',
   ];
@@ -215,6 +212,14 @@ function buildExistingTaskFollowUpMessage({
       `The pull request source branch is \`${pullRequest.head.ref}\`.`,
     );
   }
+
+  lines.push(
+    '',
+    'Mention comment (the request to act on):',
+    buildMentionRequestBlock(commentBody),
+    '',
+    buildUntrustedContentPolicy(),
+  );
 
   return lines.join('\n');
 }

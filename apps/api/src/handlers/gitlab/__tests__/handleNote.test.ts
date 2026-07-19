@@ -20,9 +20,16 @@ const {
   mockSteerMessageToTask: vi.fn(),
 }));
 
+// Prompt-framing fakes use distinctive markers so tests can assert the
+// handler routes each piece of text through the right builder; the real
+// escaping/wrapping behavior is unit-tested in @roomote/cloud-agents.
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
   getTaskUrl: mockGetTaskUrl,
+  buildMentionRequestBlock: (text: string) =>
+    `<mention_request>${text}</mention_request>`,
+  buildUntrustedContentPolicy: () => '<untrusted_content_policy/>',
+  escapeTaskContextText: (value: string) => value,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -315,7 +322,15 @@ describe('handleGitLabNote', () => {
       expect.objectContaining({
         taskId: 'owner-task',
         userId: 'user-1',
+        message: expect.stringContaining(
+          '<mention_request>Hey @roomote please take a look</mention_request>',
+        ),
         senderMode: 'github_pr_follow_up',
+      }),
+    );
+    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('<untrusted_content_policy/>'),
       }),
     );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
