@@ -323,6 +323,7 @@ import {
   pollGitHubCopilotDeviceAuthCommand,
   startGitHubCopilotDeviceAuthCommand,
 } from '../commands/github-copilot-subscription';
+import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
 import {
   getRouterDebugSettingsCommand,
   updateRouterDebugSettingsCommand,
@@ -1891,6 +1892,12 @@ export const appRouter = createRouter({
       ),
     disconnect: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectGitHubCopilotSubscriptionCommand(auth),
+    ),
+  }),
+
+  subscriptionUsage: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSubscriptionProviderUsageCommand(auth),
     ),
   }),
 

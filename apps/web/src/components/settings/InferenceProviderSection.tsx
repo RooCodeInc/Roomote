@@ -12,6 +12,9 @@ import type {
   SetupModelProviderId,
   SetupModelProviderStatus,
   SetupModelStatus,
+  SubscriptionProviderUsage,
+  SubscriptionUsageProviderId,
+  SubscriptionUsageWindow,
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
@@ -113,14 +116,86 @@ function getSubmitAdditionalEnvValues(
   );
 }
 
+function formatUsageReset(resetsAt: string): string | null {
+  const reset = new Date(resetsAt).getTime();
+
+  if (Number.isNaN(reset)) {
+    return null;
+  }
+
+  const deltaMinutes = Math.round((reset - Date.now()) / 60_000);
+
+  if (deltaMinutes <= 0) {
+    return null;
+  }
+  if (deltaMinutes < 60) {
+    return `resets in ${deltaMinutes}m`;
+  }
+  if (deltaMinutes < 48 * 60) {
+    return `resets in ${Math.round(deltaMinutes / 60)}h`;
+  }
+
+  return `resets ${new Date(reset).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  })}`;
+}
+
+function formatUsageWindow(window: SubscriptionUsageWindow): string | null {
+  let value: string;
+
+  if (window.unlimited) {
+    value = 'unlimited';
+  } else if (window.remaining !== undefined && window.limit !== undefined) {
+    value = `${window.remaining.toLocaleString()} of ${window.limit.toLocaleString()} left`;
+  } else if (window.usedPercent !== undefined) {
+    value = `${Math.round(window.usedPercent)}% used`;
+  } else {
+    return null;
+  }
+
+  const reset =
+    !window.unlimited && window.resetsAt
+      ? formatUsageReset(window.resetsAt)
+      : null;
+
+  return `${window.label}: ${value}${reset ? ` (${reset})` : ''}`;
+}
+
+function SubscriptionUsageLine({
+  usage,
+  className,
+}: {
+  usage: SubscriptionProviderUsage | undefined;
+  className?: string;
+}) {
+  const parts = (usage?.windows ?? [])
+    .map(formatUsageWindow)
+    .filter((part): part is string => part !== null);
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return (
+    <p
+      className={`min-w-0 truncate text-xs text-muted-foreground ${className ?? ''}`}
+    >
+      {parts.join(' · ')}
+    </p>
+  );
+}
+
 function ConnectedProviderRow({
   provider,
+  usage,
   isSaving,
   canDelete,
   onEdit,
   onDelete,
 }: {
   provider: SetupModelProviderStatus;
+  usage?: SubscriptionProviderUsage;
   isSaving: boolean;
   canDelete: boolean;
   onEdit: () => void;
@@ -158,6 +233,7 @@ function ConnectedProviderRow({
             aria-label={`${primaryCredentialLabel} for ${provider.label}`}
             data-1p-ignore
           />
+          <SubscriptionUsageLine usage={usage} className="mt-1" />
         </div>
 
         {hasRuntimeKey ? (
@@ -549,6 +625,7 @@ function ChatGptSubscriptionRow({
   errored,
   accountEmail,
   errorMessage,
+  usage,
   onReconnect,
   onDisconnect,
   isDisconnecting,
@@ -556,6 +633,7 @@ function ChatGptSubscriptionRow({
   errored: boolean;
   accountEmail?: string;
   errorMessage?: string;
+  usage?: SubscriptionProviderUsage;
   onReconnect: () => void;
   onDisconnect: () => Promise<void>;
   isDisconnecting: boolean;
@@ -569,17 +647,20 @@ function ChatGptSubscriptionRow({
       </div>
 
       <div className="flex min-w-0 items-center gap-2">
-        {errored ? (
-          <p className="min-w-0 flex-1 truncate text-sm text-destructive">
-            {errorMessage ?? 'ChatGPT subscription needs to be reconnected.'}
-          </p>
-        ) : (
-          <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-            {accountEmail
-              ? `Connected as ${accountEmail}`
-              : 'Connected to a ChatGPT account.'}
-          </p>
-        )}
+        <div className="min-w-0 flex-1">
+          {errored ? (
+            <p className="min-w-0 truncate text-sm text-destructive">
+              {errorMessage ?? 'ChatGPT subscription needs to be reconnected.'}
+            </p>
+          ) : (
+            <p className="min-w-0 truncate text-sm text-muted-foreground">
+              {accountEmail
+                ? `Connected as ${accountEmail}`
+                : 'Connected to a ChatGPT account.'}
+            </p>
+          )}
+          {!errored ? <SubscriptionUsageLine usage={usage} /> : null}
+        </div>
 
         {errored ? (
           <Button
@@ -608,12 +689,14 @@ function ChatGptSubscriptionRow({
 function GitHubCopilotSubscriptionRow({
   errored,
   errorMessage,
+  usage,
   onReconnect,
   onDisconnect,
   isDisconnecting,
 }: {
   errored: boolean;
   errorMessage?: string;
+  usage?: SubscriptionProviderUsage;
   onReconnect: () => void;
   onDisconnect: () => Promise<void>;
   isDisconnecting: boolean;
@@ -624,13 +707,16 @@ function GitHubCopilotSubscriptionRow({
         {getModelProviderLabel('github-copilot')}
       </span>
       <div className="flex min-w-0 items-center gap-2">
-        <p
-          className={`min-w-0 flex-1 truncate text-sm ${errored ? 'text-destructive' : 'text-muted-foreground'}`}
-        >
-          {errored
-            ? (errorMessage ?? 'GitHub Copilot needs to be reconnected.')
-            : 'Connected to a GitHub Copilot account.'}
-        </p>
+        <div className="min-w-0 flex-1">
+          <p
+            className={`min-w-0 truncate text-sm ${errored ? 'text-destructive' : 'text-muted-foreground'}`}
+          >
+            {errored
+              ? (errorMessage ?? 'GitHub Copilot needs to be reconnected.')
+              : 'Connected to a GitHub Copilot account.'}
+          </p>
+          {!errored ? <SubscriptionUsageLine usage={usage} /> : null}
+        </div>
         {errored ? (
           <Button size="sm" variant="outline" onClick={onReconnect}>
             Reconnect
@@ -724,6 +810,24 @@ export function InferenceProviderSection({
     trpc.githubCopilotSubscription.status.queryOptions(),
   );
   const githubCopilotStatus = githubCopilotStatusQuery.data ?? null;
+
+  // Usage endpoints are unofficial upstream surfaces; a provider missing from
+  // the result just means no usage line is rendered for it.
+  const subscriptionUsageQuery = useQuery(
+    trpc.subscriptionUsage.list.queryOptions(undefined, {
+      staleTime: 60_000,
+    }),
+  );
+  const usageByProvider = useMemo(
+    () =>
+      new Map<SubscriptionUsageProviderId, SubscriptionProviderUsage>(
+        (subscriptionUsageQuery.data ?? []).map((usage) => [
+          usage.providerId,
+          usage,
+        ]),
+      ),
+    [subscriptionUsageQuery.data],
+  );
 
   const saveProvider = useMutation(
     trpc.taskModels.saveProvider.mutationOptions({
@@ -1057,6 +1161,7 @@ export function InferenceProviderSection({
                 errored={chatgptErrored}
                 accountEmail={chatgptStatus?.email}
                 errorMessage={chatgptStatus?.error}
+                usage={usageByProvider.get(CHATGPT_SUBSCRIPTION_PROVIDER_ID)}
                 onReconnect={() => setIsChatGptDialogOpen(true)}
                 onDisconnect={handleDisconnectChatGpt}
                 isDisconnecting={disconnectChatGpt.isPending}
@@ -1066,6 +1171,7 @@ export function InferenceProviderSection({
               <GitHubCopilotSubscriptionRow
                 errored={githubCopilotErrored}
                 errorMessage={githubCopilotStatus?.error}
+                usage={usageByProvider.get('github-copilot')}
                 onReconnect={() => setIsGitHubCopilotDialogOpen(true)}
                 onDisconnect={handleDisconnectGitHubCopilot}
                 isDisconnecting={disconnectGitHubCopilot.isPending}
@@ -1075,6 +1181,11 @@ export function InferenceProviderSection({
               <ConnectedProviderRow
                 key={provider.id}
                 provider={provider}
+                usage={
+                  provider.id === 'kimi-for-coding'
+                    ? usageByProvider.get('kimi-for-coding')
+                    : undefined
+                }
                 isSaving={savingProviderId === provider.id}
                 canDelete={connectedProviderCount > 1}
                 onEdit={() =>

@@ -48,6 +48,7 @@ export * from './preview-proxy';
 export * from './primitives';
 export * from './provider-retry-notice';
 export * from './provider-usage-workflow-phase';
+export * from './subscription-provider-usage';
 export * from './request-observability';
 export * from './sandbox-server';
 export * from './sandbox-spawn';
