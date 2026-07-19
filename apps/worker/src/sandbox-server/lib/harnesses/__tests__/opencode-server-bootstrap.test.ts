@@ -413,7 +413,7 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome and returns concise review findings.',
+        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/review-model',
@@ -441,6 +441,11 @@ describe('opencode-server bootstrap', () => {
         'Avoid open-ended repository exploration',
       ),
     });
+    expect(baseConfig.agent?.judge).toMatchObject({
+      prompt: expect.stringContaining(
+        'When visual-proof evidence is included, verify it as part of the check',
+      ),
+    });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.instructions).toEqual([
       judgeModelInstructionsPath,
@@ -451,6 +456,18 @@ describe('opencode-server bootstrap', () => {
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'Keep judge tool use minimal and targeted.',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'do not run the judge pass until that handoff has returned',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'verify kept screenshot and screencast evidence',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'If judge-driven fixes change repository files and this run requires a pre-delivery',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff',
     );
     expect(runtimeEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
     expect(runtimeEnv).not.toHaveProperty(
@@ -492,7 +509,7 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome and returns concise review findings.',
+        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/main-model',
@@ -528,7 +545,7 @@ describe('opencode-server bootstrap', () => {
       'falls back to the active coding model',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'Start from the shipped diff, the plan, and the validation state',
+      'Start from the shipped diff, the plan, the validation state, and the latest pre-delivery visual-proof result',
     );
   });
 
