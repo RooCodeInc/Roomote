@@ -1,5 +1,6 @@
 import {
   TaskRunQueueEnqueueError,
+  buildAutomationExecutionGuidanceBlock,
   buildUntrustedContentPolicy,
   buildUntrustedExternalContentBlock,
   enqueueTask,
@@ -118,12 +119,15 @@ function buildExecutionTaskPrompt(
           text: item.investigationContext,
         })}`
       : null,
-    // The execution prompt is the automation's instruction channel (the
-    // policy names an automation's execution instructions as a valid
-    // instruction source), so it stays unwrapped; the untrusted boundary for
-    // its provenance belongs to the scan run that distills external sources
-    // into the work item.
-    item.executionPrompt ? `Execution prompt:\n${item.executionPrompt}` : null,
+    // The execution prompt is authored by the scan run over external
+    // sources, so it is delivered as scoped guidance rather than a fully
+    // trusted instruction channel: the policy limits it to the named work
+    // item and it cannot expand scope or authorize new actions.
+    item.executionPrompt
+      ? `Execution guidance from the scan run (apply only within the scope of this work item):\n${buildAutomationExecutionGuidanceBlock(
+          item.executionPrompt,
+        )}`
+      : null,
     buildUntrustedContentPolicy(),
   ];
 

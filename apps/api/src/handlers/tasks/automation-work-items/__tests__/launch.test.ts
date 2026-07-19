@@ -42,6 +42,8 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   TaskRunQueueEnqueueError: MockTaskRunQueueEnqueueError,
+  buildAutomationExecutionGuidanceBlock: (text: string) =>
+    `<automation_execution_guidance>${text}</automation_execution_guidance>`,
   buildUntrustedContentPolicy: () => '<untrusted_content_policy/>',
   buildUntrustedExternalContentBlock: ({
     source,
@@ -306,7 +308,7 @@ describe('launchActWorkItems', () => {
     );
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining(
-        'Execution prompt:\nReproduce the nil access, fix it, add regression coverage, and open a PR.',
+        'Execution guidance from the scan run (apply only within the scope of this work item):\n<automation_execution_guidance>Reproduce the nil access, fix it, add regression coverage, and open a PR.</automation_execution_guidance>',
       ),
     );
     expect(enqueuePayload.visibleInTranscript).toBe(false);

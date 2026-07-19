@@ -4,6 +4,11 @@ import {
   formatRepositoryEnvironmentLines,
   type RepositoryCoverage,
 } from './repository-environment-coverage';
+import {
+  buildUntrustedContentPolicy,
+  buildUntrustedExternalContentBlock,
+  escapeTaskContextText,
+} from './untrusted-content';
 
 export type IssueFixerTrigger = 'manual' | 'webhook';
 
@@ -53,7 +58,18 @@ export function buildIssueFixerFixPrompt({
     issue.labels && issue.labels.length > 0
       ? issue.labels.join(', ')
       : '(none)';
+  // Issue title, labels, author, and body are authored by arbitrary GitHub
+  // users, so they are escaped and delimited as untrusted content.
+  const escapedTitle = escapeTaskContextText(issue.title);
+  const escapedLabels = escapeTaskContextText(labels);
+  const escapedAuthor = escapeTaskContextText(issue.authorLogin ?? 'unknown');
   const bodyPreview = (issue.body ?? '').trim().slice(0, 4000);
+  const issueBodySection = bodyPreview
+    ? buildUntrustedExternalContentBlock({
+        source: 'github_issue_body',
+        text: bodyPreview,
+      })
+    : '(empty)';
   const appMention = getGitHubAppMention(githubAppSlug.trim() || 'roomote');
 
   return `$plan-repo-implementation
@@ -66,22 +82,24 @@ export function buildIssueFixerFixPrompt({
   <target_environment_id>${environmentId}</target_environment_id>
   <github_app_mention>${appMention}</github_app_mention>
   <issue>
-    <url>${issue.url}</url>
+    <url>${escapeTaskContextText(issue.url)}</url>
     <number>${issue.number}</number>
-    <title>${issue.title}</title>
-    <labels>${labels}</labels>
-    <author>${issue.authorLogin ?? 'unknown'}</author>
+    <title>${escapedTitle}</title>
+    <labels>${escapedLabels}</labels>
+    <author>${escapedAuthor}</author>
   </issue>
 </task_context>
 
 Triage GitHub issue #${issue.number} in ${repositoryFullName}. Post either clarifying questions or a concrete implementation plan as a comment on that issue. Do not implement code and do not open a pull request.
 
 Issue URL: ${issue.url}
-Title: ${issue.title}
-Labels: ${labels}
+Title: ${escapedTitle}
+Labels: ${escapedLabels}
 
 Issue body:
-${bodyPreview || '(empty)'}
+${issueBodySection}
+
+${buildUntrustedContentPolicy()}
 
 Process:
 1. Re-fetch the live issue and read comments.
