@@ -413,8 +413,7 @@ function ProviderCredentialsDialog({
                           aria-label="Connection name for OpenAI-compatible endpoint"
                         />
                         <p className="text-xs text-muted-foreground">
-                          Used to tell multiple OpenAI-compatible endpoints
-                          apart in Models settings.
+                          A short label for this endpoint in Models settings.
                         </p>
                       </div>
                     </div>
