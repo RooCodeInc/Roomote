@@ -14,7 +14,6 @@ import type {
   SetupModelStatus,
   SubscriptionProviderUsage,
   SubscriptionUsageProviderId,
-  SubscriptionUsageWindow,
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
@@ -45,6 +44,7 @@ import {
 import { Section } from '@/components/settings/Section';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
+import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
@@ -113,76 +113,6 @@ function getSubmitAdditionalEnvValues(
     Object.entries(additionalEnvValues).filter(([name]) =>
       declaredNames.has(name),
     ),
-  );
-}
-
-function formatUsageReset(resetsAt: string): string | null {
-  const reset = new Date(resetsAt).getTime();
-
-  if (Number.isNaN(reset)) {
-    return null;
-  }
-
-  const deltaMinutes = Math.round((reset - Date.now()) / 60_000);
-
-  if (deltaMinutes <= 0) {
-    return null;
-  }
-  if (deltaMinutes < 60) {
-    return `resets in ${deltaMinutes}m`;
-  }
-  if (deltaMinutes < 48 * 60) {
-    return `resets in ${Math.round(deltaMinutes / 60)}h`;
-  }
-
-  return `resets ${new Date(reset).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })}`;
-}
-
-function formatUsageWindow(window: SubscriptionUsageWindow): string | null {
-  let value: string;
-
-  if (window.unlimited) {
-    value = 'unlimited';
-  } else if (window.remaining !== undefined && window.limit !== undefined) {
-    value = `${window.remaining.toLocaleString()} of ${window.limit.toLocaleString()} left`;
-  } else if (window.usedPercent !== undefined) {
-    value = `${Math.round(window.usedPercent)}% used`;
-  } else {
-    return null;
-  }
-
-  const reset =
-    !window.unlimited && window.resetsAt
-      ? formatUsageReset(window.resetsAt)
-      : null;
-
-  return `${window.label}: ${value}${reset ? ` (${reset})` : ''}`;
-}
-
-function SubscriptionUsageLine({
-  usage,
-  className,
-}: {
-  usage: SubscriptionProviderUsage | undefined;
-  className?: string;
-}) {
-  const parts = (usage?.windows ?? [])
-    .map(formatUsageWindow)
-    .filter((part): part is string => part !== null);
-
-  if (parts.length === 0) {
-    return null;
-  }
-
-  return (
-    <p
-      className={`min-w-0 truncate text-xs text-muted-foreground ${className ?? ''}`}
-    >
-      {parts.join(' · ')}
-    </p>
   );
 }
 
@@ -659,7 +589,9 @@ function ChatGptSubscriptionRow({
                 : 'Connected to a ChatGPT account.'}
             </p>
           )}
-          {!errored ? <SubscriptionUsageLine usage={usage} /> : null}
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
         </div>
 
         {errored ? (
@@ -715,7 +647,9 @@ function GitHubCopilotSubscriptionRow({
               ? (errorMessage ?? 'GitHub Copilot needs to be reconnected.')
               : 'Connected to a GitHub Copilot account.'}
           </p>
-          {!errored ? <SubscriptionUsageLine usage={usage} /> : null}
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
         </div>
         {errored ? (
           <Button size="sm" variant="outline" onClick={onReconnect}>

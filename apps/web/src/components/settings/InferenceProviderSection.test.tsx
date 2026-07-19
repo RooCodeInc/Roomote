@@ -358,6 +358,12 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.getByText('Premium requests: 211 of 300 left'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Weekly limit usage' }),
+    ).toHaveAttribute('aria-valuenow', '8');
+    expect(
+      screen.getByRole('progressbar', { name: 'Premium requests usage' }),
+    ).toHaveAttribute('aria-valuenow', '30');
   });
 
   it('omits the usage line when no usage data is available or the row errored', () => {
