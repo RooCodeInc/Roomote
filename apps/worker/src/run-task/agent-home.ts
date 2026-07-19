@@ -107,8 +107,87 @@ const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
   },
 } as const;
 
-type OpenAiCompatibleProviderId =
+type StaticOpenAiCompatibleProviderId =
   keyof typeof OPENAI_COMPATIBLE_PROVIDER_CONFIGS;
+
+type OpenAiCompatibleProviderRuntimeConfig = {
+  name: string;
+  baseUrlEnvVarName: string;
+  fallbackBaseUrl: string;
+  apiKeyEnvVarName: string | undefined;
+  keyless: boolean;
+  allowOpenAiEnvFallback: boolean;
+};
+
+function getOpenAiCompatibleRuntimeConfigs(
+  modelIds: Array<string | undefined>,
+  runtimeEnv: Record<string, string>,
+): Map<string, OpenAiCompatibleProviderRuntimeConfig> {
+  const configs = new Map<string, OpenAiCompatibleProviderRuntimeConfig>();
+
+  for (const [providerId, provider] of Object.entries(
+    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
+  ) as Array<
+    [StaticOpenAiCompatibleProviderId, OpenAiCompatibleProviderRuntimeConfig]
+  >) {
+    configs.set(providerId, provider);
+  }
+
+  const candidateProviderIds = new Set<string>();
+  for (const modelId of modelIds) {
+    const providerId = modelId?.trim().split('/')[0];
+    if (providerId?.startsWith('openai-compatible')) {
+      candidateProviderIds.add(providerId);
+    }
+  }
+
+  for (const envName of Object.keys(runtimeEnv)) {
+    if (
+      envName.startsWith('OPENAI_COMPATIBLE_') &&
+      envName.endsWith('_BASE_URL')
+    ) {
+      // OPENAI_COMPATIBLE_BASE_URL → openai-compatible
+      // OPENAI_COMPATIBLE_FOO_BAR_BASE_URL → openai-compatible-foo-bar
+      if (envName === 'OPENAI_COMPATIBLE_BASE_URL') {
+        candidateProviderIds.add('openai-compatible');
+        continue;
+      }
+      const middle = envName.slice(
+        'OPENAI_COMPATIBLE_'.length,
+        envName.length - '_BASE_URL'.length,
+      );
+      if (middle) {
+        candidateProviderIds.add(
+          `openai-compatible-${middle.toLowerCase().replaceAll('_', '-')}`,
+        );
+      }
+    }
+  }
+
+  for (const providerId of candidateProviderIds) {
+    if (configs.has(providerId)) {
+      continue;
+    }
+    if (providerId === 'openai-compatible') {
+      continue;
+    }
+    if (!providerId.startsWith('openai-compatible-')) {
+      continue;
+    }
+    const slug = providerId.slice('openai-compatible-'.length);
+    const envSegment = slug.replaceAll('-', '_').toUpperCase();
+    configs.set(providerId, {
+      name: `OpenAI-compatible (${slug})`,
+      baseUrlEnvVarName: `OPENAI_COMPATIBLE_${envSegment}_BASE_URL`,
+      fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
+      apiKeyEnvVarName: `OPENAI_COMPATIBLE_${envSegment}_API_KEY`,
+      keyless: false,
+      allowOpenAiEnvFallback: false,
+    });
+  }
+
+  return configs;
+}
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -692,11 +771,12 @@ function mergeOpenAiCompatibleProviderConfig(
   modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
   let merged = providerConfig;
+  const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
+    modelIds,
+    runtimeEnv,
+  );
 
-  for (const providerId of Object.keys(
-    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
-  ) as OpenAiCompatibleProviderId[]) {
-    const provider = OPENAI_COMPATIBLE_PROVIDER_CONFIGS[providerId];
+  for (const [providerId, provider] of runtimeConfigs) {
     const prefix = `${providerId}/`;
     const modelIdsForProvider = [
       ...new Set(
@@ -858,9 +938,11 @@ function mergeInferenceGatewayProviderConfig(
   // These providers are configured explicitly because OpenCode has no catalog
   // entries for their arbitrary model IDs. Rebase only registered gateway
   // providers: vLLM stays direct until the gateway declares its route.
-  for (const providerId of Object.keys(
-    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
-  ) as OpenAiCompatibleProviderId[]) {
+  const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
+    modelIds,
+    runtimeEnv,
+  );
+  for (const providerId of runtimeConfigs.keys()) {
     const gatewayProvider = getInferenceGatewayProvider(providerId);
 
     if (

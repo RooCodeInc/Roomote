@@ -360,6 +360,42 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('configures named openai-compatible connections separately', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible-company-proxy/gpt-4o',
+        R_SMALL_MODEL: 'openai-compatible-local/qwen3',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL:
+          'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY: 'proxy-key',
+        OPENAI_COMPATIBLE_LOCAL_BASE_URL: 'http://127.0.0.1:8080/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible-company-proxy']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+        apiKey: '{env:OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY}',
+      },
+      models: { 'gpt-4o': { name: 'gpt-4o' } },
+    });
+    expect(config.provider['openai-compatible-local']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL: 'http://127.0.0.1:8080/v1',
+      },
+      models: { qwen3: { name: 'qwen3' } },
+    });
+    expect(
+      config.provider['openai-compatible-local']?.options.apiKey,
+    ).toBeUndefined();
+  });
+
   it('does not fall back openai-compatible to OPENAI_* credentials', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

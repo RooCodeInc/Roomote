@@ -107,8 +107,22 @@ describe('inference gateway key lookups', () => {
         'OPENAI_COMPATIBLE_BASE_URL',
         'OPENAI_COMPATIBLE_API_KEY',
       ],
-      optionalApiKey: true,
     });
+    expect(
+      getInferenceGatewayProvider('openai-compatible-company-proxy'),
+    ).toMatchObject({
+      id: 'openai-compatible-company-proxy',
+      upstreamBaseUrlEnvVarName: 'OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL',
+      gatewayEnvVarNames: [
+        'OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL',
+        'OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY',
+      ],
+    });
+    expect(
+      getInferenceGatewayProviderByEnvVarName(
+        'OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY',
+      )?.id,
+    ).toBe('openai-compatible-company-proxy');
     expect(getInferenceGatewayProvider('litellm')).toMatchObject({
       upstreamBaseUrlEnvVarName: 'LITELLM_BASE_URL',
       gatewayEnvVarNames: ['LITELLM_BASE_URL', 'LITELLM_API_KEY'],

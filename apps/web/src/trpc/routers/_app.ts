@@ -17,7 +17,8 @@ import {
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
   SETUP_AUTH_PROVIDER_IDS,
-  SETUP_MODEL_PROVIDER_IDS,
+  isSetupModelProviderId,
+  isOpenAiCompatibleProviderId,
   SUGGESTER_ROUTING_MODES,
   prActions,
   sourceControlProviderSchema,
@@ -1686,49 +1687,87 @@ export const appRouter = createRouter({
     saveProvider: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          provider: z
+            .string()
+            .trim()
+            .refine(isSetupModelProviderId, 'Invalid model provider.'),
           apiKey: z.string().trim().optional(),
           additionalEnvValues: z.record(z.string().trim()).optional(),
+          connectionName: z.string().trim().optional(),
           modelId: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        saveTaskModelProviderCommand(auth, input),
+        saveTaskModelProviderCommand(auth, {
+          ...input,
+          provider: input.provider,
+        }),
       ),
 
     deleteProvider: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          provider: z
+            .string()
+            .trim()
+            .refine(isSetupModelProviderId, 'Invalid model provider.'),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        deleteTaskModelProviderCommand(auth, input),
+        deleteTaskModelProviderCommand(auth, {
+          provider: input.provider,
+        }),
       ),
 
     discoverProviderModels: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(LOCAL_TASK_MODEL_PROVIDER_IDS),
+          provider: z
+            .string()
+            .trim()
+            .refine(
+              (value) =>
+                (LOCAL_TASK_MODEL_PROVIDER_IDS as readonly string[]).includes(
+                  value,
+                ) || isOpenAiCompatibleProviderId(value),
+              'Invalid local model provider.',
+            ),
           baseUrl: z.string().trim().optional(),
           apiKey: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        discoverProviderModelsCommand(auth, input),
+        discoverProviderModelsCommand(auth, {
+          ...input,
+          provider:
+            input.provider as (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number],
+        }),
       ),
 
     qualifyProviderModel: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(LOCAL_TASK_MODEL_PROVIDER_IDS),
+          provider: z
+            .string()
+            .trim()
+            .refine(
+              (value) =>
+                (LOCAL_TASK_MODEL_PROVIDER_IDS as readonly string[]).includes(
+                  value,
+                ) || isOpenAiCompatibleProviderId(value),
+              'Invalid local model provider.',
+            ),
           modelId: z.string().trim().min(1),
           baseUrl: z.string().trim().optional(),
           apiKey: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        qualifyProviderModelCommand(auth, input),
+        qualifyProviderModelCommand(auth, {
+          ...input,
+          provider:
+            input.provider as (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number],
+        }),
       ),
 
     lookup: protectedProcedure
@@ -1744,12 +1783,18 @@ export const appRouter = createRouter({
     suggest: protectedProcedure
       .input(
         z.object({
-          providerId: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          providerId: z
+            .string()
+            .trim()
+            .refine(isSetupModelProviderId, 'Invalid model provider.'),
           query: z.string().trim(),
         }),
       )
       .query(({ ctx: { auth }, input }) =>
-        suggestTaskModelsCommand(auth, input),
+        suggestTaskModelsCommand(auth, {
+          ...input,
+          providerId: input.providerId,
+        }),
       ),
 
     refreshMetadata: protectedProcedure.mutation(({ ctx: { auth } }) =>
@@ -1940,14 +1985,21 @@ export const appRouter = createRouter({
     saveModelConfig: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          provider: z
+            .string()
+            .trim()
+            .refine(isSetupModelProviderId, 'Invalid model provider.'),
           apiKey: z.string().trim().optional(),
           additionalEnvValues: z.record(z.string().trim()).optional(),
+          connectionName: z.string().trim().optional(),
           modelId: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewModelConfigCommand(auth, input),
+        saveSetupNewModelConfigCommand(auth, {
+          ...input,
+          provider: input.provider,
+        }),
       ),
 
     saveComputeProviderChoice: protectedProcedure

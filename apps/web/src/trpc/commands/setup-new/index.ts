@@ -55,6 +55,7 @@ import {
   buildSetupModelStatus,
   buildSetupSourceControlStatus,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
   createEmptySetupNewState,
@@ -70,6 +71,10 @@ import {
   getSetupModelProvider,
   getSetupModelProviderAdditionalEnvFields,
   SETUP_MODEL_PROVIDER_CATALOG,
+  buildOpenAiCompatibleProviderId,
+  buildOpenAiCompatibleProviderInstance,
+  isOpenAiCompatibleProviderId,
+  normalizeOpenAiCompatibleConnectionSlug,
   isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
@@ -1505,13 +1510,48 @@ export async function saveSetupNewModelConfigCommand(
     provider: SetupModelProviderId;
     apiKey?: string;
     additionalEnvValues?: Record<string, string>;
+    connectionName?: string;
     modelId?: string;
   },
 ) {
   assertAdmin(auth);
 
   const { userId } = auth;
-  const provider = getSetupModelProvider(input.provider);
+  let providerId = input.provider;
+  let additionalEnvValues = input.additionalEnvValues;
+  const apiKey = input.apiKey;
+
+  if (providerId === OPENAI_COMPATIBLE_PROVIDER_ID) {
+    const slug = normalizeOpenAiCompatibleConnectionSlug(input.connectionName);
+    if (!slug) {
+      throw new Error(
+        'Enter a connection name for the OpenAI-compatible endpoint.',
+      );
+    }
+    providerId = buildOpenAiCompatibleProviderId(slug) as SetupModelProviderId;
+    const instance = buildOpenAiCompatibleProviderInstance(slug, {
+      label: input.connectionName?.trim() || slug,
+    });
+    const remappedAdditional: Record<string, string> = {};
+    if (instance.labelEnvVarName && input.connectionName?.trim()) {
+      remappedAdditional[instance.labelEnvVarName] =
+        input.connectionName.trim();
+    }
+    for (const [name, value] of Object.entries(
+      input.additionalEnvValues ?? {},
+    )) {
+      if (name === 'OPENAI_COMPATIBLE_API_KEY') {
+        remappedAdditional[instance.apiKeyEnvVarName] = value;
+        continue;
+      }
+      remappedAdditional[name] = value;
+    }
+    additionalEnvValues = remappedAdditional;
+  } else if (isOpenAiCompatibleProviderId(providerId)) {
+    // Already named — keep as-is.
+  }
+
+  const provider = getSetupModelProvider(providerId);
   const isOauthProvider = provider.authKind === 'oauth';
 
   const [chatgptConnected, githubCopilotConnected] = await Promise.all([
@@ -1549,8 +1589,8 @@ export async function saveSetupNewModelConfigCommand(
       const { values: credentialValues, clearedEnvVarNames } =
         collectSetupModelProviderCredentialValues({
           provider,
-          apiKey: input.apiKey,
-          additionalEnvValues: input.additionalEnvValues,
+          apiKey,
+          additionalEnvValues,
           isEnvVarSatisfied: (envVarName) =>
             persistedEnvVarNameSet.has(envVarName) ||
             isConfiguredEnvValue(process.env[envVarName]),
@@ -1584,13 +1624,25 @@ export async function saveSetupNewModelConfigCommand(
 
     const setupNewState = normalizeSetupNewState({
       ...currentState,
-      modelProvider: input.provider,
+      modelProvider: provider.id,
       lastInteractedByUserId: userId,
     });
     // Connecting a provider applies its recommended per-role model defaults:
     // the provider's default coding model plus any recommended helper,
     // vision, code review, explore, and planning models.
-    const selectedDynamicModel = input.modelId?.trim();
+    let selectedDynamicModel = input.modelId?.trim();
+
+    // Discovery in the wizard uses the catalog id `openai-compatible/...`.
+    // After naming the connection, remap model ids onto the named premium.
+    if (
+      selectedDynamicModel?.startsWith(`${OPENAI_COMPATIBLE_PROVIDER_ID}/`) &&
+      provider.id !== OPENAI_COMPATIBLE_PROVIDER_ID &&
+      isOpenAiCompatibleProviderId(provider.id)
+    ) {
+      selectedDynamicModel = `${provider.id}/${selectedDynamicModel.slice(
+        OPENAI_COMPATIBLE_PROVIDER_ID.length + 1,
+      )}`;
+    }
 
     if (provider.dynamicModels && !selectedDynamicModel) {
       throw new Error(
