@@ -73,6 +73,7 @@ import {
   clearGitLabDeploymentUserCache,
   createTaskRunScopedGitLabTokens,
   createGitLabMergeRequestNote,
+  createGitLabIssueNote,
   ensureGitLabWebhooksForProjects,
   removeGitLabWebhooksForProjects,
   getGitLabDeploymentUser,
@@ -840,6 +841,51 @@ describe('createGitLabMergeRequestNote', () => {
       }),
     ).rejects.toThrow(
       'GitLab OAuth authorization is required to create merge request notes.',
+    );
+  });
+});
+
+describe('createGitLabIssueNote', () => {
+  it('posts a note to the issue notes endpoint', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: 8765 }), { status: 201 }),
+      );
+
+    const result = await createGitLabIssueNote({
+      projectId: '42',
+      issueIid: 9,
+      body: 'Looking into it!',
+      token: 'glpat_deployment_token',
+      fetchImpl: fetchMock,
+    });
+
+    expect(result).toEqual({ id: 8765 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://gitlab.com/api/v4/projects/42/issues/9/notes',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'PRIVATE-TOKEN': 'glpat_deployment_token',
+          'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify({ body: 'Looking into it!' }),
+      }),
+    );
+  });
+
+  it('requires a token', async () => {
+    await expect(
+      createGitLabIssueNote({
+        projectId: '42',
+        issueIid: 9,
+        body: 'hi',
+        token: '',
+        fetchImpl: vi.fn<typeof fetch>(),
+      }),
+    ).rejects.toThrow(
+      'GitLab OAuth authorization is required to create issue notes.',
     );
   });
 });

@@ -299,21 +299,29 @@ export async function findReusableGitHubPrFollowUpOwner({
 }
 
 /**
- * Returns the newest reusable Roomote task started from a GitHub issue
- * @mention (payload `linkedWorkItems` entry) so a second issue comment can
- * continue the original task instead of launching a sibling.
+ * Returns the newest reusable Roomote task started from an issue @mention
+ * (payload `linkedWorkItems` entry) so a second issue comment can continue the
+ * original task instead of launching a sibling.
+ *
+ * `sourceControlProvider` scopes both the task payload and the linked work
+ * item provider (defaults to GitHub, matching historical issue-mention rows).
  */
 export async function findReusableGitHubIssueTaskOwner({
   repoFullName,
   issueNumber,
+  sourceControlProvider = 'github',
 }: {
   repoFullName: string;
   issueNumber: number;
+  sourceControlProvider?: SourceControlProvider;
 }): Promise<ReusableGitHubIssueTaskOwner | null> {
   const issueIdentifier = String(issueNumber);
+  // Linked work items use the same provider enum for GitHub/GitLab issues.
+  const linkedWorkItemProvider =
+    sourceControlProvider === 'gitlab' ? 'gitlab' : 'github';
   const linkedWorkItemMatch = JSON.stringify([
     {
-      provider: 'github',
+      provider: linkedWorkItemProvider,
       identifier: issueIdentifier,
       repository: repoFullName,
     },
@@ -326,7 +334,7 @@ export async function findReusableGitHubIssueTaskOwner({
       and(
         isNull(taskRuns.canceledAt),
         inArray(taskRuns.payloadKind, [...REUSABLE_FOLLOW_UP_OWNER_TYPES]),
-        payloadProviderCondition('github'),
+        payloadProviderCondition(sourceControlProvider),
         sql`${taskRuns.payload}->>'repo' = ${repoFullName}`,
         sql`${taskRuns.payload}->'linkedWorkItems' @> ${linkedWorkItemMatch}::jsonb`,
       ),

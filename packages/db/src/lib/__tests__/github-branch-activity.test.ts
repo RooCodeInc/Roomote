@@ -1363,6 +1363,61 @@ describe('findReusableGitHubIssueTaskOwner', () => {
       delivery: 'resume',
     });
   });
+
+  it('reuses a standard task linked to the same GitLab issue', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'acme/backend-issue-gitlab';
+    const issueNumber = 91;
+
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+    });
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: repoFullName,
+        sourceControlProvider: 'gitlab',
+        description: `work on gitlab #${issueNumber}`,
+        linkedWorkItems: [
+          {
+            provider: 'gitlab',
+            identifier: String(issueNumber),
+            repository: repoFullName,
+            url: `https://gitlab.com/${repoFullName}/-/issues/${issueNumber}`,
+            title: `Issue #${issueNumber}`,
+          },
+        ],
+      },
+    });
+
+    // Same number/repo with the default GitHub provider must not match.
+    await createIssueLinkedStandardTaskRun({
+      repoFullName,
+      issueNumber,
+      userId: user.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+    });
+
+    const result = await findReusableGitHubIssueTaskOwner({
+      repoFullName,
+      issueNumber,
+      sourceControlProvider: 'gitlab',
+    });
+
+    expect(result).toEqual({
+      runId: run.id,
+      taskId: run.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      delivery: 'attach',
+    });
+  });
 });
 
 describe('findActiveGitHubPrReviewTask', () => {

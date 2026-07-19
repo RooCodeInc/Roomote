@@ -86,6 +86,16 @@ const gitLabNoteMergeRequestSchema = z
   })
   .passthrough();
 
+const gitLabNoteIssueSchema = z
+  .object({
+    iid: z.number(),
+    title: z.string(),
+    description: z.string().nullable().optional(),
+    state: z.string().optional(),
+    url: z.string().optional(),
+  })
+  .passthrough();
+
 export const gitLabNoteWebhookSchema = z
   .object({
     object_kind: z.literal('note'),
@@ -94,6 +104,7 @@ export const gitLabNoteWebhookSchema = z
     project: gitLabProjectSchema,
     object_attributes: gitLabNoteAttributesSchema,
     merge_request: gitLabNoteMergeRequestSchema.optional(),
+    issue: gitLabNoteIssueSchema.optional(),
   })
   .passthrough();
 
