@@ -184,6 +184,45 @@ describe('telegram pairing commands', () => {
       );
     });
 
+    it('recovers the one-shot token from the stash when persistence fails', async () => {
+      redisStore.set(`telegram-pairing-client:${PAIRING_ID}`, 'token');
+      stubFetchJson(200, {
+        status: 'ready',
+        token: CHILD_BOT_TOKEN,
+        botUsername: 'roomote_abc_bot',
+      });
+      saveCommsAuthConfigMock.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        checkTelegramPairingCommand(buildMockAuth(), {
+          pairingId: PAIRING_ID,
+        }),
+      ).rejects.toThrow('db down');
+      expect(redisStore.has(`telegram-pairing-result:${PAIRING_ID}`)).toBe(
+        true,
+      );
+
+      // The service has already consumed the pairing; the retry must succeed
+      // from the stash without reaching the service again.
+      const fetchMock = stubFetchJson(404, { error: 'Unknown pairing.' });
+      const result = await checkTelegramPairingCommand(buildMockAuth(), {
+        pairingId: PAIRING_ID,
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        status: 'ready',
+        botUsername: 'roomote_abc_bot',
+        telegramWebhook: { registered: true, error: null },
+      });
+      expect(redisStore.has(`telegram-pairing-result:${PAIRING_ID}`)).toBe(
+        false,
+      );
+      expect(redisStore.has(`telegram-pairing-client:${PAIRING_ID}`)).toBe(
+        false,
+      );
+    });
+
     it('treats a 404 from the service as an expired pairing', async () => {
       redisStore.set(`telegram-pairing-client:${PAIRING_ID}`, 'token');
       stubFetchJson(404, { error: 'Unknown pairing.' });

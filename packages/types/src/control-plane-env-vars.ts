@@ -40,6 +40,11 @@ export const INTEGRATION_BOT_SECRET_ENV_VAR_NAMES: ReadonlySet<string> =
   new Set([
     'R_TELEGRAM_BOT_TOKEN',
     'R_TELEGRAM_WEBHOOK_SECRET',
+    // Manager-bot credentials for the managed-bot pairing service. The
+    // manager token can export tokens for every managed child bot, so it
+    // must never reach a task sandbox or the generic env editor.
+    'R_TELEGRAM_MANAGER_BOT_TOKEN',
+    'R_TELEGRAM_MANAGER_WEBHOOK_SECRET',
     'R_DISCORD_BOT_TOKEN',
     'R_DISCORD_GATEWAY_SECRET',
     'R_TEAMS_BOT_APP_ID',
@@ -60,6 +65,7 @@ export const INTEGRATION_BOT_SECRET_ENV_VAR_NAMES: ReadonlySet<string> =
  * explicitly rather than derived.
  */
 export const PROVIDER_IDENTIFIER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'R_TELEGRAM_MANAGER_BOT_USERNAME',
   'R_GITHUB_APP_ID',
   'R_GITHUB_CLIENT_ID',
   'GITLAB_CLIENT_ID',

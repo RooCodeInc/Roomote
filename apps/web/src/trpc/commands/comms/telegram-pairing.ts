@@ -19,6 +19,7 @@ import { saveCommsAuthConfigCommand } from './index';
 
 const PAIRING_SERVICE_PATH = '/api/webhooks/telegram-pairing';
 const CLIENT_PAIRING_KEY_PREFIX = 'telegram-pairing-client:';
+const CLIENT_PAIRING_RESULT_KEY_PREFIX = 'telegram-pairing-result:';
 const PAIRING_REQUEST_TIMEOUT_MS = 10_000;
 const DEFAULT_PAIRING_TTL_SECONDS = 15 * 60;
 
@@ -104,20 +105,47 @@ type TelegramPairingCheckResult =
       telegramWebhook: { registered: boolean; error: string | null } | null;
     };
 
-export async function checkTelegramPairingCommand(
-  auth: UserAuthSuccess,
-  input: { pairingId: string },
-): Promise<TelegramPairingCheckResult> {
-  assertAdmin(auth);
+type StashedPairingResult = {
+  token: string;
+  botUsername: string | null;
+};
 
-  const redisKey = `${CLIENT_PAIRING_KEY_PREFIX}${input.pairingId}`;
-  const pollToken = await getRedis().get(redisKey);
+/**
+ * Retrieve the pairing result, tolerating retries. The service hands the
+ * token out exactly once, so the result is stashed in Redis the moment it
+ * arrives — if persisting the configuration fails afterwards, the next poll
+ * recovers the token from the stash instead of finding a consumed pairing.
+ */
+async function fetchPairingResult(
+  pairingId: string,
+): Promise<
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'ready'; result: StashedPairingResult }
+> {
+  const redis = getRedis();
+  const pollTokenKey = `${CLIENT_PAIRING_KEY_PREFIX}${pairingId}`;
+  const resultKey = `${CLIENT_PAIRING_RESULT_KEY_PREFIX}${pairingId}`;
+
+  const stashedRaw = await redis.get(resultKey);
+  if (stashedRaw) {
+    try {
+      const stashed = JSON.parse(stashedRaw) as StashedPairingResult;
+      if (isValidTelegramBotToken(stashed.token)) {
+        return { status: 'ready', result: stashed };
+      }
+    } catch {
+      // Fall through to the service poll.
+    }
+  }
+
+  const pollToken = await redis.get(pollTokenKey);
   if (!pollToken) {
     return { status: 'expired' };
   }
 
   const response = await fetch(
-    `${getPairingServiceBaseUrl()}/${encodeURIComponent(input.pairingId)}`,
+    `${getPairingServiceBaseUrl()}/${encodeURIComponent(pairingId)}`,
     {
       headers: { Authorization: `Bearer ${pollToken}` },
       signal: AbortSignal.timeout(PAIRING_REQUEST_TIMEOUT_MS),
@@ -130,7 +158,7 @@ export async function checkTelegramPairingCommand(
 
   if (response.status === 404) {
     // The service forgot the pairing (expired or already consumed).
-    await getRedis().del(redisKey);
+    await redis.del(pollTokenKey);
     return { status: 'expired' };
   }
 
@@ -145,28 +173,56 @@ export async function checkTelegramPairingCommand(
   }
 
   if (!isValidTelegramBotToken(payload.token)) {
-    await getRedis().del(redisKey);
+    await redis.del(pollTokenKey);
     throw new Error(
       'The Telegram setup service returned an invalid bot token. Try again, or enter a bot token manually.',
     );
   }
 
-  // The token is single-retrieval on the service side, so persist it before
-  // anything else can fail; the shared save path also generates the webhook
-  // secret and registers the webhook.
-  const saved = await saveCommsAuthConfigCommand(auth, {
-    provider: 'telegram',
-    values: { R_TELEGRAM_BOT_TOKEN: payload.token },
-  });
-
-  await getRedis().del(redisKey);
-
-  return {
-    status: 'ready',
+  const result: StashedPairingResult = {
+    token: payload.token,
     botUsername:
       typeof payload.botUsername === 'string' && payload.botUsername.length > 0
         ? payload.botUsername
         : null,
+  };
+
+  await redis.set(
+    resultKey,
+    JSON.stringify(result),
+    'EX',
+    DEFAULT_PAIRING_TTL_SECONDS,
+  );
+
+  return { status: 'ready', result };
+}
+
+export async function checkTelegramPairingCommand(
+  auth: UserAuthSuccess,
+  input: { pairingId: string },
+): Promise<TelegramPairingCheckResult> {
+  assertAdmin(auth);
+
+  const fetched = await fetchPairingResult(input.pairingId);
+  if (fetched.status !== 'ready') {
+    return fetched;
+  }
+
+  // The shared save path also generates the webhook secret and registers the
+  // webhook. If it throws, the stash above keeps the token recoverable and
+  // the caller can simply poll again.
+  const saved = await saveCommsAuthConfigCommand(auth, {
+    provider: 'telegram',
+    values: { R_TELEGRAM_BOT_TOKEN: fetched.result.token },
+  });
+
+  const redis = getRedis();
+  await redis.del(`${CLIENT_PAIRING_RESULT_KEY_PREFIX}${input.pairingId}`);
+  await redis.del(`${CLIENT_PAIRING_KEY_PREFIX}${input.pairingId}`);
+
+  return {
+    status: 'ready',
+    botUsername: fetched.result.botUsername,
     telegramWebhook: saved.telegramWebhook ?? null,
   };
 }

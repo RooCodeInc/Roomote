@@ -35,6 +35,7 @@ export function TelegramManagedBotPairing({
   } | null>(null);
   const [expired, setExpired] = useState(false);
   const pollBusyRef = useRef(false);
+  const lastErrorRef = useRef<string | null>(null);
 
   const start = useMutation(
     trpc.comms.startTelegramPairing.mutationOptions({
@@ -68,6 +69,7 @@ export function TelegramManagedBotPairing({
           pairingId: pairing.pairingId,
         });
         if (result.status === 'ready') {
+          lastErrorRef.current = null;
           setPairing(null);
           onPaired({
             botUsername: result.botUsername,
@@ -81,12 +83,17 @@ export function TelegramManagedBotPairing({
           setExpired(true);
         }
       } catch (error) {
-        setPairing(null);
-        toast.error(
+        // Keep polling: the server stashes a retrieved token, so a failed
+        // save attempt is retried on the next tick. Toast once per distinct
+        // error so a stuck save is visible without spamming.
+        const message =
           error instanceof Error
             ? error.message
-            : 'Telegram pairing failed. Try again.',
-        );
+            : 'Telegram pairing failed. Retrying…';
+        if (lastErrorRef.current !== message) {
+          lastErrorRef.current = message;
+          toast.error(message);
+        }
       } finally {
         pollBusyRef.current = false;
       }
