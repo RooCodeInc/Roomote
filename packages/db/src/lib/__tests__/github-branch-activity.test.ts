@@ -1418,6 +1418,101 @@ describe('findReusableGitHubIssueTaskOwner', () => {
       delivery: 'attach',
     });
   });
+
+  it('host-scopes GitLab issue reuse and tolerates unstamped legacy payloads', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'acme/backend-issue-host';
+    const issueNumber = 92;
+
+    async function createGitLabIssueRun({
+      sourceControlHost,
+    }: {
+      sourceControlHost?: string;
+    }) {
+      const task = await taskFactory.create({
+        initiatorUserId: user.id,
+      });
+
+      return runFactory.create({
+        actingUserId: user.id,
+        taskId: task.id,
+        payloadKind: TaskPayloadKind.StandardTask,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        payload: {
+          repo: repoFullName,
+          sourceControlProvider: 'gitlab',
+          ...(sourceControlHost ? { sourceControlHost } : {}),
+          description: `work on gitlab #${issueNumber}`,
+          linkedWorkItems: [
+            {
+              provider: 'gitlab',
+              identifier: String(issueNumber),
+              repository: repoFullName,
+            },
+          ],
+        },
+      });
+    }
+
+    const hostARun = await createGitLabIssueRun({
+      sourceControlHost: 'gitlab.host-a.example',
+    });
+    const hostBRun = await createGitLabIssueRun({
+      sourceControlHost: 'gitlab.host-b.example',
+    });
+
+    const hostBResult = await findReusableGitHubIssueTaskOwner({
+      repoFullName,
+      issueNumber,
+      sourceControlProvider: 'gitlab',
+      host: 'gitlab.host-b.example',
+    });
+
+    expect(hostBResult).toEqual({
+      runId: hostBRun.id,
+      taskId: hostBRun.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      delivery: 'attach',
+    });
+
+    const hostAResult = await findReusableGitHubIssueTaskOwner({
+      repoFullName,
+      issueNumber,
+      sourceControlProvider: 'gitlab',
+      host: 'gitlab.host-a.example',
+    });
+
+    expect(hostAResult).toEqual({
+      runId: hostARun.id,
+      taskId: hostARun.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      delivery: 'attach',
+    });
+
+    const legacyUnstamped = await createGitLabIssueRun({});
+    const hostScopedWithLegacy = await findReusableGitHubIssueTaskOwner({
+      repoFullName,
+      issueNumber,
+      sourceControlProvider: 'gitlab',
+      host: 'gitlab.host-a.example',
+    });
+
+    // Newest matching row is the unstamped legacy task; stamped host-B must
+    // not win a host-A lookup.
+    expect(hostScopedWithLegacy).toEqual({
+      runId: legacyUnstamped.id,
+      taskId: legacyUnstamped.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      delivery: 'attach',
+    });
+  });
 });
 
 describe('findActiveGitHubPrReviewTask', () => {

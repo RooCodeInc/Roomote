@@ -305,15 +305,22 @@ export async function findReusableGitHubPrFollowUpOwner({
  *
  * `sourceControlProvider` scopes both the task payload and the linked work
  * item provider (defaults to GitHub, matching historical issue-mention rows).
+ *
+ * When a non-null `host` is given, payload `sourceControlHost` must match that
+ * host. Rows without a stamped host still match (legacy null fallback) so
+ * pre-host-stamping issue tasks remain reusable, while a payload stamped for a
+ * different self-managed instance never cross-matches.
  */
 export async function findReusableGitHubIssueTaskOwner({
   repoFullName,
   issueNumber,
   sourceControlProvider = 'github',
+  host,
 }: {
   repoFullName: string;
   issueNumber: number;
   sourceControlProvider?: SourceControlProvider;
+  host?: string | null;
 }): Promise<ReusableGitHubIssueTaskOwner | null> {
   const issueIdentifier = String(issueNumber);
   // Linked work items use the same provider enum for GitHub/GitLab issues.
@@ -337,6 +344,14 @@ export async function findReusableGitHubIssueTaskOwner({
         payloadProviderCondition(sourceControlProvider),
         sql`${taskRuns.payload}->>'repo' = ${repoFullName}`,
         sql`${taskRuns.payload}->'linkedWorkItems' @> ${linkedWorkItemMatch}::jsonb`,
+        ...(host
+          ? [
+              sql`(
+                ${taskRuns.payload}->>'sourceControlHost' = ${host}
+                OR ${taskRuns.payload}->>'sourceControlHost' IS NULL
+              )`,
+            ]
+          : []),
       ),
     )
     .orderBy(desc(taskRuns.createdAt));

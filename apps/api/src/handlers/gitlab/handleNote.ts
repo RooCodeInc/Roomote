@@ -428,6 +428,7 @@ async function handleGitLabIssueNote({
     repoFullName,
     issueNumber: issue.iid,
     sourceControlProvider: 'gitlab',
+    host: target.repo.host ?? null,
   });
 
   if (existingIssueOwner?.taskId) {

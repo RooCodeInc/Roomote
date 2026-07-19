@@ -569,6 +569,7 @@ describe('handleGitLabNote', () => {
       repoFullName: 'acme/backend',
       issueNumber: 17,
       sourceControlProvider: 'gitlab',
+      host: null,
     });
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -613,6 +614,44 @@ describe('handleGitLabNote', () => {
       }),
     );
     expect(mockCreateGitLabMergeRequestNote).not.toHaveBeenCalled();
+  });
+
+  it('threads the repository host into issue reuse lookup and launch payloads', async () => {
+    mockGetGitLabAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitlab:pr_conflict_resolve:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'gitlab.example.com' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleGitLabNote(
+      makeNotePayload({
+        includeMergeRequest: false,
+        includeIssue: true,
+      }),
+    );
+
+    expect(mockFindReusableGitHubIssueTaskOwner).toHaveBeenCalledWith({
+      repoFullName: 'acme/backend',
+      issueNumber: 17,
+      sourceControlProvider: 'gitlab',
+      host: 'gitlab.example.com',
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlHost: 'gitlab.example.com',
+          }),
+        }),
+      }),
+    );
   });
 
   it('routes a second issue @mention into the existing issue task', async () => {
