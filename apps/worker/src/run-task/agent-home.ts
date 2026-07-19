@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import {
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
+  buildOpenAiCompatibleProviderInstance,
   buildOpenCodeModelReasoningOptions,
   CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
@@ -13,16 +14,21 @@ import {
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
   getMcpIntegration,
+  getOpenAiCompatibleProviderInstance,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   type InferenceGatewayProvider,
+  isOpenAiCompatibleProviderId,
   isTaskModelIdDisabled,
+  listOpenAiCompatibleProviderInstancesFromEnvNames,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
+  type OpenAiCompatibleProviderInstance,
   parseInferenceGatewayKeys,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
@@ -69,12 +75,26 @@ export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
-const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
-  'openai-compatible': {
-    name: 'OpenAI-compatible',
-    baseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
-    fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
-    apiKeyEnvVarName: 'OPENAI_COMPATIBLE_API_KEY' as string | undefined,
+/** Fallback direct-mode base URL for default and named OpenAI-compatible ids. */
+const OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL = 'http://127.0.0.1:4000/v1';
+
+const DEFAULT_OPENAI_COMPATIBLE_INSTANCE =
+  buildOpenAiCompatibleProviderInstance(null);
+
+/**
+ * Static OpenAI-compatible-style endpoint providers. Catalog entry names and
+ * env vars for the built-in `openai-compatible` id come from `@roomote/types`;
+ * ollama/vllm/litellm stay local here. Named `openai-compatible-<slug>`
+ * connections are discovered dynamically via the shared helpers.
+ */
+const STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+  [OPENAI_COMPATIBLE_PROVIDER_ID]: {
+    name: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.label,
+    baseUrlEnvVarName: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.baseUrlEnvVarName,
+    fallbackBaseUrl: OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL,
+    apiKeyEnvVarName: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.apiKeyEnvVarName as
+      | string
+      | undefined,
     keyless: false,
     // Arbitrary endpoints must not inherit OPENAI_* credentials. When the
     // optional dedicated key is blank, omit the API key entirely so keyless
@@ -108,7 +128,7 @@ const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
 } as const;
 
 type StaticOpenAiCompatibleProviderId =
-  keyof typeof OPENAI_COMPATIBLE_PROVIDER_CONFIGS;
+  keyof typeof STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS;
 
 type OpenAiCompatibleProviderRuntimeConfig = {
   name: string;
@@ -119,6 +139,40 @@ type OpenAiCompatibleProviderRuntimeConfig = {
   allowOpenAiEnvFallback: boolean;
 };
 
+function toNamedOpenAiCompatibleRuntimeConfig(
+  instance: OpenAiCompatibleProviderInstance,
+): OpenAiCompatibleProviderRuntimeConfig {
+  return {
+    name: instance.label,
+    baseUrlEnvVarName: instance.baseUrlEnvVarName,
+    fallbackBaseUrl: OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL,
+    apiKeyEnvVarName: instance.apiKeyEnvVarName,
+    keyless: false,
+    allowOpenAiEnvFallback: false,
+  };
+}
+
+function resolveNamedOpenAiCompatibleInstance(
+  providerId: string,
+  runtimeEnv: Record<string, string>,
+): OpenAiCompatibleProviderInstance | null {
+  const instance = getOpenAiCompatibleProviderInstance(providerId);
+  if (!instance?.slug) {
+    return null;
+  }
+
+  if (!instance.labelEnvVarName) {
+    return instance;
+  }
+
+  const label = runtimeEnv[instance.labelEnvVarName]?.trim();
+  if (!label) {
+    return instance;
+  }
+
+  return getOpenAiCompatibleProviderInstance(providerId, { label }) ?? instance;
+}
+
 function getOpenAiCompatibleRuntimeConfigs(
   modelIds: Array<string | undefined>,
   runtimeEnv: Record<string, string>,
@@ -126,7 +180,7 @@ function getOpenAiCompatibleRuntimeConfigs(
   const configs = new Map<string, OpenAiCompatibleProviderRuntimeConfig>();
 
   for (const [providerId, provider] of Object.entries(
-    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
+    STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
   ) as Array<
     [StaticOpenAiCompatibleProviderId, OpenAiCompatibleProviderRuntimeConfig]
   >) {
@@ -134,56 +188,34 @@ function getOpenAiCompatibleRuntimeConfigs(
   }
 
   const candidateProviderIds = new Set<string>();
+
   for (const modelId of modelIds) {
     const providerId = modelId?.trim().split('/')[0];
-    if (providerId?.startsWith('openai-compatible')) {
+    if (providerId && isOpenAiCompatibleProviderId(providerId)) {
       candidateProviderIds.add(providerId);
     }
   }
 
-  for (const envName of Object.keys(runtimeEnv)) {
-    if (
-      envName.startsWith('OPENAI_COMPATIBLE_') &&
-      envName.endsWith('_BASE_URL')
-    ) {
-      // OPENAI_COMPATIBLE_BASE_URL → openai-compatible
-      // OPENAI_COMPATIBLE_FOO_BAR_BASE_URL → openai-compatible-foo-bar
-      if (envName === 'OPENAI_COMPATIBLE_BASE_URL') {
-        candidateProviderIds.add('openai-compatible');
-        continue;
-      }
-      const middle = envName.slice(
-        'OPENAI_COMPATIBLE_'.length,
-        envName.length - '_BASE_URL'.length,
-      );
-      if (middle) {
-        candidateProviderIds.add(
-          `openai-compatible-${middle.toLowerCase().replaceAll('_', '-')}`,
-        );
-      }
-    }
+  for (const instance of listOpenAiCompatibleProviderInstancesFromEnvNames(
+    Object.keys(runtimeEnv),
+  )) {
+    candidateProviderIds.add(instance.id);
   }
 
   for (const providerId of candidateProviderIds) {
     if (configs.has(providerId)) {
       continue;
     }
-    if (providerId === 'openai-compatible') {
+
+    const instance = resolveNamedOpenAiCompatibleInstance(
+      providerId,
+      runtimeEnv,
+    );
+    if (!instance) {
       continue;
     }
-    if (!providerId.startsWith('openai-compatible-')) {
-      continue;
-    }
-    const slug = providerId.slice('openai-compatible-'.length);
-    const envSegment = slug.replaceAll('-', '_').toUpperCase();
-    configs.set(providerId, {
-      name: `OpenAI-compatible (${slug})`,
-      baseUrlEnvVarName: `OPENAI_COMPATIBLE_${envSegment}_BASE_URL`,
-      fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
-      apiKeyEnvVarName: `OPENAI_COMPATIBLE_${envSegment}_API_KEY`,
-      keyless: false,
-      allowOpenAiEnvFallback: false,
-    });
+
+    configs.set(providerId, toNamedOpenAiCompatibleRuntimeConfig(instance));
   }
 
   return configs;
