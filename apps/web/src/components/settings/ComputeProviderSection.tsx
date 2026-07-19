@@ -299,7 +299,7 @@ export function ComputeProviderSection({
       >
         <label
           htmlFor={`${provider.provider}-${field.envVarName}`}
-          className="text-sm font-medium"
+          className="text-sm font-medium md:pt-2"
         >
           {field.label}
           {field.required === false ? ' (optional)' : ''}
