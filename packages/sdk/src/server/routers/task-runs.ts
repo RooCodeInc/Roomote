@@ -841,8 +841,14 @@ export const taskRunsRouter = router({
     const existing = conversationId
       ? await getPendingCommunicationRequestUserInput('discord', conversationId)
       : null;
+    // Reuse any pending prompt for this run so mid-flight question enrichment
+    // edits one Discord message instead of posting a second shell.
     const existingForRequest =
-      existing && existing.requestId === input.requestId ? existing : null;
+      existing &&
+      existing.runId === input.runId &&
+      existing.status === 'pending'
+        ? existing
+        : null;
 
     return publishDiscordRequestUserInput({
       runId: input.runId,

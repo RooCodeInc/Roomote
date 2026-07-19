@@ -71,6 +71,28 @@ export function getRequestUserInputPromptSignature(
   });
 }
 
+/**
+ * OpenCode often emits the question tool first without full input, using this
+ * placeholder before structured choices arrive. Surfaces should wait for the
+ * richer update instead of posting this empty shell.
+ */
+export function isOpenCodeQuestionPlaceholderRequest(
+  request: Pick<AcpRequestUserInputPayload, 'questions'>,
+): boolean {
+  if (request.questions.length !== 1) {
+    return false;
+  }
+
+  const question = request.questions[0]!;
+  const hasOptions = Boolean(question.options && question.options.length > 0);
+
+  return (
+    !hasOptions &&
+    question.question.trim() === 'Provide the requested input.' &&
+    (question.id === 'response' || question.header === 'Response')
+  );
+}
+
 export function isSingleQuestionRequestUserInput(
   request: AcpRequestUserInputPayload,
 ): boolean {
