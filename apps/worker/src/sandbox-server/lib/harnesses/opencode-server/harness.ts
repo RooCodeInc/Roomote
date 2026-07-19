@@ -77,9 +77,12 @@ import {
   resolveOpenCodeRateLimitRetryDelayMs,
 } from './provider-rate-limit';
 import {
+  DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS,
+  DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS,
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
   isOpenCodeTerminalProviderError,
+  resolveOpenCodeProviderErrorRetryDelayMs,
   summarizeOpenCodeProviderError,
   type OpenCodeProviderErrorRecovery,
 } from './provider-error-recovery';
@@ -123,6 +126,8 @@ interface OpenCodeServerHarnessOptions {
   providerRateLimitMaxRetries?: number;
   providerRateLimitBaseDelayMs?: number;
   providerRateLimitMaxDelayMs?: number;
+  providerErrorBaseDelayMs?: number;
+  providerErrorMaxDelayMs?: number;
   mcpServerNames?: string[];
   /**
    * Observer-only breadcrumb for rare harness failures that need a durable
@@ -1489,6 +1494,8 @@ export class OpenCodeServerHarness
   private readonly providerRateLimitMaxRetries: number;
   private readonly providerRateLimitBaseDelayMs: number;
   private readonly providerRateLimitMaxDelayMs: number;
+  private readonly providerErrorBaseDelayMs: number;
+  private readonly providerErrorMaxDelayMs: number;
   private readonly streamedPartText = new Map<string, string>();
   private readonly streamedMessageIds = new Set<string>();
   private readonly streamedReasoningMessageIds = new Set<string>();
@@ -1537,11 +1544,21 @@ export class OpenCodeServerHarness
   private queuedPromptRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private providerRateLimitRetryTimer: ReturnType<typeof setTimeout> | null =
     null;
+  private providerErrorRecoveryRetryTimer: ReturnType<
+    typeof setTimeout
+  > | null = null;
   private providerRateLimitRetryCount = 0;
-  private providerErrorRecoveryCount = 0;
+  private readonly providerErrorRecoveryCounts: Record<
+    OpenCodeProviderErrorRecovery['kind'],
+    number
+  > = {
+    policy_refusal: 0,
+    provider_error: 0,
+  };
   private openCodeInternalRetryCount = 0;
   private lastOpenCodeRetryStatusMessage: string | null = null;
   private providerErrorRecoveryQueuedPromptId: string | null = null;
+  private providerErrorRecoveryRetryAtMs: number | null = null;
   private ignoreNextProviderRecoverySessionIdle = false;
   private currentWorkflowPhase: string | null = null;
   // Most recent packaged workflow skill loaded by the primary session's agent
@@ -1608,6 +1625,12 @@ export class OpenCodeServerHarness
     this.providerRateLimitMaxDelayMs =
       options.providerRateLimitMaxDelayMs ??
       DEFAULT_OPENCODE_RATE_LIMIT_MAX_DELAY_MS;
+    this.providerErrorBaseDelayMs =
+      options.providerErrorBaseDelayMs ??
+      DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS;
+    this.providerErrorMaxDelayMs =
+      options.providerErrorMaxDelayMs ??
+      DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS;
     this.knownMcpServerNames = [
       ...new Set(
         (options.mcpServerNames ?? [])
@@ -3695,7 +3718,10 @@ export class OpenCodeServerHarness
     } else if (sessionId) {
       const recovery = getOpenCodeProviderErrorRecovery(error);
 
-      if (recovery && this.providerErrorRecoveryCount < recovery.maxRetries) {
+      if (
+        recovery &&
+        this.providerErrorRecoveryCounts[recovery.kind] < recovery.maxRetries
+      ) {
         await this.recoverProviderSessionError(sessionId, error, recovery);
         return;
       }
@@ -3758,18 +3784,26 @@ export class OpenCodeServerHarness
     error: unknown,
     recovery: OpenCodeProviderErrorRecovery,
   ): Promise<void> {
-    this.providerErrorRecoveryCount += 1;
-    const attemptNumber = this.providerErrorRecoveryCount;
+    this.providerErrorRecoveryCounts[recovery.kind] += 1;
+    const attemptNumber = this.providerErrorRecoveryCounts[recovery.kind];
+    const delayMs = resolveOpenCodeProviderErrorRetryDelayMs({
+      attemptNumber,
+      baseDelayMs: this.providerErrorBaseDelayMs,
+      maxDelayMs: this.providerErrorMaxDelayMs,
+    });
     const errorSummary = summarizeOpenCodeProviderError(error);
+    const retryAtMs = Date.now() + delayMs;
     const notice: ProviderRetryNotice = {
       kind: recovery.kind,
       attemptNumber,
       maxAttempts: recovery.maxRetries,
+      delayMs,
+      retryAtMs,
       errorSummary,
     };
 
     this.logger.warn(
-      `OpenCode recoverable provider error kind=${recovery.kind} sessionId=${sessionId} attempt=${attemptNumber}/${recovery.maxRetries}: ${JSON.stringify(error ?? {})}`,
+      `OpenCode recoverable provider error kind=${recovery.kind} sessionId=${sessionId} attempt=${attemptNumber}/${recovery.maxRetries} delayMs=${delayMs}: ${JSON.stringify(error ?? {})}`,
     );
 
     this.emitProviderRetryNotice({
@@ -3780,6 +3814,7 @@ export class OpenCodeServerHarness
         attemptNumber,
         maxAttempts: recovery.maxRetries,
         errorSummary,
+        delayMs,
       }),
     });
 
@@ -3797,6 +3832,7 @@ export class OpenCodeServerHarness
     });
     this.prompts.prioritize(queuedId);
     this.providerErrorRecoveryQueuedPromptId = queuedId;
+    this.providerErrorRecoveryRetryAtMs = retryAtMs;
   }
 
   /**
@@ -3883,12 +3919,24 @@ export class OpenCodeServerHarness
 
   private clearProviderErrorRecoveryState(): void {
     this.clearProviderRateLimitRetryTimer();
+    this.clearProviderErrorRecoveryRetryTimer();
     this.providerRateLimitRetryCount = 0;
-    this.providerErrorRecoveryCount = 0;
+    this.providerErrorRecoveryCounts.policy_refusal = 0;
+    this.providerErrorRecoveryCounts.provider_error = 0;
     this.openCodeInternalRetryCount = 0;
     this.lastOpenCodeRetryStatusMessage = null;
     this.providerErrorRecoveryQueuedPromptId = null;
+    this.providerErrorRecoveryRetryAtMs = null;
     this.ignoreNextProviderRecoverySessionIdle = false;
+  }
+
+  private clearProviderErrorRecoveryRetryTimer(): void {
+    if (!this.providerErrorRecoveryRetryTimer) {
+      return;
+    }
+
+    clearTimeout(this.providerErrorRecoveryRetryTimer);
+    this.providerErrorRecoveryRetryTimer = null;
   }
 
   private async drainProviderErrorRecoveryAfterIdle(
@@ -3900,17 +3948,37 @@ export class OpenCodeServerHarness
       return false;
     }
 
+    if (this.providerErrorRecoveryRetryTimer) {
+      return true;
+    }
+
     // OpenCode emits session.error before the failed runner reaches idle. Do
     // not submit the retry until that idle boundary or prompt_async can append
     // it to the dying run without starting a fresh model loop.
-    this.providerErrorRecoveryQueuedPromptId = null;
     // OpenCode 1.17 emits session.status(idle) followed by session.idle for a
     // single transition. Consume that paired legacy event exactly once so it
     // cannot finish the recovery turn that is about to start.
     this.ignoreNextProviderRecoverySessionIdle = source === 'session_status';
     this.inFlight = false;
     this.prompts.prioritize(queuedPromptId);
-    await this.drainQueuedPrompts();
+    const delayMs = Math.max(
+      0,
+      (this.providerErrorRecoveryRetryAtMs ?? Date.now()) - Date.now(),
+    );
+
+    this.providerErrorRecoveryRetryTimer = setTimeout(() => {
+      this.providerErrorRecoveryRetryTimer = null;
+      this.providerErrorRecoveryQueuedPromptId = null;
+      this.providerErrorRecoveryRetryAtMs = null;
+      void this.drainQueuedPrompts().catch((error: unknown) => {
+        this.logger.error(
+          `Failed to drain OpenCode provider-error continue prompt: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }, delayMs);
+    this.providerErrorRecoveryRetryTimer.unref?.();
     return true;
   }
 
@@ -4321,7 +4389,8 @@ export class OpenCodeServerHarness
     // or provider-error hop; reset so a later failure gets a fresh bounded
     // automatic-retry budget.
     this.providerRateLimitRetryCount = 0;
-    this.providerErrorRecoveryCount = 0;
+    this.providerErrorRecoveryCounts.policy_refusal = 0;
+    this.providerErrorRecoveryCounts.provider_error = 0;
     this.openCodeInternalRetryCount = 0;
     this.lastOpenCodeRetryStatusMessage = null;
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
