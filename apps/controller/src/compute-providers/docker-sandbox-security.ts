@@ -293,7 +293,8 @@ export async function prepareDockerTaskNetwork(
       );
     }
   } catch (error) {
-    await removeDockerTaskNetwork(taskNetwork, runDocker);
+    // Network teardown must not share a possibly-aborted spawn signal.
+    await removeDockerTaskNetwork(taskNetwork, docker);
     throw error;
   }
 

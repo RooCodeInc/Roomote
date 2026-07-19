@@ -170,17 +170,11 @@ export async function spawnDockerWorker(
 
   throwIfSpawnAborted();
 
-  const dockerNetwork = isStandbyResume
+  // Network name is deterministic so outer cleanup can tear it down even if
+  // prepare is interrupted before returning.
+  let dockerNetwork = isStandbyResume
     ? getDockerTaskNetworkName(sourceRunId)
-    : await prepareDockerTaskNetwork(
-        {
-          taskRunId: taskRun.id,
-          controlNetwork,
-          egressPolicy: config.egressPolicy,
-          autoRemove: autoRemoveContainer,
-        },
-        runDocker,
-      );
+    : getDockerTaskNetworkName(taskRun.id);
 
   console.log(
     `[spawnDockerWorker] Starting Docker worker container for task run #${taskRun.id} ${JSON.stringify(
@@ -231,6 +225,18 @@ export async function spawnDockerWorker(
 
   try {
     throwIfSpawnAborted();
+
+    if (!isStandbyResume) {
+      dockerNetwork = await prepareDockerTaskNetwork(
+        {
+          taskRunId: taskRun.id,
+          controlNetwork,
+          egressPolicy: config.egressPolicy,
+          autoRemove: autoRemoveContainer,
+        },
+        runDocker,
+      );
+    }
 
     if (isStandbyResume) {
       await runDocker(['start', containerName]);
