@@ -2,15 +2,7 @@ import { Queue } from 'bullmq';
 import { z } from 'zod';
 
 import type { TaskRun } from '@roomote/db/server';
-import {
-  and,
-  db,
-  eq,
-  inArray,
-  taskPullRequests,
-  taskRuns,
-  tasks,
-} from '@roomote/db/server';
+import { and, db, eq, taskPullRequests } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
   type CommunicationProvider,
@@ -384,10 +376,11 @@ export async function requeuePendingPrReviewActivity({
 
 /**
  * Records PR review activity (submitted reviews and review comments) for the
- * conversation-backed tasks that own the pull request, and schedules a
- * debounced notification job per task. The notification is informational
- * only: it tells the user about the review feedback once the task is idle.
- * No agent turn is started.
+ * tasks that own the pull request, and schedules a debounced notification job
+ * per task. Chat delivery still needs an originating conversation route, but
+ * web-only tasks are enqueued too so the summary can land in task history.
+ * The notification is informational only: it tells the user about the review
+ * feedback once the task is idle. No agent turn is started.
  */
 export async function enqueuePrReviewNotification(
   input: EnqueuePrReviewNotificationInput,
@@ -412,31 +405,9 @@ export async function enqueuePrReviewNotification(
     return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
   }
 
-  const linkedRuns = await db
-    .select({
-      taskId: taskRuns.taskId,
-      payload: taskRuns.payload,
-      slackThreadTs: tasks.slackThreadTs,
-    })
-    .from(taskRuns)
-    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
-    .where(inArray(taskRuns.taskId, taskIds));
-
-  const conversationTaskIds = Array.from(
-    new Set(
-      linkedRuns
-        .filter((job) => hasPrReviewNotificationThreadContext(job))
-        .map((job) => job.taskId),
-    ),
-  );
-
-  if (conversationTaskIds.length === 0) {
-    return { notifiedTaskCount: 0, reason: 'no_thread_context' };
-  }
-
   let notifiedTaskCount = 0;
 
-  for (const taskId of conversationTaskIds) {
+  for (const taskId of taskIds) {
     const target = {
       taskId,
       repository: parsedInput.repository,
