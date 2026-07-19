@@ -3,6 +3,7 @@ import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  type CommunicationProvider,
 } from '@roomote/types';
 
 import type {
@@ -15,6 +16,18 @@ import {
   isOpenCodeQuestionPlaceholderRequest,
   supportsIntegrationRequestUserInput,
 } from './request-user-input';
+
+const COMMUNICATION_RUI_PROVIDERS = new Set<CommunicationProvider>([
+  'discord',
+  'telegram',
+  'teams',
+]);
+
+function supportsCommunicationRequestUserInput(
+  provider: CommunicationProvider | null | undefined,
+): provider is 'discord' | 'telegram' | 'teams' {
+  return Boolean(provider && COMMUNICATION_RUI_PROVIDERS.has(provider));
+}
 
 function getRequestUserInputPromptSignatures(
   context: RunTaskContext,
@@ -29,7 +42,7 @@ function getRequestUserInputPromptSignatures(
   return next;
 }
 
-function getDiscordConversationId(taskRun: TaskRun): string | null {
+function getConversationId(taskRun: TaskRun): string | null {
   const threadId = getCommunicationThreadIdFromTaskPayload(taskRun.payload);
   const channelId = getCommunicationChannelFromTaskPayload(taskRun.payload);
   return threadId?.trim() || channelId?.trim() || null;
@@ -41,7 +54,7 @@ async function handleRequestUserInput(
   context: RunTaskContext,
 ): Promise<void> {
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
-  if (provider !== 'discord') {
+  if (!supportsCommunicationRequestUserInput(provider)) {
     return;
   }
 
@@ -53,20 +66,18 @@ async function handleRequestUserInput(
   }
 
   // OpenCode streams the question tool before options land. Skip the empty
-  // "Provide the requested input." shell so Discord only shows the real prompt.
+  // shell so chat surfaces only show the real structured prompt.
   if (isOpenCodeQuestionPlaceholderRequest(event.request)) {
     return;
   }
 
   try {
     if (!supportsIntegrationRequestUserInput(event.request)) {
-      // Secrets stay on the task UI. Mark as handled so we do not spam Discord
-      // with button prompts that cannot accept private answers.
       postedSignatures.set(event.request.requestId, promptSignature);
       return;
     }
 
-    await sdk.taskRuns.publishDiscordRequestUserInput({
+    await sdk.taskRuns.publishCommunicationRequestUserInput({
       runId: taskRun.id,
       requestId: event.request.requestId,
       taskId: taskRun.taskId,
@@ -75,7 +86,7 @@ async function handleRequestUserInput(
     postedSignatures.set(event.request.requestId, promptSignature);
   } catch (error) {
     console.error(
-      `[communicationCallbacks] Failed to publish Discord request_user_input: ${
+      `[communicationCallbacks] Failed to publish ${provider} request_user_input: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -87,11 +98,11 @@ async function handleRequestUserInputResponse(
   event: CallbackEvent & { type: 'request_user_input_response' },
 ): Promise<void> {
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
-  if (provider !== 'discord') {
+  if (!supportsCommunicationRequestUserInput(provider)) {
     return;
   }
 
-  const conversationId = getDiscordConversationId(taskRun);
+  const conversationId = getConversationId(taskRun);
   if (!conversationId) {
     return;
   }
@@ -99,13 +110,13 @@ async function handleRequestUserInputResponse(
   try {
     await sdk.taskRuns.clearPendingCommunicationRequestUserInput({
       runId: taskRun.id,
-      provider: 'discord',
+      provider,
       conversationId,
       requestId: event.response.requestId,
     });
   } catch (error) {
     console.error(
-      `[communicationCallbacks] Failed to clear Discord request_user_input state: ${
+      `[communicationCallbacks] Failed to clear ${provider} request_user_input state: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -116,7 +127,7 @@ export function getCommunicationRunTaskCallbacks(
   taskRun: TaskRun,
 ): RunTaskCallbacks {
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
-  if (provider !== 'discord') {
+  if (!supportsCommunicationRequestUserInput(provider)) {
     return {};
   }
 
@@ -130,19 +141,19 @@ export function getCommunicationRunTaskCallbacks(
       }
     },
     onExit: async (run) => {
-      const conversationId = getDiscordConversationId(run);
+      const conversationId = getConversationId(run);
       if (!conversationId) {
         return;
       }
       try {
         await sdk.taskRuns.clearPendingCommunicationRequestUserInput({
           runId: run.id,
-          provider: 'discord',
+          provider,
           conversationId,
         });
       } catch (error) {
         console.error(
-          `[communicationCallbacks#onExit] Failed to clear Discord request_user_input: ${
+          `[communicationCallbacks#onExit] Failed to clear ${provider} request_user_input: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );

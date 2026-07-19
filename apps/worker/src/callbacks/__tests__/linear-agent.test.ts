@@ -234,7 +234,8 @@ describe('linearAgentCallbacks', () => {
       context,
     );
 
-    expect(setPendingLinearRequestUserInputMock).toHaveBeenCalledTimes(2);
+    // Placeholder OpenCode shells are skipped; only the richer question posts.
+    expect(setPendingLinearRequestUserInputMock).toHaveBeenCalledTimes(1);
     expect(setPendingLinearRequestUserInputMock).toHaveBeenLastCalledWith({
       runId: 123,
       sessionId: 'session_123',
@@ -242,7 +243,7 @@ describe('linearAgentCallbacks', () => {
       taskId: 'task_123',
       questions: [richQuestion],
     });
-    expect(emitElicitationMock).toHaveBeenCalledTimes(2);
+    expect(emitElicitationMock).toHaveBeenCalledTimes(1);
     expect(emitElicitationMock).toHaveBeenLastCalledWith(
       'session_123',
       expect.stringContaining('Which language should I use?'),

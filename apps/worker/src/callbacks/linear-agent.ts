@@ -19,6 +19,7 @@ import {
   buildRequestUserInputTaskUrl,
   formatRequestUserInputPrompt,
   getRequestUserInputPromptSignature,
+  isOpenCodeQuestionPlaceholderRequest,
   isSingleQuestionRequestUserInput,
   supportsIntegrationRequestUserInput,
 } from './request-user-input';
@@ -262,6 +263,12 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
       const promptSignature = getRequestUserInputPromptSignature(event.request);
 
       if (postedSignatures.get(event.request.requestId) === promptSignature) {
+        return;
+      }
+
+      // OpenCode streams the question tool before options land. Skip the empty
+      // shell so Linear only shows the real structured elicitation.
+      if (isOpenCodeQuestionPlaceholderRequest(event.request)) {
         return;
       }
 

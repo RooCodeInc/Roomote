@@ -325,6 +325,10 @@ export const publishDiscordRequestUserInput = (
   options: AppRouterInput['taskRuns']['publishDiscordRequestUserInput'],
 ) => client.taskRuns.publishDiscordRequestUserInput.mutate(options);
 
+export const publishCommunicationRequestUserInput = (
+  options: AppRouterInput['taskRuns']['publishCommunicationRequestUserInput'],
+) => client.taskRuns.publishCommunicationRequestUserInput.mutate(options);
+
 export const setPendingCommunicationRequestUserInput = (
   options: AppRouterInput['taskRuns']['setPendingCommunicationRequestUserInput'],
 ) => client.taskRuns.setPendingCommunicationRequestUserInput.mutate(options);
