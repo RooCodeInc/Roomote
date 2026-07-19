@@ -105,6 +105,8 @@ describe('install-browser-agent.sh', () => {
       'export AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-/opt/agent-browser/chrome}"',
     );
     expect(script).toContain('local saved_path="/opt/agent-browser/.cli-path"');
+    expect(script).toContain('ensure_home_dir_traversable_for_gpu_process');
+    expect(script).toContain('chmod o+x "$home_dir"');
   });
 
   it('writes sudo-managed wrapper paths without a guaranteed permission error first', () => {

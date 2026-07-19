@@ -107,7 +107,12 @@ RUN mkdir -p \
     /opt/mise \
     /opt/mise/cache \
     /home/roomote/.local/bin \
-  && chown -R roomote:roomote /sandbox /opt/mise /home/roomote
+  && chown -R roomote:roomote /sandbox /opt/mise /home/roomote \
+  # Chromium's GPU child drops all caps and must traverse $HOME when Chrome
+  # lives under ~/.agent-browser (permission-bit check only). Allow others
+  # execute (traverse-only) so ANGLE can load the bundled Vulkan/SwiftShader
+  # libs and WebGL works in software sandboxes.
+  && chmod o+x /home/roomote
 
 ENV MISE_DATA_DIR=/opt/mise
 ENV MISE_CACHE_DIR=/opt/mise/cache
