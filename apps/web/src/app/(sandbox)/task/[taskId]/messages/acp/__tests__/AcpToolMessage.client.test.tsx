@@ -1,4 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import { Bot, Eye, Search, SquarePen, Wrench } from '@/components/system';
@@ -446,9 +452,7 @@ describe('AcpToolMessage', () => {
     expect(frame.tagName).toBe('IFRAME');
     expect(frame).toHaveAttribute('sandbox', '');
     expect(frame.getAttribute('srcdoc') ?? '').toContain('<p>Ready</p>');
-    expect(frame.getAttribute('srcdoc') ?? '').toContain(
-      'color-scheme: light dark',
-    );
+    expect(frame.getAttribute('srcdoc') ?? '').toContain('color-scheme: light');
   });
 
   it('opens the artifact viewer when session path is known', () => {
@@ -548,6 +552,53 @@ describe('AcpToolMessage', () => {
       'tmp/capture-visual-proof/proof.png',
       1,
     );
+  });
+
+  it('remounts show_widget when the selected Roomote theme changes', async () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'show_widget',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'show_widget',
+          serverName: 'roomote',
+          toolName: 'show_widget',
+          output: JSON.stringify({
+            success: true,
+            shown: true,
+            title: 'Theme preview',
+            html: '<div class="rw-card">Ready</div>',
+            css: null,
+            height: 240,
+            textFallback: 'Ready',
+          }),
+        })}
+      />,
+    );
+
+    const lightFrame = screen.getByTitle('Theme preview');
+    expect(lightFrame.getAttribute('srcdoc') ?? '').toContain(
+      'data-theme="light"',
+    );
+
+    await act(async () => {
+      document.body.classList.add('dark');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => {
+      const darkFrame = screen.getByTitle('Theme preview');
+      expect(darkFrame).not.toBe(lightFrame);
+      expect(darkFrame.getAttribute('srcdoc') ?? '').toContain(
+        'data-theme="dark"',
+      );
+    });
+
+    await act(async () => {
+      document.body.classList.remove('dark');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
   });
 
   it('keeps subagent results without session artifacts as plain rows', () => {

@@ -45,6 +45,7 @@
             "root": "models",
             "expanded": true,
             "pages": [
+              "providers/inference/openai-compatible",
               "providers/inference/litellm",
               "providers/inference/ollama",
               "providers/inference/vllm"

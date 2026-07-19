@@ -78,6 +78,12 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    resolveComputeProviderEnvValues: vi.fn(
+      async (
+        _provider: unknown,
+        options: { runtimeEnv: Record<string, unknown> },
+      ) => options.runtimeEnv,
+    ),
     db: {
       query: {
         ...actual.db.query,
@@ -484,6 +490,8 @@ describe('RoomoteController', () => {
         modalRegistryPassword: 'ghcr-token',
         modalRegions: 'us,us-west',
         modalVmMemoryMiB: 8192,
+        onWorkerExit: expect.any(Function),
+        onWorkerRestart: expect.any(Function),
       }),
     );
   });

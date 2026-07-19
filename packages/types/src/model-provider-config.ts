@@ -513,6 +513,24 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     },
   },
   {
+    id: 'openai-compatible',
+    label: 'OpenAI-compatible',
+    envVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    additionalEnvFields: [
+      {
+        envVarName: 'OPENAI_COMPATIBLE_API_KEY',
+        label: 'API key (optional)',
+        secret: true,
+        required: false,
+      },
+    ],
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    dynamicModels: true,
+  },
+  {
     id: 'litellm',
     label: 'LiteLLM',
     envVarName: 'LITELLM_BASE_URL',

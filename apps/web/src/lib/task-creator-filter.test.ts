@@ -111,6 +111,7 @@ describe('formatAutomationLabel', () => {
     );
     expect(formatAutomationLabel('ci-fixer')).toBe('CI Fixer');
     expect(formatAutomationLabel('codeql_triage')).toBe('CodeQL Triage');
+    expect(formatAutomationLabel('issue_fixer')).toBe('Issue Fixer');
   });
 
   it('does not treat Object.prototype keys as token overrides', () => {

@@ -11,17 +11,20 @@ const {
   mockCaptureControllerException,
   mockCaptureControllerMessage,
   mockTaskRunsFindFirst,
+  mockTaskRunsFindMany,
   mockOrgsFindFirst,
   mockDequeueTaskRun,
   mockGetOrphanedTaskRun,
   mockRecordTaskRunLifecycleEvent,
   mockRedisSet,
   mockUpdateWhere,
+  mockSyncTaskStateFromRuns,
 } = vi.hoisted(() => ({
   mockFinishRun: vi.fn().mockResolvedValue(undefined),
   mockCaptureControllerException: vi.fn(),
   mockCaptureControllerMessage: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
+  mockTaskRunsFindMany: vi.fn(),
   mockOrgsFindFirst: vi.fn(),
   mockDequeueTaskRun: vi.fn().mockResolvedValue(null),
   mockGetOrphanedTaskRun: vi.fn().mockResolvedValue(null),
@@ -30,6 +33,7 @@ const {
   mockUpdateWhere: vi.fn().mockReturnValue({
     returning: vi.fn().mockResolvedValue([{}]),
   }),
+  mockSyncTaskStateFromRuns: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -59,6 +63,7 @@ vi.mock('@roomote/db/server', async () => {
       query: {
         taskRuns: {
           findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
+          findMany: (...args: unknown[]) => mockTaskRunsFindMany(...args),
         },
         orgs: { findFirst: (...args: unknown[]) => mockOrgsFindFirst(...args) },
       },
@@ -69,6 +74,9 @@ vi.mock('@roomote/db/server', async () => {
     },
     recordTaskRunLifecycleEvent: (...args: unknown[]) =>
       mockRecordTaskRunLifecycleEvent(...args),
+    resolveDefaultComputeProvider: vi.fn().mockResolvedValue('docker'),
+    syncTaskStateFromRuns: (...args: unknown[]) =>
+      mockSyncTaskStateFromRuns(...args),
     updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
       mockUpdatePendingEnvironmentSnapshot(...args),
   };
@@ -136,6 +144,21 @@ class TestController extends BaseController {
   public async testDequeueTaskRun(taskRun: TaskRun) {
     return this.dequeueTaskRun(taskRun);
   }
+
+  public async testHandleWorkerExitBeforeStart(
+    taskRun: TaskRun,
+    exitCode: number,
+  ) {
+    return this.handleWorkerExitBeforeStart(taskRun, exitCode);
+  }
+
+  public async testFailTimedOutWorkerBootstraps() {
+    return this.failTimedOutWorkerBootstraps();
+  }
+
+  public async testRecoverPersistedWorkerBootstrapRestarts() {
+    return this.recoverPersistedWorkerBootstrapRestarts();
+  }
 }
 
 class SaturatedTestController extends TestController {
@@ -171,12 +194,16 @@ function makeTaskRun(overrides: Partial<TaskRun> = {}): TaskRun {
 
 function resetControllerMocks() {
   mockTaskRunsFindFirst.mockResolvedValue(null);
+  mockTaskRunsFindMany.mockResolvedValue([]);
   mockDequeueTaskRun.mockResolvedValue(null);
   mockGetOrphanedTaskRun.mockResolvedValue(null);
   mockRecordTaskRunLifecycleEvent.mockResolvedValue(undefined);
   mockRedisSet.mockResolvedValue('OK');
   mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
-  mockUpdateWhere.mockReturnValue({
+  mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
+  mockDbExecute.mockReset().mockResolvedValue([]);
+  mockDbTransaction.mockReset();
+  mockUpdateWhere.mockReset().mockReturnValue({
     returning: vi.fn().mockResolvedValue([{}]),
   });
 }
@@ -480,5 +507,177 @@ describe('BaseController.dequeueTaskRun', () => {
 
     expect(result).toBeNull();
     expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('BaseController.handleWorkerExitBeforeStart', () => {
+  let controller: TestController;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetControllerMocks();
+    mockUpdateWhere.mockReturnValue({
+      returning: vi.fn().mockResolvedValue([{ id: 42 }]),
+    });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          execute: (...args: unknown[]) => mockDbExecute(...args),
+          update: (...args: unknown[]) => mockDbUpdate(...args),
+        }),
+    );
+    controller = new TestController();
+  });
+
+  it('schedules one fresh sandbox when the first worker exits before starting', async () => {
+    mockDbExecute.mockResolvedValueOnce([{ id: 42 }]).mockResolvedValueOnce([]);
+    const job = makeTaskRun({
+      id: 42,
+      status: RunStatus.Dequeued,
+      machineId: 'sandbox-old',
+      startedAt: null,
+      workerHeartbeatAt: null,
+    });
+
+    await expect(
+      controller.testHandleWorkerExitBeforeStart(job, 1),
+    ).resolves.toBe('restart');
+
+    expect(mockDbUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: RunStatus.Pending,
+        machineId: null,
+        provisionStartedAt: null,
+        provisionReadyAt: null,
+      }),
+    );
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 42,
+        details: expect.objectContaining({
+          stage: 'worker_bootstrap_restart',
+          restartAttempt: 1,
+          previousMachineId: 'sandbox-old',
+        }),
+      }),
+    );
+    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
+      'Controller scheduled a fresh sandbox after worker bootstrap failure',
+      expect.objectContaining({
+        runId: 42,
+        exitCode: 1,
+        restartAttempt: 1,
+        phase: 'worker_bootstrap',
+      }),
+      expect.objectContaining({ signal: 'worker-bootstrap-restart' }),
+    );
+  });
+
+  it('fails the run when the replacement worker also exits before starting', async () => {
+    mockDbExecute
+      .mockResolvedValueOnce([{ id: 42 }])
+      .mockResolvedValueOnce([{ id: 'restart-event' }]);
+
+    await expect(
+      controller.testHandleWorkerExitBeforeStart(
+        makeTaskRun({ id: 42, status: RunStatus.Dequeued }),
+        1,
+      ),
+    ).resolves.toBe('failed');
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 42,
+      status: RunStatus.Failed,
+      error: 'Worker process exited before claiming task run (exit code 1)',
+    });
+  });
+
+  it('ignores an exit when the run already advanced', async () => {
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+
+    const claimed = await controller.testHandleWorkerExitBeforeStart(
+      makeTaskRun({ id: 42, status: RunStatus.Processing }),
+      0,
+    );
+
+    expect(claimed).toBe('ignore');
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockCaptureControllerMessage).not.toHaveBeenCalled();
+  });
+
+  it('fails every provisioned run due in the same watchdog scan', async () => {
+    mockTaskRunsFindMany.mockResolvedValueOnce([
+      makeTaskRun({
+        id: 43,
+        status: RunStatus.Dequeued,
+        provisionReadyAt: new Date(Date.now() - 3 * 60_000),
+        startedAt: null,
+        workerHeartbeatAt: null,
+      }),
+      makeTaskRun({
+        id: 45,
+        status: RunStatus.Dequeued,
+        provisionReadyAt: new Date(Date.now() - 4 * 60_000),
+        startedAt: null,
+        workerHeartbeatAt: null,
+      }),
+    ]);
+
+    await expect(controller.testFailTimedOutWorkerBootstraps()).resolves.toBe(
+      2,
+    );
+
+    expect(mockFinishRun).toHaveBeenCalledTimes(2);
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 43, status: RunStatus.Failed }),
+    );
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 45, status: RunStatus.Failed }),
+    );
+    expect(mockSyncTaskStateFromRuns).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers every persisted bootstrap restart after controller state is lost', async () => {
+    mockTaskRunsFindMany.mockResolvedValueOnce([
+      makeTaskRun({ id: 46, status: RunStatus.Pending }),
+      makeTaskRun({ id: 47, status: RunStatus.Pending }),
+    ]);
+
+    await expect(
+      controller.testRecoverPersistedWorkerBootstrapRestarts(),
+    ).resolves.toBe(2);
+  });
+
+  it('keeps the claimed failure durable when finalization side effects fail', async () => {
+    mockDbExecute
+      .mockResolvedValueOnce([{ id: 44 }])
+      .mockResolvedValueOnce([{ id: 'restart-event' }]);
+    mockFinishRun.mockRejectedValueOnce(new Error('notification failed'));
+
+    await expect(
+      controller.testHandleWorkerExitBeforeStart(
+        makeTaskRun({ id: 44, status: RunStatus.Dequeued }),
+        1,
+      ),
+    ).resolves.toBe('failed');
+
+    expect(mockCaptureControllerException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'notification failed' }),
+      expect.objectContaining({
+        runId: 44,
+        phase: 'worker_bootstrap_finalize',
+      }),
+    );
+    expect(mockSyncTaskStateFromRuns).toHaveBeenCalledWith(
+      expect.anything(),
+      'task-1',
+    );
+    expect(mockSyncTaskStateFromRuns.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFinishRun.mock.invocationCallOrder[0] ?? Infinity,
+    );
   });
 });

@@ -209,13 +209,19 @@ export function StepInferenceProvider({
       : apiKey.trim() || undefined;
 
     if (isEndpointProvider) {
-      const provider = selectedProvider as 'ollama' | 'vllm' | 'litellm';
+      const provider = selectedProvider as
+        | 'openai-compatible'
+        | 'ollama'
+        | 'vllm'
+        | 'litellm';
+      const endpointApiKeyEnvVarName = additionalEnvFields.find(
+        (field) => field.secret,
+      )?.envVarName;
       const connection = {
         baseUrl: submittedCredential,
-        apiKey:
-          additionalEnvValues[
-            `${selectedProvider.toUpperCase()}_API_KEY`
-          ]?.trim() || undefined,
+        apiKey: endpointApiKeyEnvVarName
+          ? additionalEnvValues[endpointApiKeyEnvVarName]?.trim() || undefined
+          : undefined,
       };
       const discovery = await discoverProviderModels.mutateAsync({
         provider,

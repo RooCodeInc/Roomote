@@ -3,6 +3,7 @@ import {
   resolveShowWidgetForToolMessage,
   SHOW_WIDGET_TOOL_NAME,
 } from '../show-widget-tool-result';
+import type { ShowWidgetHostTheme } from '../show-widget-theme';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
 
 function buildResult(
@@ -180,7 +181,50 @@ describe('buildShowWidgetSrcDoc', () => {
     expect(doc).toContain("default-src 'none'");
     expect(doc).toContain('p{font-weight:700}');
     expect(doc).toContain('<p>Hello</p>');
-    expect(doc).toContain('color-scheme: light dark');
+    expect(doc).toContain('color-scheme: light');
+    expect(doc).toContain('--rw-surface: #fafaf9');
+    expect(doc).toContain('.rw-card');
+    expect(doc).toContain('data-theme="light"');
+  });
+
+  it('injects the resolved host theme before custom widget CSS', () => {
+    const darkTheme: ShowWidgetHostTheme = {
+      colorScheme: 'dark',
+      background: 'oklch(0.2 0 0)',
+      surface: 'oklch(0.1 0 0)',
+      surfaceMuted: 'oklch(0.3 0 0)',
+      text: 'white',
+      textMuted: 'lightgray',
+      border: 'gray',
+      primary: 'lime',
+      primaryForeground: 'black',
+      accent: 'chartreuse',
+      success: 'teal',
+      warning: 'orange',
+      danger: 'red',
+      codeBackground: '#222',
+      radius: '8px',
+      fontSans: 'Test Sans, sans-serif',
+      fontMono: 'Test Mono, monospace',
+    };
+    const doc = buildShowWidgetSrcDoc(
+      {
+        title: 'Themed card',
+        html: '<div class="rw-card">Ready</div>',
+        css: '.rw-card { outline-color: var(--rw-accent); }',
+        height: 240,
+        textFallback: null,
+      },
+      darkTheme,
+    );
+
+    expect(doc).toContain('data-theme="dark"');
+    expect(doc).toContain('color-scheme: dark');
+    expect(doc).toContain('--rw-background: oklch(0.2 0 0)');
+    expect(doc).toContain('--rw-primary: lime');
+    expect(doc.indexOf('--rw-primary: lime')).toBeLessThan(
+      doc.indexOf('outline-color: var(--rw-accent)'),
+    );
   });
 
   it('always wraps fragments under a controlled head so remote shells cannot re-enter', () => {
@@ -195,7 +239,7 @@ describe('buildShowWidgetSrcDoc', () => {
     expect(doc).toContain("default-src 'none'");
     expect(doc).toContain('<b>x</b>');
     expect(doc).toMatch(
-      /^<!DOCTYPE html><html><head><meta charset="utf-8">[\s\S]*<\/head><body>/,
+      /^<!DOCTYPE html><html data-theme="light"><head><meta charset="utf-8">[\s\S]*<\/head><body>/,
     );
   });
 

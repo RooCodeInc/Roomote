@@ -534,7 +534,8 @@ export function useSetupFlow(
       return (
         navigationHistoryRef.current.at(-1) ??
         findPreviousStep(SETUP_STEPS.indexOf(currentStep)) ??
-        (currentStep === 'source-control-connect'
+        (currentStep === 'source-control-connect' ||
+        currentStep === 'source-control-config'
           ? 'source-control-provider'
           : null)
       );

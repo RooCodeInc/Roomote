@@ -231,6 +231,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'google',
         'xai',
         'github-copilot',
+        'openai-compatible',
         'litellm',
         'ollama',
         'vllm',

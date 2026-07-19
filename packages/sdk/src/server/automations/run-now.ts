@@ -6,6 +6,7 @@ import { codeQualityAuditorJob } from './code-quality-auditor';
 import { codeqlTriageJob } from './codeql-triage';
 import { conflictScanJob } from './conflict-scan';
 import { dependabotTriageJob } from './dependabot-triage';
+import { issueFixerJob } from './issue-fixer';
 import { managerStatsJob } from './manager-stats';
 import { securityAuditorJob } from './security-auditor';
 import { sentryTriageJob } from './sentry-triage';
@@ -27,6 +28,7 @@ const AUTOMATION_RUNNERS: Record<
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
   codeql_triage: codeqlTriageJob,
+  issue_fixer: issueFixerJob,
   security_auditor: securityAuditorJob,
   code_quality_auditor: codeQualityAuditorJob,
   ci_failure_triage: ciFailureTriageJob,

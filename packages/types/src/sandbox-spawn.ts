@@ -27,6 +27,11 @@ export const SANDBOX_SPAWN_RETRY_DELAY_MS = 5_000;
 
 export const SANDBOX_ORPHAN_SCAN_INTERVAL_MS = 30_000;
 
+// Once infrastructure is ready, a healthy worker should claim its run within
+// seconds. Keep this separate from the full spawn envelope so a dead worker
+// does not leave the UI in "booting environment" until orphan recovery.
+export const WORKER_BOOTSTRAP_CLAIM_TIMEOUT_MS = 2 * MINUTE;
+
 function getExponentialBackoffTotalMs(
   retryCount: number,
   initialDelayMs: number,
