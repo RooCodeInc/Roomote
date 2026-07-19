@@ -2,6 +2,13 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.14.2 (2026-07-19)
+
+### Patch changes
+
+- Back off transient provider retry attempts with exponential delay (1s, 2s, 4s) instead of retrying immediately after capacity failures.
+- Fix controller recovery scans for persisted worker-bootstrap restarts so the query no longer references invalid table aliases and bootstrap recovery can continue.
+
 ## 0.14.1 (2026-07-19)
 
 ### Patch changes
