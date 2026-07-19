@@ -44,6 +44,8 @@ import {
   linear,
   teams,
   telegram,
+  telegramManagerWebhook,
+  telegramPairing,
   discord,
   inference,
   mcp,
@@ -71,8 +73,14 @@ const PUBLIC_OIDC_PATHS = new Set([
 const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/webhooks/teams',
   '/api/webhooks/telegram',
+  '/api/webhooks/telegram-manager',
   '/api/internal/discord/events',
 ]);
+
+// The pairing poll endpoint authenticates with its own bearer poll token,
+// which the Roomote token middleware must not try to parse. Mounted under
+// /api/webhooks/ so the web app's existing webhook proxy exposes it.
+const TELEGRAM_PAIRING_PATH_PREFIX = '/api/webhooks/telegram-pairing';
 
 type ListenOptions = {
   port: number;
@@ -84,7 +92,12 @@ function isPublicOidcPath(path: string): boolean {
 }
 
 function isPublicMiddlewareBypassPath(path: string): boolean {
-  return isPublicOidcPath(path) || SELF_AUTHENTICATING_WEBHOOK_PATHS.has(path);
+  return (
+    isPublicOidcPath(path) ||
+    SELF_AUTHENTICATING_WEBHOOK_PATHS.has(path) ||
+    path === TELEGRAM_PAIRING_PATH_PREFIX ||
+    path.startsWith(`${TELEGRAM_PAIRING_PATH_PREFIX}/`)
+  );
 }
 
 function observedFetchImpl(
@@ -192,6 +205,8 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/linear', linear);
   app.route('/api/webhooks/teams', teams);
   app.route('/api/webhooks/telegram', telegram);
+  app.route('/api/webhooks/telegram-manager', telegramManagerWebhook);
+  app.route('/api/webhooks/telegram-pairing', telegramPairing);
   app.route('/api/internal/discord', discord);
   app.route('/api/inference', inference);
   app.route('/api/mcp', mcp);

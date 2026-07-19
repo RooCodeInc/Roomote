@@ -13,6 +13,7 @@ export { slack } from './slack';
 export { linear } from './linear';
 export { teams } from './teams';
 export { telegram } from './telegram';
+export { telegramManagerWebhook, telegramPairing } from './telegram-pairing';
 export { discord } from './discord';
 
 // trpc

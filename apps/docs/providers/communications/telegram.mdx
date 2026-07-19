@@ -16,6 +16,37 @@ Use `<public-url>` below for your stable public Roomote URL.
 
 ## Create a Telegram bot
 
+### Automatic setup (recommended)
+
+When the deployment has `R_TELEGRAM_PAIRING_URL` configured, the setup wizard
+offers **Create my Telegram bot**: Roomote shows a QR code and deep link that
+open Telegram, you tap **Create Bot** once, and Telegram's Managed Bots
+feature (Bot API 9.6) hands the new bot's token straight to Roomote's pairing
+service. No BotFather conversation and no token copy-paste; the token never
+passes through your browser. Roomote then registers the webhook and command
+menu exactly as in the manual flow.
+
+```sh
+# On the deployment that should offer automatic setup:
+R_TELEGRAM_PAIRING_URL=<public-url-of-a-deployment-running-the-pairing-service>
+```
+
+To host the pairing service yourself, create a manager bot in BotFather,
+enable **Bot Management Mode** for it, and set on the hosting deployment:
+
+```sh
+R_TELEGRAM_MANAGER_BOT_TOKEN=<manager-bot-token>
+R_TELEGRAM_MANAGER_BOT_USERNAME=<manager-bot-username>
+R_TELEGRAM_MANAGER_WEBHOOK_SECRET=<random-secret>
+```
+
+The service exposes `POST /api/webhooks/telegram-pairing` (create a pairing)
+and `GET /api/webhooks/telegram-pairing/<pairing-id>` (poll, bearer-token
+authenticated, single retrieval), and receives `managed_bot` updates at
+`/api/webhooks/telegram-manager`.
+
+### Manual setup
+
 Message `@BotFather` in Telegram and create or select a bot. In the Roomote UI
 (**Settings > Communications > Telegram**), enter the bot token, then save.
 Roomote reads the bot identity from Telegram, generates a webhook secret,

@@ -207,6 +207,30 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'webhook',
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
+  // Manager-bot webhook for the managed-bot pairing service; the handler
+  // verifies Telegram's secret-token header before acting.
+  {
+    name: 'webhook-telegram-manager',
+    match: { type: 'prefix', path: '/api/webhooks/telegram-manager' },
+    policy: 'webhook',
+    rateLimits: WEBHOOK_RATE_LIMITS,
+  },
+  // Managed-bot pairing service. Creation is unauthenticated by design
+  // (other deployments call it before they have any credentials), so it gets
+  // a tight client-keyed ceiling; polling authenticates per-pairing with a
+  // bearer poll token and needs headroom for 2s poll loops.
+  {
+    name: 'telegram-pairing-create',
+    match: { type: 'exact', path: '/api/webhooks/telegram-pairing' },
+    policy: 'webhook',
+    rateLimits: [{ keySource: 'client', limit: 30, windowSeconds: 60 }],
+  },
+  {
+    name: 'telegram-pairing-poll',
+    match: { type: 'prefix', path: '/api/webhooks/telegram-pairing' },
+    policy: 'webhook',
+    rateLimits: [{ keySource: 'client', limit: 600, windowSeconds: 60 }],
+  },
   {
     name: 'internal-discord-events',
     match: { type: 'exact', path: '/api/internal/discord/events' },

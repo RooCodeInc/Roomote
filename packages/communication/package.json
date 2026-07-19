@@ -18,6 +18,7 @@
     "./teams-bot-framework-client": "./src/teams-bot-framework-client.ts",
     "./teams-graph-client": "./src/teams-graph-client.ts",
     "./teams-provider": "./src/teams-provider.ts",
+    "./telegram-managed-bot": "./src/telegram-managed-bot.ts",
     "./telegram-provider": "./src/telegram-provider.ts",
     "./telegram-update": "./src/telegram-update.ts",
     "./thread-reply-footer-state": "./src/thread-reply-footer-state.ts"

@@ -133,6 +133,11 @@ function createTelegramWebhookSecret() {
   return crypto.randomUUID();
 }
 
+/** Whether the automatic managed-bot Telegram setup path is configured. */
+function isTelegramPairingAvailable(): boolean {
+  return Boolean(Env.R_TELEGRAM_PAIRING_URL);
+}
+
 function createDiscordGatewaySecret() {
   return crypto.randomUUID();
 }
@@ -144,6 +149,7 @@ export type CommsProviderStatus = Omit<
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
   telegramBotUsername?: string | null;
+  telegramPairingAvailable?: boolean;
   discord?: DiscordCommsStatus | null;
 };
 
@@ -854,7 +860,11 @@ function withAdditionalCommsProviders(
         isSatisfied(field.envVarName),
       ),
       ...(definition.id === 'telegram'
-        ? { telegramWebhook, telegramBotUsername }
+        ? {
+            telegramWebhook,
+            telegramBotUsername,
+            telegramPairingAvailable: isTelegramPairingAvailable(),
+          }
         : {}),
       ...(definition.id === 'discord' ? { discord } : {}),
     };

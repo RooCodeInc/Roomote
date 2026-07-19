@@ -261,6 +261,10 @@ import {
   selectDiscordDestinationCommand,
 } from '../commands/comms';
 import {
+  checkTelegramPairingCommand,
+  startTelegramPairingCommand,
+} from '../commands/comms/telegram-pairing';
+import {
   getComputeStatusCommand,
   saveComputeConfigCommand,
   clearComputeConfigCommand,
@@ -1483,6 +1487,16 @@ export const appRouter = createRouter({
     repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       repairTelegramWebhookCommand(auth),
     ),
+
+    startTelegramPairing: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      startTelegramPairingCommand(auth),
+    ),
+
+    checkTelegramPairing: protectedProcedure
+      .input(z.object({ pairingId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        checkTelegramPairingCommand(auth, input),
+      ),
 
     listDiscordGuilds: protectedProcedure.query(({ ctx: { auth } }) =>
       listDiscordGuildsCommand(auth),

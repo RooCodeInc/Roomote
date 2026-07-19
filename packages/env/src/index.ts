@@ -180,6 +180,14 @@ const serverSchema = {
   R_TEAMS_BOT_OAUTH_SCOPE: z.string().min(1).optional(),
   R_TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   R_TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
+  // Managed-bot pairing: set on the deployment that hosts the pairing
+  // service (Roomote's central one, or a self-hoster's own manager bot).
+  R_TELEGRAM_MANAGER_BOT_TOKEN: z.string().min(1).optional(),
+  R_TELEGRAM_MANAGER_BOT_USERNAME: z.string().min(1).optional(),
+  R_TELEGRAM_MANAGER_WEBHOOK_SECRET: z.string().min(1).optional(),
+  // Managed-bot pairing: set on client deployments to enable the automatic
+  // Telegram setup path; points at a deployment running the pairing service.
+  R_TELEGRAM_PAIRING_URL: z.string().url().optional(),
   TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
   R_DISCORD_BOT_TOKEN: z.string().min(1).optional(),
   R_DISCORD_GATEWAY_SECRET: z.string().min(1).optional(),
@@ -415,6 +423,10 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_TEAMS_BOT_OAUTH_SCOPE',
   'R_TELEGRAM_BOT_TOKEN',
   'R_TELEGRAM_WEBHOOK_SECRET',
+  'R_TELEGRAM_MANAGER_BOT_TOKEN',
+  'R_TELEGRAM_MANAGER_BOT_USERNAME',
+  'R_TELEGRAM_MANAGER_WEBHOOK_SECRET',
+  'R_TELEGRAM_PAIRING_URL',
   'R_DISCORD_BOT_TOKEN',
   'R_DISCORD_GATEWAY_SECRET',
   'DISCORD_API_BASE_URL',

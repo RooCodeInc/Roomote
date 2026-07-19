@@ -95,6 +95,11 @@ export type MockTelegramState = {
   callbackAnswers?: MockTelegramCallbackAnswer[];
   chatActions?: MockTelegramChatAction[];
   botCommands?: Array<{ command: string; description: string }>;
+  /**
+   * Managed Bots support (Bot API 9.6): child-bot tokens returned by
+   * `getManagedBotToken`, keyed by the child bot's user id.
+   */
+  managedBotTokens?: Record<string, string>;
   behavior?: MockTelegramBehavior;
 };
 
@@ -863,6 +868,19 @@ export class MockTelegramServer {
             : {}),
         };
         apiResult(response, true);
+        return;
+      }
+
+      case 'getManagedBotToken': {
+        const botUserId = String(body.bot_user_id ?? '');
+        const token = this.state.managedBotTokens?.[botUserId];
+
+        if (!token) {
+          apiError(response, 400, 'Bad Request: managed bot not found');
+          return;
+        }
+
+        apiResult(response, { token });
         return;
       }
 
