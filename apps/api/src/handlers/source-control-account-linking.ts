@@ -16,7 +16,7 @@ const sourceControlCommentProviderCopy = {
   },
   gitlab: {
     accountLabel: 'GitLab',
-    commentSurface: 'merge request comments',
+    commentSurface: 'issue and merge request comments',
     settingsQuery: 'gitlab',
   },
   gitea: {

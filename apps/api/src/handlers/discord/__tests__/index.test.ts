@@ -922,6 +922,9 @@ describe('Discord Gateway event handler', () => {
         replyToMessageId: 'message-1',
       }),
     );
+    expect(mocks.reply.mock.calls[0]?.[0]?.text).toMatch(
+      /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
+    );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
@@ -1021,6 +1024,9 @@ describe('Discord Gateway event handler', () => {
         text: expect.stringContaining('/link code:<code>'),
         replyToMessageId: 'message-1',
       }),
+    );
+    expect(mocks.reply.mock.calls[0]?.[0]?.text).toMatch(
+      /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
