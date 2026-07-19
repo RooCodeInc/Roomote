@@ -229,14 +229,6 @@ function buildTaskStartFailedNote(surface: 'merge request' | 'issue'): string {
   return `I saw the mention, but I could not start a task for this ${surface} right now. Please try again in a moment.`;
 }
 
-function formatQuotedText(text: string): string {
-  return text
-    .trim()
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n');
-}
-
 function buildExistingMrTaskFollowUpMessage({
   repoFullName,
   mergeRequest,
@@ -249,8 +241,7 @@ function buildExistingMrTaskFollowUpMessage({
   noteBody: string;
 }): string {
   const lines = [
-    `${commenter} mentioned Roomote in a comment on GitLab merge request !${mergeRequest.iid} (${mergeRequest.title}) in ${repoFullName}:`,
-    formatQuotedText(noteBody),
+    `${commenter} mentioned Roomote in a comment on GitLab merge request !${mergeRequest.iid} (${escapeTaskContextText(mergeRequest.title)}) in ${repoFullName}.`,
     '',
     'Please act on this comment as a follow-up to your existing work on this merge request.',
   ];
@@ -260,6 +251,14 @@ function buildExistingMrTaskFollowUpMessage({
       `The merge request source branch is \`${mergeRequest.source_branch}\`.`,
     );
   }
+
+  lines.push(
+    '',
+    'Mention comment (the request to act on):',
+    buildMentionRequestBlock(noteBody),
+    '',
+    buildUntrustedContentPolicy(),
+  );
 
   return lines.join('\n');
 }
