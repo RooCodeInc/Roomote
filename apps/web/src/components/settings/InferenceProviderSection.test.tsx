@@ -14,14 +14,19 @@ const chatgptStatusData = vi.hoisted(() => ({
 const githubCopilotStatusData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
+const subscriptionUsageData = vi.hoisted(() => ({
+  current: null as Array<Record<string, unknown>> | null,
+}));
 const mutateAsyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutateAsync: mutateAsyncMock }),
   useQuery: (options: { queryKey?: string[] }) => ({
-    data: options.queryKey?.[0]?.includes('githubCopilot')
-      ? githubCopilotStatusData.current
-      : chatgptStatusData.current,
+    data: options.queryKey?.[0]?.includes('subscriptionUsage')
+      ? subscriptionUsageData.current
+      : options.queryKey?.[0]?.includes('githubCopilot')
+        ? githubCopilotStatusData.current
+        : chatgptStatusData.current,
   }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -77,6 +82,12 @@ vi.mock('@/trpc/client', () => ({
       },
       disconnect: {
         mutationOptions: () => ({ mutationKey: ['disconnectCopilot'] }),
+      },
+    },
+    subscriptionUsage: {
+      list: {
+        queryOptions: () => ({ queryKey: ['subscriptionUsage', 'list'] }),
+        queryKey: () => ['subscriptionUsage', 'list'],
       },
     },
   }),
@@ -219,6 +230,8 @@ describe('InferenceProviderSection', () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     providerSetupData.current = null;
     chatgptStatusData.current = null;
+    githubCopilotStatusData.current = null;
+    subscriptionUsageData.current = null;
   });
 
   const renderInferenceProviderSection = () => {
@@ -307,6 +320,68 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.queryByRole('button', { name: /Connect ChatGPT/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows a usage line under a connected subscription row', () => {
+    providerSetupData.current = buildProviderSetup({ chatgptConnected: true });
+    chatgptStatusData.current = {
+      connected: true,
+      status: 'connected',
+      email: 'user@example.com',
+    };
+    githubCopilotStatusData.current = { connected: true, status: 'connected' };
+    subscriptionUsageData.current = [
+      {
+        providerId: 'chatgpt',
+        planType: 'pro',
+        windows: [
+          {
+            label: 'Weekly limit',
+            usedPercent: 8,
+            resetsAt: new Date(Date.now() + 5 * 3_600_000).toISOString(),
+          },
+        ],
+        fetchedAt: new Date().toISOString(),
+      },
+      {
+        providerId: 'github-copilot',
+        windows: [{ label: 'Premium requests', remaining: 211, limit: 300 }],
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(
+      screen.getByText('Weekly limit: 8% used (resets in 5h)'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Premium requests: 211 of 300 left'),
+    ).toBeInTheDocument();
+  });
+
+  it('omits the usage line when no usage data is available or the row errored', () => {
+    providerSetupData.current = buildProviderSetup({ chatgptConnected: true });
+    chatgptStatusData.current = {
+      connected: false,
+      status: 'error',
+      error: 'ChatGPT token refresh failed: 401',
+    };
+    githubCopilotStatusData.current = { connected: true, status: 'connected' };
+    subscriptionUsageData.current = [
+      {
+        providerId: 'chatgpt',
+        windows: [{ label: 'Weekly limit', usedPercent: 8 }],
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    // The errored ChatGPT row hides its stale usage; the Copilot row has no
+    // usage entry at all, so neither renders a usage line.
+    expect(screen.queryByText(/Weekly limit/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Premium requests/)).not.toBeInTheDocument();
   });
 
   it('renders Reconnect and Disconnect for an errored ChatGPT subscription', () => {

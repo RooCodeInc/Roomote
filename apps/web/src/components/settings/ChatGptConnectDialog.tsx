@@ -87,6 +87,9 @@ export function ChatGptConnectDialog({
           await queryClient.invalidateQueries({
             queryKey: trpc.chatgptSubscription.status.queryKey(),
           });
+          await queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
+          });
           await onConnected?.();
           handleOpenChange(false);
         } else if (result.status === 'failed') {

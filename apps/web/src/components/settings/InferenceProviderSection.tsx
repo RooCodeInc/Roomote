@@ -851,6 +851,9 @@ export function InferenceProviderSection({
           queryClient.invalidateQueries({
             queryKey: trpc.taskModels.providerSetup.queryKey(),
           }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
           ...(addedModelCount > 0 || addedDiscoveredModelCount > 0
             ? [
                 queryClient.invalidateQueries({
@@ -890,6 +893,9 @@ export function InferenceProviderSection({
           queryClient.invalidateQueries({
             queryKey: trpc.chatgptSubscription.status.queryKey(),
           }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
         ]);
       },
       onError: (error) => {
@@ -910,6 +916,9 @@ export function InferenceProviderSection({
           }),
           queryClient.invalidateQueries({
             queryKey: trpc.githubCopilotSubscription.status.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
           }),
         ]);
       },
@@ -933,6 +942,9 @@ export function InferenceProviderSection({
           }),
           queryClient.invalidateQueries({
             queryKey: trpc.taskModels.launchOptions.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
           }),
         ]);
       },
