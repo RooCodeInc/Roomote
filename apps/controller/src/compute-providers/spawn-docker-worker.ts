@@ -239,8 +239,11 @@ export async function spawnDockerWorker(
     }
 
     if (isStandbyResume) {
-      await runDocker(['start', containerName]);
+      // Retain ownership before `docker start`. If cancel aborts the start
+      // call after Docker has begun starting the retained snapshot, catch must
+      // still take the non-destructive resume path and never delete it.
       containerId = containerName;
+      await runDocker(['start', containerName]);
       await restoreDockerStandbyNetworking(
         {
           containerName,
@@ -470,8 +473,14 @@ export async function spawnDockerWorker(
     return { containerId: containerName };
   } catch (error) {
     const aborted = config.signal?.aborted || isAbortError(error);
+    const cleanupMode = resolveDockerSpawnCleanupMode({
+      isStandbyResume,
+      aborted,
+      appEnv: resolveAppEnv(process.env),
+      hasContainerId: Boolean(containerId),
+    });
 
-    if (isStandbyResume && containerId) {
+    if (cleanupMode === 'stop-retained') {
       await docker(['stop', '--time', '10', containerName], {
         allowFailure: true,
       });
@@ -484,13 +493,7 @@ export async function spawnDockerWorker(
           allowFailure: true,
         });
       }
-    } else if (
-      shouldPreserveFailedDockerWorkerContainer({
-        aborted,
-        appEnv: resolveAppEnv(process.env),
-        hasContainerId: Boolean(containerId),
-      })
-    ) {
+    } else if (cleanupMode === 'preserve-dev') {
       // Keep ordinary local spawn failures for debugging, but never retain a
       // canceled or timed-out partial provision (autoRemove is false).
       console.error(
@@ -504,6 +507,35 @@ export async function spawnDockerWorker(
     }
     throw error;
   }
+}
+
+type DockerSpawnCleanupMode = 'stop-retained' | 'preserve-dev' | 'remove';
+
+/**
+ * Snapshot resume always stops and keeps the retained worker. Fresh spawn may
+ * preserve ordinary development failures, but abort/timeout always tear down.
+ */
+export function resolveDockerSpawnCleanupMode(params: {
+  isStandbyResume: boolean;
+  aborted: boolean;
+  appEnv: string;
+  hasContainerId: boolean;
+}): DockerSpawnCleanupMode {
+  if (params.isStandbyResume) {
+    return 'stop-retained';
+  }
+
+  if (
+    shouldPreserveFailedDockerWorkerContainer({
+      aborted: params.aborted,
+      appEnv: params.appEnv,
+      hasContainerId: params.hasContainerId,
+    })
+  ) {
+    return 'preserve-dev';
+  }
+
+  return 'remove';
 }
 
 /**

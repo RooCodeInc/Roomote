@@ -5,6 +5,7 @@ import {
   buildDockerSandboxServerUrl,
   DOCKER_SPAWN_TIMEOUT_MS,
   getDockerWorkerCommand,
+  resolveDockerSpawnCleanupMode,
   resolveDockerWorkerOwnershipTargetFromLookup,
   resumeDockerTaskDaemon,
   shouldPreserveFailedDockerWorkerContainer,
@@ -102,6 +103,30 @@ describe('shouldPreserveFailedDockerWorkerContainer', () => {
         hasContainerId: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe('resolveDockerSpawnCleanupMode', () => {
+  it('never deletes a retained snapshot on standby resume abort', () => {
+    expect(
+      resolveDockerSpawnCleanupMode({
+        isStandbyResume: true,
+        aborted: true,
+        appEnv: 'production',
+        hasContainerId: false,
+      }),
+    ).toBe('stop-retained');
+  });
+
+  it('removes fresh spawn resources when canceled', () => {
+    expect(
+      resolveDockerSpawnCleanupMode({
+        isStandbyResume: false,
+        aborted: true,
+        appEnv: 'development',
+        hasContainerId: true,
+      }),
+    ).toBe('remove');
   });
 });
 
