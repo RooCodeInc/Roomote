@@ -1582,10 +1582,38 @@ async function enqueueFreshLaunch(
           });
           // Rename landed (or was a no-op surface). Lock checkpoint 1 so the
           // first-message path does not spend another LLM title call.
-          await persistEarlyGeneratedTaskTitle({
+          const lockedCheckpoint = await persistEarlyGeneratedTaskTitle({
             taskId: taskRun.taskId,
             generatedTitle,
             lockFirstMessageCheckpoint: true,
+          });
+          if (lockedCheckpoint) {
+            return;
+          }
+
+          // A concurrent first-message refresh (or user edit) already advanced
+          // past checkpoint 0. The callback above may have applied this older
+          // early title last — re-read canonical title and re-apply if needed.
+          const [latestTask] = await db
+            .select({
+              title: tasks.title,
+              titleEditedByUserAt: tasks.titleEditedByUserAt,
+            })
+            .from(tasks)
+            .where(eq(tasks.id, taskRun.taskId))
+            .limit(1);
+          if (
+            !latestTask ||
+            latestTask.titleEditedByUserAt ||
+            !latestTask.title ||
+            latestTask.title === generatedTitle
+          ) {
+            return;
+          }
+
+          await options.onEarlyTitleGenerated({
+            taskRun,
+            title: latestTask.title,
           });
         } catch (error) {
           console.warn(

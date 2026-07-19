@@ -332,6 +332,65 @@ describe('enqueueTask initiator stamping', () => {
     });
   });
 
+  it('re-applies the newer canonical title when the checkpoint lock loses a race', async () => {
+    const userId = await createUser();
+    mockGenerateLlmTaskTitle.mockResolvedValueOnce('Early generated title');
+    let taskId = '';
+    const onEarlyTitleGenerated = vi.fn(
+      async ({ title }: { title: string }) => {
+        if (title === 'Early generated title' && taskId) {
+          await db
+            .update(tasks)
+            .set({
+              title: 'First-message refresh title',
+              llmTitleCheckpoint: 1,
+              updatedAt: new Date(),
+            })
+            .where(eq(tasks.id, taskId));
+        }
+      },
+    );
+
+    const run = await enqueueTask(
+      {
+        task: standardTaskInput(),
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'discord',
+        trigger: 'message',
+      },
+      {
+        enqueue: false,
+        onEarlyTitleGenerated,
+      },
+    );
+    taskId = run.taskId;
+    createdTaskIds.push(run.taskId);
+
+    await vi.waitFor(() => {
+      expect(onEarlyTitleGenerated).toHaveBeenCalledWith({
+        taskRun: expect.objectContaining({ taskId: run.taskId }),
+        title: 'Early generated title',
+      });
+      expect(onEarlyTitleGenerated).toHaveBeenCalledWith({
+        taskRun: expect.objectContaining({ taskId: run.taskId }),
+        title: 'First-message refresh title',
+      });
+    });
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: {
+        title: true,
+        llmTitleCheckpoint: true,
+      },
+    });
+    expect(task).toEqual({
+      title: 'First-message refresh title',
+      llmTitleCheckpoint: 1,
+    });
+  });
+
   it('persists an intentional pre-dispatch phase and error', async () => {
     const userId = await createUser();
 
