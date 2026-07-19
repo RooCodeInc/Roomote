@@ -12,6 +12,7 @@ import type {
 } from '../run-task/types';
 import {
   getRequestUserInputPromptSignature,
+  isOpenCodeQuestionPlaceholderRequest,
   supportsIntegrationRequestUserInput,
 } from './request-user-input';
 
@@ -48,6 +49,12 @@ async function handleRequestUserInput(
   const promptSignature = getRequestUserInputPromptSignature(event.request);
 
   if (postedSignatures.get(event.request.requestId) === promptSignature) {
+    return;
+  }
+
+  // OpenCode streams the question tool before options land. Skip the empty
+  // "Provide the requested input." shell so Discord only shows the real prompt.
+  if (isOpenCodeQuestionPlaceholderRequest(event.request)) {
     return;
   }
 
