@@ -91,6 +91,8 @@ export async function replyToDiscordEvent(input: {
   buttons?: CommunicationMessageButton[][];
   /** Must match the Gateway's initial defer choice; it cannot be changed later. */
   ephemeral?: boolean;
+  /** When posting a non-interaction channel message, nest under this message. */
+  replyToMessageId?: string;
 }) {
   if (input.interaction?.interactionDeferred) {
     try {
@@ -118,5 +120,8 @@ export async function replyToDiscordEvent(input: {
       : {}),
     text: input.text,
     ...(input.buttons ? { buttons: input.buttons } : {}),
+    ...(input.replyToMessageId
+      ? { replyToMessageId: input.replyToMessageId }
+      : {}),
   });
 }

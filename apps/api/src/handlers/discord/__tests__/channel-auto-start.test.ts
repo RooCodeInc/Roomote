@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     scard: vi.fn(),
     ttl: vi.fn(),
     set: vi.fn(),
+    get: vi.fn(),
     del: vi.fn(),
   },
   getBackgroundAgentSettings: vi.fn(),
@@ -157,6 +158,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     mocks.redis.scard.mockResolvedValue(1);
     // Routing lock + nudge dedupe acquire successfully.
     mocks.redis.set.mockResolvedValue('OK');
+    mocks.redis.get.mockResolvedValue(null);
     mocks.redis.del.mockResolvedValue(1);
     mocks.getBackgroundAgentSettings.mockResolvedValue(
       settingsWith([
@@ -283,6 +285,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
   it('dedupes the link nudge per user', async () => {
     mocks.findMappedUserId.mockResolvedValue(null);
     mocks.redis.set.mockResolvedValue(null); // dedupe key already present
+    mocks.redis.get.mockResolvedValue('sent');
 
     await expect(runHandler({})).resolves.toBe(true);
     expect(mocks.createDirectMessage).not.toHaveBeenCalled();
@@ -302,7 +305,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
 
     await expect(runHandler({})).resolves.toBe(true);
     expect(mocks.redis.del).toHaveBeenCalledWith(
-      'discord:auto-start-link-nudge:discord-user-1',
+      'discord:account-link-dm:discord-user-1',
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
