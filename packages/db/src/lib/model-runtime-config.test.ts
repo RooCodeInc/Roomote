@@ -843,5 +843,31 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK',
       );
     });
+
+    it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is set', async () => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: {},
+        taskModelSettings: null,
+      });
+
+      const env = await resolveSandboxModelRuntimeEnv({
+        runtimeEnv: {
+          R_MODEL: 'qwen3.6-35b-local',
+          R_SMALL_MODEL: 'coding',
+          LITELLM_BASE_URL: 'http://localhost:4000',
+          LITELLM_API_KEY: 'litellm-key',
+        },
+        deploymentEnvVars: {},
+      });
+
+      expect(env.R_MODEL).toBe('litellm/qwen3.6-35b-local');
+      expect(env.R_SMALL_MODEL).toBe('litellm/coding');
+      expect(env.R_MODEL_ENV_KEYS).toBe('LITELLM_BASE_URL,LITELLM_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe(
+        'LITELLM_BASE_URL,LITELLM_API_KEY',
+      );
+      expect(env).not.toHaveProperty('LITELLM_API_KEY');
+      expect(env).not.toHaveProperty('LITELLM_BASE_URL');
+    });
   });
 });

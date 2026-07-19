@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+  applyImplicitLiteLlmModelPrefix,
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenAiCompatibleProviderInstance,
@@ -21,6 +22,7 @@ import {
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   type InferenceGatewayProvider,
+  isConfiguredEnvValue,
   isOpenAiCompatibleProviderId,
   isTaskModelIdDisabled,
   listOpenAiCompatibleProviderInstancesFromEnvNames,
@@ -1318,17 +1320,46 @@ function resolveModelBackedOpenCodeConfig(
   modelOverride?: string,
   reasoningEffortOverride?: ReasoningEffort,
 ): Record<string, unknown> | null {
-  const rawModel = runtimeEnv.R_MODEL?.trim();
+  const isLiteLlmConfigured = isConfiguredEnvValue(runtimeEnv.LITELLM_BASE_URL);
+  const rawModel = applyImplicitLiteLlmModelPrefix(
+    runtimeEnv.R_MODEL?.trim() ?? '',
+    isLiteLlmConfigured,
+  );
 
   if (!rawModel) {
     return null;
   }
 
-  const rawSmallModel = runtimeEnv.R_SMALL_MODEL?.trim();
-  const rawVisionModel = runtimeEnv.R_VISION_MODEL?.trim();
-  const rawCodeReviewModel = runtimeEnv.R_CODE_REVIEW_MODEL?.trim();
-  const rawExploreModel = runtimeEnv.R_EXPLORE_MODEL?.trim();
-  const rawPlanningModel = runtimeEnv.R_PLANNING_MODEL?.trim();
+  const rawSmallModel = runtimeEnv.R_SMALL_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_SMALL_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
+  const rawVisionModel = runtimeEnv.R_VISION_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_VISION_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
+  const rawCodeReviewModel = runtimeEnv.R_CODE_REVIEW_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_CODE_REVIEW_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
+  const rawExploreModel = runtimeEnv.R_EXPLORE_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_EXPLORE_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
+  const rawPlanningModel = runtimeEnv.R_PLANNING_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_PLANNING_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
     runtimeEnv.R_MODEL_REASONING_EFFORT?.trim(),
   );
@@ -1377,7 +1408,10 @@ function resolveModelBackedOpenCodeConfig(
   // override wins, then the coding model, then helper roles.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
   const normalizedModelOverride = modelOverride
-    ? collectOpenRouterVariantModelAlias(variantAliases, modelOverride)
+    ? collectOpenRouterVariantModelAlias(
+        variantAliases,
+        applyImplicitLiteLlmModelPrefix(modelOverride, isLiteLlmConfigured),
+      )
     : undefined;
   const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
   const smallModel = rawSmallModel

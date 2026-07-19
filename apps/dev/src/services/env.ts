@@ -3,6 +3,7 @@ import fs from 'fs';
 
 import ora from 'ora';
 import {
+  applyImplicitLiteLlmModelPrefix,
   getModelProviderEnvKeyCandidates,
   resolveModelProviderIdFromModel,
 } from '@roomote/types';
@@ -80,7 +81,14 @@ export class EnvService {
     const model = getConfiguredEnvValue('R_MODEL', fileValues)?.trim();
 
     if (isConfiguredEnvValue(model)) {
-      const provider = resolveModelProviderIdFromModel(model)?.toLowerCase();
+      const resolvedModel = applyImplicitLiteLlmModelPrefix(
+        model,
+        isConfiguredEnvValue(
+          getConfiguredEnvValue('LITELLM_BASE_URL', fileValues),
+        ),
+      );
+      const provider =
+        resolveModelProviderIdFromModel(resolvedModel)?.toLowerCase();
 
       if (!provider) {
         checkEnvVars.fail();
@@ -89,7 +97,9 @@ export class EnvService {
             '\n' +
             'Example:\n' +
             '\n' +
-            'R_MODEL=openrouter/anthropic/claude-sonnet-4\n',
+            'R_MODEL=openrouter/anthropic/claude-sonnet-4\n' +
+            '\n' +
+            'When LITELLM_BASE_URL is set, bare LiteLLM route names are also accepted.\n',
         );
       }
 
