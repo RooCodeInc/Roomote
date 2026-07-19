@@ -1264,7 +1264,7 @@ function createJudgeModelInstructions(): string {
     '',
     'Ask it to review what was built against the plan or requested outcome, verify visual proof when a pre-delivery proof handoff result or proof artifacts are available, summarize what matches, call out missing or risky gaps, and return the smallest concrete follow-up fixes worth making now.',
     '',
-    'Treat the judge response as review input for the parent workflow. Keep orchestration, code changes, and final user-facing decisions in the parent agent.',
+    'Treat the judge response as review input for the parent workflow. If judge-driven fixes change repository files, re-run the pre-delivery `capture-visual-proof` handoff for the updated shipped change, replace prior proof evidence with that latest result, then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery. Keep orchestration, code changes, and final user-facing decisions in the parent agent.',
     '',
     "Do not paste the judge's full output into chat or any user-facing reply. The judge verdict is internal review material; surface at most a brief, parent-authored summary of the actionable outcome (what was fixed or what still needs attention), never the raw review dump.",
   ].join('\n');

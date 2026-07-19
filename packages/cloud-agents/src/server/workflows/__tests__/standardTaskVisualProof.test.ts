@@ -230,7 +230,13 @@ describe('Standard Task visual-proof delegation', () => {
       'Ask it specifically to compare plan versus built result and to verify visual proof when evidence was captured or when proof should have applied',
     );
     expect(skillContent).toContain(
-      'fix actionable plan-mismatch or proof gaps it finds',
+      'Treat the judge verdict as review input and fix actionable plan-mismatch or proof gaps it finds',
+    );
+    expect(skillContent).toContain(
+      'When those judge-driven fixes change repository files, re-run the pre-delivery `capture-visual-proof` handoff for the updated shipped change',
+    );
+    expect(skillContent).toContain(
+      'then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery',
     );
   });
 });
