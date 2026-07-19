@@ -300,6 +300,9 @@ export function StepInferenceProvider({
 
         {isOAuthProvider ? null : (
           <Input
+            type={isEndpointProvider ? 'url' : undefined}
+            inputMode={isEndpointProvider ? 'url' : undefined}
+            autoComplete={isEndpointProvider ? 'url' : undefined}
             secret={!isEndpointProvider && !hasRuntimeProviderKey}
             value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
             onFocus={() => {
