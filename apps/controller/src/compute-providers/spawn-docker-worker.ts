@@ -371,7 +371,10 @@ export async function spawnDockerWorker(
       image: config.image,
       extraEnv: {
         SANDBOX_TIMEOUT_MS: String(config.dockerTimeoutMs),
-        TRPC_URL: toContainerReachableUrl(process.env.TRPC_URL ?? Env.TRPC_URL),
+        TRPC_URL: resolveDockerWorkerTrpcUrl({
+          trpcUrl: process.env.TRPC_URL ?? Env.TRPC_URL,
+          controlNetwork,
+        }),
         // Mock-Slack parity: worker-side SlackNotifier calls (question blocks,
         // reactions) must reach the same mock harness the API uses.
         ...(process.env.SLACK_API_BASE_URL && {
@@ -733,6 +736,40 @@ export function getDockerWorkerCommand(
   payloadKind: TaskPayloadKind,
 ): 'resume' | 'run' {
   return payloadKind === TaskPayloadKind.SnapshotResume ? 'resume' : 'run';
+}
+
+/**
+ * Docker Compose self-host/prod attaches the `api` service to each task
+ * network. When a control network is configured, egress policy blackholes the
+ * docker bridge gateway so sandboxes cannot hairpin through the public edge.
+ * Workers must call the in-network API alias directly (no `/_roomote-api`
+ * prefix — that path only exists on the public reverse proxy).
+ */
+export const DOCKER_CONTROL_PLANE_TRPC_URL = 'http://api:3001';
+
+export function resolveDockerWorkerTrpcUrl(params: {
+  trpcUrl: string | undefined;
+  controlNetwork?: string;
+}): string {
+  if (params.controlNetwork?.trim()) {
+    const configured = params.trpcUrl?.trim();
+
+    if (configured) {
+      try {
+        const url = new URL(configured);
+
+        if (url.hostname === 'api') {
+          return trimTrailingSlash(url.toString());
+        }
+      } catch {
+        // Fall through to the control-plane default.
+      }
+    }
+
+    return DOCKER_CONTROL_PLANE_TRPC_URL;
+  }
+
+  return toContainerReachableUrl(params.trpcUrl);
 }
 
 export function toContainerReachableUrl(value: string | undefined): string {
