@@ -3,7 +3,7 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote
 
 const {
   buildThreadReplyImagesMock,
-  clearLatestUserMessageForReplyQuoteMock,
+  clearLatestUserMessageForReplyQuoteIfIdMock,
   discordAddReactionMock,
   discordPostMessageMock,
   envMock,
@@ -16,7 +16,7 @@ const {
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImagesMock: vi.fn(),
-  clearLatestUserMessageForReplyQuoteMock: vi.fn(),
+  clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   discordAddReactionMock: vi.fn(),
   discordPostMessageMock: vi.fn(),
   envMock: { R_APP_URL: 'https://app.example.com' },
@@ -53,7 +53,8 @@ vi.mock('@roomote/communication', () => ({
   UnsupportedCommunicationOperationError: class UnsupportedCommunicationOperationError extends Error {},
   getLatestInboundMessageId: getLatestInboundMessageIdMock,
   getLatestUserMessageForReplyQuote: getLatestUserMessageForReplyQuoteMock,
-  clearLatestUserMessageForReplyQuote: clearLatestUserMessageForReplyQuoteMock,
+  clearLatestUserMessageForReplyQuoteIfId:
+    clearLatestUserMessageForReplyQuoteIfIdMock,
   resolveThreadReplyFooterContext: vi.fn().mockResolvedValue({
     linkedPr: null,
     livePreviewUrl: null,
@@ -164,7 +165,7 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     });
     buildThreadReplyImagesMock.mockResolvedValue([]);
     getLatestUserMessageForReplyQuoteMock.mockResolvedValue(null);
-    clearLatestUserMessageForReplyQuoteMock.mockResolvedValue(undefined);
+    clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
     discordPostMessageMock.mockResolvedValue({ messageId: 'reply-1' });
     discordAddReactionMock.mockResolvedValue({
       channelId: 'thread-1',
@@ -194,11 +195,12 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     expect(discordPostMessageMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'replyToMessageId',
     );
-    expect(clearLatestUserMessageForReplyQuoteMock).not.toHaveBeenCalled();
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
   });
 
-  it('prepends a pending web-reply quote and clears it after a successful Discord post', async () => {
+  it('prepends a pending web-reply quote and clears it by id after a successful Discord post', async () => {
     getLatestUserMessageForReplyQuoteMock.mockResolvedValue({
+      id: 'quote-abc',
       text: 'Do it',
       userName: 'Matt Rubens',
     });
@@ -216,9 +218,10 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       textFormat: 'markdown',
       images: [],
     });
-    expect(clearLatestUserMessageForReplyQuoteMock).toHaveBeenCalledWith(
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
       'discord',
       44,
+      'quote-abc',
     );
   });
 

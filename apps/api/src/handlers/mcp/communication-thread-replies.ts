@@ -1,6 +1,6 @@
 import {
   UnsupportedCommunicationOperationError,
-  clearLatestUserMessageForReplyQuote,
+  clearLatestUserMessageForReplyQuoteIfId,
   getLatestInboundMessageId,
   getLatestUserMessageForReplyQuote,
   type DiscordCommunicationProvider,
@@ -80,7 +80,7 @@ function buildDiscordThreadReplyQuote(params: {
 }
 
 async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
-  pendingUserMessage: { text: string; userName: string };
+  pendingUserMessage: { id: string; text: string; userName: string };
   quote: string;
 } | null> {
   try {
@@ -488,22 +488,13 @@ async function sendDiscordThreadReply(params: {
 
     if (pendingQuote) {
       try {
-        // Only clear if this delivery still owns the pending web reply. A
-        // newer web message may have overwritten Redis between peek and post.
-        const latestAfterPost = await getLatestUserMessageForReplyQuote(
+        // Clear only the exact quote id delivered here. A newer web message
+        // (even with the same user + text) gets a new id and must remain.
+        await clearLatestUserMessageForReplyQuoteIfId(
           'discord',
           params.taskRun.id,
+          pendingQuote.pendingUserMessage.id,
         );
-        if (
-          latestAfterPost &&
-          latestAfterPost.text === pendingQuote.pendingUserMessage.text &&
-          latestAfterPost.userName === pendingQuote.pendingUserMessage.userName
-        ) {
-          await clearLatestUserMessageForReplyQuote(
-            'discord',
-            params.taskRun.id,
-          );
-        }
       } catch (error) {
         console.error(
           `[${LOG_CONTEXT}] Failed to clear Discord reply quote for task run ${params.taskRun.id}: ${

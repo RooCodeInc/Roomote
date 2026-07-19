@@ -11,6 +11,7 @@ const {
   multiExpireMock,
   multiLpushMock,
   multiMock,
+  randomUUIDMock,
   rpushMock,
   setMock,
 } = vi.hoisted(() => ({
@@ -24,9 +25,18 @@ const {
   multiExpireMock: vi.fn(),
   multiLpushMock: vi.fn(),
   multiMock: vi.fn(),
+  randomUUIDMock: vi.fn(() => 'quote-id-fixed'),
   rpushMock: vi.fn(),
   setMock: vi.fn(),
 }));
+
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return {
+    ...actual,
+    randomUUID: randomUUIDMock,
+  };
+});
 
 vi.mock('@roomote/redis', () => ({
   getRedis: vi.fn(() => ({
@@ -42,6 +52,7 @@ vi.mock('@roomote/redis', () => ({
 
 import {
   clearLatestUserMessageForReplyQuote,
+  clearLatestUserMessageForReplyQuoteIfId,
   getCommunicationMessages,
   getLatestInboundMessageId,
   getLatestUserMessageForReplyQuote,
@@ -56,9 +67,11 @@ import {
 describe('communication message queues', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    randomUUIDMock.mockReturnValue('quote-id-fixed');
     rpushMock.mockResolvedValue(1);
     expireMock.mockResolvedValue(1);
     execMock.mockResolvedValue([]);
+    evalMock.mockResolvedValue(1);
     evalMock.mockResolvedValue(1);
 
     const multi = {
@@ -263,7 +276,7 @@ describe('communication message queues', () => {
   });
 
   describe('latest user message reply-quote tracker', () => {
-    it('writes the latest user message with a TTL', async () => {
+    it('writes the latest user message with a TTL and generated id', async () => {
       await setLatestUserMessageForReplyQuote('discord', 44, {
         text: 'Do it',
         userName: 'Matt Rubens',
@@ -271,7 +284,11 @@ describe('communication message queues', () => {
 
       expect(setMock).toHaveBeenCalledWith(
         'discord:latest_user_message:44',
-        JSON.stringify({ text: 'Do it', userName: 'Matt Rubens' }),
+        JSON.stringify({
+          id: 'quote-id-fixed',
+          text: 'Do it',
+          userName: 'Matt Rubens',
+        }),
         'EX',
         30 * 24 * 60 * 60,
       );
@@ -287,7 +304,11 @@ describe('communication message queues', () => {
 
       expect(setMock).toHaveBeenCalledWith(
         'discord:latest_user_message:44',
-        JSON.stringify({ text: 'ship it', userName: 'Ada' }),
+        JSON.stringify({
+          id: 'quote-id-fixed',
+          text: 'ship it',
+          userName: 'Ada',
+        }),
         'EX',
         30 * 24 * 60 * 60,
       );
@@ -295,17 +316,32 @@ describe('communication message queues', () => {
 
     it('reads the latest user message', async () => {
       getMock.mockResolvedValueOnce(
-        JSON.stringify({ text: 'hello', userName: 'Bob' }),
+        JSON.stringify({
+          id: 'quote-1',
+          text: 'hello',
+          userName: 'Bob',
+        }),
       );
 
       await expect(
         getLatestUserMessageForReplyQuote('discord', 44),
       ).resolves.toEqual({
+        id: 'quote-1',
         text: 'hello',
         userName: 'Bob',
       });
 
       expect(getMock).toHaveBeenCalledWith('discord:latest_user_message:44');
+    });
+
+    it('rejects stored messages without an id', async () => {
+      getMock.mockResolvedValueOnce(
+        JSON.stringify({ text: 'hello', userName: 'Bob' }),
+      );
+
+      await expect(
+        getLatestUserMessageForReplyQuote('discord', 44),
+      ).resolves.toBeNull();
     });
 
     it('clears the latest user message', async () => {
@@ -314,6 +350,29 @@ describe('communication message queues', () => {
       await clearLatestUserMessageForReplyQuote('discord', 44);
 
       expect(delMock).toHaveBeenCalledWith('discord:latest_user_message:44');
+    });
+
+    it('atomically clears only when the stored id still matches', async () => {
+      evalMock.mockResolvedValueOnce(1);
+
+      await expect(
+        clearLatestUserMessageForReplyQuoteIfId('discord', 44, 'quote-1'),
+      ).resolves.toBe(true);
+
+      expect(evalMock).toHaveBeenCalledWith(
+        expect.stringContaining('cjson.decode'),
+        1,
+        'discord:latest_user_message:44',
+        'quote-1',
+      );
+    });
+
+    it('does not clear when the stored id no longer matches', async () => {
+      evalMock.mockResolvedValueOnce(0);
+
+      await expect(
+        clearLatestUserMessageForReplyQuoteIfId('discord', 44, 'quote-old'),
+      ).resolves.toBe(false);
     });
   });
 });
