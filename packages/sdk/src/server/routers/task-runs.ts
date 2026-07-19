@@ -20,6 +20,8 @@ import {
   runEventTypes,
   taskSpecSchema,
   communicationProviderSchema,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationThreadIdFromTaskPayload,
   computeProviderLaunchModes,
   computeProviderUsageLifecycleActions,
   environmentSetupStates,
@@ -35,6 +37,14 @@ import {
   getCommunicationMessages,
   queueCommunicationMessage,
 } from '@roomote/communication/messages';
+import {
+  clearPendingCommunicationRequestUserInput,
+  getCommunicationRequestUserInputAnswers,
+  getCommunicationRequestUserInputConversationId,
+  getPendingCommunicationRequestUserInput,
+  queueCommunicationRequestUserInputAnswer,
+  setPendingCommunicationRequestUserInput,
+} from '@roomote/communication/request-user-input';
 import {
   enqueueTask,
   type EnqueueTaskInput,
@@ -58,7 +68,7 @@ import {
   queueLinearRequestUserInputAnswer,
   setPendingLinearRequestUserInput,
 } from '@roomote/linear';
-
+import { publishDiscordRequestUserInput } from '../lib/discord-request-user-input';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -799,6 +809,120 @@ export const taskRunsRouter = router({
     'runId',
   ).mutation(async ({ input }) =>
     queueLinearRequestUserInputAnswer(input.runId, {
+      requestId: input.requestId,
+      answers: input.answers,
+      userId: input.userId,
+      timestamp: input.timestamp,
+    }),
+  ),
+  publishDiscordRequestUserInput: runScoped(
+    z.object({
+      runId: z.number(),
+      requestId: z.string(),
+      taskId: z.string(),
+      questions: z.array(acpRequestUserInputQuestionSchema),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => {
+    const taskRun = await findTaskRun(input.runId);
+    if (!taskRun) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: `Task run ${input.runId} not found`,
+      });
+    }
+
+    const channelId = getCommunicationChannelFromTaskPayload(taskRun.payload);
+    const threadId = getCommunicationThreadIdFromTaskPayload(taskRun.payload);
+    const conversationId = getCommunicationRequestUserInputConversationId({
+      channelId,
+      threadId,
+    });
+    const existing = conversationId
+      ? await getPendingCommunicationRequestUserInput('discord', conversationId)
+      : null;
+    // Reuse any pending prompt for this run so mid-flight question enrichment
+    // edits one Discord message instead of posting a second shell.
+    const existingForRequest =
+      existing &&
+      existing.runId === input.runId &&
+      existing.status === 'pending'
+        ? existing
+        : null;
+
+    return publishDiscordRequestUserInput({
+      runId: input.runId,
+      taskId: input.taskId,
+      payload: taskRun.payload,
+      request: {
+        requestId: input.requestId,
+        questions: input.questions,
+      },
+      existing: existingForRequest,
+    });
+  }),
+  setPendingCommunicationRequestUserInput: runScoped(
+    z.object({
+      runId: z.number(),
+      provider: communicationProviderSchema,
+      conversationId: z.string(),
+      requestId: z.string(),
+      taskId: z.string(),
+      questions: z.array(acpRequestUserInputQuestionSchema),
+      promptMessageId: z.string().optional(),
+      currentQuestionIndex: z.number().optional(),
+    }),
+    'runId',
+  ).mutation(async ({ input }) =>
+    setPendingCommunicationRequestUserInput(
+      input.provider,
+      input.conversationId,
+      {
+        requestId: input.requestId,
+        runId: input.runId,
+        taskId: input.taskId,
+        questions: input.questions,
+        promptMessageId: input.promptMessageId,
+        currentQuestionIndex: input.currentQuestionIndex,
+      },
+    ),
+  ),
+  clearPendingCommunicationRequestUserInput: runScoped(
+    z.object({
+      runId: z.number(),
+      provider: communicationProviderSchema,
+      conversationId: z.string(),
+      requestId: z.string().optional(),
+    }),
+    'runId',
+  ).mutation(async ({ input }) =>
+    clearPendingCommunicationRequestUserInput(
+      input.provider,
+      input.conversationId,
+      input.requestId ? { requestId: input.requestId } : undefined,
+    ),
+  ),
+  getCommunicationRequestUserInputAnswers: runScoped(
+    z.object({
+      runId: z.number(),
+      provider: communicationProviderSchema,
+    }),
+    'runId',
+  ).query(async ({ input }) =>
+    getCommunicationRequestUserInputAnswers(input.provider, input.runId),
+  ),
+  queueCommunicationRequestUserInputAnswer: runScoped(
+    z.object({
+      runId: z.number(),
+      provider: communicationProviderSchema,
+      requestId: z.string(),
+      answers: acpRequestUserInputAnswersSchema,
+      userId: z.string().optional(),
+      timestamp: z.number(),
+    }),
+    'runId',
+  ).mutation(async ({ input }) =>
+    queueCommunicationRequestUserInputAnswer(input.provider, input.runId, {
       requestId: input.requestId,
       answers: input.answers,
       userId: input.userId,

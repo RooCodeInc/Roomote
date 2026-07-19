@@ -103,6 +103,8 @@ function createHarness(
     providerRateLimitMaxRetries?: number;
     providerRateLimitBaseDelayMs?: number;
     providerRateLimitMaxDelayMs?: number;
+    providerErrorBaseDelayMs?: number;
+    providerErrorMaxDelayMs?: number;
     mcpServerNames?: string[];
     model?: string;
   } = {},
@@ -122,6 +124,8 @@ function createHarness(
     providerRateLimitMaxRetries: options.providerRateLimitMaxRetries,
     providerRateLimitBaseDelayMs: options.providerRateLimitBaseDelayMs,
     providerRateLimitMaxDelayMs: options.providerRateLimitMaxDelayMs,
+    providerErrorBaseDelayMs: options.providerErrorBaseDelayMs,
+    providerErrorMaxDelayMs: options.providerErrorMaxDelayMs,
     mcpServerNames: options.mcpServerNames,
     beforeQueuedPrompt: options.beforeQueuedPrompt,
   });
@@ -2065,6 +2069,7 @@ describe('OpenCodeServerHarness', () => {
   });
 
   it('retries a cyber policy refusal with safer framing without aborting the task', async () => {
+    vi.useFakeTimers();
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -2131,19 +2136,18 @@ describe('OpenCodeServerHarness', () => {
         type: 'session.status',
         properties: { sessionID: 'ses_1', status: { type: 'idle' } },
       });
-
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(2);
-      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
 
       // OpenCode emits this legacy idle event for the same transition after
-      // session.status(idle). It must be consumed instead of completing the
-      // recovery loop that was just started.
+      // session.status(idle). It must not drain the retry before backoff ends.
       await client.emit({
         type: 'session.idle',
         properties: { sessionID: 'ses_1' },
       });
 
+      await vi.advanceTimersByTimeAsync(999);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(client.promptAsync).toHaveBeenCalledTimes(2);
       expect(
         taskEvents.some(
@@ -2177,7 +2181,7 @@ describe('OpenCodeServerHarness', () => {
             String(envelope.payload.text ?? '').includes(
               'Provider safety refusal',
             ) &&
-            String(envelope.payload.text ?? '').includes('Retrying now') &&
+            String(envelope.payload.text ?? '').includes('Retrying in 1s') &&
             asRecord(envelope.payload.providerRetryNotice)?.kind ===
               'policy_refusal',
         ),
@@ -2187,10 +2191,12 @@ describe('OpenCodeServerHarness', () => {
       ).toEqual(['Queued follow-up.']);
     } finally {
       harness.dispose();
+      vi.useRealTimers();
     }
   });
 
-  it('retries an unknown provider error once before aborting', async () => {
+  it('exponentially backs off repeated unknown provider errors', async () => {
+    vi.useFakeTimers();
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -2235,7 +2241,7 @@ describe('OpenCodeServerHarness', () => {
             String(envelope.payload.text ?? '').includes(
               'Upstream connection closed unexpectedly.',
             ) &&
-            String(envelope.payload.text ?? '').includes('Retrying now') &&
+            String(envelope.payload.text ?? '').includes('Retrying in 1s') &&
             asRecord(envelope.payload.providerRetryNotice)?.kind ===
               'provider_error',
         ),
@@ -2246,9 +2252,10 @@ describe('OpenCodeServerHarness', () => {
         properties: { sessionID: 'ses_1' },
       });
 
-      await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(2);
-      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
       expect(
         taskEvents.some(
           (event) => event.eventName === TaskEventName.TaskAborted,
@@ -2260,13 +2267,79 @@ describe('OpenCodeServerHarness', () => {
         properties: { sessionID: 'ses_1', error: providerError },
       });
 
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      expect(
+        persistedEnvelopes.some((envelope) => {
+          const notice = asRecord(envelope.payload.providerRetryNotice);
+          return (
+            notice?.kind === 'provider_error' &&
+            notice.attemptNumber === 2 &&
+            notice.delayMs === 2_000
+          );
+        }),
+      ).toBe(true);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.promptAsync).toHaveBeenCalledTimes(3);
       expect(
         taskEvents.some(
           (event) => event.eventName === TaskEventName.TaskAborted,
         ),
+      ).toBe(false);
+
+      const policyError = {
+        name: 'ContentFilterError',
+        data: {
+          message: "The response was blocked by the provider's content filter",
+        },
+      };
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: policyError },
+      });
+      expect(
+        persistedEnvelopes.some((envelope) => {
+          const notice = asRecord(envelope.payload.providerRetryNotice);
+          return (
+            notice?.kind === 'policy_refusal' &&
+            notice.attemptNumber === 1 &&
+            notice.maxAttempts === 2
+          );
+        }),
       ).toBe(true);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(client.promptAsync).toHaveBeenCalledTimes(4);
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: policyError },
+      });
+      expect(
+        persistedEnvelopes.some((envelope) => {
+          const notice = asRecord(envelope.payload.providerRetryNotice);
+          return (
+            notice?.kind === 'policy_refusal' && notice.attemptNumber === 2
+          );
+        }),
+      ).toBe(true);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
     } finally {
       harness.dispose();
+      vi.useRealTimers();
     }
   });
 

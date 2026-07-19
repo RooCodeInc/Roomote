@@ -170,6 +170,15 @@ export function buildChatProviderMessageInstructions(
   } = {},
 ): string {
   const { tag, name, label } = getNonSlackChatProviderDisplay(provider);
+  const requestUserInputInstructions =
+    provider === 'discord'
+      ? `
+  <${tag}_request_user_input>
+    <rule>At the beginning of a ${label} turn, do not use \`request_user_input\` unless the next step is still genuinely blocked after using thread context and available tools to resolve the question.</rule>
+    <rule>When a ${label}-backed StandardTask run truly needs structured or private input, use \`request_user_input\` in progressive blocks of up to 4 questions. Non-secret prompts render in ${label}; secret/private prompts should continue in the task UI.</rule>
+    <rule>A ${label}-rendered \`request_user_input\` prompt is supplemental and never satisfies ack or closeout on its own. Pair it with a brief \`send_chat_reply\` closeout that states what input is needed and that work is paused pending the answer.</rule>
+  </${tag}_request_user_input>`
+      : '';
   const proofDeliveryInstructions = visualProofAutoPostEnabled
     ? `
     <rule>Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.</rule>
@@ -214,6 +223,8 @@ export function buildChatProviderMessageInstructions(
     <rule>Keep internal workflow names, routine validation details, todo transitions, tool logs, every routine implementation-process chatter, repeated heartbeat text, and internal reasoning out of ${label} unless they create a blocker, delivery change, or concrete next step for the user.</rule>
     <rule>When mentioning a preview, PR, task, or similar destination, prefer descriptive links or plain URLs that render clearly in ${label} instead of burying destinations in implementation detail.</rule>
   </${tag}_message_style>
+
+  ${requestUserInputInstructions}
 
   <${tag}_response_delivery>
     <rule>Use \`send_chat_reply\` for lifecycle replies in the originating ${label} thread when the reply needs words: early acknowledgements, useful progress, closeouts, and lightweight clarifications. Set its \`purpose\` to match the lifecycle purpose.</rule>

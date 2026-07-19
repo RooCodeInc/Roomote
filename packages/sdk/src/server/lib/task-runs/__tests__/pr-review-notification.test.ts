@@ -1,5 +1,4 @@
 const mockFindManyTaskPullRequests = vi.fn();
-const mockFindManyTaskRuns = vi.fn();
 const mockRedisSet = vi.fn();
 const mockRedisDel = vi.fn();
 const mockQueueAdd = vi.fn();
@@ -37,13 +36,6 @@ vi.mock('@roomote/db/server', async () => {
             mockFindManyTaskPullRequests(...args),
         },
       },
-      select: () => ({
-        from: () => ({
-          innerJoin: () => ({
-            where: (...args: unknown[]) => mockFindManyTaskRuns(...args),
-          }),
-        }),
-      }),
     },
   };
 });
@@ -82,9 +74,6 @@ describe('enqueuePrReviewNotification', () => {
     multiCalls.length = 0;
 
     mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
-    mockFindManyTaskRuns.mockResolvedValue([
-      { taskId: 'task-1', payload: { channel: 'C123' }, slackThreadTs: '1.2' },
-    ]);
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
     mockQueueAdd.mockResolvedValue(undefined);
@@ -111,33 +100,24 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
-  it('returns no_thread_context when no linked task has an originating conversation', async () => {
-    mockFindManyTaskRuns.mockResolvedValue([
-      { taskId: 'task-1', payload: {}, slackThreadTs: null },
-    ]);
-
+  it('schedules notifications for web-only tasks without an originating conversation', async () => {
     const result = await enqueuePrReviewNotification(baseInput);
 
-    expect(result).toEqual({
-      notifiedTaskCount: 0,
-      reason: 'no_thread_context',
-    });
-    expect(mockQueueAdd).not.toHaveBeenCalled();
-  });
-
-  it('schedules notifications for Teams-originated tasks', async () => {
-    mockFindManyTaskRuns.mockResolvedValue([
+    expect(result).toEqual({ notifiedTaskCount: 1 });
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'notify-pr-review-activity',
       {
         taskId: 'task-1',
-        payload: {
-          communicationProvider: 'teams',
-          communicationChannelId: '19:abc',
-          communicationServiceUrl: 'https://smba.example.com',
-        },
-        slackThreadTs: null,
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        deferrals: 0,
       },
-    ]);
+      { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+    );
+  });
 
+  it('schedules notifications for conversation-linked tasks', async () => {
     const result = await enqueuePrReviewNotification(baseInput);
 
     expect(result).toEqual({ notifiedTaskCount: 1 });

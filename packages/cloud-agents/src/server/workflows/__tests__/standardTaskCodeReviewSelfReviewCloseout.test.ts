@@ -20,7 +20,7 @@ describe('Standard Task code-review self-review closeout', () => {
       '<code_review_self_review_closeout>',
     );
     expect(disabledInstructions).not.toContain(
-      'plan to do a self-review on GitHub',
+      'are doing a self-review on GitHub',
     );
   });
 
@@ -42,7 +42,7 @@ describe('Standard Task code-review self-review closeout', () => {
       'When you share a newly created or refreshed pull request or merge request link back to the originating chat or communications channel',
     );
     expect(harnessInstructions).toContain(
-      'plan to do a self-review on GitHub and will follow up here with those results',
+      'are doing a self-review on GitHub and will follow up here with those results',
     );
     expect(harnessInstructions).toContain(
       'Do not perform that Code Reviewer self-review yourself in this task.',
@@ -71,7 +71,7 @@ describe('Standard Task code-review self-review closeout', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'plan to do a self-review on GitLab and will follow up here with those results',
+      'are doing a self-review on GitLab and will follow up here with those results',
     );
   });
 
@@ -84,7 +84,7 @@ describe('Standard Task code-review self-review closeout', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'plan to do a self-review on GitHub/GitLab and will follow up here with those results',
+      'are doing a self-review on GitHub/GitLab and will follow up here with those results',
     );
   });
 
@@ -100,7 +100,7 @@ describe('Standard Task code-review self-review closeout', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you are doing a self-review on GitHub and will follow up here with those results',
     );
   });
 
@@ -119,7 +119,7 @@ describe('Standard Task code-review self-review closeout', () => {
       'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread. The parent must not load or directly use browser tooling',
     );
     expect(harnessInstructions).not.toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you are doing a self-review on GitHub and will follow up here with those results',
     );
   });
 
@@ -138,7 +138,7 @@ describe('Standard Task code-review self-review closeout', () => {
       '<code_review_self_review_closeout>',
     );
     expect(harnessInstructions).not.toContain(
-      'plan to do a self-review on GitHub',
+      'are doing a self-review on GitHub',
     );
     expect(harnessInstructions).toContain(
       'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread. The parent must not load or directly use browser tooling',
@@ -166,7 +166,7 @@ describe('Standard Task code-review self-review closeout', () => {
       'Judge from the PR you actually opened or refreshed (including after explicit `$create-pr` / `$create-draft-pr` overrides)',
     );
     expect(harnessInstructions).not.toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you are doing a self-review on GitHub and will follow up here with those results',
     );
   });
 
@@ -190,7 +190,7 @@ describe('Standard Task code-review self-review closeout', () => {
       'Judge from the PR you actually opened or refreshed (including after explicit `$create-pr` / `$create-draft-pr` overrides)',
     );
     expect(harnessInstructions).not.toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you are doing a self-review on GitHub and will follow up here with those results',
     );
   });
 });

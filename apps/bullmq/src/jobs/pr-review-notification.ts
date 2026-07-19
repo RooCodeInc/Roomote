@@ -211,24 +211,27 @@ export const prReviewNotificationJob = async (
     });
 
     if (!delivery.post) {
-      if (delivery.reason === 'no_conversation_route') {
-        console.warn(
-          `[PrReviewNotification] No conversation routing for task ${data.taskId}, skipping`,
-        );
-        return;
-      }
-
       console.log(
         `[PrReviewNotification] Skipping review-feedback notification for ${data.repository}#${data.prNumber} (${delivery.reason})`,
       );
       return;
     }
 
-    const messageTs = await postPrReviewNotification({
-      taskId: data.taskId,
-      route: delivery.route,
-      text: delivery.text,
-    });
+    // Chat delivery is optional (web-only tasks have no route). Task history is
+    // always recorded so the web task view shows the self-review summary.
+    let messageTs: string | null = null;
+    if (delivery.route) {
+      messageTs = await postPrReviewNotification({
+        taskId: data.taskId,
+        route: delivery.route,
+        text: delivery.text,
+      });
+    } else {
+      console.log(
+        `[PrReviewNotification] No conversation routing for task ${data.taskId}; recording review feedback to task history only`,
+      );
+    }
+
     await recordPrReviewNotificationDeliveryBestEffort({
       runId: latestJob.id,
       taskId: data.taskId,
@@ -237,9 +240,15 @@ export const prReviewNotificationJob = async (
       ...(messageTs ? { messageTs } : {}),
     });
 
-    console.log(
-      `[PrReviewNotification] Posted review-feedback notification for ${data.repository}#${data.prNumber} to ${delivery.route.provider} conversation ${delivery.route.channelId}`,
-    );
+    if (delivery.route) {
+      console.log(
+        `[PrReviewNotification] Posted review-feedback notification for ${data.repository}#${data.prNumber} to ${delivery.route.provider} conversation ${delivery.route.channelId}`,
+      );
+    } else {
+      console.log(
+        `[PrReviewNotification] Recorded review-feedback notification for ${data.repository}#${data.prNumber} on task ${data.taskId}`,
+      );
+    }
   } catch (error) {
     // Put the drained events back so a retried job can deliver them.
     try {

@@ -14,7 +14,6 @@ import { CircleSlash, TriangleAlert } from '@/components/system';
 import {
   TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
-  isExitedRunStatus,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -137,24 +136,35 @@ export default function SandboxPage() {
     }
   }, [sessionState]);
 
+  // Refresh transcript history when the active run phase changes, or when
+  // task activity advances (e.g. out-of-band PR self-review summaries written
+  // while the page is open on an idle/historical session).
+  const taskActivityAtMs =
+    task?.activityAt == null
+      ? null
+      : typeof task.activityAt === 'number'
+        ? task.activityAt
+        : new Date(task.activityAt).getTime();
+
   useEffect(() => {
-    if (
-      !taskId ||
-      !activeRunId ||
-      !activeTaskRunStatus ||
-      sessionState !== 'interactive' ||
-      isExitedRunStatus(activeTaskRunStatus)
-    ) {
+    if (!taskId) {
       return;
     }
 
     const historyRefreshSignal = [
-      activeRunId,
-      activeTaskRunStatus,
+      activeRunId ?? '',
+      activeTaskRunStatus ?? '',
       activeTaskRunTaskPhase ?? '',
+      taskActivityAtMs ?? '',
     ].join(':');
 
     if (historyRefreshSignal === lastHistoryRefreshSignalRef.current) {
+      return;
+    }
+
+    // Skip the very first signal (initial load already fetches envelopes).
+    if (lastHistoryRefreshSignalRef.current === null) {
+      lastHistoryRefreshSignalRef.current = historyRefreshSignal;
       return;
     }
 
@@ -168,7 +178,7 @@ export default function SandboxPage() {
     activeTaskRunStatus,
     activeTaskRunTaskPhase,
     queryClient,
-    sessionState,
+    taskActivityAtMs,
     taskId,
     trpc.tasks.messageEnvelopes,
   ]);

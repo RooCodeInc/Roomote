@@ -37,6 +37,7 @@ import {
   findCommunicationTaskRunBySourceEvent,
 } from '../tasks/communication-task-run-lookup.js';
 import { resumeCommunicationTaskFromSnapshot } from '../tasks/communication-snapshot-resume.js';
+import { tryHandleDiscordRequestUserInputMessage } from './request-user-input.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
@@ -519,6 +520,28 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       runId: activeRun.id,
       senderUserId,
     });
+
+    if (message && queuedMessage) {
+      const handledRequestUserInput =
+        await tryHandleDiscordRequestUserInputMessage({
+          provider: resolved.provider,
+          applicationId: resolved.applicationId,
+          channel,
+          activeRun: { id: activeRun.id },
+          userId: senderUserId,
+          text: queuedMessage.text,
+          replyToMessageId: message.id,
+        });
+      if (handledRequestUserInput) {
+        return {
+          ok: true,
+          queued: true,
+          runId: activeRun.id,
+          requestUserInput: true,
+        };
+      }
+    }
+
     // Mirror Slack: rebuild undelivered thread context + latest bot reply into
     // the follow-up prompt so agents keep full Discord conversation context.
     let continuationClaim: {

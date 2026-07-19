@@ -4,6 +4,7 @@ import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
   isOpenCodeTerminalProviderError,
+  resolveOpenCodeProviderErrorRetryDelayMs,
   summarizeOpenCodeProviderError,
 } from './provider-error-recovery';
 
@@ -37,7 +38,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
         name: 'UnknownError',
         data: { message: 'Upstream connection closed unexpectedly.' },
       }),
-    ).toMatchObject({ kind: 'provider_error', maxRetries: 1 });
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
   });
 
   it('classifies native ContentFilterError payloads as policy refusals', () => {
@@ -126,16 +127,31 @@ describe('summarizeOpenCodeProviderError', () => {
 });
 
 describe('formatOpenCodeProviderErrorRetryNoticeText', () => {
-  it('includes the error summary and an immediate retry status', () => {
+  it('includes the error summary and retry delay', () => {
     expect(
       formatOpenCodeProviderErrorRetryNoticeText({
         kind: 'provider_error',
         attemptNumber: 1,
-        maxAttempts: 1,
+        maxAttempts: 3,
         errorSummary: 'Upstream connection closed unexpectedly.',
+        delayMs: 1_000,
       }),
     ).toBe(
-      'Provider error: Upstream connection closed unexpectedly.\n\nRetrying now (attempt 1/1).',
+      'Provider error: Upstream connection closed unexpectedly.\n\nRetrying in 1s (attempt 1/3).',
     );
+  });
+});
+
+describe('resolveOpenCodeProviderErrorRetryDelayMs', () => {
+  it('waits at least one second and exponentially backs off', () => {
+    expect(
+      [1, 2, 3].map((attemptNumber) =>
+        resolveOpenCodeProviderErrorRetryDelayMs({
+          attemptNumber,
+          baseDelayMs: 100,
+          maxDelayMs: 10_000,
+        }),
+      ),
+    ).toEqual([1_000, 2_000, 4_000]);
   });
 });

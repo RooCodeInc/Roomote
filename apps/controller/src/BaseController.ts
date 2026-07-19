@@ -18,7 +18,6 @@ import {
   type TaskRun,
   db,
   taskRuns,
-  taskRunEvents,
   buildPendingEnvironmentSnapshotMatchForTaskRun,
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
@@ -41,6 +40,7 @@ import {
   captureControllerMessage,
 } from './monitoring/sentry';
 import { resolveFromWorkspaceRoot } from './repo-paths';
+import { findPersistedWorkerBootstrapRestarts } from './worker-bootstrap-restarts';
 
 type WorkerBootstrapExitDisposition = 'ignore' | 'restart' | 'failed';
 
@@ -677,21 +677,7 @@ export abstract class BaseController {
   }
 
   protected async recoverPersistedWorkerBootstrapRestarts(): Promise<number> {
-    const scheduledRuns = await db.query.taskRuns.findMany({
-      where: and(
-        eq(taskRuns.status, RunStatus.Pending),
-        isNull(taskRuns.startedAt),
-        isNull(taskRuns.canceledAt),
-        sql`EXISTS (
-          SELECT 1
-          FROM ${taskRunEvents}
-          WHERE ${taskRunEvents.runId} = ${taskRuns.id}
-            AND ${taskRunEvents.source} = 'run_lifecycle'
-            AND ${taskRunEvents.details} ->> 'stage' = 'worker_bootstrap_restart'
-        )`,
-      ),
-      orderBy: [asc(taskRuns.createdAt)],
-    });
+    const scheduledRuns = await findPersistedWorkerBootstrapRestarts();
 
     let recoveredCount = 0;
 

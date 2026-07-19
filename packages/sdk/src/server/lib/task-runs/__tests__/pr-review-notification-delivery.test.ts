@@ -278,13 +278,30 @@ describe('preparePrReviewNotificationDelivery', () => {
     expect(prompt).toContain('- Merge conflicts: yes');
   });
 
-  it('skips without triage when no conversation route can be resolved', async () => {
+  it('still prepares a web-history message when no conversation route can be resolved', async () => {
     mockResolveRoute.mockResolvedValue(null);
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        summary:
+          'I reviewed [owner/repo#42](https://github.com/owner/repo/pull/42) on GitHub and found no issues.',
+      },
+    });
+    mockFormatMessage.mockReturnValue(
+      'I reviewed [owner/repo#42](https://github.com/owner/repo/pull/42) on GitHub and found no issues.',
+    );
 
     await expect(
       preparePrReviewNotificationDelivery({ taskRun, request, events }),
-    ).resolves.toEqual({ post: false, reason: 'no_conversation_route' });
-    expect(mockGenerateObject).not.toHaveBeenCalled();
+    ).resolves.toEqual({
+      post: true,
+      route: null,
+      text: 'I reviewed [owner/repo#42](https://github.com/owner/repo/pull/42) on GitHub and found no issues.',
+    });
+    expect(mockGenerateObject).toHaveBeenCalled();
+    expect(mockFormatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'teams' }),
+    );
   });
 
   it('propagates a triage skip decision', async () => {
@@ -734,7 +751,7 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
     );
   });
 
-  it('returns early for Slack replies without a message timestamp', async () => {
+  it('still persists Slack notifications into task history without a message timestamp', async () => {
     await recordPrReviewNotificationDeliveryBestEffort({
       runId: 1,
       taskId: 'task-1',
@@ -742,7 +759,7 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
       text: 'formatted-message',
     });
 
-    expect(mockRecordTaskMessageEnvelope).not.toHaveBeenCalled();
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenCalled();
     expect(mockTrackSlackBotReply).not.toHaveBeenCalled();
     expect(mockSetLatestSlackBotReply).not.toHaveBeenCalled();
   });
@@ -761,6 +778,29 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
     });
 
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalled();
+    expect(mockTrackSlackBotReply).not.toHaveBeenCalled();
+    expect(mockSetLatestSlackBotReply).not.toHaveBeenCalled();
+  });
+
+  it('persists web-only review feedback when there is no conversation route', async () => {
+    await recordPrReviewNotificationDeliveryBestEffort({
+      runId: 1,
+      taskId: 'task-1',
+      route: null,
+      text: 'formatted-message',
+    });
+
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      envelope: expect.objectContaining({
+        payload: {
+          text: 'formatted-message',
+          source: 'pr_review_notification',
+        },
+        visibleInTranscript: true,
+      }),
+    });
     expect(mockTrackSlackBotReply).not.toHaveBeenCalled();
     expect(mockSetLatestSlackBotReply).not.toHaveBeenCalled();
   });

@@ -14,6 +14,7 @@ const {
   mockTaskRunsFindMany,
   mockOrgsFindFirst,
   mockDequeueTaskRun,
+  mockFindPersistedWorkerBootstrapRestarts,
   mockGetOrphanedTaskRun,
   mockRecordTaskRunLifecycleEvent,
   mockRedisSet,
@@ -27,6 +28,7 @@ const {
   mockTaskRunsFindMany: vi.fn(),
   mockOrgsFindFirst: vi.fn(),
   mockDequeueTaskRun: vi.fn().mockResolvedValue(null),
+  mockFindPersistedWorkerBootstrapRestarts: vi.fn().mockResolvedValue([]),
   mockGetOrphanedTaskRun: vi.fn().mockResolvedValue(null),
   mockRecordTaskRunLifecycleEvent: vi.fn().mockResolvedValue(undefined),
   mockRedisSet: vi.fn().mockResolvedValue('OK'),
@@ -99,6 +101,11 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('../orphaned-task-runs', () => ({
   getOrphanedTaskRun: (...args: unknown[]) => mockGetOrphanedTaskRun(...args),
+}));
+
+vi.mock('../worker-bootstrap-restarts', () => ({
+  findPersistedWorkerBootstrapRestarts: (...args: unknown[]) =>
+    mockFindPersistedWorkerBootstrapRestarts(...args),
 }));
 
 vi.mock('../monitoring/sentry', () => ({
@@ -196,6 +203,7 @@ function resetControllerMocks() {
   mockTaskRunsFindFirst.mockResolvedValue(null);
   mockTaskRunsFindMany.mockResolvedValue([]);
   mockDequeueTaskRun.mockResolvedValue(null);
+  mockFindPersistedWorkerBootstrapRestarts.mockResolvedValue([]);
   mockGetOrphanedTaskRun.mockResolvedValue(null);
   mockRecordTaskRunLifecycleEvent.mockResolvedValue(undefined);
   mockRedisSet.mockResolvedValue('OK');
@@ -642,7 +650,7 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
   });
 
   it('recovers every persisted bootstrap restart after controller state is lost', async () => {
-    mockTaskRunsFindMany.mockResolvedValueOnce([
+    mockFindPersistedWorkerBootstrapRestarts.mockResolvedValueOnce([
       makeTaskRun({ id: 46, status: RunStatus.Pending }),
       makeTaskRun({ id: 47, status: RunStatus.Pending }),
     ]);
