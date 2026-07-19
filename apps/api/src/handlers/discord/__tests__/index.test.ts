@@ -4,6 +4,8 @@ import {
   DiscordApiTransportError,
 } from '@roomote/communication/discord-provider';
 
+import { accountLinkDmInFlightWait } from '../account-link.js';
+
 const mocks = vi.hoisted(() => ({
   claimEvent: vi.fn(),
   completeEvent: vi.fn(),
@@ -38,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   attachOutOfBand: vi.fn(),
   releaseOutOfBand: vi.fn(),
   redisSet: vi.fn(),
+  redisGet: vi.fn(),
   redisDel: vi.fn(),
   buildContinuation: vi.fn(),
   releaseContinuation: vi.fn(),
@@ -50,7 +53,11 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/redis')>();
   return {
     ...actual,
-    getRedis: () => ({ set: mocks.redisSet, del: mocks.redisDel }),
+    getRedis: () => ({
+      set: mocks.redisSet,
+      get: mocks.redisGet,
+      del: mocks.redisDel,
+    }),
   };
 });
 
@@ -231,6 +238,7 @@ describe('Discord Gateway event handler', () => {
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
     mocks.redisSet.mockResolvedValue('OK');
+    mocks.redisGet.mockResolvedValue(null);
     mocks.redisDel.mockResolvedValue(1);
     mocks.component.mockResolvedValue('handled');
     mocks.channelAutoStart.mockResolvedValue(false);
@@ -706,6 +714,19 @@ describe('Discord Gateway event handler', () => {
         text: expect.stringContaining('/link'),
       }),
     );
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      'discord:account-link-dm:discord-user-1',
+      'pending',
+      'EX',
+      24 * 60 * 60,
+      'NX',
+    );
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      'discord:account-link-dm:discord-user-1',
+      'sent',
+      'EX',
+      24 * 60 * 60,
+    );
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         text: 'I sent you a DM to link your Discord account.',
@@ -717,8 +738,9 @@ describe('Discord Gateway event handler', () => {
 
   it('skips the duplicate link DM when one went out recently and still acks in channel', async () => {
     mocks.findMappedUserId.mockResolvedValue(null);
-    // Dedupe slot already taken: a link DM was sent within the TTL.
+    // Dedupe slot already holds a confirmed delivery.
     mocks.redisSet.mockResolvedValue(null);
+    mocks.redisGet.mockResolvedValue('sent');
     mocks.getChannel.mockResolvedValue({
       id: 'channel-1',
       guildId: 'guild-1',
@@ -747,6 +769,81 @@ describe('Discord Gateway event handler', () => {
       }),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('waits for an in-flight link DM before acknowledging it as sent', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    // Another path already claimed the pending slot.
+    mocks.redisSet.mockResolvedValue(null);
+    mocks.redisGet
+      .mockResolvedValueOnce('pending')
+      .mockResolvedValueOnce('pending')
+      .mockResolvedValue('sent');
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'I sent you a DM to link your Discord account.',
+      }),
+    );
+  });
+
+  it('does not claim a pending in-flight DM was sent when it never settles', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.redisSet.mockResolvedValue(null);
+    mocks.redisGet.mockResolvedValue('pending');
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const originalWait = { ...accountLinkDmInFlightWait };
+    accountLinkDmInFlightWait.timeoutMs = 20;
+    accountLinkDmInFlightWait.intervalMs = 5;
+    accountLinkDmInFlightWait.sleep = async () => undefined;
+
+    try {
+      const response = await postEvent(
+        envelope(
+          message({
+            channel_id: 'channel-1',
+            guild_id: 'guild-1',
+            content: '<@bot-1> fix this',
+            mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+          }),
+        ),
+      );
+
+      // Still pending after the wait window — keep the event so the Gateway can
+      // retry instead of lying that a DM went out.
+      expect(response.status).toBe(503);
+      expect(mocks.reply).not.toHaveBeenCalled();
+      expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    } finally {
+      accountLinkDmInFlightWait.timeoutMs = originalWait.timeoutMs;
+      accountLinkDmInFlightWait.intervalMs = originalWait.intervalMs;
+      accountLinkDmInFlightWait.sleep = originalWait.sleep;
+    }
   });
 
   it('sends the link DM even when the dedupe check is unavailable', async () => {

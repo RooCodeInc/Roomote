@@ -20,6 +20,7 @@ import { evaluateChannelLaunchGate } from '../shared/channel-launch-gate.js';
 import {
   claimAccountLinkDmSlot,
   isDiscordDmBlockedError,
+  markAccountLinkDmSent,
   releaseAccountLinkDmSlot,
 } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
@@ -62,9 +63,9 @@ async function sendLinkNudgeBestEffort(input: {
 }): Promise<void> {
   const slot = await claimAccountLinkDmSlot(input.discordUserId);
   if (slot !== 'claimed') {
-    // `sent_recently`: the user already has a fresh link DM from any entry
-    // path. `unavailable`: this nudge is best-effort, so skip rather than
-    // risk DM spam while Redis cannot answer.
+    // `sent_recently` / `in_flight`: another path owns or already finished the
+    // daily link DM. `unavailable`: this nudge is best-effort, so skip rather
+    // than risk DM spam while Redis cannot answer.
     return;
   }
 
@@ -79,6 +80,7 @@ async function sendLinkNudgeBestEffort(input: {
         'Generate a code under **Settings → Personal → Linked Accounts** in Roomote, then reply here with `/link code:<code>`.',
       ].join('\n\n'),
     });
+    await markAccountLinkDmSent(input.discordUserId);
   } catch (error) {
     // Let the next qualifying message retry instead of burning the daily slot
     // on a failed delivery.

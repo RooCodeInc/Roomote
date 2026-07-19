@@ -21,6 +21,32 @@ const DISCORD_ACCOUNT_LABEL = 'Discord account';
 // failure cannot double-send the DM.
 const ACCOUNT_LINK_DM_DEDUPE_PREFIX = 'discord:account-link-dm:';
 const ACCOUNT_LINK_DM_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
+// "pending" is held while a claimant is still trying to deliver the DM.
+// Only "sent" means a concurrent path may safely acknowledge delivery.
+const ACCOUNT_LINK_DM_SLOT_PENDING = 'pending';
+const ACCOUNT_LINK_DM_SLOT_SENT = 'sent';
+// Written by earlier builds of this PR before pending/sent were split. Treat
+// as delivered so a rolling deploy does not re-DM or falsely take over.
+const ACCOUNT_LINK_DM_SLOT_LEGACY = '1';
+
+const ACCOUNT_LINK_DM_IN_FLIGHT_WAIT_MS = 2_500;
+const ACCOUNT_LINK_DM_IN_FLIGHT_POLL_MS = 50;
+
+/** Test-only knobs for the in-flight DM waiter. */
+export const accountLinkDmInFlightWait = {
+  timeoutMs: ACCOUNT_LINK_DM_IN_FLIGHT_WAIT_MS,
+  intervalMs: ACCOUNT_LINK_DM_IN_FLIGHT_POLL_MS,
+  sleep: (milliseconds: number) =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, milliseconds);
+    }),
+};
+
+type AccountLinkDmSlotResult =
+  | 'claimed'
+  | 'sent_recently'
+  | 'in_flight'
+  | 'unavailable';
 
 export function isDiscordDmBlockedError(error: unknown): boolean {
   // Discord API error 50007 is the only code that means "Cannot send messages
@@ -33,23 +59,50 @@ export function isDiscordDmBlockedError(error: unknown): boolean {
   );
 }
 
+function accountLinkDmSlotKey(discordUserId: string): string {
+  return `${ACCOUNT_LINK_DM_DEDUPE_PREFIX}${discordUserId}`;
+}
+
+function classifyAccountLinkDmSlotValue(
+  value: string | null,
+): Exclude<AccountLinkDmSlotResult, 'claimed' | 'unavailable'> | null {
+  if (
+    value === ACCOUNT_LINK_DM_SLOT_SENT ||
+    value === ACCOUNT_LINK_DM_SLOT_LEGACY
+  ) {
+    return 'sent_recently';
+  }
+  if (value === ACCOUNT_LINK_DM_SLOT_PENDING) {
+    return 'in_flight';
+  }
+  return null;
+}
+
 /**
- * NX-claim the per-user link-DM slot. `sent_recently` means a link DM already
- * went out within the TTL from any entry path; `unavailable` means Redis
- * could not answer and the caller decides whether to fail open or closed.
+ * NX-claim the per-user link-DM slot as `pending` until delivery finishes.
+ * `sent_recently` means a link DM was confirmed delivered within the TTL.
+ * `in_flight` means another path claimed the slot but has not marked delivery
+ * yet — callers must not acknowledge "I sent you a DM" until that settles.
+ * `unavailable` means Redis could not answer and the caller decides whether
+ * to fail open or closed.
  */
 export async function claimAccountLinkDmSlot(
   discordUserId: string,
-): Promise<'claimed' | 'sent_recently' | 'unavailable'> {
+): Promise<AccountLinkDmSlotResult> {
+  const key = accountLinkDmSlotKey(discordUserId);
   try {
     const acquired = await getRedis().set(
-      `${ACCOUNT_LINK_DM_DEDUPE_PREFIX}${discordUserId}`,
-      '1',
+      key,
+      ACCOUNT_LINK_DM_SLOT_PENDING,
       'EX',
       ACCOUNT_LINK_DM_DEDUPE_TTL_SECONDS,
       'NX',
     );
-    return acquired === 'OK' ? 'claimed' : 'sent_recently';
+    if (acquired === 'OK') {
+      return 'claimed';
+    }
+    const value = await getRedis().get(key);
+    return classifyAccountLinkDmSlotValue(value) ?? 'unavailable';
   } catch (error) {
     apiLogger.warn(
       `[discord] Account-link DM dedupe check failed for ${discordUserId}: ${error instanceof Error ? error.message : String(error)}`,
@@ -58,13 +111,76 @@ export async function claimAccountLinkDmSlot(
   }
 }
 
+/** Promote a claimed pending slot to confirmed delivery for the TTL window. */
+export async function markAccountLinkDmSent(
+  discordUserId: string,
+): Promise<void> {
+  try {
+    await getRedis().set(
+      accountLinkDmSlotKey(discordUserId),
+      ACCOUNT_LINK_DM_SLOT_SENT,
+      'EX',
+      ACCOUNT_LINK_DM_DEDUPE_TTL_SECONDS,
+    );
+  } catch (error) {
+    apiLogger.warn(
+      `[discord] Failed to mark account-link DM sent for ${discordUserId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 /** Free the slot after a failed DM so the next attempt can retry. */
 export async function releaseAccountLinkDmSlot(
   discordUserId: string,
 ): Promise<void> {
   await getRedis()
-    .del(`${ACCOUNT_LINK_DM_DEDUPE_PREFIX}${discordUserId}`)
+    .del(accountLinkDmSlotKey(discordUserId))
     .catch(() => undefined);
+}
+
+async function waitForAccountLinkDmSettlement(
+  discordUserId: string,
+): Promise<'sent' | 'released' | 'timeout'> {
+  const timeoutMs = accountLinkDmInFlightWait.timeoutMs;
+  const intervalMs = accountLinkDmInFlightWait.intervalMs;
+  const sleep = accountLinkDmInFlightWait.sleep;
+  const key = accountLinkDmSlotKey(discordUserId);
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    let value: string | null;
+    try {
+      value = await getRedis().get(key);
+    } catch {
+      return 'timeout';
+    }
+    if (value === null) {
+      return 'released';
+    }
+    if (
+      value === ACCOUNT_LINK_DM_SLOT_SENT ||
+      value === ACCOUNT_LINK_DM_SLOT_LEGACY
+    ) {
+      return 'sent';
+    }
+    await sleep(intervalMs);
+  }
+
+  try {
+    const finalValue = await getRedis().get(key);
+    if (finalValue === null) {
+      return 'released';
+    }
+    if (
+      finalValue === ACCOUNT_LINK_DM_SLOT_SENT ||
+      finalValue === ACCOUNT_LINK_DM_SLOT_LEGACY
+    ) {
+      return 'sent';
+    }
+  } catch {
+    // fall through to timeout
+  }
+  return 'timeout';
 }
 
 /**
@@ -99,15 +215,44 @@ export async function promptDiscordAccountLink(input: {
   }
 
   let dmPromptSent = false;
-  const slot = await claimAccountLinkDmSlot(input.discordUserId);
+  let slot = await claimAccountLinkDmSlot(input.discordUserId);
 
   if (slot === 'sent_recently') {
-    // A link DM already went out within the TTL; the ack below still points
-    // the user at it without sending another copy.
     dmPromptSent = true;
-  } else {
+  } else if (slot === 'in_flight') {
+    // Another path owns the pending claim. Wait for delivery confirmation or
+    // release so we never say "I sent you a DM" about a DM that failed.
+    const settlement = await waitForAccountLinkDmSettlement(
+      input.discordUserId,
+    );
+    if (settlement === 'sent') {
+      dmPromptSent = true;
+    } else if (settlement === 'released') {
+      slot = await claimAccountLinkDmSlot(input.discordUserId);
+      if (slot === 'sent_recently') {
+        dmPromptSent = true;
+      } else if (slot === 'in_flight') {
+        throw new DiscordApiError({
+          method: 'POST',
+          path: '/users/@me/channels',
+          status: 503,
+          message: 'Account-link DM delivery still in progress',
+        });
+      }
+    } else {
+      throw new DiscordApiError({
+        method: 'POST',
+        path: '/users/@me/channels',
+        status: 503,
+        message: 'Account-link DM delivery still in progress',
+      });
+    }
+  }
+
+  if (!dmPromptSent) {
     // On `unavailable` (Redis down) fail open: the user explicitly asked the
     // bot for something, so a possible duplicate DM beats silence.
+    // On `claimed`, we own the pending slot until mark/release below.
     try {
       const dmChannel = await input.provider.createDirectMessage(
         input.discordUserId,
@@ -117,6 +262,9 @@ export async function promptDiscordAccountLink(input: {
         text: DISCORD_LINK_REQUIRED_MESSAGE,
       });
       dmPromptSent = true;
+      if (slot === 'claimed') {
+        await markAccountLinkDmSent(input.discordUserId);
+      }
     } catch (error) {
       if (slot === 'claimed') {
         // Let the next attempt retry instead of burning the daily slot on a
