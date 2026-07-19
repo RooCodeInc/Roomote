@@ -210,4 +210,27 @@ describe('Standard Task visual-proof delegation', () => {
     );
     expect(skillContent).not.toContain('Slack screenshot posting');
   });
+
+  it('requires implement-changes to run the judge after pre-delivery visual proof and include proof verification', () => {
+    const thisFilePath = fileURLToPath(import.meta.url);
+    const thisDirPath = path.dirname(thisFilePath);
+    const skillPath = path.resolve(
+      thisDirPath,
+      '../skills/standard/implement-changes/SKILL.md',
+    );
+    const skillContent = fs.readFileSync(skillPath, 'utf8');
+
+    expect(skillContent).toContain(
+      'run one focused Task-tool judge pass after the initial self-review and only after any required pre-delivery `capture-visual-proof` handoff for this shipped change has completed',
+    );
+    expect(skillContent).toContain(
+      'using the final shipped diff, the validation state, and the latest visual-proof result',
+    );
+    expect(skillContent).toContain(
+      'Ask it specifically to compare plan versus built result and to verify visual proof when evidence was captured or when proof should have applied',
+    );
+    expect(skillContent).toContain(
+      'fix actionable plan-mismatch or proof gaps it finds',
+    );
+  });
 });
