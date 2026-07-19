@@ -158,20 +158,6 @@ export async function publishCommunicationRequestUserInput(params: {
   return { conversationId, promptMessageId };
 }
 
-/** @deprecated Prefer publishCommunicationRequestUserInput. */
-export async function publishDiscordRequestUserInput(params: {
-  runId: number;
-  taskId: string;
-  payload: unknown;
-  request: {
-    requestId: string;
-    questions: AcpRequestUserInputQuestion[];
-  };
-  existing?: PendingCommunicationRequestUserInput | null;
-}): Promise<{ conversationId: string; promptMessageId: string | null }> {
-  return publishCommunicationRequestUserInput(params);
-}
-
 async function editCommunicationPromptMessage(params: {
   provider: SupportedCommunicationRuiProvider;
   adapter: Awaited<ReturnType<typeof getCommunicationProviderAdapter>>;
