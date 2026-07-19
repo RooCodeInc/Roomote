@@ -714,11 +714,14 @@ describe('Discord Gateway event handler', () => {
         text: expect.stringContaining('/link'),
       }),
     );
+    // The pending claim expires quickly so a crashed claimant cannot wedge
+    // the slot for the full dedupe window; only confirmed delivery holds it
+    // for 24h.
     expect(mocks.redisSet).toHaveBeenCalledWith(
       'discord:account-link-dm:discord-user-1',
       'pending',
       'EX',
-      24 * 60 * 60,
+      120,
       'NX',
     );
     expect(mocks.redisSet).toHaveBeenCalledWith(

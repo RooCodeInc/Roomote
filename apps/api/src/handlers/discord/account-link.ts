@@ -23,7 +23,12 @@ const ACCOUNT_LINK_DM_DEDUPE_PREFIX = 'discord:account-link-dm:';
 const ACCOUNT_LINK_DM_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
 // "pending" is held while a claimant is still trying to deliver the DM.
 // Only "sent" means a concurrent path may safely acknowledge delivery.
+// A pending claim expires on its own short TTL: a claimant that crashes
+// between claim and mark/release must not wedge the slot for the full
+// dedupe window, or every later ping would wait out the in-flight window
+// and bounce back to the Gateway for a day.
 const ACCOUNT_LINK_DM_SLOT_PENDING = 'pending';
+const ACCOUNT_LINK_DM_PENDING_TTL_SECONDS = 120;
 const ACCOUNT_LINK_DM_SLOT_SENT = 'sent';
 // Written by earlier builds of this PR before pending/sent were split. Treat
 // as delivered so a rolling deploy does not re-DM or falsely take over.
@@ -95,7 +100,7 @@ export async function claimAccountLinkDmSlot(
       key,
       ACCOUNT_LINK_DM_SLOT_PENDING,
       'EX',
-      ACCOUNT_LINK_DM_DEDUPE_TTL_SECONDS,
+      ACCOUNT_LINK_DM_PENDING_TTL_SECONDS,
       'NX',
     );
     if (acquired === 'OK') {
