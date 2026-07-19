@@ -233,10 +233,16 @@ describe('Standard Task visual-proof delegation', () => {
       'Treat the judge verdict as review input and fix actionable plan-mismatch or proof gaps it finds',
     );
     expect(skillContent).toContain(
-      'When those judge-driven fixes change repository files, re-run the pre-delivery `capture-visual-proof` handoff for the updated shipped change',
+      'When those judge-driven fixes change repository files and this run requires a pre-delivery `capture-visual-proof` handoff, re-run that pre-delivery handoff for the updated shipped change',
     );
     expect(skillContent).toContain(
       'then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery',
+    );
+    expect(skillContent).toContain(
+      'When those judge-driven fixes change repository files and background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff or block delivery on proof',
+    );
+    expect(skillContent).toContain(
+      'let the post-delivery background `capture-visual-proof` capture that final shipped state',
     );
   });
 });

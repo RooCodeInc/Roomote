@@ -463,6 +463,12 @@ describe('opencode-server bootstrap', () => {
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'verify kept screenshot and screencast evidence',
     );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'If judge-driven fixes change repository files and this run requires a pre-delivery',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff',
+    );
     expect(runtimeEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
     expect(runtimeEnv).not.toHaveProperty(
       'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
