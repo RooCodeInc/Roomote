@@ -284,6 +284,51 @@ describe('Telegram task topic launch', () => {
     });
   });
 
+  it('throws when an implicit topic rename fails so early-title checkpoint stays open', async () => {
+    consumeTelegramImplicitTopicMock.mockResolvedValue(true);
+    editTelegramForumTopicBestEffortMock.mockResolvedValue(false);
+
+    await launchTelegramTask({
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'telegram',
+        user: 'Grace',
+        userId: 'user-1',
+        text: 'Fix the flaky login test',
+        ts: '42',
+        channel: '111000111',
+        threadTs: '77',
+      },
+      metadata: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '111000111',
+        communicationThreadId: '77',
+        communicationMessageId: '42',
+      },
+      workspace: {
+        repoForPayload: 'roomote/roomote',
+        workspaceDisplayName: 'Roomote',
+      },
+    });
+
+    const onEarlyTitleGenerated = enqueueTaskMock.mock.calls[0]?.[1]
+      .onEarlyTitleGenerated as (input: {
+      title: string;
+      taskRun: { taskId: string };
+    }) => Promise<void>;
+
+    await expect(
+      onEarlyTitleGenerated({
+        title: 'Fix flaky login tests',
+        taskRun: { taskId: 'task-1' },
+      }),
+    ).rejects.toThrow(/Failed to rename Telegram topic/);
+    expect(rememberTelegramImplicitTopicMock).toHaveBeenCalledWith({
+      chatId: '111000111',
+      threadId: '77',
+    });
+  });
+
   it('creates topics only for eligible new task conversations', () => {
     expect(
       shouldCreateTelegramTaskTopic({
