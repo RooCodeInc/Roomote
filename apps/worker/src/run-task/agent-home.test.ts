@@ -369,15 +369,20 @@ describe('generateOpenCodeConfig provider support', () => {
         OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL:
           'https://proxy.example.com/v1',
         OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY: 'proxy-key',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_LABEL: 'Corp Proxy',
         OPENAI_COMPATIBLE_LOCAL_BASE_URL: 'http://127.0.0.1:8080/v1',
       },
     });
     const config = JSON.parse(result.configContent) as {
-      provider: Record<string, { options: Record<string, unknown> }>;
+      provider: Record<
+        string,
+        { name?: string; options: Record<string, unknown> }
+      >;
     };
 
     expect(config.provider['openai-compatible-company-proxy']).toMatchObject({
       npm: '@ai-sdk/openai-compatible',
+      name: 'OpenAI-compatible (Corp Proxy)',
       options: {
         baseURL: 'https://proxy.example.com/v1',
         apiKey: '{env:OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY}',
@@ -386,6 +391,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
     expect(config.provider['openai-compatible-local']).toMatchObject({
       npm: '@ai-sdk/openai-compatible',
+      name: 'OpenAI-compatible (Local)',
       options: {
         baseURL: 'http://127.0.0.1:8080/v1',
       },
@@ -393,6 +399,52 @@ describe('generateOpenCodeConfig provider support', () => {
     });
     expect(
       config.provider['openai-compatible-local']?.options.apiKey,
+    ).toBeUndefined();
+  });
+
+  it('ignores invalid openai-compatible env segments from shared parsing', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/gpt-4o',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        // Double underscore is rejected by shared named-env validation
+        OPENAI_COMPATIBLE_BAD__SLUG_BASE_URL: 'https://bad.example.com/v1',
+        // Leading digit env segment is invalid
+        OPENAI_COMPATIBLE_9PROXY_BASE_URL: 'https://nine.example.com/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider['openai-compatible']).toBeDefined();
+    expect(config.provider['openai-compatible-bad--slug']).toBeUndefined();
+    expect(config.provider['openai-compatible-9proxy']).toBeUndefined();
+  });
+
+  it('does not fall back named openai-compatible connections to OPENAI_* credentials', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible-company-proxy/gpt-4o',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL:
+          'https://proxy.example.com/v1',
+        OPENAI_API_KEY: 'sk-openai-should-not-leak',
+        OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible-company-proxy']).toMatchObject({
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+      },
+    });
+    expect(
+      config.provider['openai-compatible-company-proxy']?.options.apiKey,
     ).toBeUndefined();
   });
 
