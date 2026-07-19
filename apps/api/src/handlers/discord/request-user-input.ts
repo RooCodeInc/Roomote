@@ -3,11 +3,10 @@ import {
   buildDiscordCancelledRequestUserInputText,
   getDiscordRequestUserInputCurrentQuestion,
   getPendingCommunicationRequestUserInput,
-  markPendingCommunicationRequestUserInputSubmitted,
   clearPendingCommunicationRequestUserInput,
   parseDiscordRequestUserInputAnswerCallbackData,
   parseDiscordRequestUserInputCancelCallbackData,
-  queueCommunicationRequestUserInputAnswer,
+  submitPendingCommunicationRequestUserInputAnswer,
   type PendingCommunicationRequestUserInput,
 } from '@roomote/communication';
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
@@ -69,27 +68,23 @@ async function finalizeDiscordRequestUserInputAnswer(params: {
     params.pendingRequest,
   );
 
+  // Atomically claim submitted + enqueue in Redis first (Slack-style), then
+  // only the winning claim updates actingUserId. Concurrent losers return
+  // false without double-enqueueing an answer.
   const queued = await setTrustedRunActingUserOnSuccess({
     runId: params.activeRunId,
     userId: params.userId,
-    operation: async () => {
-      await queueCommunicationRequestUserInputAnswer(
+    operation: async () =>
+      submitPendingCommunicationRequestUserInputAnswer(
         'discord',
-        params.activeRunId,
+        conversationId,
+        params.pendingRequest,
         {
-          requestId: params.pendingRequest.requestId,
           answers: params.answers,
           userId: params.userId,
           timestamp: Date.now(),
         },
-      );
-      await markPendingCommunicationRequestUserInputSubmitted(
-        'discord',
-        conversationId,
-        params.pendingRequest.requestId,
-      );
-      return true;
-    },
+      ),
   });
 
   if (!queued) {

@@ -30,6 +30,58 @@ export interface QueuedCommunicationRequestUserInputAnswer {
   timestamp: number;
 }
 
+/**
+ * Atomically claim a pending request_user_input as submitted and optionally
+ * enqueue the winning answer. Mirrors Slack's claim Lua so concurrent replies
+ * cannot both mark-submit and double-enqueue.
+ *
+ * KEYS[1] = pending request key
+ * KEYS[2] = answer queue key
+ * ARGV[1] = expected requestId
+ * ARGV[2] = expected runId
+ * ARGV[3] = expected currentQuestionIndex
+ * ARGV[4] = next pending request JSON (status=submitted)
+ * ARGV[5] = answer JSON or empty string
+ * ARGV[6] = pending TTL seconds
+ * ARGV[7] = answer queue TTL seconds
+ */
+const CLAIM_PENDING_REQUEST_USER_INPUT_SCRIPT = `
+local rawRequest = redis.call('GET', KEYS[1])
+if not rawRequest then
+  return 0
+end
+
+local ok, pendingRequest = pcall(cjson.decode, rawRequest)
+if not ok then
+  return 0
+end
+
+if pendingRequest['requestId'] ~= ARGV[1] then
+  return 0
+end
+
+if tostring(pendingRequest['runId']) ~= ARGV[2] then
+  return 0
+end
+
+if (pendingRequest['status'] or 'pending') ~= 'pending' then
+  return 0
+end
+
+if tostring(pendingRequest['currentQuestionIndex'] or 0) ~= ARGV[3] then
+  return 0
+end
+
+redis.call('SET', KEYS[1], ARGV[4], 'EX', tonumber(ARGV[6]))
+
+if ARGV[5] ~= '' then
+  redis.call('RPUSH', KEYS[2], ARGV[5])
+  redis.call('EXPIRE', KEYS[2], tonumber(ARGV[7]))
+end
+
+return 1
+`;
+
 function getPendingRequestKey(
   provider: CommunicationProvider,
   conversationId: string,
@@ -42,6 +94,56 @@ function getAnswerQueueKey(
   runId: number,
 ): string {
   return `${provider}:request_user_input:answers:${runId}`;
+}
+
+function buildPendingCommunicationRequestUserInputPayload(
+  provider: CommunicationProvider,
+  conversationId: string,
+  request: Omit<
+    PendingCommunicationRequestUserInput,
+    'createdAt' | 'status' | 'provider' | 'conversationId'
+  > & {
+    createdAt?: number;
+    status?: PendingCommunicationRequestUserInput['status'];
+    promptMessageId?: string;
+    currentQuestionIndex?: number;
+    answers?: AcpRequestUserInputAnswers;
+  },
+): PendingCommunicationRequestUserInput {
+  return {
+    ...request,
+    provider,
+    conversationId,
+    currentQuestionIndex: request.currentQuestionIndex ?? 0,
+    answers: request.answers ?? {},
+    createdAt: request.createdAt ?? Date.now(),
+    status: request.status ?? 'pending',
+  };
+}
+
+async function claimPendingCommunicationRequestUserInputUpdate(params: {
+  provider: CommunicationProvider;
+  conversationId: string;
+  request: PendingCommunicationRequestUserInput;
+  expectedQuestionIndex: number;
+  answer?: QueuedCommunicationRequestUserInputAnswer;
+}): Promise<boolean> {
+  const redis = getRedis();
+  const result = await redis.eval(
+    CLAIM_PENDING_REQUEST_USER_INPUT_SCRIPT,
+    2,
+    getPendingRequestKey(params.provider, params.conversationId),
+    getAnswerQueueKey(params.provider, params.request.runId),
+    params.request.requestId,
+    String(params.request.runId),
+    String(params.expectedQuestionIndex),
+    JSON.stringify(params.request),
+    params.answer ? JSON.stringify(params.answer) : '',
+    String(PENDING_REQUEST_TTL_SECONDS),
+    String(ANSWER_QUEUE_TTL_SECONDS),
+  );
+
+  return result === 1;
 }
 
 export function getCommunicationRequestUserInputConversationId(params: {
@@ -71,13 +173,11 @@ export async function setPendingCommunicationRequestUserInput(
   },
 ): Promise<void> {
   const redis = getRedis();
-  const payload: PendingCommunicationRequestUserInput = {
-    ...request,
+  const payload = buildPendingCommunicationRequestUserInputPayload(
     provider,
     conversationId,
-    createdAt: request.createdAt ?? Date.now(),
-    status: request.status ?? 'pending',
-  };
+    request,
+  );
 
   await redis.set(
     getPendingRequestKey(provider, conversationId),
@@ -149,13 +249,41 @@ export async function markPendingCommunicationRequestUserInputSubmitted(
     return false;
   }
 
-  await setPendingCommunicationRequestUserInput(provider, conversationId, {
-    ...existing,
-    status: 'submitted',
-    createdAt: existing.createdAt,
+  return claimPendingCommunicationRequestUserInputUpdate({
+    provider,
+    conversationId,
+    expectedQuestionIndex: existing.currentQuestionIndex ?? 0,
+    request: {
+      ...existing,
+      status: 'submitted',
+    },
   });
+}
 
-  return true;
+/**
+ * Atomically mark the pending prompt submitted and enqueue the answer only for
+ * the winning claim. Concurrent losers return false without enqueueing.
+ */
+export async function submitPendingCommunicationRequestUserInputAnswer(
+  provider: CommunicationProvider,
+  conversationId: string,
+  request: PendingCommunicationRequestUserInput,
+  answer: Omit<QueuedCommunicationRequestUserInputAnswer, 'requestId'>,
+): Promise<boolean> {
+  return claimPendingCommunicationRequestUserInputUpdate({
+    provider,
+    conversationId,
+    expectedQuestionIndex: request.currentQuestionIndex ?? 0,
+    request: {
+      ...request,
+      answers: answer.answers,
+      status: 'submitted',
+    },
+    answer: {
+      ...answer,
+      requestId: request.requestId,
+    },
+  });
 }
 
 export async function queueCommunicationRequestUserInputAnswer(
