@@ -2,7 +2,9 @@ import { pathToFileURL } from 'node:url';
 
 import { execa } from 'execa';
 import {
+  applyImplicitLiteLlmModelPrefix,
   getModelProviderEnvKeyCandidates,
+  isConfiguredEnvValue,
   resolveModelProviderIdFromModel,
 } from '@roomote/types';
 
@@ -829,7 +831,12 @@ function checkModelProviders(
     };
   }
 
-  const provider = resolveModelProviderIdFromModel(model)?.toLowerCase();
+  const resolvedModel = applyImplicitLiteLlmModelPrefix(
+    model,
+    isConfiguredEnvValue(configEnv.LITELLM_BASE_URL),
+  );
+  const provider =
+    resolveModelProviderIdFromModel(resolvedModel)?.toLowerCase();
 
   if (!provider) {
     return {

@@ -360,6 +360,34 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is set', () => {
+    const homeDir = createHomeDir();
+    const result = generateOpenCodeConfig({
+      homeDir,
+      runtimeEnv: {
+        R_MODEL: 'qwen3.6-35b-local',
+        R_SMALL_MODEL: 'coding',
+        LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+        LITELLM_API_KEY: 'litellm-key',
+      },
+    });
+    const globalConfig = JSON.parse(
+      readFileSync(join(result.openCodeConfigDir, 'opencode.json'), 'utf8'),
+    ) as {
+      model: string;
+      small_model?: string;
+      provider: Record<string, { models?: Record<string, unknown> }>;
+    };
+
+    expect(globalConfig.model).toBe('litellm/qwen3.6-35b-local');
+    expect(globalConfig.small_model).toBe('litellm/coding');
+    expect(globalConfig.provider.litellm?.models).toMatchObject({
+      'qwen3.6-35b-local': { name: 'qwen3.6-35b-local' },
+      coding: { name: 'coding' },
+    });
+    expect(result.configContent).toContain('litellm');
+  });
+
   it('configures named openai-compatible connections separately', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

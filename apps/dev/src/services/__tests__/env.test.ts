@@ -94,6 +94,21 @@ describe('EnvService.checkEnvVars', () => {
     );
   });
 
+  it('accepts bare LiteLLM route names when LITELLM_BASE_URL is set', async () => {
+    fs.writeFileSync(
+      path.join(tempRoot, '.env.local'),
+      [
+        'R_PUBLIC_URL=https://roomote-example.ngrok.app',
+        'R_MODEL=qwen3.6-35b-local',
+        'LITELLM_BASE_URL=http://localhost:4000',
+        'LITELLM_API_KEY=litellm-key',
+        '',
+      ].join('\n'),
+    );
+
+    await expect(EnvService.checkEnvVars()).resolves.toBeUndefined();
+  });
+
   it('accepts required local values from the local env file', async () => {
     fs.writeFileSync(
       path.join(tempRoot, '.env.local'),

@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import {
+  applyImplicitLiteLlmModelPrefix,
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
@@ -234,26 +235,45 @@ async function resolveModelRuntimeEnv(
     roomoteExploreModel: runtimeEnv.R_EXPLORE_MODEL,
     roomotePlanningModel: runtimeEnv.R_PLANNING_MODEL,
   });
-  const resolvedRoomoteModel =
+  // Bare R_MODEL values are valid LiteLLM route names when a LiteLLM endpoint
+  // is configured; rewrite them to OpenCode's litellm/<name> form before key
+  // resolution so provider credentials and sandbox validation stay aligned.
+  const isLiteLlmConfigured = Boolean(
+    normalizeConfiguredValue(runtimeEnv.LITELLM_BASE_URL) ??
+    normalizeConfiguredValue(persistedEnvVars.LITELLM_BASE_URL),
+  );
+  const withLiteLlmPrefix = (modelId: string | undefined): string | undefined =>
+    modelId
+      ? applyImplicitLiteLlmModelPrefix(modelId, isLiteLlmConfigured)
+      : undefined;
+  const resolvedRoomoteModel = withLiteLlmPrefix(
     runtimeOverrideModelConfig.roomoteModel ??
-    normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel);
-  const resolvedRoomoteSmallModel =
+      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel),
+  );
+  const resolvedRoomoteSmallModel = withLiteLlmPrefix(
     runtimeOverrideModelConfig.roomoteSmallModel ??
-    normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteSmallModel);
-  const resolvedRoomoteVisionModel =
+      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteSmallModel),
+  );
+  const resolvedRoomoteVisionModel = withLiteLlmPrefix(
     runtimeOverrideModelConfig.roomoteVisionModel ??
-    normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteVisionModel);
-  const resolvedRoomoteCodeReviewModel =
+      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteVisionModel),
+  );
+  const resolvedRoomoteCodeReviewModel = withLiteLlmPrefix(
     runtimeOverrideModelConfig.roomoteCodeReviewModel ??
-    normalizeConfiguredValue(
-      persistedRuntimeModelConfig.roomoteCodeReviewModel,
-    );
-  const resolvedRoomoteExploreModel =
+      normalizeConfiguredValue(
+        persistedRuntimeModelConfig.roomoteCodeReviewModel,
+      ),
+  );
+  const resolvedRoomoteExploreModel = withLiteLlmPrefix(
     runtimeOverrideModelConfig.roomoteExploreModel ??
-    normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteExploreModel);
-  const resolvedRoomotePlanningModel =
+      normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteExploreModel),
+  );
+  const resolvedRoomotePlanningModel = withLiteLlmPrefix(
     runtimeOverrideModelConfig.roomotePlanningModel ??
-    normalizeConfiguredValue(persistedRuntimeModelConfig.roomotePlanningModel);
+      normalizeConfiguredValue(
+        persistedRuntimeModelConfig.roomotePlanningModel,
+      ),
+  );
   // Roomote applies per-role reasoning defaults when no explicit level is
   // configured, but only for models that are not known to lack configurable
   // reasoning support (unknown support keeps the default, matching the UI).
