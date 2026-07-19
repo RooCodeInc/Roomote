@@ -21,6 +21,7 @@ import {
   taskSpecSchema,
   communicationProviderSchema,
   getCommunicationChannelFromTaskPayload,
+  getCommunicationProviderFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   computeProviderLaunchModes,
   computeProviderUsageLifecycleActions,
@@ -68,7 +69,7 @@ import {
   queueLinearRequestUserInputAnswer,
   setPendingLinearRequestUserInput,
 } from '@roomote/linear';
-import { publishDiscordRequestUserInput } from '../lib/discord-request-user-input';
+import { publishCommunicationRequestUserInput } from '../lib/communication-request-user-input';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -832,6 +833,19 @@ export const taskRunsRouter = router({
       });
     }
 
+    const provider =
+      getCommunicationProviderFromTaskPayload(taskRun.payload) ?? 'discord';
+    if (
+      provider !== 'discord' &&
+      provider !== 'telegram' &&
+      provider !== 'teams'
+    ) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `request_user_input publish is not supported for provider ${provider}`,
+      });
+    }
+
     const channelId = getCommunicationChannelFromTaskPayload(taskRun.payload);
     const threadId = getCommunicationThreadIdFromTaskPayload(taskRun.payload);
     const conversationId = getCommunicationRequestUserInputConversationId({
@@ -839,10 +853,10 @@ export const taskRunsRouter = router({
       threadId,
     });
     const existing = conversationId
-      ? await getPendingCommunicationRequestUserInput('discord', conversationId)
+      ? await getPendingCommunicationRequestUserInput(provider, conversationId)
       : null;
     // Reuse any pending prompt for this run so mid-flight question enrichment
-    // edits one Discord message instead of posting a second shell.
+    // edits one message instead of posting a second shell.
     const existingForRequest =
       existing &&
       existing.runId === input.runId &&
@@ -850,7 +864,65 @@ export const taskRunsRouter = router({
         ? existing
         : null;
 
-    return publishDiscordRequestUserInput({
+    return publishCommunicationRequestUserInput({
+      runId: input.runId,
+      taskId: input.taskId,
+      payload: taskRun.payload,
+      request: {
+        requestId: input.requestId,
+        questions: input.questions,
+      },
+      existing: existingForRequest,
+    });
+  }),
+  publishCommunicationRequestUserInput: runScoped(
+    z.object({
+      runId: z.number(),
+      requestId: z.string(),
+      taskId: z.string(),
+      questions: z.array(acpRequestUserInputQuestionSchema),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => {
+    // Alias: same implementation resolve provider from the task payload.
+    const taskRun = await findTaskRun(input.runId);
+    if (!taskRun) {
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: `Task run ${input.runId} not found`,
+      });
+    }
+
+    const provider =
+      getCommunicationProviderFromTaskPayload(taskRun.payload) ?? 'discord';
+    if (
+      provider !== 'discord' &&
+      provider !== 'telegram' &&
+      provider !== 'teams'
+    ) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `request_user_input publish is not supported for provider ${provider}`,
+      });
+    }
+
+    const channelId = getCommunicationChannelFromTaskPayload(taskRun.payload);
+    const threadId = getCommunicationThreadIdFromTaskPayload(taskRun.payload);
+    const conversationId = getCommunicationRequestUserInputConversationId({
+      channelId,
+      threadId,
+    });
+    const existing = conversationId
+      ? await getPendingCommunicationRequestUserInput(provider, conversationId)
+      : null;
+    const existingForRequest =
+      existing &&
+      existing.runId === input.runId &&
+      existing.status === 'pending'
+        ? existing
+        : null;
+
+    return publishCommunicationRequestUserInput({
       runId: input.runId,
       taskId: input.taskId,
       payload: taskRun.payload,

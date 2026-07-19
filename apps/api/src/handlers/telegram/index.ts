@@ -414,6 +414,31 @@ telegram.post('/', async (c) => {
       return c.json({ ok: true, ignored: 'unsupported_update' });
     }
 
+    // Prefer structured request_user_input answers over plain¡ follow-ups.
+    if (queuedMessage.userId && queuedMessage.text?.trim()) {
+      const { tryHandleTelegramRequestUserInputMessage } =
+        await import('./request-user-input.js');
+      const handled = await tryHandleTelegramRequestUserInputMessage({
+        activeRunId: activeRun.id,
+        userId: queuedMessage.userId,
+        text: queuedMessage.text,
+        chatId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+      });
+      if (handled) {
+        await ackTelegramMessageBestEffort({
+          chatId: metadata.communicationChannelId,
+          messageId: metadata.communicationMessageId,
+        }).catch(() => undefined);
+        return c.json({
+          ok: true,
+          queued: true,
+          runId: activeRun.id,
+          requestUserInput: true,
+        });
+      }
+    }
+
     // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker
     // only runs the queued turn as this sender if the server actor matches.
     await syncActingUserForInboundMessage({

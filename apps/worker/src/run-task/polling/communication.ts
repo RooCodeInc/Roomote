@@ -79,7 +79,11 @@ export function createCommunicationMessageInterval({
     }
 
     try {
-      if (provider === 'discord') {
+      if (
+        provider === 'discord' ||
+        provider === 'telegram' ||
+        provider === 'teams'
+      ) {
         const queuedAnswers = await runPollingSdkCall({
           execute: () =>
             sdk.taskRuns.getCommunicationRequestUserInputAnswers({

@@ -171,7 +171,7 @@ export function buildChatProviderMessageInstructions(
 ): string {
   const { tag, name, label } = getNonSlackChatProviderDisplay(provider);
   const requestUserInputInstructions =
-    provider === 'discord'
+    provider === 'discord' || provider === 'telegram' || provider === 'teams'
       ? `
   <${tag}_request_user_input>
     <rule>At the beginning of a ${label} turn, do not use \`request_user_input\` unless the next step is still genuinely blocked after using thread context and available tools to resolve the question.</rule>
