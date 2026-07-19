@@ -27,6 +27,7 @@ import {
 import {
   getNamedPortsForTaskRun,
   shouldEnableAuthBypassForTaskRun,
+  clearTaskRunMachine,
   updateTaskRunMachine,
 } from '../utils';
 import { resolveFromWorkspaceRoot } from '../repo-paths';
@@ -504,6 +505,9 @@ export async function spawnDockerWorker(
         containerName,
         taskNetwork: dockerNetwork,
       });
+      // updateTaskRunMachine may have already persisted routing for this
+      // container before abort; terminal cancel leaves those fields in place.
+      await clearTaskRunMachine(taskRun.id);
     }
     throw error;
   }
