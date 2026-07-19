@@ -109,6 +109,25 @@ vi.mock('../request-user-input', () => ({
       requestId: request.requestId,
       questions: request.questions,
     }),
+  isOpenCodeQuestionPlaceholderRequest: (request: {
+    questions: Array<{
+      id?: string;
+      header?: string;
+      question?: string;
+      options?: unknown[];
+    }>;
+  }) => {
+    if (request.questions.length !== 1) {
+      return false;
+    }
+    const question = request.questions[0]!;
+    const hasOptions = Boolean(question.options && question.options.length > 0);
+    return (
+      !hasOptions &&
+      question.question?.trim() === 'Provide the requested input.' &&
+      (question.id === 'response' || question.header === 'Response')
+    );
+  },
   supportsIntegrationRequestUserInput: mockSupportsIntegrationRequestUserInput,
 }));
 
@@ -591,21 +610,12 @@ describe('slackMentionCallbacks', () => {
       context,
     );
 
+    // Placeholder OpenCode shells are skipped, so the rich question posts once
+    // instead of posting a shell and then updating it.
     expect(mockPostMessage).toHaveBeenCalledTimes(1);
-    expect(mockUpdateMessage).toHaveBeenCalledWith({
-      channel: 'C123',
-      ts: 'posted-ts',
-      message: {
-        blocks: [
-          {
-            type: 'markdown',
-            text: 'native request_user_input blocks',
-          },
-        ],
-      },
-    });
-    expect(mockBuildSlackRequestUserInputBlocks).toHaveBeenNthCalledWith(
-      2,
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+    expect(mockBuildSlackRequestUserInputBlocks).toHaveBeenCalledTimes(1);
+    expect(mockBuildSlackRequestUserInputBlocks).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId,
         questions: [richQuestion],

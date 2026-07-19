@@ -127,11 +127,13 @@ export async function publishCommunicationRequestUserInput(params: {
   }
 
   if (!promptMessageId) {
-    const postChannelId =
-      provider === 'discord' && threadId ? channelId : conversationId;
+    // channelId is always the chat/conversation destination. threadId is
+    // only reply/topic scope (Telegram topics, Discord threads, Teams reply).
     const posted = await adapter.postMessage({
-      channelId: postChannelId,
-      ...(threadId && provider !== 'teams' ? { threadId } : {}),
+      channelId,
+      ...(threadId && (provider === 'discord' || provider === 'telegram')
+        ? { threadId }
+        : {}),
       ...(provider === 'teams' && threadId
         ? { replyToMessageId: threadId }
         : {}),
