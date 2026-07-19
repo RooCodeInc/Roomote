@@ -701,6 +701,19 @@ async function refreshTaskTitle(input: {
     desiredCheckpoint === 0 ||
     taskRow.llmTitleCheckpoint >= desiredCheckpoint
   ) {
+    // Early title may have locked checkpoint 1 before the provider rename
+    // landed (or while a prior race left the surface on a provisional name).
+    // Re-push the canonical title once on the opening user prompt.
+    if (
+      input.mode === 'checkpoint' &&
+      desiredCheckpoint === 1 &&
+      visibleUserMessageCount === 1 &&
+      taskRow.llmTitleCheckpoint >= 1
+    ) {
+      await syncTaskCommunicationThreadTitleBestEffort({
+        taskId: input.taskId,
+      });
+    }
     return;
   }
 
@@ -748,11 +761,12 @@ async function refreshTaskTitle(input: {
     return;
   }
 
-  if (shouldPersistGeneratedTitle) {
-    await syncTaskCommunicationThreadTitleBestEffort({
-      taskId: updatedTask.id,
-    });
-  }
+  // Always push the current canonical title to task-owned provider threads.
+  // Even when generation fell back and left a prior title in place, surface
+  // rename retries still need a chance after checkpoint moves forward.
+  await syncTaskCommunicationThreadTitleBestEffort({
+    taskId: updatedTask.id,
+  });
 }
 
 /**

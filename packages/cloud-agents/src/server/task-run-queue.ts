@@ -842,6 +842,13 @@ export type TaskChannelBindings = {
 export async function persistEarlyGeneratedTaskTitle(input: {
   taskId: string;
   generatedTitle: string;
+  /**
+   * When false, store the generated title but leave checkpoint 0 open so the
+   * first-message transcript path can retry surface sync (Discord/Telegram
+   * rename). Surfaces pass false when their onEarlyTitleGenerated callback
+   * failed after the title was produced.
+   */
+  lockFirstMessageCheckpoint?: boolean;
 }): Promise<boolean> {
   // Do not advance the checkpoint on fallback titles. Checkpoint 1 is the
   // first-message refresh gate; locking it without a real title prevents the
@@ -849,10 +856,11 @@ export async function persistEarlyGeneratedTaskTitle(input: {
   if (isFallbackTaskTitle(input.generatedTitle)) {
     return false;
   }
+  const lockFirstMessageCheckpoint = input.lockFirstMessageCheckpoint !== false;
   const [updatedTask] = await db
     .update(tasks)
     .set({
-      llmTitleCheckpoint: 1,
+      ...(lockFirstMessageCheckpoint ? { llmTitleCheckpoint: 1 } : {}),
       updatedAt: new Date(),
       title: input.generatedTitle,
     })
@@ -1545,24 +1553,46 @@ async function enqueueFreshLaunch(
           taskId: taskRun.taskId,
           messages: [{ role: 'user', text: description }],
         });
+        if (isFallbackTaskTitle(generatedTitle)) {
+          return;
+        }
+
+        // Persist the title before any surface callback so Discord/Telegram
+        // concurrent re-reads see the canonical value. When a surface callback
+        // is present, leave checkpoint 0 open until rename succeeds — otherwise
+        // a failed rename permanently skips the first-message retry path.
+        const hasSurfaceCallback = Boolean(options.onEarlyTitleGenerated);
         const persistedGeneratedTitle = await persistEarlyGeneratedTaskTitle({
           taskId: taskRun.taskId,
           generatedTitle,
+          lockFirstMessageCheckpoint: !hasSurfaceCallback,
         });
+        if (!persistedGeneratedTitle) {
+          return;
+        }
 
-        if (persistedGeneratedTitle && options.onEarlyTitleGenerated) {
-          try {
-            await options.onEarlyTitleGenerated({
-              taskRun,
-              title: generatedTitle,
-            });
-          } catch (error) {
-            console.warn(
-              `[enqueueTask] Early-title callback failed for task ${taskRun.taskId}: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-          }
+        if (!options.onEarlyTitleGenerated) {
+          return;
+        }
+
+        try {
+          await options.onEarlyTitleGenerated({
+            taskRun,
+            title: generatedTitle,
+          });
+          // Rename landed (or was a no-op surface). Lock checkpoint 1 so the
+          // first-message path does not spend another LLM title call.
+          await persistEarlyGeneratedTaskTitle({
+            taskId: taskRun.taskId,
+            generatedTitle,
+            lockFirstMessageCheckpoint: true,
+          });
+        } catch (error) {
+          console.warn(
+            `[enqueueTask] Early-title callback failed for task ${taskRun.taskId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
         }
       } catch (error) {
         console.warn(

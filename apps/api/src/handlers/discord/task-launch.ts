@@ -507,18 +507,25 @@ export async function launchDiscordTask(input: {
               title: string;
             }) => {
               let canonicalTitle = title;
+              let appliedTitle: string | null = null;
               for (let attempt = 0; attempt < 2; attempt += 1) {
                 try {
                   await input.provider.editChannel({
                     channelId: titleThreadId,
                     name: buildCommunicationTaskThreadName(canonicalTitle),
                   });
+                  appliedTitle = canonicalTitle;
                 } catch (error) {
                   console.warn(
                     `[discord] Failed to rename task thread ${titleThreadId} with generated title: ${
                       error instanceof Error ? error.message : String(error)
                     }`,
                   );
+                  // Re-throw only when no rename has landed yet so enqueue
+                  // keeps checkpoint 0 and the first-message path can retry.
+                  if (!appliedTitle) {
+                    throw error;
+                  }
                   return;
                 }
 

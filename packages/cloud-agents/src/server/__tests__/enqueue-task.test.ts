@@ -209,6 +209,129 @@ describe('enqueueTask initiator stamping', () => {
     expect(task?.title).not.toBe('Untitled task');
   });
 
+  it('can store an early title without locking checkpoint 1 for surface retries', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    await expect(
+      persistEarlyGeneratedTaskTitle({
+        taskId: run.taskId,
+        generatedTitle: 'Surface-pending title',
+        lockFirstMessageCheckpoint: false,
+      }),
+    ).resolves.toBe(true);
+
+    const unlocked = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: {
+        title: true,
+        llmTitleCheckpoint: true,
+      },
+    });
+    expect(unlocked).toEqual({
+      title: 'Surface-pending title',
+      llmTitleCheckpoint: 0,
+    });
+
+    await expect(
+      persistEarlyGeneratedTaskTitle({
+        taskId: run.taskId,
+        generatedTitle: 'Surface-pending title',
+        lockFirstMessageCheckpoint: true,
+      }),
+    ).resolves.toBe(true);
+
+    const locked = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: {
+        title: true,
+        llmTitleCheckpoint: true,
+      },
+    });
+    expect(locked).toEqual({
+      title: 'Surface-pending title',
+      llmTitleCheckpoint: 1,
+    });
+  });
+
+  it('leaves checkpoint 0 open when the early-title surface callback fails', async () => {
+    const userId = await createUser();
+    mockGenerateLlmTaskTitle.mockResolvedValueOnce('Discord rename title');
+
+    const run = await enqueueTask(
+      {
+        task: standardTaskInput(),
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'discord',
+        trigger: 'message',
+      },
+      {
+        enqueue: false,
+        onEarlyTitleGenerated: async () => {
+          throw new Error('rename failed');
+        },
+      },
+    );
+    createdTaskIds.push(run.taskId);
+
+    await vi.waitFor(async () => {
+      const task = await db.query.tasks.findFirst({
+        where: eq(tasks.id, run.taskId),
+        columns: {
+          title: true,
+          llmTitleCheckpoint: true,
+        },
+      });
+      expect(task?.title).toBe('Discord rename title');
+      expect(task?.llmTitleCheckpoint).toBe(0);
+    });
+  });
+
+  it('locks checkpoint 1 after a successful early-title surface callback', async () => {
+    const userId = await createUser();
+    mockGenerateLlmTaskTitle.mockResolvedValueOnce('Renamed thread title');
+    const onEarlyTitleGenerated = vi.fn().mockResolvedValue(undefined);
+
+    const run = await enqueueTask(
+      {
+        task: standardTaskInput(),
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'discord',
+        trigger: 'message',
+      },
+      {
+        enqueue: false,
+        onEarlyTitleGenerated,
+      },
+    );
+    createdTaskIds.push(run.taskId);
+
+    await vi.waitFor(async () => {
+      const task = await db.query.tasks.findFirst({
+        where: eq(tasks.id, run.taskId),
+        columns: {
+          title: true,
+          llmTitleCheckpoint: true,
+        },
+      });
+      expect(onEarlyTitleGenerated).toHaveBeenCalledWith({
+        taskRun: expect.objectContaining({ taskId: run.taskId }),
+        title: 'Renamed thread title',
+      });
+      expect(task).toEqual({
+        title: 'Renamed thread title',
+        llmTitleCheckpoint: 1,
+      });
+    });
+  });
+
   it('persists an intentional pre-dispatch phase and error', async () => {
     const userId = await createUser();
 

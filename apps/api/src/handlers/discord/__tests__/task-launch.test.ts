@@ -324,6 +324,80 @@ describe('launchDiscordTask', () => {
     expect(provider.editChannel).toHaveBeenCalledTimes(2);
   });
 
+  it('rethrows when the generated-title rename never lands so checkpoint stays open', async () => {
+    const reservedThread = {
+      channelId: 'thread-41',
+      parentChannelId: 'channel-1',
+      name: 'Fix the flaky tests',
+      kind: 'thread' as const,
+    };
+    const provider = {
+      reserveTaskThread: vi.fn().mockResolvedValue(reservedThread),
+      completeTaskThread: vi.fn().mockResolvedValue({
+        ...reservedThread,
+        messageId: 'thread-message-1',
+      }),
+      postMessage: vi.fn().mockResolvedValue({
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-41',
+        messageId: 'ack-1',
+      }),
+      editChannel: vi.fn().mockRejectedValue(
+        new DiscordApiError({
+          method: 'PATCH',
+          path: '/channels/thread-41',
+          status: 429,
+          message: 'rate limited',
+        }),
+      ),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-rename-fail',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-rename-fail',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    const enqueueOptions = mocks.enqueueTask.mock.calls[0]?.[1] as {
+      onEarlyTitleGenerated: (input: {
+        taskRun: { taskId: string };
+        title: string;
+      }) => Promise<void>;
+    };
+
+    await expect(
+      enqueueOptions.onEarlyTitleGenerated({
+        taskRun: { taskId: 'task-41' },
+        title: 'Repair flaky authentication tests',
+      }),
+    ).rejects.toBeInstanceOf(DiscordApiError);
+  });
+
   it('anchors the task thread to the triggering channel message', async () => {
     const anchoredThread = {
       channelId: 'message-1',
