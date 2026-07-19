@@ -319,7 +319,7 @@ export function SourceControlConfigForm({
           return (
             <div
               key={field.envVarName}
-              className="grid max-w-xl gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center"
+              className="grid max-w-xl gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-start"
             >
               <div className="text-sm font-medium">
                 {field.label}

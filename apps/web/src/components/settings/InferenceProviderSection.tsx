@@ -45,7 +45,8 @@ import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotC
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
-  'grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(0,1fr)] md:items-center';
+  'grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(0,1fr)] md:items-start';
+const PROVIDER_GRID_LABEL_CLASS = 'text-sm font-medium md:pt-2';
 
 type InferenceProviderSectionProps = {
   providerSetup: SetupModelStatus | null;
@@ -141,7 +142,9 @@ function ConnectedProviderRow({
       : MASKED_VALUE;
 
   return (
-    <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
+    <div
+      className={`${PROVIDER_GRID_ROW_CLASS} md:items-center py-3 first:pt-0 last:pb-0`}
+    >
       <div className="flex min-w-0 items-center gap-2">
         <span className="min-w-0 truncate text-sm font-medium">
           {provider.label}
@@ -350,7 +353,7 @@ function ProviderCredentialsDialog({
           {selectedProvider ? (
             <>
               <div className={PROVIDER_GRID_ROW_CLASS}>
-                <span className="text-sm font-medium">Provider</span>
+                <span className={PROVIDER_GRID_LABEL_CLASS}>Provider</span>
                 <Select
                   open={providerSelectOpen}
                   onOpenChange={setProviderSelectOpen}
@@ -388,7 +391,7 @@ function ProviderCredentialsDialog({
 
               {isOAuthProvider ? (
                 <div className={PROVIDER_GRID_ROW_CLASS}>
-                  <span className="text-sm font-medium">Account</span>
+                  <span className={PROVIDER_GRID_LABEL_CLASS}>Account</span>
                   <p className="min-w-0 text-sm text-muted-foreground">
                     {isChatGptProvider
                       ? 'Connect a ChatGPT Plus or Pro account to run tasks on your subscription.'
@@ -399,7 +402,7 @@ function ProviderCredentialsDialog({
                 <>
                   {requiresConnectionName ? (
                     <div className={PROVIDER_GRID_ROW_CLASS}>
-                      <span className="text-sm font-medium">
+                      <span className={PROVIDER_GRID_LABEL_CLASS}>
                         Connection name
                       </span>
                       <div className="space-y-1.5">
@@ -419,7 +422,7 @@ function ProviderCredentialsDialog({
                     </div>
                   ) : null}
                   <div className={PROVIDER_GRID_ROW_CLASS}>
-                    <span className="text-sm font-medium">
+                    <span className={PROVIDER_GRID_LABEL_CLASS}>
                       {primaryCredentialLabel}
                     </span>
                     <div className="space-y-1.5">
@@ -469,7 +472,7 @@ function ProviderCredentialsDialog({
                       key={field.envVarName}
                       className={PROVIDER_GRID_ROW_CLASS}
                     >
-                      <span className="text-sm font-medium">
+                      <span className={PROVIDER_GRID_LABEL_CLASS}>
                         {field.label}
                         {field.required ? '' : ' (optional)'}
                       </span>
@@ -561,7 +564,9 @@ function ChatGptSubscriptionRow({
   isDisconnecting: boolean;
 }) {
   return (
-    <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
+    <div
+      className={`${PROVIDER_GRID_ROW_CLASS} md:items-center py-3 first:pt-0 last:pb-0`}
+    >
       <div className="flex min-w-0 items-center gap-2">
         <span className="min-w-0 truncate text-sm font-medium">
           {getModelProviderLabel(CHATGPT_SUBSCRIPTION_PROVIDER_ID)}
@@ -619,7 +624,9 @@ function GitHubCopilotSubscriptionRow({
   isDisconnecting: boolean;
 }) {
   return (
-    <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
+    <div
+      className={`${PROVIDER_GRID_ROW_CLASS} md:items-center py-3 first:pt-0 last:pb-0`}
+    >
       <span className="min-w-0 truncate text-sm font-medium">
         {getModelProviderLabel('github-copilot')}
       </span>
