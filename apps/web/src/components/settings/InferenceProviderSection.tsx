@@ -33,6 +33,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  Progress,
   Select,
   SelectContent,
   SelectItem,
@@ -45,6 +46,7 @@ import {
 import { Section } from '@/components/settings/Section';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
+import { cn } from '@/lib/utils';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
@@ -148,6 +150,8 @@ function formatUsageWindow(window: SubscriptionUsageWindow): string | null {
     value = 'unlimited';
   } else if (window.remaining !== undefined && window.limit !== undefined) {
     value = `${window.remaining.toLocaleString()} of ${window.limit.toLocaleString()} left`;
+  } else if (window.used !== undefined && window.limit !== undefined) {
+    value = `${window.used.toLocaleString()} of ${window.limit.toLocaleString()} used`;
   } else if (window.usedPercent !== undefined) {
     value = `${Math.round(window.usedPercent)}% used`;
   } else {
@@ -162,6 +166,51 @@ function formatUsageWindow(window: SubscriptionUsageWindow): string | null {
   return `${window.label}: ${value}${reset ? ` (${reset})` : ''}`;
 }
 
+function getUsageWindowPercent(
+  window: SubscriptionUsageWindow,
+): number | undefined {
+  if (window.unlimited) {
+    return undefined;
+  }
+
+  if (window.usedPercent !== undefined && Number.isFinite(window.usedPercent)) {
+    return Math.max(0, Math.min(100, window.usedPercent));
+  }
+
+  if (
+    window.limit !== undefined &&
+    window.limit > 0 &&
+    window.remaining !== undefined &&
+    Number.isFinite(window.remaining)
+  ) {
+    return Math.max(
+      0,
+      Math.min(100, ((window.limit - window.remaining) / window.limit) * 100),
+    );
+  }
+
+  if (
+    window.limit !== undefined &&
+    window.limit > 0 &&
+    window.used !== undefined &&
+    Number.isFinite(window.used)
+  ) {
+    return Math.max(0, Math.min(100, (window.used / window.limit) * 100));
+  }
+
+  return undefined;
+}
+
+function usageBarClassName(usedPercent: number): string {
+  if (usedPercent >= 90) {
+    return 'bg-destructive';
+  }
+  if (usedPercent >= 75) {
+    return 'bg-warning';
+  }
+  return 'bg-foreground/35';
+}
+
 function SubscriptionUsageLine({
   usage,
   className,
@@ -169,20 +218,43 @@ function SubscriptionUsageLine({
   usage: SubscriptionProviderUsage | undefined;
   className?: string;
 }) {
-  const parts = (usage?.windows ?? [])
-    .map(formatUsageWindow)
-    .filter((part): part is string => part !== null);
+  const rows = (usage?.windows ?? [])
+    .map((window) => {
+      const label = formatUsageWindow(window);
+      if (!label) {
+        return null;
+      }
 
-  if (parts.length === 0) {
+      return {
+        key: window.label,
+        label,
+        usedPercent: getUsageWindowPercent(window),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  if (rows.length === 0) {
     return null;
   }
 
   return (
-    <p
-      className={`min-w-0 truncate text-xs text-muted-foreground ${className ?? ''}`}
-    >
-      {parts.join(' · ')}
-    </p>
+    <div className={cn('min-w-0 space-y-1.5', className)}>
+      {rows.map((row) => (
+        <div key={row.key} className="min-w-0 space-y-1">
+          <p className="min-w-0 truncate text-xs text-muted-foreground">
+            {row.label}
+          </p>
+          {row.usedPercent !== undefined ? (
+            <Progress
+              value={row.usedPercent}
+              className="h-1 bg-muted"
+              barClassName={usageBarClassName(row.usedPercent)}
+              aria-label={`${row.key} usage`}
+            />
+          ) : null}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -659,7 +731,9 @@ function ChatGptSubscriptionRow({
                 : 'Connected to a ChatGPT account.'}
             </p>
           )}
-          {!errored ? <SubscriptionUsageLine usage={usage} /> : null}
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
         </div>
 
         {errored ? (
@@ -715,7 +789,9 @@ function GitHubCopilotSubscriptionRow({
               ? (errorMessage ?? 'GitHub Copilot needs to be reconnected.')
               : 'Connected to a GitHub Copilot account.'}
           </p>
-          {!errored ? <SubscriptionUsageLine usage={usage} /> : null}
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
         </div>
         {errored ? (
           <Button size="sm" variant="outline" onClick={onReconnect}>
