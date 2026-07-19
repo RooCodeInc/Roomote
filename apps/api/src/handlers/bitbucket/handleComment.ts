@@ -1,4 +1,10 @@
-import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
+import {
+  buildMentionRequestBlock,
+  buildUntrustedContentPolicy,
+  enqueueTask,
+  escapeTaskContextText,
+  getTaskUrl,
+} from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
@@ -141,14 +147,6 @@ function buildTaskStartFailedComment(): string {
   return 'I saw the mention, but Roomote could not queue a review task for this pull request. Please try again in a moment. If it keeps failing, an administrator should check the deployment logs.';
 }
 
-function formatQuotedText(text: string): string {
-  return text
-    .trim()
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n');
-}
-
 function buildExistingTaskFollowUpMessage({
   repoFullName,
   pullRequestNumber,
@@ -165,8 +163,7 @@ function buildExistingTaskFollowUpMessage({
   commentBody: string;
 }): string {
   const lines = [
-    `${commenter} mentioned Roomote in a comment on Bitbucket pull request #${pullRequestNumber} (${pullRequestTitle}) in ${repoFullName}:`,
-    formatQuotedText(commentBody),
+    `${commenter} mentioned Roomote in a comment on Bitbucket pull request #${pullRequestNumber} (${escapeTaskContextText(pullRequestTitle)}) in ${repoFullName}.`,
     '',
     'Please act on this comment as a follow-up to your existing work on this pull request.',
   ];
@@ -174,6 +171,14 @@ function buildExistingTaskFollowUpMessage({
   if (headRef) {
     lines.push(`The pull request source branch is \`${headRef}\`.`);
   }
+
+  lines.push(
+    '',
+    'Mention comment (the request to act on):',
+    buildMentionRequestBlock(commentBody),
+    '',
+    buildUntrustedContentPolicy(),
+  );
 
   return lines.join('\n');
 }

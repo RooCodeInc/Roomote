@@ -94,6 +94,9 @@ export function GitHubCopilotConnectDialog({
             queryClient.invalidateQueries({
               queryKey: trpc.githubCopilotSubscription.status.queryKey(),
             }),
+            queryClient.invalidateQueries({
+              queryKey: trpc.subscriptionUsage.list.queryKey(),
+            }),
           ]);
           await onConnected?.();
           close(false);
