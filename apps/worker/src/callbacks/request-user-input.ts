@@ -34,7 +34,7 @@ function formatQuestion(
 
 export function buildRequestUserInputTaskUrl(
   taskRun: TaskRun,
-  source: 'slack' | 'linear',
+  source: 'slack' | 'linear' | 'discord',
 ): string {
   const webPath =
     taskRun.payload &&
