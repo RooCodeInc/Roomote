@@ -311,14 +311,28 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
         return;
       }
 
-      if (structuredAnswer.questionId !== currentQuestion.question.id) {
-        throw new Error(
-          'This prompt is out of date. Please answer the newest question in the thread.',
+      let answerQuestionId = structuredAnswer.questionId!;
+      if (answerQuestionId !== currentQuestion.question.id) {
+        const answerText = structuredAnswer.answer ?? '';
+        const options = currentQuestion.question.options ?? [];
+        const matchesOption = options.some(
+          (option) => option.label === answerText,
         );
+        const allowsCustomAnswer =
+          options.length === 0 || currentQuestion.question.isOther === true;
+        const freeformOk = allowsCustomAnswer && answerText.trim().length > 0;
+
+        if (!matchesOption && !freeformOk) {
+          throw new Error(
+            'This prompt is out of date. Please answer the newest question in the thread.',
+          );
+        }
+
+        answerQuestionId = currentQuestion.question.id;
       }
 
       const nextAnswers = mergeRequestUserInputAnswers(pendingRequest.answers, {
-        [structuredAnswer.questionId]: {
+        [answerQuestionId]: {
           answers: [structuredAnswer.answer!],
         },
       });

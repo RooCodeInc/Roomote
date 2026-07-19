@@ -24,6 +24,7 @@ import { captureWorkerException } from '../monitoring/sentry';
 import {
   buildRequestUserInputTaskUrl,
   getRequestUserInputPromptSignature,
+  isStreamingPlaceholderRequestUserInput,
   supportsIntegrationRequestUserInput,
 } from './request-user-input';
 
@@ -302,6 +303,10 @@ async function handleRequestUserInput(
     return;
   }
 
+  if (isStreamingPlaceholderRequestUserInput(event.request)) {
+    return;
+  }
+
   try {
     const slack = await getSlackNotifier();
     const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);
@@ -348,6 +353,33 @@ async function handleRequestUserInput(
             thread_ts: threadTs,
             blocks: promptBlocks,
           });
+
+      if (
+        !didUpdatePrompt &&
+        existingPromptMessageTs &&
+        promptMessageTs &&
+        promptMessageTs !== existingPromptMessageTs
+      ) {
+        const neutralized = await slack.updateMessage({
+          channel,
+          ts: existingPromptMessageTs,
+          message: {
+            blocks: [
+              {
+                type: 'markdown',
+                text: '_This prompt was updated. Please use the newest question in the thread._',
+              },
+            ],
+          },
+        });
+
+        if (!neutralized) {
+          await slack.deleteMessage({
+            channel,
+            ts: existingPromptMessageTs,
+          });
+        }
+      }
 
       if (!promptMessageTs) {
         await sdk.taskRuns.clearPendingSlackRequestUserInput({

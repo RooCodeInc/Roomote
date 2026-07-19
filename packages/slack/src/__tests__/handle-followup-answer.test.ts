@@ -561,6 +561,70 @@ describe('handleFollowupAnswer', () => {
     expect(consoleErrorMock).not.toHaveBeenCalled();
   });
 
+  it('accepts a Pick answer with a stale question id when the option still matches the current prompt', async () => {
+    findActiveSlackTaskRunMock.mockResolvedValue({
+      id: 42,
+      machineId: null,
+      taskId: 'task-1',
+    });
+    selectLimitMock
+      .mockResolvedValueOnce([{ userId: 'user-1' }])
+      .mockResolvedValueOnce([{ botAccessToken: 'xoxb-test' }]);
+    getPendingSlackRequestUserInputMock.mockResolvedValue({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      questions: [
+        {
+          id: 'language-v2',
+          header: 'Language',
+          question: 'Which language should I use?',
+          isOther: true,
+          isSecret: false,
+          options: [
+            {
+              label: 'TypeScript',
+              description: 'Use the app stack.',
+            },
+          ],
+        },
+      ],
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'pending',
+      createdAt: 123,
+      promptMessageTs: 'prompt-ts',
+    });
+
+    await handleFollowupAnswer(
+      buildPayload(
+        JSON.stringify({
+          requestId: 'rui:session:turn:call',
+          questionId: 'language',
+          questionIndex: 0,
+          answer: 'TypeScript',
+        }),
+      ),
+    );
+
+    expect(submitPendingSlackRequestUserInputAnswerMock).toHaveBeenCalledWith(
+      '111.222',
+      expect.objectContaining({
+        requestId: 'rui:session:turn:call',
+      }),
+      expect.objectContaining({
+        answers: {
+          'language-v2': {
+            answers: ['TypeScript'],
+          },
+        },
+        user: 'U123',
+        userId: 'user-1',
+      }),
+    );
+    expect(consoleErrorMock).not.toHaveBeenCalled();
+  });
+
   it('shows already-received copy when a structured final answer loses the atomic claim', async () => {
     findActiveSlackTaskRunMock.mockResolvedValue({
       id: 42,

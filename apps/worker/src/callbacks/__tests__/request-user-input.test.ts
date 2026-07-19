@@ -1,8 +1,10 @@
 import type { TaskRun } from '@roomote/sdk/client';
 
 import {
+  STREAMING_PLACEHOLDER_QUESTION_TEXT,
   buildRequestUserInputTaskUrl,
   formatRequestUserInputPrompt,
+  isStreamingPlaceholderRequestUserInput,
 } from '../request-user-input';
 
 describe('formatRequestUserInputPrompt', () => {
@@ -211,5 +213,54 @@ describe('buildRequestUserInputTaskUrl', () => {
     expect(url).toBe(
       `${localOrigin}/setup?utm_source=slack&utm_medium=integration&utm_campaign=request_user_input`,
     );
+  });
+});
+
+describe('isStreamingPlaceholderRequestUserInput', () => {
+  it('detects the harness streaming placeholder', () => {
+    expect(
+      isStreamingPlaceholderRequestUserInput({
+        questions: [
+          {
+            id: 'response',
+            header: 'Response',
+            question: STREAMING_PLACEHOLDER_QUESTION_TEXT,
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects real questions with options or custom wording', () => {
+    expect(
+      isStreamingPlaceholderRequestUserInput({
+        questions: [
+          {
+            id: 'language',
+            header: 'Language',
+            question: 'Which language should I use?',
+            isOther: true,
+            isSecret: false,
+            options: [{ label: 'TypeScript', description: 'App stack' }],
+          },
+        ],
+      }),
+    ).toBe(false);
+
+    expect(
+      isStreamingPlaceholderRequestUserInput({
+        questions: [
+          {
+            id: 'response',
+            header: 'Response',
+            question: 'Anything else?',
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      }),
+    ).toBe(false);
   });
 });
