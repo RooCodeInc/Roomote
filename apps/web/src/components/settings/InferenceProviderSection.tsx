@@ -9,6 +9,8 @@ import {
   getModelProviderLabel,
 } from '@roomote/types';
 import type {
+  ProviderCreditBalance,
+  ProviderCreditBalanceProviderId,
   SetupModelProviderId,
   SetupModelProviderStatus,
   SetupModelStatus,
@@ -44,6 +46,7 @@ import {
 import { Section } from '@/components/settings/Section';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
+import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
 import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
@@ -119,6 +122,7 @@ function getSubmitAdditionalEnvValues(
 function ConnectedProviderRow({
   provider,
   usage,
+  creditBalance,
   isSaving,
   canDelete,
   onEdit,
@@ -126,6 +130,7 @@ function ConnectedProviderRow({
 }: {
   provider: SetupModelProviderStatus;
   usage?: SubscriptionProviderUsage;
+  creditBalance?: ProviderCreditBalance;
   isSaving: boolean;
   canDelete: boolean;
   onEdit: () => void;
@@ -164,6 +169,7 @@ function ConnectedProviderRow({
             data-1p-ignore
           />
           <SubscriptionUsageLine usage={usage} className="mt-1" />
+          <ProviderCreditBalanceLine balance={creditBalance} className="mt-1" />
         </div>
 
         {hasRuntimeKey ? (
@@ -763,6 +769,23 @@ export function InferenceProviderSection({
     [subscriptionUsageQuery.data],
   );
 
+  // Credit-balance endpoints soft-fail the same way: missing means no line.
+  const providerCreditsQuery = useQuery(
+    trpc.providerCredits.list.queryOptions(undefined, {
+      staleTime: 60_000,
+    }),
+  );
+  const creditBalanceByProvider = useMemo(
+    () =>
+      new Map<ProviderCreditBalanceProviderId, ProviderCreditBalance>(
+        (providerCreditsQuery.data ?? []).map((balance) => [
+          balance.providerId,
+          balance,
+        ]),
+      ),
+    [providerCreditsQuery.data],
+  );
+
   const saveProvider = useMutation(
     trpc.taskModels.saveProvider.mutationOptions({
       onSuccess: async (result, variables) => {
@@ -787,6 +810,9 @@ export function InferenceProviderSection({
           }),
           queryClient.invalidateQueries({
             queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.providerCredits.list.queryKey(),
           }),
           ...(addedModelCount > 0 || addedDiscoveredModelCount > 0
             ? [
@@ -879,6 +905,9 @@ export function InferenceProviderSection({
           }),
           queryClient.invalidateQueries({
             queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.providerCredits.list.queryKey(),
           }),
         ]);
       },
@@ -1130,6 +1159,11 @@ export function InferenceProviderSection({
                 usage={
                   provider.id === 'kimi-for-coding'
                     ? usageByProvider.get('kimi-for-coding')
+                    : undefined
+                }
+                creditBalance={
+                  provider.id === 'openrouter'
+                    ? creditBalanceByProvider.get('openrouter')
                     : undefined
                 }
                 isSaving={savingProviderId === provider.id}

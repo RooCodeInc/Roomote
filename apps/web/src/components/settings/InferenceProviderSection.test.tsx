@@ -17,6 +17,9 @@ const githubCopilotStatusData = vi.hoisted(() => ({
 const subscriptionUsageData = vi.hoisted(() => ({
   current: null as Array<Record<string, unknown>> | null,
 }));
+const providerCreditsData = vi.hoisted(() => ({
+  current: null as Array<Record<string, unknown>> | null,
+}));
 const mutateAsyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-query', () => ({
@@ -24,9 +27,11 @@ vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: { queryKey?: string[] }) => ({
     data: options.queryKey?.[0]?.includes('subscriptionUsage')
       ? subscriptionUsageData.current
-      : options.queryKey?.[0]?.includes('githubCopilot')
-        ? githubCopilotStatusData.current
-        : chatgptStatusData.current,
+      : options.queryKey?.[0]?.includes('providerCredits')
+        ? providerCreditsData.current
+        : options.queryKey?.[0]?.includes('githubCopilot')
+          ? githubCopilotStatusData.current
+          : chatgptStatusData.current,
   }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -88,6 +93,12 @@ vi.mock('@/trpc/client', () => ({
       list: {
         queryOptions: () => ({ queryKey: ['subscriptionUsage', 'list'] }),
         queryKey: () => ['subscriptionUsage', 'list'],
+      },
+    },
+    providerCredits: {
+      list: {
+        queryOptions: () => ({ queryKey: ['providerCredits', 'list'] }),
+        queryKey: () => ['providerCredits', 'list'],
       },
     },
   }),
@@ -232,6 +243,7 @@ describe('InferenceProviderSection', () => {
     chatgptStatusData.current = null;
     githubCopilotStatusData.current = null;
     subscriptionUsageData.current = null;
+    providerCreditsData.current = null;
   });
 
   const renderInferenceProviderSection = () => {
@@ -364,6 +376,30 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.getByRole('progressbar', { name: 'Premium requests usage' }),
     ).toHaveAttribute('aria-valuenow', '30');
+  });
+
+  it('shows a credit balance line under a connected OpenRouter row', () => {
+    providerSetupData.current = buildProviderSetup({
+      openrouterSavedKey: true,
+    });
+    providerCreditsData.current = [
+      {
+        providerId: 'openrouter',
+        remaining: 12.5,
+        limit: 50,
+        currency: 'USD',
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(
+      screen.getByText(/Credits:.*12\.50.*of.*50\.00.*left/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Credit balance' }),
+    ).toBeInTheDocument();
   });
 
   it('omits the usage line when no usage data is available or the row errored', () => {

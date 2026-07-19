@@ -324,6 +324,7 @@ import {
   startGitHubCopilotDeviceAuthCommand,
 } from '../commands/github-copilot-subscription';
 import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
+import { getProviderCreditBalancesCommand } from '../commands/provider-credits';
 import {
   getRouterDebugSettingsCommand,
   updateRouterDebugSettingsCommand,
@@ -1898,6 +1899,12 @@ export const appRouter = createRouter({
   subscriptionUsage: createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       getSubscriptionProviderUsageCommand(auth),
+    ),
+  }),
+
+  providerCredits: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      getProviderCreditBalancesCommand(auth),
     ),
   }),
 
