@@ -278,6 +278,9 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
         text: expect.stringContaining('/link code:<code>'),
       }),
     );
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.text).toMatch(
+      /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
+    );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.addReaction).not.toHaveBeenCalled();
   });

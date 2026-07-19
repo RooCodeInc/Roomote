@@ -4,16 +4,48 @@ import {
   DiscordApiError,
   type DiscordCommunicationProvider,
 } from '@roomote/communication/discord-provider';
+import { Env } from '@roomote/env';
 import { getRedis } from '@roomote/redis';
 
 import { apiLogger } from '../../logging.js';
 import { replyToDiscordEvent } from './replies.js';
 import type { DiscordChannelContext } from './task-launch.js';
 
-const DISCORD_ACCOUNT_LINK_FALLBACK_INSTRUCTION =
-  'Generate a code under **Settings → Personal → Linked Accounts**, then DM me with `/link code:<code>`.';
-const DISCORD_LINK_REQUIRED_MESSAGE = `Link your Discord account to Roomote before starting tasks. ${DISCORD_ACCOUNT_LINK_FALLBACK_INSTRUCTION}`;
 const DISCORD_ACCOUNT_LABEL = 'Discord account';
+const DISCORD_LINKED_ACCOUNTS_LABEL = 'Settings → Personal → Linked Accounts';
+const DISCORD_LINK_CODE_INSTRUCTION = 'DM me with `/link code:<code>`';
+
+function getPersonalLinkedAccountsSettingsUrl(): string | null {
+  try {
+    return new URL('/settings/personal', Env.R_APP_URL).toString();
+  } catch {
+    return null;
+  }
+}
+
+function formatDiscordLinkedAccountsPath(): string {
+  const settingsUrl = getPersonalLinkedAccountsSettingsUrl();
+  return settingsUrl
+    ? `[${DISCORD_LINKED_ACCOUNTS_LABEL}](${settingsUrl})`
+    : `**${DISCORD_LINKED_ACCOUNTS_LABEL}**`;
+}
+
+export function buildDiscordAccountLinkFallbackInstruction(): string {
+  return `Generate a code under ${formatDiscordLinkedAccountsPath()}, then ${DISCORD_LINK_CODE_INSTRUCTION}.`;
+}
+
+export function buildDiscordLinkRequiredMessage(): string {
+  return `Link your Discord account to Roomote before starting tasks. ${buildDiscordAccountLinkFallbackInstruction()}`;
+}
+
+export function buildDiscordChannelAutoStartLinkMessage(
+  channelName: string,
+): string {
+  return [
+    `Roomote watches **#${channelName}** and starts a task for each new message, but your Discord account is not linked to a Roomote account yet, so your message did not start one.`,
+    `Generate a code under ${formatDiscordLinkedAccountsPath()} in Roomote, then reply here with \`/link code:<code>\`.`,
+  ].join('\n\n');
+}
 
 // One link DM per user per day across every entry path (mentions, slash
 // commands, channel auto-start): repeated pings acknowledge the existing DM
@@ -211,7 +243,7 @@ export async function promptDiscordAccountLink(input: {
       applicationId: input.applicationId,
       channel: input.channel,
       ...(input.interaction ? { interaction: input.interaction } : {}),
-      text: DISCORD_LINK_REQUIRED_MESSAGE,
+      text: buildDiscordLinkRequiredMessage(),
       ...(input.replyToMessageId
         ? { replyToMessageId: input.replyToMessageId }
         : {}),
@@ -264,7 +296,7 @@ export async function promptDiscordAccountLink(input: {
       );
       await input.provider.postMessage({
         channelId: dmChannel.id,
-        text: DISCORD_LINK_REQUIRED_MESSAGE,
+        text: buildDiscordLinkRequiredMessage(),
       });
       dmPromptSent = true;
       if (slot === 'claimed') {
@@ -300,7 +332,7 @@ export async function promptDiscordAccountLink(input: {
     text: buildAccountLinkThreadReplyText({
       dmPromptSent,
       accountLabel: DISCORD_ACCOUNT_LABEL,
-      fallbackInstruction: DISCORD_ACCOUNT_LINK_FALLBACK_INSTRUCTION,
+      fallbackInstruction: buildDiscordAccountLinkFallbackInstruction(),
     }),
     ...(input.replyToMessageId
       ? { replyToMessageId: input.replyToMessageId }
