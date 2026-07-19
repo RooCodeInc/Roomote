@@ -2,9 +2,13 @@ import {
   resolveRoomoteCloudBackend,
   resolveRoomoteCloudModalAppName,
   type ComputeProvider,
+  RunStatus,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
+  db,
+  eq,
+  taskRuns,
   type TaskRun,
   resolveComputeProviderEnvValues,
 } from '@roomote/db/server';
@@ -14,6 +18,7 @@ import {
   cleanupStaleDockerSandboxes,
   spawnDaytonaWorker,
   spawnDockerWorker,
+  DOCKER_SPAWN_TIMEOUT_MS,
   spawnE2bWorker,
   spawnBlaxelWorker,
   spawnModalWorker,
@@ -146,23 +151,73 @@ export class RoomoteController extends BaseController {
         return;
       }
       case 'docker': {
-        await spawnDockerWorker(taskRun, authToken, {
-          image: Env.DOCKER_WORKER_IMAGE,
-          platform: Env.DOCKER_WORKER_PLATFORM,
-          network: Env.DOCKER_WORKER_NETWORK,
-          dockerTimeoutMs: timeoutMs,
-          cpuLimit: Env.DOCKER_WORKER_CPU_LIMIT,
-          memoryLimit: Env.DOCKER_WORKER_MEMORY_LIMIT,
-          taskDaemonMemoryLimit: Env.DOCKER_TASK_DAEMON_MEMORY_LIMIT,
-          pidsLimit: Env.DOCKER_WORKER_PIDS_LIMIT,
-          diskLimit: Env.DOCKER_WORKER_DISK_LIMIT,
-          allowUnboundedDisk: Env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
-          logMaxSize: Env.DOCKER_WORKER_LOG_MAX_SIZE,
-          logMaxFiles: Env.DOCKER_WORKER_LOG_MAX_FILES,
-          egressPolicy: Env.DOCKER_WORKER_EGRESS_POLICY,
-          localWorkerReleasePath: this.localWorkerReleasePath,
-          deploymentSlug: deploymentSlug,
-        });
+        const abortController = new AbortController();
+        const spawnTimeoutMs = Math.min(timeoutMs, DOCKER_SPAWN_TIMEOUT_MS);
+        const timeoutId = setTimeout(() => {
+          abortController.abort(
+            Object.assign(
+              new Error(
+                `Docker worker spawn timed out after ${spawnTimeoutMs}ms`,
+              ),
+              { name: 'TimeoutError' },
+            ),
+          );
+        }, spawnTimeoutMs);
+
+        // Interrupt provisioning when the run is canceled after dequeue so we
+        // do not keep creating containers/networks for a discarded task.
+        const cancelPollId = setInterval(() => {
+          void db.query.taskRuns
+            .findFirst({
+              where: eq(taskRuns.id, taskRun.id),
+              columns: {
+                canceledAt: true,
+                status: true,
+              },
+            })
+            .then((latestRun) => {
+              if (
+                latestRun?.canceledAt ||
+                latestRun?.status === RunStatus.Canceled
+              ) {
+                abortController.abort(
+                  Object.assign(
+                    new Error(
+                      `Task run #${taskRun.id} was canceled during Docker spawn`,
+                    ),
+                    { name: 'AbortError' },
+                  ),
+                );
+              }
+            })
+            .catch(() => {
+              // Best-effort cancel observation; do not fail spawn on poll errors.
+            });
+        }, 2_000);
+
+        try {
+          await spawnDockerWorker(taskRun, authToken, {
+            image: Env.DOCKER_WORKER_IMAGE,
+            platform: Env.DOCKER_WORKER_PLATFORM,
+            network: Env.DOCKER_WORKER_NETWORK,
+            dockerTimeoutMs: timeoutMs,
+            cpuLimit: Env.DOCKER_WORKER_CPU_LIMIT,
+            memoryLimit: Env.DOCKER_WORKER_MEMORY_LIMIT,
+            taskDaemonMemoryLimit: Env.DOCKER_TASK_DAEMON_MEMORY_LIMIT,
+            pidsLimit: Env.DOCKER_WORKER_PIDS_LIMIT,
+            diskLimit: Env.DOCKER_WORKER_DISK_LIMIT,
+            allowUnboundedDisk: Env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
+            logMaxSize: Env.DOCKER_WORKER_LOG_MAX_SIZE,
+            logMaxFiles: Env.DOCKER_WORKER_LOG_MAX_FILES,
+            egressPolicy: Env.DOCKER_WORKER_EGRESS_POLICY,
+            localWorkerReleasePath: this.localWorkerReleasePath,
+            deploymentSlug: deploymentSlug,
+            signal: abortController.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+          clearInterval(cancelPollId);
+        }
         return;
       }
       case 'daytona': {

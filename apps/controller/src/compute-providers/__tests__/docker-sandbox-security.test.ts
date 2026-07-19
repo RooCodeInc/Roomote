@@ -81,6 +81,28 @@ describe('buildDockerTaskDaemonResourceArgs', () => {
   });
 });
 
+describe('DockerCommand signal options', () => {
+  it('forwards signal through prepareDockerTaskNetwork runDocker calls', async () => {
+    const signal = AbortSignal.abort();
+    const runDocker = vi.fn<DockerCommand>().mockResolvedValue('');
+
+    await prepareDockerTaskNetwork(
+      {
+        taskRunId: 7,
+        egressPolicy: 'internet',
+        autoRemove: false,
+        createdAtMs: 1,
+      },
+      (args, options) => runDocker(args, { ...options, signal }),
+    );
+
+    expect(runDocker).toHaveBeenCalledWith(
+      expect.arrayContaining(['network', 'create']),
+      expect.objectContaining({ signal }),
+    );
+  });
+});
+
 describe('removeDockerSandboxResources', () => {
   it('removes the task Docker daemon and shared workspace volume', async () => {
     const runDocker = vi.fn<DockerCommand>().mockResolvedValue('');

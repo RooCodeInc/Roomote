@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { processListIncludesDockerWorkerRun } from '../docker-sandbox-security';
 import {
   buildDockerSandboxServerUrl,
+  DOCKER_SPAWN_TIMEOUT_MS,
   getDockerWorkerCommand,
   resolveDockerWorkerOwnershipTargetFromLookup,
   resumeDockerTaskDaemon,
@@ -62,6 +63,12 @@ describe('getDockerWorkerCommand', () => {
       'resume',
     );
     expect(getDockerWorkerCommand(TaskPayloadKind.StandardTask)).toBe('run');
+  });
+});
+
+describe('DOCKER_SPAWN_TIMEOUT_MS', () => {
+  it('caps provisioning well below the full sandbox lifetime', () => {
+    expect(DOCKER_SPAWN_TIMEOUT_MS).toBe(15 * 60 * 1_000);
   });
 });
 
