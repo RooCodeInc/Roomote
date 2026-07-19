@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
+  delMock,
   execMock,
   evalMock,
   expireMock,
@@ -13,6 +14,7 @@ const {
   rpushMock,
   setMock,
 } = vi.hoisted(() => ({
+  delMock: vi.fn(),
   execMock: vi.fn(),
   evalMock: vi.fn(),
   expireMock: vi.fn(),
@@ -28,6 +30,7 @@ const {
 
 vi.mock('@roomote/redis', () => ({
   getRedis: vi.fn(() => ({
+    del: delMock,
     get: getMock,
     eval: evalMock,
     multi: multiMock,
@@ -38,12 +41,16 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 import {
+  clearLatestUserMessageForReplyQuote,
   getCommunicationMessages,
   getLatestInboundMessageId,
+  getLatestUserMessageForReplyQuote,
   prependCommunicationMessages,
   queueCommunicationMessage,
   queueCommunicationMessageOnce,
   setLatestInboundMessageId,
+  setLatestUserMessageForReplyQuote,
+  trackLatestUserMessageForReplyQuote,
 } from '../messages';
 
 describe('communication message queues', () => {
@@ -252,6 +259,61 @@ describe('communication message queues', () => {
       await expect(
         getLatestInboundMessageId('telegram', 42),
       ).resolves.toBeNull();
+    });
+  });
+
+  describe('latest user message reply-quote tracker', () => {
+    it('writes the latest user message with a TTL', async () => {
+      await setLatestUserMessageForReplyQuote('discord', 44, {
+        text: 'Do it',
+        userName: 'Matt Rubens',
+      });
+
+      expect(setMock).toHaveBeenCalledWith(
+        'discord:latest_user_message:44',
+        JSON.stringify({ text: 'Do it', userName: 'Matt Rubens' }),
+        'EX',
+        30 * 24 * 60 * 60,
+      );
+    });
+
+    it('tracks through the non-throwing helper', async () => {
+      await trackLatestUserMessageForReplyQuote({
+        provider: 'discord',
+        runId: 44,
+        text: 'ship it',
+        userName: 'Ada',
+      });
+
+      expect(setMock).toHaveBeenCalledWith(
+        'discord:latest_user_message:44',
+        JSON.stringify({ text: 'ship it', userName: 'Ada' }),
+        'EX',
+        30 * 24 * 60 * 60,
+      );
+    });
+
+    it('reads the latest user message', async () => {
+      getMock.mockResolvedValueOnce(
+        JSON.stringify({ text: 'hello', userName: 'Bob' }),
+      );
+
+      await expect(
+        getLatestUserMessageForReplyQuote('discord', 44),
+      ).resolves.toEqual({
+        text: 'hello',
+        userName: 'Bob',
+      });
+
+      expect(getMock).toHaveBeenCalledWith('discord:latest_user_message:44');
+    });
+
+    it('clears the latest user message', async () => {
+      delMock.mockResolvedValueOnce(1);
+
+      await clearLatestUserMessageForReplyQuote('discord', 44);
+
+      expect(delMock).toHaveBeenCalledWith('discord:latest_user_message:44');
     });
   });
 });

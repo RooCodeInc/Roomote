@@ -3,10 +3,12 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote
 
 const {
   buildThreadReplyImagesMock,
+  clearLatestUserMessageForReplyQuoteMock,
   discordAddReactionMock,
   discordPostMessageMock,
   envMock,
   getLatestInboundMessageIdMock,
+  getLatestUserMessageForReplyQuoteMock,
   postMessageMock,
   sendChatActionMock,
   resolveTelegramRuntimeCredentialsMock,
@@ -14,10 +16,12 @@ const {
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImagesMock: vi.fn(),
+  clearLatestUserMessageForReplyQuoteMock: vi.fn(),
   discordAddReactionMock: vi.fn(),
   discordPostMessageMock: vi.fn(),
   envMock: { R_APP_URL: 'https://app.example.com' },
   getLatestInboundMessageIdMock: vi.fn(),
+  getLatestUserMessageForReplyQuoteMock: vi.fn(),
   postMessageMock: vi.fn(),
   sendChatActionMock: vi.fn(),
   resolveTelegramRuntimeCredentialsMock: vi.fn(),
@@ -48,6 +52,8 @@ vi.mock('@roomote/communication', () => ({
   }),
   UnsupportedCommunicationOperationError: class UnsupportedCommunicationOperationError extends Error {},
   getLatestInboundMessageId: getLatestInboundMessageIdMock,
+  getLatestUserMessageForReplyQuote: getLatestUserMessageForReplyQuoteMock,
+  clearLatestUserMessageForReplyQuote: clearLatestUserMessageForReplyQuoteMock,
   resolveThreadReplyFooterContext: vi.fn().mockResolvedValue({
     linkedPr: null,
     livePreviewUrl: null,
@@ -157,6 +163,8 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       applicationId: 'application-1',
     });
     buildThreadReplyImagesMock.mockResolvedValue([]);
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue(null);
+    clearLatestUserMessageForReplyQuoteMock.mockResolvedValue(undefined);
     discordPostMessageMock.mockResolvedValue({ messageId: 'reply-1' });
     discordAddReactionMock.mockResolvedValue({
       channelId: 'thread-1',
@@ -165,13 +173,17 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     });
   });
 
-  it('posts directly into the task thread without quoting a message', async () => {
+  it('posts directly into the task thread without quoting when no web reply is pending', async () => {
     const response = await maybeSendCommunicationThreadReply({
       taskRun: discordTaskRun,
       parsedBody: { text: 'done', images: [] },
     });
 
     expect(response).not.toBeNull();
+    expect(getLatestUserMessageForReplyQuoteMock).toHaveBeenCalledWith(
+      'discord',
+      44,
+    );
     expect(discordPostMessageMock).toHaveBeenCalledWith({
       channelId: 'channel-1',
       threadId: 'thread-1',
@@ -181,6 +193,32 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     });
     expect(discordPostMessageMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'replyToMessageId',
+    );
+    expect(clearLatestUserMessageForReplyQuoteMock).not.toHaveBeenCalled();
+  });
+
+  it('prepends a pending web-reply quote and clears it after a successful Discord post', async () => {
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue({
+      text: 'Do it',
+      userName: 'Matt Rubens',
+    });
+
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: discordTaskRun,
+      parsedBody: { text: 'On it — implementing now.', images: [] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(discordPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      text: '> **Matt Rubens:** Do it\n\nOn it — implementing now.',
+      textFormat: 'markdown',
+      images: [],
+    });
+    expect(clearLatestUserMessageForReplyQuoteMock).toHaveBeenCalledWith(
+      'discord',
+      44,
     );
   });
 

@@ -9,6 +9,20 @@ import {
 const COMMUNICATION_MESSAGE_TTL_SECONDS = 60 * 60;
 const COMMUNICATION_MESSAGE_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
 const LATEST_INBOUND_MESSAGE_ID_TTL_SECONDS = 60 * 60 * 24;
+const LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+export interface LatestUserMessageForReplyQuote {
+  text: string;
+  userName: string;
+}
+
+type TrackLatestUserMessageForReplyQuoteParams = {
+  provider: CommunicationProvider;
+  runId: number;
+  text: string;
+  userName: string;
+  onError?: (error: unknown) => void;
+};
 
 const QUEUE_COMMUNICATION_MESSAGE_ONCE_SCRIPT = `
 if redis.call('EXISTS', KEYS[2]) == 1 then
@@ -32,6 +46,36 @@ function getLatestInboundMessageIdKey(
   runId: number,
 ): string {
   return `${provider}:latest_inbound_message_id:${runId}`;
+}
+
+function getLatestUserMessageForReplyQuoteKey(
+  provider: CommunicationProvider,
+  runId: number,
+): string {
+  return `${provider}:latest_user_message:${runId}`;
+}
+
+function parseLatestUserMessageForReplyQuote(
+  raw: string | null,
+): LatestUserMessageForReplyQuote | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<LatestUserMessageForReplyQuote>;
+
+    if (
+      typeof parsed.text !== 'string' ||
+      typeof parsed.userName !== 'string'
+    ) {
+      return null;
+    }
+
+    return { text: parsed.text, userName: parsed.userName };
+  } catch {
+    return null;
+  }
 }
 
 function getCommunicationMessageDedupeKey(
@@ -270,4 +314,77 @@ export async function getLatestInboundMessageId(
   const trimmed = raw.trim();
 
   return trimmed || null;
+}
+
+/**
+ * Persist the latest web/user follow-up so the next outbound agent reply can
+ * quote it back into the originating chat thread (Discord parity with Slack).
+ */
+export async function setLatestUserMessageForReplyQuote(
+  provider: CommunicationProvider,
+  runId: number,
+  message: LatestUserMessageForReplyQuote,
+): Promise<void> {
+  const redis = getRedis();
+  const key = getLatestUserMessageForReplyQuoteKey(provider, runId);
+
+  await redis.set(
+    key,
+    JSON.stringify(message satisfies LatestUserMessageForReplyQuote),
+    'EX',
+    LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS,
+  );
+}
+
+export async function trackLatestUserMessageForReplyQuote({
+  provider,
+  runId,
+  text,
+  userName,
+  onError,
+}: TrackLatestUserMessageForReplyQuoteParams): Promise<void> {
+  try {
+    await setLatestUserMessageForReplyQuote(provider, runId, {
+      text,
+      userName,
+    });
+  } catch (error) {
+    if (onError) {
+      onError(error);
+      return;
+    }
+
+    console.warn(
+      `[trackLatestUserMessageForReplyQuote] Failed to persist latest user message for ${provider} task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+export async function getLatestUserMessageForReplyQuote(
+  provider: CommunicationProvider,
+  runId: number,
+): Promise<LatestUserMessageForReplyQuote | null> {
+  const redis = getRedis();
+  const raw = await redis.get(
+    getLatestUserMessageForReplyQuoteKey(provider, runId),
+  );
+  return parseLatestUserMessageForReplyQuote(raw);
+}
+
+export async function clearLatestUserMessageForReplyQuote(
+  provider: CommunicationProvider,
+  runId: number,
+): Promise<void> {
+  try {
+    const redis = getRedis();
+    await redis.del(getLatestUserMessageForReplyQuoteKey(provider, runId));
+  } catch (error) {
+    console.error(
+      `[clearLatestUserMessageForReplyQuote] Failed to clear latest user message for ${provider} task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
