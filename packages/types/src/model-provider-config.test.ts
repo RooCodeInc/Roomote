@@ -231,6 +231,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'google',
         'xai',
         'github-copilot',
+        'openai-compatible',
         'litellm',
         'ollama',
         'vllm',
@@ -1170,5 +1171,45 @@ describe('collectSetupModelProviderCredentialValues', () => {
         action: 'save it',
       }),
     ).toThrow('Amazon Bedrock does not accept a DATABASE_URL value.');
+  });
+
+  it('ignores the primary endpoint env var when present in additionalEnvValues', () => {
+    const openaiCompatibleProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+      (provider) => provider.id === 'openai-compatible',
+    )!;
+
+    expect(
+      collectSetupModelProviderCredentialValues({
+        provider: openaiCompatibleProvider,
+        apiKey: 'https://proxy.example.com/v1',
+        additionalEnvValues: {
+          OPENAI_COMPATIBLE_BASE_URL: 'https://stale.example.com/v1',
+          OPENAI_COMPATIBLE_API_KEY: 'optional-key',
+        },
+        isEnvVarSatisfied: () => false,
+        action: 'save it',
+      }),
+    ).toEqual({
+      values: [
+        {
+          name: 'OPENAI_COMPATIBLE_BASE_URL',
+          value: 'https://proxy.example.com/v1',
+        },
+        { name: 'OPENAI_COMPATIBLE_API_KEY', value: 'optional-key' },
+      ],
+      clearedEnvVarNames: [],
+    });
+  });
+
+  it('still rejects a primary API-key env var submitted via additionalEnvValues', () => {
+    expect(() =>
+      collectSetupModelProviderCredentialValues({
+        provider: anthropicProvider,
+        apiKey: 'sk-ant-main',
+        additionalEnvValues: { ANTHROPIC_API_KEY: 'sk-ant-extra' },
+        isEnvVarSatisfied: () => false,
+        action: 'save it',
+      }),
+    ).toThrow('Anthropic does not accept a ANTHROPIC_API_KEY value.');
   });
 });

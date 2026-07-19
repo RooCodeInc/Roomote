@@ -21,6 +21,7 @@ import { handlePrReopen } from './handlePrReopen';
 import { handlePrSynchronize } from './handlePrSynchronize';
 import { handlePrComment } from './handlePrComment';
 import { handleGitHubIssueComment } from './handleGitHubIssueComment';
+import { handleGitHubIssueFixer } from './handleGitHubIssueFixer';
 
 // PR merge handling:
 import { handlePrMerge } from './handlePrMerge';
@@ -214,13 +215,37 @@ github.post('/', async (c) => {
           };
         }
 
-        return handleGitHubIssueComment({
+        const mentionResult = await handleGitHubIssueComment({
           installation: payload.installation,
           repository: payload.repository,
           sender: payload.sender,
           issue: payload.issue,
           mentionBody: payload.issue.body ?? '',
         });
+
+        // Always run Issue Fixer when enabled (immediate, like Review Code).
+        // Mentions and Issue Fixer are independent: a mention still starts a
+        // conversation task, while Issue Fixer may launch a hidden fix task.
+        const fixerResult = await handleGitHubIssueFixer(payload);
+
+        if (fixerResult.status === 'error') {
+          return fixerResult;
+        }
+
+        return mentionResult;
+      }),
+    );
+
+    webhooks.on('issues.reopened', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+        if (isRepoSkipped(payload.repository.full_name)) {
+          return {
+            status: 'ok' as const,
+            message: `Skipping issue webhook for ${payload.repository.full_name}`,
+          };
+        }
+
+        return handleGitHubIssueFixer(payload);
       }),
     );
 

@@ -1,4 +1,10 @@
 import type { SetupModelProviderId } from './model-provider-config';
+import {
+  getOpenAiCompatibleProviderInstance,
+  isOpenAiCompatibleProviderEnvVarName,
+  isOpenAiCompatibleProviderId,
+  parseOpenAiCompatibleBaseUrlEnvVarName,
+} from './openai-compatible-providers';
 
 /**
  * Sandbox-facing env var carrying the gateway base URL (e.g.
@@ -341,6 +347,20 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       openCodeBaseUrlSuffix: '/v1',
     },
     {
+      id: 'openai-compatible',
+      name: 'OpenAI-compatible',
+      envVarNames: ['OPENAI_COMPATIBLE_API_KEY'],
+      gatewayEnvVarNames: [
+        'OPENAI_COMPATIBLE_BASE_URL',
+        'OPENAI_COMPATIBLE_API_KEY',
+      ],
+      upstreamBaseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      optionalApiKey: true,
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
       id: 'litellm',
       name: 'LiteLLM',
       envVarNames: ['LITELLM_API_KEY'],
@@ -412,9 +432,34 @@ export const INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES: readonly string[] =
 export function getInferenceGatewayProvider(
   providerId: string,
 ): InferenceGatewayProvider | undefined {
-  return INFERENCE_GATEWAY_PROVIDERS.find(
+  const builtin = INFERENCE_GATEWAY_PROVIDERS.find(
     (provider) => provider.id === providerId,
   );
+
+  if (builtin) {
+    return builtin;
+  }
+
+  if (!isOpenAiCompatibleProviderId(providerId)) {
+    return undefined;
+  }
+
+  const instance = getOpenAiCompatibleProviderInstance(providerId);
+  if (!instance) {
+    return undefined;
+  }
+
+  return {
+    id: instance.id as SetupModelProviderId,
+    name: instance.label,
+    envVarNames: [instance.apiKeyEnvVarName],
+    gatewayEnvVarNames: [instance.baseUrlEnvVarName, instance.apiKeyEnvVarName],
+    upstreamBaseUrlEnvVarName: instance.baseUrlEnvVarName,
+    authHeader: { name: 'authorization', scheme: 'bearer' },
+    optionalApiKey: true,
+    allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+    openCodeBaseUrlSuffix: '/v1',
+  };
 }
 
 const INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAME_SET = new Set(
@@ -423,7 +468,10 @@ const INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAME_SET = new Set(
 
 /** True when `envVarName` is a provider key the gateway can serve. */
 export function isInferenceGatewayCoveredEnvVar(envVarName: string): boolean {
-  return INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAME_SET.has(envVarName);
+  return (
+    INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAME_SET.has(envVarName) ||
+    isOpenAiCompatibleProviderEnvVarName(envVarName)
+  );
 }
 
 /**
@@ -434,9 +482,36 @@ export function isInferenceGatewayCoveredEnvVar(envVarName: string): boolean {
 export function getInferenceGatewayProviderByEnvVarName(
   envVarName: string,
 ): InferenceGatewayProvider | undefined {
-  return INFERENCE_GATEWAY_PROVIDERS.find((provider) =>
+  const builtin = INFERENCE_GATEWAY_PROVIDERS.find((provider) =>
     (provider.gatewayEnvVarNames ?? provider.envVarNames).includes(envVarName),
   );
+
+  if (builtin) {
+    return builtin;
+  }
+
+  const openAiCompatible =
+    parseOpenAiCompatibleBaseUrlEnvVarName(envVarName) ??
+    (isOpenAiCompatibleProviderEnvVarName(envVarName)
+      ? (() => {
+          // Match API key / label env vars back to the same instance as BASE_URL.
+          if (envVarName.endsWith('_API_KEY')) {
+            return parseOpenAiCompatibleBaseUrlEnvVarName(
+              `${envVarName.slice(0, -'_API_KEY'.length)}_BASE_URL`,
+            );
+          }
+          if (envVarName.endsWith('_LABEL')) {
+            return parseOpenAiCompatibleBaseUrlEnvVarName(
+              `${envVarName.slice(0, -'_LABEL'.length)}_BASE_URL`,
+            );
+          }
+          return null;
+        })()
+      : null);
+
+  return openAiCompatible
+    ? getInferenceGatewayProvider(openAiCompatible.id)
+    : undefined;
 }
 
 /** Parse the comma-separated `R_INFERENCE_GATEWAY_KEYS` value into a list. */

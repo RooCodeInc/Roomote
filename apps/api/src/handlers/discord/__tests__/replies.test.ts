@@ -109,6 +109,30 @@ describe('replyToDiscordEvent', () => {
 
     expect(postMessage).not.toHaveBeenCalled();
   });
+
+  it('forwards replyToMessageId when posting a non-interaction channel reply', async () => {
+    const postMessage = vi.fn(async () => ({
+      provider: 'discord' as const,
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'reply-1',
+    }));
+
+    await replyToDiscordEvent({
+      provider: { postMessage } as never,
+      applicationId: 'app-1',
+      channel: channelContext(),
+      text: 'I sent you a DM to link your Discord account.',
+      replyToMessageId: 'message-1',
+    });
+
+    expect(postMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      text: 'I sent you a DM to link your Discord account.',
+      replyToMessageId: 'message-1',
+    });
+  });
 });
 
 describe('replaceOrPostDiscordMessage', () => {

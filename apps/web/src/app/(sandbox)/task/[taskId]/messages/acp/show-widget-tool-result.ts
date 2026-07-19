@@ -1,4 +1,10 @@
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
+import { SHOW_WIDGET_DEFAULT_CSS } from './show-widget-styles';
+import {
+  buildShowWidgetHostThemeCss,
+  DEFAULT_SHOW_WIDGET_HOST_THEME,
+  type ShowWidgetHostTheme,
+} from './show-widget-theme';
 
 export const SHOW_WIDGET_TOOL_NAME = 'show_widget';
 const ROOMOTE_MCP_SERVER_NAME = 'roomote';
@@ -133,16 +139,11 @@ function isSettledToolResult(
 export function resolveShowWidgetForToolMessage(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
 ): ShowWidgetPayload | null {
-  if (msg.data.isMcp !== true) {
+  if (msg.data.isMcp !== true || !isRoomoteMcpServer(msg.data)) {
     return null;
   }
 
-  if (!isRoomoteMcpServer(msg.data)) {
-    return null;
-  }
-
-  const toolName = getMcpToolName(msg.data);
-  if (toolName !== SHOW_WIDGET_TOOL_NAME) {
+  if (getMcpToolName(msg.data) !== SHOW_WIDGET_TOOL_NAME) {
     return null;
   }
 
@@ -167,117 +168,15 @@ export function resolveShowWidgetForToolMessage(
   return null;
 }
 
-/**
- * Default stylesheet injected around model HTML so unstyled fragments still
- * look reasonable inside the dark/light task UI.
- */
-const SHOW_WIDGET_DEFAULT_CSS = `
-:root {
-  color-scheme: light dark;
-  --rw-fg: #1c1917;
-  --rw-muted: #57534e;
-  --rw-border: #e7e5e4;
-  --rw-bg: #ffffff;
-  --rw-card: #fafaf9;
-  --rw-accent: #0f766e;
-  --rw-code-bg: #f5f5f4;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --rw-fg: #f5f5f4;
-    --rw-muted: #a8a29e;
-    --rw-border: #44403c;
-    --rw-bg: #1c1917;
-    --rw-card: #292524;
-    --rw-accent: #2dd4bf;
-    --rw-code-bg: #292524;
-  }
-}
-html, body {
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--rw-fg);
-  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-}
-body {
-  padding: 12px 14px;
-  word-wrap: break-word;
-  overflow-wrap: anywhere;
-}
-h1, h2, h3, h4, h5, h6 {
-  margin: 0 0 0.6em;
-  line-height: 1.25;
-  font-weight: 600;
-}
-h1 { font-size: 1.35rem; }
-h2 { font-size: 1.2rem; }
-h3 { font-size: 1.05rem; }
-p, ul, ol, pre, table, blockquote {
-  margin: 0 0 0.75em;
-}
-ul, ol { padding-left: 1.25em; }
-a { color: var(--rw-accent); }
-code, kbd, samp {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.9em;
-  background: var(--rw-code-bg);
-  border-radius: 4px;
-  padding: 0.1em 0.35em;
-}
-pre {
-  background: var(--rw-code-bg);
-  border: 1px solid var(--rw-border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  overflow: auto;
-}
-pre code {
-  background: transparent;
-  padding: 0;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.95em;
-}
-th, td {
-  border: 1px solid var(--rw-border);
-  padding: 6px 8px;
-  text-align: left;
-  vertical-align: top;
-}
-th { background: var(--rw-card); font-weight: 600; }
-blockquote {
-  border-left: 3px solid var(--rw-border);
-  margin-left: 0;
-  padding: 0.2em 0 0.2em 0.9em;
-  color: var(--rw-muted);
-}
-img, svg, video {
-  max-width: 100%;
-  height: auto;
-}
-.card, .panel {
-  background: var(--rw-card);
-  border: 1px solid var(--rw-border);
-  border-radius: 10px;
-  padding: 12px;
-}
-.muted { color: var(--rw-muted); }
-.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.badge {
-  display: inline-block;
-  border: 1px solid var(--rw-border);
-  border-radius: 999px;
-  padding: 0.1em 0.55em;
-  font-size: 0.85em;
-  color: var(--rw-muted);
-}
-`.trim();
-
-export function buildShowWidgetSrcDoc(payload: ShowWidgetPayload): string {
-  const styles = [SHOW_WIDGET_DEFAULT_CSS, payload.css ?? '']
+export function buildShowWidgetSrcDoc(
+  payload: ShowWidgetPayload,
+  theme: ShowWidgetHostTheme = DEFAULT_SHOW_WIDGET_HOST_THEME,
+): string {
+  const styles = [
+    SHOW_WIDGET_DEFAULT_CSS,
+    buildShowWidgetHostThemeCss(theme),
+    payload.css ?? '',
+  ]
     .filter((part) => part.trim().length > 0)
     .map((part) => part.replace(/[<>]/g, ''))
     .join('\n\n');
@@ -293,7 +192,7 @@ export function buildShowWidgetSrcDoc(payload: ShowWidgetPayload): string {
 
   // Always wrap as a full document we fully control. Do not inject into
   // attacker-supplied <html>/<head> shells that could reintroduce remote loads.
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">${headBits}</head><body>${payload.html}</body></html>`;
+  return `<!DOCTYPE html><html data-theme="${theme.colorScheme}"><head><meta charset="utf-8">${headBits}</head><body>${payload.html}</body></html>`;
 }
 
 function escapeHtmlText(value: string): string {

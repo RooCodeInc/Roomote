@@ -602,7 +602,9 @@ describe('InferenceProviderSection', () => {
     renderInferenceProviderSection();
 
     fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
-    fireEvent.change(screen.getByLabelText('Endpoint URL for Ollama'), {
+    const endpointInput = screen.getByLabelText('Endpoint URL for Ollama');
+    expect(endpointInput).toHaveAttribute('type', 'url');
+    fireEvent.change(endpointInput, {
       target: { value: 'http://ollama.example' },
     });
 
@@ -615,6 +617,67 @@ describe('InferenceProviderSection', () => {
       apiKey: 'http://ollama.example',
     });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('saves an OpenAI-compatible endpoint without resubmitting the base URL as additional env', async () => {
+    const { providerSetup } = buildProviderSetup();
+    providerSetup.providers = [
+      {
+        id: 'openai-compatible',
+        label: 'OpenAI-compatible',
+        envVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+        envVarLabel: 'Endpoint URL',
+        defaultRoomoteModel: '',
+        authKind: 'endpoint',
+        suggestedTaskModels: [],
+        additionalEnvFields: [
+          {
+            envVarName: 'OPENAI_COMPATIBLE_API_KEY',
+            label: 'API key',
+            secret: true,
+            required: false,
+          },
+        ],
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: true,
+        additionalEnvValues: {
+          OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        },
+      },
+    ];
+    providerSetupData.current = { providerSetup };
+    mutateAsyncMock.mockResolvedValue({
+      addedRecommendedModelCount: 0,
+      addedDiscoveredModelCount: 1,
+      discoveryError: null,
+    });
+
+    renderInferenceProviderSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Edit OpenAI-compatible Endpoint URL',
+      }),
+    );
+
+    expect(
+      screen.getByLabelText('New Endpoint URL for OpenAI-compatible'),
+    ).toHaveValue('https://proxy.example.com/v1');
+    expect(
+      screen.getByLabelText('New Endpoint URL for OpenAI-compatible'),
+    ).toHaveAttribute('type', 'url');
+    expect(screen.getByText('API key (optional)')).toBeInTheDocument();
+    expect(screen.queryByText('API key (optional)(optional)')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      provider: 'openai-compatible',
+      apiKey: 'https://proxy.example.com/v1',
+      additionalEnvValues: {},
+    });
   });
 
   it('keeps endpoint credentials while provider metadata refreshes', () => {

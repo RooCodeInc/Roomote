@@ -67,10 +67,12 @@ export type SecurityAuditorFrequency =
 export type CodeQualityAuditorFrequency =
   ScheduleOnlyBackgroundAutomationFrequency;
 
-// CI failure triage is webhook-driven and has no schedule; 'daily' is only
-// the stored enabled sentinel so the automation reuses the generic
+// CI failure triage and Issue Fixer are webhook-driven and have no schedule;
+// 'daily' is only the stored enabled sentinel so they reuse the generic
 // schedule-only settings machinery.
 export type CiFailureTriageFrequency = 'off' | 'daily';
+
+export type IssueFixerFrequency = 'off' | 'daily';
 
 /**
  * User-facing automations shown on the Automations settings page. Each key is
@@ -92,6 +94,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
+  'issue_fixer',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
@@ -232,6 +235,26 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
     requiresManagerChannel: true,
     suggestionSource: 'ci_failure',
   },
+  issueFixer: {
+    id: 'issueFixer',
+    label: 'Triage GitHub Issues',
+    hashAliases: [
+      'issue-fixer',
+      'issuefixer',
+      'fix-issues',
+      'fixissues',
+      'triage-github-issues',
+      'triagegithubissues',
+    ],
+    availability: 'stable',
+    automationKey: 'issue_fixer',
+    frequencyField: 'issueFixerFrequency',
+    lastRunAtField: 'issueFixerLastRunAt',
+    scanCursorField: 'issueFixerScanCursor',
+    defaultFrequency: 'off',
+    requiresManagerChannel: true,
+    suggestionSource: 'issue_fixer',
+  },
 } as const satisfies Record<string, ScheduleOnlyBackgroundAutomationDefinition>;
 
 export type ScheduleOnlyBackgroundAutomationId =
@@ -259,6 +282,7 @@ export const BETA_BACKGROUND_AUTOMATION_KEYS = [
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
+  'issue_fixer',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',

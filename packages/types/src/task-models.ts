@@ -4,6 +4,7 @@ import {
   OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
   mapRecommendedTaskModels,
 } from './recommended-task-models';
+import { isOpenAiCompatibleProviderId } from './openai-compatible-providers';
 
 const TASK_MODEL_ID_PATTERN = /^[^/\s]+\/.+$/u;
 
@@ -30,6 +31,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'google',
   'xai',
   'github-copilot',
+  'openai-compatible',
   'litellm',
   'ollama',
   'vllm',
@@ -220,7 +222,8 @@ export function normalizeTaskModelId(modelId: string): string {
     trimmedModelId &&
     !trimmedModelId.startsWith('openrouter/') &&
     trimmedModelId.split('/').length === 2 &&
-    !DIRECT_TASK_MODEL_PROVIDER_ID_SET.has(trimmedModelId.split('/')[0]!)
+    !DIRECT_TASK_MODEL_PROVIDER_ID_SET.has(trimmedModelId.split('/')[0]!) &&
+    !isOpenAiCompatibleProviderId(trimmedModelId.split('/')[0]!)
   ) {
     return `openrouter/${trimmedModelId}`;
   }

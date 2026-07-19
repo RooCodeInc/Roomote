@@ -192,6 +192,9 @@ as per-task auth tokens or workspace paths.
 | `LITELLM_BASE_URL`                     | LiteLLM      | LiteLLM endpoint URL, usually including its `/v1` path.                                                                                 |
 | `LITELLM_API_KEY`                      | LiteLLM      | LiteLLM gateway API key. Required when configuring LiteLLM.                                                                              |
 | `OLLAMA_BASE_URL`                      | Ollama       | Ollama endpoint URL. Use the service root, for example `http://ollama:11434`.                                                           |
+| `OPENAI_COMPATIBLE_<NAME>_BASE_URL`    | OpenAI-compatible | Endpoint URL for a named OpenAI-compatible connection (see Settings > Models). Example: `OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL`. |
+| `OPENAI_COMPATIBLE_<NAME>_API_KEY`     | Optional     | Bearer API key for that named OpenAI-compatible connection.                                                                              |
+| `OPENAI_COMPATIBLE_<NAME>_LABEL`       | Optional     | Display label stored with a named OpenAI-compatible connection.                                                                          |
 | `VLLM_BASE_URL`                        | vLLM         | vLLM OpenAI-compatible endpoint URL, usually including its `/v1` path.                                                                  |
 | `VLLM_API_KEY`                         | Optional     | Bearer API key for a vLLM endpoint that requires authentication.                                                                        |
 

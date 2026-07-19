@@ -2,6 +2,25 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.13.0 (2026-07-19)
+
+### Minor changes
+
+- Make presentational widgets follow the selected Roomote theme and provide native layout classes and CSS variables for agent-generated UI.
+- Add an OpenAI-compatible inference provider option for any OpenAI API endpoint, including multiple named connections in Settings > Models.
+- Add Triage GitHub Issues automation under Review Code that posts clarifying questions or a proposed plan on env-backed issues when they open or reopen.
+
+### Patch changes
+
+- Stop Discord (and Teams/Telegram) task runs from posting duplicate closeout messages after PR delivery by using the same parent-owned single-closeout lifecycle as Slack.
+- Discord account-link setup instructions now arrive by DM with a short channel acknowledgement instead of full setup copy in public channels, deduplicated to one link DM per user per day, and turn Settings → Personal → Linked Accounts into a link to Personal settings
+- Rebuild Discord thread context on follow-ups and snapshot resumes so agents receive earlier undelivered messages, the latest Roomote reply, and prior attachments instead of only the latest user text.
+- Apply Slack-style unmentioned follow-up gating in Discord task threads so natural replies only work for people already in the conversation until the next @mention.
+- Reuse the original Roomote task when a second GitHub issue @mention lands on the same issue.
+- Recover stalled worker bootstraps promptly with bounded claim retries, a single fresh sandbox restart, and a provider-neutral bootstrap watchdog instead of waiting for the full orphan-recovery window.
+- Strip Discord/Teams/Telegram prompt wrappers so task transcripts show only the user message text.
+- Frame third-party text (issue bodies, PR discussion, automation source context) as untrusted data in agent prompts, with escaped delimiter blocks and a shared injection-resistance policy
+
 ## 0.12.1 (2026-07-18)
 
 ### Patch changes

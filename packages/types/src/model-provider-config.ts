@@ -14,6 +14,14 @@ import {
   getTaskModelProviderId,
   isTaskModelIdDisabled,
 } from './task-models';
+import {
+  OPENAI_COMPATIBLE_PROVIDER_ID,
+  buildOpenAiCompatibleProviderInstance,
+  getOpenAiCompatibleProviderInstance,
+  isOpenAiCompatibleProviderId,
+  listOpenAiCompatibleProviderInstancesFromEnvNames,
+  type OpenAiCompatibleProviderInstance,
+} from './openai-compatible-providers';
 
 /**
  * The ChatGPT subscription provider id. Instead of an API-key env var, an
@@ -32,7 +40,20 @@ export const SETUP_MODEL_PROVIDER_IDS = [
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
 ] as const;
 
-export type SetupModelProviderId = (typeof SETUP_MODEL_PROVIDER_IDS)[number];
+/**
+ * Built-in catalog providerids. Named OpenAI-compatible connections use
+ * `openai-compatible-<slug>` in addition to this closed set.
+ */
+export type BuiltinSetupModelProviderId =
+  (typeof SETUP_MODEL_PROVIDER_IDS)[number];
+
+/**
+ * Provider ids accepted by setup/save surfaces: either a built-in catalog id
+ * or a named OpenAI-compatible connection (`openai-compatible-<slug>`).
+ */
+export type SetupModelProviderId =
+  | BuiltinSetupModelProviderId
+  | `openai-compatible-${string}`;
 
 /**
  * How a model provider is authenticated. API-key providers read a single env
@@ -132,6 +153,12 @@ export type SetupModelProviderDescriptor = {
    * unaffected.
    */
   hidden?: boolean;
+  /**
+   * When true, operators can connect more than one instance of this provider
+   * type. Only OpenAI-compatible supports this today (named instances with
+   * distinct env vars and model-id prefixes).
+   */
+  allowMultipleConnections?: boolean;
   /** Provider-local role mappings shown by the settings preset picker. */
   recommendedPresets?: readonly RecommendedModelPreset[];
   /** Legacy single-mapping shape used to synthesize a default preset. */
@@ -513,6 +540,25 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     },
   },
   {
+    id: OPENAI_COMPATIBLE_PROVIDER_ID,
+    label: 'OpenAI-compatible',
+    envVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    additionalEnvFields: [
+      {
+        envVarName: 'OPENAI_COMPATIBLE_API_KEY',
+        label: 'API key',
+        secret: true,
+        required: false,
+      },
+    ],
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    dynamicModels: true,
+    allowMultipleConnections: true,
+  },
+  {
     id: 'litellm',
     label: 'LiteLLM',
     envVarName: 'LITELLM_BASE_URL',
@@ -679,9 +725,59 @@ export const REASONING_EFFORT_OPTIONS = REASONING_EFFORT_VALUES.map(
 );
 
 const SETUP_MODEL_PROVIDER_BY_ID = new Map<
-  SetupModelProviderId,
+  BuiltinSetupModelProviderId,
   SetupModelProviderDescriptor
->(SETUP_MODEL_PROVIDER_CATALOG.map((provider) => [provider.id, provider]));
+>(
+  SETUP_MODEL_PROVIDER_CATALOG.map((provider) => [
+    provider.id as BuiltinSetupModelProviderId,
+    provider,
+  ]),
+);
+
+function buildOpenAiCompatibleSetupDescriptor(
+  instance: OpenAiCompatibleProviderInstance,
+): SetupModelProviderDescriptor {
+  const base = SETUP_MODEL_PROVIDER_BY_ID.get(OPENAI_COMPATIBLE_PROVIDER_ID)!;
+
+  return {
+    ...base,
+    id: instance.id as SetupModelProviderId,
+    label: instance.label,
+    envVarName: instance.baseUrlEnvVarName,
+    additionalEnvFields: [
+      {
+        envVarName: instance.apiKeyEnvVarName,
+        label: 'API key',
+        secret: true,
+        required: false,
+      },
+      ...(instance.labelEnvVarName
+        ? [
+            {
+              envVarName: instance.labelEnvVarName,
+              label: 'Connection name',
+              secret: false,
+              required: false,
+            } satisfies SetupModelProviderEnvField,
+          ]
+        : []),
+    ],
+  };
+}
+
+/**
+ * True when `value` is a built-in setup provider id or a named
+ * OpenAI-compatible connection id (`openai-compatible-<slug>`).
+ */
+export function isSetupModelProviderId(
+  value: string,
+): value is SetupModelProviderId {
+  if (SETUP_MODEL_PROVIDER_BY_ID.has(value as BuiltinSetupModelProviderId)) {
+    return true;
+  }
+
+  return isOpenAiCompatibleProviderId(value);
+}
 
 export type DeploymentModelConfig = {
   roomoteModel: string | null;
@@ -897,12 +993,22 @@ export function getReasoningEffortLabel(value: ReasoningEffort): string {
 }
 
 export function getSetupModelProvider(
-  providerId: SetupModelProviderId,
+  providerId: SetupModelProviderId | string,
 ): SetupModelProviderDescriptor {
-  return (
-    SETUP_MODEL_PROVIDER_BY_ID.get(providerId) ??
-    SETUP_MODEL_PROVIDER_CATALOG[0]
+  const builtin = SETUP_MODEL_PROVIDER_BY_ID.get(
+    providerId as BuiltinSetupModelProviderId,
   );
+
+  if (builtin) {
+    return builtin;
+  }
+
+  const openAiCompatible = getOpenAiCompatibleProviderInstance(providerId);
+  if (openAiCompatible) {
+    return buildOpenAiCompatibleSetupDescriptor(openAiCompatible);
+  }
+
+  return SETUP_MODEL_PROVIDER_CATALOG[0]!;
 }
 
 /**
@@ -916,14 +1022,20 @@ export function getModelProviderLabel(
     return 'Other';
   }
 
-  const provider = SETUP_MODEL_PROVIDER_BY_ID.get(
-    (providerId === 'bedrock-mantle'
-      ? 'amazon-bedrock'
-      : providerId) as SetupModelProviderId,
+  const resolvedProviderId =
+    providerId === 'bedrock-mantle' ? 'amazon-bedrock' : providerId;
+  const builtin = SETUP_MODEL_PROVIDER_BY_ID.get(
+    resolvedProviderId as BuiltinSetupModelProviderId,
   );
 
-  if (provider) {
-    return provider.label;
+  if (builtin) {
+    return builtin.label;
+  }
+
+  const openAiCompatible =
+    getOpenAiCompatibleProviderInstance(resolvedProviderId);
+  if (openAiCompatible) {
+    return openAiCompatible.label;
   }
 
   return providerId.charAt(0).toUpperCase() + providerId.slice(1);
@@ -1024,9 +1136,21 @@ export function getSetupModelProviderForEnvVarName(
     return undefined;
   }
 
-  return SETUP_MODEL_PROVIDER_CATALOG.find(
+  const catalogMatch = SETUP_MODEL_PROVIDER_CATALOG.find(
     (provider) => provider.envVarName === normalizedName,
   );
+
+  if (catalogMatch) {
+    return catalogMatch;
+  }
+
+  const openAiCompatible = listOpenAiCompatibleProviderInstancesFromEnvNames([
+    normalizedName,
+  ])[0];
+
+  return openAiCompatible
+    ? buildOpenAiCompatibleSetupDescriptor(openAiCompatible)
+    : undefined;
 }
 
 export function resolveSetupModelProviderIdFromModel(
@@ -1048,9 +1172,17 @@ export function resolveSetupModelProviderIdFromModel(
     return 'amazon-bedrock';
   }
 
-  return SETUP_MODEL_PROVIDER_BY_ID.has(providerId as SetupModelProviderId)
-    ? (providerId as SetupModelProviderId)
-    : null;
+  if (
+    SETUP_MODEL_PROVIDER_BY_ID.has(providerId as BuiltinSetupModelProviderId)
+  ) {
+    return providerId as SetupModelProviderId;
+  }
+
+  if (isOpenAiCompatibleProviderId(providerId)) {
+    return providerId as SetupModelProviderId;
+  }
+
+  return null;
 }
 
 export function resolveModelProviderIdFromModel(
@@ -1096,10 +1228,21 @@ export function getModelProviderEnvKeyCandidates(input: {
           .map((key) => normalizeOptionalString(key))
           .filter((key): key is string => key !== null);
 
+  const openAiCompatible =
+    normalizedProviderId && isOpenAiCompatibleProviderId(normalizedProviderId)
+      ? getOpenAiCompatibleProviderInstance(normalizedProviderId)
+      : null;
+
   return [
     ...new Set([
       ...(normalizedProviderId
         ? (MODEL_PROVIDER_ENV_KEYS_BY_PROVIDER.get(normalizedProviderId) ?? [])
+        : []),
+      ...(openAiCompatible
+        ? [
+            openAiCompatible.baseUrlEnvVarName,
+            openAiCompatible.apiKeyEnvVarName,
+          ]
         : []),
       ...configuredEnvKeys,
     ]),
@@ -1160,6 +1303,12 @@ export function collectSetupModelProviderCredentialValues(options: {
   );
 
   for (const name of Object.keys(options.additionalEnvValues ?? {})) {
+    // Endpoint providers sometimes surface the primary base URL in UI-side
+    // additionalEnvValues for display; ignore that key instead of rejecting.
+    if (provider.authKind === 'endpoint' && name === providerEnvVarName) {
+      continue;
+    }
+
     if (!declaredEnvVarNames.has(name)) {
       throw new Error(`${provider.label} does not accept a ${name} value.`);
     }
@@ -1241,74 +1390,136 @@ export function buildSetupModelStatus(input: {
     persistedProviderId ??
     DEFAULT_SETUP_MODEL_PROVIDER_ID;
 
-  const providers = SETUP_MODEL_PROVIDER_CATALOG.map(
-    (provider): SetupModelProviderStatus => {
-      if (provider.authKind === 'oauth') {
-        const oauthConnected =
-          provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
-            ? chatgptConnected
-            : provider.id === 'github-copilot'
-              ? githubCopilotConnected
-              : false;
-        return {
-          ...provider,
-          additionalEnvValues: {},
-          runtimeApiKeySatisfied: false,
-          savedApiKeySatisfied: oauthConnected,
-        };
-      }
-
-      // Providers with multiple credential fields (e.g. Bedrock) are satisfied only
-      // when every required env var is configured. Runtime satisfaction is
-      // runtime-env-only; saved satisfaction allows mixed sources (the
-      // effective model runtime env resolves each key runtime-first with a DB
-      // fallback) as long as at least one required value is actually saved.
-      const requiredEnvVarNames =
-        getSetupModelProviderRequiredEnvVarNames(provider);
-      const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
-      const isRuntimeConfigured = (name: string) =>
-        isConfiguredEnvValue(runtimeEnv[name]);
-      const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
-      const additionalEnvValues = Object.fromEntries(
-        [
-          ...(provider.authKind === 'endpoint' && provider.envVarName
-            ? [
-                {
-                  envVarName: provider.envVarName,
-                  secret: false,
-                },
-              ]
-            : []),
-          ...getSetupModelProviderAdditionalEnvFields(provider),
-        ]
-          .filter((field) => !field.secret)
-          .map((field) => {
-            const runtimeValue = normalizeOptionalString(
-              runtimeEnv[field.envVarName],
-            );
-            const persistedValue = normalizeOptionalString(
-              input.persistedEnvVarValues?.[field.envVarName],
-            );
-
-            return [field.envVarName, runtimeValue ?? persistedValue];
-          })
-          .filter((entry): entry is [string, string] => entry[1] !== null),
-      );
-
+  const buildProviderStatus = (
+    provider: SetupModelProviderDescriptor,
+  ): SetupModelProviderStatus => {
+    if (provider.authKind === 'oauth') {
+      const oauthConnected =
+        provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
+          ? chatgptConnected
+          : provider.id === 'github-copilot'
+            ? githubCopilotConnected
+            : false;
       return {
         ...provider,
-        additionalEnvValues,
-        runtimeApiKeySatisfied:
-          hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured),
-        savedApiKeySatisfied:
-          hasRequiredEnvVars &&
-          requiredEnvVarNames.every(
-            (name) => isPersisted(name) || isRuntimeConfigured(name),
-          ) &&
-          requiredEnvVarNames.some(isPersisted),
+        additionalEnvValues: {},
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: oauthConnected,
       };
-    },
-  ).filter(
+    }
+
+    // Providers with multiple credential fields (e.g. Bedrock) are satisfied only
+    // when every required env var is configured. Runtime satisfaction is
+    // runtime-env-only; saved satisfaction allows mixed sources (the
+    // effective model runtime env resolves each key runtime-first with a DB
+    // fallback) as long as at least one required value is actually saved.
+    const requiredEnvVarNames =
+      getSetupModelProviderRequiredEnvVarNames(provider);
+    const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
+    const isRuntimeConfigured = (name: string) =>
+      isConfiguredEnvValue(runtimeEnv[name]);
+    const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
+    const additionalEnvValues = Object.fromEntries(
+      [
+        ...(provider.authKind === 'endpoint' && provider.envVarName
+          ? [
+              {
+                envVarName: provider.envVarName,
+                secret: false,
+              },
+            ]
+          : []),
+        ...getSetupModelProviderAdditionalEnvFields(provider),
+      ]
+        .filter((field) => !field.secret)
+        .map((field) => {
+          const runtimeValue = normalizeOptionalString(
+            runtimeEnv[field.envVarName],
+          );
+          const persistedValue = normalizeOptionalString(
+            input.persistedEnvVarValues?.[field.envVarName],
+          );
+
+          return [field.envVarName, runtimeValue ?? persistedValue];
+        })
+        .filter((entry): entry is [string, string] => entry[1] !== null),
+    );
+
+    return {
+      ...provider,
+      additionalEnvValues,
+      runtimeApiKeySatisfied:
+        hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured),
+      savedApiKeySatisfied:
+        hasRequiredEnvVars &&
+        requiredEnvVarNames.every(
+          (name) => isPersisted(name) || isRuntimeConfigured(name),
+        ) &&
+        requiredEnvVarNames.some(isPersisted),
+    };
+  };
+
+  const discoveredOpenAiCompatibleIds = new Set(
+    listOpenAiCompatibleProviderInstancesFromEnvNames([
+      ...persistedEnvVarNameSet,
+      ...Object.keys(runtimeEnv).filter((name) =>
+        isConfiguredEnvValue(runtimeEnv[name]),
+      ),
+    ]).map((instance) => instance.id),
+  );
+
+  if (
+    runtimeKnownProviderId &&
+    isOpenAiCompatibleProviderId(runtimeKnownProviderId)
+  ) {
+    discoveredOpenAiCompatibleIds.add(runtimeKnownProviderId);
+  }
+  if (
+    persistedProviderId &&
+    isOpenAiCompatibleProviderId(persistedProviderId)
+  ) {
+    discoveredOpenAiCompatibleIds.add(persistedProviderId);
+  }
+
+  const providersById = new Map<string, SetupModelProviderStatus>();
+
+  for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
+    providersById.set(provider.id, buildProviderStatus(provider));
+  }
+
+  for (const providerId of discoveredOpenAiCompatibleIds) {
+    if (providersById.has(providerId)) {
+      continue;
+    }
+
+    const baseInstance = getOpenAiCompatibleProviderInstance(providerId);
+    if (!baseInstance) {
+      continue;
+    }
+
+    const labeledInstance = buildOpenAiCompatibleProviderInstance(
+      baseInstance.slug,
+      {
+        label: baseInstance.labelEnvVarName
+          ? (normalizeOptionalString(
+              runtimeEnv[baseInstance.labelEnvVarName],
+            ) ??
+            normalizeOptionalString(
+              input.persistedEnvVarValues?.[baseInstance.labelEnvVarName],
+            ))
+          : null,
+      },
+    );
+
+    providersById.set(
+      labeledInstance.id,
+      buildProviderStatus(
+        buildOpenAiCompatibleSetupDescriptor(labeledInstance),
+      ),
+    );
+  }
+
+  const providers = [...providersById.values()].filter(
     // Hidden providers are not offered for new connections but stay listed
     // (and manageable) while they are connected.
     (provider) =>

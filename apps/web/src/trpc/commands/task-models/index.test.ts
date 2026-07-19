@@ -1259,6 +1259,7 @@ describe('task model provider commands', () => {
       'AWS_REGION',
       'LITELLM_BASE_URL',
       'OLLAMA_BASE_URL',
+      'OPENAI_COMPATIBLE_BASE_URL',
       'VLLM_BASE_URL',
     ]);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
@@ -1269,6 +1270,7 @@ describe('task model provider commands', () => {
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
       'AWS_REGION',
+      'OPENAI_COMPATIBLE_BASE_URL',
       'LITELLM_BASE_URL',
       'OLLAMA_BASE_URL',
       'VLLM_BASE_URL',

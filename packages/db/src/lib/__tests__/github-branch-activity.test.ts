@@ -16,6 +16,7 @@ import {
   findActiveGitHubPrReviewTask,
   findActiveGitHubBranchWork,
   findReusableGitHubPrFollowUpOwner,
+  findReusableGitHubIssueTaskOwner,
   hasRecentGitHubBranchCommit,
 } from '../github-branch-activity';
 
@@ -1211,6 +1212,156 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
     });
 
     expect(adoResult).toBeNull();
+  });
+});
+
+describe('findReusableGitHubIssueTaskOwner', () => {
+  async function createIssueLinkedStandardTaskRun({
+    repoFullName,
+    issueNumber,
+    userId,
+    status = RunStatus.Pending,
+    taskPhase = null,
+  }: {
+    repoFullName: string;
+    issueNumber: number;
+    userId: string;
+    status?: RunStatus;
+    taskPhase?: string | null;
+  }) {
+    const task = await taskFactory.create({
+      initiatorUserId: userId,
+    });
+
+    return runFactory.create({
+      actingUserId: userId,
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status,
+      taskPhase,
+      payload: {
+        repo: repoFullName,
+        description: `work on #${issueNumber}`,
+        linkedWorkItems: [
+          {
+            provider: 'github',
+            identifier: String(issueNumber),
+            repository: repoFullName,
+            url: `https://github.com/${repoFullName}/issues/${issueNumber}`,
+            title: `Issue #${issueNumber}`,
+          },
+        ],
+      },
+    });
+  }
+
+  it('returns null when no issue-linked tasks exist', async () => {
+    const result = await findReusableGitHubIssueTaskOwner({
+      repoFullName: 'owner/repo-issue-no-match',
+      issueNumber: 991,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('reuses a standard task linked to the same GitHub issue', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-issue-reuse';
+    const issueNumber = 88;
+
+    const run = await createIssueLinkedStandardTaskRun({
+      repoFullName,
+      issueNumber,
+      userId: user.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+    });
+
+    // Different issue should not match.
+    await createIssueLinkedStandardTaskRun({
+      repoFullName,
+      issueNumber: issueNumber + 1,
+      userId: user.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+    });
+
+    const result = await findReusableGitHubIssueTaskOwner({
+      repoFullName,
+      issueNumber,
+    });
+
+    expect(result).toEqual({
+      runId: run.id,
+      taskId: run.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      delivery: 'attach',
+    });
+  });
+
+  it('does not match a linked issue on a different repository', async () => {
+    const { user } = await createActor();
+    const issueNumber = 89;
+
+    await createIssueLinkedStandardTaskRun({
+      repoFullName: 'owner/other-repo',
+      issueNumber,
+      userId: user.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+    });
+
+    const result = await findReusableGitHubIssueTaskOwner({
+      repoFullName: 'owner/target-repo',
+      issueNumber,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('reuses a completed issue task with a snapshot via resume delivery', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-issue-resume';
+    const issueNumber = 90;
+
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+    });
+    const completed = await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
+      taskPhase: null,
+      snapshotId: 'snap-issue-1',
+      payload: {
+        repo: repoFullName,
+        description: `done #${issueNumber}`,
+        linkedWorkItems: [
+          {
+            provider: 'github',
+            identifier: String(issueNumber),
+            repository: repoFullName,
+          },
+        ],
+      },
+    });
+
+    const result = await findReusableGitHubIssueTaskOwner({
+      repoFullName,
+      issueNumber,
+    });
+
+    expect(result).toEqual({
+      runId: completed.id,
+      taskId: completed.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
+      taskPhase: null,
+      delivery: 'resume',
+    });
   });
 });
 

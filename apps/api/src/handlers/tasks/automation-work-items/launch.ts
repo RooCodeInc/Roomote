@@ -1,6 +1,10 @@
 import {
   TaskRunQueueEnqueueError,
+  buildAutomationExecutionGuidanceBlock,
+  buildUntrustedContentPolicy,
+  buildUntrustedExternalContentBlock,
   enqueueTask,
+  escapeTaskContextText,
 } from '@roomote/cloud-agents/server';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
@@ -82,8 +86,16 @@ function buildExecutionTaskPrompt(
   const lines = [
     options.executionTaskBootstrap,
     '',
-    `Automation work item: ${item.title}`,
-    item.brief,
+    // Work-item fields are distilled by a scan run from external sources
+    // (issues, alerts, PR discussions), so the descriptive fields stay inside
+    // escaped untrusted-content boundaries.
+    `Automation work item: ${escapeTaskContextText(item.title)}`,
+    item.brief.trim()
+      ? buildUntrustedExternalContentBlock({
+          source: 'automation_work_item_brief',
+          text: item.brief,
+        })
+      : null,
     '',
     `Action kind: ${item.actionKind}`,
     `Disposition: ${item.disposition}`,
@@ -102,9 +114,21 @@ function buildExecutionTaskPrompt(
         )
       : DEFAULT_AUTOMATION_EXECUTION_INSTRUCTIONS,
     item.investigationContext
-      ? `Investigation context:\n${item.investigationContext}`
+      ? `Investigation context:\n${buildUntrustedExternalContentBlock({
+          source: 'automation_investigation_context',
+          text: item.investigationContext,
+        })}`
       : null,
-    item.executionPrompt ? `Execution prompt:\n${item.executionPrompt}` : null,
+    // The execution prompt is authored by the scan run over external
+    // sources, so it is delivered as scoped guidance rather than a fully
+    // trusted instruction channel: the policy limits it to the named work
+    // item and it cannot expand scope or authorize new actions.
+    item.executionPrompt
+      ? `Execution guidance from the scan run (apply only within the scope of this work item):\n${buildAutomationExecutionGuidanceBlock(
+          item.executionPrompt,
+        )}`
+      : null,
+    buildUntrustedContentPolicy(),
   ];
 
   return lines.filter(Boolean).join('\n');

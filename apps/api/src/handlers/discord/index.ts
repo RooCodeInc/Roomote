@@ -41,6 +41,7 @@ import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
 } from '../tasks/communication-out-of-band-context.js';
+import { promptDiscordAccountLink } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
 import {
   DISCORD_GATEWAY_SECRET_HEADER,
@@ -68,6 +69,13 @@ import {
   resolveDiscordChannelContext,
 } from './task-launch.js';
 import { startNewDiscordTask } from './task-orchestration.js';
+import {
+  buildDiscordContinuationPrompt,
+  fetchDiscordThreadHistoryBestEffort,
+  releaseDiscordContinuationClaim,
+  markDiscordThreadHistoryDelivered,
+} from './thread-context.js';
+import { shouldRouteUnmentionedDiscordThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const DISCORD_HELP_MESSAGE = [
   "👋 I'm Roomote. Mention me in a server channel or message me directly to start a task.",
@@ -79,9 +87,6 @@ const DISCORD_HELP_MESSAGE = [
   '',
   'Follow up by sending another message in the task thread.',
 ].join('\n');
-
-const DISCORD_LINK_REQUIRED_MESSAGE =
-  'Link your Discord account to Roomote before starting tasks. Generate a code under **Settings → Personal → Linked Accounts**, then DM me with `/link code:<code>`.';
 
 function isPermanentDiscordEventError(
   error: unknown,
@@ -335,9 +340,12 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
           launchOwnerUserId: senderUserId,
         })
       : null;
+  const isRoomoteThread = Boolean(
+    activeRun || completedRun || pendingRoutingReply,
+  );
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
-    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
+    isTaskThread: isRoomoteThread,
     parentChannelId: channel.parentChannelId,
   });
   if (!isTaskEntry) {
@@ -362,18 +370,59 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       };
     }
 
-    await replyToDiscordEvent({
+    await promptDiscordAccountLink({
       provider: resolved.provider,
       applicationId: resolved.applicationId,
       channel,
+      discordUserId: sender.id,
       ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-      text: DISCORD_LINK_REQUIRED_MESSAGE,
+      ...(message?.id ? { replyToMessageId: message.id } : {}),
     });
     return {
       ok: true,
       queued: false,
       reason: 'discord_sender_not_linked',
     };
+  }
+
+  // Mirror Slack/Teams: unmentioned guild-thread follow-ups only route when the
+  // sender is already in the conversation and nobody else interjected since
+  // the bot's last reply. Explicit @mentions, DMs, and slash commands stay on
+  // the normal task-entry path above.
+  if (
+    message &&
+    !channel.isDirectMessage &&
+    !command &&
+    !isDiscordBotMentioned(message, resolved.botUserId) &&
+    isRoomoteThread
+  ) {
+    const shouldRouteUnmentioned =
+      await shouldRouteUnmentionedDiscordThreadReplyToAgent({
+        message,
+        botUserId: resolved.botUserId,
+        mappedUserId: senderUserId,
+        isRoomoteThread: true,
+        ownedThreadUserId:
+          activeRun?.userId ??
+          completedRun?.userId ??
+          (pendingRoutingReply ? senderUserId : null),
+        fetchThreadMessages: async () => {
+          const history = await fetchDiscordThreadHistoryBestEffort({
+            provider: resolved.provider,
+            channelId: channel.channelId,
+          });
+          return history.length > 0 ? history : null;
+        },
+      });
+    if (!shouldRouteUnmentioned) {
+      apiLogger.debug(
+        `[discord] Ignoring unmentioned guild-thread reply from ${sender.id} (requires @mention after interjection or ineligible sender)`,
+      );
+      return {
+        ok: true,
+        ignored: 'discord_unmentioned_requires_mention',
+      };
+    }
   }
   await refreshDiscordUserMappingBestEffort({
     discordUserId: sender.id,
@@ -394,7 +443,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   const queuedMessage = discordEventToQueuedCommunicationMessage(event, {
     botUserId: resolved.botUserId,
     userId: senderUserId,
-    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
+    isTaskThread: isRoomoteThread,
     parentChannelId: channel.parentChannelId,
     attachmentImages: processedAttachments.images,
     attachmentText: processedAttachments.attachmentTexts,
@@ -470,6 +519,32 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       runId: activeRun.id,
       senderUserId,
     });
+    // Mirror Slack: rebuild undelivered thread context + latest bot reply into
+    // the follow-up prompt so agents keep full Discord conversation context.
+    let continuationClaim: {
+      channelId: string;
+      claimedMessageIds: string[];
+    } | null = null;
+    let messageForQueue = queuedMessage;
+    try {
+      const continuation = await buildDiscordContinuationPrompt({
+        provider: resolved.provider,
+        channelId: channel.channelId,
+        botUserId: resolved.botUserId,
+        queuedMessage,
+      });
+      messageForQueue = continuation.message;
+      continuationClaim = {
+        channelId: continuation.channelId,
+        claimedMessageIds: continuation.claimedMessageIds,
+      };
+    } catch (error) {
+      apiLogger.warn(
+        `[discord] Failed to build thread continuation for active run ${activeRun.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
     // Mirror Slack: out-of-band PR review/status notifications are posted
     // outside the harness session and must be re-surfaced on the next user
     // turn so the agent knows what the user is replying to.
@@ -477,7 +552,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       await attachOutOfBandContextToCommunicationMessage({
         taskId: activeRun.taskId,
         provider: 'discord',
-        message: queuedMessage,
+        message: messageForQueue,
       });
     try {
       const queued = await queueCommunicationMessageOnce(
@@ -486,12 +561,21 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         messageWithOutOfBand,
       );
       // Dedupe hit: nothing new will be delivered, so put claimed OOB
-      // messages back for a later real follow-up.
+      // messages and undelivered thread claims back for a later real follow-up.
       if (!queued) {
         await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+        await releaseDiscordContinuationClaim(continuationClaim);
+      } else {
+        // Match Slack: mark the current follow-up delivered so the next turn
+        // does not re-inject it as thread_context background.
+        await markDiscordThreadHistoryDelivered({
+          channelId: channel.channelId,
+          messageIds: [queuedMessage.ts],
+        });
       }
     } catch (error) {
       await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+      await releaseDiscordContinuationClaim(continuationClaim);
       throw error;
     }
     await setLatestInboundMessageId('discord', activeRun.id, queuedMessage.ts);
@@ -501,17 +585,52 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   }
 
   if (completedRun) {
-    const resumed = await resumeCommunicationTaskFromSnapshot({
-      provider: 'discord',
-      completedRun,
-      queuedMessage,
-      channelId: metadata.communicationChannelId,
-      threadId: metadata.communicationThreadId,
-      messageId: metadata.communicationMessageId,
-      guildId: metadata.communicationGuildId,
-      preservePayloadFlags: ['discordTaskThread'],
-    });
-    return { ok: true, resumed: true, runId: resumed.id };
+    // Snapshot resume also carries Slack-style thread context so the restored
+    // session sees earlier Discord messages, not only the resume trigger text.
+    let resumeMessage = queuedMessage;
+    let continuationClaim: {
+      channelId: string;
+      claimedMessageIds: string[];
+    } | null = null;
+    try {
+      const continuation = await buildDiscordContinuationPrompt({
+        provider: resolved.provider,
+        channelId: channel.channelId,
+        botUserId: resolved.botUserId,
+        queuedMessage,
+      });
+      resumeMessage = continuation.message;
+      continuationClaim = {
+        channelId: continuation.channelId,
+        claimedMessageIds: continuation.claimedMessageIds,
+      };
+    } catch (error) {
+      apiLogger.warn(
+        `[discord] Failed to build thread continuation for snapshot resume: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    try {
+      const resumed = await resumeCommunicationTaskFromSnapshot({
+        provider: 'discord',
+        completedRun,
+        queuedMessage: resumeMessage,
+        channelId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+        messageId: metadata.communicationMessageId,
+        guildId: metadata.communicationGuildId,
+        preservePayloadFlags: ['discordTaskThread'],
+      });
+      await markDiscordThreadHistoryDelivered({
+        channelId: channel.channelId,
+        messageIds: [queuedMessage.ts],
+      });
+      return { ok: true, resumed: true, runId: resumed.id };
+    } catch (error) {
+      await releaseDiscordContinuationClaim(continuationClaim);
+      throw error;
+    }
   }
 
   // Match Slack intake: ack the origin message with 👀 before launch work.

@@ -120,18 +120,21 @@ roomoteMcpServer.registerTool(
   {
     title: 'Show Widget',
     description:
-      'Render a presentational HTML widget in the Roomote task transcript. ' +
+      'Render a presentational HTML widget in the current task transcript. ' +
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
-      'HTML is displayed in a sandboxed iframe with scripts disabled and network requests blocked; Roomote injects default styles when css is omitted. ' +
+      'HTML is displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
+      'Prefer semantic HTML with the built-in widget classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the host task theme. ' +
+      'For custom CSS, use the provided `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient. ' +
+      'Keep widgets compact enough to fit without scrolling: use concise labels and a small number of cards, rows, or table entries, and choose a height that fully fits the expected content. Use ordinary prose or an artifact for long content. ' +
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
-      'Optional textFallback is delivered by Roomote to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
+      'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
       html: z
         .string()
         .min(1)
         .describe(
-          'HTML fragment or full document to display. Scripts and nested browsing contexts are stripped.',
+          'Compact HTML fragment or full document to display. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
         ),
       title: z
         .string()
@@ -141,13 +144,13 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Optional extra CSS injected into the widget document after Roomote defaults',
+          'Optional extra CSS injected after the built-in widget defaults. Prefer --rw-background, --rw-surface, --rw-surface-muted, --rw-text, --rw-text-muted, --rw-border, --rw-primary, --rw-accent, --rw-success, --rw-warning, and --rw-danger instead of hard-coded colors.',
         ),
       height: z
         .number()
         .optional()
         .describe(
-          'Optional widget iframe height in pixels (clamped to a safe range; default 320)',
+          'Optional widget iframe height in pixels (clamped to 120-800; default 320). Choose the smallest height that fully fits the expected content without a vertical scrollbar.',
         ),
       textFallback: z
         .string()

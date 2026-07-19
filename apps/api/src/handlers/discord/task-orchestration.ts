@@ -5,10 +5,7 @@ import {
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
-import type {
-  DiscordAttachment,
-  DiscordInteraction,
-} from '@roomote/communication/discord-event';
+import type { DiscordInteraction } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { findDiscordInstallationByGuildId } from '@roomote/sdk/server';
 import {
@@ -30,134 +27,13 @@ import {
   resolveDiscordWorkspace,
   type DiscordChannelContext,
 } from './task-launch.js';
-
-type DiscordThreadHistoryMessage = {
-  id: string;
-  user: string;
-  username?: string;
-  text: string;
-  botId?: string;
-  attachments: DiscordAttachment[];
-};
-
-function escapeDiscordPromptContent(value: string): string {
-  return value
-    .replaceAll('&', '&' + 'amp;')
-    .replaceAll('<', '&' + 'lt;')
-    .replaceAll('>', '&' + 'gt;');
-}
-
-function compareDiscordSnowflakes(left: string, right: string): number {
-  try {
-    const leftId = BigInt(left);
-    const rightId = BigInt(right);
-    if (leftId === rightId) return 0;
-    return leftId < rightId ? -1 : 1;
-  } catch {
-    return left.localeCompare(right);
-  }
-}
-
-function formatDiscordThreadContext(input: {
-  messages: DiscordThreadHistoryMessage[];
-  currentMessageId: string;
-}): string | undefined {
-  const earlier = input.messages.filter(
-    (message) =>
-      compareDiscordSnowflakes(message.id, input.currentMessageId) < 0 &&
-      message.text.trim().length > 0,
-  );
-  if (earlier.length === 0) return undefined;
-
-  const entries = earlier.map((message) => {
-    const displayName = (
-      message.username?.trim() ||
-      message.user ||
-      'Unknown'
-    ).trim();
-    return `${escapeDiscordPromptContent(displayName)}: ${escapeDiscordPromptContent(message.text.trim())}`;
-  });
-
-  return `<thread_context>\n${entries.join('\n\n')}\n</thread_context>`;
-}
-
-function toDiscordAttachmentsFromHistory(
-  messages: DiscordThreadHistoryMessage[],
-  options?: { excludeMessageId?: string },
-): DiscordAttachment[] {
-  const attachments: DiscordAttachment[] = [];
-  const seen = new Set<string>();
-  for (const message of messages) {
-    if (options?.excludeMessageId && message.id === options.excludeMessageId) {
-      continue;
-    }
-    for (const attachment of message.attachments) {
-      if (!attachment.url || seen.has(attachment.id)) continue;
-      seen.add(attachment.id);
-      attachments.push(attachment);
-    }
-  }
-  return attachments;
-}
-
-async function fetchThreadHistoryBestEffort(input: {
-  provider: DiscordCommunicationProvider;
-  channelId: string;
-}): Promise<DiscordThreadHistoryMessage[]> {
-  // Discord returns newest-first pages of up to 100. Walk backward with `before`
-  // so a long thread still becomes agent context (Slack fetches full reply chains).
-  const MAX_THREAD_HISTORY_MESSAGES = 500;
-  const PAGE_SIZE = 100;
-  try {
-    const collected: DiscordThreadHistoryMessage[] = [];
-    let before: string | undefined;
-    while (collected.length < MAX_THREAD_HISTORY_MESSAGES) {
-      const result = await input.provider.fetchChannelMessages({
-        channelId: input.channelId,
-        ...(before ? { latest: before } : {}),
-      });
-      if (result.messages.length === 0) break;
-
-      const page = result.messages.map((message) => ({
-        id: message.id,
-        user: message.user,
-        ...(message.username ? { username: message.username } : {}),
-        text: message.text,
-        ...(message.botId ? { botId: message.botId } : {}),
-        attachments: (message.files ?? [])
-          .filter((file) => Boolean(file.url?.trim()))
-          .map((file) => ({
-            id: file.id,
-            filename: file.name,
-            size: file.size,
-            url: file.url!,
-            ...(file.mimeType && file.mimeType !== 'application/octet-stream'
-              ? { content_type: file.mimeType }
-              : {}),
-          })),
-      }));
-
-      // Pages arrive newest-last after provider reverse; prepend so overall
-      // order stays oldest -> newest while we walk earlier pages.
-      collected.unshift(...page);
-      if (result.messages.length < PAGE_SIZE) break;
-      before = page[0]?.id;
-      if (!before) break;
-    }
-
-    if (collected.length > MAX_THREAD_HISTORY_MESSAGES) {
-      return collected.slice(-MAX_THREAD_HISTORY_MESSAGES);
-    }
-    return collected;
-  } catch (error) {
-    console.warn(
-      `[discord] Failed to fetch thread history for channel ${input.channelId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return [];
-  }
-}
+import {
+  fetchDiscordThreadHistoryBestEffort,
+  formatDiscordThreadContext,
+  markDiscordThreadHistoryDelivered,
+  toDiscordAttachmentsFromHistory,
+  type DiscordThreadHistoryMessage,
+} from './thread-context.js';
 
 export async function startNewDiscordTask(input: {
   provider: DiscordCommunicationProvider;
@@ -221,7 +97,7 @@ export async function startNewDiscordTask(input: {
     input.channel.isThread && !input.forceNewThread;
   const [history, installation] = await Promise.all([
     includeFullThreadContext
-      ? fetchThreadHistoryBestEffort({
+      ? fetchDiscordThreadHistoryBestEffort({
           provider: input.provider,
           channelId: input.channel.channelId,
         })
@@ -340,6 +216,12 @@ export async function startNewDiscordTask(input: {
       forceNewThread: input.forceNewThread,
       ...(agentPromptText ? { agentPromptText } : {}),
     });
+    if (includeFullThreadContext) {
+      await markDiscordThreadHistoryDelivered({
+        channelId: input.channel.channelId,
+        messageIds: historyWithTrigger.map((message) => message.id),
+      });
+    }
     return {
       status: 'confirmation_pending' as const,
       routingDecision,
@@ -378,6 +260,12 @@ export async function startNewDiscordTask(input: {
     forceNewThread: input.forceNewThread,
     ...(kickoffMessage ? { kickoffMessage } : {}),
   });
+  if (includeFullThreadContext) {
+    await markDiscordThreadHistoryDelivered({
+      channelId: input.channel.channelId,
+      messageIds: historyWithTrigger.map((message) => message.id),
+    });
+  }
   if (input.interaction) {
     await replyToDiscordEvent({
       provider: input.provider,

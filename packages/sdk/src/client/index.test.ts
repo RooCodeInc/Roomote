@@ -343,11 +343,9 @@ describe('createWorkerFetchWithRetry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('gives the dequeue claim a longer default retry budget than other callbacks', async () => {
+  it('bounds the dequeue claim retry budget so the controller can replace a broken sandbox', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
-      .mockRejectedValueOnce(new TypeError('fetch failed'))
-      .mockRejectedValueOnce(new TypeError('fetch failed'))
       .mockRejectedValueOnce(new TypeError('fetch failed'))
       .mockRejectedValueOnce(new TypeError('fetch failed'))
       .mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -371,7 +369,7 @@ describe('createWorkerFetchWithRetry', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it('retries the resume claim on transport failure', async () => {

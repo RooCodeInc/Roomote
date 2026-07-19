@@ -70,31 +70,124 @@ export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
 const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+  'openai-compatible': {
+    name: 'OpenAI-compatible',
+    baseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+    fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
+    apiKeyEnvVarName: 'OPENAI_COMPATIBLE_API_KEY' as string | undefined,
+    keyless: false,
+    // Arbitrary endpoints must not inherit OPENAI_* credentials. When the
+    // optional dedicated key is blank, omit the API key entirely so keyless
+    // servers that reject bearer auth match setup qualification behavior.
+    allowOpenAiEnvFallback: false,
+  },
   ollama: {
     name: 'Ollama',
     baseUrlEnvVarName: 'OLLAMA_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnvVarName: undefined,
+    apiKeyEnvVarName: undefined as string | undefined,
     keyless: true,
+    allowOpenAiEnvFallback: false,
   },
   vllm: {
     name: 'vLLM',
     baseUrlEnvVarName: 'VLLM_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:8000/v1',
-    apiKeyEnvVarName: 'VLLM_API_KEY',
+    apiKeyEnvVarName: 'VLLM_API_KEY' as string | undefined,
     keyless: false,
+    allowOpenAiEnvFallback: true,
   },
   litellm: {
     name: 'LiteLLM',
     baseUrlEnvVarName: 'LITELLM_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
-    apiKeyEnvVarName: 'LITELLM_API_KEY',
+    apiKeyEnvVarName: 'LITELLM_API_KEY' as string | undefined,
     keyless: false,
+    allowOpenAiEnvFallback: true,
   },
 } as const;
 
-type OpenAiCompatibleProviderId =
+type StaticOpenAiCompatibleProviderId =
   keyof typeof OPENAI_COMPATIBLE_PROVIDER_CONFIGS;
+
+type OpenAiCompatibleProviderRuntimeConfig = {
+  name: string;
+  baseUrlEnvVarName: string;
+  fallbackBaseUrl: string;
+  apiKeyEnvVarName: string | undefined;
+  keyless: boolean;
+  allowOpenAiEnvFallback: boolean;
+};
+
+function getOpenAiCompatibleRuntimeConfigs(
+  modelIds: Array<string | undefined>,
+  runtimeEnv: Record<string, string>,
+): Map<string, OpenAiCompatibleProviderRuntimeConfig> {
+  const configs = new Map<string, OpenAiCompatibleProviderRuntimeConfig>();
+
+  for (const [providerId, provider] of Object.entries(
+    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
+  ) as Array<
+    [StaticOpenAiCompatibleProviderId, OpenAiCompatibleProviderRuntimeConfig]
+  >) {
+    configs.set(providerId, provider);
+  }
+
+  const candidateProviderIds = new Set<string>();
+  for (const modelId of modelIds) {
+    const providerId = modelId?.trim().split('/')[0];
+    if (providerId?.startsWith('openai-compatible')) {
+      candidateProviderIds.add(providerId);
+    }
+  }
+
+  for (const envName of Object.keys(runtimeEnv)) {
+    if (
+      envName.startsWith('OPENAI_COMPATIBLE_') &&
+      envName.endsWith('_BASE_URL')
+    ) {
+      // OPENAI_COMPATIBLE_BASE_URL → openai-compatible
+      // OPENAI_COMPATIBLE_FOO_BAR_BASE_URL → openai-compatible-foo-bar
+      if (envName === 'OPENAI_COMPATIBLE_BASE_URL') {
+        candidateProviderIds.add('openai-compatible');
+        continue;
+      }
+      const middle = envName.slice(
+        'OPENAI_COMPATIBLE_'.length,
+        envName.length - '_BASE_URL'.length,
+      );
+      if (middle) {
+        candidateProviderIds.add(
+          `openai-compatible-${middle.toLowerCase().replaceAll('_', '-')}`,
+        );
+      }
+    }
+  }
+
+  for (const providerId of candidateProviderIds) {
+    if (configs.has(providerId)) {
+      continue;
+    }
+    if (providerId === 'openai-compatible') {
+      continue;
+    }
+    if (!providerId.startsWith('openai-compatible-')) {
+      continue;
+    }
+    const slug = providerId.slice('openai-compatible-'.length);
+    const envSegment = slug.replaceAll('-', '_').toUpperCase();
+    configs.set(providerId, {
+      name: `OpenAI-compatible (${slug})`,
+      baseUrlEnvVarName: `OPENAI_COMPATIBLE_${envSegment}_BASE_URL`,
+      fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
+      apiKeyEnvVarName: `OPENAI_COMPATIBLE_${envSegment}_API_KEY`,
+      keyless: false,
+      allowOpenAiEnvFallback: false,
+    });
+  }
+
+  return configs;
+}
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -678,11 +771,12 @@ function mergeOpenAiCompatibleProviderConfig(
   modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
   let merged = providerConfig;
+  const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
+    modelIds,
+    runtimeEnv,
+  );
 
-  for (const providerId of Object.keys(
-    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
-  ) as OpenAiCompatibleProviderId[]) {
-    const provider = OPENAI_COMPATIBLE_PROVIDER_CONFIGS[providerId];
+  for (const [providerId, provider] of runtimeConfigs) {
     const prefix = `${providerId}/`;
     const modelIdsForProvider = [
       ...new Set(
@@ -706,6 +800,19 @@ function mergeOpenAiCompatibleProviderConfig(
     const directApiKey = provider.apiKeyEnvVarName
       ? runtimeEnv[provider.apiKeyEnvVarName]?.trim()
       : undefined;
+    const baseURL =
+      runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
+      (provider.allowOpenAiEnvFallback
+        ? runtimeEnv.OPENAI_BASE_URL?.trim()
+        : '') ||
+      provider.fallbackBaseUrl;
+    const apiKeyOptions = directApiKey
+      ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
+      : provider.keyless
+        ? { apiKey: 'ollama' }
+        : provider.allowOpenAiEnvFallback && runtimeEnv.OPENAI_API_KEY?.trim()
+          ? { apiKey: '{env:OPENAI_API_KEY}' }
+          : {};
 
     merged = {
       ...merged,
@@ -715,19 +822,10 @@ function mergeOpenAiCompatibleProviderConfig(
         name: provider.name,
         options: {
           ...existingOptions,
-          baseURL:
-            runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
-            (!provider.keyless ? runtimeEnv.OPENAI_BASE_URL?.trim() : '') ||
-            provider.fallbackBaseUrl,
+          baseURL,
           // OpenAI-compatible clients require an API key even though Ollama
           // itself accepts unauthenticated requests.
-          ...(directApiKey
-            ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
-            : provider.keyless
-              ? { apiKey: 'ollama' }
-              : runtimeEnv.OPENAI_API_KEY?.trim()
-                ? { apiKey: '{env:OPENAI_API_KEY}' }
-                : {}),
+          ...apiKeyOptions,
         },
         models: {
           ...existingModels,
@@ -840,9 +938,11 @@ function mergeInferenceGatewayProviderConfig(
   // These providers are configured explicitly because OpenCode has no catalog
   // entries for their arbitrary model IDs. Rebase only registered gateway
   // providers: vLLM stays direct until the gateway declares its route.
-  for (const providerId of Object.keys(
-    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
-  ) as OpenAiCompatibleProviderId[]) {
+  const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
+    modelIds,
+    runtimeEnv,
+  );
+  for (const providerId of runtimeConfigs.keys()) {
     const gatewayProvider = getInferenceGatewayProvider(providerId);
 
     if (

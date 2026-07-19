@@ -42,6 +42,14 @@ vi.mock('../attachments.js', () => ({
   processDiscordAttachments: mocks.processAttachments,
 }));
 
+vi.mock('../thread-delivery.js', () => ({
+  markDiscordThreadMessagesDelivered: vi.fn().mockResolvedValue(undefined),
+  claimUndeliveredDiscordThreadMessages: vi.fn(
+    async (_channelId: string, ids: string[]) => ids,
+  ),
+  releaseClaimedDiscordThreadMessages: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { startNewDiscordTask } from '../task-orchestration.js';
 
 describe('startNewDiscordTask', () => {
