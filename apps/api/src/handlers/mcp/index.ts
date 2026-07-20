@@ -11,6 +11,7 @@ import { grafanaMcp } from './grafana';
 import { getIntegrationMcpProxyOptions } from './integration-mcp-policy';
 import { linearMcp } from './linear';
 import { mcpAuthMiddleware } from './middleware';
+import { discordMcp } from './discord';
 import { slackMcp } from './slack';
 import { snowflakeMcp } from './snowflake';
 import { vercelMcp } from './vercel';
@@ -39,11 +40,14 @@ for (const integration of MCP_INTEGRATIONS.filter(
 // Task and agent routes share the mcpAuth middleware
 mcp.use('/slack/*', mcpAuthMiddleware);
 mcp.use('/slack', mcpAuthMiddleware);
+mcp.use('/discord/*', mcpAuthMiddleware);
+mcp.use('/discord', mcpAuthMiddleware);
 mcp.use('/tasks/*', mcpAuthMiddleware);
 mcp.use('/tasks', mcpAuthMiddleware);
 mcp.use('/environments/*', mcpAuthMiddleware);
 mcp.use('/environments', mcpAuthMiddleware);
 
 mcp.route('/slack', slackMcp);
+mcp.route('/discord', discordMcp);
 mcp.route('/tasks', tasksRouter);
 mcp.route('/environments', environmentsRouter);

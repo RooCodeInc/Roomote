@@ -36,6 +36,10 @@ import {
   toMcpToolResult,
 } from './proxy-utils';
 import {
+  lookupDiscordChannelMessages,
+  lookupDiscordThread,
+} from './discord-thread-lookup';
+import {
   lookupSlackChannelMessages,
   lookupSlackThread,
 } from './slack-thread-lookup';
@@ -367,6 +371,107 @@ async function buildSlackChannelMessagesPayload(options: {
   });
 }
 
+type DiscordLookupRunContext = {
+  actingUserId: string | null;
+  payload: unknown;
+};
+
+async function loadDiscordLookupRunContext(
+  runId: number,
+): Promise<DiscordLookupRunContext> {
+  const run = await db.query.taskRuns.findFirst({
+    columns: {
+      actingUserId: true,
+      payload: true,
+    },
+    where: eq(taskRuns.id, runId),
+  });
+
+  if (!run) {
+    throw new McpProxyError(404, 'Task run not found for this MCP token');
+  }
+
+  return {
+    actingUserId: run.actingUserId,
+    payload: run.payload,
+  };
+}
+
+async function buildDiscordThreadPayload(options: {
+  auth: McpAuthContext;
+  actingUserId: string | null;
+  channel?: string;
+  messageId?: string;
+  messageLink?: string;
+}) {
+  let taskRun: DiscordLookupRunContext | undefined;
+
+  if (options.auth.tokenType === 'run') {
+    if (!options.auth.runId) {
+      throw new McpProxyError(
+        403,
+        'MCP proxy requires a task run token with a task run id',
+      );
+    }
+
+    taskRun = await loadDiscordLookupRunContext(options.auth.runId);
+  }
+
+  return lookupDiscordThread({
+    ...(typeof options.channel === 'string' && options.channel.length > 0
+      ? { channel: options.channel }
+      : {}),
+    ...(typeof options.messageId === 'string' && options.messageId.length > 0
+      ? { messageId: options.messageId }
+      : {}),
+    ...(typeof options.messageLink === 'string' &&
+    options.messageLink.length > 0
+      ? { messageLink: options.messageLink }
+      : {}),
+    ...(taskRun ? { taskRun } : {}),
+    ...(options.auth.tokenType === 'auth'
+      ? { actingDiscordMembershipUserId: options.actingUserId }
+      : {}),
+  });
+}
+
+async function buildDiscordChannelMessagesPayload(options: {
+  auth: McpAuthContext;
+  actingUserId: string | null;
+  channel?: string;
+  oldest?: string;
+  latest?: string;
+}) {
+  let taskRun: DiscordLookupRunContext | undefined;
+
+  if (options.auth.tokenType === 'run') {
+    if (!options.auth.runId) {
+      throw new McpProxyError(
+        403,
+        'MCP proxy requires a task run token with a task run id',
+      );
+    }
+
+    taskRun = await loadDiscordLookupRunContext(options.auth.runId);
+  }
+
+  return lookupDiscordChannelMessages({
+    ...(typeof options.channel === 'string' && options.channel.length > 0
+      ? { channel: options.channel }
+      : {}),
+    ...(typeof options.oldest === 'string' && options.oldest.length > 0
+      ? { oldest: options.oldest }
+      : {}),
+    ...(typeof options.latest === 'string' && options.latest.length > 0
+      ? { latest: options.latest }
+      : {}),
+    ...(taskRun ? { taskRun } : {}),
+    ...(options.auth.tokenType === 'auth'
+      ? { actingDiscordMembershipUserId: options.actingUserId }
+      : {}),
+  });
+}
+
 function createRoomoteTransport() {
   return new WebStandardStreamableHTTPServerTransport({
     enableJsonResponse: true,
@@ -379,7 +484,7 @@ function createRoomoteMcpServer(
 ) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions:
-      'Use get_about_me for Roomote platform, integration, and getting-started context. Use get_slack_thread when you need the surrounding Slack thread for a referenced Slack message. Use get_slack_channel_messages when you need history from a public Slack channel the app has already joined.',
+      'Use get_about_me for Roomote platform, integration, and getting-started context. Use get_slack_thread when you need the surrounding Slack thread for a referenced Slack message. Use get_slack_channel_messages when you need history from a public Slack channel the app has already joined. Use get_discord_thread when you need a Discord message/thread by channel + message id or discord.com message link. Use get_discord_channel_messages when you need Discord channel/thread history the bot can read.',
   });
 
   server.registerTool(
@@ -502,6 +607,112 @@ function createRoomoteMcpServer(
           ? { channel: channel.trim() }
           : {}),
         messageTs: messageTs.trim(),
+      });
+
+      return toMcpToolResult(payload);
+    },
+  );
+
+  server.registerTool(
+    'get_discord_channel_messages',
+    {
+      title: 'Get Discord Channel Messages',
+      description:
+        'Fetch history from the originating Discord channel/thread or an explicitly provided Discord channel id. Explicit channel lookups require the acting user to have a linked Discord account in that guild. Optional oldest/latest bounds accept Discord snowflake message ids.',
+      inputSchema: {
+        channel: z
+          .string()
+          .optional()
+          .describe(
+            'Optional Discord channel/thread id or discord.com message link. Required when the current context did not start from Discord.',
+          ),
+        oldest: z
+          .string()
+          .optional()
+          .describe(
+            'Optional inclusive lower bound for returned messages, as a Discord snowflake message id.',
+          ),
+        latest: z
+          .string()
+          .optional()
+          .describe(
+            'Optional inclusive upper bound for returned messages, as a Discord snowflake message id.',
+          ),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ channel, oldest, latest }) => {
+      const payload = await buildDiscordChannelMessagesPayload({
+        auth,
+        actingUserId,
+        ...(typeof channel === 'string' && channel.trim().length > 0
+          ? { channel: channel.trim() }
+          : {}),
+        ...(typeof oldest === 'string' && oldest.trim().length > 0
+          ? { oldest: oldest.trim() }
+          : {}),
+        ...(typeof latest === 'string' && latest.trim().length > 0
+          ? { latest: latest.trim() }
+          : {}),
+      });
+
+      return toMcpToolResult(payload);
+    },
+  );
+
+  server.registerTool(
+    'get_discord_thread',
+    {
+      title: 'Get Discord Thread',
+      description:
+        'Look up a Discord message by channel + message id, or by a discord.com/channels/... message link, and return nearby thread/channel context. Use this when a Discord message references or links another message. Explicit channel lookups outside the originating Discord task thread require a linked acting Discord user.',
+      inputSchema: {
+        channel: z
+          .string()
+          .optional()
+          .describe(
+            'Optional Discord channel/thread id or full message link. Required when the current context did not start from Discord and messageLink is not provided.',
+          ),
+        messageId: z
+          .string()
+          .optional()
+          .describe(
+            'Discord message snowflake id. Optional when messageLink (or channel as a message link) already includes the message id.',
+          ),
+        messageLink: z
+          .string()
+          .optional()
+          .describe(
+            'Full Discord message permalink such as https://discord.com/channels/{guild}/{channel}/{message}.',
+          ),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ channel, messageId, messageLink }) => {
+      const payload = await buildDiscordThreadPayload({
+        auth,
+        actingUserId,
+        ...(typeof channel === 'string' && channel.trim().length > 0
+          ? { channel: channel.trim() }
+          : {}),
+        ...(typeof messageId === 'string' && messageId.trim().length > 0
+          ? { messageId: messageId.trim() }
+          : {}),
+        ...(typeof messageLink === 'string' && messageLink.trim().length > 0
+          ? { messageLink: messageLink.trim() }
+          : {}),
       });
 
       return toMcpToolResult(payload);

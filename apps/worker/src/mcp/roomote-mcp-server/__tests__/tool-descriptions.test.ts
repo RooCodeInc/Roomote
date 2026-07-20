@@ -487,6 +487,19 @@ describe('roomote MCP tool descriptions', () => {
     ).toBe(undefined);
   });
 
+  it('registers the Discord thread lookup tool', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const lookupTool = getRegisteredTool(registeredTools, 'get_discord_thread');
+    const messageLinkField = getInputSchemaField(lookupTool, 'messageLink');
+
+    expect(lookupTool.config.description).toContain(
+      'discord.com/channels/... message link',
+    );
+    expect(messageLinkField.description).toContain(
+      'https://discord.com/channels/{guild}/{channel}/{message}',
+    );
+  });
+
   it('registers the Slack channel history lookup tool', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const lookupTool = getRegisteredTool(

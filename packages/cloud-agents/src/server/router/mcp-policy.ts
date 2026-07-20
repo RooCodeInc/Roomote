@@ -14,6 +14,7 @@ type RouterMcpPolicyPurpose =
 type RouterMcpToolGroup =
   | 'roomote-platform-context'
   | 'roomote-slack-thread-context'
+  | 'roomote-discord-thread-context'
   | 'linear-issue-context'
   | 'linear-comment-context'
   | 'github-pr-context'
@@ -39,6 +40,10 @@ const ROUTER_MCP_TOOL_GROUPS: Record<RouterMcpToolGroup, readonly string[]> = {
     'get_slack_thread',
     'get_slack_channel_messages',
   ],
+  'roomote-discord-thread-context': [
+    'get_discord_thread',
+    'get_discord_channel_messages',
+  ],
   'linear-issue-context': ['get_issue', 'list_issues'],
   'linear-comment-context': ['list_comments'],
   'github-pr-context': [
@@ -59,6 +64,8 @@ const ROUTER_ROOMOTE_ALLOWED_TOOLS = [
   'get_about_me',
   'get_slack_channel_messages',
   'get_slack_thread',
+  'get_discord_channel_messages',
+  'get_discord_thread',
 ] as const;
 
 const ROUTER_LINEAR_ALLOWED_TOOLS = [
@@ -104,6 +111,7 @@ const ROUTER_MCP_SERVER_POLICIES: Record<
     requiredToolGroups: [
       'roomote-platform-context',
       'roomote-slack-thread-context',
+      'roomote-discord-thread-context',
     ],
   },
   linear: {
@@ -190,6 +198,8 @@ const SLACK_ARCHIVE_URL_REGEX =
   /https?:\/\/[\w-]+\.slack\.com\/archives\/[A-Z0-9]+\/p\d+/i;
 const SLACK_APP_THREAD_URL_REGEX =
   /https?:\/\/app\.slack\.com\/client\/[A-Z0-9]+\/[A-Z0-9]+\/thread\/[A-Z0-9]+-\d+(?:\.\d+)?/i;
+const DISCORD_MESSAGE_URL_REGEX =
+  /https?:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/channels\/(?:\d+|@me)\/\d+(?:\/\d+)?/i;
 
 export function shouldIncludeRoomoteRouterLookup(
   externalReference: string | null,
@@ -200,6 +210,7 @@ export function shouldIncludeRoomoteRouterLookup(
 
   return (
     SLACK_ARCHIVE_URL_REGEX.test(externalReference) ||
-    SLACK_APP_THREAD_URL_REGEX.test(externalReference)
+    SLACK_APP_THREAD_URL_REGEX.test(externalReference) ||
+    DISCORD_MESSAGE_URL_REGEX.test(externalReference)
   );
 }

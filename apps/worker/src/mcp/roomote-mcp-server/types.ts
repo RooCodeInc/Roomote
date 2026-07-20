@@ -170,6 +170,39 @@ export interface SlackThreadLookupResponse {
   messages: SlackThreadLookupMessage[];
 }
 
+export interface DiscordThreadLookupMessage {
+  id: string;
+  user: string;
+  username?: string;
+  botId?: string;
+  text: string;
+  fileCount: number;
+  files?: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    size: number;
+    url?: string;
+  }>;
+}
+
+export interface DiscordThreadLookupResponse {
+  channelId: string;
+  requestedMessageId: string;
+  threadId: string;
+  matchedMessageIndex: number;
+  messageCount: number;
+  messages: DiscordThreadLookupMessage[];
+}
+
+export interface DiscordChannelMessagesResponse {
+  channelId: string;
+  requestedOldest?: string;
+  requestedLatest?: string;
+  messageCount: number;
+  messages: DiscordThreadLookupMessage[];
+}
+
 export interface SlackChannelMessagesResponse {
   channelId: string;
   requestedOldest?: string;

@@ -804,25 +804,98 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     });
   }
 
+  async getMessage(input: {
+    channelId: string;
+    messageId: string;
+  }): Promise<CommunicationMessage | null> {
+    try {
+      const raw = await this.request<DiscordApiMessage>(
+        'GET',
+        `/channels/${input.channelId}/messages/${input.messageId}`,
+        undefined,
+        { retryNetworkErrors: true, retryServerErrors: true },
+      );
+      return toCommunicationMessage(raw);
+    } catch (error) {
+      if (error instanceof DiscordApiError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async fetchThreadMessages(input: {
     channelId: string;
     messageId: string;
   }): Promise<CommunicationThreadLookupResult> {
+    const targetMessage = await this.getMessage({
+      channelId: input.channelId,
+      messageId: input.messageId,
+    });
+    if (!targetMessage) {
+      return {
+        provider: 'discord',
+        channelId: input.channelId,
+        requestedMessageId: input.messageId,
+        threadId: input.channelId,
+        matchedMessageIndex: -1,
+        messageCount: 0,
+        messages: [],
+      };
+    }
+
+    // Prefer the nested thread channel when the linked message is a thread
+    // starter on a parent channel.
+    const historyChannelId = targetMessage.threadId ?? input.channelId;
+    const query = new URLSearchParams({
+      limit: '100',
+      around: input.messageId,
+    });
+    // Discord's `around` is only valid for the channel that owns the message id.
+    // When we hop into an attached thread, use blessed recent history instead.
+    if (historyChannelId !== input.channelId) {
+      query.delete('around');
+    }
+
     const raw = await this.request<DiscordApiMessage[]>(
       'GET',
-      `/channels/${input.channelId}/messages?limit=100`,
+      `/channels/${historyChannelId}/messages?${query.toString()}`,
       undefined,
       { retryNetworkErrors: true, retryServerErrors: true },
     );
-    const messages = raw.map(toCommunicationMessage).reverse();
+    const byId = new Map<string, CommunicationMessage>();
+    for (const message of raw.map(toCommunicationMessage)) {
+      byId.set(message.id, message);
+    }
+    if (historyChannelId === input.channelId) {
+      byId.set(targetMessage.id, targetMessage);
+    } else {
+      // Keep the starter in context when it lives on the parent channel.
+      byId.set(targetMessage.id, {
+        ...targetMessage,
+        threadId: historyChannelId,
+      });
+    }
+
+    const messages = [...byId.values()].sort((left, right) => {
+      try {
+        const leftId = BigInt(left.id);
+        const rightId = BigInt(right.id);
+        if (leftId === rightId) return 0;
+        return leftId < rightId ? -1 : 1;
+      } catch {
+        return left.id.localeCompare(right.id);
+      }
+    });
     const matchedMessageIndex = messages.findIndex(
       (message) => message.id === input.messageId,
     );
+
     return {
       provider: 'discord',
       channelId: input.channelId,
       requestedMessageId: input.messageId,
-      threadId: input.channelId,
+      threadId: historyChannelId,
       matchedMessageIndex,
       messageCount: messages.length,
       messages,
@@ -1126,6 +1199,31 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       { retryNetworkErrors: true, retryServerErrors: true },
     );
     return this.normalizeChannel(channel);
+  }
+
+  /**
+   * Returns whether `userId` is a member of `guildId`.
+   * `null` means membership could not be verified (transient Discord failures).
+   */
+  async isUserInGuild(input: {
+    guildId: string;
+    userId: string;
+  }): Promise<boolean | null> {
+    try {
+      await this.request(
+        'GET',
+        `/guilds/${input.guildId}/members/${input.userId}`,
+        undefined,
+        { retryNetworkErrors: true, retryServerErrors: true },
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof DiscordApiError) {
+        if (error.status === 404) return false;
+        if (error.status === 403) return false;
+      }
+      return null;
+    }
   }
 
   async editChannel(input: {

@@ -385,6 +385,7 @@ describe('router helpers', () => {
       expect.arrayContaining([
         ...getRouterMcpToolGroupToolNames('roomote-platform-context'),
         ...getRouterMcpToolGroupToolNames('roomote-slack-thread-context'),
+        ...getRouterMcpToolGroupToolNames('roomote-discord-thread-context'),
       ]),
     );
     expect(getRouterMcpUpstreamConstraints('roomote')).toBeUndefined();
@@ -392,18 +393,24 @@ describe('router helpers', () => {
     expect(isRouterMcpToolAllowed('roomote', allowedTools[0]!)).toBe(true);
   });
 
-  it('includes Roomote lookup support only for Slack permalink references', () => {
+  it('includes Roomote lookup support for Slack and Discord permalink references', () => {
     expect(
       shouldIncludeRoomoteRouterLookup(
-        'https://example.slack.com/archives/C0EXAMPLE01/p1776819983463289',
+        'https://acme.slack.com/archives/C123/p1710000000000000',
       ),
     ).toBe(true);
     expect(
       shouldIncludeRoomoteRouterLookup(
-        'https://app.slack.com/client/T123/C456/thread/C456-1776819983.463289',
+        'https://app.slack.com/client/T123/C456/thread/C456-1710000000.000100',
+      ),
+    ).toBe(true);
+    expect(
+      shouldIncludeRoomoteRouterLookup(
+        'https://discord.com/channels/123/456/789',
       ),
     ).toBe(true);
     expect(shouldIncludeRoomoteRouterLookup('LIN-123')).toBe(false);
+
     expect(shouldIncludeRoomoteRouterLookup(null)).toBe(false);
   });
 });
