@@ -41,6 +41,7 @@ function mockStatus(
     hasEnabledUserLevelMcp: boolean;
     userHasConnectedEnabledUserLevelMcp: boolean;
     enabledUserLevelMcpIds: string[];
+    isAdmin: boolean;
   }> = {},
 ) {
   mockUseQuery.mockReturnValue({
@@ -54,6 +55,7 @@ function mockStatus(
       hasEnabledUserLevelMcp: false,
       userHasConnectedEnabledUserLevelMcp: false,
       enabledUserLevelMcpIds: [],
+      isAdmin: true,
       ...overrides,
     },
     isLoading: false,
@@ -120,5 +122,13 @@ describe('useOnboardingFlow', () => {
       '',
       '/onboarding',
     );
+  });
+
+  it('starts Members at their first available personal linking step', () => {
+    mockStatus({ isAdmin: false });
+
+    const { result } = renderHook(() => useOnboardingFlow());
+
+    expect(result.current.step).toBe('slack');
   });
 });

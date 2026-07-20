@@ -4,11 +4,7 @@ const replaceMock = vi.fn();
 const setQueryDataMock = vi.fn();
 const invalidateQueriesMock = vi.fn().mockResolvedValue(undefined);
 const removeQueriesMock = vi.fn();
-const fetchQueryMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
-const environmentState = vi.hoisted(() => ({
-  environments: [{ id: 'env-1' }],
-}));
 
 const queryKeys = {
   onboardingStatus: ['onboarding.status'],
@@ -32,22 +28,10 @@ vi.mock('@tanstack/react-query', async () => {
       },
       isPending: false,
     }),
-    useQuery: () => ({
-      data: {
-        invocationIdentities: [
-          {
-            provider: 'github',
-            mentionText: '@roomote',
-            examplePrompt: '@roomote address the PR feedback above',
-          },
-        ],
-      },
-    }),
     useQueryClient: () => ({
       setQueryData: setQueryDataMock,
       invalidateQueries: invalidateQueriesMock,
       removeQueries: removeQueriesMock,
-      fetchQuery: fetchQueryMock,
     }),
   };
 });
@@ -62,27 +46,11 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => queryKeys.onboardingStatus,
       },
     },
-    comms: {
-      status: {
-        queryOptions: () => ({ queryKey: ['comms.status'] }),
-      },
-    },
     github: {
       installations: {
         queryKey: () => queryKeys.githubInstallations,
       },
     },
-    environments: {
-      list: {
-        queryOptions: () => ({ queryKey: ['environments.list'] }),
-      },
-    },
-  }),
-}));
-
-vi.mock('@/hooks/environments/useEnvironments', () => ({
-  useEnvironments: () => ({
-    data: environmentState.environments,
   }),
 }));
 
@@ -124,10 +92,6 @@ describe('Onboarding StepInvoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateQueriesMock.mockResolvedValue(undefined);
-    environmentState.environments = [{ id: 'env-1' }];
-    fetchQueryMock.mockImplementation(
-      async () => environmentState.environments,
-    );
   });
 
   it('optimistically completes onboarding before routing away', async () => {
@@ -168,26 +132,14 @@ describe('Onboarding StepInvoke', () => {
       queryKey: queryKeys.githubInstallations,
     });
 
-    expect(replaceMock).toHaveBeenCalledWith('/?environmentId=env-1');
+    expect(replaceMock).toHaveBeenCalledWith('/');
   });
 
-  it('routes to the first environment when multiple environments exist', async () => {
-    environmentState.environments = [{ id: 'env-newer' }, { id: 'env-older' }];
-
-    render(<StepInvoke />);
-
-    fireEvent.click(screen.getByRole('button', { name: /try it out/i }));
-
-    await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/?environmentId=env-newer');
-    });
-  });
-
-  it('clarifies that GitHub mentions work on any PR', () => {
+  it('uses the configured GitHub invocation fallback', () => {
     render(<StepInvoke sourceControlProviders={['github']} />);
 
     expect(
-      screen.getByText('Mention @roomote in a comment on any PR.'),
+      screen.getByText('Mention the GitHub app in a comment on any PR.'),
     ).toBeInTheDocument();
   });
 
