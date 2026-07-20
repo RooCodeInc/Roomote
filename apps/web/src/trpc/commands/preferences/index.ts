@@ -2,6 +2,7 @@ import { db, eq, users } from '@roomote/db/server';
 import { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
+import { userHasCredentialAccount } from '@/lib/server/user-management';
 import {
   DEFAULT_PERSONAL_PREFERENCES,
   isPersonalColorTheme,
@@ -58,6 +59,14 @@ export async function getPersonalPreferencesCommand(
     showDebugUISettingEnabled:
       auth.featureFlags[FeatureFlag.ShowDebugUISetting] === true,
   });
+}
+
+export async function getPersonalAccountCapabilitiesCommand(
+  auth: UserAuthSuccess,
+) {
+  return {
+    canChangePassword: await userHasCredentialAccount(auth.userId),
+  };
 }
 
 export async function updatePersonalPreferencesCommand(

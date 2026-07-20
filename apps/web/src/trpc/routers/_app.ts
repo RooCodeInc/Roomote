@@ -134,6 +134,7 @@ import {
   getLinkedMicrosoftTeamsAccountCommand,
 } from '../commands/linked-accounts';
 import {
+  getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
   updatePersonalPreferencesCommand,
 } from '../commands/preferences';
@@ -1109,6 +1110,9 @@ export const appRouter = createRouter({
   }),
 
   preferences: createRouter({
+    accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPersonalAccountCapabilitiesCommand(auth),
+    ),
     getPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalPreferencesCommand(auth),
     ),
