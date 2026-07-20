@@ -1,6 +1,7 @@
 import type { SourceControlProvider } from '@roomote/types';
 
 import {
+  manageSourceControlIssue,
   manageSourceControl,
   readSourceControl,
   writeSourceControl,
@@ -18,9 +19,13 @@ type ManageSourceControlParams = {
     | 'create_pull_request_comment'
     | 'resolve_pull_request_thread'
     | 'submit_pull_request_review'
-    | 'update_pull_request_comment';
+    | 'update_pull_request_comment'
+    | 'get_issue'
+    | 'list_issue_comments'
+    | 'create_issue_comment';
   repositoryFullName: string;
   prNumber?: number;
+  issueNumber?: number;
   state?: 'open';
   limit?: number;
   threadId?: string;
@@ -93,6 +98,34 @@ export async function handleManageSourceControl(
           result.url
         }`,
       });
+    }
+
+    if (
+      params.action === 'get_issue' ||
+      params.action === 'list_issue_comments' ||
+      params.action === 'create_issue_comment'
+    ) {
+      if (
+        typeof params.issueNumber !== 'number' ||
+        !Number.isInteger(params.issueNumber) ||
+        params.issueNumber <= 0
+      ) {
+        return errorResult(`issueNumber is required for ${params.action}`);
+      }
+
+      if (params.action === 'create_issue_comment' && !params.body?.trim()) {
+        return errorResult('body is required for create_issue_comment');
+      }
+
+      return jsonResult(
+        await manageSourceControlIssue(config, taskId, {
+          action: params.action,
+          repositoryFullName: params.repositoryFullName,
+          issueNumber: params.issueNumber,
+          body: params.body,
+          sourceControlProvider: params.sourceControlProvider,
+        }),
+      );
     }
 
     if (params.action === 'list_pull_requests') {

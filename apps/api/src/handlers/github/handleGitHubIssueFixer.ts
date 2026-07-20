@@ -1,23 +1,14 @@
-import {
-  buildIssueFixerFixPrompt,
-  buildRepositoryCoverage,
-  enqueueTask,
-} from '@roomote/cloud-agents/server';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import {
   and,
   db,
   eq,
-  getBackgroundAgentSettingsForDeployment,
   githubInstallations,
-  recordAutomationRunOutcome,
   repositories,
 } from '@roomote/db/server';
-import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
-import { TaskPayloadKind } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
-
-const LOG_PREFIX = '[handleGitHubIssueFixer]';
+import { launchIssueFixerTriage } from '../shared/issue-fixer-launch';
 
 interface IssueFixerPayload {
   action: string;
@@ -71,7 +62,9 @@ export async function handleGitHubIssueFixer(
 
   const [match] = await db
     .select({
+      repositoryId: repositories.id,
       repositoryFullName: repositories.fullName,
+      sourceControlHost: repositories.host,
     })
     .from(repositories)
     .innerJoin(
@@ -91,92 +84,21 @@ export async function handleGitHubIssueFixer(
     return { status: 'ok', message: 'Repository is not active in Roomote' };
   }
 
-  const settings = await getBackgroundAgentSettingsForDeployment();
+  const githubAppSlug = await resolveConfiguredGitHubAppSlug();
 
-  if (settings.issueFixerFrequency === 'off') {
-    return { status: 'ok', message: 'Triage GitHub Issues is disabled' };
-  }
-
-  const repositoryCoverage = await buildRepositoryCoverage([
-    match.repositoryFullName,
-  ]);
-  const environmentId = repositoryCoverage[0]?.targetEnvironmentId;
-
-  if (!environmentId) {
-    return {
-      status: 'ok',
-      message:
-        'Repository has no configured environment for Triage GitHub Issues',
-    };
-  }
-
-  try {
-    const githubAppSlug = await resolveConfiguredGitHubAppSlug();
-    const description = buildIssueFixerFixPrompt({
-      repositoryFullName: match.repositoryFullName,
-      environmentId,
-      trigger: 'webhook',
-      repositoryCoverage,
-      githubAppSlug,
-      issue: {
-        repositoryFullName: match.repositoryFullName,
-        number: payload.issue.number,
-        title: payload.issue.title,
-        url: payload.issue.html_url,
-        body: payload.issue.body,
-        labels: issueLabels(payload.issue.labels),
-        authorLogin: payload.issue.user?.login ?? null,
-      },
-    });
-
-    const launchResult = await enqueueTask(
-      {
-        task: {
-          type: TaskPayloadKind.StandardTask,
-          payload: {
-            repo: match.repositoryFullName,
-            environmentId,
-            selectedRepositories: [match.repositoryFullName],
-            description,
-            visibleInTranscript: false,
-          },
-        },
-        initiator: { kind: 'automation', key: 'issue_fixer' },
-        workflow: 'standard',
-        surface: 'github',
-        trigger: 'webhook',
-        visibility: 'hidden',
-      },
-      {
-        launchClass: 'automation',
-      },
-    );
-
-    await recordAutomationRunOutcome(db, {
-      key: 'issue_fixer',
-      status: 'succeeded',
-      at: new Date(),
-    });
-
-    return {
-      status: 'ok',
-      message: `Launched Triage GitHub Issues for ${match.repositoryFullName}#${payload.issue.number}`,
-      metadata: { taskId: launchResult.taskId },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    await recordAutomationRunOutcome(db, {
-      key: 'issue_fixer',
-      status: 'failed',
-      at: new Date(),
-      error: message,
-    }).catch(() => undefined);
-
-    console.error(
-      `${LOG_PREFIX} Failed to launch Triage GitHub Issues for ${match.repositoryFullName}#${payload.issue.number}: ${message}`,
-    );
-
-    return { status: 'error', message };
-  }
+  return launchIssueFixerTriage({
+    sourceControlProvider: 'github',
+    repositoryId: match.repositoryId,
+    repositoryFullName: match.repositoryFullName,
+    sourceControlHost: match.sourceControlHost,
+    githubAppSlug,
+    issue: {
+      number: payload.issue.number,
+      title: payload.issue.title,
+      url: payload.issue.html_url,
+      body: payload.issue.body,
+      labels: issueLabels(payload.issue.labels),
+      authorLogin: payload.issue.user?.login ?? null,
+    },
+  });
 }

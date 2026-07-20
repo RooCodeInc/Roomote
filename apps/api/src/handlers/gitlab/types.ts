@@ -109,3 +109,35 @@ export const gitLabNoteWebhookSchema = z
   .passthrough();
 
 export type GitLabNoteWebhook = z.infer<typeof gitLabNoteWebhookSchema>;
+
+const gitLabIssueAttributesSchema = z
+  .object({
+    action: z.string().optional(),
+    id: z.number().optional(),
+    iid: z.number(),
+    title: z.string(),
+    description: z.string().nullable().optional(),
+    url: z.string(),
+    state: z.string().optional(),
+  })
+  .passthrough();
+
+const gitLabIssueLabelSchema = z
+  .object({
+    id: z.number().optional(),
+    title: z.string().optional(),
+  })
+  .passthrough();
+
+export const gitLabIssueWebhookSchema = z
+  .object({
+    object_kind: z.literal('issue'),
+    event_type: z.string().optional(),
+    user: gitLabUserSchema.optional(),
+    project: gitLabProjectSchema,
+    object_attributes: gitLabIssueAttributesSchema,
+    labels: z.array(gitLabIssueLabelSchema).optional(),
+  })
+  .passthrough();
+
+export type GitLabIssueWebhook = z.infer<typeof gitLabIssueWebhookSchema>;

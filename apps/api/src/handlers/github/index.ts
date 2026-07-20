@@ -223,9 +223,9 @@ github.post('/', async (c) => {
           mentionBody: payload.issue.body ?? '',
         });
 
-        // Always run Issue Fixer when enabled (immediate, like Review Code).
-        // Mentions and Issue Fixer are independent: a mention still starts a
-        // conversation task, while Issue Fixer may launch a hidden fix task.
+        // Always run Triage Issues when enabled (immediate, like Review Code).
+        // Mentions and Triage Issues are independent: a mention still starts a
+        // conversation task, while Triage Issues may launch a hidden plan task.
         const fixerResult = await handleGitHubIssueFixer(payload);
 
         if (fixerResult.status === 'error') {

@@ -3,11 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { buildIssueFixerFixPrompt } from '../issue-fixer-prompt';
 
 describe('buildIssueFixerFixPrompt', () => {
-  it('injects the configured GitHub app mention into comment templates', () => {
+  it('injects the configured GitHub app mention into provider-neutral context', () => {
     const prompt = buildIssueFixerFixPrompt({
       repositoryFullName: 'acme/api',
       environmentId: 'env-api',
       trigger: 'webhook',
+      sourceControlProvider: 'github',
       githubAppSlug: 'roomote-roomote',
       repositoryCoverage: [
         { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
@@ -23,17 +24,46 @@ describe('buildIssueFixerFixPrompt', () => {
       },
     });
 
+    expect(prompt.startsWith('$issue-fixer')).toBe(true);
     expect(prompt).toContain(
-      '<github_app_mention>@roomote-roomote</github_app_mention>',
+      '<continue_mention>@roomote-roomote</continue_mention>',
     );
+    expect(prompt).not.toContain('<github_app_mention>');
+    expect(prompt).not.toContain('Comment formats');
+  });
+
+  it('uses provider-neutral GitLab context without duplicating tool guidance', () => {
+    const prompt = buildIssueFixerFixPrompt({
+      repositoryFullName: 'group/project',
+      environmentId: 'env-api',
+      trigger: 'webhook',
+      sourceControlProvider: 'gitlab',
+      continueMention: '@roomote',
+      repositoryCoverage: [
+        {
+          repositoryFullName: 'group/project',
+          targetEnvironmentId: 'env-api',
+        },
+      ],
+      issue: {
+        repositoryFullName: 'group/project',
+        number: 9,
+        title: 'Broken pipeline',
+        url: 'https://gitlab.com/group/project/-/issues/9',
+        body: 'Default branch is red.',
+        labels: ['ci'],
+        authorLogin: 'bob',
+      },
+    });
+
     expect(prompt).toContain(
-      'Please tag @roomote-roomote in your response with the answers',
+      '<source_control_provider>gitlab</source_control_provider>',
     );
-    expect(prompt).toContain(
-      "Please tag @roomote-roomote if you'd like me to implement this",
-    );
-    expect(prompt).not.toContain('Please tag @roomote in your response');
-    expect(prompt).not.toContain("Please tag @roomote if you'd like me");
+    expect(prompt).toContain('<continue_mention>@roomote</continue_mention>');
+    expect(prompt).toContain('Triage GitLab issue #9');
+    expect(prompt).toContain('source="gitlab_issue_body"');
+    expect(prompt).not.toContain('GITLAB_TOKEN');
+    expect(prompt).not.toContain('GitLab REST API');
   });
 
   it('escapes and delimits attacker-controlled issue fields', () => {
@@ -41,6 +71,7 @@ describe('buildIssueFixerFixPrompt', () => {
       repositoryFullName: 'acme/api',
       environmentId: 'env-api',
       trigger: 'webhook',
+      sourceControlProvider: 'github',
       githubAppSlug: 'roomote',
       repositoryCoverage: [
         { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },

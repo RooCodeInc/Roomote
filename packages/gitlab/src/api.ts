@@ -473,6 +473,7 @@ export async function listGitLabProjects({
 const GITLAB_WEBHOOK_EVENT_FLAGS = {
   merge_requests_events: true,
   note_events: true,
+  issues_events: true,
   push_events: false,
 } as const;
 

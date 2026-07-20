@@ -33,7 +33,7 @@ These automations react to pull requests, issues, and repository state.
 | Automation                 | What it does                                                      | Good first use                                                         |
 | -------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | **Review Code**            | Reviews pull requests automatically or on demand                  | Add an extra reviewer for regressions, risky changes, and missed tests |
-| **Triage GitHub Issues**   | Posts an implementation plan when a GitHub issue is opened/reopened | Get a grounded plan on the issue without auto-opening a PR           |
+| **Triage Issues**          | Posts an implementation plan when an issue is opened/reopened on GitHub, GitLab, or Gitea | Get a grounded plan on the issue without auto-opening a PR           |
 | **Resolve PR Conflicts**   | Looks for merge conflicts and helps fix them on open PRs          | Keep long-running branches from getting stuck                          |
 
 For **Review Code**, decide whether Roomote should review new commits
@@ -41,12 +41,14 @@ automatically and whether draft pull requests should be included. If your team
 treats drafts as active collaboration, include them. If drafts are noisy or
 half-formed, keep them out until they are ready.
 
-For **Triage GitHub Issues**, turn the toggle on once GitHub is connected and
-the repos you care about have configured Roomote environments. When an issue is
-opened or reopened, Roomote starts a task immediately, investigates the issue,
-and posts a concrete plan as a comment on that GitHub issue. It does not need a
-Manager Channel, does not post Slack digests, does not implement the fix, and
-does not open a pull request automatically.
+For **Triage Issues**, turn the toggle on once a supported source-control
+provider is connected (GitHub, GitLab, or Gitea) and the repos you care about
+have configured Roomote environments. When an issue is opened or reopened,
+Roomote starts a task immediately, investigates the issue, and posts a concrete
+plan as a comment on that issue. It does not need a Manager Channel, does not
+post Slack digests, does not implement the fix, and does not open a pull
+request automatically. Azure DevOps work items and Bitbucket issues are not
+covered yet.
 
 For **Resolve PR Conflicts**, pick a schedule, PR age cap, and label. The
 label is the team-controlled opt-in for scheduled scans. Make sure the label
@@ -122,7 +124,8 @@ surfaces).
 Cards also show capability badges for what each automation supports today:
 the chat surfaces it can report to and the source-control providers it works
 with. Triage Dependabot Alerts, Triage CodeQL Alerts, and CI Failure Triage are
-GitHub-only by nature. Security Auditor, Code Quality Auditor, Weekly Manager
+GitHub-only by nature. Triage Issues supports GitHub, GitLab, and Gitea issues.
+Security Auditor, Code Quality Auditor, Weekly Manager
 Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
 any connected source-control provider. Resolve PR Conflicts supports GitHub,
 GitLab, and Azure DevOps. CI Failure Triage reacts immediately to GitHub

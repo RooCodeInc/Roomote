@@ -5,13 +5,7 @@ import {
   enqueueTask,
   escapeTaskContextText,
 } from '@roomote/cloud-agents/server';
-import {
-  db,
-  environmentRepositoryMappings,
-  eq,
-  asc,
-  findReusableGitHubIssueTaskOwner,
-} from '@roomote/db/server';
+import { findReusableGitHubIssueTaskOwner } from '@roomote/db/server';
 import {
   type RunStatus,
   type SourceControlProvider,
@@ -28,6 +22,7 @@ import {
   sendMessageToTask,
   steerMessageToTask,
 } from '../tasks/sendMessageToTask';
+import { resolveMappedEnvironmentId } from './repository-environment';
 
 const EXISTING_TASK_WAIT_TIMEOUT_MS = 15_000;
 const EXISTING_TASK_WAIT_POLL_MS = 500;
@@ -87,27 +82,6 @@ type IssueMentionOrchestrationInput = {
     campaign: string;
   }) => string | null;
 };
-
-async function resolveMappedEnvironmentId(
-  repositoryId: string,
-): Promise<string | null> {
-  const mappings = await db
-    .select({
-      environmentId: environmentRepositoryMappings.environmentId,
-    })
-    .from(environmentRepositoryMappings)
-    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId))
-    .orderBy(asc(environmentRepositoryMappings.environmentId));
-
-  if (mappings.length === 0) {
-    return null;
-  }
-
-  // When multiple environments map to the same repository, pick a stable
-  // ordered environment id and still pin the selected repository so the worker
-  // has a concrete checkout target.
-  return mappings[0]?.environmentId ?? null;
-}
 
 function buildIssueMentionPrompt({
   providerDisplayName,
