@@ -479,6 +479,7 @@ describe('Gitea API helpers', () => {
         body: expect.stringContaining('"pull_request_sync"'),
       }),
     );
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toContain('"issues"');
   });
 
   it('posts a Gitea pull request comment through the issue comments API', async () => {

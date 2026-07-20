@@ -935,16 +935,10 @@ export async function updateBackgroundAgentSettingsCommand(
       'Add at least one active repository before enabling Triage CodeQL Alerts.';
   }
 
-  if (issueFixerFrequency !== 'off' && !(await hasActiveGitHubInstallation())) {
-    fieldErrors.general =
-      fieldErrors.general ||
-      'Connect GitHub before enabling Triage GitHub Issues.';
-  }
-
   if (issueFixerFrequency !== 'off' && !(await hasActiveRepository())) {
     fieldErrors.general =
       fieldErrors.general ||
-      'Add at least one active repository before enabling Triage GitHub Issues.';
+      'Add at least one active GitHub, GitLab, or Gitea repository before enabling Triage Issues.';
   }
   if (Object.keys(fieldErrors).length > 0) {
     return {

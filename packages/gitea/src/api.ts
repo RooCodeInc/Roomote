@@ -26,6 +26,7 @@ const GITEA_WEBHOOK_EVENTS = [
   'pull_request_sync',
   'pull_request_comment',
   'issue_comment',
+  'issues',
 ] as const;
 
 const giteaRepositorySchema = z.object({

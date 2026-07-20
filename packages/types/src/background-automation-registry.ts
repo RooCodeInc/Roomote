@@ -216,15 +216,17 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   },
   {
     automationKey: 'issue_fixer',
-    label: 'Triage GitHub Issues',
+    label: 'Triage Issues',
     availability: 'stable',
     scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
-    // Webhook-driven on new GitHub issues only (no Run now / batch scan).
-    // Plans are posted on the GitHub issue itself, not as Slack suggestion cards.
+    // Webhook-driven on new issues only (no Run now / batch scan).
+    // Plans are posted on the issue itself, not as Slack suggestion cards.
+    // GitHub, GitLab, and Gitea issue webhooks are wired today; ADO work items
+    // and Bitbucket issues are not yet supported.
     manualTriggerRequirements: [],
     usesManagerChannel: false,
     supportedCommunicationProviders: [],
-    supportedSourceControlProviders: ['github'],
+    supportedSourceControlProviders: ['github', 'gitlab', 'gitea'],
   },
   {
     automationKey: 'security_auditor',

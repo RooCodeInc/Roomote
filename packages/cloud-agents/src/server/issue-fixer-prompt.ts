@@ -1,4 +1,8 @@
-import { getGitHubAppMention } from '@roomote/types';
+import {
+  getGitHubAppMention,
+  getSourceControlProviderLabel,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 import {
   formatRepositoryEnvironmentLines,
@@ -22,9 +26,43 @@ export type IssueFixerTriggeringIssue = {
   authorLogin?: string | null;
 };
 
+function resolveContinueMention({
+  sourceControlProvider,
+  continueMention,
+  githubAppSlug,
+}: {
+  sourceControlProvider: SourceControlProvider;
+  continueMention?: string;
+  githubAppSlug?: string;
+}): string {
+  const explicit = continueMention?.trim();
+  if (explicit) {
+    return explicit.startsWith('@') ? explicit : `@${explicit}`;
+  }
+
+  if (sourceControlProvider === 'github') {
+    return getGitHubAppMention(githubAppSlug?.trim() || 'roomote');
+  }
+
+  return '@roomote';
+}
+
+function commentHowTo(sourceControlProvider: SourceControlProvider): string {
+  switch (sourceControlProvider) {
+    case 'github':
+      return 'Post one top-level issue comment with `gh issue comment <number> --repo <owner/repo> --body "..."` (or the equivalent GitHub API). Do not use GitLab/Gitea CLIs.';
+    case 'gitlab':
+      return 'Post one issue note with the GitLab REST API (`POST /projects/:id/issues/:iid/notes`) using `GITLAB_TOKEN` / credential already in the environment, or `glab` if available. Do not use `gh`.';
+    case 'gitea':
+      return 'Post one issue comment with the Gitea REST API (`POST /api/v1/repos/{owner}/{repo}/issues/{index}/comments`) using `GITEA_TOKEN` / credential already in the environment. Do not use `gh`.';
+    default:
+      return 'Post one top-level comment on the issue using the source-control credentials already in the task environment. Do not use GitHub-only CLIs such as `gh` unless the provider is GitHub.';
+  }
+}
+
 /**
- * Builds the one-task Triage GitHub Issues prompt: investigate a named issue
- * and post either clarifying questions or a plan on the GitHub issue.
+ * Builds the one-task Triage Issues prompt: investigate a named issue and post
+ * either clarifying questions or a plan on that issue (provider-neutral).
  */
 export function buildIssueFixerFixPrompt({
   repositoryFullName,
@@ -32,6 +70,8 @@ export function buildIssueFixerFixPrompt({
   trigger,
   issue,
   repositoryCoverage,
+  sourceControlProvider = 'github',
+  continueMention,
   githubAppSlug,
 }: {
   repositoryFullName: string;
@@ -39,8 +79,11 @@ export function buildIssueFixerFixPrompt({
   trigger: IssueFixerTrigger;
   issue: IssueFixerTriggeringIssue;
   repositoryCoverage?: RepositoryCoverage[];
-  /** Deployment-configured GitHub App slug used for @mentions. */
-  githubAppSlug: string;
+  sourceControlProvider?: SourceControlProvider;
+  /** Provider-native follow-up tag for humans (e.g. `@roomote`). */
+  continueMention?: string;
+  /** Deployment-configured GitHub App slug used for @mentions on GitHub. */
+  githubAppSlug?: string;
 }): string {
   const coverage =
     repositoryCoverage ??
@@ -58,7 +101,7 @@ export function buildIssueFixerFixPrompt({
     issue.labels && issue.labels.length > 0
       ? issue.labels.join(', ')
       : '(none)';
-  // Issue title, labels, author, and body are authored by arbitrary GitHub
+  // Issue title, labels, author, and body are authored by arbitrary SCM
   // users, so they are escaped and delimited as untrusted content.
   const escapedTitle = escapeTaskContextText(issue.title);
   const escapedLabels = escapeTaskContextText(labels);
@@ -66,11 +109,16 @@ export function buildIssueFixerFixPrompt({
   const bodyPreview = (issue.body ?? '').trim().slice(0, 4000);
   const issueBodySection = bodyPreview
     ? buildUntrustedExternalContentBlock({
-        source: 'github_issue_body',
+        source: `${sourceControlProvider}_issue_body`,
         text: bodyPreview,
       })
     : '(empty)';
-  const appMention = getGitHubAppMention(githubAppSlug.trim() || 'roomote');
+  const appMention = resolveContinueMention({
+    sourceControlProvider,
+    continueMention,
+    githubAppSlug,
+  });
+  const providerLabel = getSourceControlProviderLabel(sourceControlProvider);
 
   return `$plan-repo-implementation
 
@@ -78,8 +126,10 @@ export function buildIssueFixerFixPrompt({
   <source>issue_fixer</source>
   <run_mode>issue_plan_only</run_mode>
   <trigger>${trigger}</trigger>
+  <source_control_provider>${sourceControlProvider}</source_control_provider>
   <repository_scope>${repositoryFullName}</repository_scope>
   <target_environment_id>${environmentId}</target_environment_id>
+  <continue_mention>${appMention}</continue_mention>
   <github_app_mention>${appMention}</github_app_mention>
   <issue>
     <url>${escapeTaskContextText(issue.url)}</url>
@@ -90,7 +140,7 @@ export function buildIssueFixerFixPrompt({
   </issue>
 </task_context>
 
-Triage GitHub issue #${issue.number} in ${repositoryFullName}. Post either clarifying questions or a concrete implementation plan as a comment on that issue. Do not implement code and do not open a pull request.
+Triage ${providerLabel} issue #${issue.number} in ${repositoryFullName}. Post either clarifying questions or a concrete implementation plan as a comment on that issue. Do not implement code and do not open a pull request.
 
 Issue URL: ${issue.url}
 Title: ${escapedTitle}
@@ -102,15 +152,16 @@ ${issueBodySection}
 ${buildUntrustedContentPolicy()}
 
 Process:
-1. Re-fetch the live issue and read comments.
+1. Re-fetch the live issue and read comments using the ${providerLabel} credentials already in the task environment.
 2. Explore the codebase enough to ground any plan in real files and patterns.
 3. If material details are missing (acceptance criteria, expected behavior, scope, constraints, ownership), post clarifying questions and stop. Do not invent product decisions.
 4. Otherwise post a proposed implementation plan and stop.
 5. Skip with a brief comment (or a terse internal note if a comment would be noise) when the issue is closed, is a pull request, already has a recent full plan or active fix PR, or is waiting on unanswered questions you already asked.
-6. Stay quiet on chat unless you need input outside GitHub, hit a blocker, or finish with a result.
-7. When asking humans to follow up so Roomote continues, tell them to tag ${appMention} (the configured GitHub App mention from task_context). Do not hard-code a different app handle.
+6. Stay quiet on chat unless you need input outside the issue tracker, hit a blocker, or finish with a result.
+7. When asking humans to follow up so Roomote continues, tell them to tag ${appMention} (the configured continue_mention from task_context). Do not hard-code a different handle.
+8. ${commentHowTo(sourceControlProvider)}
 ${environmentSection}
-Comment formats (post one GitHub issue comment using one of these body shapes):
+Comment formats (post one issue comment using one of these body shapes):
 
 **When you need clarification:**
 

@@ -8,6 +8,7 @@ describe('buildIssueFixerFixPrompt', () => {
       repositoryFullName: 'acme/api',
       environmentId: 'env-api',
       trigger: 'webhook',
+      sourceControlProvider: 'github',
       githubAppSlug: 'roomote-roomote',
       repositoryCoverage: [
         { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
@@ -27,6 +28,9 @@ describe('buildIssueFixerFixPrompt', () => {
       '<github_app_mention>@roomote-roomote</github_app_mention>',
     );
     expect(prompt).toContain(
+      '<continue_mention>@roomote-roomote</continue_mention>',
+    );
+    expect(prompt).toContain(
       'Please tag @roomote-roomote in your response with the answers',
     );
     expect(prompt).toContain(
@@ -36,11 +40,45 @@ describe('buildIssueFixerFixPrompt', () => {
     expect(prompt).not.toContain("Please tag @roomote if you'd like me");
   });
 
+  it('uses GitLab-specific continue mention and avoids gh guidance', () => {
+    const prompt = buildIssueFixerFixPrompt({
+      repositoryFullName: 'group/project',
+      environmentId: 'env-api',
+      trigger: 'webhook',
+      sourceControlProvider: 'gitlab',
+      continueMention: '@roomote',
+      repositoryCoverage: [
+        {
+          repositoryFullName: 'group/project',
+          targetEnvironmentId: 'env-api',
+        },
+      ],
+      issue: {
+        repositoryFullName: 'group/project',
+        number: 9,
+        title: 'Broken pipeline',
+        url: 'https://gitlab.com/group/project/-/issues/9',
+        body: 'Default branch is red.',
+        labels: ['ci'],
+        authorLogin: 'bob',
+      },
+    });
+
+    expect(prompt).toContain(
+      '<source_control_provider>gitlab</source_control_provider>',
+    );
+    expect(prompt).toContain('<continue_mention>@roomote</continue_mention>');
+    expect(prompt).toContain('Triage GitLab issue #9');
+    expect(prompt).toContain('Do not use `gh`');
+    expect(prompt).toContain('source="gitlab_issue_body"');
+  });
+
   it('escapes and delimits attacker-controlled issue fields', () => {
     const prompt = buildIssueFixerFixPrompt({
       repositoryFullName: 'acme/api',
       environmentId: 'env-api',
       trigger: 'webhook',
+      sourceControlProvider: 'github',
       githubAppSlug: 'roomote',
       repositoryCoverage: [
         { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },

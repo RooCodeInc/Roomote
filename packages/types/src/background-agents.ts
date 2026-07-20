@@ -67,7 +67,7 @@ export type SecurityAuditorFrequency =
 export type CodeQualityAuditorFrequency =
   ScheduleOnlyBackgroundAutomationFrequency;
 
-// CI failure triage and Issue Fixer are webhook-driven and have no schedule;
+// CI failure triage and Triage Issues are webhook-driven and have no schedule;
 // 'daily' is only the stored enabled sentinel so they reuse the generic
 // schedule-only settings machinery.
 export type CiFailureTriageFrequency = 'off' | 'daily';
@@ -237,12 +237,14 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
   },
   issueFixer: {
     id: 'issueFixer',
-    label: 'Triage GitHub Issues',
+    label: 'Triage Issues',
     hashAliases: [
       'issue-fixer',
       'issuefixer',
       'fix-issues',
       'fixissues',
+      'triage-issues',
+      'triageissues',
       'triage-github-issues',
       'triagegithubissues',
     ],
