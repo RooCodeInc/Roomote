@@ -4,7 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { Streamdown } from 'streamdown';
 
 import {
+  Astroid,
   Button,
+  ChevronDown,
+  ChevronRight,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -40,12 +43,14 @@ function ReleaseNotesBody({
   highlights,
   detailsMarkdown,
   isLoading,
+  mode,
 }: {
   version: string;
   summary: string | null;
   highlights: string[];
   detailsMarkdown: string;
   isLoading: boolean;
+  mode: string;
 }) {
   if (isLoading) {
     return (
@@ -77,23 +82,45 @@ function ReleaseNotesBody({
 
       {highlights.length > 0 ? (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold">Highlights</h3>
-          <ul className="list-disc space-y-1 pl-5 text-sm text-foreground/90">
-            {highlights.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+          <h2 className="text-base font-semibold tracking-tight flex items-center gap-2">
+            <Astroid className="size-4" />
+            <span>Highlights for {version}</span>
+          </h2>
+          <div className="border-l-2 pl-4 ml-1.5">
+            <ul className="space-y-1 text-sm">
+              {highlights.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+
+            {mode === 'update-available' ? (
+              <p className="text-sm mt-3">
+                For upgrade instructions, check our{' '}
+                <a
+                  href={DOCS_SELF_HOSTING_URL}
+                  target="_blank"
+                  className="underline"
+                  rel="noreferrer"
+                >
+                  self-hosting docs.
+                </a>
+              </p>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
       {detailsMarkdown ? (
         <Collapsible defaultOpen={!summary && highlights.length === 0}>
-          <CollapsibleTrigger className="text-sm font-semibold text-foreground hover:underline">
-            All changes
+          <CollapsibleTrigger className="text-sm cursor-pointer font-semibold text-foreground hover:underline group">
+            Show all changes
+            <ChevronDown className="inline size-4 group-data-[state=open]:rotate-180 transition-transform mr-1" />
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2">
-            <div className="prose prose-sm dark:prose-invert max-w-none text-foreground/90">
-              <Streamdown>{detailsMarkdown}</Streamdown>
+            <div className="dark:prose-invert">
+              <Streamdown className="text-sm [&_[data-streamdown='heading-1']]:text-lg! [&_[data-streamdown='heading-2']]:text-base! [&_[data-streamdown='heading-3']]:text-base!">
+                {detailsMarkdown}
+              </Streamdown>
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -126,7 +153,7 @@ export function ReleaseNotesDialog({
   const title =
     mode === 'whats-new'
       ? `What's new in Roomote ${tag}`
-      : `Roomote ${tag} is available`;
+      : `A new version of Roomote is available`;
   const description =
     mode === 'whats-new'
       ? 'Highlights from the release now running in this deployment.'
@@ -136,7 +163,7 @@ export function ReleaseNotesDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto" size="2xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto" size="3xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -148,27 +175,14 @@ export function ReleaseNotesDialog({
           highlights={notesQuery.data?.highlights ?? []}
           detailsMarkdown={notesQuery.data?.detailsMarkdown ?? ''}
           isLoading={notesQuery.isLoading}
+          mode={mode}
         />
-
-        {mode === 'update-available' ? (
-          <p className="text-sm">
-            For upgrade instructions, check our{' '}
-            <a
-              href={DOCS_SELF_HOSTING_URL}
-              target="_blank"
-              className="underline"
-              rel="noreferrer"
-            >
-              self-hosting docs.
-            </a>
-          </p>
-        ) : null}
 
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" asChild>
               <a href={htmlUrl} target="_blank" rel="noreferrer">
-                View details
+                Go to the release
                 <SquareArrowOutUpRight />
               </a>
             </Button>
