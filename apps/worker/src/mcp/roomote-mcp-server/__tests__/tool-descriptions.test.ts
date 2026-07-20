@@ -221,10 +221,16 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain(
       'Keep widgets compact enough to fit without scrolling',
     );
+    expect(tool.config.description).toContain(
+      'HTML, CSS, and inline SVG are displayed in a sandboxed iframe',
+    );
     expect(tool.config.description).toContain('request_user_input');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
     expect(getInputSchemaField(tool, 'html').description).toContain(
       'Avoid long prose',
+    );
+    expect(getInputSchemaField(tool, 'html').description).toContain(
+      'including inline SVG',
     );
     expect(getInputSchemaField(tool, 'css').description).toContain(
       '--rw-surface',

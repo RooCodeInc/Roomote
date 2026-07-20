@@ -97,6 +97,56 @@ describe('handleShowWidget', () => {
 });
 
 describe('show-widget helpers', () => {
+  it('keeps static inline SVG chart primitives', async () => {
+    const html = await sanitizeWidgetHtml(`
+      <svg viewBox="0 0 200 100" role="img" aria-label="Bar chart">
+        <defs>
+          <linearGradient id="bar-gradient"><stop offset="0" stop-color="#38bdf8" /></linearGradient>
+          <clipPath id="plot"><rect width="200" height="100" /></clipPath>
+        </defs>
+        <g clip-path="url(#plot)">
+          <rect x="10" y="20" width="30" height="70" fill="url(#bar-gradient)" />
+          <circle cx="80" cy="50" r="12" />
+          <path d="M110 80 L140 30 L170 60" />
+          <text x="10" y="15">Static chart</text>
+        </g>
+      </svg>
+    `);
+
+    expect(html).toContain('<svg');
+    expect(html).toContain('<linearGradient');
+    expect(html).toContain('<clipPath');
+    expect(html).toContain('<rect');
+    expect(html).toContain('<circle');
+    expect(html).toContain('<path');
+    expect(html).toContain('<text');
+    expect(html).toContain('url(#bar-gradient)');
+  });
+
+  it('strips active SVG content and external references', async () => {
+    const html = await sanitizeWidgetHtml(`
+      <svg viewBox="0 0 100 100">
+        <foreignObject><div>embedded HTML</div></foreignObject>
+        <image href="https://evil.example/chart.svg" />
+        <use href="https://evil.example/icons.svg#chart" />
+        <animateTransform attributeName="transform" />
+        <rect onclick="alert(1)" fill="url(https://evil.example/paint.svg#gradient)" />
+        <a xlink:href="javascript:alert(1)"><text>bad link</text></a>
+      </svg>
+    `);
+
+    expect(html).toContain('<svg');
+    expect(html.toLowerCase()).not.toContain('foreignobject');
+    expect(html).not.toContain('embedded HTML');
+    expect(html.toLowerCase()).not.toContain('<image');
+    expect(html.toLowerCase()).not.toContain('<use');
+    expect(html.toLowerCase()).not.toContain('animatetransform');
+    expect(html.toLowerCase()).not.toContain('onclick');
+    expect(html.toLowerCase()).not.toContain('xlink:href');
+    expect(html.toLowerCase()).not.toContain('https://evil.example');
+    expect(html.toLowerCase()).not.toContain('javascript:');
+  });
+
   it('strips javascript urls and nested frames', async () => {
     const html = await sanitizeWidgetHtml(
       '<a href="javascript:alert(1)">x</a><iframe src="https://evil"></iframe><img src="https://evil/x.png">',
