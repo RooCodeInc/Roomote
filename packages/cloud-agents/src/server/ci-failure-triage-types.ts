@@ -19,5 +19,7 @@ export type FailedCiRun = {
   workflowOrPipelineName: string;
   runId: string;
   runUrl: string;
+  /** Bounded provider-fetched failed-job metadata/log tails when available. */
+  failureEvidence?: string | null;
   completedAt?: Date | null;
 };

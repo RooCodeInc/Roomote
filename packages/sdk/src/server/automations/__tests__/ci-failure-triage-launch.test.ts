@@ -3,7 +3,10 @@ const {
   mockListConnectedCommunicationProviders,
   mockResolveAutomationRuntimeDestination,
   mockBuildDestinationTaskPayloadFields,
+  mockBuildCiFailureTriagePrompt,
   mockBuildRepositoryCoverage,
+  mockFindEnvironmentIdForRepositoryId,
+  mockFindEnvironmentForRepo,
   mockEnqueueTask,
   mockGetTaskUrl,
   mockRecordAutomationRunOutcome,
@@ -19,7 +22,10 @@ const {
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
   mockBuildDestinationTaskPayloadFields: vi.fn(() => ({})),
+  mockBuildCiFailureTriagePrompt: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
+  mockFindEnvironmentIdForRepositoryId: vi.fn(),
+  mockFindEnvironmentForRepo: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(
     ({ taskId }: { taskId: string }) =>
@@ -48,21 +54,28 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  buildCiFailureTriagePrompt: (params: {
-    trigger: string;
-    triggeringRun?: { runUrl: string } | null;
-    hasAnnouncementThread?: boolean;
-  }) =>
-    `$ci-failure-triage trigger=${params.trigger} run=${params.triggeringRun?.runUrl ?? 'none'} announced=${params.hasAnnouncementThread === true}`,
-  buildRepositoryCoverage: mockBuildRepositoryCoverage,
+  buildCiFailureTriagePrompt: (...args: unknown[]) =>
+    mockBuildCiFailureTriagePrompt(...args),
   enqueueTask: mockEnqueueTask,
+  findEnvironmentForRepo: mockFindEnvironmentForRepo,
   getTaskUrl: mockGetTaskUrl,
   buildCiFailureTriageFingerprint: (params: {
     repositoryFullName: string;
     workflowName: string;
     headBranch: string;
+    repositoryHost?: string | null;
+    provider?: string;
   }) =>
-    `${params.repositoryFullName}::${params.workflowName}::${params.headBranch}`,
+    [
+      params.provider !== 'github'
+        ? params.repositoryHost?.trim().toLowerCase()
+        : undefined,
+      params.repositoryFullName,
+      params.workflowName,
+      params.headBranch,
+    ]
+      .filter(Boolean)
+      .join('::'),
   buildCiFailureTriageDebounceKey: (params: {
     provider: string;
     repositoryId: string;
@@ -70,6 +83,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   tryClaimCiFailureTriageInvestigation:
     mockTryClaimCiFailureTriageInvestigation,
   releaseCiFailureTriageInvestigation: mockReleaseCiFailureTriageInvestigation,
+}));
+
+vi.mock('../github-deployment-scope', () => ({
+  findEnvironmentIdForRepositoryId: mockFindEnvironmentIdForRepositoryId,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -216,6 +233,8 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockBuildRepositoryCoverage.mockResolvedValue([
       { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
     ]);
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-api');
     mockRedisSet.mockResolvedValue('OK');
     mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(true);
     mockReleaseCiFailureTriageInvestigation.mockResolvedValue(undefined);
@@ -236,6 +255,14 @@ describe('launchCiFailureTriageForFailedRun', () => {
       taskId: 'task-scan-1',
     });
     mockGetCommunicationProviderAdapter.mockResolvedValue(null);
+    mockBuildCiFailureTriagePrompt.mockImplementation(
+      (params: {
+        trigger: string;
+        triggeringRun?: { runUrl: string } | null;
+        hasAnnouncementThread?: boolean;
+      }) =>
+        `$ci-failure-triage trigger=${params.trigger} run=${params.triggeringRun?.runUrl ?? 'none'} announced=${params.hasAnnouncementThread === true}`,
+    );
   });
 
   it('launches one environment-backed investigate-and-fix task', async () => {
@@ -320,6 +347,32 @@ describe('launchCiFailureTriageForFailedRun', () => {
     expect(mockUpdateMessage).not.toHaveBeenCalled();
   });
 
+  it('preserves GitLab host and failure evidence in the launched task', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-gl');
+
+    await launchCiFailureTriageForFailedRun({
+      ...failedRun,
+      provider: 'gitlab',
+      repositoryHost: 'gitlab.example.com',
+      runUrl: 'https://gitlab.example.com/acme/api/-/pipelines/42',
+      failureEvidence: 'job="test" id=21\nAssertionError',
+    });
+
+    const payload = mockEnqueueTask.mock.calls[0]?.[0].task.payload;
+    expect(payload.sourceControlProvider).toBe('gitlab');
+    expect(payload.sourceControlHost).toBe('gitlab.example.com');
+    expect(payload.environmentId).toBe('env-gl');
+    expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
+    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        triggeringRun: expect.objectContaining({
+          provider: 'gitlab',
+          failureEvidence: 'job="test" id=21\nAssertionError',
+        }),
+      }),
+    );
+  });
+
   it('skips when the investigation claim is held', async () => {
     mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(false);
 
@@ -339,6 +392,7 @@ describe('launchCiFailureTriageForFailedRun', () => {
     expect(mockReleaseCiFailureTriageInvestigation).toHaveBeenCalledWith({
       provider: 'github',
       repositoryFullName: 'acme/api',
+      repositoryHost: undefined,
       fingerprint: 'acme/api::CI::main',
     });
   });
@@ -360,10 +414,74 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockBuildRepositoryCoverage.mockResolvedValue([
       { repositoryFullName: 'acme/api' },
     ]);
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue(undefined);
 
     const result = await launchCiFailureTriageForFailedRun(failedRun);
 
     expect(result.message).toContain('no configured environment');
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('prefers repository-id environment mapping over fullName lookup', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-from-mapping');
+    mockFindEnvironmentForRepo.mockResolvedValue('env-from-fullname');
+
+    const result = await launchCiFailureTriageForFailedRun(failedRun);
+
+    expect(result.status).toBe('ok');
+    expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
+      'repo-row-1',
+    );
+    expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            environmentId: 'env-from-mapping',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('falls back to fullName environment lookup when mapping is missing', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-from-config');
+
+    const result = await launchCiFailureTriageForFailedRun(failedRun);
+
+    expect(result.status).toBe('ok');
+    expect(mockFindEnvironmentForRepo).toHaveBeenCalledWith(
+      'acme/api',
+      undefined,
+      'github',
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            environmentId: 'env-from-config',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('does not path-fallback for GitLab when repository mapping is missing', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-wrong-host');
+
+    const result = await launchCiFailureTriageForFailedRun({
+      ...failedRun,
+      provider: 'gitlab',
+      repositoryHost: 'gitlab.example.com',
+    });
+
+    expect(result.message).toContain('no configured environment');
+    expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 

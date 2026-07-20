@@ -547,7 +547,7 @@ function handleTokenProviderSyncSuccess(
   const configuredCount = webhooks.created + webhooks.updated;
   const webhookSubject =
     provider === 'gitlab'
-      ? 'merge request webhooks'
+      ? 'source-control webhooks'
       : provider === 'ado'
         ? 'Azure DevOps service hooks'
         : 'pull request webhooks';

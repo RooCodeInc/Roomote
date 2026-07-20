@@ -26,7 +26,9 @@ export {
   loadAutomationThreadFeedbackReport,
 } from './automation-thread-feedback';
 export {
+  findEnvironmentIdForRepositoryId,
   getActiveRepositoryFullNames,
+  getActiveRepositoriesForProviders,
   hasActiveGitHubInstallation,
 } from './github-deployment-scope';
 export type {

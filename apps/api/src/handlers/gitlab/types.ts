@@ -14,6 +14,7 @@ const gitLabProjectSchema = z
     path_with_namespace: z.string().optional(),
     web_url: z.string().optional(),
     git_http_url: z.string().optional(),
+    default_branch: z.string().optional(),
   })
   .passthrough();
 
@@ -141,3 +142,47 @@ export const gitLabIssueWebhookSchema = z
   .passthrough();
 
 export type GitLabIssueWebhook = z.infer<typeof gitLabIssueWebhookSchema>;
+
+const gitLabPipelineAttributesSchema = z
+  .object({
+    id: z.number(),
+    iid: z.number().optional(),
+    name: z.string().nullable().optional(),
+    ref: z.string(),
+    sha: z.string(),
+    status: z.string(),
+    detailed_status: z.string().optional(),
+    source: z.string().optional(),
+    url: z.string().optional(),
+  })
+  .passthrough();
+
+const gitLabPipelineCommitSchema = z
+  .object({
+    id: z.string().optional(),
+  })
+  .passthrough()
+  .optional();
+
+const gitLabPipelineJobSchema = z
+  .object({
+    id: z.number(),
+    name: z.string(),
+    stage: z.string().nullable().optional(),
+    status: z.string(),
+    failure_reason: z.string().nullable().optional(),
+    allow_failure: z.boolean().optional(),
+  })
+  .passthrough();
+
+export const gitLabPipelineWebhookSchema = z
+  .object({
+    object_kind: z.literal('pipeline'),
+    object_attributes: gitLabPipelineAttributesSchema,
+    project: gitLabProjectSchema,
+    commit: gitLabPipelineCommitSchema,
+    builds: z.array(gitLabPipelineJobSchema).optional(),
+  })
+  .passthrough();
+
+export type GitLabPipelineWebhook = z.infer<typeof gitLabPipelineWebhookSchema>;

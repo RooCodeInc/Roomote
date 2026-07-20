@@ -2,8 +2,8 @@ import {
   buildCiFailureTriageDebounceKey,
   buildCiFailureTriageFingerprint,
   buildCiFailureTriagePrompt,
-  buildRepositoryCoverage,
   enqueueTask,
+  findEnvironmentForRepo,
   getTaskUrl,
   releaseCiFailureTriageInvestigation,
   tryClaimCiFailureTriageInvestigation,
@@ -37,6 +37,7 @@ import {
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
+import { findEnvironmentIdForRepositoryId } from './github-deployment-scope';
 
 const LOG_PREFIX = '[ci-failure-triage-launch]';
 
@@ -269,16 +270,34 @@ export async function launchCiFailureTriageForFailedRun(
     return { status: 'ok', message: 'Manager channel is not configured' };
   }
 
-  const repositoryCoverage = await buildRepositoryCoverage([
-    run.repositoryFullName,
-  ]);
-  const environmentId = repositoryCoverage[0]?.targetEnvironmentId;
+  // GitHub keeps a path-only fullName fallback for older envs without mapping
+  // rows. Non-GitHub providers require the repository-id mapping so same-path
+  // hosts cannot select each other's workspaces.
+  const mappedEnvironmentId = await findEnvironmentIdForRepositoryId(
+    run.repositoryId,
+  );
+  const environmentId =
+    mappedEnvironmentId ??
+    (run.provider === 'github'
+      ? await findEnvironmentForRepo(
+          run.repositoryFullName,
+          undefined,
+          'github',
+        )
+      : undefined);
   if (!environmentId) {
     return {
       status: 'ok',
       message: 'Repository has no configured environment for CI triage',
     };
   }
+
+  const repositoryCoverage = [
+    {
+      repositoryFullName: run.repositoryFullName,
+      targetEnvironmentId: environmentId,
+    },
+  ];
 
   const redis = getRedis();
   const debounceClaim = await redis.set(
@@ -302,10 +321,13 @@ export async function launchCiFailureTriageForFailedRun(
     repositoryFullName: run.repositoryFullName,
     workflowName: run.workflowOrPipelineName,
     headBranch: run.headBranch,
+    repositoryHost: run.repositoryHost,
+    provider: run.provider,
   });
   const investigationClaimed = await tryClaimCiFailureTriageInvestigation({
     provider: run.provider,
     repositoryFullName: run.repositoryFullName,
+    repositoryHost: run.repositoryHost,
     fingerprint,
     marker: run.runUrl,
   });
@@ -388,6 +410,9 @@ export async function launchCiFailureTriageForFailedRun(
             ...(run.provider !== 'github'
               ? { sourceControlProvider: run.provider }
               : {}),
+            ...(run.repositoryHost
+              ? { sourceControlHost: run.repositoryHost }
+              : {}),
             description: buildCiFailureTriagePrompt({
               channelId,
               repositoryFullNames: [run.repositoryFullName],
@@ -400,6 +425,7 @@ export async function launchCiFailureTriageForFailedRun(
                 headBranch: run.headBranch,
                 headSha: run.headSha,
                 provider: run.provider,
+                failureEvidence: run.failureEvidence,
               },
               hasAnnouncementThread: announcementTs !== null,
               destinationProvider: destination.provider,
@@ -464,6 +490,7 @@ export async function launchCiFailureTriageForFailedRun(
     await releaseCiFailureTriageInvestigation({
       provider: run.provider,
       repositoryFullName: run.repositoryFullName,
+      repositoryHost: run.repositoryHost,
       fingerprint,
     }).catch((releaseError: unknown) => {
       console.warn(
