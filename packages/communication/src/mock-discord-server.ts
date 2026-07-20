@@ -529,9 +529,30 @@ export class MockDiscordServer {
       );
     }
     if (messages && method === 'GET') {
-      return jsonResponse(
-        [...(this.state.messages[messages[1] ?? ''] ?? [])].reverse(),
-      );
+      const channelId = messages[1] ?? '';
+      const search = new URLSearchParams(messages[2] ?? '');
+      const after = search.get('after');
+      const before = search.get('before');
+      let list = [...(this.state.messages[channelId] ?? [])];
+      if (after) {
+        list = list.filter((item) => {
+          try {
+            return BigInt(item.id) > BigInt(after);
+          } catch {
+            return item.id > after;
+          }
+        });
+      }
+      if (before) {
+        list = list.filter((item) => {
+          try {
+            return BigInt(item.id) < BigInt(before);
+          } catch {
+            return item.id < before;
+          }
+        });
+      }
+      return jsonResponse(list.reverse());
     }
 
     const message = /^\/channels\/([^/]+)\/messages\/([^/]+)$/u.exec(path);

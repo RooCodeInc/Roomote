@@ -11,12 +11,24 @@ export function buildDiscordMessagePermalink(input: {
   return messageId ? `${base}/${messageId}` : base;
 }
 
-const DISCORD_MESSAGE_LINK_REGEX =
-  /^https?:\/\/(?:(?:canary|ptb)\.)?discord(?:app)?\.com\/channels\/(\d+|@me)\/(\d+)(?:\/(\d+))?\/?(?:\?.*)?(?:#.*)?$/i;
+const DISCORD_LINK_HOSTS = new Set([
+  'discord.com',
+  'discordapp.com',
+  'canary.discord.com',
+  'ptb.discord.com',
+  'canary.discordapp.com',
+  'ptb.discordapp.com',
+]);
+
+const DISCORD_SNOWFLAKE_OR_ME = /^(?:\d+|@me)$/;
+const DISCORD_SNOWFLAKE = /^\d+$/;
 
 /**
  * Parses a Discord message or channel permalink into guild/channel/message ids.
  * Accepts `discord.com`, `discordapp.com`, canary, and ptb hosts.
+ *
+ * Uses URL + segment checks instead of a single end-anchored regex so path
+ * parsing stays linear-time on adversarial inputs.
  */
 export function parseDiscordMessagePermalink(raw: string): {
   guildId: string | null;
@@ -26,25 +38,50 @@ export function parseDiscordMessagePermalink(raw: string): {
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
-  let pathname: string;
+  let url: URL;
   try {
-    const url = new URL(trimmed);
-    pathname = `${url.protocol}//${url.host}${url.pathname}`;
+    url = new URL(trimmed);
   } catch {
-    pathname = trimmed;
+    return null;
   }
 
-  const match = pathname.match(DISCORD_MESSAGE_LINK_REGEX);
-  if (!match) return null;
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return null;
+  }
 
-  const guildRaw = match[1] ?? '';
-  const channelId = match[2]?.trim() ?? '';
-  const messageId = match[3]?.trim() || null;
-  if (!channelId) return null;
+  const host = url.hostname.toLowerCase();
+  if (!DISCORD_LINK_HOSTS.has(host)) {
+    return null;
+  }
+
+  // Expected path: /channels/{guild|@me}/{channel}[/{message}]
+  const segments = url.pathname
+    .split('/')
+    .filter((segment) => segment.length > 0);
+  if (segments.length < 3 || segments.length > 4) {
+    return null;
+  }
+  if (segments[0] !== 'channels') {
+    return null;
+  }
+
+  const guildRaw = segments[1] ?? '';
+  const channelId = segments[2] ?? '';
+  const messageRaw = segments[3] ?? '';
+
+  if (!DISCORD_SNOWFLAKE_OR_ME.test(guildRaw)) {
+    return null;
+  }
+  if (!DISCORD_SNOWFLAKE.test(channelId)) {
+    return null;
+  }
+  if (messageRaw && !DISCORD_SNOWFLAKE.test(messageRaw)) {
+    return null;
+  }
 
   return {
     guildId: guildRaw === '@me' ? null : guildRaw,
     channelId,
-    messageId,
+    messageId: messageRaw || null,
   };
 }

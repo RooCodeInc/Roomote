@@ -527,6 +527,50 @@ describe('DiscordCommunicationProvider', () => {
     expect(server.state.messages[channelId]).toHaveLength(0);
   });
 
+  it('keeps oldest and latest channel message bounds inclusive', async () => {
+    const server = new MockDiscordServer();
+    let nonce = 1_000;
+    const provider = new DiscordCommunicationProvider({
+      botToken: server.botToken,
+      applicationId: server.application.id,
+      apiBaseUrl: 'https://discord.example.test/api/v10',
+      fetch: server.fetch as typeof fetch,
+      nonceFactory: () => String((nonce += 1)),
+      sleep: async () => undefined,
+    });
+    const channelId = '400000000000000099';
+    const oldest = await provider.postMessage({ channelId, text: 'oldest' });
+    const middle = await provider.postMessage({ channelId, text: 'middle' });
+    const latest = await provider.postMessage({ channelId, text: 'latest' });
+
+    expect(
+      new Set([oldest.messageId, middle.messageId, latest.messageId]).size,
+    ).toBe(3);
+
+    const result = await provider.fetchChannelMessages({
+      channelId,
+      oldest: oldest.messageId,
+      latest: latest.messageId,
+    });
+
+    expect(result.messages.map((message) => message.id)).toEqual([
+      oldest.messageId,
+      middle.messageId,
+      latest.messageId,
+    ]);
+
+    const historyRequest = server.state.requests.find(
+      (request) =>
+        request.method === 'GET' &&
+        request.path.startsWith(`/channels/${channelId}/messages?`),
+    );
+    const query = new URLSearchParams(historyRequest?.path.split('?')[1] ?? '');
+    expect(query.get('after')).toBe((BigInt(oldest.messageId) - 1n).toString());
+    expect(query.get('before')).toBe(
+      (BigInt(latest.messageId) + 1n).toString(),
+    );
+  });
+
   it('maps Slack-style reaction names onto Discord unicode emoji', async () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000002';

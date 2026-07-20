@@ -312,6 +312,31 @@ function buildDiscordComponents(
   return rows.length ? rows : undefined;
 }
 
+function discordExclusiveAfterCursor(inclusiveOldestId: string): string {
+  // Discord's `after` cursor is exclusive of the given id. Subtract one so an
+  // inclusive oldest bound can still return that boundary message.
+  const value = BigInt(inclusiveOldestId);
+  if (value <= 0n) return '0';
+  return (value - 1n).toString();
+}
+
+function discordExclusiveBeforeCursor(inclusiveLatestId: string): string {
+  // Discord's `before` cursor is exclusive of the given id. Add one so an
+  // inclusive latest bound can still return that boundary message.
+  return (BigInt(inclusiveLatestId) + 1n).toString();
+}
+
+function compareDiscordMessageIds(left: string, right: string): number {
+  try {
+    const leftId = BigInt(left);
+    const rightId = BigInt(right);
+    if (leftId === rightId) return 0;
+    return leftId < rightId ? -1 : 1;
+  } catch {
+    return left.localeCompare(right);
+  }
+}
+
 function toCommunicationMessage(
   message: DiscordApiMessage,
 ): CommunicationMessage {
@@ -908,15 +933,31 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     latest?: string;
   }): Promise<CommunicationChannelMessagesResult> {
     const query = new URLSearchParams({ limit: '100' });
-    if (input.oldest) query.set('after', input.oldest);
-    if (input.latest) query.set('before', input.latest);
+    // Discord after/before exclude the cursor message. Expand cursors by one
+    // snowflake so oldest/latest stay inclusive, then filter client-side.
+    if (input.oldest) {
+      query.set('after', discordExclusiveAfterCursor(input.oldest));
+    }
+    if (input.latest) {
+      query.set('before', discordExclusiveBeforeCursor(input.latest));
+    }
     const raw = await this.request<DiscordApiMessage[]>(
       'GET',
       `/channels/${input.channelId}/messages?${query.toString()}`,
       undefined,
       { retryNetworkErrors: true, retryServerErrors: true },
     );
-    const messages = raw.map(toCommunicationMessage).reverse();
+    let messages = raw.map(toCommunicationMessage).reverse();
+    if (input.oldest) {
+      messages = messages.filter(
+        (message) => compareDiscordMessageIds(message.id, input.oldest!) >= 0,
+      );
+    }
+    if (input.latest) {
+      messages = messages.filter(
+        (message) => compareDiscordMessageIds(message.id, input.latest!) <= 0,
+      );
+    }
     return {
       provider: 'discord',
       channelId: input.channelId,
