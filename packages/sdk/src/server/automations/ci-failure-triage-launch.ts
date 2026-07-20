@@ -302,10 +302,12 @@ export async function launchCiFailureTriageForFailedRun(
     repositoryFullName: run.repositoryFullName,
     workflowName: run.workflowOrPipelineName,
     headBranch: run.headBranch,
+    repositoryHost: run.repositoryHost,
   });
   const investigationClaimed = await tryClaimCiFailureTriageInvestigation({
     provider: run.provider,
     repositoryFullName: run.repositoryFullName,
+    repositoryHost: run.repositoryHost,
     fingerprint,
     marker: run.runUrl,
   });
@@ -468,6 +470,7 @@ export async function launchCiFailureTriageForFailedRun(
     await releaseCiFailureTriageInvestigation({
       provider: run.provider,
       repositoryFullName: run.repositoryFullName,
+      repositoryHost: run.repositoryHost,
       fingerprint,
     }).catch((releaseError: unknown) => {
       console.warn(

@@ -59,8 +59,16 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     repositoryFullName: string;
     workflowName: string;
     headBranch: string;
+    repositoryHost?: string | null;
   }) =>
-    `${params.repositoryFullName}::${params.workflowName}::${params.headBranch}`,
+    [
+      params.repositoryHost?.trim().toLowerCase(),
+      params.repositoryFullName,
+      params.workflowName,
+      params.headBranch,
+    ]
+      .filter(Boolean)
+      .join('::'),
   buildCiFailureTriageDebounceKey: (params: {
     provider: string;
     repositoryId: string;
@@ -367,6 +375,7 @@ describe('launchCiFailureTriageForFailedRun', () => {
     expect(mockReleaseCiFailureTriageInvestigation).toHaveBeenCalledWith({
       provider: 'github',
       repositoryFullName: 'acme/api',
+      repositoryHost: undefined,
       fingerprint: 'acme/api::CI::main',
     });
   });

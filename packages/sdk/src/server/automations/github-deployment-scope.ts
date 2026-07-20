@@ -105,10 +105,20 @@ export async function getActiveRepositoriesForProviders(
   const seen = new Set<string>();
   const result: ActiveRepositoryRef[] = [];
   for (const row of rows) {
-    if (!row.fullName || seen.has(row.fullName)) {
+    if (!row.fullName) {
       continue;
     }
-    seen.add(row.fullName);
+    // Identity is provider + host + fullName; do not collapse same-path
+    // projects on different instances before Manual Run now inspects them.
+    const identityKey = [
+      row.sourceControlProvider,
+      row.host ?? '',
+      row.fullName,
+    ].join('\0');
+    if (seen.has(identityKey)) {
+      continue;
+    }
+    seen.add(identityKey);
     result.push({
       fullName: row.fullName,
       sourceControlProvider: row.sourceControlProvider as SourceControlProvider,

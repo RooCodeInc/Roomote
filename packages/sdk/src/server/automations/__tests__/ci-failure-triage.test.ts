@@ -155,6 +155,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     expect(mockTryClaimCiFailureTriageInvestigation).toHaveBeenCalledWith({
       provider: 'github',
       repositoryFullName: 'acme/api',
+      repositoryHost: 'github.com',
       fingerprint: 'fp-manual',
       marker: 'manual:acme/api',
     });
