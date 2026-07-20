@@ -10,7 +10,14 @@ export const REDIS_KEYS = {
   SLACK_AUTO_START_CHANNEL: 'slack:auto-start-channel',
   DISCORD_AUTO_START_CHANNEL: 'discord:auto-start-channel',
   CONTROLLER_HEARTBEAT: 'controller:heartbeat',
+  /** Cached GitHub release notes payload keyed as `${prefix}:${version}`. */
+  RELEASE_NOTES: 'release:notes',
 } as const;
+
+/** Positive-cache TTL for successfully fetched GitHub release notes. */
+export const RELEASE_NOTES_CACHE_TTL_SECONDS = 6 * 60 * 60;
+/** Negative-cache TTL when a release is missing or GitHub fetch fails. */
+export const RELEASE_NOTES_NEGATIVE_CACHE_TTL_SECONDS = 15 * 60;
 
 export const AUTO_START_EMPTY_SENTINEL = '__roomote_empty__';
 export const AUTO_START_CHANNEL_CACHE_TTL_SECONDS = 60;

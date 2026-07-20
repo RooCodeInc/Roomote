@@ -129,13 +129,28 @@ Run the repository-owned version command; never hand-edit the output:
 pnpm run version
 ```
 
+Then author the **in-app release summary and highlights** for the new top
+`CHANGELOG.md` section. The version script seeds a one-sentence summary and a
+`### Highlights` list from the bump bullets — replace those with polished,
+user-facing copy before opening the PR:
+
+- **Summary**: one plain-language sentence about what this release delivers.
+- **Highlights**: 1–4 bullets of the most important changes operators and users
+  should notice. Avoid internal jargon, commit SHAs, and package names.
+
+These fields power the in-app What's new / Update available dialogs (they ship
+through GitHub Releases via `extract-changelog-section`). Leave
+`### Major/Minor/Patch changes` bullets as generated unless a bullet needs a
+clarity fix; do not pad them.
+
 Then verify:
 
 - `package.json` contains the expected next version using ordinary semver
   (`patch` increments patch, `minor` increments minor and zeros patch, `major`
   increments major and zeros minor and patch)
 - the new top `CHANGELOG.md` section contains every intended note under the
-  correct bump-level heading
+  correct bump-level heading, plus an edited summary paragraph and
+  `### Highlights` list suitable for in-app display
 - every pending changeset was consumed and `.changeset/README.md` remains
 - workspace package versions did not change
 - the diff contains only release artifacts: root `package.json`,

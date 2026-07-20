@@ -151,8 +151,8 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // getInstanceAnalyticsId). Stable across versions, never derived from any
   // customer data, and never editable through any user-facing mutation.
   instanceAnalyticsId: text('instance_analytics_id'),
-  // Latest released app version reported by the Ping version-check endpoint,
-  // stored for a future "update available" surface. No UI reads this yet.
+  // Latest released app version reported by the Ping version-check endpoint.
+  // Read by the in-app "update available" notice for self-host admins.
   latestKnownVersion: text('latest_known_version'),
   latestVersionCheckedAt: timestamp('latest_version_checked_at'),
   setupCompletedAt: timestamp('setup_completed_at'),

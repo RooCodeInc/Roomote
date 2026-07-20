@@ -352,6 +352,10 @@ import {
   getMiscSettingsCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
+import {
+  getReleaseNotesCommand,
+  getReleaseStatusCommand,
+} from '../commands/product-releases';
 
 const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
@@ -2394,6 +2398,19 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setAnonymousAnalyticsCommand(auth, input),
       ),
+  }),
+
+  releases: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getReleaseStatusCommand(auth),
+    ),
+    notes: protectedProcedure
+      .input(
+        z.object({
+          version: z.string().min(1).max(64),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getReleaseNotesCommand(auth, input)),
   }),
 });
 
