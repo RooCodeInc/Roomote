@@ -35,6 +35,30 @@ import {
   type DiscordThreadHistoryMessage,
 } from './thread-context.js';
 
+/**
+ * Soft-clear the MESSAGE_CREATE intake 👀 when a path ends without a worker.
+ * Platform answers and auto-start skips never hit onStart cleanup.
+ */
+async function clearDiscordIntakeAckBestEffort(input: {
+  provider: DiscordCommunicationProvider;
+  channel: DiscordChannelContext;
+  metadata: DiscordEventCommunicationMetadata;
+  intakeAckPinned?: boolean;
+}): Promise<void> {
+  const messageId = input.metadata.communicationAnchorMessageId;
+  if (!input.intakeAckPinned || !messageId || !input.provider.removeReaction) {
+    return;
+  }
+
+  await input.provider
+    .removeReaction({
+      channelId: input.channel.channelId,
+      messageId,
+      name: 'eyes',
+    })
+    .catch(() => undefined);
+}
+
 export async function startNewDiscordTask(input: {
   provider: DiscordCommunicationProvider;
   applicationId: string;
@@ -185,6 +209,7 @@ export async function startNewDiscordTask(input: {
     // a question-shaped message that routes to a platform answer is skipped
     // silently (mirrors Slack's auto-routed path, which never posts answers).
     if (input.channelAutoStart) {
+      await clearDiscordIntakeAckBestEffort(input);
       return { status: 'skipped_platform_answer' as const, routingDecision };
     }
     await replyToDiscordEvent({
@@ -194,6 +219,8 @@ export async function startNewDiscordTask(input: {
       ...(input.interaction ? { interaction: input.interaction } : {}),
       text: routingDecision.result.answer,
     });
+    // No worker onStart fires for inline answers; clear intake 👀 here.
+    await clearDiscordIntakeAckBestEffort(input);
     return { status: 'replied_inline' as const, routingDecision };
   }
 

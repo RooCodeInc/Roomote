@@ -377,6 +377,143 @@ describe('startNewDiscordTask', () => {
         agentPromptText: expect.stringContaining('Alice: Earlier detail'),
       }),
     );
+  });
+
+  it('clears intake eyes when a platform answer is handled inline', async () => {
+    mocks.routeTask.mockResolvedValue({
+      status: 'platform_answer',
+      result: { answer: 'Use the npm scripts in package.json.' },
+    });
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    const result = await startNewDiscordTask({
+      provider: { removeReaction } as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      intakeAckPinned: true,
+      queuedMessage: {
+        provider: 'discord',
+        text: 'How do I run tests?',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(result.status).toBe('replied_inline');
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Use the npm scripts in package.json.',
+      }),
+    );
     expect(mocks.launchTask).not.toHaveBeenCalled();
+    expect(removeReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
+  });
+
+  it('clears intake eyes when auto-start skips a platform answer', async () => {
+    mocks.routeTask.mockResolvedValue({
+      status: 'platform_answer',
+      result: { answer: 'Should not post in monitored channel.' },
+    });
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    const result = await startNewDiscordTask({
+      provider: { removeReaction } as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      intakeAckPinned: true,
+      channelAutoStart: {
+        initiator: { kind: 'user', userId: 'user-1' },
+      },
+      queuedMessage: {
+        provider: 'discord',
+        text: 'what is 2+2?',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-2',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-2',
+        communicationMessageId: 'message-2',
+        communicationAnchorMessageId: 'message-2',
+      },
+      channel: {
+        channelId: 'channel-2',
+        channelName: 'bugs',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(result.status).toBe('skipped_platform_answer');
+    expect(mocks.reply).not.toHaveBeenCalled();
+    expect(removeReaction).toHaveBeenCalledWith({
+      channelId: 'channel-2',
+      messageId: 'message-2',
+      name: 'eyes',
+    });
+  });
+
+  it('does not remove eyes when intake ack was never pinned', async () => {
+    mocks.routeTask.mockResolvedValue({
+      status: 'platform_answer',
+      result: { answer: 'No eyes were pinned.' },
+    });
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    const result = await startNewDiscordTask({
+      provider: { removeReaction } as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      intakeAckPinned: false,
+      queuedMessage: {
+        provider: 'discord',
+        text: 'How do I run tests?',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-3',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-3',
+        communicationAnchorMessageId: 'message-3',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(result.status).toBe('replied_inline');
+    expect(removeReaction).not.toHaveBeenCalled();
   });
 });
