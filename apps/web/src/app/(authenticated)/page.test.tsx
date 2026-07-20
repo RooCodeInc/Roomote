@@ -1,6 +1,17 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 
-const { mockHome } = vi.hoisted(() => ({
+const {
+  mockHome,
+  mockResolveComputeProviderSelection,
+  mockResolveDefaultComputeProvider,
+  runtimeState,
+} = vi.hoisted(() => ({
+  mockResolveComputeProviderSelection: vi.fn().mockResolvedValue({
+    defaultComputeProvider: 'modal',
+    availableComputeProviders: ['modal', 'docker'],
+  }),
+  mockResolveDefaultComputeProvider: vi.fn().mockResolvedValue('roomote'),
+  runtimeState: { cloudEnabled: false },
   mockHome: vi.fn(
     ({
       initialPlaceholderIndex,
@@ -25,10 +36,13 @@ vi.mock('./home/Home', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  resolveDefaultComputeProvider: vi.fn().mockResolvedValue('modal'),
-  listConfiguredComputeProviders: vi
-    .fn()
-    .mockResolvedValue(['modal', 'docker']),
+  resolveComputeProviderSelection: mockResolveComputeProviderSelection,
+  resolveDefaultComputeProvider: mockResolveDefaultComputeProvider,
+}));
+
+vi.mock('@/lib/server/env', () => ({
+  Env: { R_CLOUD_ENABLED: 'cloud-setting' },
+  isRoomoteCloudEnabled: () => runtimeState.cloudEnabled,
 }));
 
 vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
@@ -43,7 +57,10 @@ import Page from './page';
 
 describe('Authenticated home page', () => {
   beforeEach(() => {
+    runtimeState.cloudEnabled = false;
     mockHome.mockClear();
+    mockResolveComputeProviderSelection.mockClear();
+    mockResolveDefaultComputeProvider.mockClear();
   });
 
   it('passes the server-selected placeholder index to Home', async () => {
@@ -60,5 +77,21 @@ describe('Authenticated home page', () => {
     expect(html).toContain('data-home-placeholder-index="4"');
     expect(html).toContain('data-home-compute-provider="modal"');
     expect(html).toContain('data-home-available-providers="modal,docker"');
+  });
+
+  it('does not scan picker options when cloud hides the provider picker', async () => {
+    runtimeState.cloudEnabled = true;
+
+    renderToStaticMarkup(await Page());
+
+    expect(mockResolveDefaultComputeProvider).toHaveBeenCalledOnce();
+    expect(mockResolveComputeProviderSelection).not.toHaveBeenCalled();
+    expect(mockHome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultComputeProvider: 'roomote',
+        availableComputeProviders: ['roomote'],
+      }),
+      undefined,
+    );
   });
 });
