@@ -220,7 +220,7 @@ const SLACK_TO_DISCORD_DESTINATION_FIELDS = Object.fromEntries(
  */
 export const DISCORD_DESTINATION_OPTION_PREFIX = 'discord:';
 /** Synthetic option id for Suggest Ideas Telegram sticky-topic destination. */
-export const TELEGRAM_DESTINATION_OPTION = 'telegram:primary';
+const TELEGRAM_DESTINATION_OPTION = 'telegram:primary';
 
 type SlackChannelOption = {
   id: string;
