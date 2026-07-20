@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import { APIError } from 'better-auth/api';
 
 import { db, deploymentSettings, eq, invites, users } from '@roomote/db/server';
 import type { UserRole } from '@roomote/types';
@@ -293,9 +294,19 @@ function isMatchingUserEntity(
 async function getBetterAuthSession() {
   const auth = await getAuth();
 
-  return auth.api.getSession({
-    headers: await headers(),
-  });
+  try {
+    return await auth.api.getSession({
+      headers: await headers(),
+    });
+  } catch (error) {
+    // Invalid or expired auth cookies should behave like a signed-out
+    // visitor on server renders instead of crashing the whole page.
+    if (error instanceof APIError && error.statusCode === 401) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 export async function getSignedInAuthContext(
