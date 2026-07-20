@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FeatureFlag } from '@roomote/feature-flags';
+import { APIError } from 'better-auth/api';
 
 const {
   mockDeploymentFindFirst,
@@ -174,6 +175,28 @@ describe('authorize', () => {
         metadata: expect.anything(),
       }),
     );
+  });
+
+  it('treats invalid auth cookies as signed out instead of throwing', async () => {
+    mockGetSession.mockRejectedValue(
+      new APIError('UNAUTHORIZED', {
+        message: 'Invalid session',
+      }),
+    );
+
+    await expect(authorize()).resolves.toEqual({
+      success: false,
+      error: 'Unauthorized: User required',
+    });
+  });
+
+  it('does not hide auth service failures as signed-out sessions', async () => {
+    const error = new APIError('INTERNAL_SERVER_ERROR', {
+      message: 'Session store unavailable',
+    });
+    mockGetSession.mockRejectedValue(error);
+
+    await expect(authorize()).rejects.toBe(error);
   });
 
   it('admits a bootstrap sign-in as admin even when another user already exists', async () => {
