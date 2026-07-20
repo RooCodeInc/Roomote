@@ -64,6 +64,15 @@ vi.mock('../github-deployment-scope', () => ({
 vi.mock('@roomote/gitlab', () => ({
   getLatestGitLabPipeline: mockGetLatestGitLabPipeline,
   getGitLabPipelineFailureEvidence: mockGetGitLabPipelineFailureEvidence,
+  isNestedGitLabPipelineSource: (source: string | null | undefined) => {
+    const normalized = source?.trim().toLowerCase();
+    return (
+      normalized === 'parent_pipeline' ||
+      normalized === 'pipeline' ||
+      normalized === 'ondemand_dast_scan' ||
+      normalized === 'ondemand_dast_validation'
+    );
+  },
 }));
 
 import { ciFailureTriageJob } from '../ci-failure-triage';
@@ -318,6 +327,39 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     const result = await ciFailureTriageJob({ manualTrigger: true });
 
     expect(result.launchedTaskId).toBeNull();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('skips GitLab manual Run now when the latest failed pipeline is nested/child', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-1',
+        fullName: 'acme/gitlab-api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '9001',
+        host: 'gitlab.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockGetLatestGitLabPipeline.mockResolvedValue({
+      id: 88,
+      name: 'child',
+      ref: 'main',
+      sha: 'def456',
+      status: 'failed',
+      source: 'parent_pipeline',
+      web_url: 'https://gitlab.com/acme/gitlab-api/-/pipelines/88',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockGetGitLabPipelineFailureEvidence).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 

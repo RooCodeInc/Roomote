@@ -11,6 +11,15 @@ const {
 vi.mock('@roomote/gitlab', () => ({
   getGitLabPipelineFailureEvidence: (...args: unknown[]) =>
     mockGetGitLabPipelineFailureEvidence(...args),
+  isNestedGitLabPipelineSource: (source: string | null | undefined) => {
+    const normalized = source?.trim().toLowerCase();
+    return (
+      normalized === 'parent_pipeline' ||
+      normalized === 'pipeline' ||
+      normalized === 'ondemand_dast_scan' ||
+      normalized === 'ondemand_dast_validation'
+    );
+  },
 }));
 
 vi.mock('@roomote/sdk/server', () => ({

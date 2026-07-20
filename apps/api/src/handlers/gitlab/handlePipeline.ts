@@ -1,24 +1,15 @@
 import type { FailedCiRun } from '@roomote/cloud-agents/server';
 import { and, db, eq, or, repositories } from '@roomote/db/server';
-import { getGitLabPipelineFailureEvidence } from '@roomote/gitlab';
+import {
+  getGitLabPipelineFailureEvidence,
+  isNestedGitLabPipelineSource,
+} from '@roomote/gitlab';
 import { launchCiFailureTriageForFailedRun } from '@roomote/sdk/server';
 
 import { logApiError } from '../../logging';
 import type { WebhookResponse } from '../../types';
 import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import type { GitLabPipelineWebhook } from './types';
-
-/**
- * Nested/child pipeline sources that usually re-fire when a parent pipeline
- * fails. One investigation per repository is enough; skip these so a root
- * failure does not fan out into multiple triage tasks.
- */
-const SKIP_PIPELINE_SOURCES = new Set([
-  'parent_pipeline',
-  'pipeline',
-  'ondemand_dast_scan',
-  'ondemand_dast_validation',
-]);
 
 function buildPipelineUrl(
   projectWebUrl: string | undefined,
@@ -52,8 +43,7 @@ export async function handleGitLabPipeline(
     };
   }
 
-  const source = (attrs.source ?? '').toLowerCase();
-  if (source && SKIP_PIPELINE_SOURCES.has(source)) {
+  if (isNestedGitLabPipelineSource(attrs.source)) {
     return {
       status: 'ok',
       message: `Ignoring nested/child GitLab pipeline source: ${attrs.source}`,

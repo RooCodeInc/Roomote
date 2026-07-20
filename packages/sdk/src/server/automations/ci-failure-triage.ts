@@ -15,6 +15,7 @@ import {
 import {
   getGitLabPipelineFailureEvidence,
   getLatestGitLabPipeline,
+  isNestedGitLabPipelineSource,
 } from '@roomote/gitlab';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
@@ -143,6 +144,13 @@ export async function ciFailureTriageJob(
           ) {
             console.log(
               `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: latest GitLab default-branch pipeline is not failed`,
+            );
+            continue;
+          }
+
+          if (isNestedGitLabPipelineSource(latestPipeline.source)) {
+            console.log(
+              `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: latest GitLab pipeline source is nested/child (${latestPipeline.source})`,
             );
             continue;
           }

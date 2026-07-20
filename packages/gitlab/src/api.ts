@@ -72,6 +72,30 @@ const gitLabPipelineSchema = z
     web_url: z.string(),
   })
   .passthrough();
+
+/**
+ * Nested/child pipeline sources that usually re-fire when a parent pipeline
+ * fails. One investigation per repository is enough; webhook and Manual Run
+ * share this filter.
+ */
+export const GITLAB_NESTED_PIPELINE_SOURCES = [
+  'parent_pipeline',
+  'pipeline',
+  'ondemand_dast_scan',
+  'ondemand_dast_validation',
+] as const;
+
+export function isNestedGitLabPipelineSource(
+  source: string | null | undefined,
+): boolean {
+  const normalized = source?.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (GITLAB_NESTED_PIPELINE_SOURCES as readonly string[]).includes(
+    normalized,
+  );
+}
 const gitLabPipelineJobSchema = z
   .object({
     id: z.number(),

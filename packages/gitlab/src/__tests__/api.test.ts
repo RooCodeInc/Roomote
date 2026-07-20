@@ -77,6 +77,7 @@ import {
   ensureGitLabWebhooksForProjects,
   getGitLabPipelineFailureEvidence,
   getLatestGitLabPipeline,
+  isNestedGitLabPipelineSource,
   removeGitLabWebhooksForProjects,
   getGitLabDeploymentUser,
   resolveGitLabBaseUrl,
@@ -293,6 +294,14 @@ describe('GitLab pipeline inspection', () => {
         fetchImpl: fetchMock,
       }),
     ).resolves.toBeNull();
+  });
+
+  it('identifies nested/child GitLab pipeline sources', () => {
+    expect(isNestedGitLabPipelineSource('parent_pipeline')).toBe(true);
+    expect(isNestedGitLabPipelineSource('pipeline')).toBe(true);
+    expect(isNestedGitLabPipelineSource('ondemand_dast_scan')).toBe(true);
+    expect(isNestedGitLabPipelineSource('push')).toBe(false);
+    expect(isNestedGitLabPipelineSource(undefined)).toBe(false);
   });
 
   it('fetches bounded log tails for failed pipeline jobs', async () => {
