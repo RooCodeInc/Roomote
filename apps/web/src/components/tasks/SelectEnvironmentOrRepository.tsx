@@ -108,7 +108,7 @@ export const SelectEnvironmentOrRepository = ({
             )
             .sort((a, b) => a.name.localeCompare(b.name))
         : [],
-    [environments.data, repositoryFilter],
+    [environments.data, isAdmin, repositoryFilter],
   );
 
   const selectedEnv = environments.data?.find(
