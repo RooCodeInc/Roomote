@@ -32,12 +32,12 @@ import {
 const EXISTING_TASK_WAIT_TIMEOUT_MS = 15_000;
 const EXISTING_TASK_WAIT_POLL_MS = 500;
 
-export type IssueMentionProvider = Extract<
+type IssueMentionProvider = Extract<
   SourceControlProvider,
   'github' | 'gitlab' | 'gitea'
 >;
 
-export type IssueMentionOrchestrationInput = {
+type IssueMentionOrchestrationInput = {
   provider: IssueMentionProvider;
   /** Console warn prefix, e.g. `[handleGitHubIssueComment]`. */
   logPrefix: string;
@@ -88,7 +88,7 @@ export type IssueMentionOrchestrationInput = {
   }) => string | null;
 };
 
-export async function resolveMappedEnvironmentId(
+async function resolveMappedEnvironmentId(
   repositoryId: string,
 ): Promise<string | null> {
   const mappings = await db
@@ -109,7 +109,7 @@ export async function resolveMappedEnvironmentId(
   return mappings[0]?.environmentId ?? null;
 }
 
-export function buildIssueMentionPrompt({
+function buildIssueMentionPrompt({
   providerDisplayName,
   repositoryFullName,
   issueNumber,
@@ -160,7 +160,7 @@ export function buildIssueMentionPrompt({
   ].join('\n');
 }
 
-export function buildIssueFollowUpMessage({
+function buildIssueFollowUpMessage({
   providerDisplayName,
   repositoryFullName,
   issueNumber,
