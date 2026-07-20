@@ -97,16 +97,20 @@ export async function ciFailureTriageJob(
     // Walk every provider+host+fullName identity and resolve coverage through
     // the repository-id environment mapping (not fullName).
     for (const selectedRepository of selectedRepositories) {
-      // Prefer the provider+host-scoped mapping row, then fall back to the
-      // long-standing fullName config lookup so existing GitHub environments
-      // without mapping rows keep working.
+      // Prefer the provider+host-scoped mapping row. Path-only fullName fallback
+      // is GitHub-only so GitLab same-path hosts cannot mis-resolve workspaces.
+      const mappedEnvironmentId = await findEnvironmentIdForRepositoryId(
+        selectedRepository.id,
+      );
       const environmentId =
-        (await findEnvironmentIdForRepositoryId(selectedRepository.id)) ??
-        (await findEnvironmentForRepo(
-          selectedRepository.fullName,
-          undefined,
-          selectedRepository.sourceControlProvider,
-        ));
+        mappedEnvironmentId ??
+        (selectedRepository.sourceControlProvider === 'github'
+          ? await findEnvironmentForRepo(
+              selectedRepository.fullName,
+              undefined,
+              'github',
+            )
+          : undefined);
       if (!environmentId) {
         continue;
       }

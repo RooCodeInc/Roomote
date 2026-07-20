@@ -348,6 +348,8 @@ describe('launchCiFailureTriageForFailedRun', () => {
   });
 
   it('preserves GitLab host and failure evidence in the launched task', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-gl');
+
     await launchCiFailureTriageForFailedRun({
       ...failedRun,
       provider: 'gitlab',
@@ -359,6 +361,8 @@ describe('launchCiFailureTriageForFailedRun', () => {
     const payload = mockEnqueueTask.mock.calls[0]?.[0].task.payload;
     expect(payload.sourceControlProvider).toBe('gitlab');
     expect(payload.sourceControlHost).toBe('gitlab.example.com');
+    expect(payload.environmentId).toBe('env-gl');
+    expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
     expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         triggeringRun: expect.objectContaining({
@@ -464,6 +468,21 @@ describe('launchCiFailureTriageForFailedRun', () => {
       }),
       expect.anything(),
     );
+  });
+
+  it('does not path-fallback for GitLab when repository mapping is missing', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-wrong-host');
+
+    const result = await launchCiFailureTriageForFailedRun({
+      ...failedRun,
+      provider: 'gitlab',
+      repositoryHost: 'gitlab.example.com',
+    });
+
+    expect(result.message).toContain('no configured environment');
+    expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('debounces repeated failures for the same repository', async () => {

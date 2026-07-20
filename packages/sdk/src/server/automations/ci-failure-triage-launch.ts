@@ -270,13 +270,21 @@ export async function launchCiFailureTriageForFailedRun(
     return { status: 'ok', message: 'Manager channel is not configured' };
   }
 
+  // GitHub keeps a path-only fullName fallback for older envs without mapping
+  // rows. Non-GitHub providers require the repository-id mapping so same-path
+  // hosts cannot select each other's workspaces.
+  const mappedEnvironmentId = await findEnvironmentIdForRepositoryId(
+    run.repositoryId,
+  );
   const environmentId =
-    (await findEnvironmentIdForRepositoryId(run.repositoryId)) ??
-    (await findEnvironmentForRepo(
-      run.repositoryFullName,
-      undefined,
-      run.provider,
-    ));
+    mappedEnvironmentId ??
+    (run.provider === 'github'
+      ? await findEnvironmentForRepo(
+          run.repositoryFullName,
+          undefined,
+          'github',
+        )
+      : undefined);
   if (!environmentId) {
     return {
       status: 'ok',

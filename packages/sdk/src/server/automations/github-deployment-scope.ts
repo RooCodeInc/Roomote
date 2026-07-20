@@ -2,6 +2,7 @@ import {
   and,
   db,
   environmentRepositoryMappings,
+  environments,
   eq,
   githubInstallations,
   inArray,
@@ -137,7 +138,8 @@ export async function getActiveRepositoriesForProviders(
 
 /**
  * Resolve the environment mapped to a specific repository row (provider+host
- * scoped). When multiple environments map the same repository, prefer the
+ * scoped). Eval environments are excluded (same as findEnvironmentForRepo).
+ * When multiple non-eval environments map the same repository, prefer the
  * most specific mapping (fewest repositories), then a stable environment id.
  */
 export async function findEnvironmentIdForRepositoryId(
@@ -148,7 +150,16 @@ export async function findEnvironmentIdForRepositoryId(
       environmentId: environmentRepositoryMappings.environmentId,
     })
     .from(environmentRepositoryMappings)
-    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId));
+    .innerJoin(
+      environments,
+      eq(environments.id, environmentRepositoryMappings.environmentId),
+    )
+    .where(
+      and(
+        eq(environmentRepositoryMappings.repositoryId, repositoryId),
+        eq(environments.isEval, false),
+      ),
+    );
 
   if (directMappings.length === 0) {
     return undefined;
@@ -167,7 +178,16 @@ export async function findEnvironmentIdForRepositoryId(
       repoCount: sql<number>`count(*)::int`,
     })
     .from(environmentRepositoryMappings)
-    .where(inArray(environmentRepositoryMappings.environmentId, environmentIds))
+    .innerJoin(
+      environments,
+      eq(environments.id, environmentRepositoryMappings.environmentId),
+    )
+    .where(
+      and(
+        inArray(environmentRepositoryMappings.environmentId, environmentIds),
+        eq(environments.isEval, false),
+      ),
+    )
     .groupBy(environmentRepositoryMappings.environmentId);
 
   counts.sort(

@@ -374,4 +374,32 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       expect.anything(),
     );
   });
+
+  it('does not path-fallback for GitLab when repository mapping is missing', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-1',
+        fullName: 'acme/api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '9001',
+        host: 'gitlab.example.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-wrong-host');
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(result.skippedReason).toContain('no repositories are covered');
+    expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
+    expect(mockGetLatestGitLabPipeline).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
 });
