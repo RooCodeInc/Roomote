@@ -1,9 +1,17 @@
-const { mockDbFindMany, mockLaunchCiFailureTriageForFailedRun } = vi.hoisted(
-  () => ({
-    mockDbFindMany: vi.fn(),
-    mockLaunchCiFailureTriageForFailedRun: vi.fn(),
-  }),
-);
+const {
+  mockDbFindMany,
+  mockGetGitLabPipelineFailureEvidence,
+  mockLaunchCiFailureTriageForFailedRun,
+} = vi.hoisted(() => ({
+  mockDbFindMany: vi.fn(),
+  mockGetGitLabPipelineFailureEvidence: vi.fn(),
+  mockLaunchCiFailureTriageForFailedRun: vi.fn(),
+}));
+
+vi.mock('@roomote/gitlab', () => ({
+  getGitLabPipelineFailureEvidence: (...args: unknown[]) =>
+    mockGetGitLabPipelineFailureEvidence(...args),
+}));
 
 vi.mock('@roomote/sdk/server', () => ({
   launchCiFailureTriageForFailedRun: (...args: unknown[]) =>
@@ -30,12 +38,14 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { handleGitLabPipeline } from '../handlePipeline';
+import type { GitLabPipelineWebhook } from '../types';
 
 function buildPayload(
   overrides: {
     object_attributes?: Record<string, unknown>;
     project?: Record<string, unknown>;
     commit?: Record<string, unknown> | null;
+    builds?: NonNullable<GitLabPipelineWebhook['builds']>;
   } = {},
 ) {
   return {
@@ -64,6 +74,7 @@ function buildPayload(
             id: 'abc123def',
             ...overrides.commit,
           },
+    builds: overrides.builds,
   };
 }
 
@@ -83,6 +94,7 @@ describe('handleGitLabPipeline', () => {
       message: 'Launched CI failure triage for acme/api',
       taskId: 'task-1',
     });
+    mockGetGitLabPipelineFailureEvidence.mockResolvedValue(null);
   });
 
   it('maps a failed default-branch pipeline into FailedCiRun and launches', async () => {
@@ -111,6 +123,41 @@ describe('handleGitLabPipeline', () => {
 
     expect(result.message).toContain('non-failure');
     expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
+  });
+
+  it('injects failed-job evidence fetched with the deployment credential', async () => {
+    mockGetGitLabPipelineFailureEvidence.mockResolvedValue(
+      'job="test" id=21\nAssertionError: expected true',
+    );
+
+    await handleGitLabPipeline(
+      buildPayload({
+        builds: [
+          {
+            id: 21,
+            name: 'test',
+            stage: 'test',
+            status: 'failed',
+            failure_reason: 'script_failure',
+            allow_failure: false,
+          },
+        ],
+      }),
+    );
+
+    expect(mockGetGitLabPipelineFailureEvidence).toHaveBeenCalledWith({
+      projectId: '9001',
+      pipelineId: 77,
+      jobs: [
+        expect.objectContaining({ id: 21, name: 'test', status: 'failed' }),
+      ],
+    });
+    expect(mockLaunchCiFailureTriageForFailedRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'gitlab',
+        failureEvidence: 'job="test" id=21\nAssertionError: expected true',
+      }),
+    );
   });
 
   it('ignores failures outside the default branch', async () => {

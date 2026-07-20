@@ -6,12 +6,17 @@ import {
   getEnvironmentBackedCoverage,
   releaseCiFailureTriageInvestigation,
   tryClaimCiFailureTriageInvestigation,
+  type CiFailureTriageTriggeringRun,
 } from '@roomote/cloud-agents/server';
 import {
   db,
   getAutomationRuntime,
   recordAutomationRunOutcome,
 } from '@roomote/db/server';
+import {
+  getGitLabPipelineFailureEvidence,
+  getLatestGitLabPipeline,
+} from '@roomote/gitlab';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   TaskPayloadKind,
@@ -87,11 +92,8 @@ export async function ciFailureTriageJob(
       selectedRepositories.map((repo) => repo.fullName),
     );
     const environmentBacked = getEnvironmentBackedCoverage(repositoryCoverage);
-    const providerByFullName = new Map(
-      selectedRepositories.map((repo) => [
-        repo.fullName,
-        repo.sourceControlProvider,
-      ]),
+    const repositoryByFullName = new Map(
+      selectedRepositories.map((repo) => [repo.fullName, repo]),
     );
 
     if (environmentBacked.length === 0) {
@@ -109,20 +111,81 @@ export async function ciFailureTriageJob(
         continue;
       }
 
-      const sourceControlProvider =
-        providerByFullName.get(coverage.repositoryFullName) ?? 'github';
+      const selectedRepository = repositoryByFullName.get(
+        coverage.repositoryFullName,
+      );
+      if (!selectedRepository) {
+        continue;
+      }
+
+      const sourceControlProvider = selectedRepository.sourceControlProvider;
+      let triggeringRun: CiFailureTriageTriggeringRun | undefined;
+      let workflowName = 'manual-run-now';
+      let headBranch = 'default';
+      let claimMarker = `manual:${coverage.repositoryFullName}`;
+
+      if (sourceControlProvider === 'gitlab') {
+        const projectId = selectedRepository.externalRepoId?.trim();
+        if (!projectId) {
+          result.errors.push(
+            `${coverage.repositoryFullName}: GitLab project id is unavailable`,
+          );
+          continue;
+        }
+
+        try {
+          const latestPipeline = await getLatestGitLabPipeline({
+            projectId,
+            ref: selectedRepository.defaultBranch,
+          });
+
+          if (
+            !latestPipeline ||
+            latestPipeline.status.toLowerCase() !== 'failed'
+          ) {
+            console.log(
+              `${LOG_PREFIX} Skipping ${coverage.repositoryFullName}: latest GitLab default-branch pipeline is not failed`,
+            );
+            continue;
+          }
+
+          const failureEvidence = await getGitLabPipelineFailureEvidence({
+            projectId,
+            pipelineId: latestPipeline.id,
+          });
+          workflowName = latestPipeline.name?.trim() || 'pipeline';
+          headBranch = latestPipeline.ref;
+          claimMarker = latestPipeline.web_url;
+          triggeringRun = {
+            repositoryFullName: coverage.repositoryFullName,
+            workflowName,
+            runUrl: latestPipeline.web_url,
+            headBranch,
+            headSha: latestPipeline.sha,
+            provider: 'gitlab',
+            failureEvidence,
+          };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${coverage.repositoryFullName}: failed to inspect GitLab pipeline (${message})`,
+          );
+          continue;
+        }
+      }
 
       // Repo claim blocks double-start against an active webhook investigation.
       const fingerprint = buildCiFailureTriageFingerprint({
         repositoryFullName: coverage.repositoryFullName,
-        workflowName: 'manual-run-now',
-        headBranch: 'default',
+        workflowName,
+        headBranch,
       });
       const claimed = await tryClaimCiFailureTriageInvestigation({
         provider: sourceControlProvider,
         repositoryFullName: coverage.repositoryFullName,
         fingerprint,
-        marker: `manual:${coverage.repositoryFullName}`,
+        marker: claimMarker,
       });
 
       if (!claimed) {
@@ -151,6 +214,10 @@ export async function ciFailureTriageJob(
                 ...(sourceControlProvider !== 'github'
                   ? { sourceControlProvider }
                   : {}),
+                ...(sourceControlProvider !== 'github' &&
+                selectedRepository.host
+                  ? { sourceControlHost: selectedRepository.host }
+                  : {}),
                 description: buildCiFailureTriagePrompt({
                   channelId,
                   repositoryFullNames: [coverage.repositoryFullName],
@@ -158,6 +225,7 @@ export async function ciFailureTriageJob(
                   trigger: 'manual',
                   destinationProvider: destination.provider,
                   sourceControlProvider,
+                  triggeringRun,
                 }),
                 ...buildDestinationTaskPayloadFields(destination),
                 visibleInTranscript: false,

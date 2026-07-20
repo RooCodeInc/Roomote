@@ -23,6 +23,9 @@ import {
 const GITLAB_PROVIDER = 'gitlab' satisfies SourceControlProvider;
 const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
 const GITLAB_PROJECTS_PER_PAGE = 100;
+const GITLAB_FAILURE_EVIDENCE_MAX_JOBS = 3;
+const GITLAB_FAILURE_EVIDENCE_TRACE_CHARS = 6_000;
+const GITLAB_FAILURE_EVIDENCE_TIMEOUT_MS = 5_000;
 const GITLAB_SCOPED_PROJECT_TOKEN_ACCESS_LEVEL_DEVELOPER = 30;
 const GITLAB_SCOPED_PROJECT_TOKEN_SCOPES = [
   'read_repository',
@@ -58,6 +61,28 @@ const gitLabProjectHookSchema = z.object({
   url: z.string(),
 });
 const gitLabProjectHookListSchema = z.array(gitLabProjectHookSchema);
+const gitLabPipelineSchema = z
+  .object({
+    id: z.number(),
+    name: z.string().nullable().optional(),
+    ref: z.string(),
+    sha: z.string(),
+    status: z.string(),
+    source: z.string().optional(),
+    web_url: z.string(),
+  })
+  .passthrough();
+const gitLabPipelineJobSchema = z
+  .object({
+    id: z.number(),
+    name: z.string(),
+    stage: z.string().nullable().optional(),
+    status: z.string(),
+    failure_reason: z.string().nullable().optional(),
+    allow_failure: z.boolean().optional(),
+  })
+  .passthrough();
+const gitLabPipelineJobListSchema = z.array(gitLabPipelineJobSchema);
 const gitLabProjectAccessTokenSchema = z.object({
   id: z.number(),
   token: z.string(),
@@ -112,6 +137,9 @@ export type ListGitLabProjectsOptions = {
   fetchImpl?: typeof fetch;
   stopAfter?: number;
 };
+
+export type GitLabPipeline = z.infer<typeof gitLabPipelineSchema>;
+export type GitLabPipelineJob = z.infer<typeof gitLabPipelineJobSchema>;
 
 function removeTrailingSlashes(value: string): string {
   let end = value.length;
@@ -335,6 +363,8 @@ async function requestGitLab(
     params,
     token,
     body,
+    accept = 'application/json',
+    signal,
   }: {
     apiBaseUrl?: string;
     fetchImpl?: typeof fetch;
@@ -343,6 +373,8 @@ async function requestGitLab(
     params?: Record<string, string | number | boolean>;
     token: string;
     body?: Record<string, unknown>;
+    accept?: string;
+    signal?: AbortSignal;
   },
   expectedStatuses: number[],
 ): Promise<Response> {
@@ -353,13 +385,14 @@ async function requestGitLab(
     {
       method,
       headers: {
-        Accept: 'application/json',
+        Accept: accept,
         ...(isGitLabOAuthAccessToken(token)
           ? { Authorization: `Bearer ${token}` }
           : { 'PRIVATE-TOKEN': token }),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
+      signal,
     },
   );
 
@@ -370,6 +403,192 @@ async function requestGitLab(
   return response;
 }
 
+async function readResponseTextTail(
+  response: Response,
+  maxChars: number,
+): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) {
+    const text = await response.text();
+    return {
+      text: text.slice(-maxChars),
+      truncated: text.length > maxChars,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let tail = '';
+  let totalChars = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    const chunk = decoder.decode(value, { stream: true });
+    totalChars += chunk.length;
+    tail = `${tail}${chunk}`.slice(-maxChars);
+  }
+
+  const finalChunk = decoder.decode();
+  totalChars += finalChunk.length;
+  tail = `${tail}${finalChunk}`.slice(-maxChars);
+
+  return { text: tail, truncated: totalChars > maxChars };
+}
+
+function formatGitLabPipelineJobEvidence(params: {
+  job: GitLabPipelineJob;
+  trace: string | null;
+  traceTruncated: boolean;
+}): string {
+  const metadata = [
+    `job=${JSON.stringify(params.job.name)}`,
+    `id=${params.job.id}`,
+    ...(params.job.stage ? [`stage=${JSON.stringify(params.job.stage)}`] : []),
+    ...(params.job.failure_reason
+      ? [`failure_reason=${JSON.stringify(params.job.failure_reason)}`]
+      : []),
+  ].join(' ');
+
+  if (!params.trace) {
+    return `${metadata}\nLog trace unavailable.`;
+  }
+
+  return `${metadata}\n${params.traceTruncated ? '[Earlier log output omitted; showing the tail.]\n' : ''}${params.trace}`;
+}
+
+/**
+ * Reads the newest pipeline for a branch using the deployment-held GitLab
+ * credential. A missing pipeline is a normal null result.
+ */
+export async function getLatestGitLabPipeline(params: {
+  projectId: string;
+  ref: string;
+  token?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<GitLabPipeline | null> {
+  const token = params.token ?? (await resolveGitLabToken());
+  if (!token?.trim()) {
+    throw new Error(
+      'GitLab OAuth authorization is required to inspect CI pipelines.',
+    );
+  }
+
+  const response = await requestGitLab(
+    {
+      apiBaseUrl: params.apiBaseUrl,
+      fetchImpl: params.fetchImpl,
+      path: `/projects/${encodeURIComponent(params.projectId)}/pipelines/latest`,
+      params: { ref: params.ref },
+      token,
+      signal: AbortSignal.timeout(GITLAB_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+    [200, 403, 404],
+  );
+
+  if (response.status !== 200) {
+    return null;
+  }
+
+  return gitLabPipelineSchema.parse(await response.json());
+}
+
+/**
+ * Fetches a bounded, prompt-ready snapshot of failed job metadata and log
+ * tails. Webhook callers can pass the jobs already present in the payload;
+ * manual runs omit them and read failed jobs from the pipeline API.
+ */
+export async function getGitLabPipelineFailureEvidence(params: {
+  projectId: string;
+  pipelineId: number;
+  jobs?: GitLabPipelineJob[];
+  token?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<string | null> {
+  const token = params.token ?? (await resolveGitLabToken());
+  if (!token?.trim()) {
+    throw new Error(
+      'GitLab OAuth authorization is required to inspect CI job logs.',
+    );
+  }
+
+  const jobs =
+    params.jobs ??
+    (
+      await requestGitLabJson({
+        apiBaseUrl: params.apiBaseUrl,
+        fetchImpl: params.fetchImpl,
+        path: `/projects/${encodeURIComponent(params.projectId)}/pipelines/${params.pipelineId}/jobs`,
+        params: {
+          scope: 'failed',
+          include_retried: false,
+          per_page: GITLAB_FAILURE_EVIDENCE_MAX_JOBS,
+        },
+        token,
+        signal: AbortSignal.timeout(GITLAB_FAILURE_EVIDENCE_TIMEOUT_MS),
+        schema: gitLabPipelineJobListSchema,
+      })
+    ).data;
+
+  const failedJobs = jobs
+    .filter((job) => job.status.toLowerCase() === 'failed')
+    .sort((left, right) => {
+      if (Boolean(left.allow_failure) !== Boolean(right.allow_failure)) {
+        return left.allow_failure ? 1 : -1;
+      }
+      return right.id - left.id;
+    })
+    .slice(0, GITLAB_FAILURE_EVIDENCE_MAX_JOBS);
+
+  if (failedJobs.length === 0) {
+    return null;
+  }
+
+  const evidence = await Promise.all(
+    failedJobs.map(async (job) => {
+      try {
+        const response = await requestGitLab(
+          {
+            apiBaseUrl: params.apiBaseUrl,
+            fetchImpl: params.fetchImpl,
+            path: `/projects/${encodeURIComponent(params.projectId)}/jobs/${job.id}/trace`,
+            token,
+            accept: 'text/plain',
+            signal: AbortSignal.timeout(GITLAB_FAILURE_EVIDENCE_TIMEOUT_MS),
+          },
+          [200, 404],
+        );
+
+        const trace =
+          response.status === 200
+            ? await readResponseTextTail(
+                response,
+                GITLAB_FAILURE_EVIDENCE_TRACE_CHARS,
+              )
+            : { text: '', truncated: false };
+
+        return formatGitLabPipelineJobEvidence({
+          job,
+          trace: trace.text.trim() || null,
+          traceTruncated: trace.truncated,
+        });
+      } catch {
+        return formatGitLabPipelineJobEvidence({
+          job,
+          trace: null,
+          traceTruncated: false,
+        });
+      }
+    }),
+  );
+
+  return evidence.join('\n\n');
+}
+
 async function requestGitLabJson<T>({
   apiBaseUrl,
   fetchImpl = fetch,
@@ -378,6 +597,7 @@ async function requestGitLabJson<T>({
   params,
   token,
   body,
+  signal,
   schema,
 }: {
   apiBaseUrl?: string;
@@ -387,6 +607,7 @@ async function requestGitLabJson<T>({
   params: Record<string, string | number | boolean>;
   token: string;
   body?: Record<string, unknown>;
+  signal?: AbortSignal;
   schema: z.ZodType<T>;
 }): Promise<{ data: T; response: Response }> {
   const response = await requestGitLab(
@@ -398,6 +619,7 @@ async function requestGitLabJson<T>({
       params,
       token,
       body,
+      signal,
     },
     [200, 201],
   );
@@ -474,6 +696,7 @@ const GITLAB_WEBHOOK_EVENT_FLAGS = {
   merge_requests_events: true,
   note_events: true,
   issues_events: true,
+  pipeline_events: true,
   push_events: false,
 } as const;
 
@@ -585,7 +808,7 @@ async function ensureGitLabProjectWebhook({
 }
 
 /**
- * Creates or refreshes the Roomote merge-request webhook on each project.
+ * Creates or refreshes the Roomote source-control webhook on each project.
  * Failures are collected per project (for example when the token identity is
  * not a Maintainer of a project) instead of failing the whole batch.
  */

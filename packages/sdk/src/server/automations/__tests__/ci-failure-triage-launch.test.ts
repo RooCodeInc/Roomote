@@ -3,6 +3,7 @@ const {
   mockListConnectedCommunicationProviders,
   mockResolveAutomationRuntimeDestination,
   mockBuildDestinationTaskPayloadFields,
+  mockBuildCiFailureTriagePrompt,
   mockBuildRepositoryCoverage,
   mockEnqueueTask,
   mockGetTaskUrl,
@@ -19,6 +20,7 @@ const {
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
   mockBuildDestinationTaskPayloadFields: vi.fn(() => ({})),
+  mockBuildCiFailureTriagePrompt: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(
@@ -48,12 +50,8 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  buildCiFailureTriagePrompt: (params: {
-    trigger: string;
-    triggeringRun?: { runUrl: string } | null;
-    hasAnnouncementThread?: boolean;
-  }) =>
-    `$ci-failure-triage trigger=${params.trigger} run=${params.triggeringRun?.runUrl ?? 'none'} announced=${params.hasAnnouncementThread === true}`,
+  buildCiFailureTriagePrompt: (...args: unknown[]) =>
+    mockBuildCiFailureTriagePrompt(...args),
   buildRepositoryCoverage: mockBuildRepositoryCoverage,
   enqueueTask: mockEnqueueTask,
   getTaskUrl: mockGetTaskUrl,
@@ -236,6 +234,14 @@ describe('launchCiFailureTriageForFailedRun', () => {
       taskId: 'task-scan-1',
     });
     mockGetCommunicationProviderAdapter.mockResolvedValue(null);
+    mockBuildCiFailureTriagePrompt.mockImplementation(
+      (params: {
+        trigger: string;
+        triggeringRun?: { runUrl: string } | null;
+        hasAnnouncementThread?: boolean;
+      }) =>
+        `$ci-failure-triage trigger=${params.trigger} run=${params.triggeringRun?.runUrl ?? 'none'} announced=${params.hasAnnouncementThread === true}`,
+    );
   });
 
   it('launches one environment-backed investigate-and-fix task', async () => {
@@ -318,6 +324,28 @@ describe('launchCiFailureTriageForFailedRun', () => {
     expect(payload.description).toContain('announced=false');
     expect(mockUpsertBackgroundAutomationSlackThread).not.toHaveBeenCalled();
     expect(mockUpdateMessage).not.toHaveBeenCalled();
+  });
+
+  it('preserves GitLab host and failure evidence in the launched task', async () => {
+    await launchCiFailureTriageForFailedRun({
+      ...failedRun,
+      provider: 'gitlab',
+      repositoryHost: 'gitlab.example.com',
+      runUrl: 'https://gitlab.example.com/acme/api/-/pipelines/42',
+      failureEvidence: 'job="test" id=21\nAssertionError',
+    });
+
+    const payload = mockEnqueueTask.mock.calls[0]?.[0].task.payload;
+    expect(payload.sourceControlProvider).toBe('gitlab');
+    expect(payload.sourceControlHost).toBe('gitlab.example.com');
+    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        triggeringRun: expect.objectContaining({
+          provider: 'gitlab',
+          failureEvidence: 'job="test" id=21\nAssertionError',
+        }),
+      }),
+    );
   });
 
   it('skips when the investigation claim is held', async () => {

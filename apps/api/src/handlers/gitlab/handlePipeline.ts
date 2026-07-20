@@ -1,7 +1,9 @@
 import type { FailedCiRun } from '@roomote/cloud-agents/server';
 import { and, db, eq, or, repositories } from '@roomote/db/server';
+import { getGitLabPipelineFailureEvidence } from '@roomote/gitlab';
 import { launchCiFailureTriageForFailedRun } from '@roomote/sdk/server';
 
+import { logApiError } from '../../logging';
 import type { WebhookResponse } from '../../types';
 import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import type { GitLabPipelineWebhook } from './types';
@@ -108,6 +110,17 @@ export async function handleGitLabPipeline(
 
   const workflowName = (attrs.name ?? '').trim() || 'pipeline';
   const runUrl = buildPipelineUrl(payload.project.web_url, attrs.id, attrs.url);
+  const failureEvidence = await getGitLabPipelineFailureEvidence({
+    projectId,
+    pipelineId: attrs.id,
+    jobs: payload.builds,
+  }).catch((error) => {
+    logApiError(
+      `[GitLab] Failed to fetch job evidence for pipeline ${attrs.id}`,
+      error,
+    );
+    return null;
+  });
 
   const failedRun: FailedCiRun = {
     provider: 'gitlab',
@@ -121,6 +134,7 @@ export async function handleGitLabPipeline(
     workflowOrPipelineName: workflowName,
     runId: String(attrs.id),
     runUrl,
+    ...(failureEvidence ? { failureEvidence } : {}),
   };
 
   return launchCiFailureTriageForFailedRun(failedRun);

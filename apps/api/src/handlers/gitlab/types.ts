@@ -164,12 +164,24 @@ const gitLabPipelineCommitSchema = z
   .passthrough()
   .optional();
 
+const gitLabPipelineJobSchema = z
+  .object({
+    id: z.number(),
+    name: z.string(),
+    stage: z.string().nullable().optional(),
+    status: z.string(),
+    failure_reason: z.string().nullable().optional(),
+    allow_failure: z.boolean().optional(),
+  })
+  .passthrough();
+
 export const gitLabPipelineWebhookSchema = z
   .object({
     object_kind: z.literal('pipeline'),
     object_attributes: gitLabPipelineAttributesSchema,
     project: gitLabProjectSchema,
     commit: gitLabPipelineCommitSchema,
+    builds: z.array(gitLabPipelineJobSchema).optional(),
   })
   .passthrough();
 

@@ -388,6 +388,9 @@ export async function launchCiFailureTriageForFailedRun(
             ...(run.provider !== 'github'
               ? { sourceControlProvider: run.provider }
               : {}),
+            ...(run.repositoryHost
+              ? { sourceControlHost: run.repositoryHost }
+              : {}),
             description: buildCiFailureTriagePrompt({
               channelId,
               repositoryFullNames: [run.repositoryFullName],
@@ -400,6 +403,7 @@ export async function launchCiFailureTriageForFailedRun(
                 headBranch: run.headBranch,
                 headSha: run.headSha,
                 provider: run.provider,
+                failureEvidence: run.failureEvidence,
               },
               hasAnnouncementThread: announcementTs !== null,
               destinationProvider: destination.provider,

@@ -70,6 +70,9 @@ export async function getActiveGitHubRepositoryFullNames(): Promise<string[]> {
 type ActiveRepositoryRef = {
   fullName: string;
   sourceControlProvider: SourceControlProvider;
+  externalRepoId: string | null;
+  host: string | null;
+  defaultBranch: string;
 };
 
 /**
@@ -86,6 +89,9 @@ export async function getActiveRepositoriesForProviders(
     .select({
       fullName: repositories.fullName,
       sourceControlProvider: repositories.sourceControlProvider,
+      externalRepoId: repositories.externalRepoId,
+      host: repositories.host,
+      defaultBranch: repositories.defaultBranch,
     })
     .from(repositories)
     .where(
@@ -106,6 +112,9 @@ export async function getActiveRepositoriesForProviders(
     result.push({
       fullName: row.fullName,
       sourceControlProvider: row.sourceControlProvider as SourceControlProvider,
+      externalRepoId: row.externalRepoId,
+      host: row.host,
+      defaultBranch: row.defaultBranch,
     });
   }
   return result;
