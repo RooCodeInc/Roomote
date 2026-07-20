@@ -22,6 +22,16 @@ vi.mock('@tanstack/react-query', async () => {
 
   return {
     ...actual,
+    useQuery: () => ({
+      data: {
+        invocationIdentities: [
+          {
+            provider: 'github',
+            examplePrompt: '@roomote-app address the PR feedback above',
+          },
+        ],
+      },
+    }),
     useMutation: (options: { onSuccess?: () => Promise<void> | void }) => ({
       mutate: async () => {
         await options.onSuccess?.();
@@ -49,6 +59,11 @@ vi.mock('@/trpc/client', () => ({
     github: {
       installations: {
         queryKey: () => queryKeys.githubInstallations,
+      },
+    },
+    comms: {
+      status: {
+        queryOptions: vi.fn(() => ({ queryKey: ['comms.status'] })),
       },
     },
   }),
@@ -135,11 +150,13 @@ describe('Onboarding StepInvoke', () => {
     expect(replaceMock).toHaveBeenCalledWith('/');
   });
 
-  it('uses the configured GitHub invocation fallback', () => {
+  it('uses the configured GitHub app identity in its invocation example', () => {
     render(<StepInvoke sourceControlProviders={['github']} />);
 
     expect(
-      screen.getByText('Mention the GitHub app in a comment on any PR.'),
+      screen.getByText(
+        'On a pull request, comment: @roomote-app address the PR feedback above',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -151,20 +168,56 @@ describe('Onboarding StepInvoke', () => {
       />,
     );
 
-    expect(screen.getByText('Microsoft Teams')).toBeInTheDocument();
-    expect(screen.getByText('GitLab')).toBeInTheDocument();
+    expect(
+      screen.getByText('Microsoft Teams:', { exact: false }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('GitLab:', { exact: false })).toBeInTheDocument();
     expect(screen.queryByText('Slack')).not.toBeInTheDocument();
     expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
 
     const methodHeadings = screen
-      .getAllByText(/^(Microsoft Teams|GitLab|Automations|Web UI)$/)
+      .getAllByText(/^(Microsoft Teams|GitLab|Automations|Web UI):$/)
       .map((node) => node.textContent);
 
     expect(methodHeadings).toEqual([
-      'Microsoft Teams',
-      'GitLab',
-      'Automations',
-      'Web UI',
+      'Microsoft Teams: ',
+      'GitLab: ',
+      'Automations: ',
+      'Web UI: ',
     ]);
+  });
+
+  it('lists every configured communication and source-control provider without Linear', () => {
+    render(
+      <StepInvoke
+        communicationProviders={['slack', 'microsoft', 'telegram', 'discord']}
+        sourceControlProviders={[
+          'github',
+          'gitlab',
+          'gitea',
+          'bitbucket',
+          'ado',
+        ]}
+        includeAutomations={false}
+      />,
+    );
+
+    for (const provider of [
+      'Slack',
+      'Microsoft Teams',
+      'Telegram',
+      'Discord',
+      'GitHub',
+      'GitLab',
+      'Gitea',
+      'Bitbucket Cloud',
+      'Azure DevOps',
+    ]) {
+      expect(
+        screen.getByText(`${provider}:`, { exact: false }),
+      ).toBeInTheDocument();
+    }
+
+    expect(screen.queryByText('Linear')).not.toBeInTheDocument();
   });
 });

@@ -31,23 +31,24 @@ const communicationProviderCopy: Record<
   slack: {
     icon: 'slack',
     title: 'Slack',
-    description: `talk to it directly, or mention it in any connected channel.`,
+    description:
+      'In a connected channel, try: @roomote Add support for a reset password flow.',
   },
   microsoft: {
     icon: 'teams',
     title: 'Microsoft Teams',
-    description: `talk to it directly, or mention it in any connected channel.`,
+    description:
+      'In a connected channel, try: @roomote Add support for a reset password flow.',
   },
   telegram: {
     icon: 'telegram',
     title: 'Telegram',
-    description: `start work from any connected chats.`,
+    description: 'Try: @roomote Add support for a reset password flow.',
   },
   discord: {
     icon: 'discord',
     title: 'Discord',
-    description:
-      'mention it in a server channel, use /new, or continue work in a task thread.',
+    description: 'Try: @roomote Add support for a reset password flow.',
   },
 };
 
@@ -60,23 +61,28 @@ const sourceControlProviderCopy: Record<
 > = {
   github: {
     icon: 'github',
-    description: `Mention the GitHub app in a comment on any PR.`,
+    description:
+      'On a pull request, comment: @roomote address the feedback above.',
   },
   gitlab: {
     icon: 'gitlab',
-    description: `Mention @roomote in a comment on any merge request.`,
+    description:
+      'On a merge request, comment: @roomote address the feedback above.',
   },
   gitea: {
     icon: 'gitea',
-    description: `Mention @roomote in a comment on any pull request.`,
+    description:
+      'On a pull request, comment: @roomote address the feedback above.',
   },
   bitbucket: {
     icon: 'bitbucket',
-    description: `Mention @roomote in a comment on any pull request.`,
+    description:
+      'On a pull request, comment: @roomote address the feedback above.',
   },
   ado: {
     icon: 'ado',
-    description: `Start work from connected Azure DevOps pull requests and repositories.`,
+    description:
+      'On a connected pull request, ask Roomote to address the feedback above.',
   },
 };
 
@@ -99,6 +105,13 @@ const sourceControlInvocationProviderById = {
   bitbucket: 'bitbucket',
   ado: 'ado',
 } as const satisfies Record<SourceControlProvider, InvocationProvider>;
+
+const communicationInvocationProviderById = {
+  slack: 'slack',
+  microsoft: 'microsoft',
+  telegram: 'telegram',
+  discord: 'discord',
+} as const satisfies Record<CommunicationProviderId, InvocationProvider>;
 
 function getIdentity(
   identities: readonly InvocationIdentity[] | undefined,
@@ -131,11 +144,17 @@ export function buildInvokeMethods({
   return [
     ...uniqueValues(communicationProviders).map((provider) => {
       const copy = communicationProviderCopy[provider];
+      const identity = getIdentity(
+        invocationIdentities,
+        communicationInvocationProviderById[provider],
+      );
 
       return {
         icon: createBrandIcon(copy.icon, copy.title),
         title: copy.title,
-        description: copy.description,
+        description: identity?.examplePrompt
+          ? `Try: ${identity.examplePrompt}`
+          : copy.description,
       };
     }),
     ...uniqueValues(sourceControlProviders).map((provider) => {
@@ -145,8 +164,8 @@ export function buildInvokeMethods({
         invocationIdentities,
         sourceControlInvocationProviderById[provider],
       );
-      const description = identity?.mentionText
-        ? `Mention ${identity.mentionText} in a comment on any PR.`
+      const description = identity?.examplePrompt
+        ? `On a pull request, comment: ${identity.examplePrompt}`
         : copy.description;
 
       return {

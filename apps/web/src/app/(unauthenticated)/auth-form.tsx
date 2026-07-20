@@ -151,15 +151,11 @@ export function AuthForm({
       <div className="relative w-full max-w-2xl space-y-6 py-2 text-left md:py-0">
         <h1 className="relative text-3xl font-bold tracking-tighter">
           <span className="relative flex items-center gap-3">
-            {inviteRole ? "You're invited to Roomote." : 'Welcome! Come on in.'}
+            {inviteRole
+              ? "Welcome! Let's create your account."
+              : 'Welcome! Come on in.'}
           </span>
         </h1>
-        {inviteRole && (
-          <p className="max-w-xl text-muted-foreground">
-            You will join this deployment as an{' '}
-            {inviteRole === 'admin' ? 'Admin' : 'Member'}.
-          </p>
-        )}
         <div className="max-w-xl space-y-4">
           <div className="space-y-2">
             <OriginMismatchAlert />

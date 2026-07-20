@@ -1,156 +1,88 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+
 import { useTRPC } from '@/trpc/client';
-import { ONBOARDING_STEPS, type OnboardingStep } from './types';
 
-/**
- * Reads initial state from URL search params (needed for OAuth return flows)
- * and clears the URL so the browser history stays clean.
- */
-function readAndClearUrlParams() {
-  if (typeof window === 'undefined') {
-    return {
-      urlStep: null,
-      slackConnected: false,
-      linearConnected: false,
-      githubConnected: false,
-    };
-  }
+import {
+  ONBOARDING_PROVIDER_IDS,
+  ONBOARDING_STEP_IDS,
+  type OnboardingStep,
+} from './types';
 
-  const params = new URLSearchParams(window.location.search);
-  const rawUrlStep = params.get('step');
-  const urlStep = ONBOARDING_STEPS.includes(rawUrlStep as OnboardingStep)
-    ? (rawUrlStep as OnboardingStep)
+function readUrlStep(): OnboardingStep | null {
+  if (typeof window === 'undefined') return null;
+
+  const step = new URLSearchParams(window.location.search).get('step');
+  return ONBOARDING_STEP_IDS.includes(step as OnboardingStep)
+    ? (step as OnboardingStep)
     : null;
-  const slackConnected = params.get('slack') === 'connected';
-  const linearConnected = params.get('linear') === 'connected';
-  const githubConnected = params.get('github') === 'connected';
-
-  // Strip query params so back/forward buttons don't accumulate history
-  if (params.size > 0) {
-    window.history.replaceState({}, '', window.location.pathname);
-  }
-
-  return {
-    urlStep,
-    slackConnected,
-    linearConnected,
-    githubConnected,
-  };
 }
 
 export function useOnboardingFlow() {
   const trpc = useTRPC();
-
-  const { data: status, isLoading } = useQuery(
-    trpc.onboarding.status.queryOptions(),
-  );
-
+  const {
+    data: status,
+    isLoading,
+    refetch,
+  } = useQuery(trpc.onboarding.status.queryOptions());
   const [step, setStep] = useState<OnboardingStep>('welcome');
+  const initialized = useRef(false);
 
-  // Track integration connection status in memory (set from OAuth return params)
-  const [slackConnected, setSlackConnected] = useState(false);
-  const [linearConnected, setLinearConnected] = useState(false);
-  const [githubConnected, setGithubConnected] = useState(false);
+  const steps = useMemo<OnboardingStep[]>(() => {
+    if (!status) return [];
 
-  const shouldSkip = useCallback(
-    (s: OnboardingStep): boolean => {
-      if (!status) return false;
-      if (s === 'welcome' && !status.isAdmin) return true;
-      // Skip the welcome screen when the user has already linked any account,
-      // so returning from an OAuth callback doesn't restart the flow.
-      if (s === 'welcome') {
-        const hasAnyProgress =
-          status.userHasLinkedSlack ||
-          status.userHasLinkedLinear ||
-          status.userHasLinkedGitHub ||
-          slackConnected ||
-          linearConnected ||
-          githubConnected;
-        if (hasAnyProgress) return true;
-      }
-      if (
-        s === 'slack' &&
-        (!status.orgHasSlack || status.userHasLinkedSlack || slackConnected)
-      )
-        return true;
-      if (
-        s === 'linear' &&
-        (!status.orgHasLinear || status.userHasLinkedLinear || linearConnected)
-      )
-        return true;
-      if (s === 'github' && (status.userHasLinkedGitHub || githubConnected))
-        return true;
-      return false;
+    return [
+      ...(status.isAdmin ? (['welcome'] as const) : []),
+      ...status.linkableProviders
+        .filter((provider) => provider.configured && !provider.linked)
+        .map((provider) => provider.id),
+      'invoke',
+    ];
+  }, [status]);
+
+  const getNextStep = useCallback(
+    (currentStep: OnboardingStep) => {
+      const currentIndex = ONBOARDING_STEP_IDS.indexOf(currentStep);
+      return (
+        ONBOARDING_STEP_IDS.slice(currentIndex + 1).find((candidate) =>
+          steps.includes(candidate),
+        ) ?? 'invoke'
+      );
     },
-    [status, slackConnected, linearConnected, githubConnected],
+    [steps],
   );
-
-  const findNextStep = useCallback(
-    (fromIndex: number): OnboardingStep => {
-      for (let i = fromIndex; i < ONBOARDING_STEPS.length; i++) {
-        if (!shouldSkip(ONBOARDING_STEPS[i]!)) {
-          return ONBOARDING_STEPS[i]!;
-        }
-      }
-      return ONBOARDING_STEPS[ONBOARDING_STEPS.length - 1]!;
-    },
-    [shouldSkip],
-  );
-
-  const goToStep = useCallback((newStep: OnboardingStep) => {
-    setStep(newStep);
-  }, []);
 
   const goToNextStep = useCallback(() => {
-    const currentIndex = ONBOARDING_STEPS.indexOf(step);
-    if (currentIndex < ONBOARDING_STEPS.length - 1) {
-      const nextStep = findNextStep(currentIndex + 1);
-      goToStep(nextStep);
-    }
-  }, [step, findNextStep, goToStep]);
+    setStep((currentStep) => getNextStep(currentStep));
+  }, [getNextStep]);
 
-  // Read URL params once on mount (for OAuth return) then keep everything in memory
-  const initialized = useRef(false);
   useEffect(() => {
-    if (isLoading || initialized.current) return;
+    if (isLoading || initialized.current || !status) return;
     initialized.current = true;
 
-    const {
-      urlStep,
-      slackConnected: sc,
-      linearConnected: lc,
-      githubConnected: gc,
-    } = readAndClearUrlParams();
+    const urlStep = readUrlStep();
+    setStep(
+      urlStep
+        ? steps.includes(urlStep)
+          ? urlStep
+          : getNextStep(urlStep)
+        : (steps[0] ?? 'invoke'),
+    );
+  }, [getNextStep, isLoading, status, steps]);
 
-    if (sc) setSlackConnected(true);
-    if (lc) setLinearConnected(true);
-    if (gc) setGithubConnected(true);
-
-    if (urlStep && ONBOARDING_STEPS.includes(urlStep)) {
-      if (shouldSkip(urlStep)) {
-        const index = ONBOARDING_STEPS.indexOf(urlStep);
-        setStep(findNextStep(index));
-      } else {
-        setStep(urlStep);
-      }
-    } else {
-      const firstValid = findNextStep(0);
-      setStep(firstValid);
-    }
-    // Only run on mount and when status finishes loading
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading]);
+  const currentProvider = ONBOARDING_PROVIDER_IDS.includes(
+    step as (typeof ONBOARDING_PROVIDER_IDS)[number],
+  )
+    ? status?.linkableProviders.find((provider) => provider.id === step)
+    : undefined;
 
   return {
     step,
+    currentProvider,
     goToNextStep,
-    goToStep,
-    slackConnected,
-    linearConnected,
-    githubConnected,
+    refetch,
     status,
     isLoading,
   };

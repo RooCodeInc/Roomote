@@ -2,6 +2,7 @@ import {
   db,
   users,
   slackInstallations,
+  githubInstallations,
   githubUserMappings,
   slackUserMappings,
   deploymentMcpEnablements,
@@ -23,6 +24,16 @@ import {
 } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
+import type { OnboardingLinkableProvider } from '@/app/(onboarding)/onboarding/types';
+import {
+  getLinkedAdoAccountCommand,
+  getLinkedBitbucketAccountCommand,
+  getLinkedDiscordAccountCommand,
+  getLinkedGitLabAccountCommand,
+  getLinkedGiteaAccountCommand,
+  getLinkedMicrosoftTeamsAccountCommand,
+  getLinkedTelegramAccountCommand,
+} from '../linked-accounts';
 
 export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
   const { userId } = auth;
@@ -38,6 +49,14 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
     slackLinkedResult,
     linearLinkedResult,
     enabledUserLevelMcpResult,
+    githubInstallationResult,
+    gitlabAccount,
+    giteaAccount,
+    bitbucketAccount,
+    adoAccount,
+    microsoftTeamsAccount,
+    telegramAccount,
+    discordAccount,
     // The GitHub step renders the deployment's bot handle; resolve it through
     // the deployment env layer so a slug configured only in the database (the
     // /setup manifest flow) is shown instead of the hosted-product default.
@@ -96,6 +115,18 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
               inArray(deploymentMcpEnablements.mcpId, mcpIntegrationIds),
             ),
           ),
+    db
+      .select({ id: githubInstallations.id })
+      .from(githubInstallations)
+      .where(isNull(githubInstallations.suspendedAt))
+      .limit(1),
+    getLinkedGitLabAccountCommand(auth),
+    getLinkedGiteaAccountCommand(auth),
+    getLinkedBitbucketAccountCommand(auth),
+    getLinkedAdoAccountCommand(auth),
+    getLinkedMicrosoftTeamsAccountCommand(auth),
+    getLinkedTelegramAccountCommand(auth),
+    getLinkedDiscordAccountCommand(auth),
     resolveConfiguredGitHubAppSlug(),
   ]);
 
@@ -108,6 +139,72 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
   const enabledUserScopedMcpIds = enabledUserLevelMcpIds.filter(
     (mcpId) => !isDeploymentScopedMcpIntegration(mcpId),
   );
+
+  const linkableProviders: OnboardingLinkableProvider[] = [
+    {
+      id: 'slack',
+      category: 'communication',
+      label: 'Slack',
+      configured: slackInstallationResult.length > 0,
+      linked: slackLinkedResult.length > 0,
+    },
+    {
+      id: 'microsoft',
+      category: 'communication',
+      label: 'Microsoft Teams',
+      configured: microsoftTeamsAccount.configured,
+      linked: microsoftTeamsAccount.account !== null,
+    },
+    {
+      id: 'telegram',
+      category: 'communication',
+      label: 'Telegram',
+      configured: telegramAccount.configured,
+      linked: telegramAccount.mapping !== null,
+    },
+    {
+      id: 'discord',
+      category: 'communication',
+      label: 'Discord',
+      configured: discordAccount.configured,
+      linked: discordAccount.mapping !== null,
+    },
+    {
+      id: 'github',
+      category: 'source-control',
+      label: 'GitHub',
+      configured: githubInstallationResult.length > 0,
+      linked: githubLinkedResult.length > 0,
+    },
+    {
+      id: 'gitlab',
+      category: 'source-control',
+      label: 'GitLab',
+      configured: gitlabAccount.configured,
+      linked: gitlabAccount.account !== null,
+    },
+    {
+      id: 'gitea',
+      category: 'source-control',
+      label: 'Gitea',
+      configured: giteaAccount.configured,
+      linked: giteaAccount.account !== null,
+    },
+    {
+      id: 'bitbucket',
+      category: 'source-control',
+      label: 'Bitbucket Cloud',
+      configured: bitbucketAccount.configured,
+      linked: bitbucketAccount.account !== null,
+    },
+    {
+      id: 'ado',
+      category: 'source-control',
+      label: 'Azure DevOps',
+      configured: adoAccount.configured,
+      linked: adoAccount.account !== null,
+    },
+  ];
 
   const userConnectedEnabledMcpResult =
     enabledUserLevelMcpIds.length === 0
@@ -155,6 +252,7 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
     userHasConnectedEnabledUserLevelMcp:
       userConnectedEnabledMcpResult.length > 0,
     enabledUserLevelMcpIds,
+    linkableProviders,
     githubAppSlug,
   };
 }
