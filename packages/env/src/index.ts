@@ -62,7 +62,7 @@ const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
-    .enum(['roomote-cloud', 'modal', 'docker', 'daytona', 'e2b', 'blaxel'])
+    .enum(['roomote', 'modal', 'docker', 'daytona', 'e2b', 'blaxel'])
     .default('docker'),
   EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
   ROOMOTE_CLOUD_URL: z.string().url().optional(),

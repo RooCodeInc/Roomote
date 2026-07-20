@@ -66,7 +66,7 @@ describe('createComputeProviderClient', () => {
 
   it('resolves Roomote Cloud control-plane credentials', () => {
     createComputeProviderClient({
-      provider: 'roomote-cloud',
+      provider: 'roomote',
       envFallback: {
         ROOMOTE_CLOUD_URL: 'https://cloud.example',
         ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'deployment-token',

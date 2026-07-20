@@ -7,7 +7,7 @@ import { SANDBOX_FILES_DIR } from './worker-runtime';
  */
 
 export const computeProviders = [
-  'roomote-cloud',
+  'roomote',
   'modal',
   'docker',
   'daytona',
@@ -44,7 +44,7 @@ export const standbyResumeCapableComputeProviders = [
  */
 export const sleepCheckManagedComputeProviders = [
   ...snapshotCapableComputeProviders,
-  'roomote-cloud',
+  'roomote',
   'docker',
   'blaxel',
 ] as const satisfies readonly ComputeProvider[];
@@ -151,7 +151,7 @@ const RUNTIME_PATHS_BY_ENVIRONMENT: Record<
   RuntimePathsWithoutEnvironment
 > = {
   sandbox: SANDBOX_WORKER_RUNTIME_PATHS,
-  'roomote-cloud': SANDBOX_WORKER_RUNTIME_PATHS,
+  roomote: SANDBOX_WORKER_RUNTIME_PATHS,
   modal: MODAL_WORKER_RUNTIME_PATHS,
   docker: SANDBOX_WORKER_RUNTIME_PATHS,
   daytona: DAYTONA_WORKER_RUNTIME_PATHS,

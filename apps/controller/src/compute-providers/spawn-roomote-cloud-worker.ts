@@ -55,8 +55,8 @@ export async function spawnRoomoteCloudWorker(input: {
     }),
     // The worker sees the stable Cloud contract, never the broker vendor that
     // Cloud may replace between leases.
-    COMPUTE_PROVIDER: 'roomote-cloud',
-    ROOMOTE_WORKER_COMPUTE_PROVIDER: 'roomote-cloud',
+    COMPUTE_PROVIDER: 'roomote',
+    ROOMOTE_WORKER_COMPUTE_PROVIDER: 'roomote',
   };
   const lease = await launchRoomoteCloudCompute(input.cloudConfig, {
     runId: input.taskRun.id,
@@ -77,7 +77,7 @@ export async function spawnRoomoteCloudWorker(input: {
 
   await updateTaskRunMachine({
     taskRun: input.taskRun,
-    vendor: 'roomote-cloud',
+    vendor: 'roomote',
     // Roomote Cloud keeps the underlying vendor machine id private and owns
     // its lifecycle. Local recovery addresses the opaque lease instead.
     machineId: lease.id,

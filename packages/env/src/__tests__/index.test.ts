@@ -226,12 +226,12 @@ describe('Env', () => {
   it('accepts Roomote Cloud as the default compute provider', () => {
     const env = createRoomoteEnv({
       ...process.env,
-      DEFAULT_COMPUTE_PROVIDER: 'roomote-cloud',
+      DEFAULT_COMPUTE_PROVIDER: 'roomote',
       ROOMOTE_CLOUD_URL: 'https://cloud.example',
       ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'deployment-token',
     });
 
-    expect(env.DEFAULT_COMPUTE_PROVIDER).toBe('roomote-cloud');
+    expect(env.DEFAULT_COMPUTE_PROVIDER).toBe('roomote');
     expect(env.ROOMOTE_CLOUD_URL).toBe('https://cloud.example');
     expect(env.ROOMOTE_CLOUD_DEPLOYMENT_TOKEN).toBe('deployment-token');
   });

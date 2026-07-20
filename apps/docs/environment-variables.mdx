@@ -196,47 +196,47 @@ as per-task auth tokens or workspace paths.
 
 ### Sandbox providers
 
-| Env var                              | Required          | Used for                                                                                                                                 |
-| ------------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `roomote-cloud`, `docker`, `modal`, `e2b`, `daytona`, and `blaxel`. |
-| `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                                  |
-| `ROOMOTE_CLOUD_URL`                  | Roomote Cloud     | Roomote Cloud control-plane URL. Set with `ROOMOTE_CLOUD_DEPLOYMENT_TOKEN`.                                                              |
-| `ROOMOTE_CLOUD_DEPLOYMENT_TOKEN`     | Roomote Cloud     | Deployment-scoped credential used for task admission and managed sandbox lifecycle.                                                     |
-| `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker. In production, prefer an immutable registry-qualified tag.                                                  |
-| `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                          |
-| `DOCKER_WORKER_PLATFORM`             | Optional          | Docker worker platform. Defaults to the host architecture (`linux/arm64` on arm hosts, `linux/amd64` otherwise).                         |
-| `DOCKER_WORKER_NETWORK`              | Self-host Docker  | Docker network for worker containers in Compose/self-host mode.                                                                          |
-| `DOCKER_WORKER_RELEASE_PATH`         | Optional          | Path to a packaged worker release archive used by Docker worker bootstrap.                                                               |
-| `DOCKER_WORKER_CPU_LIMIT`            | Optional          | CPU limit per Docker task. Defaults to `2`.                                                                                              |
-| `DOCKER_WORKER_MEMORY_LIMIT`         | Optional          | Memory and memory+swap limit per Docker task. Defaults to `4g`.                                                                          |
-| `DOCKER_WORKER_PIDS_LIMIT`           | Optional          | Process limit per Docker task. Defaults to `512`.                                                                                        |
-| `DOCKER_WORKER_DISK_LIMIT`           | Optional          | Writable-layer limit. Defaults to `20g`; tasks fail closed when the Docker storage driver cannot enforce it.                             |
-| `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK` | Optional          | Explicitly permits startup without `--storage-opt size`. Defaults to `false`; use only with an equivalent host-level quota.              |
-| `DOCKER_WORKER_LOG_MAX_SIZE`         | Optional          | Maximum size of each Docker JSON log file. Defaults to `10m`.                                                                            |
-| `DOCKER_WORKER_LOG_MAX_FILES`        | Optional          | Number of rotated Docker JSON log files retained. Defaults to `3`.                                                                       |
-| `DOCKER_WORKER_EGRESS_POLICY`        | Optional          | `internet` (public egress; self-host blocks private+metadata ranges, local dev blocks metadata) or `none` (no external egress).          |
-| `DOCKER_STANDBY_MAX_COUNT`           | Optional          | Maximum stopped Docker task containers retained for resume. Defaults to `10`; `0` disables retention.                                    |
-| `DOCKER_STANDBY_MAX_AGE_HOURS`       | Optional          | Maximum age of a retained Docker task container. Defaults to `24`, capped at `168`.                                                      |
-| `MODAL_TOKEN_ID`                     | Modal             | Modal token ID. Can also be saved from **Settings > Sandboxes**.                                                                         |
-| `MODAL_TOKEN_SECRET`                 | Modal             | Modal token secret.                                                                                                                      |
-| `MODAL_ENDPOINT`                     | Optional          | Modal endpoint override.                                                                                                                 |
-| `MODAL_ENVIRONMENT`                  | Optional          | Modal environment name.                                                                                                                  |
-| `MODAL_APP_NAME`                     | Optional          | Modal app name override.                                                                                                                 |
-| `MODAL_REGIONS`                      | Optional          | Comma-separated Modal sandbox placement regions (for example `us` or `us-west`). Unset keeps Modal default placement.                    |
-| `E2B_API_KEY`                        | E2B               | E2B API key. Can also be saved from **Settings > Sandboxes**.                                                                            |
-| `E2B_DOMAIN`                         | Optional          | E2B domain for self-hosted or custom E2B clusters.                                                                                       |
-| `E2B_MAX_SANDBOX_TIMEOUT_MS`         | Optional          | Maximum E2B sandbox timeout Roomote will request. Defaults to one hour.                                                                  |
-| `DAYTONA_API_KEY`                    | Daytona           | Daytona API key. Can also be saved from **Settings > Sandboxes**.                                                                        |
-| `DAYTONA_API_URL`                    | Optional          | Daytona API URL override.                                                                                                                |
-| `DAYTONA_TARGET`                     | Optional          | Daytona target or region.                                                                                                                |
-| `BL_API_KEY`                         | Blaxel            | Blaxel API key. Can also be saved from **Settings > Sandboxes**.                                                                         |
-| `BL_WORKSPACE`                       | Blaxel            | Blaxel workspace name.                                                                                                                   |
-| `BLAXEL_REGION`                      | Optional          | Blaxel sandbox placement region. Unset lets Blaxel choose the closest region.                                                            |
-| `BLAXEL_STANDBY_MAX_COUNT`           | Optional          | Maximum Blaxel standby sandboxes retained for resume. Defaults to `25`; `0` disables retention.                                          |
-| `BLAXEL_STANDBY_MAX_AGE_HOURS`       | Optional          | Maximum age of a Blaxel standby sandbox. Defaults to `168`, capped at `168`.                                                             |
-| `WORKER_RELEASE_CHANNEL`             | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                                      |
-| `WORKER_RELEASE_VERSION`             | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                             |
-| `LOCAL_SANDBOX_FILES_DIR`            | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                          |
+| Env var                              | Required          | Used for                                                                                                                                            |
+| ------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `roomote`, `docker`, `modal`, `e2b`, `daytona`, and `blaxel`. |
+| `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                                             |
+| `ROOMOTE_CLOUD_URL`                  | Roomote Cloud     | Roomote Cloud control-plane URL. Set with `ROOMOTE_CLOUD_DEPLOYMENT_TOKEN`.                                                                         |
+| `ROOMOTE_CLOUD_DEPLOYMENT_TOKEN`     | Roomote Cloud     | Deployment-scoped credential used for task admission and managed sandbox lifecycle.                                                                 |
+| `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker. In production, prefer an immutable registry-qualified tag.                                                             |
+| `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                                     |
+| `DOCKER_WORKER_PLATFORM`             | Optional          | Docker worker platform. Defaults to the host architecture (`linux/arm64` on arm hosts, `linux/amd64` otherwise).                                    |
+| `DOCKER_WORKER_NETWORK`              | Self-host Docker  | Docker network for worker containers in Compose/self-host mode.                                                                                     |
+| `DOCKER_WORKER_RELEASE_PATH`         | Optional          | Path to a packaged worker release archive used by Docker worker bootstrap.                                                                          |
+| `DOCKER_WORKER_CPU_LIMIT`            | Optional          | CPU limit per Docker task. Defaults to `2`.                                                                                                         |
+| `DOCKER_WORKER_MEMORY_LIMIT`         | Optional          | Memory and memory+swap limit per Docker task. Defaults to `4g`.                                                                                     |
+| `DOCKER_WORKER_PIDS_LIMIT`           | Optional          | Process limit per Docker task. Defaults to `512`.                                                                                                   |
+| `DOCKER_WORKER_DISK_LIMIT`           | Optional          | Writable-layer limit. Defaults to `20g`; tasks fail closed when the Docker storage driver cannot enforce it.                                        |
+| `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK` | Optional          | Explicitly permits startup without `--storage-opt size`. Defaults to `false`; use only with an equivalent host-level quota.                         |
+| `DOCKER_WORKER_LOG_MAX_SIZE`         | Optional          | Maximum size of each Docker JSON log file. Defaults to `10m`.                                                                                       |
+| `DOCKER_WORKER_LOG_MAX_FILES`        | Optional          | Number of rotated Docker JSON log files retained. Defaults to `3`.                                                                                  |
+| `DOCKER_WORKER_EGRESS_POLICY`        | Optional          | `internet` (public egress; self-host blocks private+metadata ranges, local dev blocks metadata) or `none` (no external egress).                     |
+| `DOCKER_STANDBY_MAX_COUNT`           | Optional          | Maximum stopped Docker task containers retained for resume. Defaults to `10`; `0` disables retention.                                               |
+| `DOCKER_STANDBY_MAX_AGE_HOURS`       | Optional          | Maximum age of a retained Docker task container. Defaults to `24`, capped at `168`.                                                                 |
+| `MODAL_TOKEN_ID`                     | Modal             | Modal token ID. Can also be saved from **Settings > Sandboxes**.                                                                                    |
+| `MODAL_TOKEN_SECRET`                 | Modal             | Modal token secret.                                                                                                                                 |
+| `MODAL_ENDPOINT`                     | Optional          | Modal endpoint override.                                                                                                                            |
+| `MODAL_ENVIRONMENT`                  | Optional          | Modal environment name.                                                                                                                             |
+| `MODAL_APP_NAME`                     | Optional          | Modal app name override.                                                                                                                            |
+| `MODAL_REGIONS`                      | Optional          | Comma-separated Modal sandbox placement regions (for example `us` or `us-west`). Unset keeps Modal default placement.                               |
+| `E2B_API_KEY`                        | E2B               | E2B API key. Can also be saved from **Settings > Sandboxes**.                                                                                       |
+| `E2B_DOMAIN`                         | Optional          | E2B domain for self-hosted or custom E2B clusters.                                                                                                  |
+| `E2B_MAX_SANDBOX_TIMEOUT_MS`         | Optional          | Maximum E2B sandbox timeout Roomote will request. Defaults to one hour.                                                                             |
+| `DAYTONA_API_KEY`                    | Daytona           | Daytona API key. Can also be saved from **Settings > Sandboxes**.                                                                                   |
+| `DAYTONA_API_URL`                    | Optional          | Daytona API URL override.                                                                                                                           |
+| `DAYTONA_TARGET`                     | Optional          | Daytona target or region.                                                                                                                           |
+| `BL_API_KEY`                         | Blaxel            | Blaxel API key. Can also be saved from **Settings > Sandboxes**.                                                                                    |
+| `BL_WORKSPACE`                       | Blaxel            | Blaxel workspace name.                                                                                                                              |
+| `BLAXEL_REGION`                      | Optional          | Blaxel sandbox placement region. Unset lets Blaxel choose the closest region.                                                                       |
+| `BLAXEL_STANDBY_MAX_COUNT`           | Optional          | Maximum Blaxel standby sandboxes retained for resume. Defaults to `25`; `0` disables retention.                                                     |
+| `BLAXEL_STANDBY_MAX_AGE_HOURS`       | Optional          | Maximum age of a Blaxel standby sandbox. Defaults to `168`, capped at `168`.                                                                        |
+| `WORKER_RELEASE_CHANNEL`             | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                                                 |
+| `WORKER_RELEASE_VERSION`             | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                                        |
+| `LOCAL_SANDBOX_FILES_DIR`            | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                                     |
 
 ### Source control providers
 

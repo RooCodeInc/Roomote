@@ -53,7 +53,7 @@ export function createComputeProviderClient(
     options.envFallback?.[name] ?? process.env[name];
 
   switch (options.provider) {
-    case 'roomote-cloud': {
+    case 'roomote': {
       const baseUrl = options.config?.baseUrl ?? envValue('ROOMOTE_CLOUD_URL');
       const deploymentToken =
         options.config?.deploymentToken ??

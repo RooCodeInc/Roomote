@@ -151,7 +151,7 @@ describe('buildSetupComputeStatus', () => {
       status.providers.find((provider) => provider.provider === 'docker')
         ?.label,
     ).toBe('Local Docker');
-    expect(infrastructureByProvider['roomote-cloud']).toEqual([]);
+    expect(infrastructureByProvider.roomote).toEqual([]);
     expect(infrastructureByProvider.modal).toEqual([
       'MODAL_BASE_IMAGE_REF',
       'MODAL_REGIONS',
@@ -248,7 +248,7 @@ describe('buildSetupComputeStatus', () => {
     const status = buildSetupComputeStatus({});
 
     expect(status.providers.map((provider) => provider.provider)).toEqual([
-      'roomote-cloud',
+      'roomote',
       'modal',
       'e2b',
       'daytona',
@@ -606,7 +606,7 @@ describe('buildSetupComputeStatus', () => {
         ]),
       ),
     ).toEqual({
-      'roomote-cloud': true,
+      roomote: true,
       modal: true,
       // Daytona and E2B stay offered because their worker base images are
       // provisionable during setup from the registry-qualified worker image.
@@ -639,7 +639,7 @@ describe('buildSetupComputeStatus', () => {
         ]),
       ),
     ).toEqual({
-      'roomote-cloud': true,
+      roomote: true,
       modal: false,
       daytona: false,
       e2b: false,
@@ -663,7 +663,7 @@ describe('buildSetupComputeStatus', () => {
         ]),
       ),
     ).toEqual({
-      'roomote-cloud': true,
+      roomote: true,
       modal: true,
       daytona: true,
       e2b: true,
@@ -893,14 +893,7 @@ describe('getDefaultAvailableComputeProvider', () => {
   it('falls back to docker when every provider is excluded', () => {
     expect(
       getDefaultAvailableComputeProvider(
-        new Set([
-          'roomote-cloud',
-          'docker',
-          'modal',
-          'daytona',
-          'e2b',
-          'blaxel',
-        ]),
+        new Set(['roomote', 'docker', 'modal', 'daytona', 'e2b', 'blaxel']),
       ),
     ).toBe('docker');
   });

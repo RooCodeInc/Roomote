@@ -83,7 +83,7 @@ export class RoomoteController extends BaseController {
       runtimeEnv: Env,
     });
     switch (provider) {
-      case 'roomote-cloud': {
+      case 'roomote': {
         if (
           taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
           taskRun.payloadKind === TaskPayloadKind.SnapshotResume

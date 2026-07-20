@@ -233,7 +233,7 @@ export function getDefaultAvailableComputeProvider(
 
 export const SETUP_COMPUTE_PROVIDER_CATALOG = [
   {
-    provider: 'roomote-cloud',
+    provider: 'roomote',
     label: 'Roomote Cloud',
     description:
       'Managed inference and isolated sandboxes billed from prepaid Roomote Cloud credits.',

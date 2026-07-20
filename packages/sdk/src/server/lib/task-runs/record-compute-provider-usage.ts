@@ -219,11 +219,11 @@ const computeProviderUsagePolicies: Record<
   ComputeProvider,
   ComputeProviderUsagePolicy
 > = {
-  'roomote-cloud': {
+  roomote: {
     async deriveUsage(context) {
       await recordComputeProviderUsageSampleIfPresent({
         context,
-        provider: 'roomote-cloud',
+        provider: 'roomote',
         source: 'worker_roomote_cloud_cgroup_poll',
       });
 

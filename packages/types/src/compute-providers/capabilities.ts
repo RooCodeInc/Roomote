@@ -110,7 +110,7 @@ export function getComputeProviderCapabilities(
   provider: ComputeProvider,
 ): ComputeProviderCapabilities {
   switch (provider) {
-    case 'roomote-cloud':
+    case 'roomote':
       return ROOMOTE_CLOUD_CAPABILITIES;
     case 'modal':
       return MODAL_CAPABILITIES;

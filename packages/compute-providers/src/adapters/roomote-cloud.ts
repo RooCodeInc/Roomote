@@ -33,7 +33,7 @@ type CloudLeaseStatus = {
 };
 
 export class RoomoteCloudClient implements ComputeProviderClient {
-  public readonly vendor: ComputeProvider = 'roomote-cloud';
+  public readonly vendor: ComputeProvider = 'roomote';
   public readonly capabilities = ROOMOTE_CLOUD_CAPABILITIES;
 
   private readonly baseUrl: string;

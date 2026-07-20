@@ -92,15 +92,15 @@ describe('spawnRoomoteCloudWorker', () => {
       expect.anything(),
       expect.objectContaining({
         environment: expect.objectContaining({
-          COMPUTE_PROVIDER: 'roomote-cloud',
-          ROOMOTE_WORKER_COMPUTE_PROVIDER: 'roomote-cloud',
+          COMPUTE_PROVIDER: 'roomote',
+          ROOMOTE_WORKER_COMPUTE_PROVIDER: 'roomote',
         }),
       }),
     );
     expect(mockUpdateTaskRunMachine).toHaveBeenCalledWith(
       expect.objectContaining({
         taskRun,
-        vendor: 'roomote-cloud',
+        vendor: 'roomote',
         machineId: 'lease-1',
         sandboxServerUrl: 'https://sandbox.example',
       }),

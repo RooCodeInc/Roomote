@@ -249,16 +249,10 @@ describe('RoomoteController', () => {
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
-          provider: 'roomote-cloud',
+          provider: 'roomote',
         ) => Promise<void>;
       }
-    ).spawnFreshWorker(
-      taskRun,
-      'auth-token',
-      'roomote',
-      60_000,
-      'roomote-cloud',
-    );
+    ).spawnFreshWorker(taskRun, 'auth-token', 'roomote', 60_000, 'roomote');
 
     expect(mockAcquireRoomoteCloudRuntime).toHaveBeenCalledWith(cloudConfig, {
       taskId: 'task-148',
@@ -335,16 +329,10 @@ describe('RoomoteController', () => {
             authToken: string,
             deploymentSlug: string,
             timeoutMs: number,
-            provider: 'roomote-cloud',
+            provider: 'roomote',
           ) => Promise<void>;
         }
-      ).spawnFreshWorker(
-        taskRun,
-        'auth-token',
-        'roomote',
-        60_000,
-        'roomote-cloud',
-      ),
+      ).spawnFreshWorker(taskRun, 'auth-token', 'roomote', 60_000, 'roomote'),
     ).rejects.toThrow('compute launch failed');
     expect(mockCloseRoomoteCloudRuntime).toHaveBeenCalledWith(cloudConfig, {
       reservationId: 'reservation-1',

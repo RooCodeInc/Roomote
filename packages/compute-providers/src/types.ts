@@ -312,7 +312,7 @@ export interface BlaxelConfig {
 
 export type ComputeProviderFactoryOptions = (
   | {
-      provider: 'roomote-cloud';
+      provider: 'roomote';
       config?: RoomoteCloudConfig;
     }
   | {
