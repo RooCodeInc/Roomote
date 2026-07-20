@@ -1,4 +1,4 @@
-export const WHATS_NEW_SEEN_VERSION_KEY = 'RoomoteWhatsNewSeenVersion';
+const WHATS_NEW_SEEN_VERSION_KEY = 'RoomoteWhatsNewSeenVersion';
 
 export function readWhatsNewSeenVersion(): string | null {
   if (typeof window === 'undefined') {
