@@ -31,14 +31,18 @@ describe('ci-failure-triage-claims', () => {
       repositoryFullName: 'Acme/API',
       workflowName: ' CI ',
       headBranch: 'Main',
+      provider: 'github',
+      repositoryHost: 'github.com',
     });
     const hostedFingerprint = buildCiFailureTriageFingerprint({
       repositoryFullName: 'Acme/API',
       workflowName: ' CI ',
       headBranch: 'Main',
+      provider: 'gitlab',
       repositoryHost: 'GitLab.Example.com',
     });
 
+    // GitHub ignores host so existing webhook/Manual claims stay compatible.
     expect(fingerprint).toBe('acme/api::ci::main');
     expect(hostedFingerprint).toBe('gitlab.example.com::acme/api::ci::main');
     expect(
@@ -55,6 +59,7 @@ describe('ci-failure-triage-claims', () => {
       buildCiFailureTriageRepoClaimKey({
         provider: 'github',
         repositoryFullName: 'Acme/API',
+        repositoryHost: 'github.com',
       }),
     ).toBe('ci-failure-triage:github:active-repo:acme/api');
     expect(

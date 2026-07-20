@@ -2,8 +2,8 @@ import {
   buildCiFailureTriageDebounceKey,
   buildCiFailureTriageFingerprint,
   buildCiFailureTriagePrompt,
-  buildRepositoryCoverage,
   enqueueTask,
+  findEnvironmentForRepo,
   getTaskUrl,
   releaseCiFailureTriageInvestigation,
   tryClaimCiFailureTriageInvestigation,
@@ -37,6 +37,7 @@ import {
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
+import { findEnvironmentIdForRepositoryId } from './github-deployment-scope';
 
 const LOG_PREFIX = '[ci-failure-triage-launch]';
 
@@ -269,16 +270,26 @@ export async function launchCiFailureTriageForFailedRun(
     return { status: 'ok', message: 'Manager channel is not configured' };
   }
 
-  const repositoryCoverage = await buildRepositoryCoverage([
-    run.repositoryFullName,
-  ]);
-  const environmentId = repositoryCoverage[0]?.targetEnvironmentId;
+  const environmentId =
+    (await findEnvironmentIdForRepositoryId(run.repositoryId)) ??
+    (await findEnvironmentForRepo(
+      run.repositoryFullName,
+      undefined,
+      run.provider,
+    ));
   if (!environmentId) {
     return {
       status: 'ok',
       message: 'Repository has no configured environment for CI triage',
     };
   }
+
+  const repositoryCoverage = [
+    {
+      repositoryFullName: run.repositoryFullName,
+      targetEnvironmentId: environmentId,
+    },
+  ];
 
   const redis = getRedis();
   const debounceClaim = await redis.set(
@@ -303,6 +314,7 @@ export async function launchCiFailureTriageForFailedRun(
     workflowName: run.workflowOrPipelineName,
     headBranch: run.headBranch,
     repositoryHost: run.repositoryHost,
+    provider: run.provider,
   });
   const investigationClaimed = await tryClaimCiFailureTriageInvestigation({
     provider: run.provider,

@@ -5,6 +5,8 @@ const {
   mockBuildDestinationTaskPayloadFields,
   mockBuildCiFailureTriagePrompt,
   mockBuildRepositoryCoverage,
+  mockFindEnvironmentIdForRepositoryId,
+  mockFindEnvironmentForRepo,
   mockEnqueueTask,
   mockGetTaskUrl,
   mockRecordAutomationRunOutcome,
@@ -22,6 +24,8 @@ const {
   mockBuildDestinationTaskPayloadFields: vi.fn(() => ({})),
   mockBuildCiFailureTriagePrompt: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
+  mockFindEnvironmentIdForRepositoryId: vi.fn(),
+  mockFindEnvironmentForRepo: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(
     ({ taskId }: { taskId: string }) =>
@@ -52,17 +56,20 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildCiFailureTriagePrompt: (...args: unknown[]) =>
     mockBuildCiFailureTriagePrompt(...args),
-  buildRepositoryCoverage: mockBuildRepositoryCoverage,
   enqueueTask: mockEnqueueTask,
+  findEnvironmentForRepo: mockFindEnvironmentForRepo,
   getTaskUrl: mockGetTaskUrl,
   buildCiFailureTriageFingerprint: (params: {
     repositoryFullName: string;
     workflowName: string;
     headBranch: string;
     repositoryHost?: string | null;
+    provider?: string;
   }) =>
     [
-      params.repositoryHost?.trim().toLowerCase(),
+      params.provider !== 'github'
+        ? params.repositoryHost?.trim().toLowerCase()
+        : undefined,
       params.repositoryFullName,
       params.workflowName,
       params.headBranch,
@@ -76,6 +83,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   tryClaimCiFailureTriageInvestigation:
     mockTryClaimCiFailureTriageInvestigation,
   releaseCiFailureTriageInvestigation: mockReleaseCiFailureTriageInvestigation,
+}));
+
+vi.mock('../github-deployment-scope', () => ({
+  findEnvironmentIdForRepositoryId: mockFindEnvironmentIdForRepositoryId,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -222,6 +233,8 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockBuildRepositoryCoverage.mockResolvedValue([
       { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
     ]);
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-api');
     mockRedisSet.mockResolvedValue('OK');
     mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(true);
     mockReleaseCiFailureTriageInvestigation.mockResolvedValue(undefined);
@@ -397,11 +410,60 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockBuildRepositoryCoverage.mockResolvedValue([
       { repositoryFullName: 'acme/api' },
     ]);
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue(undefined);
 
     const result = await launchCiFailureTriageForFailedRun(failedRun);
 
     expect(result.message).toContain('no configured environment');
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('prefers repository-id environment mapping over fullName lookup', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-from-mapping');
+    mockFindEnvironmentForRepo.mockResolvedValue('env-from-fullname');
+
+    const result = await launchCiFailureTriageForFailedRun(failedRun);
+
+    expect(result.status).toBe('ok');
+    expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
+      'repo-row-1',
+    );
+    expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            environmentId: 'env-from-mapping',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('falls back to fullName environment lookup when mapping is missing', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-from-config');
+
+    const result = await launchCiFailureTriageForFailedRun(failedRun);
+
+    expect(result.status).toBe('ok');
+    expect(mockFindEnvironmentForRepo).toHaveBeenCalledWith(
+      'acme/api',
+      undefined,
+      'github',
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            environmentId: 'env-from-config',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
   });
 
   it('debounces repeated failures for the same repository', async () => {

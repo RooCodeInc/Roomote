@@ -2,6 +2,7 @@ import {
   buildCiFailureTriageFingerprint,
   buildCiFailureTriagePrompt,
   enqueueTask,
+  findEnvironmentForRepo,
   releaseCiFailureTriageInvestigation,
   tryClaimCiFailureTriageInvestigation,
   type CiFailureTriageTriggeringRun,
@@ -96,9 +97,16 @@ export async function ciFailureTriageJob(
     // Walk every provider+host+fullName identity and resolve coverage through
     // the repository-id environment mapping (not fullName).
     for (const selectedRepository of selectedRepositories) {
-      const environmentId = await findEnvironmentIdForRepositoryId(
-        selectedRepository.id,
-      );
+      // Prefer the provider+host-scoped mapping row, then fall back to the
+      // long-standing fullName config lookup so existing GitHub environments
+      // without mapping rows keep working.
+      const environmentId =
+        (await findEnvironmentIdForRepositoryId(selectedRepository.id)) ??
+        (await findEnvironmentForRepo(
+          selectedRepository.fullName,
+          undefined,
+          selectedRepository.sourceControlProvider,
+        ));
       if (!environmentId) {
         continue;
       }
@@ -167,6 +175,7 @@ export async function ciFailureTriageJob(
         workflowName,
         headBranch,
         repositoryHost: selectedRepository.host,
+        provider: sourceControlProvider,
       });
       const claimed = await tryClaimCiFailureTriageInvestigation({
         provider: sourceControlProvider,

@@ -17,13 +17,19 @@ export function buildCiFailureTriageFingerprint(params: {
   headBranch: string;
   /** Provider host when relevant (self-managed GitLab, etc.). */
   repositoryHost?: string | null;
+  provider?: SourceControlProvider;
 }): string {
   const parts = [
     params.repositoryFullName.trim().toLowerCase(),
     params.workflowName.trim().toLowerCase(),
     params.headBranch.trim().toLowerCase(),
   ];
-  const host = normalizeCiFailureTriageRepositoryHost(params.repositoryHost);
+  // GitHub is single-host for deployments; keep pre-multi-SCM key shape so
+  // webhook and Manual Run now claims stay interoperable.
+  const host =
+    params.provider === 'github'
+      ? ''
+      : normalizeCiFailureTriageRepositoryHost(params.repositoryHost);
   if (host) {
     parts.unshift(host);
   }
@@ -43,8 +49,12 @@ export function buildCiFailureTriageRepoClaimKey(params: {
   repositoryHost?: string | null;
 }): string {
   const fullName = params.repositoryFullName.trim().toLowerCase();
-  const host = normalizeCiFailureTriageRepositoryHost(params.repositoryHost);
-  // Host is only included when known so default-host GitHub keys stay stable.
+  // GitHub claim keys stay hostless for backward compatibility with existing
+  // webhook/Manual claims. Multi-host SCMs (GitLab) include the host.
+  const host =
+    params.provider === 'github'
+      ? ''
+      : normalizeCiFailureTriageRepositoryHost(params.repositoryHost);
   return host
     ? `ci-failure-triage:${params.provider}:active-repo:${host}:${fullName}`
     : `ci-failure-triage:${params.provider}:active-repo:${fullName}`;

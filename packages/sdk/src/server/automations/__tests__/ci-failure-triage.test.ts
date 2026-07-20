@@ -8,6 +8,7 @@ const {
   mockBuildDestinationTaskPayloadFields,
   mockGetActiveRepositoriesForProviders,
   mockFindEnvironmentIdForRepositoryId,
+  mockFindEnvironmentForRepo,
   mockGetLatestGitLabPipeline,
   mockGetGitLabPipelineFailureEvidence,
   mockTryClaimCiFailureTriageInvestigation,
@@ -23,6 +24,7 @@ const {
   mockBuildDestinationTaskPayloadFields: vi.fn(),
   mockGetActiveRepositoriesForProviders: vi.fn(),
   mockFindEnvironmentIdForRepositoryId: vi.fn(),
+  mockFindEnvironmentForRepo: vi.fn(),
   mockGetLatestGitLabPipeline: vi.fn(),
   mockGetGitLabPipelineFailureEvidence: vi.fn(),
   mockTryClaimCiFailureTriageInvestigation: vi.fn(),
@@ -42,6 +44,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   buildCiFailureTriageFingerprint: mockBuildCiFailureTriageFingerprint,
   buildCiFailureTriagePrompt: mockBuildCiFailureTriagePrompt,
   enqueueTask: mockEnqueueTask,
+  findEnvironmentForRepo: mockFindEnvironmentForRepo,
   releaseCiFailureTriageInvestigation: mockReleaseCiFailureTriageInvestigation,
   tryClaimCiFailureTriageInvestigation:
     mockTryClaimCiFailureTriageInvestigation,
@@ -94,6 +97,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
         return undefined;
       },
     );
+    mockFindEnvironmentForRepo.mockResolvedValue(undefined);
     mockGetLatestGitLabPipeline.mockResolvedValue({
       id: 77,
       name: 'default',
@@ -334,6 +338,40 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
         channels: { slackChannelId: 'C123MANAGER' },
       }),
       { launchClass: 'automation' },
+    );
+  });
+
+  it('falls back to fullName environment lookup for GitHub when mapping rows are missing', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-from-config');
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
+      'repo-gh-1',
+    );
+    expect(mockFindEnvironmentForRepo).toHaveBeenCalledWith(
+      'acme/api',
+      undefined,
+      'github',
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/api',
+            environmentId: 'env-from-config',
+          }),
+        }),
+      }),
+      expect.anything(),
     );
   });
 });
