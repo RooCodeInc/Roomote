@@ -14,6 +14,7 @@ export * from './task-run-queue';
 export * from './commit-author';
 export * from './repository-environment-coverage';
 export * from './ci-failure-triage-prompt';
+export * from './ci-failure-triage-types';
 export * from './issue-fixer-prompt';
 
 export * from './ci-failure-triage-claims';

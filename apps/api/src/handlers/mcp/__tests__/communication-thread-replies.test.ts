@@ -198,6 +198,32 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
   });
 
+  it('attaches to the investigating opener when only a root message id is present', async () => {
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: {
+        ...discordTaskRun,
+        payload: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'opener-1',
+        },
+      },
+      parsedBody: { text: 'fixed it', images: [] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(discordPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      replyToMessageId: 'opener-1',
+      text: 'fixed it',
+      textFormat: 'markdown',
+      images: [],
+    });
+    expect(discordPostMessageMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      'threadId',
+    );
+  });
+
   it('prepends a pending web-reply quote and clears it by id after a successful Discord post', async () => {
     getLatestUserMessageForReplyQuoteMock.mockResolvedValue({
       id: 'quote-abc',

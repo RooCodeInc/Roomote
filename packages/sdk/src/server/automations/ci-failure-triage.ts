@@ -99,6 +99,7 @@ export async function ciFailureTriageJob(
         headBranch: 'default',
       });
       const claimed = await tryClaimCiFailureTriageInvestigation({
+        provider: 'github',
         repositoryFullName: coverage.repositoryFullName,
         fingerprint,
         marker: `manual:${coverage.repositoryFullName}`,
@@ -156,6 +157,7 @@ export async function ciFailureTriageJob(
         break;
       } catch (enqueueError) {
         await releaseCiFailureTriageInvestigation({
+          provider: 'github',
           repositoryFullName: coverage.repositoryFullName,
           fingerprint,
         }).catch(() => undefined);

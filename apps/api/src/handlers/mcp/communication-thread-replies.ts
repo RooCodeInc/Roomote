@@ -428,6 +428,9 @@ async function sendDiscordThreadReply(params: {
   const threadId = getCommunicationThreadIdFromTaskPayload(
     params.taskRun.payload,
   );
+  const messageId = getCommunicationMessageIdFromTaskPayload(
+    params.taskRun.payload,
+  );
   if (!channelId) {
     return new Response(
       JSON.stringify({
@@ -480,7 +483,12 @@ async function sendDiscordThreadReply(params: {
   try {
     reply = await provider.postMessage({
       channelId,
+      // Discord thread channels are real destinations (threadId). When the
+      // task only has a root message id (e.g. a channel investigating opener),
+      // attach via replyToMessageId so closeouts stay on that message instead
+      // of posting a free-floating channel message.
       ...(threadId ? { threadId } : {}),
+      ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
       ...(textWithQuote ? { text: textWithQuote } : {}),
       textFormat: 'markdown',
       images,
