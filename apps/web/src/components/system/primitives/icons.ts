@@ -126,6 +126,7 @@ export {
   MessagesSquare,
   Mic,
   MicOff,
+  Minus,
   MoreHorizontal,
   MoreVertical,
   Moon,

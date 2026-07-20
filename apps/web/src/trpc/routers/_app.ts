@@ -268,6 +268,7 @@ import {
   clearComputeConfigCommand,
   setDefaultComputeProviderCommand,
   setLocalDockerEnabledCommand,
+  validateDockerEnvironmentCommand,
 } from '../commands/compute';
 import {
   getTaskSuggestionFilterOptionsCommand,
@@ -1586,6 +1587,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setLocalDockerEnabledCommand(auth, input),
       ),
+
+    validateDockerEnvironment: protectedProcedure.mutation(
+      ({ ctx: { auth } }) => validateDockerEnvironmentCommand(auth),
+    ),
   }),
 
   taskEnvVarRequests: createRouter({

@@ -19,6 +19,7 @@ export {
 } from './lib/task-runs/record-task-inference-usage';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
+export { requestDockerEnvironmentValidation } from './lib/docker-environment-validation';
 export {
   enqueueTaskSleep,
   TASK_SLEEP_QUEUE_NAME,

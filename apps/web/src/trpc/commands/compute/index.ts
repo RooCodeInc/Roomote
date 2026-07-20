@@ -31,6 +31,9 @@ import {
   type SetupProvisionableComputeProvider,
 } from '@roomote/types';
 
+import { requestDockerEnvironmentValidation } from '@roomote/sdk/server';
+import type { DockerEnvironmentValidationResult } from '@roomote/compute-providers';
+
 import type { UserAuthSuccess } from '@/types';
 
 import {
@@ -433,6 +436,39 @@ export async function setDefaultComputeProviderCommand(
 
     return { runtimeComputeConfig };
   });
+}
+
+export async function validateDockerEnvironmentCommand(
+  auth: UserAuthSuccess,
+): Promise<
+  | { status: 'completed'; result: DockerEnvironmentValidationResult }
+  | { status: 'unavailable'; message: string }
+> {
+  assertAdmin(auth);
+
+  try {
+    const result = await requestDockerEnvironmentValidation({
+      // The web process may know the configured image; the bullmq worker
+      // falls back to its own DOCKER_WORKER_IMAGE when this is unset.
+      ...(process.env.DOCKER_WORKER_IMAGE
+        ? { image: process.env.DOCKER_WORKER_IMAGE }
+        : {}),
+    });
+
+    return { status: 'completed', result };
+  } catch (error) {
+    console.warn(
+      `[validateDockerEnvironment] validation request failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return {
+      status: 'unavailable',
+      message:
+        'The validation service did not respond. Make sure the background worker (bullmq) service is running, then try again.',
+    };
+  }
 }
 
 export async function setLocalDockerEnabledCommand(

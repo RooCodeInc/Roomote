@@ -37,6 +37,7 @@ import {
   Trash2,
 } from '@/components/system';
 import { Section } from './Section';
+import { DockerEnvironmentValidation } from './DockerEnvironmentValidation';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
@@ -404,6 +405,10 @@ export function ComputeProviderSection({
               </p>
             </div>
           </div>
+        ) : null}
+
+        {isLocalDocker && (localDockerEnabled ?? true) ? (
+          <DockerEnvironmentValidation />
         ) : null}
 
         {(!isLocalDocker || (localDockerEnabled ?? true)) &&
