@@ -22,6 +22,30 @@ const GIT_FETCH_COMMAND = {
   continue_on_error: false,
 } as const;
 
+const GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND = {
+  name: 'Git resolve local origin/HEAD',
+  run: 'git symbolic-ref --quiet --short refs/remotes/origin/HEAD',
+  timeout: 60,
+  continue_on_error: true,
+} as const;
+
+const GIT_RESOLVE_REMOTE_HEAD_COMMAND = {
+  name: 'Git resolve remote HEAD',
+  run: 'git ls-remote --symref origin HEAD',
+  timeout: 60,
+  retries: 1,
+  continue_on_error: true,
+} as const;
+
+function buildVerifyRemoteBranchCommand(branch: string) {
+  return {
+    name: 'Git verify remote branch',
+    run: `git show-ref --verify --quiet 'refs/remotes/origin/${branch}'`,
+    timeout: 60,
+    continue_on_error: true,
+  };
+}
+
 function buildCheckoutCommands(branch: string) {
   return [
     {
@@ -88,7 +112,7 @@ type PrivateWorkspaceManagerMethods = {
   }) => Promise<void>;
 };
 
-describe('WorkspaceManager git fetch retry', () => {
+describe('WorkspaceManager git synchronization', () => {
   let manager: WorkspaceManager;
   let privateManager: PrivateWorkspaceManagerMethods;
   let syncRepositoryGitState: PrivateWorkspaceManagerMethods['syncRepositoryGitState'];
@@ -219,7 +243,7 @@ describe('WorkspaceManager git fetch retry', () => {
     expect(console.warn).toHaveBeenCalledTimes(4);
   });
 
-  it('uses the remote HEAD when syncing an implicit default branch', async () => {
+  it('uses local origin/HEAD before a network lookup when stored default metadata is stale', async () => {
     executor.execute
       .mockResolvedValueOnce({
         command: GIT_FETCH_COMMAND,
@@ -229,16 +253,17 @@ describe('WorkspaceManager git fetch retry', () => {
         stderr: '',
       })
       .mockResolvedValueOnce({
-        command: {
-          name: 'Git resolve remote HEAD',
-          run: 'git ls-remote --symref origin HEAD',
-          timeout: 60,
-          continue_on_error: true,
-        },
+        command: GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND,
         success: true,
         duration: 5,
-        stdout:
-          'ref: refs/heads/master\tHEAD\n0123456789abcdef0123456789abcdef01234567\tHEAD\n',
+        stdout: 'origin/develop\n',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: buildVerifyRemoteBranchCommand('develop'),
+        success: true,
+        duration: 5,
+        stdout: '',
         stderr: '',
       });
 
@@ -250,18 +275,106 @@ describe('WorkspaceManager git fetch retry', () => {
       setDefaultRemote: false,
     });
 
-    expect(executor.execute).toHaveBeenCalledTimes(2);
+    expect(executor.execute).toHaveBeenCalledTimes(3);
     expect(executor.execute).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'Git resolve origin/HEAD',
-      }),
+      GIT_RESOLVE_REMOTE_HEAD_COMMAND,
     );
+    expect(executor.executeAll).toHaveBeenCalledWith(
+      buildCheckoutCommands('develop'),
+    );
+    expect(console.warn).toHaveBeenCalledWith(
+      'Resolved origin/HEAD for acme/backend to develop; ignoring stale default branch main.',
+    );
+  });
+
+  it('uses the remote HEAD when the local origin/HEAD ref is unavailable', async () => {
+    executor.execute
+      .mockResolvedValueOnce({
+        command: GIT_FETCH_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND,
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: 'fatal: ref refs/remotes/origin/HEAD is not a symbolic ref',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_RESOLVE_REMOTE_HEAD_COMMAND,
+        success: true,
+        duration: 5,
+        stdout:
+          'ref: refs/heads/master\tHEAD\n0123456789abcdef0123456789abcdef01234567\tHEAD\n',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: buildVerifyRemoteBranchCommand('master'),
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/backend',
+      targetBranch: 'main',
+      allowRemoteHeadFallback: true,
+      setDefaultRemote: false,
+    });
+
     expect(executor.executeAll).toHaveBeenCalledWith(
       buildCheckoutCommands('master'),
     );
-    expect(console.warn).toHaveBeenCalledWith(
-      'Resolved remote HEAD for acme/backend to master; ignoring stale default branch main.',
+  });
+
+  it('uses a verified stored default when both origin/HEAD lookups are unavailable', async () => {
+    executor.execute
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/backend',
+      targetBranch: 'main',
+      allowRemoteHeadFallback: true,
+      setDefaultRemote: false,
+    });
+
+    expect(executor.execute).toHaveBeenLastCalledWith(
+      buildVerifyRemoteBranchCommand('main'),
     );
+    expect(executor.executeAll).toHaveBeenCalledWith(
+      buildCheckoutCommands('main'),
+    );
+  });
+
+  it('fails before checkout when origin/HEAD is unavailable and the stored default does not exist', async () => {
+    executor.execute
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' });
+
+    await expect(
+      syncRepositoryGitState({
+        executor,
+        repoFullName: 'acme/backend',
+        targetBranch: 'main',
+        allowRemoteHeadFallback: true,
+        setDefaultRemote: false,
+      }),
+    ).rejects.toThrow(
+      'Could not determine the default branch for acme/backend: origin/HEAD was unavailable and stored branch origin/main does not exist.',
+    );
+
+    expect(executor.executeAll).not.toHaveBeenCalled();
   });
 
   it('keeps the longer sync timeout while still pinning repositories to an exact sha', async () => {
