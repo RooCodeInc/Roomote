@@ -31,7 +31,9 @@ import {
   type SetupProvisionableComputeProvider,
 } from '@roomote/types';
 
-import { requestDockerEnvironmentValidation } from '@roomote/sdk/server';
+// Deep import: the server barrel drags the full sdk surface (db queries,
+// Linear, Slack) into every consumer, which breaks narrowly-mocked tests.
+import { requestDockerEnvironmentValidation } from '@roomote/sdk/server/docker-environment-validation';
 import type { DockerEnvironmentValidationResult } from '@roomote/compute-providers';
 
 import type { UserAuthSuccess } from '@/types';

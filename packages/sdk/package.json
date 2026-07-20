@@ -24,6 +24,10 @@
       "import": "./src/server/lib/slack-conversation-log.ts",
       "require": "./src/server/lib/slack-conversation-log.ts"
     },
+    "./server/docker-environment-validation": {
+      "import": "./src/server/lib/docker-environment-validation.ts",
+      "require": "./src/server/lib/docker-environment-validation.ts"
+    },
     "./server/telegram-primary-chat": {
       "import": "./src/server/lib/telegram-primary-chat.ts",
       "require": "./src/server/lib/telegram-primary-chat.ts"
