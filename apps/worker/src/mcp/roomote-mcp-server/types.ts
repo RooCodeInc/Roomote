@@ -168,7 +168,7 @@ export interface CommunicationLookupMessage {
   }>;
 }
 
-export interface CommunicationThreadLookupResponse {
+export interface CommunicationMessageContextResponse {
   provider: CommunicationProvider;
   channelId: string;
   requestedMessageId: string;

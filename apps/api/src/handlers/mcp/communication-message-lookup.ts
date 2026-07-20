@@ -1,301 +1,129 @@
-import type { CommunicationProvider } from '@roomote/types';
 import {
-  getCommunicationProviderFromTaskPayload,
   getCommunicationProviderDisplayName,
-  parseDiscordMessagePermalink,
-  parseSlackMessagePermalink,
+  getCommunicationProviderFromTaskPayload,
 } from '@roomote/types';
 
-import {
-  lookupDiscordChannelMessages,
-  lookupDiscordThread,
-} from './discord-thread-lookup';
+import { COMMUNICATION_LOOKUP_STRATEGIES } from './communication-message-lookup-strategies';
+import type {
+  CommunicationChannelMessagesPayload,
+  CommunicationLookupTaskRun,
+  CommunicationMessageContextPayload,
+  ParsedCommunicationReference,
+  SupportedCommunicationLookupProvider,
+} from './communication-message-lookup-types';
 import { McpProxyError } from './proxy-utils';
-import {
-  lookupSlackChannelMessages,
-  lookupSlackThread,
-} from './slack-thread-lookup';
 
-export type CommunicationLookupTaskRun = {
-  actingUserId?: string | null;
-  payload: unknown;
-  slackChannelId?: string | null;
-  slackThreadTs?: string | null;
-};
+export type { CommunicationLookupTaskRun } from './communication-message-lookup-types';
 
-type SupportedLookupProvider = Extract<
-  CommunicationProvider,
-  'slack' | 'discord'
->;
-
-type ParsedMessageReference = {
-  provider: SupportedLookupProvider;
-  channelId: string;
-  messageId: string;
-};
-
-type CommunicationLookupMessage = {
-  provider: SupportedLookupProvider;
-  id: string;
-  user: string;
-  username?: string;
-  botId?: string;
-  text: string;
-  channelId: string;
-  threadId?: string;
-  fileCount: number;
-  files?: Array<{
-    id: string;
-    name: string;
-    mimeType: string;
-    size: number;
-    url?: string;
-  }>;
-};
-
-type CommunicationThreadLookupPayload = {
-  provider: SupportedLookupProvider;
-  channelId: string;
-  requestedMessageId: string;
-  threadId: string;
-  matchedMessageIndex: number;
-  messageCount: number;
-  messages: CommunicationLookupMessage[];
-};
-
-type CommunicationChannelMessagesPayload = {
-  provider: SupportedLookupProvider;
-  channelId: string;
-  requestedOldest?: string;
-  requestedLatest?: string;
-  messageCount: number;
-  messages: CommunicationLookupMessage[];
-};
-
-function parseMessageReference(raw: string): ParsedMessageReference | null {
-  const discord = parseDiscordMessagePermalink(raw);
-  if (discord?.messageId) {
-    return {
-      provider: 'discord',
-      channelId: discord.channelId,
-      messageId: discord.messageId,
-    };
+function parseReference(raw: string): ParsedCommunicationReference | null {
+  for (const strategy of Object.values(COMMUNICATION_LOOKUP_STRATEGIES)) {
+    const parsed = strategy.parseReference(raw);
+    if (parsed) return { provider: strategy.provider, ...parsed };
   }
-
-  const slack = parseSlackMessagePermalink(raw);
-  if (slack) {
-    return {
-      provider: 'slack',
-      channelId: slack.channelId,
-      messageId: slack.messageId,
-    };
-  }
-
   return null;
 }
 
-function parseChannelReference(
-  raw: string,
-): Omit<ParsedMessageReference, 'messageId'> | null {
-  const discord = parseDiscordMessagePermalink(raw);
-  if (discord) {
-    return { provider: 'discord', channelId: discord.channelId };
-  }
-
-  const slack = parseSlackMessagePermalink(raw);
-  if (slack) {
-    return { provider: 'slack', channelId: slack.channelId };
-  }
-
-  return null;
-}
-
-function inferProviderFromRawTarget(options: {
-  channel?: string;
-  messageId?: string;
-}): SupportedLookupProvider | null {
-  const channel = options.channel?.trim() ?? '';
-  const messageId = options.messageId?.trim() ?? '';
-
-  if (/^\d+$/.test(channel)) return 'discord';
-  if (
-    channel.startsWith('#') ||
-    channel.startsWith('<#') ||
-    /^[CGD][A-Z0-9]{8,}$/i.test(channel) ||
-    (channel.length > 0 && !/^\d+$/.test(channel))
-  ) {
-    return 'slack';
-  }
-
-  if (/^\d+\.\d+$/.test(messageId)) return 'slack';
-  if (/^\d+$/.test(messageId)) return 'discord';
-  return null;
-}
-
-function resolveLookupProvider(options: {
-  explicitProvider?: SupportedLookupProvider;
-  taskRun?: CommunicationLookupTaskRun | null;
-  channel?: string;
-  messageId?: string;
-}): SupportedLookupProvider {
-  if (options.explicitProvider) return options.explicitProvider;
-
-  const originProvider = options.taskRun
-    ? getCommunicationProviderFromTaskPayload(options.taskRun.payload)
+function getTaskLookupProvider(
+  taskRun?: CommunicationLookupTaskRun | null,
+): SupportedCommunicationLookupProvider | null {
+  const provider = taskRun
+    ? getCommunicationProviderFromTaskPayload(taskRun.payload)
     : null;
-  if (originProvider === 'slack' || originProvider === 'discord') {
-    return originProvider;
-  }
-  if (originProvider) {
+  if (provider === 'slack' || provider === 'discord') return provider;
+  if (provider) {
     throw new McpProxyError(
       400,
-      `${getCommunicationProviderDisplayName(originProvider)} message lookup is not supported yet`,
+      `${getCommunicationProviderDisplayName(provider)} message lookup is not supported yet`,
     );
   }
-
-  const inferred = inferProviderFromRawTarget(options);
-  if (inferred) return inferred;
-
-  throw new McpProxyError(
-    400,
-    'A Slack or Discord message/channel link is required when the task has no communication channel',
-  );
+  return null;
 }
 
-function assertMatchingExplicitValue(options: {
-  field: string;
-  explicit?: string;
-  parsed?: string;
-}): void {
+function assertMatchingReferences(
+  left: ParsedCommunicationReference,
+  right: ParsedCommunicationReference,
+): void {
   if (
-    options.explicit?.trim() &&
-    options.parsed &&
-    options.explicit.trim() !== options.parsed
+    left.provider !== right.provider ||
+    left.channelId !== right.channelId ||
+    (left.messageId && right.messageId && left.messageId !== right.messageId)
   ) {
     throw new McpProxyError(
       400,
-      `${options.field} does not match the supplied message link`,
+      'channel and messageLink refer to different messages',
     );
   }
 }
 
-function toSlackLookupTaskRun(taskRun: CommunicationLookupTaskRun) {
-  return {
-    ...taskRun,
-    slackThreadTs: taskRun.slackThreadTs ?? null,
-  };
-}
-
-export async function lookupCommunicationThread(options: {
+export async function lookupCommunicationMessageContext(options: {
   channel?: string;
   messageId?: string;
   messageLink?: string;
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
-}): Promise<CommunicationThreadLookupPayload> {
-  const rawLink = options.messageLink?.trim();
-  const channelLink = options.channel?.trim()
-    ? parseMessageReference(options.channel)
-    : null;
-  const parsedLink = rawLink ? parseMessageReference(rawLink) : channelLink;
-
-  if (rawLink && !parsedLink) {
+}): Promise<CommunicationMessageContextPayload> {
+  const messageLink = options.messageLink?.trim();
+  const parsedMessageLink = messageLink ? parseReference(messageLink) : null;
+  if (messageLink && !parsedMessageLink?.messageId) {
     throw new McpProxyError(
       400,
       'messageLink must be a Slack or Discord message link',
     );
   }
 
-  assertMatchingExplicitValue({
-    field: 'channel',
-    explicit: channelLink ? undefined : options.channel,
-    parsed: parsedLink?.channelId,
-  });
-  assertMatchingExplicitValue({
-    field: 'messageId',
-    explicit: options.messageId,
-    parsed: parsedLink?.messageId,
-  });
+  const channel = options.channel?.trim();
+  const parsedChannel = channel ? parseReference(channel) : null;
+  if (parsedMessageLink && parsedChannel) {
+    assertMatchingReferences(parsedMessageLink, parsedChannel);
+  }
 
-  const channel = parsedLink?.channelId ?? options.channel?.trim();
-  const messageId = parsedLink?.messageId ?? options.messageId?.trim();
+  const reference = parsedMessageLink ?? parsedChannel;
+  if (
+    reference &&
+    channel &&
+    !parsedChannel &&
+    reference.channelId !== channel
+  ) {
+    throw new McpProxyError(
+      400,
+      'channel does not match the supplied message link',
+    );
+  }
+  if (
+    reference?.messageId &&
+    options.messageId?.trim() &&
+    reference.messageId !== options.messageId.trim()
+  ) {
+    throw new McpProxyError(
+      400,
+      'messageId does not match the supplied message link',
+    );
+  }
+
+  const provider =
+    reference?.provider ?? getTaskLookupProvider(options.taskRun);
+  if (!provider) {
+    throw new McpProxyError(
+      400,
+      'A Slack or Discord message link is required when the task has no communication channel',
+    );
+  }
+
+  const messageId = reference?.messageId ?? options.messageId?.trim();
   if (!messageId) {
     throw new McpProxyError(400, 'messageId or messageLink is required');
   }
 
-  const provider = resolveLookupProvider({
-    explicitProvider: parsedLink?.provider,
-    taskRun: options.taskRun,
-    channel,
+  return COMMUNICATION_LOOKUP_STRATEGIES[provider].getMessageContext({
+    ...(reference?.channelId
+      ? { channel: reference.channelId }
+      : channel
+        ? { channel }
+        : {}),
     messageId,
+    ...(options.taskRun ? { taskRun: options.taskRun } : {}),
+    ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
   });
-
-  if (provider === 'discord') {
-    const result = await lookupDiscordThread({
-      ...(channel ? { channel } : {}),
-      messageId,
-      ...(options.taskRun ? { taskRun: options.taskRun } : {}),
-      ...(!options.taskRun && options.actingUserId
-        ? { actingDiscordMembershipUserId: options.actingUserId }
-        : {}),
-    });
-
-    return {
-      provider,
-      channelId: result.channelId,
-      requestedMessageId: result.requestedMessageId,
-      threadId: result.threadId,
-      matchedMessageIndex: result.matchedMessageIndex,
-      messageCount: result.messageCount,
-      messages: result.messages.map((message) => ({
-        provider,
-        ...message,
-        channelId: result.channelId,
-        threadId: result.threadId,
-      })),
-    };
-  }
-
-  const result = await lookupSlackThread({
-    ...(channel ? { channel } : {}),
-    messageTs: messageId,
-    ...(options.taskRun
-      ? { taskRun: toSlackLookupTaskRun(options.taskRun) }
-      : {}),
-    ...(!options.taskRun && options.actingUserId
-      ? { actingSlackMembershipUserId: options.actingUserId }
-      : {}),
-  });
-
-  return {
-    provider,
-    channelId: result.channelId,
-    requestedMessageId: result.requestedMessageTs,
-    threadId: result.threadTs,
-    matchedMessageIndex: result.matchedMessageIndex,
-    messageCount: result.messageCount,
-    messages: result.messages.map((message) => ({
-      provider,
-      id: message.ts,
-      user: message.user,
-      ...(message.username ? { username: message.username } : {}),
-      ...(message.botId ? { botId: message.botId } : {}),
-      text: message.text,
-      channelId: result.channelId,
-      threadId: result.threadTs,
-      fileCount: message.fileCount,
-      ...(message.files?.length
-        ? {
-            files: message.files.map((file) => ({
-              id: file.id,
-              name: file.name,
-              mimeType: file.mimetype,
-              size: file.size,
-            })),
-          }
-        : {}),
-    })),
-  };
 }
 
 export async function lookupCommunicationChannelMessages(options: {
@@ -305,87 +133,26 @@ export async function lookupCommunicationChannelMessages(options: {
   taskRun?: CommunicationLookupTaskRun | null;
   actingUserId?: string | null;
 }): Promise<CommunicationChannelMessagesPayload> {
-  const parsedChannel = options.channel?.trim()
-    ? parseChannelReference(options.channel)
-    : null;
-  const channel = parsedChannel?.channelId ?? options.channel?.trim();
-  const provider = resolveLookupProvider({
-    explicitProvider: parsedChannel?.provider,
-    taskRun: options.taskRun,
-    channel,
-  });
-
-  if (provider === 'discord') {
-    const result = await lookupDiscordChannelMessages({
-      ...(channel ? { channel } : {}),
-      ...(options.oldest ? { oldest: options.oldest } : {}),
-      ...(options.latest ? { latest: options.latest } : {}),
-      ...(options.taskRun ? { taskRun: options.taskRun } : {}),
-      ...(!options.taskRun && options.actingUserId
-        ? { actingDiscordMembershipUserId: options.actingUserId }
-        : {}),
-    });
-
-    return {
-      provider,
-      channelId: result.channelId,
-      ...(result.requestedOldest
-        ? { requestedOldest: result.requestedOldest }
-        : {}),
-      ...(result.requestedLatest
-        ? { requestedLatest: result.requestedLatest }
-        : {}),
-      messageCount: result.messageCount,
-      messages: result.messages.map((message) => ({
-        provider,
-        ...message,
-        channelId: result.channelId,
-      })),
-    };
+  const channel = options.channel?.trim();
+  const reference = channel ? parseReference(channel) : null;
+  const provider =
+    reference?.provider ?? getTaskLookupProvider(options.taskRun);
+  if (!provider) {
+    throw new McpProxyError(
+      400,
+      'A Slack or Discord channel/message link is required when the task has no communication channel',
+    );
   }
 
-  const result = await lookupSlackChannelMessages({
-    ...(channel ? { channel } : {}),
+  return COMMUNICATION_LOOKUP_STRATEGIES[provider].getChannelMessages({
+    ...(reference?.channelId
+      ? { channel: reference.channelId }
+      : channel
+        ? { channel }
+        : {}),
     ...(options.oldest ? { oldest: options.oldest } : {}),
     ...(options.latest ? { latest: options.latest } : {}),
-    ...(options.taskRun
-      ? { taskRun: toSlackLookupTaskRun(options.taskRun) }
-      : {}),
-    ...(!options.taskRun && options.actingUserId
-      ? { actingSlackMembershipUserId: options.actingUserId }
-      : {}),
+    ...(options.taskRun ? { taskRun: options.taskRun } : {}),
+    ...(options.actingUserId ? { actingUserId: options.actingUserId } : {}),
   });
-
-  return {
-    provider,
-    channelId: result.channelId,
-    ...(result.requestedOldest
-      ? { requestedOldest: result.requestedOldest }
-      : {}),
-    ...(result.requestedLatest
-      ? { requestedLatest: result.requestedLatest }
-      : {}),
-    messageCount: result.messageCount,
-    messages: result.messages.map((message) => ({
-      provider,
-      id: message.ts,
-      user: message.user,
-      ...(message.username ? { username: message.username } : {}),
-      ...(message.botId ? { botId: message.botId } : {}),
-      text: message.text,
-      channelId: result.channelId,
-      ...(message.threadTs ? { threadId: message.threadTs } : {}),
-      fileCount: message.fileCount,
-      ...(message.files?.length
-        ? {
-            files: message.files.map((file) => ({
-              id: file.id,
-              name: file.name,
-              mimeType: file.mimetype,
-              size: file.size,
-            })),
-          }
-        : {}),
-    })),
-  };
 }

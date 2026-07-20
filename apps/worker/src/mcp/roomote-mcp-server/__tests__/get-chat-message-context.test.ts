@@ -1,5 +1,5 @@
-import { getChatThread } from '../chat-api-client.js';
-import { handleGetChatThread } from '../get-chat-thread.js';
+import { getChatMessageContext } from '../chat-api-client.js';
+import { handleGetChatMessageContext } from '../get-chat-message-context.js';
 import type { RoomoteConfig } from '../types.js';
 
 vi.mock('../chat-api-client.js');
@@ -9,11 +9,11 @@ const config: RoomoteConfig = {
   platformApiUrl: 'https://platform.example.com',
 };
 
-describe('handleGetChatThread', () => {
+describe('handleGetChatMessageContext', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('returns normalized communication context', async () => {
-    vi.mocked(getChatThread).mockResolvedValueOnce({
+    vi.mocked(getChatMessageContext).mockResolvedValueOnce({
       provider: 'discord',
       channelId: '456',
       requestedMessageId: '789',
@@ -34,7 +34,7 @@ describe('handleGetChatThread', () => {
       ],
     });
 
-    const result = await handleGetChatThread(
+    const result = await handleGetChatMessageContext(
       {
         messageLink: ' https://discord.com/channels/123/456/789 ',
       },
@@ -46,15 +46,17 @@ describe('handleGetChatThread', () => {
       requestedMessageId: '789',
       messageCount: 1,
     });
-    expect(getChatThread).toHaveBeenCalledWith(config, {
+    expect(getChatMessageContext).toHaveBeenCalledWith(config, {
       messageLink: 'https://discord.com/channels/123/456/789',
     });
   });
 
   it('returns an error result when the lookup fails', async () => {
-    vi.mocked(getChatThread).mockRejectedValueOnce(new Error('not found'));
+    vi.mocked(getChatMessageContext).mockRejectedValueOnce(
+      new Error('not found'),
+    );
 
-    const result = await handleGetChatThread(
+    const result = await handleGetChatMessageContext(
       { channel: '456', messageId: '789' },
       config,
     );

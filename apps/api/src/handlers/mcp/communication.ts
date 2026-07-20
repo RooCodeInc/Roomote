@@ -1,13 +1,12 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { db, eq, taskRuns } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
-import { getTaskChannelBindings } from '../tasks/helpers';
 
+import { loadCommunicationLookupTaskRun } from './communication-lookup-run-context';
 import {
   lookupCommunicationChannelMessages,
-  lookupCommunicationThread,
+  lookupCommunicationMessageContext,
 } from './communication-message-lookup';
 import type { McpAuth } from './middleware';
 import { isRunTokenContext, McpProxyError } from './proxy-utils';
@@ -16,7 +15,7 @@ type CommunicationMcpVariables = Variables & {
   mcpAuth: McpAuth;
 };
 
-function parseThreadLookupRequestBody(body: unknown): {
+function parseMessageContextRequestBody(body: unknown): {
   channel?: string;
   messageId?: string;
   messageLink?: string;
@@ -67,31 +66,11 @@ function parseChannelMessagesRequestBody(body: unknown): {
   };
 }
 
-async function loadLookupRun(runId: number) {
-  const run = await db.query.taskRuns.findFirst({
-    columns: {
-      actingUserId: true,
-      taskId: true,
-      payload: true,
-    },
-    where: eq(taskRuns.id, runId),
-  });
-
-  if (!run) return null;
-  const bindings = await getTaskChannelBindings(run.taskId);
-  return {
-    actingUserId: run.actingUserId,
-    payload: run.payload,
-    slackChannelId: bindings?.slackChannelId ?? null,
-    slackThreadTs: bindings?.slackThreadTs ?? null,
-  };
-}
-
 export const communicationMcp = new Hono<{
   Variables: CommunicationMcpVariables;
 }>();
 
-communicationMcp.post('/thread_lookup', async (c) => {
+communicationMcp.post('/message_context', async (c) => {
   const { authContext } = c.get('mcpAuth');
   if (!isRunTokenContext(authContext)) {
     return c.json(
@@ -100,14 +79,14 @@ communicationMcp.post('/thread_lookup', async (c) => {
     );
   }
 
-  const taskRun = await loadLookupRun(authContext.runId);
+  const taskRun = await loadCommunicationLookupTaskRun(authContext.runId);
   if (!taskRun) {
     return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }
 
-  let parsedBody: ReturnType<typeof parseThreadLookupRequestBody>;
+  let parsedBody: ReturnType<typeof parseMessageContextRequestBody>;
   try {
-    parsedBody = parseThreadLookupRequestBody(await c.req.json());
+    parsedBody = parseMessageContextRequestBody(await c.req.json());
   } catch (error) {
     return c.json(
       { error: error instanceof Error ? error.message : 'Invalid JSON body' },
@@ -117,7 +96,7 @@ communicationMcp.post('/thread_lookup', async (c) => {
 
   try {
     return c.json(
-      await lookupCommunicationThread({
+      await lookupCommunicationMessageContext({
         ...parsedBody,
         taskRun,
       }),
@@ -142,7 +121,7 @@ communicationMcp.post('/channel_messages', async (c) => {
     );
   }
 
-  const taskRun = await loadLookupRun(authContext.runId);
+  const taskRun = await loadCommunicationLookupTaskRun(authContext.runId);
   if (!taskRun) {
     return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }

@@ -464,15 +464,18 @@ describe('roomote MCP tool descriptions', () => {
     ).toBe(false);
   });
 
-  it('registers one provider-neutral thread lookup tool', async () => {
+  it('registers one provider-neutral message context tool', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
-    const lookupTool = getRegisteredTool(registeredTools, 'get_chat_thread');
+    const lookupTool = getRegisteredTool(
+      registeredTools,
+      'get_chat_message_context',
+    );
     const channelField = getInputSchemaField(lookupTool, 'channel');
     const messageIdField = getInputSchemaField(lookupTool, 'messageId');
     const messageLinkField = getInputSchemaField(lookupTool, 'messageLink');
 
     expect(lookupTool.config.description).toBe(
-      'Look up a message in the task communication channel and return its surrounding thread or conversation context. When the task started from the web, provide a Slack or Discord message link. Explicit cross-channel lookups require the acting user to have access.',
+      'Look up a message in the task communication channel and return its surrounding conversation context. When the task has no communication channel, provide a Slack or Discord message link. Explicit cross-channel lookups require the acting user to have access.',
     );
     expect(channelField.description).toBe(
       'Optional channel ID, name, mention, or message link. Omit it to use the task communication channel.',
@@ -506,7 +509,7 @@ describe('roomote MCP tool descriptions', () => {
     const latestField = getInputSchemaField(lookupTool, 'latest');
 
     expect(lookupTool.config.description).toBe(
-      'Fetch readable history from the task communication channel. When the task started from the web, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
+      'Fetch readable history from the task communication channel. When the task has no communication channel, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
     );
     expect(channelField.description).toBe(
       'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
@@ -545,7 +548,10 @@ describe('roomote MCP tool descriptions', () => {
       ROOMOTE_CLOUD_TOKEN: 'run-token',
       ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
     });
-    const lookupTool = getRegisteredTool(registeredTools, 'get_chat_thread');
+    const lookupTool = getRegisteredTool(
+      registeredTools,
+      'get_chat_message_context',
+    );
 
     expect(lookupTool.handler).toBeDefined();
     await lookupTool.handler?.({
@@ -554,7 +560,7 @@ describe('roomote MCP tool descriptions', () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://platform.example.com/api/mcp/communication/thread_lookup',
+      'https://platform.example.com/api/mcp/communication/message_context',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({

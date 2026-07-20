@@ -1,5 +1,6 @@
 import {
   buildSlackThreadPermalink,
+  parseSlackChannelPermalink,
   parseSlackMessagePermalink,
 } from '../slack';
 
@@ -98,6 +99,25 @@ describe('parseSlackMessagePermalink', () => {
     ).toBeNull();
     expect(
       parseSlackMessagePermalink('https://app.slack.com/archives/C123/nope'),
+    ).toBeNull();
+  });
+});
+
+describe('parseSlackChannelPermalink', () => {
+  it('parses workspace archive and app client channel links', () => {
+    expect(
+      parseSlackChannelPermalink('https://acme.slack.com/archives/C123'),
+    ).toEqual({ teamId: null, channelId: 'C123' });
+    expect(
+      parseSlackChannelPermalink('https://app.slack.com/client/T123/C456'),
+    ).toEqual({ teamId: 'T123', channelId: 'C456' });
+  });
+
+  it('does not treat a message link as a channel-only link', () => {
+    expect(
+      parseSlackChannelPermalink(
+        'https://acme.slack.com/archives/C123/p1710000000000100',
+      ),
     ).toBeNull();
   });
 });

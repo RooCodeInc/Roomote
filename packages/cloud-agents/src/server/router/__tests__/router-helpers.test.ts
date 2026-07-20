@@ -405,6 +405,11 @@ describe('router helpers', () => {
     ).toBe(true);
     expect(
       shouldIncludeRoomoteRouterLookup(
+        'https://app.slack.com/client/T123/C456',
+      ),
+    ).toBe(true);
+    expect(
+      shouldIncludeRoomoteRouterLookup(
         'https://discord.com/channels/123/456/789',
       ),
     ).toBe(true);

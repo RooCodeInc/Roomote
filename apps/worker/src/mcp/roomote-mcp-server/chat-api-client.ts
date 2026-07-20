@@ -5,7 +5,7 @@ import {
 } from './api-client.js';
 import type {
   CommunicationChannelMessagesResponse,
-  CommunicationThreadLookupResponse,
+  CommunicationMessageContextResponse,
   RoomoteConfig,
   SlackChannelPostResponse,
   SlackMutationResponse,
@@ -13,25 +13,26 @@ import type {
   SlackThreadReplyResponse,
 } from './types.js';
 
-const CHAT_THREAD_REPLY_MAX_503_RETRIES = 3;
-const CHAT_THREAD_REPLY_RETRY_DELAY_MS = 250;
+const MCP_POST_MAX_503_RETRIES = 3;
+const MCP_POST_RETRY_DELAY_MS = 250;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function postToChatEndpoint<
+async function postToMcpEndpoint<
   TResponse,
   TRequest extends object = Record<string, unknown>,
 >(
   config: RoomoteConfig,
+  namespace: 'slack' | 'communication',
   path: string,
   input: TRequest,
   errorPrefix: string,
 ): Promise<TResponse> {
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetchWithTimeout(
-      `${config.platformApiUrl}/api/mcp/slack/${path}`,
+      `${config.platformApiUrl}/api/mcp/${namespace}/${path}`,
       {
         method: 'POST',
         headers: buildApiHeaders(config, {
@@ -46,17 +47,26 @@ async function postToChatEndpoint<
       return (await response.json()) as TResponse;
     }
 
-    if (
-      response.status === 503 &&
-      attempt < CHAT_THREAD_REPLY_MAX_503_RETRIES
-    ) {
-      await sleep(CHAT_THREAD_REPLY_RETRY_DELAY_MS);
+    if (response.status === 503 && attempt < MCP_POST_MAX_503_RETRIES) {
+      await sleep(MCP_POST_RETRY_DELAY_MS);
       continue;
     }
 
     const error = await parseApiError(response);
     throw new Error(`${errorPrefix}: ${response.status} ${error}`);
   }
+}
+
+async function postToChatEndpoint<
+  TResponse,
+  TRequest extends object = Record<string, unknown>,
+>(
+  config: RoomoteConfig,
+  path: string,
+  input: TRequest,
+  errorPrefix: string,
+): Promise<TResponse> {
+  return postToMcpEndpoint(config, 'slack', path, input, errorPrefix);
 }
 
 async function postToCommunicationLookupEndpoint<
@@ -68,24 +78,7 @@ async function postToCommunicationLookupEndpoint<
   input: TRequest,
   errorPrefix: string,
 ): Promise<TResponse> {
-  const response = await fetchWithTimeout(
-    `${config.platformApiUrl}/api/mcp/communication/${path}`,
-    {
-      method: 'POST',
-      headers: buildApiHeaders(config, {
-        'Content-Type': 'application/json',
-      }),
-      body: JSON.stringify(input),
-    },
-    { label: errorPrefix },
-  );
-
-  if (response.ok) {
-    return (await response.json()) as TResponse;
-  }
-
-  const error = await parseApiError(response);
-  throw new Error(`${errorPrefix}: ${response.status} ${error}`);
+  return postToMcpEndpoint(config, 'communication', path, input, errorPrefix);
 }
 
 export async function replyToChatThread(
@@ -169,19 +162,19 @@ export async function addReactionToSlackMessage(
   );
 }
 
-export async function getChatThread(
+export async function getChatMessageContext(
   config: RoomoteConfig,
   input: {
     channel?: string;
     messageId?: string;
     messageLink?: string;
   },
-): Promise<CommunicationThreadLookupResponse> {
-  return postToCommunicationLookupEndpoint<CommunicationThreadLookupResponse>(
+): Promise<CommunicationMessageContextResponse> {
+  return postToCommunicationLookupEndpoint<CommunicationMessageContextResponse>(
     config,
-    'thread_lookup',
+    'message_context',
     input,
-    'Failed to look up chat thread',
+    'Failed to look up chat message context',
   );
 }
 

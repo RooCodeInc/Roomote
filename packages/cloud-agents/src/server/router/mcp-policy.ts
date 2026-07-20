@@ -1,5 +1,8 @@
 import {
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
   parseDiscordMessagePermalink,
+  parseSlackChannelPermalink,
   parseSlackMessagePermalink,
 } from '@roomote/types';
 
@@ -40,7 +43,10 @@ interface RouterMcpServerPolicy {
 
 const ROUTER_MCP_TOOL_GROUPS: Record<RouterMcpToolGroup, readonly string[]> = {
   'roomote-platform-context': ['get_about_me'],
-  'roomote-chat-context': ['get_chat_thread', 'get_chat_channel_messages'],
+  'roomote-chat-context': [
+    CHAT_MESSAGE_CONTEXT_TOOL.name,
+    CHAT_CHANNEL_MESSAGES_TOOL.name,
+  ],
   'linear-issue-context': ['get_issue', 'list_issues'],
   'linear-comment-context': ['list_comments'],
   'github-pr-context': [
@@ -59,8 +65,8 @@ const ROUTER_MCP_TOOL_GROUPS: Record<RouterMcpToolGroup, readonly string[]> = {
 
 const ROUTER_ROOMOTE_ALLOWED_TOOLS = [
   'get_about_me',
-  'get_chat_channel_messages',
-  'get_chat_thread',
+  CHAT_CHANNEL_MESSAGES_TOOL.name,
+  CHAT_MESSAGE_CONTEXT_TOOL.name,
 ] as const;
 
 const ROUTER_LINEAR_ALLOWED_TOOLS = [
@@ -201,6 +207,7 @@ export function shouldIncludeRoomoteRouterLookup(
     const normalized = candidate.replace(/[.,;:!?]+$/, '');
     return (
       parseSlackMessagePermalink(normalized) !== null ||
+      parseSlackChannelPermalink(normalized) !== null ||
       parseDiscordMessagePermalink(normalized) !== null
     );
   });

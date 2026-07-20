@@ -2,7 +2,7 @@ import {
   getChatChannelMessages,
   addReactionToSlackMessage,
   clearSlackReplyQuote,
-  getChatThread,
+  getChatMessageContext,
   postToSlackChannel,
   replyToSlackThread,
   trackSlackReplyQuote,
@@ -357,7 +357,7 @@ describe('addReactionToSlackMessage', () => {
   });
 });
 
-describe('getChatThread', () => {
+describe('getChatMessageContext', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -398,7 +398,7 @@ describe('getChatThread', () => {
       }),
     });
 
-    const result = await getChatThread(config, {
+    const result = await getChatMessageContext(config, {
       channel: '#eng',
       messageId: '111.222',
     });
@@ -434,7 +434,7 @@ describe('getChatThread', () => {
       ],
     });
     expect(fetch).toHaveBeenCalledWith(
-      'https://platform.example.com/api/mcp/communication/thread_lookup',
+      'https://platform.example.com/api/mcp/communication/message_context',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
@@ -453,9 +453,9 @@ describe('getChatThread', () => {
     });
 
     await expect(
-      getChatThread(config, { messageId: '111.222' }),
+      getChatMessageContext(config, { messageId: '111.222' }),
     ).rejects.toThrow(
-      'Failed to look up chat thread: 404 Slack message not found',
+      'Failed to look up chat message context: 404 Slack message not found',
     );
   });
 });

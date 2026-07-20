@@ -1,8 +1,8 @@
-import { getChatThread } from './chat-api-client.js';
+import { getChatMessageContext } from './chat-api-client.js';
 import { catchError, jsonResult } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
 
-export async function handleGetChatThread(
+export async function handleGetChatMessageContext(
   input: {
     channel?: string;
     messageId?: string;
@@ -16,7 +16,7 @@ export async function handleGetChatThread(
     const messageLink = input.messageLink?.trim();
 
     return jsonResult(
-      await getChatThread(roomoteConfig, {
+      await getChatMessageContext(roomoteConfig, {
         ...(channel ? { channel } : {}),
         ...(messageId ? { messageId } : {}),
         ...(messageLink ? { messageLink } : {}),

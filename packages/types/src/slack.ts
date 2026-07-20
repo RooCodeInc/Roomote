@@ -57,15 +57,7 @@ const SLACK_CHANNEL_ID = /^[A-Z0-9]+$/i;
 const SLACK_PERMALINK_TIMESTAMP = /^\d{7,}$/;
 const SLACK_TIMESTAMP = /^\d+(?:\.\d+)?$/;
 
-/**
- * Parse the two Slack message-link shapes Roomote receives from routing:
- * workspace/app archive permalinks and app client thread links.
- */
-export function parseSlackMessagePermalink(raw: string): {
-  teamId: string | null;
-  channelId: string;
-  messageId: string;
-} | null {
+function parseSlackLinkSegments(raw: string): string[] | null {
   let url: URL;
   try {
     url = new URL(raw.trim());
@@ -82,15 +74,27 @@ export function parseSlackMessagePermalink(raw: string): {
     return null;
   }
 
-  let segments: string[];
   try {
-    segments = url.pathname
+    return url.pathname
       .split('/')
       .filter((segment) => segment.length > 0)
       .map((segment) => decodeURIComponent(segment));
   } catch {
     return null;
   }
+}
+
+/**
+ * Parse the two Slack message-link shapes Roomote receives from routing:
+ * workspace/app archive permalinks and app client thread links.
+ */
+export function parseSlackMessagePermalink(raw: string): {
+  teamId: string | null;
+  channelId: string;
+  messageId: string;
+} | null {
+  const segments = parseSlackLinkSegments(raw);
+  if (!segments) return null;
 
   if (segments[0] === 'archives' && segments.length === 3) {
     const channelId = segments[1] ?? '';
@@ -129,6 +133,32 @@ export function parseSlackMessagePermalink(raw: string): {
     }
 
     return { teamId, channelId, messageId };
+  }
+
+  return null;
+}
+
+/** Parse Slack archive and app-client channel links without requiring a message. */
+export function parseSlackChannelPermalink(raw: string): {
+  teamId: string | null;
+  channelId: string;
+} | null {
+  const segments = parseSlackLinkSegments(raw);
+  if (!segments) return null;
+
+  if (segments[0] === 'archives' && segments.length === 2) {
+    const channelId = segments[1] ?? '';
+    return SLACK_CHANNEL_ID.test(channelId)
+      ? { teamId: null, channelId }
+      : null;
+  }
+
+  if (segments[0] === 'client' && segments.length === 3) {
+    const teamId = segments[1] ?? '';
+    const channelId = segments[2] ?? '';
+    return SLACK_CHANNEL_ID.test(teamId) && SLACK_CHANNEL_ID.test(channelId)
+      ? { teamId, channelId }
+      : null;
   }
 
   return null;

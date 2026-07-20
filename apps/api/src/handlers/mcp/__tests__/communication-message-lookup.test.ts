@@ -22,10 +22,10 @@ vi.mock('../discord-thread-lookup', () => ({
 
 import {
   lookupCommunicationChannelMessages,
-  lookupCommunicationThread,
+  lookupCommunicationMessageContext,
 } from '../communication-message-lookup';
 
-describe('lookupCommunicationThread', () => {
+describe('lookupCommunicationMessageContext', () => {
   afterEach(() => vi.clearAllMocks());
 
   it('uses the task communication provider without exposing a provider input', async () => {
@@ -51,7 +51,7 @@ describe('lookupCommunicationThread', () => {
       slackThreadTs: '1710000000.000000',
       actingUserId: 'user-1',
     };
-    const result = await lookupCommunicationThread({
+    const result = await lookupCommunicationMessageContext({
       messageId: '1710000000.000100',
       taskRun,
     });
@@ -79,7 +79,7 @@ describe('lookupCommunicationThread', () => {
     });
 
     const taskRun = { payload: {}, actingUserId: 'user-1' };
-    const result = await lookupCommunicationThread({
+    const result = await lookupCommunicationMessageContext({
       messageLink: 'https://discord.com/channels/123/456/789',
       taskRun,
     });
@@ -110,7 +110,7 @@ describe('lookupCommunicationThread', () => {
     });
 
     const taskRun = { payload: {}, actingUserId: 'user-1' };
-    await lookupCommunicationThread({
+    await lookupCommunicationMessageContext({
       messageLink: 'https://acme.slack.com/archives/C123/p1710000000000100',
       taskRun,
     });
@@ -122,14 +122,37 @@ describe('lookupCommunicationThread', () => {
     });
   });
 
-  it('requires a link when a web-started task has no inferable target', async () => {
+  it('accepts a Slack channel link with a separate message id', async () => {
+    lookupSlackThreadMock.mockResolvedValueOnce({
+      channelId: 'C123',
+      requestedMessageTs: '1710000000.000100',
+      threadTs: '1710000000.000000',
+      matchedMessageIndex: 0,
+      messageCount: 0,
+      messages: [],
+    });
+
+    await lookupCommunicationMessageContext({
+      channel: 'https://acme.slack.com/archives/C123',
+      messageId: '1710000000.000100',
+      taskRun: { payload: {} },
+    });
+
+    expect(lookupSlackThreadMock).toHaveBeenCalledWith({
+      channel: 'C123',
+      messageTs: '1710000000.000100',
+      taskRun: { payload: {}, slackThreadTs: null },
+    });
+  });
+
+  it('does not guess a provider from a raw id when the task has no channel', async () => {
     await expect(
-      lookupCommunicationThread({
-        messageId: 'not-a-provider-id',
+      lookupCommunicationMessageContext({
+        messageId: '789',
         taskRun: { payload: {} },
       }),
     ).rejects.toThrow(
-      'A Slack or Discord message/channel link is required when the task has no communication channel',
+      'A Slack or Discord message link is required when the task has no communication channel',
     );
   });
 });
@@ -171,7 +194,7 @@ describe('lookupCommunicationChannelMessages', () => {
     const taskRun = { payload: {}, actingUserId: 'user-1' };
 
     await lookupCommunicationChannelMessages({
-      channel: 'https://acme.slack.com/archives/C123/p1710000000000100',
+      channel: 'https://acme.slack.com/archives/C123',
       taskRun,
     });
 
@@ -179,5 +202,16 @@ describe('lookupCommunicationChannelMessages', () => {
       channel: 'C123',
       taskRun: { ...taskRun, slackThreadTs: null },
     });
+  });
+
+  it('does not guess a provider from a raw channel when the task has none', async () => {
+    await expect(
+      lookupCommunicationChannelMessages({
+        channel: '456',
+        taskRun: { payload: {} },
+      }),
+    ).rejects.toThrow(
+      'A Slack or Discord channel/message link is required when the task has no communication channel',
+    );
   });
 });

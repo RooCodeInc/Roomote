@@ -7,6 +7,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
@@ -52,7 +54,7 @@ import {
   handlePostToSlackChannel,
 } from './post-to-slack-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
-import { handleGetChatThread } from './get-chat-thread.js';
+import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleSubmitTaskSuggestions } from './submit-task-suggestions.js';
@@ -1129,32 +1131,23 @@ if (shouldRegisterTaskSuggestionsTool()) {
 }
 
 roomoteMcpServer.registerTool(
-  'get_chat_channel_messages',
+  CHAT_CHANNEL_MESSAGES_TOOL.name,
   {
-    title: 'Get Chat Channel Messages',
-    description:
-      'Fetch readable history from the task communication channel. ' +
-      'When the task started from the web, or when another channel is needed, provide a Slack or Discord channel/message link. ' +
-      'Provider-specific access checks still apply.',
+    title: CHAT_CHANNEL_MESSAGES_TOOL.title,
+    description: CHAT_CHANNEL_MESSAGES_TOOL.description,
     inputSchema: {
       channel: z
         .string()
         .optional()
-        .describe(
-          'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
-        ),
+        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
       oldest: z
         .string()
         .optional()
-        .describe(
-          'Optional inclusive lower message bound. Use a Slack timestamp or ISO 8601 date for Slack, or a message snowflake for Discord.',
-        ),
+        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
       latest: z
         .string()
         .optional()
-        .describe(
-          'Optional inclusive upper message bound. Use a Slack timestamp or ISO 8601 date for Slack, or a message snowflake for Discord.',
-        ),
+        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
     },
     annotations: {
       readOnlyHint: true,
@@ -1181,32 +1174,23 @@ roomoteMcpServer.registerTool(
 );
 
 roomoteMcpServer.registerTool(
-  'get_chat_thread',
+  CHAT_MESSAGE_CONTEXT_TOOL.name,
   {
-    title: 'Get Chat Thread',
-    description:
-      'Look up a message in the task communication channel and return its surrounding thread or conversation context. ' +
-      'When the task started from the web, provide a Slack or Discord message link. ' +
-      'Explicit cross-channel lookups require the acting user to have access.',
+    title: CHAT_MESSAGE_CONTEXT_TOOL.title,
+    description: CHAT_MESSAGE_CONTEXT_TOOL.description,
     inputSchema: {
       channel: z
         .string()
         .optional()
-        .describe(
-          'Optional channel ID, name, mention, or message link. Omit it to use the task communication channel.',
-        ),
+        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.channel),
       messageId: z
         .string()
         .optional()
-        .describe(
-          'Provider message ID or timestamp. Optional when messageLink, or channel as a message link, includes it.',
-        ),
+        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageId),
       messageLink: z
         .string()
         .optional()
-        .describe(
-          'Optional full Slack or Discord message link. Required for a web-started task unless channel and messageId identify the provider unambiguously.',
-        ),
+        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
     },
     annotations: {
       readOnlyHint: true,
@@ -1221,7 +1205,7 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
 
-    return handleGetChatThread(
+    return handleGetChatMessageContext(
       {
         channel: params.channel,
         messageId: params.messageId,
