@@ -5,12 +5,21 @@ import { decodeRecord } from '@/lib';
 
 const {
   mockDbTransaction,
+  mockEnvState,
   mockFetch,
   mockResolveDeploymentEnvVar,
   mockResolvePendingGitHubInstallations,
   mockUpsertDeploymentEnvironmentVariables,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
+  mockEnvState: {
+    R_APP_URL: 'https://roomote.example.com',
+    R_PUBLIC_URL: undefined as string | undefined,
+    TRPC_URL: 'http://localhost:3000',
+    R_GITHUB_APP_SLUG: 'roomote',
+    R_GITHUB_CLIENT_ID: 'client-id',
+    R_GITHUB_CLIENT_SECRET: 'client-secret',
+  },
   mockFetch: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
   mockResolvePendingGitHubInstallations: vi.fn(),
@@ -54,13 +63,12 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@/lib/server', () => ({
-  Env: {
-    R_APP_URL: 'https://roomote.example.com',
-    TRPC_URL: 'http://localhost:3000',
-    R_GITHUB_APP_SLUG: 'roomote',
-    R_GITHUB_CLIENT_ID: 'client-id',
-    R_GITHUB_CLIENT_SECRET: 'client-secret',
-  },
+  Env: new Proxy(
+    {},
+    {
+      get: (_target, prop) => mockEnvState[prop as keyof typeof mockEnvState],
+    },
+  ),
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -106,6 +114,9 @@ function buildMockAuth(
 describe('GitHub App manifest commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnvState.R_APP_URL = 'https://roomote.example.com';
+    mockEnvState.R_PUBLIC_URL = undefined;
+    mockEnvState.TRPC_URL = 'http://localhost:3000';
     mockDbTransaction.mockImplementation(async (callback) =>
       callback({ kind: 'tx' }),
     );
@@ -204,6 +215,58 @@ describe('GitHub App manifest commands', () => {
       setup_on_update: true,
       public: true,
     });
+  });
+
+  it('prefers R_PUBLIC_URL for manifest callbacks, webhooks, and name when R_APP_URL is loopback', async () => {
+    mockEnvState.R_APP_URL = 'http://127.0.0.1:13000';
+    mockEnvState.R_PUBLIC_URL = 'https://customer.example';
+    mockEnvState.TRPC_URL = 'http://127.0.0.1:13001';
+
+    const result = await startCreateGitHubAppManifestCommand(buildMockAuth(), {
+      mode: 'github-app-manifest',
+      redirect: '/setup?step=source-control-connect',
+    });
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    const manifest = JSON.parse(result.values.manifest);
+    expect(manifest.name).toBe('roomote-customer-example');
+    expect(manifest).toMatchObject({
+      url: 'https://customer.example/github/callback',
+      redirect_url: 'https://customer.example/github/callback',
+      setup_url: 'https://customer.example/github/callback',
+      callback_urls: ['https://customer.example/github/callback'],
+      hook_attributes: {
+        url: 'https://customer.example/api/webhooks/github',
+        active: true,
+      },
+    });
+  });
+
+  it('keeps a non-loopback TRPC_URL as the webhook host when set', async () => {
+    mockEnvState.R_APP_URL = 'http://127.0.0.1:13000';
+    mockEnvState.R_PUBLIC_URL = 'https://customer.example';
+    mockEnvState.TRPC_URL = 'https://api.customer.example';
+
+    const result = await startCreateGitHubAppManifestCommand(buildMockAuth());
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    const manifest = JSON.parse(result.values.manifest);
+    expect(manifest.hook_attributes.url).toBe(
+      'https://api.customer.example/api/webhooks/github',
+    );
+    expect(manifest.redirect_url).toBe(
+      'https://customer.example/github/callback',
+    );
   });
 
   it('targets the organization manifest endpoint when an organization is provided', async () => {
@@ -365,6 +428,37 @@ describe('GitHub App manifest commands', () => {
     );
   });
 
+  it('prefers R_PUBLIC_URL for install redirect_url when R_APP_URL is loopback', async () => {
+    mockEnvState.R_APP_URL = 'http://127.0.0.1:13000';
+    mockEnvState.R_PUBLIC_URL = 'https://customer.example';
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) => {
+      switch (name) {
+        case 'R_GITHUB_APP_SLUG':
+          return 'configured-roomote-app';
+        case 'R_GITHUB_APP_ID':
+        case 'R_GITHUB_APP_PRIVATE_KEY':
+        case 'R_GITHUB_CLIENT_ID':
+        case 'R_GITHUB_CLIENT_SECRET':
+        case 'R_GITHUB_WEBHOOK_SECRET':
+          return 'configured-value';
+        default:
+          return null;
+      }
+    });
+
+    const result = await startCreateGitHubInstallationCommand(buildMockAuth());
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    expect(new URL(result.url).searchParams.get('redirect_url')).toBe(
+      'https://customer.example/github/callback',
+    );
+  });
+
   it('refuses to start installation when GitHub App credentials are not configured', async () => {
     mockResolveDeploymentEnvVar.mockResolvedValue(null);
 
@@ -490,6 +584,9 @@ describe('resolvePendingGitHubInstallationsCommand', () => {
 describe('startAuthenticateGitHubAccountCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnvState.R_APP_URL = 'https://roomote.example.com';
+    mockEnvState.R_PUBLIC_URL = undefined;
+    mockEnvState.TRPC_URL = 'http://localhost:3000';
   });
 
   it('builds the authorize URL from the deployment-resolved client id', async () => {
@@ -529,6 +626,26 @@ describe('startAuthenticateGitHubAccountCommand', () => {
       redirect: '/settings?tab=account',
       userId: expect.any(String),
     });
+  });
+
+  it('prefers R_PUBLIC_URL for the OAuth redirect_uri when R_APP_URL is loopback', async () => {
+    mockEnvState.R_APP_URL = 'http://127.0.0.1:13000';
+    mockEnvState.R_PUBLIC_URL = 'https://customer.example';
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
+      name === 'R_GITHUB_CLIENT_ID' ? 'Iv1.resolved-client' : null,
+    );
+
+    const result = await startAuthenticateGitHubAccountCommand(buildMockAuth());
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    expect(new URL(result.url).searchParams.get('redirect_uri')).toBe(
+      'https://customer.example/github/callback',
+    );
   });
 
   it('refuses to link an account when no GitHub App client id is configured', async () => {
