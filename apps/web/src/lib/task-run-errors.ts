@@ -110,7 +110,7 @@ function getDockerSpawnDisplayMessage(error: string): string | undefined {
   }
 
   if (DOCKER_WORKER_START_TIMEOUT.test(error)) {
-    return 'The sandbox container started, but the Roomote worker did not come up in time. Check that the worker image and local worker release archive are present, then retry. Container logs are included below when available.';
+    return 'The sandbox container started, but the Roomote worker did not come up in time. Check that the worker image and local worker release archive are present, then retry. Diagnostic details are included below when available.';
   }
 
   if (DOCKER_WORKER_EXITED_EARLY.test(error)) {
@@ -132,9 +132,13 @@ function composeDockerDisplayMessage(friendly: string, error: string): string {
   const diagnostic = extractDockerDiagnosticReason(error);
 
   if (!diagnostic || friendly.includes(diagnostic)) {
-    const logsMatch = error.match(/Recent Docker logs:\n([\s\S]+)$/i);
-    if (logsMatch?.[1]?.trim()) {
-      return `${friendly}\n\nRecent Docker logs:\n${logsMatch[1].trim()}`;
+    // The controller attaches "Recent Docker logs:" on early container exit
+    // and "Docker process list:" on worker start timeout — keep either one.
+    const trailerMatch = error.match(
+      /(Recent Docker logs|Docker process list):\n([\s\S]+)$/i,
+    );
+    if (trailerMatch?.[2]?.trim()) {
+      return `${friendly}\n\n${trailerMatch[1]}:\n${trailerMatch[2].trim()}`;
     }
 
     return friendly;

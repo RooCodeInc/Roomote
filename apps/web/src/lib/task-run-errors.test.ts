@@ -54,18 +54,20 @@ docker run -d roomote-worker:local`;
     );
   });
 
-  it('explains worker start timeouts and keeps docker logs when present', () => {
+  it('explains worker start timeouts and keeps the docker process list', () => {
     const error = `Docker worker for task run #9 did not start within 60s.
 
-The sandbox container started, but the Roomote worker process never appeared.
+The container stayed running, but the Roomote worker process never appeared. Check that the local worker image and release archive are available, and inspect container logs for fetch/start failures.
 
-Recent Docker logs:
-worker exited before receiving a task`;
+Docker process list:
+PID   COMMAND
+1     sleep infinity`;
 
     const display = getTaskRunErrorDisplayMessage(error);
 
     expect(display).toContain('did not come up in time');
-    expect(display).toContain('worker exited before receiving a task');
+    expect(display).toContain('Docker process list:');
+    expect(display).toContain('sleep infinity');
   });
 
   it('explains worker fetch failures seen in container logs', () => {

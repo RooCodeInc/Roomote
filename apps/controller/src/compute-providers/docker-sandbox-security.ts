@@ -124,6 +124,8 @@ export function sanitizeDockerCommandForDisplay(
     return `docker ${sanitized.join(' ')}`.trim();
   }
 
+  // Unquoted values are redacted to the next whitespace only: worker env
+  // values must stay space-free or the remainder would survive redaction.
   return command
     .replace(
       /(^|\s)(-e|--env)\s+([A-Za-z_][\w]*)=(?:"[^"]*"|'[^']*'|\S+)/g,
@@ -166,10 +168,6 @@ export function formatDockerCommandError(
   );
 
   const details: string[] = [`Failed to run ${operation}.`, reason];
-
-  if (reason !== stderr && stderr) {
-    details.push(`stderr:\n${stderr}`);
-  }
 
   if (stdout && stdout !== reason) {
     details.push(`stdout:\n${stdout}`);
