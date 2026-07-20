@@ -464,21 +464,29 @@ describe('roomote MCP tool descriptions', () => {
     ).toBe(false);
   });
 
-  it('registers the Slack thread lookup tool without Slack reply context', async () => {
+  it('registers one provider-neutral thread lookup tool', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
-    const lookupTool = getRegisteredTool(registeredTools, 'get_slack_thread');
+    const lookupTool = getRegisteredTool(registeredTools, 'get_chat_thread');
     const channelField = getInputSchemaField(lookupTool, 'channel');
-    const messageTsField = getInputSchemaField(lookupTool, 'messageTs');
+    const messageIdField = getInputSchemaField(lookupTool, 'messageId');
+    const messageLinkField = getInputSchemaField(lookupTool, 'messageLink');
 
     expect(lookupTool.config.description).toBe(
-      'Look up a Slack message by timestamp in the originating Slack channel and return the full thread that contains it. Use this when a Slack thread references another Slack message timestamp and you need the surrounding thread context. When the current task did not start from Slack, provide the Slack channel ID, name, or channel mention. Explicit channel lookups require a linked acting Slack user, except bot-started Slack jobs are limited to public channels the app has joined.',
+      'Look up a message in the task communication channel and return its surrounding thread or conversation context. When the task started from the web, provide a Slack or Discord message link. Explicit cross-channel lookups require the acting user to have access.',
     );
     expect(channelField.description).toBe(
-      'Optional Slack channel ID, channel name, or channel mention. Required when the current task did not start from Slack. Explicit channels require a linked acting Slack user unless the job only has bot Slack context, in which case only public channels are allowed.',
+      'Optional channel ID, name, mention, or message link. Omit it to use the task communication channel.',
     );
-    expect(messageTsField.description).toBe(
-      'Slack message timestamp to look up in the originating or provided Slack channel.',
+    expect(messageIdField.description).toContain('Provider message ID');
+    expect(messageLinkField.description).toContain(
+      'full Slack or Discord message link',
     );
+    expect(
+      registeredTools.find(({ name }) => name.startsWith('get_slack_')),
+    ).toBeUndefined();
+    expect(
+      registeredTools.find(({ name }) => name.startsWith('get_discord_')),
+    ).toBeUndefined();
     expect(registeredTools.find(({ name }) => name === 'send_chat_reply')).toBe(
       undefined,
     );
@@ -487,59 +495,45 @@ describe('roomote MCP tool descriptions', () => {
     ).toBe(undefined);
   });
 
-  it('registers the Discord thread lookup tool', async () => {
-    const { registeredTools } = await importRoomoteMcpServer();
-    const lookupTool = getRegisteredTool(registeredTools, 'get_discord_thread');
-    const messageLinkField = getInputSchemaField(lookupTool, 'messageLink');
-
-    expect(lookupTool.config.description).toContain(
-      'discord.com/channels/... message link',
-    );
-    expect(messageLinkField.description).toContain(
-      'https://discord.com/channels/{guild}/{channel}/{message}',
-    );
-  });
-
-  it('registers the Slack channel history lookup tool', async () => {
+  it('registers one provider-neutral channel history lookup tool', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const lookupTool = getRegisteredTool(
       registeredTools,
-      'get_slack_channel_messages',
+      'get_chat_channel_messages',
     );
     const channelField = getInputSchemaField(lookupTool, 'channel');
     const oldestField = getInputSchemaField(lookupTool, 'oldest');
     const latestField = getInputSchemaField(lookupTool, 'latest');
 
     expect(lookupTool.config.description).toBe(
-      'Fetch history from the originating Slack channel or an explicitly provided Slack channel, but only when that channel is public and the Slack app has already joined it. Optional oldest/latest bounds accept Slack timestamps or ISO 8601 date strings. Explicit channel lookups still require a linked acting Slack user when the current task has one.',
+      'Fetch readable history from the task communication channel. When the task started from the web, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
     );
     expect(channelField.description).toBe(
-      'Optional Slack channel ID, channel name, or channel mention. Required when the current task did not start from Slack. Only public channels the Slack app has already joined are supported.',
+      'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
     );
-    expect(oldestField.description).toBe(
-      'Optional inclusive lower bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
-    );
-    expect(latestField.description).toBe(
-      'Optional inclusive upper bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
-    );
+    expect(oldestField.description).toContain('Slack timestamp');
+    expect(latestField.description).toContain('message snowflake');
   });
 
-  it('forwards explicit Slack lookup channels to the API', async () => {
+  it('forwards generic thread lookups to the communication API', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
+          provider: 'discord',
           channelId: 'C0B1H9DPHC0',
-          requestedMessageTs: '1777486147.585109',
-          threadTs: '1777486147.000000',
+          requestedMessageId: '1777486147.585109',
+          threadId: '1777486147.000000',
           matchedMessageIndex: 0,
           messageCount: 1,
           messages: [
             {
-              ts: '1777486147.585109',
+              provider: 'discord',
+              id: '1777486147.585109',
               user: 'U123',
               text: 'message',
+              channelId: 'C0B1H9DPHC0',
               fileCount: 0,
             },
           ],
@@ -551,41 +545,44 @@ describe('roomote MCP tool descriptions', () => {
       ROOMOTE_CLOUD_TOKEN: 'run-token',
       ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
     });
-    const lookupTool = getRegisteredTool(registeredTools, 'get_slack_thread');
+    const lookupTool = getRegisteredTool(registeredTools, 'get_chat_thread');
 
     expect(lookupTool.handler).toBeDefined();
     await lookupTool.handler?.({
       channel: 'C0B1H9DPHC0',
-      messageTs: '1777486147.585109',
+      messageId: '1777486147.585109',
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://platform.example.com/api/mcp/slack/thread_lookup',
+      'https://platform.example.com/api/mcp/communication/thread_lookup',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
           channel: 'C0B1H9DPHC0',
-          messageTs: '1777486147.585109',
+          messageId: '1777486147.585109',
         }),
       }),
     );
   });
 
-  it('forwards Slack channel history lookup parameters to the API', async () => {
+  it('forwards channel history parameters to the communication API', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
+          provider: 'slack',
           channelId: 'C0B1H9DPHC0',
           requestedOldest: '2026-04-01T00:00:00Z',
           requestedLatest: '2026-04-02T00:00:00Z',
           messageCount: 1,
           messages: [
             {
-              ts: '1777486147.585109',
+              provider: 'slack',
+              id: '1777486147.585109',
               user: 'U123',
               text: 'message',
+              channelId: 'C0B1H9DPHC0',
               fileCount: 0,
             },
           ],
@@ -599,7 +596,7 @@ describe('roomote MCP tool descriptions', () => {
     });
     const lookupTool = getRegisteredTool(
       registeredTools,
-      'get_slack_channel_messages',
+      'get_chat_channel_messages',
     );
 
     expect(lookupTool.handler).toBeDefined();
@@ -610,7 +607,7 @@ describe('roomote MCP tool descriptions', () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://platform.example.com/api/mcp/slack/channel_messages',
+      'https://platform.example.com/api/mcp/communication/channel_messages',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({

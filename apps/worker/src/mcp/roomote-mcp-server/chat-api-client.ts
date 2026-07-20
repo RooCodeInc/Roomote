@@ -4,12 +4,12 @@ import {
   parseApiError,
 } from './api-client.js';
 import type {
+  CommunicationChannelMessagesResponse,
+  CommunicationThreadLookupResponse,
   RoomoteConfig,
-  SlackChannelMessagesResponse,
   SlackChannelPostResponse,
   SlackMutationResponse,
   SlackReactionAddResponse,
-  SlackThreadLookupResponse,
   SlackThreadReplyResponse,
 } from './types.js';
 
@@ -57,6 +57,35 @@ async function postToChatEndpoint<
     const error = await parseApiError(response);
     throw new Error(`${errorPrefix}: ${response.status} ${error}`);
   }
+}
+
+async function postToCommunicationLookupEndpoint<
+  TResponse,
+  TRequest extends object = Record<string, unknown>,
+>(
+  config: RoomoteConfig,
+  path: string,
+  input: TRequest,
+  errorPrefix: string,
+): Promise<TResponse> {
+  const response = await fetchWithTimeout(
+    `${config.platformApiUrl}/api/mcp/communication/${path}`,
+    {
+      method: 'POST',
+      headers: buildApiHeaders(config, {
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify(input),
+    },
+    { label: errorPrefix },
+  );
+
+  if (response.ok) {
+    return (await response.json()) as TResponse;
+  }
+
+  const error = await parseApiError(response);
+  throw new Error(`${errorPrefix}: ${response.status} ${error}`);
 }
 
 export async function replyToChatThread(
@@ -140,34 +169,35 @@ export async function addReactionToSlackMessage(
   );
 }
 
-export async function getSlackThread(
+export async function getChatThread(
   config: RoomoteConfig,
   input: {
     channel?: string;
-    messageTs: string;
+    messageId?: string;
+    messageLink?: string;
   },
-): Promise<SlackThreadLookupResponse> {
-  return postToChatEndpoint<SlackThreadLookupResponse>(
+): Promise<CommunicationThreadLookupResponse> {
+  return postToCommunicationLookupEndpoint<CommunicationThreadLookupResponse>(
     config,
     'thread_lookup',
     input,
-    'Failed to look up Slack thread',
+    'Failed to look up chat thread',
   );
 }
 
-export async function getSlackChannelMessages(
+export async function getChatChannelMessages(
   config: RoomoteConfig,
   input: {
     channel?: string;
     oldest?: string;
     latest?: string;
   },
-): Promise<SlackChannelMessagesResponse> {
-  return postToChatEndpoint<SlackChannelMessagesResponse>(
+): Promise<CommunicationChannelMessagesResponse> {
+  return postToCommunicationLookupEndpoint<CommunicationChannelMessagesResponse>(
     config,
     'channel_messages',
     input,
-    'Failed to look up Slack channel messages',
+    'Failed to look up chat channel messages',
   );
 }
 

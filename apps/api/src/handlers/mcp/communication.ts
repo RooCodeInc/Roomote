@@ -3,15 +3,16 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { db, eq, taskRuns } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
+import { getTaskChannelBindings } from '../tasks/helpers';
 
 import {
-  lookupDiscordChannelMessages,
-  lookupDiscordThread,
-} from './discord-thread-lookup';
+  lookupCommunicationChannelMessages,
+  lookupCommunicationThread,
+} from './communication-message-lookup';
 import type { McpAuth } from './middleware';
 import { isRunTokenContext, McpProxyError } from './proxy-utils';
 
-type DiscordMcpVariables = Variables & {
+type CommunicationMcpVariables = Variables & {
   mcpAuth: McpAuth;
 };
 
@@ -34,9 +35,7 @@ function parseThreadLookupRequestBody(body: unknown): {
       : undefined;
 
   if (!messageId && !messageLink && !channel) {
-    throw new Error(
-      'messageId, messageLink, or channel (as a Discord message link) is required',
-    );
+    throw new Error('messageId, messageLink, or a message link is required');
   }
 
   return {
@@ -68,40 +67,45 @@ function parseChannelMessagesRequestBody(body: unknown): {
   };
 }
 
-export const discordMcp = new Hono<{ Variables: DiscordMcpVariables }>();
+async function loadLookupRun(runId: number) {
+  const run = await db.query.taskRuns.findFirst({
+    columns: {
+      actingUserId: true,
+      taskId: true,
+      payload: true,
+    },
+    where: eq(taskRuns.id, runId),
+  });
 
-discordMcp.post('/thread_lookup', async (c) => {
+  if (!run) return null;
+  const bindings = await getTaskChannelBindings(run.taskId);
+  return {
+    actingUserId: run.actingUserId,
+    payload: run.payload,
+    slackChannelId: bindings?.slackChannelId ?? null,
+    slackThreadTs: bindings?.slackThreadTs ?? null,
+  };
+}
+
+export const communicationMcp = new Hono<{
+  Variables: CommunicationMcpVariables;
+}>();
+
+communicationMcp.post('/thread_lookup', async (c) => {
   const { authContext } = c.get('mcpAuth');
-
   if (!isRunTokenContext(authContext)) {
     return c.json(
-      {
-        error:
-          'Discord thread lookup MCP is only available for task run tokens',
-      },
+      { error: 'Communication lookup is only available for task run tokens' },
       403,
     );
   }
 
-  const run = await db.query.taskRuns.findFirst({
-    columns: {
-      id: true,
-      taskId: true,
-      actingUserId: true,
-      payload: true,
-    },
-    where: eq(taskRuns.id, authContext.runId),
-  });
-
-  if (!run) {
+  const taskRun = await loadLookupRun(authContext.runId);
+  if (!taskRun) {
     return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }
 
-  let parsedBody: {
-    channel?: string;
-    messageId?: string;
-    messageLink?: string;
-  };
+  let parsedBody: ReturnType<typeof parseThreadLookupRequestBody>;
   try {
     parsedBody = parseThreadLookupRequestBody(await c.req.json());
   } catch (error) {
@@ -112,18 +116,12 @@ discordMcp.post('/thread_lookup', async (c) => {
   }
 
   try {
-    const payload = await lookupDiscordThread({
-      ...(parsedBody.channel ? { channel: parsedBody.channel } : {}),
-      ...(parsedBody.messageId ? { messageId: parsedBody.messageId } : {}),
-      ...(parsedBody.messageLink
-        ? { messageLink: parsedBody.messageLink }
-        : {}),
-      taskRun: {
-        payload: run.payload,
-        actingUserId: run.actingUserId,
-      },
-    });
-    return c.json(payload);
+    return c.json(
+      await lookupCommunicationThread({
+        ...parsedBody,
+        taskRun,
+      }),
+    );
   } catch (error) {
     if (error instanceof McpProxyError) {
       return c.json(
@@ -135,38 +133,21 @@ discordMcp.post('/thread_lookup', async (c) => {
   }
 });
 
-discordMcp.post('/channel_messages', async (c) => {
+communicationMcp.post('/channel_messages', async (c) => {
   const { authContext } = c.get('mcpAuth');
-
   if (!isRunTokenContext(authContext)) {
     return c.json(
-      {
-        error:
-          'Discord channel message lookup MCP is only available for task run tokens',
-      },
+      { error: 'Communication lookup is only available for task run tokens' },
       403,
     );
   }
 
-  const run = await db.query.taskRuns.findFirst({
-    columns: {
-      id: true,
-      taskId: true,
-      actingUserId: true,
-      payload: true,
-    },
-    where: eq(taskRuns.id, authContext.runId),
-  });
-
-  if (!run) {
+  const taskRun = await loadLookupRun(authContext.runId);
+  if (!taskRun) {
     return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }
 
-  let parsedBody: {
-    channel?: string;
-    oldest?: string;
-    latest?: string;
-  };
+  let parsedBody: ReturnType<typeof parseChannelMessagesRequestBody>;
   try {
     parsedBody = parseChannelMessagesRequestBody(await c.req.json());
   } catch (error) {
@@ -177,16 +158,12 @@ discordMcp.post('/channel_messages', async (c) => {
   }
 
   try {
-    const payload = await lookupDiscordChannelMessages({
-      ...(parsedBody.channel ? { channel: parsedBody.channel } : {}),
-      ...(parsedBody.oldest ? { oldest: parsedBody.oldest } : {}),
-      ...(parsedBody.latest ? { latest: parsedBody.latest } : {}),
-      taskRun: {
-        payload: run.payload,
-        actingUserId: run.actingUserId,
-      },
-    });
-    return c.json(payload);
+    return c.json(
+      await lookupCommunicationChannelMessages({
+        ...parsedBody,
+        taskRun,
+      }),
+    );
   } catch (error) {
     if (error instanceof McpProxyError) {
       return c.json(

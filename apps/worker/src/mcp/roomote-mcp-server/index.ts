@@ -51,10 +51,8 @@ import {
   handlePostToChannel,
   handlePostToSlackChannel,
 } from './post-to-slack-channel.js';
-import { handleGetSlackChannelMessages } from './get-slack-channel-messages.js';
-import { handleGetSlackThread } from './get-slack-thread.js';
-import { handleGetDiscordChannelMessages } from './get-discord-channel-messages.js';
-import { handleGetDiscordThread } from './get-discord-thread.js';
+import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
+import { handleGetChatThread } from './get-chat-thread.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleSubmitTaskSuggestions } from './submit-task-suggestions.js';
@@ -1131,31 +1129,31 @@ if (shouldRegisterTaskSuggestionsTool()) {
 }
 
 roomoteMcpServer.registerTool(
-  'get_slack_channel_messages',
+  'get_chat_channel_messages',
   {
-    title: 'Get Public Slack Channel Messages',
+    title: 'Get Chat Channel Messages',
     description:
-      'Fetch history from the originating Slack channel or an explicitly provided Slack channel, but only when that channel is public and the Slack app has already joined it. ' +
-      'Optional oldest/latest bounds accept Slack timestamps or ISO 8601 date strings. ' +
-      'Explicit channel lookups still require a linked acting Slack user when the current task has one.',
+      'Fetch readable history from the task communication channel. ' +
+      'When the task started from the web, or when another channel is needed, provide a Slack or Discord channel/message link. ' +
+      'Provider-specific access checks still apply.',
     inputSchema: {
       channel: z
         .string()
         .optional()
         .describe(
-          'Optional Slack channel ID, channel name, or channel mention. Required when the current task did not start from Slack. Only public channels the Slack app has already joined are supported.',
+          'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
         ),
       oldest: z
         .string()
         .optional()
         .describe(
-          'Optional inclusive lower bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
+          'Optional inclusive lower message bound. Use a Slack timestamp or ISO 8601 date for Slack, or a message snowflake for Discord.',
         ),
       latest: z
         .string()
         .optional()
         .describe(
-          'Optional inclusive upper bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
+          'Optional inclusive upper message bound. Use a Slack timestamp or ISO 8601 date for Slack, or a message snowflake for Discord.',
         ),
     },
     annotations: {
@@ -1171,7 +1169,7 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
 
-    return handleGetSlackChannelMessages(
+    return handleGetChatChannelMessages(
       {
         channel: params.channel,
         oldest: params.oldest,
@@ -1183,130 +1181,31 @@ roomoteMcpServer.registerTool(
 );
 
 roomoteMcpServer.registerTool(
-  'get_slack_thread',
+  'get_chat_thread',
   {
-    title: 'Get Slack Thread',
+    title: 'Get Chat Thread',
     description:
-      'Look up a Slack message by timestamp in the originating Slack channel and return the full thread that contains it. ' +
-      'Use this when a Slack thread references another Slack message timestamp and you need the surrounding thread context. ' +
-      'When the current task did not start from Slack, provide the Slack channel ID, name, or channel mention. ' +
-      'Explicit channel lookups require a linked acting Slack user, except bot-started Slack jobs are limited to public channels the app has joined.',
+      'Look up a message in the task communication channel and return its surrounding thread or conversation context. ' +
+      'When the task started from the web, provide a Slack or Discord message link. ' +
+      'Explicit cross-channel lookups require the acting user to have access.',
     inputSchema: {
       channel: z
         .string()
         .optional()
         .describe(
-          'Optional Slack channel ID, channel name, or channel mention. Required when the current task did not start from Slack. Explicit channels require a linked acting Slack user unless the job only has bot Slack context, in which case only public channels are allowed.',
-        ),
-      messageTs: z
-        .string()
-        .min(1)
-        .describe(
-          'Slack message timestamp to look up in the originating or provided Slack channel.',
-        ),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => {
-    const roomoteConfig = getRoomoteConfig();
-    if (!roomoteConfig) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
-
-    return handleGetSlackThread(
-      {
-        channel: params.channel,
-        messageTs: params.messageTs,
-      },
-      roomoteConfig,
-    );
-  },
-);
-
-roomoteMcpServer.registerTool(
-  'get_discord_channel_messages',
-  {
-    title: 'Get Discord Channel Messages',
-    description:
-      'Fetch history from the originating Discord channel/thread or an explicitly provided Discord channel id. ' +
-      'Explicit channel lookups require the acting user to have a linked Discord account in that guild. ' +
-      'Optional oldest/latest bounds accept Discord snowflake message ids.',
-    inputSchema: {
-      channel: z
-        .string()
-        .optional()
-        .describe(
-          'Optional Discord channel/thread id or discord.com message link. Required when the current task did not start from Discord.',
-        ),
-      oldest: z
-        .string()
-        .optional()
-        .describe(
-          'Optional inclusive lower bound for returned messages, as a Discord snowflake message id.',
-        ),
-      latest: z
-        .string()
-        .optional()
-        .describe(
-          'Optional inclusive upper bound for returned messages, as a Discord snowflake message id.',
-        ),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => {
-    const roomoteConfig = getRoomoteConfig();
-    if (!roomoteConfig) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
-
-    return handleGetDiscordChannelMessages(
-      {
-        channel: params.channel,
-        oldest: params.oldest,
-        latest: params.latest,
-      },
-      roomoteConfig,
-    );
-  },
-);
-
-roomoteMcpServer.registerTool(
-  'get_discord_thread',
-  {
-    title: 'Get Discord Thread',
-    description:
-      'Look up a Discord message by channel + message id, or by a discord.com/channels/... message link, and return nearby thread/channel context. ' +
-      'Use this when a Discord message references or links another message. ' +
-      'When the current task did not start from Discord, provide channel/messageId or messageLink. ' +
-      'Explicit channel lookups outside the originating Discord task thread require a linked acting Discord user.',
-    inputSchema: {
-      channel: z
-        .string()
-        .optional()
-        .describe(
-          'Optional Discord channel/thread id or full message link. Required when the current task did not start from Discord and messageLink is not provided.',
+          'Optional channel ID, name, mention, or message link. Omit it to use the task communication channel.',
         ),
       messageId: z
         .string()
         .optional()
         .describe(
-          'Discord message snowflake id. Optional when messageLink (or channel as a message link) already includes the message id.',
+          'Provider message ID or timestamp. Optional when messageLink, or channel as a message link, includes it.',
         ),
       messageLink: z
         .string()
         .optional()
         .describe(
-          'Full Discord message permalink such as https://discord.com/channels/{guild}/{channel}/{message}.',
+          'Optional full Slack or Discord message link. Required for a web-started task unless channel and messageId identify the provider unambiguously.',
         ),
     },
     annotations: {
@@ -1322,7 +1221,7 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
 
-    return handleGetDiscordThread(
+    return handleGetChatThread(
       {
         channel: params.channel,
         messageId: params.messageId,

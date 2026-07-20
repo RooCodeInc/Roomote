@@ -1,8 +1,8 @@
-import { getDiscordChannelMessages } from './discord-api-client.js';
+import { getChatChannelMessages } from './chat-api-client.js';
 import { catchError, jsonResult } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
 
-export async function handleGetDiscordChannelMessages(
+export async function handleGetChatChannelMessages(
   input: {
     channel?: string;
     oldest?: string;
@@ -16,7 +16,7 @@ export async function handleGetDiscordChannelMessages(
     const latest = input.latest?.trim();
 
     return jsonResult(
-      await getDiscordChannelMessages(roomoteConfig, {
+      await getChatChannelMessages(roomoteConfig, {
         ...(channel ? { channel } : {}),
         ...(oldest ? { oldest } : {}),
         ...(latest ? { latest } : {}),

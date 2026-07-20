@@ -1,8 +1,8 @@
-import { getDiscordThread } from './discord-api-client.js';
+import { getChatThread } from './chat-api-client.js';
 import { catchError, jsonResult } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
 
-export async function handleGetDiscordThread(
+export async function handleGetChatThread(
   input: {
     channel?: string;
     messageId?: string;
@@ -16,7 +16,7 @@ export async function handleGetDiscordThread(
     const messageLink = input.messageLink?.trim();
 
     return jsonResult(
-      await getDiscordThread(roomoteConfig, {
+      await getChatThread(roomoteConfig, {
         ...(channel ? { channel } : {}),
         ...(messageId ? { messageId } : {}),
         ...(messageLink ? { messageLink } : {}),

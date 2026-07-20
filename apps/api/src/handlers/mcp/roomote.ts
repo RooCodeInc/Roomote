@@ -36,13 +36,10 @@ import {
   toMcpToolResult,
 } from './proxy-utils';
 import {
-  lookupDiscordChannelMessages,
-  lookupDiscordThread,
-} from './discord-thread-lookup';
-import {
-  lookupSlackChannelMessages,
-  lookupSlackThread,
-} from './slack-thread-lookup';
+  lookupCommunicationChannelMessages,
+  lookupCommunicationThread,
+  type CommunicationLookupTaskRun,
+} from './communication-message-lookup';
 import { getTaskChannelBindings } from '../tasks/helpers';
 
 const ROOMOTE_MCP_SERVER_INFO = {
@@ -264,22 +261,13 @@ async function buildAboutMePayload(options: {
   };
 }
 
-type SlackLookupRunContext = {
-  actingUserId: string | null;
-  slackChannelId: string | null;
-  slackThreadTs: string | null;
-  payload: unknown;
-};
-
 /**
- * Load the Slack routing context for a run-token request: the run's acting
- * user and payload plus the owning task's Slack channel bindings (channel
- * bindings moved from runs to tasks in the Stage 2 data-model
- * simplification).
+ * Load the run's single communication context. Slack still stores its channel
+ * binding on the task row, while the other providers carry it in the payload.
  */
-async function loadSlackLookupRunContext(
+async function loadCommunicationLookupRunContext(
   runId: number,
-): Promise<SlackLookupRunContext> {
+): Promise<CommunicationLookupTaskRun> {
   const run = await db.query.taskRuns.findFirst({
     columns: {
       actingUserId: true,
@@ -303,108 +291,14 @@ async function loadSlackLookupRunContext(
   };
 }
 
-async function buildSlackThreadPayload(options: {
-  auth: McpAuthContext;
-  actingUserId: string | null;
-  channel?: string;
-  messageTs: string;
-}) {
-  let taskRun: SlackLookupRunContext | undefined;
-
-  if (options.auth.tokenType === 'run') {
-    if (!options.auth.runId) {
-      throw new McpProxyError(
-        403,
-        'MCP proxy requires a task run token with a task run id',
-      );
-    }
-
-    taskRun = await loadSlackLookupRunContext(options.auth.runId);
-  }
-
-  return lookupSlackThread({
-    messageTs: options.messageTs,
-    ...(typeof options.channel === 'string' && options.channel.length > 0
-      ? { channel: options.channel }
-      : {}),
-    ...(taskRun ? { taskRun } : {}),
-    ...(options.auth.tokenType === 'auth'
-      ? { actingSlackMembershipUserId: options.actingUserId }
-      : {}),
-  });
-}
-
-async function buildSlackChannelMessagesPayload(options: {
-  auth: McpAuthContext;
-  actingUserId: string | null;
-  channel?: string;
-  oldest?: string;
-  latest?: string;
-}) {
-  let taskRun: SlackLookupRunContext | undefined;
-
-  if (options.auth.tokenType === 'run') {
-    if (!options.auth.runId) {
-      throw new McpProxyError(
-        403,
-        'MCP proxy requires a task run token with a task run id',
-      );
-    }
-
-    taskRun = await loadSlackLookupRunContext(options.auth.runId);
-  }
-
-  return lookupSlackChannelMessages({
-    ...(typeof options.channel === 'string' && options.channel.length > 0
-      ? { channel: options.channel }
-      : {}),
-    ...(typeof options.oldest === 'string' && options.oldest.length > 0
-      ? { oldest: options.oldest }
-      : {}),
-    ...(typeof options.latest === 'string' && options.latest.length > 0
-      ? { latest: options.latest }
-      : {}),
-    ...(taskRun ? { taskRun } : {}),
-    ...(options.auth.tokenType === 'auth'
-      ? { actingSlackMembershipUserId: options.actingUserId }
-      : {}),
-  });
-}
-
-type DiscordLookupRunContext = {
-  actingUserId: string | null;
-  payload: unknown;
-};
-
-async function loadDiscordLookupRunContext(
-  runId: number,
-): Promise<DiscordLookupRunContext> {
-  const run = await db.query.taskRuns.findFirst({
-    columns: {
-      actingUserId: true,
-      payload: true,
-    },
-    where: eq(taskRuns.id, runId),
-  });
-
-  if (!run) {
-    throw new McpProxyError(404, 'Task run not found for this MCP token');
-  }
-
-  return {
-    actingUserId: run.actingUserId,
-    payload: run.payload,
-  };
-}
-
-async function buildDiscordThreadPayload(options: {
+async function buildCommunicationThreadPayload(options: {
   auth: McpAuthContext;
   actingUserId: string | null;
   channel?: string;
   messageId?: string;
   messageLink?: string;
 }) {
-  let taskRun: DiscordLookupRunContext | undefined;
+  let taskRun: CommunicationLookupTaskRun | undefined;
 
   if (options.auth.tokenType === 'run') {
     if (!options.auth.runId) {
@@ -414,10 +308,10 @@ async function buildDiscordThreadPayload(options: {
       );
     }
 
-    taskRun = await loadDiscordLookupRunContext(options.auth.runId);
+    taskRun = await loadCommunicationLookupRunContext(options.auth.runId);
   }
 
-  return lookupDiscordThread({
+  return lookupCommunicationThread({
     ...(typeof options.channel === 'string' && options.channel.length > 0
       ? { channel: options.channel }
       : {}),
@@ -430,19 +324,19 @@ async function buildDiscordThreadPayload(options: {
       : {}),
     ...(taskRun ? { taskRun } : {}),
     ...(options.auth.tokenType === 'auth'
-      ? { actingDiscordMembershipUserId: options.actingUserId }
+      ? { actingUserId: options.actingUserId }
       : {}),
   });
 }
 
-async function buildDiscordChannelMessagesPayload(options: {
+async function buildCommunicationChannelMessagesPayload(options: {
   auth: McpAuthContext;
   actingUserId: string | null;
   channel?: string;
   oldest?: string;
   latest?: string;
 }) {
-  let taskRun: DiscordLookupRunContext | undefined;
+  let taskRun: CommunicationLookupTaskRun | undefined;
 
   if (options.auth.tokenType === 'run') {
     if (!options.auth.runId) {
@@ -452,10 +346,10 @@ async function buildDiscordChannelMessagesPayload(options: {
       );
     }
 
-    taskRun = await loadDiscordLookupRunContext(options.auth.runId);
+    taskRun = await loadCommunicationLookupRunContext(options.auth.runId);
   }
 
-  return lookupDiscordChannelMessages({
+  return lookupCommunicationChannelMessages({
     ...(typeof options.channel === 'string' && options.channel.length > 0
       ? { channel: options.channel }
       : {}),
@@ -467,7 +361,7 @@ async function buildDiscordChannelMessagesPayload(options: {
       : {}),
     ...(taskRun ? { taskRun } : {}),
     ...(options.auth.tokenType === 'auth'
-      ? { actingDiscordMembershipUserId: options.actingUserId }
+      ? { actingUserId: options.actingUserId }
       : {}),
   });
 }
@@ -484,7 +378,7 @@ function createRoomoteMcpServer(
 ) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions:
-      'Use get_about_me for Roomote platform, integration, and getting-started context. Use get_slack_thread when you need the surrounding Slack thread for a referenced Slack message. Use get_slack_channel_messages when you need history from a public Slack channel the app has already joined. Use get_discord_thread when you need a Discord message/thread by channel + message id or discord.com message link. Use get_discord_channel_messages when you need Discord channel/thread history the bot can read.',
+      'Use get_about_me for Roomote platform, integration, and getting-started context. Use get_chat_thread for surrounding context from the task communication channel or a referenced Slack/Discord message. Use get_chat_channel_messages for readable history from the task communication channel or an explicitly linked channel.',
   });
 
   server.registerTool(
@@ -519,29 +413,29 @@ function createRoomoteMcpServer(
   );
 
   server.registerTool(
-    'get_slack_channel_messages',
+    'get_chat_channel_messages',
     {
-      title: 'Get Public Slack Channel Messages',
+      title: 'Get Chat Channel Messages',
       description:
-        'Fetch history from the originating Slack channel or an explicitly provided Slack channel, but only when that channel is public and the Slack app has already joined it. Optional oldest/latest bounds accept Slack timestamps or ISO 8601 date strings. Explicit channel lookups still require a linked acting Slack user when the current context has one.',
+        'Fetch readable history from the task communication channel. When the task started from the web, or when another channel is needed, provide a Slack or Discord channel/message link. Provider-specific access checks still apply.',
       inputSchema: {
         channel: z
           .string()
           .optional()
           .describe(
-            'Optional Slack channel ID, channel name, or channel mention. Required when the current context did not start from Slack. Only public channels the Slack app has already joined are supported.',
+            'Optional channel ID, name, mention, or Slack/Discord channel/message link. Omit it to use the task communication channel.',
           ),
         oldest: z
           .string()
           .optional()
           .describe(
-            'Optional inclusive lower bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
+            'Optional inclusive lower message bound. Use a Slack timestamp or ISO 8601 date for Slack, or a message snowflake for Discord.',
           ),
         latest: z
           .string()
           .optional()
           .describe(
-            'Optional inclusive upper bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
+            'Optional inclusive upper message bound. Use a Slack timestamp or ISO 8601 date for Slack, or a message snowflake for Discord.',
           ),
       },
       outputSchema: z.object({}).passthrough(),
@@ -553,7 +447,7 @@ function createRoomoteMcpServer(
       },
     },
     async ({ channel, oldest, latest }) => {
-      const payload = await buildSlackChannelMessagesPayload({
+      const payload = await buildCommunicationChannelMessagesPayload({
         auth,
         actingUserId,
         ...(typeof channel === 'string' && channel.trim().length > 0
@@ -572,124 +466,29 @@ function createRoomoteMcpServer(
   );
 
   server.registerTool(
-    'get_slack_thread',
+    'get_chat_thread',
     {
-      title: 'Get Slack Thread',
+      title: 'Get Chat Thread',
       description:
-        'Look up a Slack message by timestamp in the originating Slack channel and return the full thread that contains it. When the current context did not start from Slack, provide the Slack channel ID, name, or channel mention.',
+        'Look up a message in the task communication channel and return its surrounding thread or conversation context. When the task started from the web, provide a Slack or Discord message link. Explicit cross-channel lookups require the acting user to have access.',
       inputSchema: {
         channel: z
           .string()
           .optional()
           .describe(
-            'Optional Slack channel ID, channel name, or channel mention. Required when the current context did not start from Slack.',
-          ),
-        messageTs: z
-          .string()
-          .min(1)
-          .describe(
-            'Slack message timestamp to look up in the originating or provided Slack channel.',
-          ),
-      },
-      outputSchema: z.object({}).passthrough(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async ({ channel, messageTs }) => {
-      const payload = await buildSlackThreadPayload({
-        auth,
-        actingUserId,
-        ...(typeof channel === 'string' && channel.trim().length > 0
-          ? { channel: channel.trim() }
-          : {}),
-        messageTs: messageTs.trim(),
-      });
-
-      return toMcpToolResult(payload);
-    },
-  );
-
-  server.registerTool(
-    'get_discord_channel_messages',
-    {
-      title: 'Get Discord Channel Messages',
-      description:
-        'Fetch history from the originating Discord channel/thread or an explicitly provided Discord channel id. Explicit channel lookups require the acting user to have a linked Discord account in that guild. Optional oldest/latest bounds accept Discord snowflake message ids.',
-      inputSchema: {
-        channel: z
-          .string()
-          .optional()
-          .describe(
-            'Optional Discord channel/thread id or discord.com message link. Required when the current context did not start from Discord.',
-          ),
-        oldest: z
-          .string()
-          .optional()
-          .describe(
-            'Optional inclusive lower bound for returned messages, as a Discord snowflake message id.',
-          ),
-        latest: z
-          .string()
-          .optional()
-          .describe(
-            'Optional inclusive upper bound for returned messages, as a Discord snowflake message id.',
-          ),
-      },
-      outputSchema: z.object({}).passthrough(),
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async ({ channel, oldest, latest }) => {
-      const payload = await buildDiscordChannelMessagesPayload({
-        auth,
-        actingUserId,
-        ...(typeof channel === 'string' && channel.trim().length > 0
-          ? { channel: channel.trim() }
-          : {}),
-        ...(typeof oldest === 'string' && oldest.trim().length > 0
-          ? { oldest: oldest.trim() }
-          : {}),
-        ...(typeof latest === 'string' && latest.trim().length > 0
-          ? { latest: latest.trim() }
-          : {}),
-      });
-
-      return toMcpToolResult(payload);
-    },
-  );
-
-  server.registerTool(
-    'get_discord_thread',
-    {
-      title: 'Get Discord Thread',
-      description:
-        'Look up a Discord message by channel + message id, or by a discord.com/channels/... message link, and return nearby thread/channel context. Use this when a Discord message references or links another message. Explicit channel lookups outside the originating Discord task thread require a linked acting Discord user.',
-      inputSchema: {
-        channel: z
-          .string()
-          .optional()
-          .describe(
-            'Optional Discord channel/thread id or full message link. Required when the current context did not start from Discord and messageLink is not provided.',
+            'Optional channel ID, name, mention, or message link. Omit it to use the task communication channel.',
           ),
         messageId: z
           .string()
           .optional()
           .describe(
-            'Discord message snowflake id. Optional when messageLink (or channel as a message link) already includes the message id.',
+            'Provider message ID or timestamp. Optional when messageLink, or channel as a message link, includes it.',
           ),
         messageLink: z
           .string()
           .optional()
           .describe(
-            'Full Discord message permalink such as https://discord.com/channels/{guild}/{channel}/{message}.',
+            'Optional full Slack or Discord message link. Required for a web-started task unless channel and messageId identify the provider unambiguously.',
           ),
       },
       outputSchema: z.object({}).passthrough(),
@@ -701,7 +500,7 @@ function createRoomoteMcpServer(
       },
     },
     async ({ channel, messageId, messageLink }) => {
-      const payload = await buildDiscordThreadPayload({
+      const payload = await buildCommunicationThreadPayload({
         auth,
         actingUserId,
         ...(typeof channel === 'string' && channel.trim().length > 0

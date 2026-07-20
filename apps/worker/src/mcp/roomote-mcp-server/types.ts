@@ -1,4 +1,8 @@
-import type { SourceControlProvider, TaskArtifactType } from '@roomote/types';
+import type {
+  CommunicationProvider,
+  SourceControlProvider,
+  TaskArtifactType,
+} from '@roomote/types';
 
 export interface ArtifactConfig {
   token: string;
@@ -145,37 +149,15 @@ export interface SlackReactionAddResponse {
   name: string;
 }
 
-export interface SlackThreadLookupMessage {
-  ts: string;
-  user: string;
-  username?: string;
-  botId?: string;
-  text: string;
-  fileCount: number;
-  files?: Array<{
-    id: string;
-    name: string;
-    mimetype: string;
-    filetype: string;
-    size: number;
-  }>;
-}
-
-export interface SlackThreadLookupResponse {
-  channelId: string;
-  requestedMessageTs: string;
-  threadTs: string;
-  matchedMessageIndex: number;
-  messageCount: number;
-  messages: SlackThreadLookupMessage[];
-}
-
-export interface DiscordThreadLookupMessage {
+export interface CommunicationLookupMessage {
+  provider: CommunicationProvider;
   id: string;
   user: string;
   username?: string;
   botId?: string;
   text: string;
+  channelId: string;
+  threadId?: string;
   fileCount: number;
   files?: Array<{
     id: string;
@@ -186,44 +168,23 @@ export interface DiscordThreadLookupMessage {
   }>;
 }
 
-export interface DiscordThreadLookupResponse {
+export interface CommunicationThreadLookupResponse {
+  provider: CommunicationProvider;
   channelId: string;
   requestedMessageId: string;
   threadId: string;
   matchedMessageIndex: number;
   messageCount: number;
-  messages: DiscordThreadLookupMessage[];
+  messages: CommunicationLookupMessage[];
 }
 
-export interface DiscordChannelMessagesResponse {
+export interface CommunicationChannelMessagesResponse {
+  provider: CommunicationProvider;
   channelId: string;
   requestedOldest?: string;
   requestedLatest?: string;
   messageCount: number;
-  messages: DiscordThreadLookupMessage[];
-}
-
-export interface SlackChannelMessagesResponse {
-  channelId: string;
-  requestedOldest?: string;
-  requestedLatest?: string;
-  messageCount: number;
-  messages: Array<{
-    ts: string;
-    user: string;
-    username?: string;
-    botId?: string;
-    threadTs?: string;
-    text: string;
-    fileCount: number;
-    files?: Array<{
-      id: string;
-      name: string;
-      mimetype: string;
-      filetype: string;
-      size: number;
-    }>;
-  }>;
+  messages: CommunicationLookupMessage[];
 }
 
 export interface TaskMessage {

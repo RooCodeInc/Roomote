@@ -52,3 +52,84 @@ export function buildSlackThreadPermalink(params: {
 
   return `${origin}/archives/${encodeURIComponent(slackChannelId)}/p${permalinkTs}?thread_ts=${encodeURIComponent(threadTs)}&cid=${encodeURIComponent(slackChannelId)}`;
 }
+
+const SLACK_CHANNEL_ID = /^[A-Z0-9]+$/i;
+const SLACK_PERMALINK_TIMESTAMP = /^\d{7,}$/;
+const SLACK_TIMESTAMP = /^\d+(?:\.\d+)?$/;
+
+/**
+ * Parse the two Slack message-link shapes Roomote receives from routing:
+ * workspace/app archive permalinks and app client thread links.
+ */
+export function parseSlackMessagePermalink(raw: string): {
+  teamId: string | null;
+  channelId: string;
+  messageId: string;
+} | null {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return null;
+  }
+
+  const host = url.hostname.toLowerCase();
+  if (host !== 'slack.com' && !host.endsWith('.slack.com')) {
+    return null;
+  }
+
+  let segments: string[];
+  try {
+    segments = url.pathname
+      .split('/')
+      .filter((segment) => segment.length > 0)
+      .map((segment) => decodeURIComponent(segment));
+  } catch {
+    return null;
+  }
+
+  if (segments[0] === 'archives' && segments.length === 3) {
+    const channelId = segments[1] ?? '';
+    const permalinkTs = (segments[2] ?? '').replace(/^p/i, '');
+    if (
+      !SLACK_CHANNEL_ID.test(channelId) ||
+      !SLACK_PERMALINK_TIMESTAMP.test(permalinkTs)
+    ) {
+      return null;
+    }
+
+    return {
+      teamId: null,
+      channelId,
+      messageId: `${permalinkTs.slice(0, -6)}.${permalinkTs.slice(-6)}`,
+    };
+  }
+
+  if (
+    segments[0] === 'client' &&
+    segments[3] === 'thread' &&
+    segments.length === 5
+  ) {
+    const teamId = segments[1] ?? '';
+    const channelId = segments[2] ?? '';
+    const threadTarget = segments[4] ?? '';
+    const messageId = threadTarget.startsWith(`${channelId}-`)
+      ? threadTarget.slice(channelId.length + 1)
+      : '';
+    if (
+      !SLACK_CHANNEL_ID.test(teamId) ||
+      !SLACK_CHANNEL_ID.test(channelId) ||
+      !SLACK_TIMESTAMP.test(messageId)
+    ) {
+      return null;
+    }
+
+    return { teamId, channelId, messageId };
+  }
+
+  return null;
+}

@@ -384,8 +384,7 @@ describe('router helpers', () => {
     expect(allowedTools).toEqual(
       expect.arrayContaining([
         ...getRouterMcpToolGroupToolNames('roomote-platform-context'),
-        ...getRouterMcpToolGroupToolNames('roomote-slack-thread-context'),
-        ...getRouterMcpToolGroupToolNames('roomote-discord-thread-context'),
+        ...getRouterMcpToolGroupToolNames('roomote-chat-context'),
       ]),
     );
     expect(getRouterMcpUpstreamConstraints('roomote')).toBeUndefined();
@@ -407,6 +406,11 @@ describe('router helpers', () => {
     expect(
       shouldIncludeRoomoteRouterLookup(
         'https://discord.com/channels/123/456/789',
+      ),
+    ).toBe(true);
+    expect(
+      shouldIncludeRoomoteRouterLookup(
+        'Please inspect https://discord.com/channels/123/456/789 in context.',
       ),
     ).toBe(true);
     expect(shouldIncludeRoomoteRouterLookup('LIN-123')).toBe(false);
