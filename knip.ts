@@ -67,8 +67,6 @@ const config: KnipConfig = {
         'python',
         'fc-cache',
         'dpkg-query',
-        // Runtime CLI baked into worker images; version-probed before plugin seed.
-        'opencode',
       ],
     },
 
