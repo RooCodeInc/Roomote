@@ -145,18 +145,25 @@ export function formatDockerCommandError(
   error: unknown,
 ): string {
   const failure = (error ?? {}) as DockerExecFailure;
-  const stderr = bufferToString(failure.stderr).trim();
-  const stdout = bufferToString(failure.stdout).trim();
+  const stderr = sanitizeDockerCommandForDisplay(
+    bufferToString(failure.stderr).trim(),
+  );
+  const stdout = sanitizeDockerCommandForDisplay(
+    bufferToString(failure.stdout).trim(),
+  );
   const command =
     typeof failure.cmd === 'string' && failure.cmd.trim()
       ? sanitizeDockerCommandForDisplay(failure.cmd)
       : sanitizeDockerCommandForDisplay(args);
   const operation = args[0] ? `docker ${args[0]}` : 'docker';
-  const reason =
+  // Node's execFile error.message embeds the full argv (including -e secrets)
+  // when stderr/stdout are empty — always redact before surfacing.
+  const reason = sanitizeDockerCommandForDisplay(
     stderr ||
-    stdout ||
-    (typeof failure.message === 'string' ? failure.message.trim() : '') ||
-    `${operation} failed`;
+      stdout ||
+      (typeof failure.message === 'string' ? failure.message.trim() : '') ||
+      `${operation} failed`,
+  );
 
   const details: string[] = [`Failed to run ${operation}.`, reason];
 
@@ -181,13 +188,17 @@ export function formatDockerCommandError(
 export function formatSpawnWorkerError(error: unknown): string {
   if (error instanceof Error) {
     const failure = error as Error & DockerExecFailure;
-    const stderr = bufferToString(failure.stderr).trim();
-    const stdout = bufferToString(failure.stdout).trim();
+    const stderr = sanitizeDockerCommandForDisplay(
+      bufferToString(failure.stderr).trim(),
+    );
+    const stdout = sanitizeDockerCommandForDisplay(
+      bufferToString(failure.stdout).trim(),
+    );
     const message = error.message.trim();
 
     // Already formatted by formatDockerCommandError / spawn-docker-worker.
     if (message.startsWith('Failed to run docker')) {
-      return message;
+      return sanitizeDockerCommandForDisplay(message);
     }
 
     if (stderr || stdout) {
@@ -199,11 +210,11 @@ export function formatSpawnWorkerError(error: unknown): string {
       );
     }
 
-    return message || 'Worker spawn failed';
+    return sanitizeDockerCommandForDisplay(message) || 'Worker spawn failed';
   }
 
   if (typeof error === 'string' && error.trim()) {
-    return error.trim();
+    return sanitizeDockerCommandForDisplay(error.trim());
   }
 
   return String(error);

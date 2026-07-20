@@ -30,7 +30,7 @@ const DOCKER_WORKER_EXITED_EARLY =
 const DOCKER_RELEASE_ARCHIVE_MISSING =
   /Docker worker release archive does not exist|Docker provider requires a local worker release archive/i;
 const DOCKER_FETCH_FAILED_IN_LOGS =
-  /Job\s+<\s*unknown\s*>\s*failed:\s*fetch failed|failed:\s*fetch failed/i;
+  /Job\s+<\s*unknown\s*>\s*failed:\s*fetch failed|❌[^\n]*failed:\s*fetch failed/i;
 
 function parseOpenAiAdminErrorBody(
   body: string,

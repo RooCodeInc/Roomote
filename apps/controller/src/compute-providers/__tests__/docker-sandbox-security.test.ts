@@ -693,6 +693,44 @@ describe('formatDockerCommandError', () => {
     ).toBe('docker exec -e AUTH_TOKEN=<redacted> roomote-worker-1');
   });
 
+  it('redacts auth tokens when reason falls back to raw error.message', () => {
+    const message = formatDockerCommandError(
+      ['exec', '-e', 'AUTH_TOKEN=super-secret', 'roomote-worker-1', 'true'],
+      {
+        message:
+          'Command failed: docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+        cmd: 'docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+        code: 1,
+        stderr: '',
+        stdout: '',
+      },
+    );
+
+    expect(message).toContain('AUTH_TOKEN=<redacted>');
+    expect(message).not.toContain('super-secret');
+    expect(formatSpawnWorkerError(new Error(message))).not.toContain(
+      'super-secret',
+    );
+  });
+
+  it('redacts auth tokens embedded in stderr/stdout diagnostics', () => {
+    const message = formatDockerCommandError(
+      ['run', '-d', 'roomote-worker:local'],
+      {
+        message: 'Command failed',
+        cmd: 'docker run -d roomote-worker:local',
+        code: 1,
+        stderr:
+          'failed: docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+        stdout:
+          'retry: docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+      },
+    );
+
+    expect(message).toContain('AUTH_TOKEN=<redacted>');
+    expect(message).not.toContain('super-secret');
+  });
+
   it('formats plain Error messages for finishRun storage', () => {
     expect(formatSpawnWorkerError(new Error('Machine unavailable'))).toBe(
       'Machine unavailable',
