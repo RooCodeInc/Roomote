@@ -35,6 +35,12 @@ describe('product-version', () => {
     expect(compareProductVersions('0.15.0-alpha.beta', '0.15.0-beta')).toBe(-1);
     expect(compareProductVersions('0.15.0-beta.2', '0.15.0-beta.11')).toBe(-1);
     expect(compareProductVersions('0.15.0-rc.1', '0.15.0-rc.1')).toBe(0);
+    expect(
+      compareProductVersions(
+        '0.15.0-rc.9007199254740993',
+        '0.15.0-rc.9007199254740992',
+      ),
+    ).toBe(1);
   });
 
   it('isProductVersionNewer only when strictly greater', () => {

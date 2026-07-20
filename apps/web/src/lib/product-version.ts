@@ -43,9 +43,14 @@ function comparePrereleaseIdentifiers(left: string, right: string): number {
   const rightNumeric = /^\d+$/.test(right);
 
   if (leftNumeric && rightNumeric) {
-    const diff = Number.parseInt(left, 10) - Number.parseInt(right, 10);
-    if (diff !== 0) {
-      return diff < 0 ? -1 : 1;
+    const normalizedLeft = left.replace(/^0+(?=\d)/, '');
+    const normalizedRight = right.replace(/^0+(?=\d)/, '');
+
+    if (normalizedLeft.length !== normalizedRight.length) {
+      return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+    }
+    if (normalizedLeft !== normalizedRight) {
+      return normalizedLeft < normalizedRight ? -1 : 1;
     }
     return 0;
   }
