@@ -1,15 +1,22 @@
 import {
   buildMentionRequestBlock,
   buildUntrustedContentPolicy,
+  buildUntrustedExternalContentBlock,
   enqueueTask,
   escapeTaskContextText,
   getTaskUrl,
 } from '@roomote/cloud-agents/server';
 import {
+  db,
+  environmentRepositoryMappings,
+  eq,
+  asc,
   findActiveGitHubPrReviewTask,
+  findReusableGitHubIssueTaskOwner,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
 import {
+  createGiteaIssueComment,
   createGiteaPullRequestComment,
   getGiteaDeploymentUser,
 } from '@roomote/gitea';
@@ -44,9 +51,21 @@ type GiteaPrMentionReplyKind =
   | 'active_review'
   | 'review_started';
 
+type GiteaIssueMentionReplyKind = 'active_follow_up' | 'task_started';
+
 type GiteaCommentPullRequest = NonNullable<
   GiteaPullRequestCommentWebhook['pull_request']
 >;
+
+type GiteaCommentIssue = NonNullable<GiteaPullRequestCommentWebhook['issue']>;
+
+type HandleGiteaCommentOptions = {
+  /**
+   * When true (pull_request_comment events), always take the PR path even if
+   * `is_pull` is missing from the payload.
+   */
+  forcePullRequestComment?: boolean;
+};
 
 function isGiteaMention(commentBody: string): boolean {
   return commentBody.toLowerCase().includes(GITEA_MENTION_HANDLE);
@@ -102,7 +121,7 @@ async function isDeploymentTokenAuthor(
   }
 }
 
-async function postMentionResponseComment({
+async function postPullRequestMentionResponseComment({
   repositoryFullName,
   pullRequestNumber,
   body,
@@ -120,6 +139,28 @@ async function postMentionResponseComment({
   } catch (error) {
     console.warn(
       `[handleGiteaComment] failed to post mention response comment on ${repositoryFullName}#${pullRequestNumber}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+async function postIssueMentionResponseComment({
+  repositoryFullName,
+  issueNumber,
+  body,
+}: {
+  repositoryFullName: string;
+  issueNumber: number;
+  body: string;
+}): Promise<void> {
+  try {
+    await createGiteaIssueComment({
+      repositoryFullName,
+      issueNumber,
+      body,
+    });
+  } catch (error) {
+    console.warn(
+      `[handleGiteaComment] failed to post mention response comment on ${repositoryFullName} issue #${issueNumber}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -182,12 +223,48 @@ function formatGiteaPrMentionReply(
   return `${replyCopy.intro} [See task](${link})`;
 }
 
+function formatGiteaIssueMentionReply(
+  kind: GiteaIssueMentionReplyKind,
+  link: string | null,
+): string {
+  const replyCopy = (() => {
+    switch (kind) {
+      case 'active_follow_up':
+        return {
+          intro:
+            "I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.",
+          fallback:
+            'I could not generate the task link for this comment, but the follow-up was delivered.',
+        };
+      case 'task_started':
+        return {
+          intro:
+            "I'm on it. I started a task for this issue, and I'll keep updates here.",
+          fallback:
+            'I could not generate the task link for this comment, but the task is already running.',
+        };
+    }
+  })();
+
+  if (!link) {
+    return `${replyCopy.intro} ${replyCopy.fallback}`;
+  }
+
+  return `${replyCopy.intro} [See task](${link})`;
+}
+
 function buildReviewerGateMissComment(): string {
   return `I saw the mention, but I could not start work on this pull request with the current ${PRODUCT_NAME} Gitea setup.`;
 }
 
-function buildTaskStartFailedComment(): string {
-  return 'I saw the mention, but I could not start a task for this pull request right now. Please try again in a moment.';
+function buildIssueGateMissComment(): string {
+  return `I saw the mention, but I could not start work on this issue with the current ${PRODUCT_NAME} Gitea setup.`;
+}
+
+function buildTaskStartFailedComment(
+  surface: 'pull request' | 'issue',
+): string {
+  return `I saw the mention, but I could not start a task for this ${surface} right now. Please try again in a moment.`;
 }
 
 function buildExistingTaskFollowUpMessage({
@@ -224,6 +301,100 @@ function buildExistingTaskFollowUpMessage({
   return lines.join('\n');
 }
 
+function buildIssueMentionPrompt({
+  repositoryFullName,
+  issueNumber,
+  issueTitle,
+  issueBody,
+  issueUrl,
+  commentBody,
+  commenterLogin,
+}: {
+  repositoryFullName: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueBody?: string | null;
+  issueUrl: string;
+  commentBody: string;
+  commenterLogin: string;
+}): string {
+  const trimmedIssueBody = issueBody?.trim() ?? '';
+  const trimmedCommentBody = commentBody.trim();
+  const issueBodySection =
+    trimmedIssueBody && trimmedIssueBody !== trimmedCommentBody
+      ? [
+          '',
+          'Issue body (context only):',
+          buildUntrustedExternalContentBlock({
+            source: 'gitea_issue_body',
+            text: trimmedIssueBody,
+          }),
+        ]
+      : [];
+
+  return [
+    `${commenterLogin} mentioned Roomote on Gitea issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
+    `Issue URL: ${issueUrl}`,
+    '',
+    'Mention comment (the request to act on):',
+    buildMentionRequestBlock(trimmedCommentBody),
+    ...issueBodySection,
+    '',
+    buildUntrustedContentPolicy(),
+  ].join('\n');
+}
+
+function buildIssueFollowUpMessage({
+  repositoryFullName,
+  issueNumber,
+  issueTitle,
+  issueUrl,
+  commentBody,
+  commenterLogin,
+}: {
+  repositoryFullName: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueUrl: string;
+  commentBody: string;
+  commenterLogin: string;
+}): string {
+  return [
+    `${commenterLogin} mentioned Roomote again on Gitea issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
+    `Issue URL: ${issueUrl}`,
+    '',
+    'This is a follow-up on the existing Roomote task for this issue. Continue that work instead of starting a separate task.',
+    '',
+    'Mention comment (the request to act on):',
+    buildMentionRequestBlock(commentBody),
+    '',
+    buildUntrustedContentPolicy(),
+  ].join('\n');
+}
+
+async function resolveMappedEnvironmentId(
+  repositoryId: string,
+): Promise<string | null> {
+  const mappings = await db
+    .select({
+      environmentId: environmentRepositoryMappings.environmentId,
+    })
+    .from(environmentRepositoryMappings)
+    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId))
+    .orderBy(asc(environmentRepositoryMappings.environmentId));
+
+  if (mappings.length === 0) {
+    return null;
+  }
+
+  return mappings[0]?.environmentId ?? null;
+}
+
+/**
+ * Pull-request context for comments. Only synthesize a PR from `issue` when
+ * this truly is a PR comment (`is_pull === true` or forcePullRequestComment).
+ * Plain issues must not become fake PRs.
+ */
 function resolveGiteaCommentPullRequest(
   payload: GiteaPullRequestCommentWebhook,
 ): GiteaCommentPullRequest | null {
@@ -241,45 +412,228 @@ function resolveGiteaCommentPullRequest(
   return null;
 }
 
-export async function handleGiteaComment(
+function resolveGiteaCommentIssue(
   payload: GiteaPullRequestCommentWebhook,
-): Promise<WebhookResponse> {
-  if (payload.action !== 'created') {
+): GiteaCommentIssue | null {
+  if (payload.issue?.number) {
+    return payload.issue;
+  }
+
+  return null;
+}
+
+async function handleGiteaIssueComment({
+  payload,
+  commenter,
+  repoFullName,
+  issue,
+}: {
+  payload: GiteaPullRequestCommentWebhook;
+  commenter: string;
+  repoFullName: string;
+  issue: GiteaCommentIssue;
+}): Promise<WebhookResponse> {
+  const mentionResponseTarget = {
+    repositoryFullName: repoFullName,
+    issueNumber: issue.number,
+  };
+
+  // Skip pr_review automation gates. Issue mentions only need a linked sender
+  // and a mapped environment, matching GitHub/GitLab issue comment handling.
+  const targetsResult = await getGiteaAutomationTargets({
+    workflow: 'pr_conflict_resolve',
+    payload: {
+      repository: payload.repository,
+      sender: payload.sender,
+      commentAuthor: payload.comment.user,
+    },
+    webhookHost: toHostFromUrl(
+      issue.html_url ?? issue.url ?? payload.repository.html_url ?? '',
+    ),
+    ignoreAuthorPolicy: true,
+    requireLinkedSenderAccount: true,
+  });
+
+  const target =
+    targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
+
+  if (!target || !target.userId) {
+    await postIssueMentionResponseComment({
+      ...mentionResponseTarget,
+      body:
+        targetsResult.status === 'error' &&
+        targetsResult.code === 'account_link_required'
+          ? buildSourceControlAccountLinkRequiredMessage('gitea')
+          : buildIssueGateMissComment(),
+    });
+
     return {
       status: 'ok',
-      message: `unsupported_comment_action:${payload.action}`,
+      message:
+        targetsResult.status === 'error' &&
+        targetsResult.code === 'account_link_required'
+          ? 'account_link_required'
+          : 'issue_gate_miss',
     };
   }
 
-  if (payload.is_pull === false) {
-    return { status: 'ok', message: 'not_pull_request_comment' };
+  const environmentId = await resolveMappedEnvironmentId(target.repo.id);
+
+  if (!environmentId) {
+    await postIssueMentionResponseComment({
+      ...mentionResponseTarget,
+      body: buildSourceControlEnvironmentRequiredMessage('gitea'),
+    });
+
+    return { status: 'ok', message: 'environment_required' };
   }
 
-  if (!isGiteaMention(payload.comment.body)) {
-    return { status: 'ok', message: 'no_mention' };
+  const issueUrl =
+    issue.html_url ??
+    issue.url ??
+    (payload.repository.html_url
+      ? `${payload.repository.html_url}/issues/${issue.number}`
+      : '');
+  const issueTitle = issue.title ?? `Issue #${issue.number}`;
+  const issueBody = issue.body ?? null;
+
+  const existingIssueOwner = await findReusableGitHubIssueTaskOwner({
+    repoFullName,
+    issueNumber: issue.number,
+    sourceControlProvider: 'gitea',
+    host: target.repo.host ?? null,
+  });
+
+  if (existingIssueOwner?.taskId) {
+    const followUpMessage = buildIssueFollowUpMessage({
+      repositoryFullName: repoFullName,
+      issueNumber: issue.number,
+      issueTitle,
+      issueUrl,
+      commentBody: payload.comment.body,
+      commenterLogin: commenter,
+    });
+
+    const delivery = isActivelyRunningTask(
+      existingIssueOwner.status,
+      existingIssueOwner.taskPhase,
+    )
+      ? await steerMessageToTask({
+          taskId: existingIssueOwner.taskId,
+          userId: target.userId,
+          message: followUpMessage,
+          senderMode: 'github_pr_follow_up',
+        })
+      : await sendMessageToTask({
+          taskId: existingIssueOwner.taskId,
+          userId: target.userId,
+          message: followUpMessage,
+          senderMode: 'github_pr_follow_up',
+        });
+
+    if (delivery.success) {
+      await postIssueMentionResponseComment({
+        ...mentionResponseTarget,
+        body: formatGiteaIssueMentionReply(
+          'active_follow_up',
+          tryBuildTaskLink({
+            taskId: existingIssueOwner.taskId,
+            campaign: 'gitea.issue.mention.active-owner',
+          }),
+        ),
+      });
+
+      return { status: 'ok', message: 'active_issue_owner_routed' };
+    }
+
+    console.warn(
+      `[handleGiteaComment] failed to deliver issue mention to reusable task ${existingIssueOwner.taskId}: ${delivery.error}`,
+    );
   }
 
-  const commenter =
-    getGiteaUsername(payload.comment.user) ?? getGiteaUsername(payload.sender);
+  const prompt = buildIssueMentionPrompt({
+    repositoryFullName: repoFullName,
+    issueNumber: issue.number,
+    issueTitle,
+    issueBody,
+    issueUrl,
+    commentBody: payload.comment.body,
+    commenterLogin: commenter,
+  });
 
-  if (!commenter) {
-    return { status: 'ok', message: 'no_comment_author' };
+  const taskPayload = {
+    repo: repoFullName,
+    sourceControlProvider: 'gitea',
+    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
+    environmentId,
+    selectedRepositories: [repoFullName],
+    description: prompt,
+    linkedWorkItems: [
+      {
+        provider: 'gitea',
+        identifier: String(issue.number),
+        url: issueUrl,
+        title: issueTitle,
+        repository: repoFullName,
+      },
+    ],
+  } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>;
+
+  try {
+    const launch = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.StandardTask,
+        payload: taskPayload,
+      },
+      initiator: { kind: 'user', userId: target.userId },
+      workflow: 'standard',
+      surface: 'gitea',
+      trigger: 'message',
+    });
+
+    await postIssueMentionResponseComment({
+      ...mentionResponseTarget,
+      body: formatGiteaIssueMentionReply(
+        'task_started',
+        tryBuildTaskLink({
+          taskId: launch.taskId,
+          campaign: 'gitea.issue.mention',
+        }),
+      ),
+    });
+
+    return {
+      status: 'ok',
+      metadata: { ids: [launch.id] },
+    };
+  } catch (error) {
+    console.warn(
+      `[handleGiteaComment] failed to start issue task for ${repoFullName}#${issue.number}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+
+    await postIssueMentionResponseComment({
+      ...mentionResponseTarget,
+      body: buildTaskStartFailedComment('issue'),
+    });
+
+    return {
+      status: 'error',
+      message: `issue_task_start_failed:${error instanceof Error ? error.message : String(error)}`,
+    };
   }
+}
 
-  if (
-    isRoomoteGiteaUsername(commenter) ||
-    (await isDeploymentTokenAuthor([payload.comment.user, payload.sender]))
-  ) {
-    return { status: 'ok', message: 'roomote_authored_comment' };
-  }
-
-  const repoFullName = payload.repository.full_name;
-  const pullRequest = resolveGiteaCommentPullRequest(payload);
-
-  if (!pullRequest) {
-    return { status: 'ok', message: 'missing_pull_request_context' };
-  }
-
+async function handleGiteaPullRequestComment({
+  payload,
+  commenter,
+  repoFullName,
+  pullRequest,
+}: {
+  payload: GiteaPullRequestCommentWebhook;
+  commenter: string;
+  repoFullName: string;
+  pullRequest: GiteaCommentPullRequest;
+}): Promise<WebhookResponse> {
   const mentionResponseTarget = {
     repositoryFullName: repoFullName,
     pullRequestNumber: pullRequest.number,
@@ -309,7 +663,7 @@ export async function handleGiteaComment(
 
   // requireLinkedSenderAccount guarantees a linked commenter here.
   if (!target || !target.userId) {
-    await postMentionResponseComment({
+    await postPullRequestMentionResponseComment({
       ...mentionResponseTarget,
       body:
         targetsResult.status === 'error' &&
@@ -365,7 +719,7 @@ export async function handleGiteaComment(
         });
 
     if (delivery.success) {
-      await postMentionResponseComment({
+      await postPullRequestMentionResponseComment({
         ...mentionResponseTarget,
         body: formatGiteaPrMentionReply(
           'active_follow_up',
@@ -394,7 +748,7 @@ export async function handleGiteaComment(
     });
 
     if (activeReview?.taskId) {
-      await postMentionResponseComment({
+      await postPullRequestMentionResponseComment({
         ...mentionResponseTarget,
         body: formatGiteaPrMentionReply(
           'active_review',
@@ -456,7 +810,7 @@ export async function handleGiteaComment(
       },
     });
 
-    await postMentionResponseComment({
+    await postPullRequestMentionResponseComment({
       ...mentionResponseTarget,
       body: formatGiteaPrMentionReply(
         'review_started',
@@ -473,9 +827,9 @@ export async function handleGiteaComment(
       `[handleGiteaComment] failed to start PR review task for ${repoFullName}#${pullRequest.number}: ${error instanceof Error ? error.message : String(error)}`,
     );
 
-    await postMentionResponseComment({
+    await postPullRequestMentionResponseComment({
       ...mentionResponseTarget,
-      body: buildTaskStartFailedComment(),
+      body: buildTaskStartFailedComment('pull request'),
     });
 
     return {
@@ -483,4 +837,66 @@ export async function handleGiteaComment(
       message: `review_start_failed:${error instanceof Error ? error.message : String(error)}`,
     };
   }
+}
+
+export async function handleGiteaComment(
+  payload: GiteaPullRequestCommentWebhook,
+  options: HandleGiteaCommentOptions = {},
+): Promise<WebhookResponse> {
+  if (payload.action !== 'created') {
+    return {
+      status: 'ok',
+      message: `unsupported_comment_action:${payload.action}`,
+    };
+  }
+
+  if (!isGiteaMention(payload.comment.body)) {
+    return { status: 'ok', message: 'no_mention' };
+  }
+
+  const commenter =
+    getGiteaUsername(payload.comment.user) ?? getGiteaUsername(payload.sender);
+
+  if (!commenter) {
+    return { status: 'ok', message: 'no_comment_author' };
+  }
+
+  if (
+    isRoomoteGiteaUsername(commenter) ||
+    (await isDeploymentTokenAuthor([payload.comment.user, payload.sender]))
+  ) {
+    return { status: 'ok', message: 'roomote_authored_comment' };
+  }
+
+  const repoFullName = payload.repository.full_name;
+  const isPullRequestComment =
+    options.forcePullRequestComment === true || payload.is_pull === true;
+
+  if (!isPullRequestComment) {
+    const issue = resolveGiteaCommentIssue(payload);
+
+    if (!issue) {
+      return { status: 'ok', message: 'missing_issue_context' };
+    }
+
+    return handleGiteaIssueComment({
+      payload,
+      commenter,
+      repoFullName,
+      issue,
+    });
+  }
+
+  const pullRequest = resolveGiteaCommentPullRequest(payload);
+
+  if (!pullRequest) {
+    return { status: 'ok', message: 'missing_pull_request_context' };
+  }
+
+  return handleGiteaPullRequestComment({
+    payload,
+    commenter,
+    repoFullName,
+    pullRequest,
+  });
 }

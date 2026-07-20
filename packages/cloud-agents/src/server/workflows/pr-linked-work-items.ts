@@ -59,6 +59,7 @@ function renderLinkedWorkItemReference(item: LinkedWorkItem): string {
         : `Closes #${issueNumber}`;
     }
     case 'gitlab':
+    case 'gitea':
       return item.url ? `Closes ${item.url}` : `Closes ${item.identifier}`;
     case 'linear':
       return `Closes ${item.identifier}`;

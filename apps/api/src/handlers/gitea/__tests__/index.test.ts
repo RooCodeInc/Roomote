@@ -172,6 +172,7 @@ describe('gitea webhook router', () => {
           body: expect.stringContaining('@roomote'),
         }),
       }),
+      { forcePullRequestComment: true },
     );
     expect(mockHandleGiteaPullRequest).not.toHaveBeenCalled();
   });
@@ -220,10 +221,63 @@ describe('gitea webhook router', () => {
       expect.objectContaining({
         issue: expect.objectContaining({ number: 42 }),
       }),
+      { forcePullRequestComment: false },
     );
   });
 
-  it('ignores issue_comment webhooks when Gitea omits is_pull', async () => {
+  it('routes plain issue_comment webhooks when is_pull is false', async () => {
+    const payload = {
+      action: 'created',
+      is_pull: false,
+      sender: { id: 7, login: 'alice' },
+      repository: {
+        id: 123,
+        full_name: 'acme/backend',
+        html_url: 'https://git.example.com/acme/backend',
+      },
+      issue: {
+        number: 55,
+        title: 'Bug in login',
+      },
+      comment: {
+        id: 901,
+        body: '@roomote fix this bug',
+        user: { id: 7, login: 'alice' },
+      },
+    };
+    const body = JSON.stringify(payload);
+
+    const response = await app.request('http://localhost/api/webhooks/gitea', {
+      method: 'POST',
+      headers: {
+        'x-gitea-signature': sign(body),
+        'x-gitea-event': 'issue_comment',
+        'x-gitea-delivery': 'delivery-comment-3',
+      },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-comment-3',
+      'issue_comment.created',
+      expect.objectContaining({ action: 'created', is_pull: false }),
+      expect.any(Function),
+      { provider: 'gitea' },
+    );
+    expect(mockHandleGiteaComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        is_pull: false,
+        issue: expect.objectContaining({ number: 55 }),
+        comment: expect.objectContaining({
+          body: expect.stringContaining('@roomote'),
+        }),
+      }),
+      { forcePullRequestComment: false },
+    );
+  });
+
+  it('routes issue_comment webhooks when Gitea omits is_pull as plain issues', async () => {
     const payload = {
       action: 'created',
       sender: { id: 7, login: 'alice' },
@@ -249,20 +303,60 @@ describe('gitea webhook router', () => {
       headers: {
         'x-gitea-signature': sign(body),
         'x-gitea-event': 'issue_comment',
-        'x-gitea-delivery': 'delivery-comment-3',
+        'x-gitea-delivery': 'delivery-comment-4',
       },
       body,
     });
 
     expect(response.status).toBe(200);
-    expect(mockRecordWebhook).toHaveBeenCalledWith(
-      'delivery-comment-3',
-      'issue_comment.created',
-      expect.objectContaining({ action: 'created' }),
-      expect.any(Function),
-      { provider: 'gitea' },
+    expect(mockHandleGiteaComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue: expect.objectContaining({ number: 42 }),
+      }),
+      { forcePullRequestComment: false },
     );
-    expect(mockHandleGiteaComment).not.toHaveBeenCalled();
+  });
+
+  it('force-marks pull_request_comment events as PR comments', async () => {
+    const payload = {
+      action: 'created',
+      sender: { id: 7, login: 'alice' },
+      repository: {
+        id: 123,
+        full_name: 'acme/backend',
+        html_url: 'https://git.example.com/acme/backend',
+      },
+      issue: {
+        number: 42,
+        title: 'Update backend',
+      },
+      comment: {
+        id: 900,
+        body: 'Hey @roomote please take a look',
+        user: { id: 7, login: 'alice' },
+      },
+    };
+    const body = JSON.stringify(payload);
+
+    const response = await app.request('http://localhost/api/webhooks/gitea', {
+      method: 'POST',
+      headers: {
+        'x-gitea-signature': sign(body),
+        'x-gitea-event': 'pull_request_comment',
+        'x-gitea-delivery': 'delivery-comment-5',
+      },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandleGiteaComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        comment: expect.objectContaining({
+          body: expect.stringContaining('@roomote'),
+        }),
+      }),
+      { forcePullRequestComment: true },
+    );
   });
 
   it('rejects invalid signatures', async () => {

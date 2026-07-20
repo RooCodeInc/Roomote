@@ -64,19 +64,18 @@ gitea.post('/', async (c) => {
 
     if (eventName === 'pull_request_comment' || eventName === 'issue_comment') {
       const payload = giteaPullRequestCommentWebhookSchema.parse(parsedJson);
-      const isPullRequestComment =
-        eventName === 'pull_request_comment' || payload.is_pull === true;
+      // pull_request_comment is always PR-scoped. issue_comment may be either a
+      // PR discussion (is_pull === true) or a plain issue (is_pull !== true).
+      // Plain-issue mentions are handled inside handleGiteaComment.
 
       await recordWebhook(
         deliveryId,
         `${eventName}.${payload.action}`,
         payload,
         async () => {
-          if (!isPullRequestComment) {
-            return { status: 'ok', message: 'not_pull_request_comment' };
-          }
-
-          const result = await handleGiteaComment(payload);
+          const result = await handleGiteaComment(payload, {
+            forcePullRequestComment: eventName === 'pull_request_comment',
+          });
           apiLogger.info?.(
             `[Gitea] ${eventName}.${payload.action} delivery ${deliveryId}: ${result.message ?? result.status}`,
           );

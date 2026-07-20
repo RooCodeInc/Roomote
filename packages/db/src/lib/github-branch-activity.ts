@@ -305,6 +305,7 @@ export async function findReusableGitHubPrFollowUpOwner({
  *
  * `sourceControlProvider` scopes both the task payload and the linked work
  * item provider (defaults to GitHub, matching historical issue-mention rows).
+ * GitLab and Gitea stamp their own linked-work-item provider value.
  *
  * When a non-null `host` is given, payload `sourceControlHost` must match that
  * host. Rows without a stamped host still match (legacy null fallback) so
@@ -323,9 +324,13 @@ export async function findReusableGitHubIssueTaskOwner({
   host?: string | null;
 }): Promise<ReusableGitHubIssueTaskOwner | null> {
   const issueIdentifier = String(issueNumber);
-  // Linked work items use the same provider enum for GitHub/GitLab issues.
+  // Linked work items stamp the issue host provider. Other providers fall back
+  // to GitHub for historical issue-mention rows that predated multi-provider
+  // support.
   const linkedWorkItemProvider =
-    sourceControlProvider === 'gitlab' ? 'gitlab' : 'github';
+    sourceControlProvider === 'gitlab' || sourceControlProvider === 'gitea'
+      ? sourceControlProvider
+      : 'github';
   const linkedWorkItemMatch = JSON.stringify([
     {
       provider: linkedWorkItemProvider,
