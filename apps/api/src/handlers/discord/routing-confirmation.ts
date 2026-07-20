@@ -84,6 +84,11 @@ type PendingDiscordRoute = {
    * later button / reply path still receives the full Slack-style transcript.
    */
   agentPromptText?: string;
+  /**
+   * Whether intake successfully pinned 👀 before the confirmation card.
+   * Carried through so later launch can set discordIntakeAckPending accurately.
+   */
+  intakeAckPinned?: boolean;
 };
 
 function pendingRouteKey(id: string): string {
@@ -397,6 +402,7 @@ export async function requestDiscordRoutingConfirmation(input: {
   routingDecision: RoutingDecision;
   forceNewThread?: boolean;
   agentPromptText?: string;
+  intakeAckPinned?: boolean;
 }): Promise<{ pendingRouteId: string }> {
   const pendingRouteId = randomBytes(9).toString('base64url');
   const suggestedWorkspace =
@@ -448,6 +454,7 @@ export async function requestDiscordRoutingConfirmation(input: {
     ...(input.agentPromptText?.trim()
       ? { agentPromptText: input.agentPromptText.trim() }
       : {}),
+    ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
   };
   await storePendingRoute(pendingRouteId, pending);
   // Only name a best match when the router actually picked one. Without a
@@ -609,6 +616,7 @@ async function launchPendingDiscordRoute(input: {
       ? { agentPromptText: input.pending.agentPromptText.trim() }
       : {}),
     ...(kickoffMessage ? { kickoffMessage } : {}),
+    ...(input.pending.intakeAckPinned ? { intakeAckPinned: true } : {}),
     ...(input.replaceMessage
       ? { replaceMessage: input.replaceMessage }
       : input.pending.cardChannel && input.pending.cardMessageId

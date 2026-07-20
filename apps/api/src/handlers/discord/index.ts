@@ -659,6 +659,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   // Match Slack intake: ack the origin message with 👀 before launch work.
   // Only real MESSAGE_CREATE messages can receive Discord reactions; slash-
   // command interaction ids are not message targets and would 404.
+  let intakeAckPinned = false;
   if (message?.id) {
     try {
       await resolved.provider.addReaction({
@@ -666,6 +667,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         messageId: message.id,
         name: '👀',
       });
+      intakeAckPinned = true;
     } catch {
       // Soft ack only.
     }
@@ -684,6 +686,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
     // thread (with thread history as context). Only `/new` forces a sibling
     // task thread; known task threads were already handled above.
     forceNewThread: forceNewTask,
+    ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
   });
   return { ok: true, ...started };
 }

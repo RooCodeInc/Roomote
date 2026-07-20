@@ -375,6 +375,12 @@ export async function launchDiscordTask(input: {
    * it becomes the Discord acknowledgement text instead of the static template.
    */
   kickoffMessage?: string | null;
+  /**
+   * True only when a pre-enqueue MESSAGE_CREATE 👀 reaction succeeded on the
+   * origin message. Worker onStart cleanup keys off this so failed soft-acks
+   * do not produce DELETE 404 warnings.
+   */
+  intakeAckPinned?: boolean;
 }) {
   let createdThread: DiscordTaskThread | null = null;
   const parentId = taskThreadParentId(input);
@@ -458,9 +464,10 @@ export async function launchDiscordTask(input: {
           ? {
               discordReactionChannelId: reactionTarget.channelId,
               discordReactionMessageId: reactionTarget.messageId,
-              // Eyes are only pinned before enqueue for MESSAGE_CREATE origin
-              // messages (index/auto-start), not for thread-starter placeholders.
-              ...(originReaction ? { discordIntakeAckPending: true } : {}),
+              // Only when the caller successfully pinned 👀 before enqueue.
+              ...(originReaction && input.intakeAckPinned
+                ? { discordIntakeAckPending: true }
+                : {}),
             }
           : {}),
       },

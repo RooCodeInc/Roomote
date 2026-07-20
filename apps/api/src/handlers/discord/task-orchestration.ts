@@ -60,6 +60,11 @@ export async function startNewDiscordTask(input: {
     initiator: TaskInitiator;
   };
   forceNewThread?: boolean;
+  /**
+   * True when the Discord intake path successfully pinned 👀 on the origin
+   * message before calling into launch (soft-ack failures stay false).
+   */
+  intakeAckPinned?: boolean;
 }) {
   const existingRun = await findCommunicationTaskRunBySourceEvent({
     provider: 'discord',
@@ -215,6 +220,7 @@ export async function startNewDiscordTask(input: {
       routingDecision,
       forceNewThread: input.forceNewThread,
       ...(agentPromptText ? { agentPromptText } : {}),
+      ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
     });
     if (includeFullThreadContext) {
       await markDiscordThreadHistoryDelivered({
@@ -259,6 +265,7 @@ export async function startNewDiscordTask(input: {
     workspace,
     forceNewThread: input.forceNewThread,
     ...(kickoffMessage ? { kickoffMessage } : {}),
+    ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
   });
   if (includeFullThreadContext) {
     await markDiscordThreadHistoryDelivered({

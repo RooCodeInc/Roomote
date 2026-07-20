@@ -452,6 +452,7 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         requesterDiscordUserId: 'discord-user-1',
         launchOwnerUserId: 'roomote-user-1',
+        intakeAckPinned: true,
         queuedMessage: expect.objectContaining({
           provider: 'discord',
           text: 'Fix the flaky tests',
@@ -480,6 +481,10 @@ describe('Discord Gateway event handler', () => {
       name: '👀',
     });
     expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
+    const startArgs = mocks.startNewTask.mock.calls.at(-1)?.[0] as {
+      intakeAckPinned?: boolean;
+    };
+    expect(startArgs.intakeAckPinned).toBeUndefined();
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         ok: true,
