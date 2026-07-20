@@ -61,8 +61,8 @@ function ReleaseNotesBody({
   if (!hasContent) {
     return (
       <p className="text-sm text-muted-foreground">
-        Release notes for {toReleaseTag(version)} are unavailable right now.
-        Open the GitHub release for full details.
+        Release notes for {toReleaseTag(version)} are unavailable right now. You
+        can view the details on Github.
       </p>
     );
   }
@@ -131,12 +131,12 @@ export function ReleaseNotesDialog({
     mode === 'whats-new'
       ? 'Highlights from the release now running in this deployment.'
       : runningVersion
-        ? `You are on ${toReleaseTag(runningVersion)}. A newer release is ready to install.`
+        ? `You are on ${toReleaseTag(runningVersion)}. You may want to upgrade.`
         : 'A newer release is ready to install.';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto" size="2xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -150,29 +150,31 @@ export function ReleaseNotesDialog({
           isLoading={notesQuery.isLoading}
         />
 
+        {mode === 'update-available' ? (
+          <p className="text-sm">
+            For upgrade instructions, check our{' '}
+            <a
+              href={DOCS_SELF_HOSTING_URL}
+              target="_blank"
+              className="underline"
+              rel="noreferrer"
+            >
+              self-hosting docs.
+            </a>
+          </p>
+        ) : null}
+
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="outline" asChild>
               <a href={htmlUrl} target="_blank" rel="noreferrer">
-                View on GitHub
-                <SquareArrowOutUpRight className="size-3.5" />
+                View details
+                <SquareArrowOutUpRight />
               </a>
             </Button>
-            {mode === 'update-available' ? (
-              <Button variant="outline" size="sm" asChild>
-                <a
-                  href={DOCS_SELF_HOSTING_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Upgrade docs
-                  <SquareArrowOutUpRight className="size-3.5" />
-                </a>
-              </Button>
-            ) : null}
           </div>
           <Button type="button" onClick={() => onOpenChange(false)}>
-            {mode === 'whats-new' ? 'Got it' : 'Close'}
+            {mode === 'whats-new' ? 'Got it' : 'Upgrade later'}
           </Button>
         </DialogFooter>
       </DialogContent>

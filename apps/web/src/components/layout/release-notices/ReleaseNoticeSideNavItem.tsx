@@ -112,6 +112,7 @@ export function ReleaseNoticeSideNavItem({
     <>
       <SideNavItem
         icon={noticeKind === 'whats-new' ? Sparkles : Astroid}
+        className="relative -left-0.5 [&_svg]:stroke-1"
         label={noticeKind === 'whats-new' ? "What's new" : 'Update available'}
         tooltip={
           noticeKind === 'whats-new'
@@ -121,7 +122,7 @@ export function ReleaseNoticeSideNavItem({
         description={
           noticeKind === 'whats-new'
             ? 'See what changed in this release'
-            : 'A newer Roomote release is ready'
+            : "Find out what's new"
         }
         expanded={expanded}
         active={false}
