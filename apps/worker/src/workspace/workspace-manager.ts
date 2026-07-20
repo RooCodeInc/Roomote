@@ -90,6 +90,16 @@ function parseOriginHeadLsRemote(stdout?: string): string | null {
   return null;
 }
 
+function parseLocalOriginHead(stdout?: string): string | null {
+  const ref = stdout?.trim();
+
+  if (!ref?.startsWith('origin/')) {
+    return null;
+  }
+
+  return ref.slice('origin/'.length) || null;
+}
+
 function renderToolVersionsFile(
   toolVersionsConfig: Record<string, string>,
 ): string {
@@ -837,31 +847,87 @@ export class WorkspaceManager {
     targetBranch: string;
     allowRemoteHeadFallback: boolean;
   }): Promise<string> {
-    const originHeadBranch = allowRemoteHeadFallback
-      ? await this.resolveOriginHeadBranch(executor)
-      : null;
+    if (!allowRemoteHeadFallback) {
+      return targetBranch;
+    }
+
+    const originHeadBranch =
+      (await this.resolveLocalOriginHeadBranch(executor)) ??
+      (await this.resolveRemoteOriginHeadBranch(executor));
 
     if (originHeadBranch && originHeadBranch !== targetBranch) {
       console.warn(
-        `Resolved remote HEAD for ${repoFullName} to ${originHeadBranch}; ignoring stale default branch ${targetBranch}.`,
+        `Resolved origin/HEAD for ${repoFullName} to ${originHeadBranch}; ignoring stale default branch ${targetBranch}.`,
       );
       return originHeadBranch;
     }
 
-    return originHeadBranch ?? targetBranch;
+    if (
+      originHeadBranch ||
+      (await this.remoteTrackingBranchExists(executor, targetBranch))
+    ) {
+      return originHeadBranch ?? targetBranch;
+    }
+
+    throw new Error(
+      `Could not determine the default branch for ${repoFullName}: origin/HEAD was unavailable and stored branch origin/${targetBranch} does not exist.`,
+    );
   }
 
-  private async resolveOriginHeadBranch(
+  private async resolveLocalOriginHeadBranch(
+    executor: CommandExecutor,
+  ): Promise<string | null> {
+    const symbolicRefResult = await executor.execute({
+      name: 'Git resolve local origin/HEAD',
+      run: 'git symbolic-ref --quiet --short refs/remotes/origin/HEAD',
+      timeout: 60,
+      continue_on_error: true,
+    });
+    const branch = parseLocalOriginHead(symbolicRefResult.stdout);
+
+    if (!branch) {
+      return null;
+    }
+
+    return (await this.remoteTrackingBranchExists(executor, branch))
+      ? branch
+      : null;
+  }
+
+  private async resolveRemoteOriginHeadBranch(
     executor: CommandExecutor,
   ): Promise<string | null> {
     const lsRemoteResult = await executor.execute({
       name: 'Git resolve remote HEAD',
       run: 'git ls-remote --symref origin HEAD',
       timeout: 60,
+      retries: 1,
       continue_on_error: true,
     });
 
-    return parseOriginHeadLsRemote(lsRemoteResult.stdout);
+    const branch = parseOriginHeadLsRemote(lsRemoteResult.stdout);
+
+    if (!branch) {
+      return null;
+    }
+
+    return (await this.remoteTrackingBranchExists(executor, branch))
+      ? branch
+      : null;
+  }
+
+  private async remoteTrackingBranchExists(
+    executor: CommandExecutor,
+    branch: string,
+  ): Promise<boolean> {
+    const result = await executor.execute({
+      name: 'Git verify remote branch',
+      run: `git show-ref --verify --quiet 'refs/remotes/origin/${shellEscape(branch)}'`,
+      timeout: 60,
+      continue_on_error: true,
+    });
+
+    return result.success;
   }
 
   private async fetchRepositoryWithRetry({
