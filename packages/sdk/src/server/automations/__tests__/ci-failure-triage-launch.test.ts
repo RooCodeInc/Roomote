@@ -414,9 +414,10 @@ describe('launchCiFailureTriageForFailedRun', () => {
       communicationChannelId: 'D999',
     });
 
+    const postMessage = vi.fn().mockResolvedValue({ messageId: 'msg-1' });
     mockGetCommunicationProviderAdapter.mockResolvedValue({
       provider: 'discord',
-      postMessage: vi.fn().mockResolvedValue({ messageId: 'msg-1' }),
+      postMessage,
     });
 
     const result = await launchCiFailureTriageForFailedRun(failedRun);
@@ -425,7 +426,72 @@ describe('launchCiFailureTriageForFailedRun', () => {
     const payload = mockEnqueueTask.mock.calls[0]?.[0].task.payload;
     expect(payload.communicationProvider).toBe('discord');
     expect(payload.communicationChannelId).toBe('D999');
+    expect(payload.communicationMessageId).toBe('msg-1');
+    expect(payload.communicationThreadId).toBeUndefined();
     expect(payload.channel).toBeUndefined();
     expect(payload.description).toContain('announced=true');
+  });
+
+  it('stamps Teams announcement ids on the payload for reply routing', async () => {
+    mockListConnectedCommunicationProviders.mockResolvedValue(['teams']);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'teams',
+      channelId: '19:teams@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      source: 'primary_conversation',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({
+      communicationProvider: 'teams',
+      communicationChannelId: '19:teams@thread.tacv2',
+      communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+    });
+
+    mockGetCommunicationProviderAdapter.mockResolvedValue({
+      provider: 'teams',
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'activity-root' }),
+    });
+
+    await launchCiFailureTriageForFailedRun(failedRun);
+
+    const payload = mockEnqueueTask.mock.calls[0]?.[0].task.payload;
+    expect(payload.communicationMessageId).toBe('activity-root');
+    expect(payload.communicationThreadId).toBe('activity-root');
+  });
+
+  it('replies to Discord announcements with replyToMessageId, not threadId', async () => {
+    mockListConnectedCommunicationProviders.mockResolvedValue(['discord']);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'D999',
+      source: 'primary_conversation',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({
+      communicationProvider: 'discord',
+      communicationChannelId: 'D999',
+    });
+    mockEnqueueTask.mockRejectedValue(new Error('enqueue failed'));
+
+    const postMessage = vi
+      .fn()
+      .mockResolvedValueOnce({ messageId: 'opener-1' })
+      .mockResolvedValueOnce({ messageId: 'recovery-1' });
+    mockGetCommunicationProviderAdapter.mockResolvedValue({
+      provider: 'discord',
+      postMessage,
+    });
+
+    await launchCiFailureTriageForFailedRun(failedRun);
+
+    expect(postMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        channelId: 'D999',
+        replyToMessageId: 'opener-1',
+        text: expect.stringContaining(
+          "I couldn't start the investigation for this failure.",
+        ),
+      }),
+    );
+    expect(postMessage.mock.calls[1]?.[0]).not.toHaveProperty('threadId');
   });
 });

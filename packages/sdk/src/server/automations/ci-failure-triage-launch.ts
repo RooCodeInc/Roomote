@@ -151,9 +151,47 @@ async function postNonSlackInvestigationAnnouncement(params: {
   }
 }
 
+/**
+ * Stamp the announcement identity onto the task payload so send_chat_reply /
+ * finish-run can target the existing investigating opener.
+ *
+ * - Slack uses `thread_ts` / channel fields (handled separately).
+ * - Teams reuse the activity id as both reply root and thread scope.
+ * - Discord and Telegram keep the channel/chat id as the destination and only
+ *   stamp `communicationMessageId` as the reply target — Discord's adapter
+ *   treats `threadId` as a destination channel id, not a message id.
+ */
+function buildAnnouncementTaskPayloadFields(params: {
+  destination: ResolvedAutomationDestination;
+  announcementMessageId: string | null;
+}): Record<string, string> {
+  const base = buildDestinationTaskPayloadFields(params.destination);
+  if (!params.announcementMessageId) {
+    return base;
+  }
+
+  if (params.destination.provider === 'slack') {
+    return {
+      ...base,
+      channel: params.destination.channelId,
+      slackChannel: params.destination.channelId,
+      thread_ts: params.announcementMessageId,
+      slackThreadTs: params.announcementMessageId,
+    };
+  }
+
+  return {
+    ...base,
+    communicationMessageId: params.announcementMessageId,
+    ...(params.destination.provider === 'teams'
+      ? { communicationThreadId: params.announcementMessageId }
+      : {}),
+  };
+}
+
 async function postAnnouncementThreadReply(params: {
   destination: ResolvedAutomationDestination;
-  threadId: string;
+  announcementMessageId: string;
   text: string;
   slack?: SlackNotifier | null;
 }): Promise<void> {
@@ -161,7 +199,7 @@ async function postAnnouncementThreadReply(params: {
     if (params.destination.provider === 'slack' && params.slack) {
       await params.slack.postMessage({
         channel: params.destination.channelId,
-        thread_ts: params.threadId,
+        thread_ts: params.announcementMessageId,
         text: params.text,
         unfurl_links: false,
         unfurl_media: false,
@@ -179,12 +217,16 @@ async function postAnnouncementThreadReply(params: {
     const serviceUrlFields = params.destination.serviceUrl
       ? { serviceUrl: params.destination.serviceUrl }
       : {};
+
+    // Keep channelId as the original destination. For Discord/Telegram, pass
+    // the opener message only via replyToMessageId — never as threadId.
+    // Teams also needs replyToMessageId (and may use threadId as activity root).
     await adapter.postMessage({
       channelId: params.destination.channelId,
       ...serviceUrlFields,
-      threadId: params.threadId,
+      replyToMessageId: params.announcementMessageId,
       ...(params.destination.provider === 'teams'
-        ? { replyToMessageId: params.threadId }
+        ? { threadId: params.announcementMessageId }
         : {}),
       text: params.text,
       textFormat: 'markdown',
@@ -329,17 +371,10 @@ export async function launchCiFailureTriageForFailedRun(
   }
 
   const channelId = destination.channelId;
-  const destinationPayloadFields =
-    buildDestinationTaskPayloadFields(destination);
-  const slackThreadFields =
-    destination.provider === 'slack' && announcementTs
-      ? {
-          channel: channelId,
-          slackChannel: channelId,
-          thread_ts: announcementTs,
-          slackThreadTs: announcementTs,
-        }
-      : {};
+  const announcementPayloadFields = buildAnnouncementTaskPayloadFields({
+    destination,
+    announcementMessageId: announcementTs,
+  });
 
   try {
     const launchResult = await enqueueTask(
@@ -369,8 +404,7 @@ export async function launchCiFailureTriageForFailedRun(
               hasAnnouncementThread: announcementTs !== null,
               destinationProvider: destination.provider,
             }),
-            ...destinationPayloadFields,
-            ...slackThreadFields,
+            ...announcementPayloadFields,
             visibleInTranscript: false,
           },
         },
@@ -459,7 +493,7 @@ export async function launchCiFailureTriageForFailedRun(
     if (announcementTs) {
       await postAnnouncementThreadReply({
         destination,
-        threadId: announcementTs,
+        announcementMessageId: announcementTs,
         text: "I couldn't start the investigation for this failure. I'll pick it up on the next failing run or a manual scan from the Automations page.",
         slack: slackNotifier,
       });
