@@ -81,6 +81,7 @@ import {
   removeGitLabWebhooksForProjects,
   getGitLabDeploymentUser,
   resolveGitLabBaseUrl,
+  resolveGitLabInstanceHost,
   revokeGitLabScopedProjectToken,
   type GitLabProject,
   listGitLabProjects,
@@ -138,6 +139,17 @@ describe('resolveGitLabBaseUrl', () => {
     expect(normalizeGitLabBaseUrl('gitlab.example.com////////')).toBe(
       'https://gitlab.example.com',
     );
+  });
+
+  it('resolves the deployment instance host, keeping any explicit port', async () => {
+    process.env.GITLAB_BASE_URL = 'https://gitlab.example.com:8443/api/v4/';
+
+    await expect(resolveGitLabInstanceHost()).resolves.toBe(
+      'gitlab.example.com:8443',
+    );
+
+    delete process.env.GITLAB_BASE_URL;
+    await expect(resolveGitLabInstanceHost()).resolves.toBe('gitlab.com');
   });
 });
 

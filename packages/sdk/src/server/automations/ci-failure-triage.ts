@@ -16,6 +16,7 @@ import {
   getGitLabPipelineFailureEvidence,
   getLatestGitLabPipeline,
   isNestedGitLabPipelineSource,
+  resolveGitLabInstanceHost,
 } from '@roomote/gitlab';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
@@ -94,6 +95,10 @@ export async function ciFailureTriageJob(
     const channelId = destination.channelId;
     let launched = 0;
     let consideredWithEnvironment = 0;
+    // Resolved once on first GitLab repository; the deployment holds a single
+    // GitLab credential/base URL, so only repositories on that host can be
+    // inspected with it.
+    let deploymentGitLabHost: string | undefined;
 
     // Walk every provider+host+fullName identity and resolve coverage through
     // the repository-id environment mapping (not fullName).
@@ -124,6 +129,28 @@ export async function ciFailureTriageJob(
       let claimMarker = `manual:${selectedRepository.fullName}`;
 
       if (sourceControlProvider === 'gitlab') {
+        try {
+          deploymentGitLabHost ??= await resolveGitLabInstanceHost();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to resolve the GitLab instance host (${message})`,
+          );
+          continue;
+        }
+
+        // Project ids are only unique per instance; querying another host's
+        // repository with the deployment credential would read (and possibly
+        // triage) an unrelated project.
+        const repositoryHost = selectedRepository.host?.trim().toLowerCase();
+        if (repositoryHost && repositoryHost !== deploymentGitLabHost) {
+          console.log(
+            `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: repository host ${repositoryHost} does not match the deployment GitLab instance ${deploymentGitLabHost}`,
+          );
+          continue;
+        }
+
         const projectId = selectedRepository.externalRepoId?.trim();
         if (!projectId) {
           result.errors.push(

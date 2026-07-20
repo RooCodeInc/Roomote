@@ -11,6 +11,7 @@ const {
   mockFindEnvironmentForRepo,
   mockGetLatestGitLabPipeline,
   mockGetGitLabPipelineFailureEvidence,
+  mockResolveGitLabInstanceHost,
   mockTryClaimCiFailureTriageInvestigation,
   mockReleaseCiFailureTriageInvestigation,
   mockBuildCiFailureTriageFingerprint,
@@ -27,6 +28,7 @@ const {
   mockFindEnvironmentForRepo: vi.fn(),
   mockGetLatestGitLabPipeline: vi.fn(),
   mockGetGitLabPipelineFailureEvidence: vi.fn(),
+  mockResolveGitLabInstanceHost: vi.fn(),
   mockTryClaimCiFailureTriageInvestigation: vi.fn(),
   mockReleaseCiFailureTriageInvestigation: vi.fn(),
   mockBuildCiFailureTriageFingerprint: vi.fn(),
@@ -64,6 +66,7 @@ vi.mock('../github-deployment-scope', () => ({
 vi.mock('@roomote/gitlab', () => ({
   getLatestGitLabPipeline: mockGetLatestGitLabPipeline,
   getGitLabPipelineFailureEvidence: mockGetGitLabPipelineFailureEvidence,
+  resolveGitLabInstanceHost: mockResolveGitLabInstanceHost,
   isNestedGitLabPipelineSource: (source: string | null | undefined) => {
     const normalized = source?.trim().toLowerCase();
     return (
@@ -119,6 +122,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     mockGetGitLabPipelineFailureEvidence.mockResolvedValue(
       'job="test" id=21\nAssertionError',
     );
+    mockResolveGitLabInstanceHost.mockResolvedValue('gitlab.com');
     mockBuildCiFailureTriageFingerprint.mockReturnValue('fp-manual');
     mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(true);
     mockBuildCiFailureTriagePrompt.mockReturnValue('$ci-failure-triage prompt');
@@ -218,7 +222,11 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     );
   });
 
-  it('resolves distinct environments for same-path repos on different hosts', async () => {
+  it('only inspects GitLab repos on the deployment instance host', async () => {
+    // Same-path projects on two instances: the deployment credential belongs
+    // to gitlab.example.com, so the gitlab.com row must never be queried with
+    // it (project ids are only unique per instance).
+    mockResolveGitLabInstanceHost.mockResolvedValue('gitlab.example.com');
     mockGetActiveRepositoriesForProviders.mockResolvedValue([
       {
         id: 'repo-gl-cloud',
@@ -237,25 +245,15 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
         defaultBranch: 'main',
       },
     ]);
-    mockGetLatestGitLabPipeline
-      .mockResolvedValueOnce({
-        id: 1,
-        name: 'default',
-        ref: 'main',
-        sha: 'cloud-sha',
-        status: 'success',
-        source: 'push',
-        web_url: 'https://gitlab.com/acme/api/-/pipelines/1',
-      })
-      .mockResolvedValueOnce({
-        id: 2,
-        name: 'default',
-        ref: 'main',
-        sha: 'self-sha',
-        status: 'failed',
-        source: 'push',
-        web_url: 'https://gitlab.example.com/acme/api/-/pipelines/2',
-      });
+    mockGetLatestGitLabPipeline.mockResolvedValueOnce({
+      id: 2,
+      name: 'default',
+      ref: 'main',
+      sha: 'self-sha',
+      status: 'failed',
+      source: 'push',
+      web_url: 'https://gitlab.example.com/acme/api/-/pipelines/2',
+    });
     mockGetGitLabPipelineFailureEvidence.mockResolvedValue('fail-self');
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
       provider: 'slack',
@@ -267,14 +265,11 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     const result = await ciFailureTriageJob({ manualTrigger: true });
 
     expect(result.launchedTaskId).toBe('task-1');
-    expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenNthCalledWith(
-      1,
-      'repo-gl-cloud',
-    );
-    expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenNthCalledWith(
-      2,
-      'repo-gl-self',
-    );
+    expect(mockGetLatestGitLabPipeline).toHaveBeenCalledTimes(1);
+    expect(mockGetLatestGitLabPipeline).toHaveBeenCalledWith({
+      projectId: '22',
+      ref: 'main',
+    });
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
@@ -288,14 +283,6 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       }),
       expect.anything(),
     );
-    expect(mockGetLatestGitLabPipeline).toHaveBeenNthCalledWith(1, {
-      projectId: '11',
-      ref: 'main',
-    });
-    expect(mockGetLatestGitLabPipeline).toHaveBeenNthCalledWith(2, {
-      projectId: '22',
-      ref: 'main',
-    });
   });
 
   it('skips GitLab manual Run now when the latest pipeline is green', async () => {

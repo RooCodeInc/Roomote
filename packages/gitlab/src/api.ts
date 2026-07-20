@@ -322,6 +322,15 @@ export async function resolveGitLabBaseUrl(): Promise<string> {
   return normalizeGitLabBaseUrl(baseUrl ?? DEFAULT_GITLAB_BASE_URL);
 }
 
+/**
+ * Host (`hostname[:port]`) of the deployment-configured GitLab instance. The
+ * deployment holds one GitLab credential and base URL, so API calls made with
+ * it must only target repositories on this host.
+ */
+export async function resolveGitLabInstanceHost(): Promise<string> {
+  return hostFromBaseUrl(await resolveGitLabBaseUrl());
+}
+
 export function buildGitLabApiBaseUrl(baseUrl: string): string {
   return new URL('api/v4', `${normalizeGitLabBaseUrl(baseUrl)}/`).toString();
 }
