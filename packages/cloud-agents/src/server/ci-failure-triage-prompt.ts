@@ -13,6 +13,8 @@ export type CiFailureTriageTriggeringRun = {
   runUrl: string;
   headBranch: string;
   headSha: string;
+  /** Source-control provider when known; omit for GitHub-default prompts. */
+  provider?: string;
 };
 
 function destinationPromptContext(provider: CommunicationProvider): {
@@ -81,7 +83,11 @@ export function buildCiFailureTriagePrompt({
     <workflow>${triggeringRun.workflowName}</workflow>
     <run_url>${triggeringRun.runUrl}</run_url>
     <head_branch>${triggeringRun.headBranch}</head_branch>
-    <head_sha>${triggeringRun.headSha}</head_sha>
+    <head_sha>${triggeringRun.headSha}</head_sha>${
+      triggeringRun.provider
+        ? `\n    <source_control_provider>${triggeringRun.provider}</source_control_provider>`
+        : ''
+    }
   </triggering_run>`
     : '';
 

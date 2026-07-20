@@ -14,6 +14,7 @@ vi.mock('@roomote/redis', () => ({
 
 import {
   buildCiFailureTriageClaimKey,
+  buildCiFailureTriageDebounceKey,
   buildCiFailureTriageFingerprint,
   buildCiFailureTriageRepoClaimKey,
   releaseCiFailureTriageInvestigation,
@@ -25,7 +26,7 @@ describe('ci-failure-triage-claims', () => {
     vi.clearAllMocks();
   });
 
-  it('builds stable fingerprint and claim keys', () => {
+  it('builds stable fingerprint and provider-scoped claim keys', () => {
     const fingerprint = buildCiFailureTriageFingerprint({
       repositoryFullName: 'Acme/API',
       workflowName: ' CI ',
@@ -33,12 +34,21 @@ describe('ci-failure-triage-claims', () => {
     });
 
     expect(fingerprint).toBe('acme/api::ci::main');
-    expect(buildCiFailureTriageClaimKey(fingerprint)).toBe(
-      'github:ci-failure-triage:active:acme/api::ci::main',
-    );
-    expect(buildCiFailureTriageRepoClaimKey('Acme/API')).toBe(
-      'github:ci-failure-triage:active-repo:acme/api',
-    );
+    expect(
+      buildCiFailureTriageClaimKey({ provider: 'github', fingerprint }),
+    ).toBe('ci-failure-triage:github:active:acme/api::ci::main');
+    expect(
+      buildCiFailureTriageRepoClaimKey({
+        provider: 'gitlab',
+        repositoryFullName: 'Acme/API',
+      }),
+    ).toBe('ci-failure-triage:gitlab:active-repo:acme/api');
+    expect(
+      buildCiFailureTriageDebounceKey({
+        provider: 'github',
+        repositoryId: 'repo-row-1',
+      }),
+    ).toBe('ci-failure-triage:github:debounce:repo-row-1');
   });
 
   it('claims both repo and fingerprint keys', async () => {
@@ -46,6 +56,7 @@ describe('ci-failure-triage-claims', () => {
 
     await expect(
       tryClaimCiFailureTriageInvestigation({
+        provider: 'github',
         repositoryFullName: 'acme/api',
         fingerprint: 'acme/api::ci::main',
         marker: 'https://example.com/run/1',
@@ -54,10 +65,10 @@ describe('ci-failure-triage-claims', () => {
 
     expect(mockSet).toHaveBeenCalledTimes(2);
     expect(mockSet.mock.calls[0]?.[0]).toBe(
-      'github:ci-failure-triage:active-repo:acme/api',
+      'ci-failure-triage:github:active-repo:acme/api',
     );
     expect(mockSet.mock.calls[1]?.[0]).toBe(
-      'github:ci-failure-triage:active:acme/api::ci::main',
+      'ci-failure-triage:github:active:acme/api::ci::main',
     );
   });
 
@@ -67,6 +78,7 @@ describe('ci-failure-triage-claims', () => {
 
     await expect(
       tryClaimCiFailureTriageInvestigation({
+        provider: 'github',
         repositoryFullName: 'acme/api',
         fingerprint: 'acme/api::ci::main',
         marker: 'run-1',
@@ -74,7 +86,7 @@ describe('ci-failure-triage-claims', () => {
     ).resolves.toBe(false);
 
     expect(mockDel).toHaveBeenCalledWith(
-      'github:ci-failure-triage:active-repo:acme/api',
+      'ci-failure-triage:github:active-repo:acme/api',
     );
   });
 
@@ -82,15 +94,16 @@ describe('ci-failure-triage-claims', () => {
     mockDel.mockResolvedValue(1);
 
     await releaseCiFailureTriageInvestigation({
+      provider: 'github',
       repositoryFullName: 'acme/api',
       fingerprint: 'acme/api::ci::main',
     });
 
     expect(mockDel).toHaveBeenCalledWith(
-      'github:ci-failure-triage:active:acme/api::ci::main',
+      'ci-failure-triage:github:active:acme/api::ci::main',
     );
     expect(mockDel).toHaveBeenCalledWith(
-      'github:ci-failure-triage:active-repo:acme/api',
+      'ci-failure-triage:github:active-repo:acme/api',
     );
   });
 });
