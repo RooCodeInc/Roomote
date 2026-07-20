@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(),
   getChannel: vi.fn(),
   addReaction: vi.fn(),
+  removeReaction: vi.fn(),
   createDirectMessage: vi.fn(),
   postMessage: vi.fn(),
   channelAutoStart: vi.fn(),
@@ -155,6 +156,7 @@ app.route('/api/internal/discord', discord);
 const provider = {
   getChannel: mocks.getChannel,
   addReaction: mocks.addReaction,
+  removeReaction: mocks.removeReaction,
   createDirectMessage: mocks.createDirectMessage,
   postMessage: mocks.postMessage,
 };
@@ -225,6 +227,7 @@ describe('Discord Gateway event handler', () => {
     mocks.findActiveRun.mockResolvedValue(undefined);
     mocks.findCompletedRun.mockResolvedValue(null);
     mocks.findSourceRun.mockResolvedValue(null);
+    mocks.removeReaction.mockResolvedValue(undefined);
     mocks.processAttachments.mockResolvedValue({
       images: [],
       attachmentTexts: [],
@@ -318,6 +321,16 @@ describe('Discord Gateway event handler', () => {
         queuedMessage: expect.objectContaining({ text: 'use API instead' }),
       }),
     );
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
+    expect(mocks.removeReaction).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
@@ -452,6 +465,7 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         requesterDiscordUserId: 'discord-user-1',
         launchOwnerUserId: 'roomote-user-1',
+        intakeAckPinned: true,
         queuedMessage: expect.objectContaining({
           provider: 'discord',
           text: 'Fix the flaky tests',
@@ -480,6 +494,10 @@ describe('Discord Gateway event handler', () => {
       name: '👀',
     });
     expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
+    const startArgs = mocks.startNewTask.mock.calls.at(-1)?.[0] as {
+      intakeAckPinned?: boolean;
+    };
+    expect(startArgs.intakeAckPinned).toBeUndefined();
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         ok: true,

@@ -1,4 +1,5 @@
 export * from './find-task-run';
+export * from './clear-communication-ack-reaction';
 export * from './update-task-run';
 export * from './update-runtime-state';
 export * from './touch-worker-heartbeat';

@@ -250,6 +250,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       expect.objectContaining({
         skipRoutingConfirmation: true,
         launchOwnerUserId: 'roomote-user-1',
+        intakeAckPinned: true,
         channelAutoStart: {
           agentPromptPrefix: 'Treat each message as a bug report.',
           initiator: {
@@ -397,6 +398,10 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     await flushBackgroundWork();
 
     expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
+    const startArgs = mocks.startNewTask.mock.calls[0]![0] as {
+      intakeAckPinned?: boolean;
+    };
+    expect(startArgs.intakeAckPinned).toBeUndefined();
   });
 
   it('releases the routing lock when the launch fails', async () => {

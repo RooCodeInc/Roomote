@@ -303,12 +303,14 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         }
       }
 
+      let intakeAckPinned = false;
       try {
         await provider.addReaction({
           channelId: channel.channelId,
           messageId: message.id,
           name: '👀',
         });
+        intakeAckPinned = true;
       } catch {
         // The launch matters more than the acknowledgement.
       }
@@ -328,6 +330,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
             : {}),
           initiator,
         },
+        ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
       });
 
       if (started.status !== 'started') {

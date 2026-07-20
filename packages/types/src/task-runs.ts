@@ -937,6 +937,12 @@ const sharedTaskPayloadSchema = z.object({
    * Must be a real message id, never an interaction id.
    */
   discordReactionMessageId: z.string().optional(),
+  /**
+   * True when intake pinned 👀 on the origin reaction target before launch.
+   * Worker onStart clears that eyes reaction only when this flag is set so
+   * resume runs and interaction launches without intake eyes do not DELETE 404s.
+   */
+  discordIntakeAckPending: z.boolean().optional(),
   /** True when the Telegram topic was created specifically for this task. */
   telegramTaskTopic: z.boolean().optional(),
   /** True when the Discord thread/forum post was created for this task. */
@@ -1595,6 +1601,78 @@ export function getCommunicationMessageIdFromTaskPayload(
     getNonEmptyTaskPayloadString(payload, 'communicationMessageId') ??
     getNonEmptyTaskPayloadString(payload, 'teamsMessageId')
   );
+}
+
+/**
+ * Discord channel + message that intake (👀) and terminal platform reactions
+ * target. Prefer the dedicated reaction fields (always real message ids) over
+ * communication message metadata, which can lag for interaction launches.
+ */
+export function getDiscordReactionTargetFromTaskPayload(payload: unknown): {
+  channelId: string;
+  messageId: string;
+} | null {
+  const reactionChannelId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionChannelId',
+  );
+  const reactionMessageId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionMessageId',
+  );
+
+  // Dedicated reaction coordinates are one atomic target. Mixing one of them
+  // with communication metadata can pair a parent channel with a thread-only
+  // message and produce a Discord 404.
+  if (reactionChannelId && reactionMessageId) {
+    return { channelId: reactionChannelId, messageId: reactionMessageId };
+  }
+
+  const channelId =
+    getCommunicationThreadIdFromTaskPayload(payload) ??
+    getCommunicationChannelFromTaskPayload(payload);
+  const messageId = getCommunicationMessageIdFromTaskPayload(payload);
+
+  if (!channelId || !messageId) {
+    return null;
+  }
+
+  return { channelId, messageId };
+}
+
+/**
+ * Origin of a real Discord intake 👀 reaction to clear on worker start.
+ * Requires the dedicated reaction target plus the intake-pending flag set at
+ * enqueue when eyes were actually pinned (not resume / interaction-only targets).
+ */
+export function getDiscordIntakeAckReactionTargetFromTaskPayload(
+  payload: unknown,
+): { channelId: string; messageId: string } | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  if (
+    (payload as { discordIntakeAckPending?: unknown })
+      .discordIntakeAckPending !== true
+  ) {
+    return null;
+  }
+
+  const channelId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionChannelId',
+  );
+  const messageId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionMessageId',
+  );
+
+  if (!channelId || !messageId) {
+    return null;
+  }
+
+  return { channelId, messageId };
 }
 
 export function getSlackChannelFromTaskPayload(

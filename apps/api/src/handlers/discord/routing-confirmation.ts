@@ -84,6 +84,11 @@ type PendingDiscordRoute = {
    * later button / reply path still receives the full Slack-style transcript.
    */
   agentPromptText?: string;
+  /**
+   * Whether intake successfully pinned 👀 before the confirmation card.
+   * Carried through so later launch can set discordIntakeAckPending accurately.
+   */
+  intakeAckPinned?: boolean;
 };
 
 function pendingRouteKey(id: string): string {
@@ -100,6 +105,28 @@ function pendingRouteCardPointerKey(messageId: string): string {
 
 function replyChannel(pending: PendingDiscordRoute): DiscordChannelContext {
   return pending.cardChannel ?? pending.channel;
+}
+
+async function clearPendingDiscordIntakeAck(input: {
+  provider: DiscordCommunicationProvider;
+  pending: PendingDiscordRoute;
+}): Promise<void> {
+  const messageId = input.pending.metadata.communicationAnchorMessageId;
+  if (
+    !input.pending.intakeAckPinned ||
+    !messageId ||
+    !input.provider.removeReaction
+  ) {
+    return;
+  }
+
+  await input.provider
+    .removeReaction({
+      channelId: input.pending.channel.channelId,
+      messageId,
+      name: 'eyes',
+    })
+    .catch(() => undefined);
 }
 
 function safeConversationPointerChannelId(
@@ -297,7 +324,13 @@ async function autoConfirmDiscordRouting(input: {
   const pending = await claimPendingRoute(input.pendingRouteId);
   if (!pending || pending.suggestedIndex === null) return;
   const option = pending.options[pending.suggestedIndex];
-  if (!option) return;
+  if (!option) {
+    await clearPendingDiscordIntakeAck({
+      provider: input.provider,
+      pending,
+    });
+    return;
+  }
   try {
     const result = await launchPendingDiscordRoute({
       provider: input.provider,
@@ -397,6 +430,7 @@ export async function requestDiscordRoutingConfirmation(input: {
   routingDecision: RoutingDecision;
   forceNewThread?: boolean;
   agentPromptText?: string;
+  intakeAckPinned?: boolean;
 }): Promise<{ pendingRouteId: string }> {
   const pendingRouteId = randomBytes(9).toString('base64url');
   const suggestedWorkspace =
@@ -448,6 +482,7 @@ export async function requestDiscordRoutingConfirmation(input: {
     ...(input.agentPromptText?.trim()
       ? { agentPromptText: input.agentPromptText.trim() }
       : {}),
+    ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
   };
   await storePendingRoute(pendingRouteId, pending);
   // Only name a best match when the router actually picked one. Without a
@@ -578,11 +613,19 @@ async function launchPendingDiscordRoute(input: {
     sourceEventId: input.pending.queuedMessage.ts,
   });
   if (existingRun) {
+    await clearPendingDiscordIntakeAck({
+      provider: input.provider,
+      pending: input.pending,
+    });
     return { status: 'already_started' as const, existingRun };
   }
 
   const workspace = await resolveDiscordWorkspace(input.option.workspace);
   if (!workspace) {
+    await clearPendingDiscordIntakeAck({
+      provider: input.provider,
+      pending: input.pending,
+    });
     return { status: 'unavailable' as const };
   }
 
@@ -609,6 +652,7 @@ async function launchPendingDiscordRoute(input: {
       ? { agentPromptText: input.pending.agentPromptText.trim() }
       : {}),
     ...(kickoffMessage ? { kickoffMessage } : {}),
+    ...(input.pending.intakeAckPinned ? { intakeAckPinned: true } : {}),
     ...(input.replaceMessage
       ? { replaceMessage: input.replaceMessage }
       : input.pending.cardChannel && input.pending.cardMessageId
@@ -749,6 +793,10 @@ export async function handleDiscordRoutingReply(input: {
         pending,
         text: 'Canceled the request.',
       });
+      await clearPendingDiscordIntakeAck({
+        provider: input.provider,
+        pending,
+      });
       return true;
     }
 
@@ -772,6 +820,10 @@ export async function handleDiscordRoutingReply(input: {
         applicationId: input.applicationId,
         pending,
         text: routingDecision.result.answer,
+      });
+      await clearPendingDiscordIntakeAck({
+        provider: input.provider,
+        pending,
       });
       return true;
     }
@@ -955,6 +1007,10 @@ export async function handleDiscordRoutingCallback(input: {
       },
       text: 'Canceled the request.',
     });
+    await clearPendingDiscordIntakeAck({
+      provider: input.provider,
+      pending,
+    });
     return;
   }
   const option = pending.options[input.callback.selection];
@@ -968,6 +1024,10 @@ export async function handleDiscordRoutingCallback(input: {
         interactionDeferred: input.interactionDeferred,
       },
       text: 'That workspace is no longer available. Send the request again.',
+    });
+    await clearPendingDiscordIntakeAck({
+      provider: input.provider,
+      pending,
     });
     return;
   }

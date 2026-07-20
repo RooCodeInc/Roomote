@@ -44,10 +44,10 @@ type DiscordReactionTarget = {
 };
 
 /**
- * Real MESSAGE_CREATE launches pin 👀 on the triggering message. Interaction
- * launches (`/new`) have no message target at intake, so they permanently
- * record the acknowledgement / thread-starter message as the reaction target
- * after launch.
+ * Real MESSAGE_CREATE launches pin 👀 on the triggering message before enqueue.
+ * Interaction launches (`/new`) have no message target at intake, so they
+ * permanently record the acknowledgement / thread-starter message as the
+ * terminal/cancel reaction target after launch (without a post-enqueue 👀).
  */
 function resolveDiscordOriginReactionTarget(input: {
   channel: DiscordChannelContext;
@@ -375,6 +375,12 @@ export async function launchDiscordTask(input: {
    * it becomes the Discord acknowledgement text instead of the static template.
    */
   kickoffMessage?: string | null;
+  /**
+   * True only when a pre-enqueue MESSAGE_CREATE 👀 reaction succeeded on the
+   * origin message. Worker onStart cleanup keys off this so failed soft-acks
+   * do not produce DELETE 404 warnings.
+   */
+  intakeAckPinned?: boolean;
 }) {
   let createdThread: DiscordTaskThread | null = null;
   const parentId = taskThreadParentId(input);
@@ -458,6 +464,10 @@ export async function launchDiscordTask(input: {
           ? {
               discordReactionChannelId: reactionTarget.channelId,
               discordReactionMessageId: reactionTarget.messageId,
+              // Only when the caller successfully pinned 👀 before enqueue.
+              ...(originReaction && input.intakeAckPinned
+                ? { discordIntakeAckPending: true }
+                : {}),
             }
           : {}),
       },
@@ -572,8 +582,9 @@ export async function launchDiscordTask(input: {
       });
 
   // Interaction launches (`/new`) have no MESSAGE_CREATE origin. Persist the
-  // real acknowledgement (or thread-starter) message so terminal/cancel
-  // reactions have a valid Discord reaction target.
+  // acknowledgement message so terminal/cancel reactions have a valid target.
+  // Do not pin 👀 here: intake eyes are MESSAGE_CREATE-only, and post-enqueue
+  // eyes race worker onStart cleanup (which can already have run).
   if (!originReaction && acknowledgement.messageId) {
     reactionTarget = {
       channelId: communicationThreadId ?? communicationChannelId,
@@ -589,15 +600,6 @@ export async function launchDiscordTask(input: {
         }`,
       );
     });
-    try {
-      await input.provider.addReaction({
-        channelId: reactionTarget.channelId,
-        messageId: reactionTarget.messageId,
-        name: '👀',
-      });
-    } catch {
-      // Soft ack only — the launch already succeeded.
-    }
   }
 
   if (createdThread) {

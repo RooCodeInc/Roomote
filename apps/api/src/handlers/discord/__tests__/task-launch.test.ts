@@ -443,6 +443,7 @@ describe('launchDiscordTask', () => {
         repoForPayload: 'acme/repo',
         workspaceDisplayName: 'Acme',
       },
+      intakeAckPinned: true,
     });
 
     expect(provider.createThreadFromMessage).toHaveBeenCalledWith({
@@ -462,11 +463,80 @@ describe('launchDiscordTask', () => {
             discordTaskThread: true,
             discordReactionChannelId: 'channel-1',
             discordReactionMessageId: 'message-1',
+            discordIntakeAckPending: true,
           }),
         },
       }),
       expect.anything(),
     );
+  });
+
+  it('omits discordIntakeAckPending when the pre-enqueue eyes add did not succeed', async () => {
+    const anchoredThread = {
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'Fix the flaky tests',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    };
+    const provider = {
+      createThreadFromMessage: vi.fn().mockResolvedValue(anchoredThread),
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi.fn().mockResolvedValue(anchoredThread),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+      // Soft-ack failed (or was never attempted).
+      intakeAckPinned: false,
+    });
+
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: {
+          type: 'standard',
+          payload: expect.objectContaining({
+            discordReactionChannelId: 'channel-1',
+            discordReactionMessageId: 'message-1',
+          }),
+        },
+      }),
+      expect.anything(),
+    );
+    const enqueuedPayload = mocks.enqueueTask.mock.calls[0]![0].task
+      .payload as {
+      discordIntakeAckPending?: boolean;
+    };
+    expect(enqueuedPayload.discordIntakeAckPending).toBeUndefined();
   });
 
   it('renames a recovered anchored thread when Discord keeps a stale provisional name', async () => {
@@ -647,11 +717,9 @@ describe('launchDiscordTask', () => {
       expect.anything(),
     );
     expect(mocks.dbUpdate).toHaveBeenCalled();
-    expect(provider.addReaction).toHaveBeenCalledWith({
-      channelId: 'dm-1',
-      messageId: 'ack-dm-1',
-      name: '👀',
-    });
+    // Intake eyes stay MESSAGE_CREATE-only; interaction launches only need a
+    // durable reaction target for terminal/cancel, not a post-enqueue 👀.
+    expect(provider.addReaction).not.toHaveBeenCalled();
   });
 
   it('falls back to a detached thread when the anchor message was deleted', async () => {

@@ -337,6 +337,10 @@ export const clearPendingCommunicationRequestUserInput = (
   options: AppRouterInput['taskRuns']['clearPendingCommunicationRequestUserInput'],
 ) => client.taskRuns.clearPendingCommunicationRequestUserInput.mutate(options);
 
+export const clearCommunicationAckReaction = (
+  options: AppRouterInput['taskRuns']['clearCommunicationAckReaction'],
+) => client.taskRuns.clearCommunicationAckReaction.mutate(options);
+
 export const getCommunicationRequestUserInputAnswers = (
   options: AppRouterInput['taskRuns']['getCommunicationRequestUserInputAnswers'],
 ) => client.taskRuns.getCommunicationRequestUserInputAnswers.query(options);
