@@ -76,11 +76,26 @@ describe('opencode-server bootstrap', () => {
     );
   }
 
+  // The plugin seed gate probes `opencode --version` through OPENCODE_COMMAND.
+  // Pin the probe to a stub so the resolved version always matches the seed
+  // fixtures regardless of whatever opencode CLI the host machine has on PATH
+  // (a mismatch would send every test through a live npm install).
+  function writeOpenCodeVersionStub(homeDir: string): string {
+    const stubPath = path.join(homeDir, 'opencode-version-stub.sh');
+    fs.writeFileSync(
+      stubPath,
+      `#!/bin/bash\necho ${DEFAULT_OPENCODE_CLI_VERSION}\n`,
+      { mode: 0o755 },
+    );
+    return stubPath;
+  }
+
   function createDirectHarnessRuntimeEnv(
     homeDir: string,
   ): Record<string, string> {
     return {
       HOME: homeDir,
+      OPENCODE_COMMAND: writeOpenCodeVersionStub(homeDir),
       R_MODEL: 'test-provider/main-model',
       R_SMALL_MODEL: 'test-provider/small-model',
       PROVIDER_API_KEY: 'provider-key',
@@ -1772,10 +1787,9 @@ describe('opencode-server bootstrap', () => {
     const { isOpenCodePluginSeedComplete } =
       await import('../opencode-server/seed-opencode-plugin-deps');
 
-    // Empty home on purpose: fixture-free so wiring is exercised for
-    // incomplete trees. Resolve expects the default CLI version and
-    // installs via the injectable path only if network is reachable —
-    // here we rely on inject... actually we'll stub via baking seed source.
+    // Raw home on purpose (no seed fixture in the config dir): the seed gate
+    // must find the config dir incomplete and complete it by copying from the
+    // bake-dir source, exercising the image-seed path without touching npm.
     const homeDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'roomote-direct-opencode-test-home-raw-'),
     );
@@ -1807,6 +1821,9 @@ describe('opencode-server bootstrap', () => {
       }),
     ).resolves.toBe(true);
     expect(commandEnv.HOME).toBe(homeDir);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('Copying OpenCode plugin seed'),
+    );
     expect(logger.info).toHaveBeenCalledWith(
       expect.stringContaining('pluginSeedVersion='),
     );
