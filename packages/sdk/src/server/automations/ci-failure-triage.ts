@@ -142,11 +142,13 @@ export async function ciFailureTriageJob(
 
         // Project ids are only unique per instance; querying another host's
         // repository with the deployment credential would read (and possibly
-        // triage) an unrelated project.
+        // triage) an unrelated project. A hostless legacy row is an unknown
+        // instance, so it gets the same treatment; re-syncing GitLab
+        // repositories backfills `host`.
         const repositoryHost = selectedRepository.host?.trim().toLowerCase();
-        if (repositoryHost && repositoryHost !== deploymentGitLabHost) {
+        if (repositoryHost !== deploymentGitLabHost) {
           console.log(
-            `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: repository host ${repositoryHost} does not match the deployment GitLab instance ${deploymentGitLabHost}`,
+            `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: repository host ${repositoryHost ?? 'unknown'} does not match the deployment GitLab instance ${deploymentGitLabHost}`,
           );
           continue;
         }

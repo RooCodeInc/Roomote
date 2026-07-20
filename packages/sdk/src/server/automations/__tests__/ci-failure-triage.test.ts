@@ -285,6 +285,31 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     );
   });
 
+  it('skips hostless legacy GitLab rows instead of querying the deployment instance', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-legacy',
+        fullName: 'acme/legacy-api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '33',
+        host: null,
+        defaultBranch: 'main',
+      },
+    ]);
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-gl-legacy');
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockGetLatestGitLabPipeline).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('skips GitLab manual Run now when the latest pipeline is green', async () => {
     mockGetActiveRepositoriesForProviders.mockResolvedValue([
       {
