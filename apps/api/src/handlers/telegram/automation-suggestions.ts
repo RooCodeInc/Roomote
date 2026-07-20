@@ -3,18 +3,28 @@ import {
   and,
   db,
   eq,
+  getAutomationRuntime,
+  getAutomationTelegramTopicThreadId,
+  persistAutomationTelegramTopicThread,
   resolveTelegramRuntimeCredentials,
   sql,
   trackedMessages,
 } from '@roomote/db/server';
+import type { BackgroundAutomationKey } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import { resolveScheduledSuggestionSlackConfig } from '../tasks/background-automation-slack.js';
 import { buildScheduledSuggestionRootMessage } from '../tasks/scheduled-suggestion-root-summary.js';
 import { findTelegramPrimaryChatId } from './primary-chat.js';
-import { postTelegramMessageInNewTopicBestEffort } from './replies.js';
+import {
+  createTelegramForumTopicBestEffort,
+  postTelegramMessageBestEffort,
+} from './replies.js';
 
 const MAX_TELEGRAM_AUTOMATION_SUGGESTIONS = 5;
+
+/** Sticky forum-topic name for Suggest Ideas recurring delivery. */
+export const SUGGEST_IDEAS_TELEGRAM_TOPIC_NAME = 'Suggest Ideas';
 
 type TelegramAutomationSuggestion = {
   id: string;
@@ -24,17 +34,93 @@ type TelegramAutomationSuggestion = {
   targetRepositoryFullName: string | null;
 };
 
+async function resolveTelegramSuggestionChatId(
+  automationKey: BackgroundAutomationKey,
+): Promise<string | null> {
+  const runtime = await getAutomationRuntime(automationKey);
+  if (runtime.destination?.provider === 'telegram') {
+    return runtime.destination.channelId;
+  }
+  return findTelegramPrimaryChatId();
+}
+
+/**
+ * Post into an existing sticky topic when present; otherwise create a recurring
+ * topic once, persist its thread id, and post there. Falls back to the parent
+ * chat when topics are unavailable.
+ */
+async function postToStickyOrNewTopic(params: {
+  automationKey: BackgroundAutomationKey;
+  chatId: string;
+  stickyTopicName: string;
+  text: string;
+  buttons: CommunicationMessageButton[][];
+}): Promise<{ messageId: string; threadId?: string } | null> {
+  const runtime = await getAutomationRuntime(params.automationKey);
+  const existingThreadId = getAutomationTelegramTopicThreadId(runtime);
+
+  if (existingThreadId) {
+    const reused = await postTelegramMessageBestEffort({
+      chatId: params.chatId,
+      threadId: existingThreadId,
+      text: params.text,
+      textFormat: 'markdown',
+      buttons: params.buttons,
+    });
+    if (reused) {
+      return { messageId: reused.messageId, threadId: existingThreadId };
+    }
+    apiLogger.debug(
+      `[AutomationSuggestionLifecycle] Sticky Telegram topic ${existingThreadId} failed for ${params.automationKey}; recreating`,
+    );
+  }
+
+  const topic = await createTelegramForumTopicBestEffort({
+    chatId: params.chatId,
+    name: params.stickyTopicName,
+  });
+
+  if (topic?.threadId) {
+    await persistAutomationTelegramTopicThread({
+      automationKey: params.automationKey,
+      chatId: params.chatId,
+      threadId: topic.threadId,
+      topicName: params.stickyTopicName,
+    });
+    const posted = await postTelegramMessageBestEffort({
+      chatId: params.chatId,
+      threadId: topic.threadId,
+      text: params.text,
+      textFormat: 'markdown',
+      buttons: params.buttons,
+    });
+    return posted
+      ? { messageId: posted.messageId, threadId: topic.threadId }
+      : null;
+  }
+
+  // Topics unavailable (no Threaded Mode / Manage Topics): post in the chat.
+  const fallback = await postTelegramMessageBestEffort({
+    chatId: params.chatId,
+    text: params.text,
+    textFormat: 'markdown',
+    buttons: params.buttons,
+  });
+  return fallback ? { messageId: fallback.messageId } : null;
+}
+
 /**
  * Telegram counterpart of the scheduled-automation Slack summaries
  * (suggester, Sentry triage, Dependabot triage, security/code-quality
  * auditors, CI failure triage). Posts one message to the captured primary
- * chat: the automation's summary plus a start button per suggestion — the same
- * single-notification shape as the onboarding suggestions intro.
+ * chat orconfigured Telegram destination.
+ *
+ * Suggest Ideas reuses a sticky "Suggest Ideas" forum topic (create once,
+ * recreate on failure). Other automations still open a one-shot "Suggested
+ * tasks" topic per delivery for backwards compatibility with existing flows.
  *
  * Returns whether the summary was DELIVERED (posted now, or already present
- * from a prior run). Surface precedence (Slack > Telegram > Teams) is owned by
- * the caller in submitTaskSuggestions, which only invokes this when Slack did
- * not deliver — this function no longer self-suppresses on Slack existence.
+ * from a prior run). Surface precedence is owned by the caller.
  */
 export async function postScheduledSuggestionsToTelegram(params: {
   sourceTaskId: string;
@@ -59,18 +145,19 @@ export async function postScheduledSuggestionsToTelegram(params: {
     return false;
   }
 
-  const chatId = await findTelegramPrimaryChatId();
-
-  if (!chatId) {
-    apiLogger.debug(
-      `[AutomationSuggestionLifecycle] Skip Telegram automation summary because no primary chat is captured for sourceTaskId=${sourceTaskId}`,
-    );
-    return false;
-  }
-
   const slackConfig = resolveScheduledSuggestionSlackConfig(
     params.suggestionSource,
   );
+  const chatId = await resolveTelegramSuggestionChatId(
+    slackConfig.automationKey,
+  );
+
+  if (!chatId) {
+    apiLogger.debug(
+      `[AutomationSuggestionLifecycle] Skip Telegram automation summary because no chat is available for sourceTaskId=${sourceTaskId}`,
+    );
+    return false;
+  }
 
   const [existingSummaryMessage] = await db
     .select({ id: trackedMessages.id })
@@ -121,13 +208,32 @@ export async function postScheduledSuggestionsToTelegram(params: {
       },
     ],
   );
-  const posted = await postTelegramMessageInNewTopicBestEffort({
-    chatId,
-    topicName: 'Suggested tasks',
-    text: messageLines.join('\n'),
-    textFormat: 'markdown',
-    buttons,
-  });
+
+  const useStickyTopic = slackConfig.automationKey === 'suggester';
+  const posted = useStickyTopic
+    ? await postToStickyOrNewTopic({
+        automationKey: 'suggester',
+        chatId,
+        stickyTopicName: SUGGEST_IDEAS_TELEGRAM_TOPIC_NAME,
+        text: messageLines.join('\n'),
+        buttons,
+      })
+    : await (async () => {
+        const topic = await createTelegramForumTopicBestEffort({
+          chatId,
+          name: 'Suggested tasks',
+        });
+        const result = await postTelegramMessageBestEffort({
+          chatId,
+          ...(topic ? { threadId: topic.threadId } : {}),
+          text: messageLines.join('\n'),
+          textFormat: 'markdown',
+          buttons,
+        });
+        return result
+          ? { messageId: result.messageId, ...(topic ?? {}) }
+          : null;
+      })();
 
   if (!posted) {
     return false;
@@ -145,6 +251,7 @@ export async function postScheduledSuggestionsToTelegram(params: {
           kind: 'suggestion_card' as const,
           dedupeKey: `${chatId}:${messageTs}`,
           channelId: chatId,
+          ...(posted.threadId ? { threadTs: posted.threadId } : {}),
           messageTs,
           workItemId: suggestion.id,
           createdByUserId,
@@ -160,7 +267,7 @@ export async function postScheduledSuggestionsToTelegram(params: {
     });
 
   apiLogger.debug(
-    `[AutomationSuggestionLifecycle] Published ${limitedSuggestions.length} ${slackConfig.automationKey} suggestions to Telegram chat ${chatId} for sourceTaskId=${sourceTaskId}`,
+    `[AutomationSuggestionLifecycle] Published ${limitedSuggestions.length} ${slackConfig.automationKey} suggestions to Telegram chat ${chatId}${posted.threadId ? ` topic ${posted.threadId}` : ''} for sourceTaskId=${sourceTaskId}`,
   );
 
   return true;

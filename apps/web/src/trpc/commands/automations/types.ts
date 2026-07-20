@@ -50,6 +50,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
+  | 'suggesterUseTelegram'
   | 'sentryTriageProjectSlugs'
   | 'suggesterInstructions'
   | 'suggesterRoutingInstructions'
@@ -269,6 +270,8 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string | null;
   suggesterDiscordChannel?: string | null;
+  /** When true, Suggest Ideas delivers to a sticky Telegram topic. */
+  suggesterUseTelegram?: boolean;
   suggesterInstructions: string | null;
   suggesterRoutingMode?: SuggesterRoutingMode;
   suggesterRoutingInstructions?: string | null;

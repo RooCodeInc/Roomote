@@ -17,6 +17,12 @@ import {
 import { getRedis } from '@roomote/redis';
 import { type WorkItemStatus } from '@roomote/types';
 import {
+  buildDestinationTaskPayloadFields,
+  listConnectedCommunicationProviders,
+  resolveAutomationRuntimeDestination,
+  type ResolvedAutomationDestination,
+} from './destination';
+import {
   getActiveRepositoryFullNames,
   hasAnyActiveRepository,
 } from './github-deployment-scope';
@@ -50,13 +56,24 @@ async function findEligibleDeployments(): Promise<
     return [];
   }
 
-  return db
+  const rows = await db
     .select({
       slackBotToken: slackInstallations.botAccessToken,
       slackTeamId: slackInstallations.teamId,
     })
     .from(slackInstallations)
     .where(eq(slackInstallations.isActive, true));
+
+  if (rows.length > 0) {
+    return rows;
+  }
+
+  // No Slack: still eligible when another connected surface can carry
+  // Suggest Ideas (Discord channel destination or Telegram sticky topic).
+  const connectedProviders = await listConnectedCommunicationProviders();
+  return connectedProviders.length > 0
+    ? [{ slackBotToken: null, slackTeamId: null }]
+    : [];
 }
 
 async function buildRepositoryCoverage(
@@ -119,6 +136,16 @@ async function countOpenSuggestions(): Promise<number> {
   return result?.openSuggestionCount ?? 0;
 }
 
+function resolveDispatchChannelId(
+  destination: ResolvedAutomationDestination | null,
+  slackChannelId: string | null,
+): string | null {
+  if (destination) {
+    return destination.channelId;
+  }
+  return slackChannelId;
+}
+
 export async function suggesterJob(
   opts: AutomationRunOpts = {},
 ): Promise<AutomationJobResult> {
@@ -129,7 +156,8 @@ export async function suggesterJob(
   const eligibleDeployments = await findEligibleDeployments();
 
   if (eligibleDeployments.length === 0) {
-    result.skippedReason = 'GitHub and Slack must both be connected.';
+    result.skippedReason =
+      'At least one active repository and a connected communication surface are required.';
   }
 
   let processed = 0;
@@ -144,7 +172,14 @@ export async function suggesterJob(
       });
       const runtime = await getAutomationRuntime('suggester');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
-      const channelId = runtime.slackChannelId;
+      const destination = await resolveAutomationRuntimeDestination({
+        runtime,
+        slackConnected: deployment.slackBotToken !== null,
+      });
+      const channelId = resolveDispatchChannelId(
+        destination,
+        runtime.slackChannelId,
+      );
 
       if (!frequency || frequency === 'off' || !(frequency in WINDOW_DAYS)) {
         result.skippedReason = 'Automation is disabled.';
@@ -154,17 +189,23 @@ export async function suggesterJob(
 
       if (!channelId) {
         console.log(
-          `${LOG_PREFIX} Skipping deployment: suggester channel not configured`,
+          `${LOG_PREFIX} Skipping deployment: suggester destination not configured`,
         );
-        result.skippedReason = 'Suggester channel is not configured.';
+        result.skippedReason = 'Suggester destination is not configured.';
         skipped++;
         continue;
       }
 
-      const timezone = await resolveSlackWorkspaceTimezone(
-        deployment,
-        LOG_PREFIX,
-      );
+      const timezone =
+        deployment.slackBotToken && deployment.slackTeamId
+          ? await resolveSlackWorkspaceTimezone(
+              {
+                slackBotToken: deployment.slackBotToken,
+                slackTeamId: deployment.slackTeamId,
+              },
+              LOG_PREFIX,
+            )
+          : 'UTC';
 
       if (
         !opts.manualTrigger &&
@@ -246,9 +287,16 @@ export async function suggesterJob(
         );
       }
 
+      // Grouped multi-channel routing is Slack-only. Discord/Telegram destinations
+      // always take the single-route path and land digests via notifySlack fallback.
+      const useGroupedRouting =
+        suggestionRoutingEnabled &&
+        destination?.provider === 'slack' &&
+        deployment.slackBotToken !== null;
+
       const routePlan = await prepareSuggestionDispatchPlan({
         deployment,
-        groupedRoutingEnabled: suggestionRoutingEnabled,
+        groupedRoutingEnabled: useGroupedRouting,
         managerChannelId: channelId,
         now,
         repositoryCoverage,
@@ -271,6 +319,9 @@ export async function suggesterJob(
         repositoryFullNames: environmentBackedRepositoryFullNames,
         routePlan,
         triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
+        destinationPayloadFields: destination
+          ? buildDestinationTaskPayloadFields(destination)
+          : {},
       });
 
       if (dispatchResult.successfulRoutes > 0) {

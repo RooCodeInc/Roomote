@@ -151,6 +151,7 @@ type FieldErrors = Partial<
     | 'suggesterDiscordChannel'
     | 'announcerDiscordChannel'
     | 'platformIssueDiscordChannel'
+    | 'suggesterUseTelegram'
     | 'sentryTriageProjectSlugs'
     | 'suggesterInstructions'
     | 'suggesterRoutingInstructions'
@@ -218,6 +219,8 @@ const SLACK_TO_DISCORD_DESTINATION_FIELDS = Object.fromEntries(
  * are prefixed to distinguish them from (unprefixed) Slack channel ids.
  */
 export const DISCORD_DESTINATION_OPTION_PREFIX = 'discord:';
+/** Synthetic option id for Suggest Ideas Telegram sticky-topic destination. */
+export const TELEGRAM_DESTINATION_OPTION = 'telegram:primary';
 
 type SlackChannelOption = {
   id: string;
@@ -716,6 +719,7 @@ function mapSettingsToFormState(
     suggesterSlackChannelId: string | null;
     suggesterSlackChannelName?: string | null;
     suggesterDiscordChannelId: string | null;
+    suggesterTelegramChatId: string | null;
     suggesterInstructions: string | null;
     suggesterRoutingMode: SuggesterRoutingMode;
     suggesterRoutingInstructions: string | null;
@@ -820,6 +824,7 @@ function mapSettingsToFormState(
       settings.suggesterSlackChannelId ??
       '',
     suggesterDiscordChannel: settings.suggesterDiscordChannelId ?? '',
+    suggesterUseTelegram: Boolean(settings.suggesterTelegramChatId),
     suggesterInstructions: settings.suggesterInstructions ?? '',
     suggesterRoutingMode:
       settings.suggesterRoutingMode ?? DEFAULT_SUGGESTER_ROUTING_MODE,
@@ -2356,6 +2361,8 @@ export function AutomationsSettings() {
       savedChannelId,
       savedDiscordChannelId,
       warningChannelId,
+      allowTelegram = false,
+      savedTelegramSelected = false,
     }: {
       field: AutomationSlackDestinationField;
       inputId: string;
@@ -2364,14 +2371,25 @@ export function AutomationsSettings() {
       savedChannelId: string | null;
       savedDiscordChannelId: string | null;
       warningChannelId: string | null;
+      /** Suggest Ideas only: offer sticky Telegram primary-chat topic. */
+      allowTelegram?: boolean;
+      savedTelegramSelected?: boolean;
     }) => {
       const discordField = SLACK_TO_DISCORD_DESTINATION_FIELDS[field];
       const value = formState?.[field] ?? '';
       const discordValue = formState?.[discordField] ?? '';
+      const useTelegram =
+        allowTelegram && (formState?.suggesterUseTelegram ?? false);
+      const telegramConnected =
+        settingsQuery.data?.capabilities.telegramConnected ?? false;
       const showDiscordOptions = discordConnected || Boolean(discordValue);
-      // The historical labels say "Slack channel"; once Discord channels are
-      // offered in the same picker that wording reads as a bug.
-      const effectiveLabel = showDiscordOptions
+      const showTelegramOption =
+        allowTelegram &&
+        (telegramConnected || useTelegram || savedTelegramSelected);
+      // The historical labels say "Slack channel"; once multi-provider options
+      // are offered that wording reads as a bug.
+      const multiProvider = showDiscordOptions || showTelegramOption;
+      const effectiveLabel = multiProvider
         ? label.replace(/ Slack channel$/u, ' channel')
         : label;
       const options = [
@@ -2380,32 +2398,57 @@ export function AutomationsSettings() {
           ? buildAutomationDiscordDestinationOptions({
               channels: discordChannelsQuery.data?.channels ?? [],
               selectedChannelId: discordValue || null,
-              includeProviderSuffix: slackConnected,
+              includeProviderSuffix: slackConnected || showTelegramOption,
             })
           : []),
+        ...(showTelegramOption
+          ? [
+              {
+                id: TELEGRAM_DESTINATION_OPTION,
+                name: 'Telegram',
+                label:
+                  slackConnected || showDiscordOptions
+                    ? 'Telegram · recurring topic'
+                    : 'Telegram · recurring topic',
+              },
+            ]
+          : []),
       ];
-      // One-of destination: a selected Discord channel wins the combobox
-      // value; picking one provider clears the other on change.
-      const selectedValue = discordValue
-        ? `${DISCORD_DESTINATION_OPTION_PREFIX}${discordValue}`
-        : value || null;
+      // One-of destination: Telegram/Discord win the combobox when selected.
+      const selectedValue = useTelegram
+        ? TELEGRAM_DESTINATION_OPTION
+        : discordValue
+          ? `${DISCORD_DESTINATION_OPTION_PREFIX}${discordValue}`
+          : value || null;
+
+      const telegramHelper = useTelegram
+        ? 'Roomote will create a recurring Suggest Ideas topic in your Telegram chat and keep posting there. You can’t pick an existing thread.'
+        : helperText;
 
       return (
         <AutomationSlackDestinationInput
           inputId={inputId}
           label={effectiveLabel}
-          helperText={helperText}
+          helperText={telegramHelper}
           value={selectedValue}
           options={options}
           disabled={isManagerChannelSelectionDisabled({
-            slackConnected: slackConnected || discordConnected,
+            slackConnected:
+              slackConnected ||
+              discordConnected ||
+              (allowTelegram && telegramConnected),
             isFetching:
               slackChannelsQuery.isFetching || discordChannelsQuery.isFetching,
-            hasValue: Boolean(value.trim()) || Boolean(discordValue.trim()),
+            hasValue:
+              Boolean(value.trim()) ||
+              Boolean(discordValue.trim()) ||
+              useTelegram,
             isConfigured:
-              Boolean(savedChannelId) || Boolean(savedDiscordChannelId),
+              Boolean(savedChannelId) ||
+              Boolean(savedDiscordChannelId) ||
+              savedTelegramSelected,
           })}
-          discordConnected={discordConnected}
+          discordConnected={discordConnected || showTelegramOption}
           destination={
             settingsQuery.data?.resolvedDestinations[
               SLACK_DESTINATION_FIELD_AUTOMATION_KEYS[field]
@@ -2414,6 +2457,7 @@ export function AutomationsSettings() {
           slackAppMention={slackAppMention}
           showWarning={
             !discordValue &&
+            !useTelegram &&
             shouldShowManagerSlackChannelWarning({
               formValue: value,
               savedChannelId,
@@ -2421,11 +2465,24 @@ export function AutomationsSettings() {
               isDirty: isDirty[SLACK_DESTINATION_FIELD_AUTOMATION_IDS[field]],
             })
           }
-          error={fieldErrors[field] ?? fieldErrors[discordField]}
+          error={
+            fieldErrors[field] ??
+            fieldErrors[discordField] ??
+            fieldErrors.suggesterUseTelegram
+          }
           onChange={(nextValue) =>
             setFormState((prev) => {
               if (!prev) {
                 return prev;
+              }
+
+              if (nextValue === TELEGRAM_DESTINATION_OPTION) {
+                return {
+                  ...prev,
+                  [field]: '',
+                  [discordField]: '',
+                  suggesterUseTelegram: true,
+                };
               }
 
               if (nextValue?.startsWith(DISCORD_DESTINATION_OPTION_PREFIX)) {
@@ -2435,6 +2492,7 @@ export function AutomationsSettings() {
                   [discordField]: nextValue.slice(
                     DISCORD_DESTINATION_OPTION_PREFIX.length,
                   ),
+                  ...(allowTelegram ? { suggesterUseTelegram: false } : {}),
                 };
               }
 
@@ -2442,6 +2500,7 @@ export function AutomationsSettings() {
                 ...prev,
                 [field]: nextValue ?? '',
                 [discordField]: '',
+                ...(allowTelegram ? { suggesterUseTelegram: false } : {}),
               };
             })
           }
@@ -4004,6 +4063,10 @@ export function AutomationsSettings() {
                             .suggesterDiscordChannelId ?? null,
                         warningChannelId:
                           slackChannelAccessWarnings.suggesterSlackChannel,
+                        allowTelegram: true,
+                        savedTelegramSelected: Boolean(
+                          settingsQuery.data?.settings.suggesterTelegramChatId,
+                        ),
                       })}
 
                       <div className="space-y-2">

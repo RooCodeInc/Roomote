@@ -31,6 +31,7 @@ async function enqueueSuggestionRoute(params: {
   repositoryFullNames: string[];
   route: SuggestionDispatchRoute;
   triggerKind: 'manual' | 'scheduled';
+  destinationPayloadFields?: Record<string, string>;
 }): Promise<{ error?: string; success: boolean; taskId?: string }> {
   try {
     // Suggestion scans run as the deployment service principal.
@@ -40,7 +41,9 @@ async function enqueueSuggestionRoute(params: {
         payload: {
           repo: ALL_REPOSITORIES,
           selectedRepositories: params.repositoryFullNames,
-          teamId: params.deployment.slackTeamId,
+          ...(params.deployment.slackTeamId
+            ? { teamId: params.deployment.slackTeamId }
+            : {}),
           description: buildSuggestedTasksPrompt({
             repositoryFullNames: params.repositoryFullNames,
             repositoryCoverage: params.repositoryCoverage,
@@ -65,6 +68,7 @@ async function enqueueSuggestionRoute(params: {
           slackChannel: params.route.channelId,
           suggestionSource: 'suggest_ideas',
           visibleInTranscript: false,
+          ...(params.destinationPayloadFields ?? {}),
         },
       },
       initiator: { kind: 'automation', key: 'suggester' },
@@ -97,6 +101,7 @@ export async function dispatchSuggestionRoutes(params: {
   repositoryFullNames: string[];
   routePlan: SuggestionDispatchPlan;
   triggerKind: 'manual' | 'scheduled';
+  destinationPayloadFields?: Record<string, string>;
 }): Promise<{
   errors: string[];
   firstLaunchedTaskId: string | null;
@@ -121,6 +126,7 @@ export async function dispatchSuggestionRoutes(params: {
           )),
       },
       triggerKind: params.triggerKind,
+      destinationPayloadFields: params.destinationPayloadFields,
     });
 
     if (result.success) {

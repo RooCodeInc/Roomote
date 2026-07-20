@@ -1308,8 +1308,11 @@ export async function submitTaskSuggestions(
         resolveScheduledSuggestionSlackConfig(payload.suggestionSource)
           .automationKey,
       );
+      // An automation with its own Discord/Telegram destination target skips
+      // higher-precedence surfaces — the summary belongs on that surface.
+      const preferredProvider = suggestionRuntime.destination?.provider;
       const slackDelivered =
-        suggestionRuntime.destination?.provider === 'discord'
+        preferredProvider === 'discord' || preferredProvider === 'telegram'
           ? false
           : await postSuggestedTasksSummaryToSlack({
               sourceTaskId: taskId,
@@ -1321,12 +1324,15 @@ export async function submitTaskSuggestions(
             });
 
       if (!slackDelivered) {
-        const discordDelivered = await postScheduledSuggestionsToDiscord({
-          sourceTaskId: taskId,
-          createdByUserId,
-          suggestionSource: payload.suggestionSource,
-          suggestions: persistedSuggestions,
-        });
+        const discordDelivered =
+          preferredProvider === 'telegram'
+            ? false
+            : await postScheduledSuggestionsToDiscord({
+                sourceTaskId: taskId,
+                createdByUserId,
+                suggestionSource: payload.suggestionSource,
+                suggestions: persistedSuggestions,
+              });
 
         if (!discordDelivered) {
           const telegramDelivered = await postScheduledSuggestionsToTelegram({

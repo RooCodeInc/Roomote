@@ -15,12 +15,14 @@ import {
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   deploymentSettings,
   getAutomationRuntime,
+  getAutomationTelegramTopicThreadId,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
   upsertAutomation,
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
+  findTelegramPrimaryChatId,
   resolveAutomationRuntimeDestination,
 } from '@roomote/sdk/server';
 import { validateSuggestionRoutingInstructions } from '@roomote/cloud-agents/server';
@@ -133,6 +135,7 @@ function buildSuggesterAutomationSettings(params: {
 function buildDestinationChannelTargets(
   slackChannelId: string | null | undefined,
   discordChannelId: string | null | undefined,
+  telegramTarget?: AutomationTarget | null,
 ): AutomationTarget[] {
   return [
     ...(slackChannelId
@@ -153,6 +156,7 @@ function buildDestinationChannelTargets(
           },
         ]
       : []),
+    ...(telegramTarget ? [telegramTarget] : []),
   ];
 }
 
@@ -523,6 +527,46 @@ export async function updateBackgroundAgentSettingsCommand(
   const platformIssueDiscordResult =
     destinationResults.platformIssueAlerts.discord;
 
+  // Suggest Ideas may target Telegram via a sticky recurring topic in the
+  // primary chat (no thread picker). Resolve that before destination
+  // validation so Telegram counts as a configured destination.
+  const savingSuggester = input.savingAutomation === 'suggester';
+  const wantSuggesterTelegram = savingSuggester
+    ? input.suggesterUseTelegram === true
+    : Boolean(existingSettings.suggesterTelegramChatId);
+  let suggesterTelegramTarget: AutomationTarget | null = null;
+
+  if (wantSuggesterTelegram) {
+    const telegramChatId =
+      (savingSuggester ? await findTelegramPrimaryChatId() : null) ??
+      existingSettings.suggesterTelegramChatId;
+
+    if (!telegramChatId) {
+      fieldErrors.suggesterUseTelegram =
+        'Connect Telegram and capture a primary chat before routing Suggest Ideas there.';
+    } else {
+      const existingRuntime = await getAutomationRuntime('suggester');
+      const stickyThreadId =
+        getAutomationTelegramTopicThreadId(existingRuntime);
+      suggesterTelegramTarget = {
+        provider: 'telegram',
+        targetKind: 'telegram_chat',
+        externalRef: telegramChatId,
+        ...(stickyThreadId
+          ? {
+              metadata: {
+                threadId: stickyThreadId,
+                topicName: 'Suggest Ideas',
+              },
+            }
+          : {}),
+      };
+      // Telegram is one-of: clear Slack/Discord channel results for suggester.
+      destinationResults.suggester.slack = { channelId: null };
+      destinationResults.suggester.discord = { channelId: null };
+    }
+  }
+
   for (const result of Object.values(destinationResults)) {
     if (result.discord.error) {
       fieldErrors[result.discord.error.field] = result.discord.error.message;
@@ -791,7 +835,10 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'suggester',
       frequency: effectiveSuggesterFrequency,
       channelId:
-        suggesterChannelResult.channelId ?? suggesterDiscordResult.channelId,
+        suggesterChannelResult.channelId ??
+        suggesterDiscordResult.channelId ??
+        suggesterTelegramTarget?.externalRef ??
+        null,
       field: 'suggesterSlackChannel',
     },
     {
@@ -980,15 +1027,21 @@ export async function updateBackgroundAgentSettingsCommand(
       throw new Error(`Missing destination descriptor for ${automationId}`);
     }
     const result = destinationResults[automationId];
+    const telegramTarget =
+      automationId === 'suggester' ? suggesterTelegramTarget : null;
     return {
       targets: [
         ...buildDestinationChannelTargets(
           result.slack.channelId,
           result.discord.channelId,
+          telegramTarget,
         ),
         ...extraTargets,
       ],
-      managedTargetKinds: [...descriptor.managedTargetKinds],
+      managedTargetKinds:
+        automationId === 'suggester'
+          ? [...descriptor.managedTargetKinds, 'telegram_chat' as const]
+          : [...descriptor.managedTargetKinds],
     };
   }
 

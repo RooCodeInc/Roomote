@@ -33,6 +33,7 @@ const state = vi.hoisted(() => ({
       capabilities: {
         slackConnected: true,
         discordConnected: false,
+        telegramConnected: false,
         requiresSlackReconnect: false,
         missingScopes: [],
         slackWorkspaceDomain: 'acme',
@@ -89,6 +90,7 @@ const state = vi.hoisted(() => ({
         suggesterFrequency: 'off' as const,
         suggesterSlackChannelId: null,
         suggesterDiscordChannelId: null,
+        suggesterTelegramChatId: null,
         suggesterInstructions: null,
         suggesterRoutingMode: 'manager_channel' as const,
         suggesterRoutingInstructions: null,
@@ -580,10 +582,12 @@ describe('AutomationsSettings', () => {
     // Dependabot, CodeQL, Issue Fixer, and CI failure triage stay GitHub-only; manager
     // stats is provider-neutral now and shows no source-control badge.
     expect((await screen.findAllByText('GitHub only')).length).toBe(4);
-    // The suggester supports Slack and Discord destinations; the other
-    // manager automations post to all configured communication providers.
+    // The suggester supports Slack, Discord, and Telegram destinations; the
+    // other manager automations post to all configured communication providers.
     expect(screen.queryByText('Slack only')).toBeNull();
-    expect(screen.getAllByText('Slack · Discord only').length).toBe(1);
+    expect(screen.getAllByText('Slack · Discord · Telegram only').length).toBe(
+      1,
+    );
     // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no
     // Gitea/Bitbucket conflict signal).
     expect(

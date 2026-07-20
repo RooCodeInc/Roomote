@@ -14,6 +14,7 @@ import {
   getBackgroundAgentSettingsForDeployment,
   inArray,
   listAutomations,
+  resolveTelegramRuntimeCredentials,
   tasks,
 } from '@roomote/db/server';
 import {
@@ -192,6 +193,10 @@ async function resolveDestinationDisplayName(
       : null;
   }
 
+  if (destination.provider === 'telegram') {
+    return 'Telegram · Suggest Ideas topic';
+  }
+
   // Telegram chats have no reliable display name; the UI shows the chat id.
   return null;
 }
@@ -257,6 +262,7 @@ export async function getBackgroundAgentSettingsCommand(
   capabilities: {
     slackConnected: boolean;
     discordConnected: boolean;
+    telegramConnected: boolean;
     sentryConnected: boolean;
     missingScopes: readonly string[];
     requiredScopes: string[];
@@ -291,6 +297,7 @@ export async function getBackgroundAgentSettingsCommand(
     settings,
     slackInstallation,
     discordInstallation,
+    telegramCredentials,
     sentryConnected,
     recentRuns,
     status,
@@ -301,6 +308,7 @@ export async function getBackgroundAgentSettingsCommand(
       where: eq(discordInstallations.isActive, true),
       columns: { id: true },
     }),
+    resolveTelegramRuntimeCredentials(),
     hasActiveSentryIntegration(),
     listRecentAutomationTasks(),
     buildAutomationStatus(),
@@ -387,6 +395,7 @@ export async function getBackgroundAgentSettingsCommand(
     capabilities: {
       slackConnected: Boolean(slackInstallation?.isActive),
       discordConnected: Boolean(discordInstallation),
+      telegramConnected: Boolean(telegramCredentials.botToken),
       sentryConnected,
       missingScopes,
       requiredScopes: [...REQUIRED_BACKGROUND_AGENT_SCOPES],

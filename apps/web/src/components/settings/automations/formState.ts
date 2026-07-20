@@ -90,6 +90,11 @@ export type FormState = {
   codeqlTriageFrequency: CodeqlTriageFrequency;
   suggesterFrequency: SuggesterFrequency;
   suggesterInstructions: string;
+  /**
+   * When true, Suggest Ideas delivers to a sticky Telegram forum topic
+   * (created once, reused). Mutually exclusive with Slack/Discord channels.
+   */
+  suggesterUseTelegram: boolean;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string;
   announcerFrequency: AnnouncerFrequency;
@@ -162,6 +167,7 @@ const CODEQL_TRIAGE_FIELDS: Array<keyof FormState> = [
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.suggester,
+  'suggesterUseTelegram',
   'suggesterInstructions',
   'suggesterRoutingMode',
   'suggesterRoutingInstructions',
@@ -334,6 +340,7 @@ export function buildAutomationSettingsSaveInput(
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
+    suggesterUseTelegram: stateToSave.suggesterUseTelegram,
     suggesterRoutingMode: stateToSave.suggesterRoutingMode,
     suggesterRoutingInstructions:
       stateToSave.suggesterRoutingInstructions.trim() || null,
