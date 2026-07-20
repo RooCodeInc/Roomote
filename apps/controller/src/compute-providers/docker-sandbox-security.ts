@@ -243,7 +243,9 @@ export async function docker(
       return '';
     }
 
-    throw new Error(formatDockerCommandError(args, error), { cause: error });
+    // Do not attach the raw execFile error as `cause`: Sentry LinkedErrors
+    // would serialize the unredacted argv (including AUTH_TOKEN) from it.
+    throw new Error(formatDockerCommandError(args, error));
   }
 }
 

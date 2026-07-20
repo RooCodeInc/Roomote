@@ -303,13 +303,37 @@ describe('BaseController.handleSpawnTaskRunError', () => {
     );
   });
 
-  it('re-throws the original error after calling finishRun', async () => {
+  it('re-throws a sanitized error after calling finishRun (no token-bearing cause)', async () => {
     const job = makeTaskRun();
-    const originalError = new Error('original');
+    const originalError = new Error(
+      'Command failed: docker exec -e AUTH_TOKEN=super-secret true',
+    );
+    Object.assign(originalError, {
+      cause: new Error('docker exec -e AUTH_TOKEN=super-secret true'),
+    });
 
-    await expect(
-      controller.testHandleSpawnTaskRunError(job, originalError),
-    ).rejects.toThrow('original');
+    let thrown: unknown;
+    try {
+      await controller.testHandleSpawnTaskRunError(job, originalError);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBe(originalError);
+    expect((thrown as Error).cause).toBeUndefined();
+    expect((thrown as Error).message).toContain('AUTH_TOKEN=<redacted>');
+    expect((thrown as Error).message).not.toContain('super-secret');
+
+    expect(mockCaptureControllerException).toHaveBeenCalledTimes(1);
+    const [capturedError, context] =
+      mockCaptureControllerException.mock.calls[0] ?? [];
+    expect(capturedError).toBeInstanceOf(Error);
+    expect((capturedError as Error).message).not.toContain('super-secret');
+    expect((capturedError as Error).cause).toBeUndefined();
+    expect(context).toEqual(
+      expect.objectContaining({ phase: 'spawn_worker', runId: 42 }),
+    );
   });
 
   it('handles non-Error objects as error messages', async () => {
@@ -317,7 +341,7 @@ describe('BaseController.handleSpawnTaskRunError', () => {
 
     await expect(
       controller.testHandleSpawnTaskRunError(job, 'string error'),
-    ).rejects.toBe('string error');
+    ).rejects.toThrow('string error');
 
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 7,

@@ -744,3 +744,30 @@ describe('formatDockerCommandError', () => {
     ).toContain('Failed to run docker run');
   });
 });
+
+describe('docker spawn error wrapping', () => {
+  it('exposes a pure helper that never attaches a raw execFile cause', () => {
+    const raw = Object.assign(
+      new Error(
+        'Command failed: docker exec -e AUTH_TOKEN=super-secret c true',
+      ),
+      {
+        cmd: 'docker exec -e AUTH_TOKEN=super-secret c true',
+        stderr: '',
+        stdout: '',
+        code: 1,
+      },
+    );
+
+    const message = formatDockerCommandError(
+      ['exec', '-e', 'AUTH_TOKEN=super-secret', 'c', 'true'],
+      raw,
+    );
+    // Mirrors apps/controller docker() throw site: sanitized message, no cause.
+    const thrown = new Error(message);
+
+    expect(thrown.message).toContain('AUTH_TOKEN=<redacted>');
+    expect(thrown.message).not.toContain('super-secret');
+    expect(thrown.cause).toBeUndefined();
+  });
+});
