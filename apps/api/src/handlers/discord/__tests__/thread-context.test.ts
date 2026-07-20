@@ -17,8 +17,105 @@ vi.mock('../attachments.js', () => ({
 
 import {
   buildDiscordContinuationPrompt,
+  fetchDiscordThreadHistoryBestEffort,
   formatDiscordThreadContext,
 } from '../thread-context.js';
+
+describe('fetchDiscordThreadHistoryBestEffort', () => {
+  it('recovers the thread-starter message from the parent channel', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          { id: '200', user: 'u-matt', username: 'Matt', text: 'take a look' },
+        ],
+      }),
+      fetchMessage: vi.fn().mockResolvedValue({
+        provider: 'discord',
+        id: '50',
+        user: 'u-sky',
+        username: 'Sky',
+        text: 'Tested the PR and it failed.',
+        channelId: 'channel-1',
+        fileCount: 0,
+      }),
+    };
+
+    const history = await fetchDiscordThreadHistoryBestEffort({
+      provider: provider as never,
+      channelId: '50',
+      parentChannelId: 'channel-1',
+    });
+
+    expect(provider.fetchMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: '50',
+    });
+    expect(history.map((message) => message.id)).toEqual(['50', '200']);
+    expect(history[0]).toMatchObject({
+      username: 'Sky',
+      text: 'Tested the PR and it failed.',
+    });
+  });
+
+  it('does not refetch a starter already present in the thread listing (forum posts)', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          { id: '50', user: 'u-sky', username: 'Sky', text: 'Forum post body' },
+          { id: '200', user: 'u-matt', username: 'Matt', text: 'reply' },
+        ],
+      }),
+      fetchMessage: vi.fn(),
+    };
+
+    const history = await fetchDiscordThreadHistoryBestEffort({
+      provider: provider as never,
+      channelId: '50',
+      parentChannelId: 'forum-1',
+    });
+
+    expect(provider.fetchMessage).not.toHaveBeenCalled();
+    expect(history.map((message) => message.id)).toEqual(['50', '200']);
+  });
+
+  it('skips the starter lookup without a parent channel', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          { id: '200', user: 'u-matt', username: 'Matt', text: 'hello' },
+        ],
+      }),
+      fetchMessage: vi.fn(),
+    };
+
+    const history = await fetchDiscordThreadHistoryBestEffort({
+      provider: provider as never,
+      channelId: '50',
+    });
+
+    expect(provider.fetchMessage).not.toHaveBeenCalled();
+    expect(history.map((message) => message.id)).toEqual(['200']);
+  });
+
+  it('keeps collected thread history when the starter lookup fails', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          { id: '200', user: 'u-matt', username: 'Matt', text: 'still here' },
+        ],
+      }),
+      fetchMessage: vi.fn().mockRejectedValue(new Error('Unknown Message')),
+    };
+
+    const history = await fetchDiscordThreadHistoryBestEffort({
+      provider: provider as never,
+      channelId: '50',
+      parentChannelId: 'channel-1',
+    });
+
+    expect(history.map((message) => message.id)).toEqual(['200']);
+  });
+});
 
 describe('formatDiscordThreadContext', () => {
   it('formats earlier messages and omits the current one', () => {

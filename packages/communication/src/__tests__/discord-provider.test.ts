@@ -527,6 +527,26 @@ describe('DiscordCommunicationProvider', () => {
     expect(server.state.messages[channelId]).toHaveLength(0);
   });
 
+  it('fetches a single message by id and rejects for unknown messages', async () => {
+    const { provider } = createHarness();
+    const channelId = '400000000000000003';
+    const sent = await provider.postMessage({
+      channelId,
+      text: 'starter body',
+    });
+
+    await expect(
+      provider.fetchMessage({ channelId, messageId: sent.messageId }),
+    ).resolves.toMatchObject({
+      provider: 'discord',
+      id: sent.messageId,
+      text: 'starter body',
+    });
+    await expect(
+      provider.fetchMessage({ channelId, messageId: '999999999999999999' }),
+    ).rejects.toThrow();
+  });
+
   it('maps Slack-style reaction names onto Discord unicode emoji', async () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000002';

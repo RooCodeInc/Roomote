@@ -129,6 +129,9 @@ export async function startNewDiscordTask(input: {
       ? fetchDiscordThreadHistoryBestEffort({
           provider: input.provider,
           channelId: input.channel.channelId,
+          ...(input.channel.parentChannelId
+            ? { parentChannelId: input.channel.parentChannelId }
+            : {}),
         })
       : Promise.resolve([] as DiscordThreadHistoryMessage[]),
     input.channel.guildId

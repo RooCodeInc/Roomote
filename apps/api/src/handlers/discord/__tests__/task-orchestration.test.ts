@@ -160,6 +160,17 @@ describe('startNewDiscordTask', () => {
           },
         ],
       }),
+      // The message this thread was started from lives in the parent channel
+      // (its id equals the thread id) and is absent from the thread listing.
+      fetchMessage: vi.fn().mockResolvedValue({
+        provider: 'discord',
+        id: '50',
+        user: 'u-sky',
+        username: 'Sky',
+        text: 'Tested the PR and the task failed while preparing the workspace.',
+        channelId: 'channel-1',
+        fileCount: 0,
+      }),
     };
     mocks.processAttachments.mockResolvedValue({
       images: ['data:image/png;base64,thread'],
@@ -183,11 +194,11 @@ describe('startNewDiscordTask', () => {
       metadata: {
         communicationProvider: 'discord',
         communicationChannelId: 'channel-1',
-        communicationThreadId: 'discussion-thread',
+        communicationThreadId: '50',
         communicationMessageId: '200',
       },
       channel: {
-        channelId: 'discussion-thread',
+        channelId: '50',
         channelName: 'General discussion',
         channelType: 11,
         guildId: 'guild-1',
@@ -200,7 +211,11 @@ describe('startNewDiscordTask', () => {
 
     expect(result.status).toBe('started');
     expect(provider.fetchChannelMessages).toHaveBeenCalledWith({
-      channelId: 'discussion-thread',
+      channelId: '50',
+    });
+    expect(provider.fetchMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: '50',
     });
     expect(mocks.processAttachments).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -213,6 +228,10 @@ describe('startNewDiscordTask', () => {
       expect.objectContaining({
         taskDescription: expect.stringContaining('log.txt contents'),
         threadMessages: [
+          {
+            user: 'Sky',
+            text: 'Tested the PR and the task failed while preparing the workspace.',
+          },
           { user: 'Alice', text: 'Deploy failed on main' },
           { user: 'Matt', text: '@Roomote investigate the flaky build' },
         ],
@@ -236,6 +255,9 @@ describe('startNewDiscordTask', () => {
     );
     const agentPrompt = mocks.launchTask.mock.calls[0]?.[0]
       .agentPromptText as string;
+    expect(agentPrompt).toContain(
+      'Sky: Tested the PR and the task failed while preparing the workspace.',
+    );
     expect(agentPrompt).toContain('Alice: Deploy failed on main');
     expect(agentPrompt).toContain('investigate the flaky build');
     expect(agentPrompt).toContain('log.txt contents');
