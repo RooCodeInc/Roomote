@@ -3,21 +3,27 @@ const {
   mockGetTaskUrl,
   mockGetGiteaAutomationTargets,
   mockCreateGiteaPullRequestComment,
+  mockCreateGiteaIssueComment,
   mockGetGiteaDeploymentUser,
   mockFindActiveGitHubPrReviewTask,
   mockFindReusableGitHubPrFollowUpOwner,
+  mockFindReusableGitHubIssueTaskOwner,
   mockSendMessageToTask,
   mockSteerMessageToTask,
+  mockDbSelect,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
   mockCreateGiteaPullRequestComment: vi.fn(),
+  mockCreateGiteaIssueComment: vi.fn(),
   mockGetGiteaDeploymentUser: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
+  mockFindReusableGitHubIssueTaskOwner: vi.fn(),
   mockSendMessageToTask: vi.fn(),
   mockSteerMessageToTask: vi.fn(),
+  mockDbSelect: vi.fn(),
 }));
 
 // Prompt-framing fakes use distinctive markers so tests can assert the
@@ -29,19 +35,39 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   buildMentionRequestBlock: (text: string) =>
     `<mention_request>${text}</mention_request>`,
   buildUntrustedContentPolicy: () => '<untrusted_content_policy/>',
+  buildUntrustedExternalContentBlock: ({
+    source,
+    text,
+  }: {
+    source: string;
+    text: string;
+  }) =>
+    `<untrusted_external_content source="${source}">${text}</untrusted_external_content>`,
   escapeTaskContextText: (value: string) => value,
 }));
 
 vi.mock('@roomote/gitea', () => ({
   createGiteaPullRequestComment: mockCreateGiteaPullRequestComment,
+  createGiteaIssueComment: mockCreateGiteaIssueComment,
   getGiteaDeploymentUser: mockGetGiteaDeploymentUser,
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  db: {
+    select: (...args: unknown[]) => mockDbSelect(...args),
+  },
+  environmentRepositoryMappings: {
+    environmentId: 'environmentId',
+    repositoryId: 'repositoryId',
+  },
+  eq: vi.fn((...args: unknown[]) => args),
+  asc: vi.fn((value: unknown) => value),
   findActiveGitHubPrReviewTask: (...args: unknown[]) =>
     mockFindActiveGitHubPrReviewTask(...args),
   findReusableGitHubPrFollowUpOwner: (...args: unknown[]) =>
     mockFindReusableGitHubPrFollowUpOwner(...args),
+  findReusableGitHubIssueTaskOwner: (...args: unknown[]) =>
+    mockFindReusableGitHubIssueTaskOwner(...args),
 }));
 
 vi.mock('../getGiteaAutomationTargets', async () => {
@@ -71,6 +97,9 @@ function makeCommentPayload(
     pullRequest?: Partial<
       NonNullable<GiteaPullRequestCommentWebhook['pull_request']>
     > | null;
+    issue?: Partial<
+      NonNullable<GiteaPullRequestCommentWebhook['issue']>
+    > | null;
     sender?: GiteaPullRequestCommentWebhook['sender'];
     action?: string;
     isPull?: boolean;
@@ -85,10 +114,6 @@ function makeCommentPayload(
       full_name: 'acme/backend',
       html_url: 'https://git.example.com/acme/backend',
     },
-    issue: {
-      number: 42,
-      title: 'Update backend',
-    },
     comment: {
       id: 900,
       body: '@roomote please review this',
@@ -96,6 +121,16 @@ function makeCommentPayload(
       ...overrides.comment,
     },
   };
+
+  if (overrides.issue !== null) {
+    payload.issue = {
+      number: 42,
+      title: 'Update backend',
+      body: 'Issue body details',
+      html_url: 'https://git.example.com/acme/backend/issues/42',
+      ...overrides.issue,
+    };
+  }
 
   if (overrides.pullRequest !== null) {
     payload.pull_request = {
@@ -111,17 +146,32 @@ function makeCommentPayload(
   return payload;
 }
 
+function mockEnvironmentMappings(
+  rows: Array<{ environmentId: string }> = [{ environmentId: 'env-1' }],
+) {
+  mockDbSelect.mockReturnValue({
+    from: () => ({
+      where: () => ({
+        orderBy: async () => rows,
+      }),
+    }),
+  });
+}
+
 describe('handleGiteaComment', () => {
   beforeEach(() => {
     mockEnqueueTask.mockReset();
     mockGetTaskUrl.mockReset();
     mockGetGiteaAutomationTargets.mockReset();
     mockCreateGiteaPullRequestComment.mockReset();
+    mockCreateGiteaIssueComment.mockReset();
     mockGetGiteaDeploymentUser.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
     mockFindReusableGitHubPrFollowUpOwner.mockReset();
+    mockFindReusableGitHubIssueTaskOwner.mockReset();
     mockSendMessageToTask.mockReset();
     mockSteerMessageToTask.mockReset();
+    mockDbSelect.mockReset();
 
     mockGetGiteaDeploymentUser.mockResolvedValue(null);
     mockGetGiteaAutomationTargets.mockResolvedValue({
@@ -137,8 +187,11 @@ describe('handleGiteaComment', () => {
       ],
     });
     mockCreateGiteaPullRequestComment.mockResolvedValue({ id: 1 });
+    mockCreateGiteaIssueComment.mockResolvedValue({ id: 2 });
     mockFindActiveGitHubPrReviewTask.mockResolvedValue(null);
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
+    mockFindReusableGitHubIssueTaskOwner.mockResolvedValue(null);
+    mockEnvironmentMappings();
     mockEnqueueTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
     mockGetTaskUrl.mockReturnValue('https://roomote.example/tasks/task-1');
     mockSendMessageToTask.mockResolvedValue({ success: true });
@@ -364,10 +417,11 @@ describe('handleGiteaComment', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
-  it('handles issue comment payloads that only include issue PR context', async () => {
+  it('handles PR issue_comment payloads that only include issue context when is_pull is true', async () => {
     const result = await handleGiteaComment(
       makeCommentPayload({
         pullRequest: null,
+        isPull: true,
       }),
     );
 
@@ -375,6 +429,7 @@ describe('handleGiteaComment', () => {
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
           payload: expect.objectContaining({
             prNumber: 42,
             prTitle: 'Update backend',
@@ -382,6 +437,176 @@ describe('handleGiteaComment', () => {
         }),
       }),
     );
+  });
+
+  it('starts a standard issue task for plain issue_comment mentions', async () => {
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        isPull: false,
+        pullRequest: null,
+        issue: {
+          number: 55,
+          title: 'Login broken',
+          body: 'Steps to reproduce',
+          html_url: 'https://git.example.com/acme/backend/issues/55',
+        },
+        comment: {
+          body: '@roomote fix this bug',
+        },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
+    expect(mockGetGiteaAutomationTargets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'pr_conflict_resolve',
+        requireLinkedSenderAccount: true,
+      }),
+    );
+    expect(mockFindReusableGitHubIssueTaskOwner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoFullName: 'acme/backend',
+        issueNumber: 55,
+        sourceControlProvider: 'gitea',
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            sourceControlProvider: 'gitea',
+            environmentId: 'env-1',
+            description: expect.stringContaining(
+              '<mention_request>@roomote fix this bug</mention_request>',
+            ),
+            linkedWorkItems: [
+              expect.objectContaining({
+                provider: 'gitea',
+                identifier: '55',
+                repository: 'acme/backend',
+              }),
+            ],
+          }),
+        }),
+        workflow: 'standard',
+        surface: 'gitea',
+        initiator: { kind: 'user', userId: 'user-1' },
+      }),
+    );
+    expect(mockCreateGiteaIssueComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryFullName: 'acme/backend',
+        issueNumber: 55,
+        body: expect.stringContaining('I started a task for this issue'),
+      }),
+    );
+    expect(mockCreateGiteaPullRequestComment).not.toHaveBeenCalled();
+  });
+
+  it('does not treat plain issues as pull requests when synthesizing context', async () => {
+    await handleGiteaComment(
+      makeCommentPayload({
+        isPull: false,
+        pullRequest: null,
+        issue: { number: 77, title: 'Plain issue' },
+        comment: { body: '@roomote look at this' },
+      }),
+    );
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.not.objectContaining({
+            prNumber: expect.anything(),
+          }),
+        }),
+      }),
+    );
+    expect(mockFindReusableGitHubPrFollowUpOwner).not.toHaveBeenCalled();
+  });
+
+  it('routes repeat issue mentions into the reusable issue task', async () => {
+    mockFindReusableGitHubIssueTaskOwner.mockResolvedValue({
+      taskId: 'task-issue',
+      status: RunStatus.Running,
+      taskPhase: 'running',
+    });
+    mockGetTaskUrl.mockReturnValue('https://roomote.example/tasks/task-issue');
+
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        isPull: false,
+        pullRequest: null,
+        issue: { number: 55, title: 'Login broken' },
+        comment: { body: '@roomote also check logout' },
+      }),
+    );
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'active_issue_owner_routed',
+    });
+    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-issue',
+        message: expect.stringContaining(
+          '<mention_request>@roomote also check logout</mention_request>',
+        ),
+      }),
+    );
+    expect(mockCreateGiteaIssueComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('existing task for this issue'),
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('prompts for a linked account on plain issue mentions', async () => {
+    mockGetGiteaAutomationTargets.mockResolvedValue({
+      status: 'error',
+      code: 'account_link_required',
+      message: 'Gitea user alice is not linked',
+    });
+
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        isPull: false,
+        pullRequest: null,
+        comment: { body: '@roomote fix this' },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'ok', message: 'account_link_required' });
+    expect(mockCreateGiteaIssueComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('settings?service=gitea'),
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('requires a mapped environment for plain issue mentions', async () => {
+    mockEnvironmentMappings([]);
+
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        isPull: false,
+        pullRequest: null,
+        comment: { body: '@roomote fix this' },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'ok', message: 'environment_required' });
+    expect(mockCreateGiteaIssueComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('settings/environments'),
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('ignores comments from the deployment token identity', async () => {

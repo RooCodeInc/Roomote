@@ -82,6 +82,7 @@ import {
   buildGiteaRepositoryValues,
   createTaskRunGiteaCredentials,
   createGiteaPullRequestComment,
+  createGiteaIssueComment,
   ensureGiteaWebhooksForRepositories,
   removeGiteaWebhooksForRepositories,
   getGiteaAuthenticatedUser,
@@ -503,6 +504,33 @@ describe('Gitea API helpers', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ body: 'I started a review.' }),
+      }),
+    );
+  });
+
+  it('posts a plain Gitea issue comment through the issue comments API', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: 56 }), {
+        status: 201,
+      }),
+    );
+
+    await expect(
+      createGiteaIssueComment({
+        repositoryFullName: 'acme/backend',
+        issueNumber: 77,
+        body: 'I started a task for this issue.',
+        token: 'gitea_test',
+        baseUrl: 'https://git.example.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual({ id: 56 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://git.example.com/api/v1/repos/acme/backend/issues/77/comments',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ body: 'I started a task for this issue.' }),
       }),
     );
   });

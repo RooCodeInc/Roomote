@@ -73,6 +73,10 @@ const giteaIssueSchema = z
   .object({
     number: z.number(),
     title: z.string().optional(),
+    body: z.string().nullable().optional(),
+    html_url: z.string().optional(),
+    url: z.string().optional(),
+    user: giteaUserSchema.optional(),
   })
   .passthrough();
 

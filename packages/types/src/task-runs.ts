@@ -761,6 +761,7 @@ const sharedTaskSchema = z.object({
 export const linkedWorkItemProviderSchema = z.enum([
   'github',
   'gitlab',
+  'gitea',
   'linear',
   'jira',
   'asana',

@@ -664,6 +664,62 @@ function splitGiteaRepositoryFullName(repositoryFullName: string): {
   return { owner, repo };
 }
 
+async function createGiteaIssueOrPullRequestComment({
+  repositoryFullName,
+  issueNumber,
+  body,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+  surfaceLabel,
+}: {
+  repositoryFullName: string;
+  issueNumber: number;
+  body: string;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+  surfaceLabel: string;
+}): Promise<{ id: number }> {
+  const giteaToken = token ?? (await resolveGiteaToken());
+
+  if (!giteaToken?.trim()) {
+    throw new Error(
+      `Gitea OAuth connection is required to create ${surfaceLabel}.`,
+    );
+  }
+
+  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
+
+  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
+    throw new Error(
+      `GITEA_BASE_URL is required to create Gitea ${surfaceLabel}.`,
+    );
+  }
+
+  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
+  const { data } = await requestGiteaJson({
+    apiBaseUrl: apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+    fetchImpl,
+    method: 'POST',
+    path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo,
+    )}/issues/${issueNumber}/comments`,
+    params: {},
+    token: giteaToken,
+    body: { body },
+    schema: giteaIssueCommentSchema,
+  });
+
+  return data;
+}
+
+/**
+ * Gitea exposes PR discussion comments on the shared issues comments API.
+ * Prefer this for PR review acknowledgements.
+ */
 export async function createGiteaPullRequestComment({
   repositoryFullName,
   pullRequestNumber,
@@ -681,37 +737,46 @@ export async function createGiteaPullRequestComment({
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
 }): Promise<{ id: number }> {
-  const giteaToken = token ?? (await resolveGiteaToken());
-
-  if (!giteaToken?.trim()) {
-    throw new Error(
-      'Gitea OAuth connection is required to create pull request comments.',
-    );
-  }
-
-  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
-
-  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
-    throw new Error(
-      'GITEA_BASE_URL is required to create Gitea pull request comments.',
-    );
-  }
-
-  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
-  const { data } = await requestGiteaJson({
-    apiBaseUrl: apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+  return createGiteaIssueOrPullRequestComment({
+    repositoryFullName,
+    issueNumber: pullRequestNumber,
+    body,
+    token,
+    baseUrl,
+    apiBaseUrl,
     fetchImpl,
-    method: 'POST',
-    path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-      repo,
-    )}/issues/${pullRequestNumber}/comments`,
-    params: {},
-    token: giteaToken,
-    body: { body },
-    schema: giteaIssueCommentSchema,
+    surfaceLabel: 'pull request comments',
   });
+}
 
-  return data;
+/** Post a comment on a plain Gitea issue (same underlying issues comments API). */
+export async function createGiteaIssueComment({
+  repositoryFullName,
+  issueNumber,
+  body,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  issueNumber: number;
+  body: string;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ id: number }> {
+  return createGiteaIssueOrPullRequestComment({
+    repositoryFullName,
+    issueNumber,
+    body,
+    token,
+    baseUrl,
+    apiBaseUrl,
+    fetchImpl,
+    surfaceLabel: 'issue comments',
+  });
 }
 
 async function findGiteaRepositoryWebhookByUrl({
