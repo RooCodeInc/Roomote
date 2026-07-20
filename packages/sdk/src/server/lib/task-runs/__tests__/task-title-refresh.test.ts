@@ -9,7 +9,10 @@ import {
 import { ACP_ENVELOPE_EVENT_TYPES, TaskPayloadKind } from '@roomote/types';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '@roomote/cloud-agents/server';
 
-import { refreshTaskTitleOnCompletion } from '../record-task-message-envelope';
+import {
+  recordTaskMessageEnvelope,
+  refreshTaskTitleOnCompletion,
+} from '../record-task-message-envelope';
 
 const { mockGenerateLlmTaskTitle, mockSyncTaskThreadTitle } = vi.hoisted(
   () => ({
@@ -197,5 +200,118 @@ describe('task title refresh', () => {
     expect(task?.title).toBe('Checkpoint 20 title');
     expect(task?.llmTitleCheckpoint).toBe(20);
     expect(mockGenerateLlmTaskTitle).not.toHaveBeenCalled();
+  });
+
+  it('re-syncs the provider thread on the opening user prompt when checkpoint 1 is already locked', async () => {
+    const taskId = 'task-title-opening-resync';
+    await taskFactory.create({
+      id: taskId,
+      modelProvider: 'roomote',
+      model: 'test-model',
+      title: 'Early title already locked',
+      llmTitleCheckpoint: 1,
+      workflow: 'standard',
+      surface: 'discord',
+      trigger: 'message',
+    });
+
+    const [job] = await db
+      .insert(taskRuns)
+      .values({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          communicationProvider: 'discord',
+          discordTaskThread: true,
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'thread-1',
+        },
+        taskId,
+      })
+      .returning({ id: taskRuns.id });
+
+    if (!job) {
+      throw new Error('Failed to seed task run');
+    }
+
+    await recordTaskMessageEnvelope({
+      runId: job.id,
+      taskId,
+      envelope: {
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        protocol: 'roomote_runtime',
+        contentBlocks: [{ type: 'text', text: 'Fix the flaky login tests' }],
+        metadata: null,
+        payload: {},
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockSyncTaskThreadTitle).toHaveBeenCalledWith({ taskId });
+    });
+    expect(mockGenerateLlmTaskTitle).not.toHaveBeenCalled();
+  });
+
+  it('still syncs provider threads when opening-prompt generation falls back', async () => {
+    const taskId = 'task-title-fallback-resync';
+    mockGenerateLlmTaskTitle.mockResolvedValueOnce('Untitled task');
+
+    await taskFactory.create({
+      id: taskId,
+      modelProvider: 'roomote',
+      model: 'test-model',
+      title: 'Early title waiting for rename',
+      llmTitleCheckpoint: 0,
+      workflow: 'standard',
+      surface: 'discord',
+      trigger: 'message',
+    });
+
+    const [job] = await db
+      .insert(taskRuns)
+      .values({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          communicationProvider: 'discord',
+          discordTaskThread: true,
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'thread-1',
+        },
+        taskId,
+      })
+      .returning({ id: taskRuns.id });
+
+    if (!job) {
+      throw new Error('Failed to seed task run');
+    }
+
+    await recordTaskMessageEnvelope({
+      runId: job.id,
+      taskId,
+      envelope: {
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user',
+        protocol: 'roomote_runtime',
+        contentBlocks: [{ type: 'text', text: 'Fix the flaky login tests' }],
+        metadata: null,
+        payload: {},
+      },
+    });
+
+    await vi.waitFor(async () => {
+      const task = await db.query.tasks.findFirst({
+        where: eq(tasks.id, taskId),
+        columns: { title: true, llmTitleCheckpoint: true },
+      });
+      expect(task).toEqual({
+        title: 'Early title waiting for rename',
+        llmTitleCheckpoint: 1,
+      });
+      expect(mockSyncTaskThreadTitle).toHaveBeenCalledWith({ taskId });
+    });
   });
 });

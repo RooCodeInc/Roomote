@@ -24,6 +24,7 @@ export {
   lt,
   lte,
   count,
+  exists,
   max,
   isNotNull,
   isNull,
@@ -62,6 +63,8 @@ export * from './lib/compute-runtime-config';
 export * from './lib/model-runtime-config';
 export * from './lib/chatgpt-subscription';
 export * from './lib/github-copilot-subscription';
+export * from './lib/subscription-provider-usage';
+export * from './lib/provider-credit-balance';
 export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
 export * from './lib/record-task-kickoff-message';

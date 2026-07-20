@@ -9,6 +9,7 @@ import {
   getEnvironmentDefinitionIdFromPayload,
   parseConflictResolutionSummary,
   stripRunErrorMarkers,
+  type TaskRunErrorCode,
 } from '@roomote/types';
 import {
   formatMarkdownLink,
@@ -94,6 +95,7 @@ export const finishRun = async ({
   id,
   status,
   error,
+  errorCode,
 }: {
   id: number;
   status:
@@ -102,6 +104,8 @@ export const finishRun = async ({
     | RunStatus.Canceled
     | RunStatus.Idle;
   error?: string;
+  /** Machine-readable failure category persisted alongside the error text. */
+  errorCode?: TaskRunErrorCode;
 }) => {
   const run = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, id),
@@ -181,6 +185,7 @@ export const finishRun = async ({
         taskPhase: status === RunStatus.Idle ? run.taskPhase : null,
         sleepAt: status === RunStatus.Idle ? run.sleepAt : null,
         error: sanitizedError,
+        errorCode: errorCode ?? null,
         canceledAt: status === RunStatus.Canceled ? now : run.canceledAt,
         completedAt: status === RunStatus.Canceled ? null : now,
       })
@@ -224,6 +229,7 @@ export const finishRun = async ({
         sleepAt: status === RunStatus.Idle ? run.sleepAt?.toISOString() : null,
         taskPhase: status === RunStatus.Idle ? run.taskPhase : null,
         error: sanitizedError ?? null,
+        errorCode: errorCode ?? null,
       },
       createdAt: now,
     });
@@ -681,6 +687,7 @@ async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
   }
 
   const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
+  const messageId = getCommunicationMessageIdFromTaskPayload(run.payload);
   const failureText = hasReachedTaskRuntime(run)
     ? TASK_RUNTIME_FAILURE_TEXT
     : TASK_STARTUP_FAILURE_TEXT;
@@ -695,6 +702,7 @@ async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
   await provider.postMessage({
     channelId,
     ...(threadId ? { threadId } : {}),
+    ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
     text,
     textFormat: 'markdown',
   });

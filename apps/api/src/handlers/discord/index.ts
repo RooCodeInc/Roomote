@@ -37,10 +37,12 @@ import {
   findCommunicationTaskRunBySourceEvent,
 } from '../tasks/communication-task-run-lookup.js';
 import { resumeCommunicationTaskFromSnapshot } from '../tasks/communication-snapshot-resume.js';
+import { tryHandleDiscordRequestUserInputMessage } from './request-user-input.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
 } from '../tasks/communication-out-of-band-context.js';
+import { promptDiscordAccountLink } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
 import {
   DISCORD_GATEWAY_SECRET_HEADER,
@@ -70,9 +72,11 @@ import {
 import { startNewDiscordTask } from './task-orchestration.js';
 import {
   buildDiscordContinuationPrompt,
+  fetchDiscordThreadHistoryBestEffort,
   releaseDiscordContinuationClaim,
   markDiscordThreadHistoryDelivered,
 } from './thread-context.js';
+import { shouldRouteUnmentionedDiscordThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const DISCORD_HELP_MESSAGE = [
   "👋 I'm Roomote. Mention me in a server channel or message me directly to start a task.",
@@ -84,9 +88,6 @@ const DISCORD_HELP_MESSAGE = [
   '',
   'Follow up by sending another message in the task thread.',
 ].join('\n');
-
-const DISCORD_LINK_REQUIRED_MESSAGE =
-  'Link your Discord account to Roomote before starting tasks. Generate a code under **Settings → Personal → Linked Accounts**, then DM me with `/link code:<code>`.';
 
 function isPermanentDiscordEventError(
   error: unknown,
@@ -340,9 +341,12 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
           launchOwnerUserId: senderUserId,
         })
       : null;
+  const isRoomoteThread = Boolean(
+    activeRun || completedRun || pendingRoutingReply,
+  );
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
-    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
+    isTaskThread: isRoomoteThread,
     parentChannelId: channel.parentChannelId,
   });
   if (!isTaskEntry) {
@@ -367,18 +371,62 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       };
     }
 
-    await replyToDiscordEvent({
+    await promptDiscordAccountLink({
       provider: resolved.provider,
       applicationId: resolved.applicationId,
       channel,
+      discordUserId: sender.id,
       ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-      text: DISCORD_LINK_REQUIRED_MESSAGE,
+      ...(message?.id ? { replyToMessageId: message.id } : {}),
     });
     return {
       ok: true,
       queued: false,
       reason: 'discord_sender_not_linked',
     };
+  }
+
+  // Mirror Slack/Teams: unmentioned guild-thread follow-ups only route when the
+  // sender is already in the conversation and nobody else interjected since
+  // the bot's last reply. Explicit @mentions, DMs, and slash commands stay on
+  // the normal task-entry path above.
+  if (
+    message &&
+    !channel.isDirectMessage &&
+    !command &&
+    !isDiscordBotMentioned(message, resolved.botUserId) &&
+    isRoomoteThread
+  ) {
+    const shouldRouteUnmentioned =
+      await shouldRouteUnmentionedDiscordThreadReplyToAgent({
+        message,
+        botUserId: resolved.botUserId,
+        mappedUserId: senderUserId,
+        isRoomoteThread: true,
+        ownedThreadUserId:
+          activeRun?.userId ??
+          completedRun?.userId ??
+          (pendingRoutingReply ? senderUserId : null),
+        fetchThreadMessages: async () => {
+          const history = await fetchDiscordThreadHistoryBestEffort({
+            provider: resolved.provider,
+            channelId: channel.channelId,
+            ...(channel.parentChannelId
+              ? { parentChannelId: channel.parentChannelId }
+              : {}),
+          });
+          return history.length > 0 ? history : null;
+        },
+      });
+    if (!shouldRouteUnmentioned) {
+      apiLogger.debug(
+        `[discord] Ignoring unmentioned guild-thread reply from ${sender.id} (requires @mention after interjection or ineligible sender)`,
+      );
+      return {
+        ok: true,
+        ignored: 'discord_unmentioned_requires_mention',
+      };
+    }
   }
   await refreshDiscordUserMappingBestEffort({
     discordUserId: sender.id,
@@ -399,7 +447,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   const queuedMessage = discordEventToQueuedCommunicationMessage(event, {
     botUserId: resolved.botUserId,
     userId: senderUserId,
-    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
+    isTaskThread: isRoomoteThread,
     parentChannelId: channel.parentChannelId,
     attachmentImages: processedAttachments.images,
     attachmentText: processedAttachments.attachmentTexts,
@@ -409,25 +457,43 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   }
 
   if (pendingRoutingReply) {
+    let routingReplyAckPinned = false;
     try {
       await resolved.provider.addReaction({
         channelId: channel.channelId,
         messageId: queuedMessage.ts,
         name: '👀',
       });
+      routingReplyAckPinned = true;
     } catch {
       // Routing ownership is already durable; the reaction is only an ack.
     }
 
-    const handled = await handleDiscordRoutingReply({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      pendingRouteId: pendingRoutingReply.pendingRouteId,
-      requesterDiscordUserId: sender.id,
-      launchOwnerUserId: senderUserId,
-      queuedMessage,
-      channel,
-    });
+    let handled: boolean;
+    try {
+      handled = await handleDiscordRoutingReply({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        pendingRouteId: pendingRoutingReply.pendingRouteId,
+        requesterDiscordUserId: sender.id,
+        launchOwnerUserId: senderUserId,
+        queuedMessage,
+        channel,
+      });
+    } finally {
+      // A routing reply is a transient continuation, not the task's durable
+      // intake target. Its eyes must end when routing finishes; a launched
+      // worker separately clears the original request's intake reaction.
+      if (routingReplyAckPinned && resolved.provider.removeReaction) {
+        await resolved.provider
+          .removeReaction({
+            channelId: channel.channelId,
+            messageId: queuedMessage.ts,
+            name: 'eyes',
+          })
+          .catch(() => undefined);
+      }
+    }
     if (handled) {
       return { ok: true, routingReplyHandled: true };
     }
@@ -475,6 +541,28 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       runId: activeRun.id,
       senderUserId,
     });
+
+    if (message && queuedMessage) {
+      const handledRequestUserInput =
+        await tryHandleDiscordRequestUserInputMessage({
+          provider: resolved.provider,
+          applicationId: resolved.applicationId,
+          channel,
+          activeRun: { id: activeRun.id },
+          userId: senderUserId,
+          text: queuedMessage.text,
+          replyToMessageId: message.id,
+        });
+      if (handledRequestUserInput) {
+        return {
+          ok: true,
+          queued: true,
+          runId: activeRun.id,
+          requestUserInput: true,
+        };
+      }
+    }
+
     // Mirror Slack: rebuild undelivered thread context + latest bot reply into
     // the follow-up prompt so agents keep full Discord conversation context.
     let continuationClaim: {
@@ -486,6 +574,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       const continuation = await buildDiscordContinuationPrompt({
         provider: resolved.provider,
         channelId: channel.channelId,
+        ...(channel.parentChannelId
+          ? { parentChannelId: channel.parentChannelId }
+          : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
       });
@@ -552,6 +643,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       const continuation = await buildDiscordContinuationPrompt({
         provider: resolved.provider,
         channelId: channel.channelId,
+        ...(channel.parentChannelId
+          ? { parentChannelId: channel.parentChannelId }
+          : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
       });
@@ -592,6 +686,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   // Match Slack intake: ack the origin message with 👀 before launch work.
   // Only real MESSAGE_CREATE messages can receive Discord reactions; slash-
   // command interaction ids are not message targets and would 404.
+  let intakeAckPinned = false;
   if (message?.id) {
     try {
       await resolved.provider.addReaction({
@@ -599,6 +694,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         messageId: message.id,
         name: '👀',
       });
+      intakeAckPinned = true;
     } catch {
       // Soft ack only.
     }
@@ -617,6 +713,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
     // thread (with thread history as context). Only `/new` forces a sibling
     // task thread; known task threads were already handled above.
     forceNewThread: forceNewTask,
+    ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
   });
   return { ok: true, ...started };
 }

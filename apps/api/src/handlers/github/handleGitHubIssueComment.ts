@@ -1,17 +1,10 @@
-import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
-import { db, environmentRepositoryMappings, eq, asc } from '@roomote/db/server';
+import { getTaskUrl } from '@roomote/cloud-agents/server';
 import { getInstallationOctokit } from '@roomote/github';
-import {
-  type TaskPayload,
-  PRODUCT_NAME,
-  TaskPayloadKind,
-} from '@roomote/types';
+import { PRODUCT_NAME } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
-import {
-  buildSourceControlAccountLinkRequiredMessage,
-  buildSourceControlEnvironmentRequiredMessage,
-} from '../source-control-account-linking';
+import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import { orchestrateIssueMention } from '../shared/issue-mention-orchestration';
 import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { isMention } from './isMention';
 import type {
@@ -42,37 +35,6 @@ type IssueMentionPayload = {
    */
   mentionBody?: string;
 };
-
-function buildIssueMentionPrompt({
-  repositoryFullName,
-  issueNumber,
-  issueTitle,
-  issueBody,
-  issueUrl,
-  commentBody,
-  commenterLogin,
-}: {
-  repositoryFullName: string;
-  issueNumber: number;
-  issueTitle: string;
-  issueBody?: string | null;
-  issueUrl: string;
-  commentBody: string;
-  commenterLogin: string;
-}): string {
-  const issueBodySection = issueBody?.trim()
-    ? `\n\nIssue body:\n${issueBody.trim()}`
-    : '';
-
-  return [
-    `${commenterLogin} mentioned Roomote on GitHub issue #${issueNumber} (${issueTitle}) in ${repositoryFullName}.`,
-    `Issue URL: ${issueUrl}`,
-    issueBodySection,
-    '',
-    'Mention comment:',
-    commentBody.trim(),
-  ].join('\n');
-}
 
 async function postIssueComment({
   installationId,
@@ -141,6 +103,14 @@ function formatStartedReply(taskLink: string | null): string {
   return `I'm on it. I started a task for this issue, and I'll keep updates here.`;
 }
 
+function formatFollowUpReply(taskLink: string | null): string {
+  if (taskLink) {
+    return `I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.\n\n[See task](${taskLink})`;
+  }
+
+  return `I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.`;
+}
+
 function buildGateMissComment(): string {
   return `I saw the mention, but I could not start work on this issue with the current ${PRODUCT_NAME} GitHub setup.`;
 }
@@ -149,30 +119,10 @@ function buildStartFailedComment(): string {
   return `I saw the mention, but I could not start a task for this issue right now. Please try again in a moment.`;
 }
 
-async function resolveMappedEnvironmentId(
-  repositoryId: string,
-): Promise<string | null> {
-  const mappings = await db
-    .select({
-      environmentId: environmentRepositoryMappings.environmentId,
-    })
-    .from(environmentRepositoryMappings)
-    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId))
-    .orderBy(asc(environmentRepositoryMappings.environmentId));
-
-  if (mappings.length === 0) {
-    return null;
-  }
-
-  // When multiple environments map to the same repository, pick a stable
-  // ordered environment id and still pin the selected repository so the worker
-  // has a concrete checkout target.
-  return mappings[0]?.environmentId ?? null;
-}
-
 /**
  * Handle @mentions on plain GitHub issues (not pull requests).
- * Starts a standard task against the issue's repository.
+ * Starts a standard task against the issue's repository, or continues an
+ * existing task already linked to the same issue.
  */
 export async function handleGitHubIssueComment(
   eventPayload: IssueMentionPayload,
@@ -250,23 +200,18 @@ export async function handleGitHubIssueComment(
     return { status: 'ok', message: 'account_link_required' };
   }
 
-  const environmentId = await resolveMappedEnvironmentId(target.repo.id);
-
-  if (!environmentId) {
-    await postIssueComment({
-      ...replyTarget,
-      body: buildSourceControlEnvironmentRequiredMessage('github'),
-    });
-
-    return { status: 'ok', message: 'environment_required' };
-  }
-
   const issueUrl =
     issue.html_url ??
     `https://github.com/${repositoryFullName}/issues/${issueNumber}`;
   const issueTitle = issue.title ?? `Issue #${issueNumber}`;
   const issueBody = issue.body ?? null;
-  const prompt = buildIssueMentionPrompt({
+  const commenterUserId = target.properties.userId;
+  const issueAuthorLogin = issue.user?.login ?? null;
+
+  return orchestrateIssueMention({
+    provider: 'github',
+    logPrefix: '[handleGitHubIssueComment]',
+    repositoryId: target.repo.id,
     repositoryFullName,
     issueNumber,
     issueTitle,
@@ -274,67 +219,20 @@ export async function handleGitHubIssueComment(
     issueUrl,
     commentBody,
     commenterLogin: sender.login,
+    commenterUserId,
+    githubLogin: target.properties.githubLogin ?? undefined,
+    githubUserId: target.properties.githubUserId ?? undefined,
+    followUpCommenterDisplayName: target.properties.githubLogin ?? sender.login,
+    retrySandboxBoot: true,
+    providerDisplayName: 'GitHub',
+    issueBodySource: 'github_issue_body',
+    issueBodyContextLabel: `Issue body (context only, authored by ${
+      issueAuthorLogin ? `@${issueAuthorLogin}` : 'an unknown user'
+    }):`,
+    postComment: (body) => postIssueComment({ ...replyTarget, body }),
+    formatFollowUpReply,
+    formatStartedReply,
+    formatStartFailed: buildStartFailedComment,
+    tryBuildTaskLink,
   });
-
-  const payload = {
-    repo: repositoryFullName,
-    environmentId,
-    selectedRepositories: [repositoryFullName],
-    description: prompt,
-    linkedWorkItems: [
-      {
-        provider: 'github',
-        identifier: String(issueNumber),
-        url: issueUrl,
-        title: issueTitle,
-        repository: repositoryFullName,
-      },
-    ],
-  } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>;
-
-  try {
-    const launch = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.StandardTask,
-        githubLogin: target.properties.githubLogin,
-        githubUserId: target.properties.githubUserId,
-        payload,
-      },
-      initiator: { kind: 'user', userId: target.properties.userId },
-      workflow: 'standard',
-      surface: 'github',
-      trigger: 'message',
-    });
-
-    await postIssueComment({
-      ...replyTarget,
-      body: formatStartedReply(
-        tryBuildTaskLink({
-          taskId: launch.taskId,
-          campaign: 'github.issue.mention',
-        }),
-      ),
-    });
-
-    return {
-      status: 'ok',
-      metadata: { ids: [launch.id] },
-    };
-  } catch (error) {
-    console.warn(
-      `[handleGitHubIssueComment] failed to start issue task for ${repositoryFullName}#${issueNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-
-    await postIssueComment({
-      ...replyTarget,
-      body: buildStartFailedComment(),
-    });
-
-    return {
-      status: 'error',
-      message: `issue_task_start_failed:${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
 }

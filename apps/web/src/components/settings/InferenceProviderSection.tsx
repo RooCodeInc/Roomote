@@ -5,12 +5,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
   getModelProviderLabel,
 } from '@roomote/types';
 import type {
+  ProviderCreditBalance,
+  ProviderCreditBalanceProviderId,
   SetupModelProviderId,
   SetupModelProviderStatus,
   SetupModelStatus,
+  SubscriptionProviderUsage,
+  SubscriptionUsageProviderId,
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
@@ -41,6 +46,8 @@ import {
 import { Section } from '@/components/settings/Section';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
+import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
+import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
@@ -65,17 +72,65 @@ type ProviderCredentialsDialogState =
 function getInitialAdditionalEnvValues(
   provider: SetupModelProviderStatus | null,
 ) {
-  return provider?.additionalEnvValues ?? {};
+  if (!provider) {
+    return {};
+  }
+
+  // Endpoint providers expose the primary base URL in additionalEnvValues for
+  // list display, but save only accepts declared additional fields.
+  const declaredNames = new Set(
+    (provider.additionalEnvFields ?? []).map((field) => field.envVarName),
+  );
+
+  return Object.fromEntries(
+    Object.entries(provider.additionalEnvValues ?? {}).filter(([name]) =>
+      declaredNames.has(name),
+    ),
+  );
+}
+
+function getInitialPrimaryCredential(
+  provider: SetupModelProviderStatus | null,
+) {
+  if (provider?.authKind !== 'endpoint' || !provider.envVarName) {
+    return '';
+  }
+
+  return provider.additionalEnvValues[provider.envVarName] ?? '';
+}
+
+function getSubmitAdditionalEnvValues(
+  provider: SetupModelProviderStatus,
+  additionalEnvValues: Record<string, string>,
+) {
+  const additionalEnvFields = provider.additionalEnvFields ?? [];
+  if (additionalEnvFields.length === 0) {
+    return undefined;
+  }
+
+  const declaredNames = new Set(
+    additionalEnvFields.map((field) => field.envVarName),
+  );
+
+  return Object.fromEntries(
+    Object.entries(additionalEnvValues).filter(([name]) =>
+      declaredNames.has(name),
+    ),
+  );
 }
 
 function ConnectedProviderRow({
   provider,
+  usage,
+  creditBalance,
   isSaving,
   canDelete,
   onEdit,
   onDelete,
 }: {
   provider: SetupModelProviderStatus;
+  usage?: SubscriptionProviderUsage;
+  creditBalance?: ProviderCreditBalance;
   isSaving: boolean;
   canDelete: boolean;
   onEdit: () => void;
@@ -113,6 +168,8 @@ function ConnectedProviderRow({
             aria-label={`${primaryCredentialLabel} for ${provider.label}`}
             data-1p-ignore
           />
+          <SubscriptionUsageLine usage={usage} className="mt-1" />
+          <ProviderCreditBalanceLine balance={creditBalance} className="mt-1" />
         </div>
 
         {hasRuntimeKey ? (
@@ -178,13 +235,17 @@ function ProviderCredentialsDialog({
     providerId: SetupModelProviderId,
     apiKey: string,
     additionalEnvValues?: Record<string, string>,
+    connectionName?: string,
   ) => Promise<void>;
   onOpenChange: (open: boolean) => void;
   onConnectOAuth: (providerId: SetupModelProviderId) => void;
 }) {
   const [selectedProviderId, setSelectedProviderId] =
     useState<SetupModelProviderId | null>(providers[0]?.id ?? null);
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState(() =>
+    getInitialPrimaryCredential(providers[0] ?? null),
+  );
+  const [connectionName, setConnectionName] = useState('');
   const [providerSelectOpen, setProviderSelectOpen] = useState(false);
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
@@ -209,7 +270,8 @@ function ProviderCredentialsDialog({
     // dialog. Only initialize values when the selection is no longer valid.
     const provider = providers[0] ?? null;
     setSelectedProviderId(provider?.id ?? null);
-    setApiKey('');
+    setApiKey(getInitialPrimaryCredential(provider));
+    setConnectionName('');
     setAdditionalEnvValues(getInitialAdditionalEnvValues(provider));
   }, [open, providers, selectedProviderId]);
 
@@ -247,6 +309,13 @@ function ProviderCredentialsDialog({
   const hasMissingPrimaryCredential =
     !hasExistingPrimaryCredential && apiKey.trim().length === 0;
 
+  const requiresConnectionName =
+    mode === 'add' &&
+    (selectedProvider?.id === OPENAI_COMPATIBLE_PROVIDER_ID ||
+      selectedProvider?.allowMultipleConnections === true);
+  const hasMissingConnectionName =
+    requiresConnectionName && connectionName.trim().length === 0;
+
   const handleSaveClick = async () => {
     if (!selectedProvider) {
       return;
@@ -256,9 +325,11 @@ function ProviderCredentialsDialog({
       await onSave(
         selectedProvider.id,
         apiKey.trim(),
-        additionalEnvFields.length > 0 ? additionalEnvValues : undefined,
+        getSubmitAdditionalEnvValues(selectedProvider, additionalEnvValues),
+        requiresConnectionName ? connectionName.trim() : undefined,
       );
       setApiKey('');
+      setConnectionName('');
       setAdditionalEnvValues({});
     } catch {
       // The mutation surfaces failures via toast; keep the typed key so the
@@ -303,7 +374,8 @@ function ProviderCredentialsDialog({
                         (candidate) => candidate.id === providerId,
                       ) ?? null;
                     setSelectedProviderId(providerId);
-                    setApiKey('');
+                    setApiKey(getInitialPrimaryCredential(provider));
+                    setConnectionName('');
                     setAdditionalEnvValues(
                       getInitialAdditionalEnvValues(provider),
                     );
@@ -337,12 +409,48 @@ function ProviderCredentialsDialog({
                 </div>
               ) : (
                 <>
+                  {requiresConnectionName ? (
+                    <div className={PROVIDER_GRID_ROW_CLASS}>
+                      <span className="text-sm font-medium">
+                        Connection name
+                      </span>
+                      <div className="space-y-1.5">
+                        <Input
+                          value={connectionName}
+                          onChange={(event) =>
+                            setConnectionName(event.target.value)
+                          }
+                          placeholder="e.g. company-proxy"
+                          disabled={isSaving}
+                          aria-label="Connection name for OpenAI-compatible endpoint"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          A short label for this endpoint in Models settings.
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className={PROVIDER_GRID_ROW_CLASS}>
                     <span className="text-sm font-medium">
                       {primaryCredentialLabel}
                     </span>
                     <div className="space-y-1.5">
                       <Input
+                        type={
+                          selectedProvider.authKind === 'endpoint'
+                            ? 'url'
+                            : undefined
+                        }
+                        inputMode={
+                          selectedProvider.authKind === 'endpoint'
+                            ? 'url'
+                            : undefined
+                        }
+                        autoComplete={
+                          selectedProvider.authKind === 'endpoint'
+                            ? 'url'
+                            : undefined
+                        }
                         secret={selectedProvider.authKind !== 'endpoint'}
                         className="font-mono"
                         value={apiKey}
@@ -429,7 +537,8 @@ function ProviderCredentialsDialog({
                 isSaving ||
                 !selectedProvider ||
                 hasMissingPrimaryCredential ||
-                hasMissingRequiredFields
+                hasMissingRequiredFields ||
+                hasMissingConnectionName
               }
             >
               {isSaving ? (
@@ -452,6 +561,7 @@ function ChatGptSubscriptionRow({
   errored,
   accountEmail,
   errorMessage,
+  usage,
   onReconnect,
   onDisconnect,
   isDisconnecting,
@@ -459,6 +569,7 @@ function ChatGptSubscriptionRow({
   errored: boolean;
   accountEmail?: string;
   errorMessage?: string;
+  usage?: SubscriptionProviderUsage;
   onReconnect: () => void;
   onDisconnect: () => Promise<void>;
   isDisconnecting: boolean;
@@ -472,17 +583,22 @@ function ChatGptSubscriptionRow({
       </div>
 
       <div className="flex min-w-0 items-center gap-2">
-        {errored ? (
-          <p className="min-w-0 flex-1 truncate text-sm text-destructive">
-            {errorMessage ?? 'ChatGPT subscription needs to be reconnected.'}
-          </p>
-        ) : (
-          <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-            {accountEmail
-              ? `Connected as ${accountEmail}`
-              : 'Connected to a ChatGPT account.'}
-          </p>
-        )}
+        <div className="min-w-0 flex-1">
+          {errored ? (
+            <p className="min-w-0 truncate text-sm text-destructive">
+              {errorMessage ?? 'ChatGPT subscription needs to be reconnected.'}
+            </p>
+          ) : (
+            <p className="min-w-0 truncate text-sm text-muted-foreground">
+              {accountEmail
+                ? `Connected as ${accountEmail}`
+                : 'Connected to a ChatGPT account.'}
+            </p>
+          )}
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
+        </div>
 
         {errored ? (
           <Button
@@ -511,12 +627,14 @@ function ChatGptSubscriptionRow({
 function GitHubCopilotSubscriptionRow({
   errored,
   errorMessage,
+  usage,
   onReconnect,
   onDisconnect,
   isDisconnecting,
 }: {
   errored: boolean;
   errorMessage?: string;
+  usage?: SubscriptionProviderUsage;
   onReconnect: () => void;
   onDisconnect: () => Promise<void>;
   isDisconnecting: boolean;
@@ -527,13 +645,18 @@ function GitHubCopilotSubscriptionRow({
         {getModelProviderLabel('github-copilot')}
       </span>
       <div className="flex min-w-0 items-center gap-2">
-        <p
-          className={`min-w-0 flex-1 truncate text-sm ${errored ? 'text-destructive' : 'text-muted-foreground'}`}
-        >
-          {errored
-            ? (errorMessage ?? 'GitHub Copilot needs to be reconnected.')
-            : 'Connected to a GitHub Copilot account.'}
-        </p>
+        <div className="min-w-0 flex-1">
+          <p
+            className={`min-w-0 truncate text-sm ${errored ? 'text-destructive' : 'text-muted-foreground'}`}
+          >
+            {errored
+              ? (errorMessage ?? 'GitHub Copilot needs to be reconnected.')
+              : 'Connected to a GitHub Copilot account.'}
+          </p>
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
+        </div>
         {errored ? (
           <Button size="sm" variant="outline" onClick={onReconnect}>
             Reconnect
@@ -628,6 +751,41 @@ export function InferenceProviderSection({
   );
   const githubCopilotStatus = githubCopilotStatusQuery.data ?? null;
 
+  // Usage endpoints are unofficial upstream surfaces; a provider missing from
+  // the result just means no usage line is rendered for it.
+  const subscriptionUsageQuery = useQuery(
+    trpc.subscriptionUsage.list.queryOptions(undefined, {
+      staleTime: 60_000,
+    }),
+  );
+  const usageByProvider = useMemo(
+    () =>
+      new Map<SubscriptionUsageProviderId, SubscriptionProviderUsage>(
+        (subscriptionUsageQuery.data ?? []).map((usage) => [
+          usage.providerId,
+          usage,
+        ]),
+      ),
+    [subscriptionUsageQuery.data],
+  );
+
+  // Credit-balance endpoints soft-fail the same way: missing means no line.
+  const providerCreditsQuery = useQuery(
+    trpc.providerCredits.list.queryOptions(undefined, {
+      staleTime: 60_000,
+    }),
+  );
+  const creditBalanceByProvider = useMemo(
+    () =>
+      new Map<ProviderCreditBalanceProviderId, ProviderCreditBalance>(
+        (providerCreditsQuery.data ?? []).map((balance) => [
+          balance.providerId,
+          balance,
+        ]),
+      ),
+    [providerCreditsQuery.data],
+  );
+
   const saveProvider = useMutation(
     trpc.taskModels.saveProvider.mutationOptions({
       onSuccess: async (result, variables) => {
@@ -649,6 +807,12 @@ export function InferenceProviderSection({
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.taskModels.providerSetup.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.providerCredits.list.queryKey(),
           }),
           ...(addedModelCount > 0 || addedDiscoveredModelCount > 0
             ? [
@@ -689,6 +853,9 @@ export function InferenceProviderSection({
           queryClient.invalidateQueries({
             queryKey: trpc.chatgptSubscription.status.queryKey(),
           }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
         ]);
       },
       onError: (error) => {
@@ -709,6 +876,9 @@ export function InferenceProviderSection({
           }),
           queryClient.invalidateQueries({
             queryKey: trpc.githubCopilotSubscription.status.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
           }),
         ]);
       },
@@ -733,6 +903,12 @@ export function InferenceProviderSection({
           queryClient.invalidateQueries({
             queryKey: trpc.taskModels.launchOptions.queryKey(),
           }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.providerCredits.list.queryKey(),
+          }),
         ]);
       },
       onError: (error) => {
@@ -745,12 +921,14 @@ export function InferenceProviderSection({
     providerId: SetupModelProviderId,
     apiKey: string,
     additionalEnvValues?: Record<string, string>,
+    connectionName?: string,
   ) => {
     setSavingProviderId(providerId);
     await saveProvider.mutateAsync({
       provider: providerId,
       ...(apiKey && { apiKey }),
       ...(additionalEnvValues && { additionalEnvValues }),
+      ...(connectionName && { connectionName }),
     });
   };
 
@@ -958,6 +1136,7 @@ export function InferenceProviderSection({
                 errored={chatgptErrored}
                 accountEmail={chatgptStatus?.email}
                 errorMessage={chatgptStatus?.error}
+                usage={usageByProvider.get(CHATGPT_SUBSCRIPTION_PROVIDER_ID)}
                 onReconnect={() => setIsChatGptDialogOpen(true)}
                 onDisconnect={handleDisconnectChatGpt}
                 isDisconnecting={disconnectChatGpt.isPending}
@@ -967,6 +1146,7 @@ export function InferenceProviderSection({
               <GitHubCopilotSubscriptionRow
                 errored={githubCopilotErrored}
                 errorMessage={githubCopilotStatus?.error}
+                usage={usageByProvider.get('github-copilot')}
                 onReconnect={() => setIsGitHubCopilotDialogOpen(true)}
                 onDisconnect={handleDisconnectGitHubCopilot}
                 isDisconnecting={disconnectGitHubCopilot.isPending}
@@ -976,6 +1156,16 @@ export function InferenceProviderSection({
               <ConnectedProviderRow
                 key={provider.id}
                 provider={provider}
+                usage={
+                  provider.id === 'kimi-for-coding'
+                    ? usageByProvider.get('kimi-for-coding')
+                    : undefined
+                }
+                creditBalance={
+                  provider.id === 'openrouter'
+                    ? creditBalanceByProvider.get('openrouter')
+                    : undefined
+                }
                 isSaving={savingProviderId === provider.id}
                 canDelete={connectedProviderCount > 1}
                 onEdit={() =>

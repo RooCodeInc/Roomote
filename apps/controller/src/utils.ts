@@ -235,3 +235,27 @@ export async function updateTaskRunMachine(
     })
     .where(eq(taskRuns.id, taskRun.id));
 }
+
+/**
+ * Clears persisted routing / machine fields after an aborted or failed spawn
+ * removed the underlying sandbox. Terminal finalization does not clear these.
+ */
+export async function clearTaskRunMachine(
+  taskRunId: number,
+  options: UpdateTaskRunMachineOptions = {},
+): Promise<void> {
+  const database = options.db ?? db;
+
+  await database
+    .update(taskRuns)
+    .set({
+      machineId: null,
+      machineDomain: null,
+      machineDomains: null,
+      primaryPortName: null,
+      sandboxServerUrl: null,
+      sandboxCmdId: null,
+      proxyPorts: null,
+    })
+    .where(eq(taskRuns.id, taskRunId));
+}

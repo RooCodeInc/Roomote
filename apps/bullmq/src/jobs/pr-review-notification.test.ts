@@ -350,15 +350,22 @@ describe('prReviewNotificationJob', () => {
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
-  it('skips when the task has no conversation routing', async () => {
+  it('records review feedback to task history when the task has no conversation routing', async () => {
     mockPrepareDelivery.mockResolvedValue({
-      post: false,
-      reason: 'no_conversation_route',
+      post: true,
+      route: null,
+      text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
     });
 
     await prReviewNotificationJob(makeJob() as never);
 
     expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      route: null,
+      text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
+    });
   });
 
   it('skips without posting when the notification is not worth sending', async () => {

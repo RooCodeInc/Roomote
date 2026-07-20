@@ -14,14 +14,24 @@ const chatgptStatusData = vi.hoisted(() => ({
 const githubCopilotStatusData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
+const subscriptionUsageData = vi.hoisted(() => ({
+  current: null as Array<Record<string, unknown>> | null,
+}));
+const providerCreditsData = vi.hoisted(() => ({
+  current: null as Array<Record<string, unknown>> | null,
+}));
 const mutateAsyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutateAsync: mutateAsyncMock }),
   useQuery: (options: { queryKey?: string[] }) => ({
-    data: options.queryKey?.[0]?.includes('githubCopilot')
-      ? githubCopilotStatusData.current
-      : chatgptStatusData.current,
+    data: options.queryKey?.[0]?.includes('subscriptionUsage')
+      ? subscriptionUsageData.current
+      : options.queryKey?.[0]?.includes('providerCredits')
+        ? providerCreditsData.current
+        : options.queryKey?.[0]?.includes('githubCopilot')
+          ? githubCopilotStatusData.current
+          : chatgptStatusData.current,
   }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -77,6 +87,18 @@ vi.mock('@/trpc/client', () => ({
       },
       disconnect: {
         mutationOptions: () => ({ mutationKey: ['disconnectCopilot'] }),
+      },
+    },
+    subscriptionUsage: {
+      list: {
+        queryOptions: () => ({ queryKey: ['subscriptionUsage', 'list'] }),
+        queryKey: () => ['subscriptionUsage', 'list'],
+      },
+    },
+    providerCredits: {
+      list: {
+        queryOptions: () => ({ queryKey: ['providerCredits', 'list'] }),
+        queryKey: () => ['providerCredits', 'list'],
       },
     },
   }),
@@ -219,6 +241,9 @@ describe('InferenceProviderSection', () => {
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
     providerSetupData.current = null;
     chatgptStatusData.current = null;
+    githubCopilotStatusData.current = null;
+    subscriptionUsageData.current = null;
+    providerCreditsData.current = null;
   });
 
   const renderInferenceProviderSection = () => {
@@ -307,6 +332,98 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.queryByRole('button', { name: /Connect ChatGPT/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows a usage line under a connected subscription row', () => {
+    providerSetupData.current = buildProviderSetup({ chatgptConnected: true });
+    chatgptStatusData.current = {
+      connected: true,
+      status: 'connected',
+      email: 'user@example.com',
+    };
+    githubCopilotStatusData.current = { connected: true, status: 'connected' };
+    subscriptionUsageData.current = [
+      {
+        providerId: 'chatgpt',
+        planType: 'pro',
+        windows: [
+          {
+            label: 'Weekly limit',
+            usedPercent: 8,
+            resetsAt: new Date(Date.now() + 5 * 3_600_000).toISOString(),
+          },
+        ],
+        fetchedAt: new Date().toISOString(),
+      },
+      {
+        providerId: 'github-copilot',
+        windows: [{ label: 'Premium requests', remaining: 211, limit: 300 }],
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(
+      screen.getByText('Weekly limit: 8% used (resets in 5h)'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Premium requests: 211 of 300 left'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Weekly limit usage' }),
+    ).toHaveAttribute('aria-valuenow', '8');
+    expect(
+      screen.getByRole('progressbar', { name: 'Premium requests usage' }),
+    ).toHaveAttribute('aria-valuenow', '30');
+  });
+
+  it('shows a credit balance line under a connected OpenRouter row', () => {
+    providerSetupData.current = buildProviderSetup({
+      openrouterSavedKey: true,
+    });
+    providerCreditsData.current = [
+      {
+        providerId: 'openrouter',
+        remaining: 12.5,
+        limit: 50,
+        currency: 'USD',
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(
+      screen.getByText(/Credits:.*12\.50.*of.*50\.00.*left/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: 'Credit balance' }),
+    ).toBeInTheDocument();
+  });
+
+  it('omits the usage line when no usage data is available or the row errored', () => {
+    providerSetupData.current = buildProviderSetup({ chatgptConnected: true });
+    chatgptStatusData.current = {
+      connected: false,
+      status: 'error',
+      error: 'ChatGPT token refresh failed: 401',
+    };
+    githubCopilotStatusData.current = { connected: true, status: 'connected' };
+    subscriptionUsageData.current = [
+      {
+        providerId: 'chatgpt',
+        windows: [{ label: 'Weekly limit', usedPercent: 8 }],
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    // The errored ChatGPT row hides its stale usage; the Copilot row has no
+    // usage entry at all, so neither renders a usage line.
+    expect(screen.queryByText(/Weekly limit/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Premium requests/)).not.toBeInTheDocument();
   });
 
   it('renders Reconnect and Disconnect for an errored ChatGPT subscription', () => {
@@ -602,7 +719,9 @@ describe('InferenceProviderSection', () => {
     renderInferenceProviderSection();
 
     fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
-    fireEvent.change(screen.getByLabelText('Endpoint URL for Ollama'), {
+    const endpointInput = screen.getByLabelText('Endpoint URL for Ollama');
+    expect(endpointInput).toHaveAttribute('type', 'url');
+    fireEvent.change(endpointInput, {
       target: { value: 'http://ollama.example' },
     });
 
@@ -615,6 +734,67 @@ describe('InferenceProviderSection', () => {
       apiKey: 'http://ollama.example',
     });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('saves an OpenAI-compatible endpoint without resubmitting the base URL as additional env', async () => {
+    const { providerSetup } = buildProviderSetup();
+    providerSetup.providers = [
+      {
+        id: 'openai-compatible',
+        label: 'OpenAI-compatible',
+        envVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+        envVarLabel: 'Endpoint URL',
+        defaultRoomoteModel: '',
+        authKind: 'endpoint',
+        suggestedTaskModels: [],
+        additionalEnvFields: [
+          {
+            envVarName: 'OPENAI_COMPATIBLE_API_KEY',
+            label: 'API key',
+            secret: true,
+            required: false,
+          },
+        ],
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: true,
+        additionalEnvValues: {
+          OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        },
+      },
+    ];
+    providerSetupData.current = { providerSetup };
+    mutateAsyncMock.mockResolvedValue({
+      addedRecommendedModelCount: 0,
+      addedDiscoveredModelCount: 1,
+      discoveryError: null,
+    });
+
+    renderInferenceProviderSection();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Edit OpenAI-compatible Endpoint URL',
+      }),
+    );
+
+    expect(
+      screen.getByLabelText('New Endpoint URL for OpenAI-compatible'),
+    ).toHaveValue('https://proxy.example.com/v1');
+    expect(
+      screen.getByLabelText('New Endpoint URL for OpenAI-compatible'),
+    ).toHaveAttribute('type', 'url');
+    expect(screen.getByText('API key (optional)')).toBeInTheDocument();
+    expect(screen.queryByText('API key (optional)(optional)')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      provider: 'openai-compatible',
+      apiKey: 'https://proxy.example.com/v1',
+      additionalEnvValues: {},
+    });
   });
 
   it('keeps endpoint credentials while provider metadata refreshes', () => {

@@ -12,8 +12,11 @@ import {
 } from '@roomote/db/server';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
   TASK_MODEL_CATALOG,
   SETUP_MODEL_PROVIDER_CATALOG,
+  buildOpenAiCompatibleProviderId,
+  buildOpenAiCompatibleProviderInstance,
   buildSetupModelStatus,
   buildTaskModelOption,
   collectSetupModelProviderCredentialValues,
@@ -25,7 +28,9 @@ import {
   getTaskModelProviderId,
   getEnabledTaskModels,
   isConfiguredEnvValue,
+  isOpenAiCompatibleProviderId,
   isTaskModelIdDisabled,
+  normalizeOpenAiCompatibleConnectionSlug,
   normalizeOptionalReasoningEffort,
   normalizeSetupNewState,
   normalizeTaskModelId,
@@ -383,27 +388,45 @@ export async function getTaskModelProviderSetupCommand(
   const [
     persistedRuntimeModelConfig,
     persistedEnvVarNames,
-    persistedAdditionalEnvValues,
     setupNewState,
     chatgptConnected,
     githubCopilotConnected,
   ] = await Promise.all([
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
-    getPersistedEnvironmentVariableValues(
-      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => [
-        ...(provider.authKind === 'endpoint' && provider.envVarName
-          ? [provider.envVarName]
-          : []),
-        ...getSetupModelProviderAdditionalEnvFields(provider)
-          .filter((field) => !field.secret)
-          .map((field) => field.envVarName),
-      ]),
-    ),
     getDeploymentSetupNewState(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
   ]);
+
+  // Include non-secret OpenAI-compatible env values (base URLs + connection
+  // labels) for every discovered instance alongside the static catalog.
+  const openAiCompatibleEnvNames = persistedEnvVarNames.filter((name) => {
+    if (!name.startsWith('OPENAI_COMPATIBLE_')) {
+      return false;
+    }
+    return (
+      name.endsWith('_BASE_URL') ||
+      name.endsWith('_LABEL') ||
+      name === 'OPENAI_COMPATIBLE_BASE_URL'
+    );
+  });
+
+  const catalogNonSecretEnvNames = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+    (provider) => [
+      ...(provider.authKind === 'endpoint' && provider.envVarName
+        ? [provider.envVarName]
+        : []),
+      ...getSetupModelProviderAdditionalEnvFields(provider)
+        .filter((field) => !field.secret)
+        .map((field) => field.envVarName),
+    ],
+  );
+
+  const persistedAdditionalEnvValues =
+    await getPersistedEnvironmentVariableValues([
+      ...new Set([...catalogNonSecretEnvNames, ...openAiCompatibleEnvNames]),
+    ]);
 
   const providerSetup = buildSetupModelStatus({
     runtimeEnv: process.env,
@@ -435,6 +458,11 @@ export async function saveTaskModelProviderCommand(
     provider: SetupModelProviderId;
     apiKey?: string;
     additionalEnvValues?: Record<string, string>;
+    /**
+     * Required when adding (or re-adding) an OpenAI-compatible connection.
+     * Becomes the connection slug and display label.
+     */
+    connectionName?: string;
   },
 ): Promise<{
   providerSetup: SetupModelStatus;
@@ -444,7 +472,62 @@ export async function saveTaskModelProviderCommand(
 }> {
   assertAdmin(auth);
 
-  const provider = getSetupModelProvider(input.provider);
+  let providerId = input.provider;
+  let suppliedAdditionalEnvValues = input.additionalEnvValues;
+
+  if (
+    providerId === OPENAI_COMPATIBLE_PROVIDER_ID ||
+    isOpenAiCompatibleProviderId(providerId)
+  ) {
+    // Adding a new named connection goes through the catalog template id plus
+    // a connection name. Editing an existing bare `openai-compatible` row
+    // (or saving without a name) keeps the default env vars. Named id edits
+    // keep their existing id/env mapping as-is.
+    if (providerId === OPENAI_COMPATIBLE_PROVIDER_ID) {
+      const slug = normalizeOpenAiCompatibleConnectionSlug(
+        input.connectionName,
+      );
+
+      if (slug) {
+        providerId = buildOpenAiCompatibleProviderId(
+          slug,
+        ) as SetupModelProviderId;
+
+        const instance = buildOpenAiCompatibleProviderInstance(slug, {
+          label: input.connectionName?.trim() || slug,
+        });
+        // Remap values submitted against the catalog template env names onto
+        // the named instance env vars.
+        const template = getSetupModelProvider(OPENAI_COMPATIBLE_PROVIDER_ID);
+        const remappedAdditional: Record<string, string> = {};
+        if (instance.labelEnvVarName && input.connectionName?.trim()) {
+          remappedAdditional[instance.labelEnvVarName] =
+            input.connectionName.trim();
+        }
+        for (const [name, value] of Object.entries(
+          input.additionalEnvValues ?? {},
+        )) {
+          if (name === 'OPENAI_COMPATIBLE_API_KEY') {
+            remappedAdditional[instance.apiKeyEnvVarName] = value;
+            continue;
+          }
+          if (template.envVarName && name === template.envVarName) {
+            continue;
+          }
+          remappedAdditional[name] = value;
+        }
+        suppliedAdditionalEnvValues = remappedAdditional;
+      } else if (input.connectionName?.trim()) {
+        throw new Error(
+          'Enter a valid connection name for the OpenAI-compatible endpoint.',
+        );
+      }
+      // No connection name: keep the bare openai-compatible connection so
+      // edit/save of the default endpoint still works.
+    }
+  }
+
+  const provider = getSetupModelProvider(providerId);
 
   if (provider.authKind === 'oauth') {
     throw new Error(
@@ -452,6 +535,9 @@ export async function saveTaskModelProviderCommand(
     );
   }
 
+  // When remapping a newly named OpenAI-compatible connection,, rewrite the
+  // primary base URL key by treating apiKey as the template primary value and
+  // collecting against the named descriptor.
   const chatgptConnected = await isChatGptSubscriptionConnected();
 
   let addedRecommendedModelCount = 0;
@@ -468,7 +554,7 @@ export async function saveTaskModelProviderCommand(
       collectSetupModelProviderCredentialValues({
         provider,
         apiKey: input.apiKey,
-        additionalEnvValues: input.additionalEnvValues,
+        additionalEnvValues: suppliedAdditionalEnvValues,
         isEnvVarSatisfied: (envVarName) =>
           persistedEnvVarNameSet.has(envVarName) ||
           isConfiguredEnvValue(process.env[envVarName]),
@@ -517,7 +603,7 @@ export async function saveTaskModelProviderCommand(
 
     const setupNewState = normalizeSetupNewState({
       ...currentSetupNewState,
-      modelProvider: input.provider,
+      modelProvider: provider.id,
       lastInteractedByUserId: auth.userId,
     });
 

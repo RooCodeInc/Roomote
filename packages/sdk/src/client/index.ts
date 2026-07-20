@@ -84,10 +84,11 @@ export interface WorkerQueryRetryOptions {
 // freshly (re)started proxy can briefly answer 5xx or without a JSON
 // content-type before its upstreams settle. Claiming is idempotent server-side
 // (FOR UPDATE SKIP LOCKED returns nothing on a second attempt), so these paths
-// get a longer budget (~31s of backoff) instead of failing the whole job on
-// one bad response.
+// get a bounded startup budget (~7s of backoff). If the claim still cannot
+// reach the API, the worker exits and the controller can replace the sandbox
+// once instead of keeping a broken network path alive for another ~24s.
 const WORKER_STARTUP_MUTATION_RETRY_OPTIONS: WorkerQueryRetryOptions = {
-  maxAttempts: 6,
+  maxAttempts: 4,
   baseDelayMs: 1_000,
 };
 

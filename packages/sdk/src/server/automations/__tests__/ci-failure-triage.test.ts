@@ -124,6 +124,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       source: 'manager_channel',
     });
     expect(mockTryClaimCiFailureTriageInvestigation).toHaveBeenCalledWith({
+      provider: 'github',
       repositoryFullName: 'acme/api',
       fingerprint: 'fp-manual',
       marker: 'manual:acme/api',

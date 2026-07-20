@@ -221,6 +221,16 @@ export {
 
 export { updateTaskPrStatus } from './lib/pull-requests/update-task-pr-status';
 export {
+  manageSourceControlIssueForTaskRun,
+  sourceControlIssueInputSchema,
+  SourceControlIssueError,
+  type SourceControlIssueCommentWriteResult,
+  type SourceControlIssueCommentsResult,
+  type SourceControlIssueDetailsResult,
+  type SourceControlIssueInput,
+  type SourceControlIssueResult,
+} from './lib/issues/source-control-issues';
+export {
   createOrUpdateSourceControlPullRequestForTaskRun,
   findTaskRunForSourceControlMutation,
   sourceControlPullRequestMutationInputSchema,

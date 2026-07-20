@@ -22,12 +22,17 @@ export interface ActiveGitHubBranchWork {
   type: TaskPayloadKind;
   status: RunStatus;
   taskPhase: string | null;
-  match: 'task_pull_request' | 'branch';
+  match: 'task_pull_request' | 'branch' | 'linked_work_item';
 }
 
 export interface ReusableGitHubPrFollowUpOwner extends ActiveGitHubBranchWork {
   delivery: 'attach' | 'resume';
 }
+
+export type ReusableGitHubIssueTaskOwner = Omit<
+  ReusableGitHubPrFollowUpOwner,
+  'match'
+>;
 
 const ACTIVE_WORK_STATUSES = [
   ...bootingRunStatuses,
@@ -291,6 +296,85 @@ export async function findReusableGitHubPrFollowUpOwner({
     .orderBy(desc(taskRuns.createdAt));
 
   return pickReusableFollowUpOwner(branchRows, 'branch');
+}
+
+/**
+ * Returns the newest reusable Roomote task started from an issue @mention
+ * (payload `linkedWorkItems` entry) so a second issue comment can continue the
+ * original task instead of launching a sibling.
+ *
+ * `sourceControlProvider` scopes both the task payload and the linked work
+ * item provider (defaults to GitHub, matching historical issue-mention rows).
+ * GitLab and Gitea stamp their own linked-work-item provider value.
+ *
+ * When a non-null `host` is given, payload `sourceControlHost` must match that
+ * host. Rows without a stamped host still match (legacy null fallback) so
+ * pre-host-stamping issue tasks remain reusable, while a payload stamped for a
+ * different self-managed instance never cross-matches.
+ */
+export async function findReusableGitHubIssueTaskOwner({
+  repoFullName,
+  issueNumber,
+  sourceControlProvider = 'github',
+  host,
+}: {
+  repoFullName: string;
+  issueNumber: number;
+  sourceControlProvider?: SourceControlProvider;
+  host?: string | null;
+}): Promise<ReusableGitHubIssueTaskOwner | null> {
+  const issueIdentifier = String(issueNumber);
+  // Linked work items stamp the issue host provider. Other providers fall back
+  // to GitHub for historical issue-mention rows that predated multi-provider
+  // support.
+  const linkedWorkItemProvider =
+    sourceControlProvider === 'gitlab' || sourceControlProvider === 'gitea'
+      ? sourceControlProvider
+      : 'github';
+  const linkedWorkItemMatch = JSON.stringify([
+    {
+      provider: linkedWorkItemProvider,
+      identifier: issueIdentifier,
+      repository: repoFullName,
+    },
+  ]);
+
+  const rows = await db
+    .select(REUSABLE_FOLLOW_UP_OWNER_COLUMNS)
+    .from(taskRuns)
+    .where(
+      and(
+        isNull(taskRuns.canceledAt),
+        inArray(taskRuns.payloadKind, [...REUSABLE_FOLLOW_UP_OWNER_TYPES]),
+        payloadProviderCondition(sourceControlProvider),
+        sql`${taskRuns.payload}->>'repo' = ${repoFullName}`,
+        sql`${taskRuns.payload}->'linkedWorkItems' @> ${linkedWorkItemMatch}::jsonb`,
+        ...(host
+          ? [
+              sql`(
+                ${taskRuns.payload}->>'sourceControlHost' = ${host}
+                OR ${taskRuns.payload}->>'sourceControlHost' IS NULL
+              )`,
+            ]
+          : []),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt));
+
+  const owner = await pickReusableFollowUpOwner(rows, 'linked_work_item');
+
+  if (!owner) {
+    return null;
+  }
+
+  return {
+    runId: owner.runId,
+    taskId: owner.taskId,
+    type: owner.type,
+    status: owner.status,
+    taskPhase: owner.taskPhase,
+    delivery: owner.delivery,
+  };
 }
 
 /**

@@ -3,37 +3,35 @@
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
-import type {
-  SetupAuthProviderId,
-  SourceControlProvider,
-} from '@roomote/types';
+import type { SourceControlProvider } from '@roomote/types';
 import { Button, Loader2, ArrowRight } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
-import { useEnvironments } from '@/hooks/environments/useEnvironments';
-import { StepCompletedBadge } from '../setup/StepCompletedBadge';
 import { StepTitle } from '../setup/StepTitle';
 import { buildInvokeMethods } from '../invokeMethods';
 
+type OnboardingCommunicationProvider =
+  | 'slack'
+  | 'microsoft'
+  | 'telegram'
+  | 'discord';
+
 export function StepInvoke({
-  previousStepCompleted,
   communicationProviders = [],
   sourceControlProviders = [],
-  includeLinear = false,
+  includeAutomations = true,
 }: {
-  previousStepCompleted?: string;
-  communicationProviders?: readonly SetupAuthProviderId[];
+  communicationProviders?: readonly OnboardingCommunicationProvider[];
   sourceControlProviders?: readonly SourceControlProvider[];
-  includeLinear?: boolean;
+  includeAutomations?: boolean;
 }) {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const environments = useEnvironments();
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const methods = buildInvokeMethods({
     communicationProviders,
     sourceControlProviders,
-    includeLinear,
+    includeAutomations,
     invocationIdentities: commsStatus.data?.invocationIdentities,
   });
 
@@ -55,48 +53,22 @@ export function StepInvoke({
           queryKey: trpc.github.installations.queryKey(),
         });
 
-        // Environment may have just been created; refresh so Home can default
-        // to the sole environment via environmentId immediately after setup.
-        let envs = environments.data;
-        try {
-          const refreshed = await queryClient.fetchQuery(
-            trpc.environments.list.queryOptions(undefined, { staleTime: 0 }),
-          );
-          if (Array.isArray(refreshed)) {
-            envs = refreshed;
-          }
-        } catch {
-          // Fall back to whatever is already cached.
-        }
-
-        const targetEnv = envs?.[0];
-
-        if (targetEnv) {
-          router.replace(`/?environmentId=${targetEnv.id}`);
-        } else {
-          router.replace('/');
-        }
+        router.replace('/');
       },
     }),
   );
 
   return (
-    <div className="space-y-6 max-w-xl relative">
-      {previousStepCompleted && (
-        <StepCompletedBadge text={previousStepCompleted} />
-      )}
+    <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text="You're all set!" showCheckbox={false} />
-      <p className="text-sm mb-4">How to work with {PRODUCT_NAME}:</p>
-      <div className="space-y-4">
+      <p>How to work with {PRODUCT_NAME}:</p>
+      <div className="space-y-5">
         {methods.map((method) => (
-          <div
-            key={method.title}
-            className="flex items-start gap-3 text-sm group"
-          >
-            <method.icon className="size-5 mt-0.5 shrink-0 text-muted-foreground transition-transform group-hover:scale-120" />
+          <div key={method.title} className="flex items-start gap-3 group">
+            <method.icon className="size-5 mt-0.5 shrink-0 text-foreground transition-transform group-hover:scale-120" />
             <div className="space-y-1">
-              <p className="font-medium">{method.title}</p>
-              <p className="text-sm text-muted-foreground cursor-default group-hover:text-foreground">
+              <p>
+                <span className="font-semibold">{method.title}: </span>
                 {method.description}
               </p>
             </div>

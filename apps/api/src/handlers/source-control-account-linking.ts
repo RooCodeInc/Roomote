@@ -16,12 +16,14 @@ const sourceControlCommentProviderCopy = {
   },
   gitlab: {
     accountLabel: 'GitLab',
-    commentSurface: 'merge request comments',
+    commentSurface: 'issue and merge request comments',
     settingsQuery: 'gitlab',
   },
   gitea: {
     accountLabel: 'Gitea',
-    commentSurface: 'pull request comments',
+    // Gitea routes both plain-issue and PR @mentions through the same link
+    // gate; keep wording provider-level so neither surface misleads.
+    commentSurface: 'issue and pull request comments',
     settingsQuery: 'gitea',
   },
   bitbucket: {

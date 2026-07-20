@@ -14,8 +14,8 @@ const LOG_PREFIX = '[instancePing]';
 /**
  * Daily telemetry job:
  * 1. Version check against the Ping service (mandatory; carries only the
- *    anonymous instance id + running version). The result is stored for a
- *    future "update available" surface.
+ *    anonymous instance id + running version). The result is stored for the
+ *    in-app "update available" notice.
  * 2. Anonymous instance stats report (covered by the admin opt-out).
  *
  * Sends nothing at all in environments where telemetry is not allowed

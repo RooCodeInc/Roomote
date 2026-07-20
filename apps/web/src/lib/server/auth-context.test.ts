@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FeatureFlag } from '@roomote/feature-flags';
+import { APIError } from 'better-auth/api';
 
 const {
   mockDeploymentFindFirst,
@@ -153,9 +154,19 @@ describe('authorize', () => {
     });
     mockUsersFindFirst.mockResolvedValue({
       id: 'user-1',
+      name: 'Jane Admin',
+      email: 'jane@example.com',
+      entity: {
+        id: 'user-1',
+        name: 'Jane Admin',
+        email: 'jane@example.com',
+        imageUrl: 'https://example.com/avatar.png',
+      },
+      role: 'admin',
       createdAt: new Date('2025-01-01T00:00:00.000Z'),
       imageUrl: 'https://example.com/avatar.png',
       onboardingCompletedAt: new Date('2025-01-01T00:00:00.000Z'),
+      deletedAt: null,
     });
     mockUpdateWhere.mockResolvedValue([]);
   });
@@ -174,6 +185,88 @@ describe('authorize', () => {
         metadata: expect.anything(),
       }),
     );
+  });
+
+  it('does not write an unchanged existing user during authorization', async () => {
+    const result = await authorize();
+
+    expect(result.success).toBe(true);
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unchanged member with incomplete onboarding read-only', async () => {
+    mockUsersFindFirst.mockResolvedValue({
+      id: 'user-1',
+      name: 'Jane Admin',
+      email: 'jane@example.com',
+      entity: {
+        id: 'user-1',
+        name: 'Jane Admin',
+        email: 'jane@example.com',
+        imageUrl: 'https://example.com/avatar.png',
+      },
+      role: 'member',
+      createdAt: new Date('2025-01-01T00:00:00.000Z'),
+      imageUrl: 'https://example.com/avatar.png',
+      onboardingCompletedAt: null,
+      deletedAt: null,
+    });
+
+    const result = await authorize();
+
+    expect(result.success).toBe(true);
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it('syncs an existing user when their auth profile changes', async () => {
+    mockUsersFindFirst.mockResolvedValue({
+      id: 'user-1',
+      name: 'Old Name',
+      email: 'jane@example.com',
+      entity: {
+        id: 'user-1',
+        name: 'Old Name',
+        email: 'jane@example.com',
+        imageUrl: 'https://example.com/avatar.png',
+      },
+      role: 'admin',
+      createdAt: new Date('2025-01-01T00:00:00.000Z'),
+      imageUrl: 'https://example.com/avatar.png',
+      onboardingCompletedAt: new Date('2025-01-01T00:00:00.000Z'),
+      deletedAt: null,
+    });
+
+    const result = await authorize();
+
+    expect(result.success).toBe(true);
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Jane Admin',
+        entity: expect.objectContaining({ name: 'Jane Admin' }),
+      }),
+    );
+  });
+
+  it('treats invalid auth cookies as signed out instead of throwing', async () => {
+    mockGetSession.mockRejectedValue(
+      new APIError('UNAUTHORIZED', {
+        message: 'Invalid session',
+      }),
+    );
+
+    await expect(authorize()).resolves.toEqual({
+      success: false,
+      error: 'Unauthorized: User required',
+    });
+  });
+
+  it('does not hide auth service failures as signed-out sessions', async () => {
+    const error = new APIError('INTERNAL_SERVER_ERROR', {
+      message: 'Session store unavailable',
+    });
+    mockGetSession.mockRejectedValue(error);
+
+    await expect(authorize()).rejects.toBe(error);
   });
 
   it('admits a bootstrap sign-in as admin even when another user already exists', async () => {

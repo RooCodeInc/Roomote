@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getRedis } from '@roomote/redis';
 import {
   type CommunicationProvider,
@@ -9,6 +10,42 @@ import {
 const COMMUNICATION_MESSAGE_TTL_SECONDS = 60 * 60;
 const COMMUNICATION_MESSAGE_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
 const LATEST_INBOUND_MESSAGE_ID_TTL_SECONDS = 60 * 60 * 24;
+const LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+export interface LatestUserMessageForReplyQuote {
+  /** Unique id so clear-after-delivery never confuses two same-text follows. */
+  id: string;
+  text: string;
+  userName: string;
+}
+
+type TrackLatestUserMessageForReplyQuoteParams = {
+  provider: CommunicationProvider;
+  runId: number;
+  text: string;
+  userName: string;
+  onError?: (error: unknown) => void;
+};
+
+/**
+ * Atomically delete the pending reply quote only when it still has the id that
+ * was delivered. Same user/text is not enough — a newer identical message
+ * generates a new id and must stay queued for the next agent reply.
+ */
+const CLEAR_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_IF_ID_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+local ok, data = pcall(cjson.decode, raw)
+if not ok or type(data) ~= 'table' then
+  return 0
+end
+if data.id ~= ARGV[1] then
+  return 0
+end
+return redis.call('DEL', KEYS[1])
+`;
 
 const QUEUE_COMMUNICATION_MESSAGE_ONCE_SCRIPT = `
 if redis.call('EXISTS', KEYS[2]) == 1 then
@@ -32,6 +69,42 @@ function getLatestInboundMessageIdKey(
   runId: number,
 ): string {
   return `${provider}:latest_inbound_message_id:${runId}`;
+}
+
+function getLatestUserMessageForReplyQuoteKey(
+  provider: CommunicationProvider,
+  runId: number,
+): string {
+  return `${provider}:latest_user_message:${runId}`;
+}
+
+function parseLatestUserMessageForReplyQuote(
+  raw: string | null,
+): LatestUserMessageForReplyQuote | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<LatestUserMessageForReplyQuote>;
+
+    if (
+      typeof parsed.id !== 'string' ||
+      parsed.id.trim().length === 0 ||
+      typeof parsed.text !== 'string' ||
+      typeof parsed.userName !== 'string'
+    ) {
+      return null;
+    }
+
+    return {
+      id: parsed.id,
+      text: parsed.text,
+      userName: parsed.userName,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function getCommunicationMessageDedupeKey(
@@ -270,4 +343,117 @@ export async function getLatestInboundMessageId(
   const trimmed = raw.trim();
 
   return trimmed || null;
+}
+
+/**
+ * Persist the latest web/user follow-up so the next outbound agent reply can
+ * quote it back into the originating chat thread (Discord parity with Slack).
+ */
+export async function setLatestUserMessageForReplyQuote(
+  provider: CommunicationProvider,
+  runId: number,
+  message: Omit<LatestUserMessageForReplyQuote, 'id'> & { id?: string },
+): Promise<LatestUserMessageForReplyQuote> {
+  const redis = getRedis();
+  const key = getLatestUserMessageForReplyQuoteKey(provider, runId);
+  const stored: LatestUserMessageForReplyQuote = {
+    id: message.id?.trim() || randomUUID(),
+    text: message.text,
+    userName: message.userName,
+  };
+
+  await redis.set(
+    key,
+    JSON.stringify(stored satisfies LatestUserMessageForReplyQuote),
+    'EX',
+    LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS,
+  );
+
+  return stored;
+}
+
+export async function trackLatestUserMessageForReplyQuote({
+  provider,
+  runId,
+  text,
+  userName,
+  onError,
+}: TrackLatestUserMessageForReplyQuoteParams): Promise<void> {
+  try {
+    await setLatestUserMessageForReplyQuote(provider, runId, {
+      text,
+      userName,
+    });
+  } catch (error) {
+    if (onError) {
+      onError(error);
+      return;
+    }
+
+    console.warn(
+      `[trackLatestUserMessageForReplyQuote] Failed to persist latest user message for ${provider} task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+export async function getLatestUserMessageForReplyQuote(
+  provider: CommunicationProvider,
+  runId: number,
+): Promise<LatestUserMessageForReplyQuote | null> {
+  const redis = getRedis();
+  const raw = await redis.get(
+    getLatestUserMessageForReplyQuoteKey(provider, runId),
+  );
+  return parseLatestUserMessageForReplyQuote(raw);
+}
+
+export async function clearLatestUserMessageForReplyQuote(
+  provider: CommunicationProvider,
+  runId: number,
+): Promise<void> {
+  try {
+    const redis = getRedis();
+    await redis.del(getLatestUserMessageForReplyQuoteKey(provider, runId));
+  } catch (error) {
+    console.error(
+      `[clearLatestUserMessageForReplyQuote] Failed to clear latest user message for ${provider} task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+/**
+ * Clear the pending reply quote only when Redis still holds the exact id that
+ * was quoted on this delivery. Prevents clearing a newer same-text follow-up.
+ */
+export async function clearLatestUserMessageForReplyQuoteIfId(
+  provider: CommunicationProvider,
+  runId: number,
+  id: string,
+): Promise<boolean> {
+  const trimmedId = id.trim();
+  if (!trimmedId) {
+    return false;
+  }
+
+  try {
+    const redis = getRedis();
+    const result = await redis.eval(
+      CLEAR_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_IF_ID_SCRIPT,
+      1,
+      getLatestUserMessageForReplyQuoteKey(provider, runId),
+      trimmedId,
+    );
+    return typeof result === 'number' ? result > 0 : Number(result) > 0;
+  } catch (error) {
+    console.error(
+      `[clearLatestUserMessageForReplyQuoteIfId] Failed to clear latest user message for ${provider} task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return false;
+  }
 }

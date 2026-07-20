@@ -623,6 +623,60 @@ describe('buildChatProviderMessageInstructions', () => {
   );
 
   it.each(['discord', 'teams', 'telegram'] as const)(
+    'teaches structured request_user_input rendering for %s',
+    (provider) => {
+      const label =
+        provider === 'discord'
+          ? 'Discord'
+          : provider === 'telegram'
+            ? 'Telegram'
+            : 'Teams';
+      const instructions = buildChatProviderMessageInstructions(provider);
+
+      expect(instructions).toContain(
+        'do not use `request_user_input` unless the next step is still genuinely blocked after using thread context and available tools to resolve the question',
+      );
+      expect(instructions).toContain(
+        `A ${label}-rendered \`request_user_input\` prompt is supplemental and never satisfies ack or closeout on its own`,
+      );
+      expect(instructions).toContain(
+        'use `request_user_input` in progressive blocks of up to 4 questions',
+      );
+    },
+  );
+
+  it.each(['discord', 'teams', 'telegram'] as const)(
+    'matches Slack parent-owned single-closeout lifecycle guidance for %s',
+    (provider) => {
+      const label =
+        provider === 'discord'
+          ? 'Discord'
+          : provider === 'telegram'
+            ? 'Telegram'
+            : 'Teams';
+      const instructions = buildChatProviderMessageInstructions(provider);
+
+      expect(instructions).toContain(
+        `When an active parent workflow delegates to a child skill and the parent still owns remaining proof, delivery, blocker handling, or final reporting, do not let the child satisfy the ${label} closeout on its own.`,
+      );
+      expect(instructions).toContain(
+        `Keep the parent as the only narrator on ${label}.`,
+      );
+      expect(instructions).toContain(
+        'Do not send another closeout that restates the same delivery outcome',
+      );
+      expect(instructions).toContain(
+        'do not re-post a second near-identical lifecycle reply just because stop or silence machinery asks for another chat-visible update',
+      );
+      expect(instructions).toContain(
+        'One ' +
+          label +
+          ' message can satisfy multiple lifecycle purposes only when its content genuinely does so.',
+      );
+    },
+  );
+
+  it.each(['discord', 'teams', 'telegram'] as const)(
     'documents manual visual-proof posting when auto-post is disabled for %s',
     (provider) => {
       const label =

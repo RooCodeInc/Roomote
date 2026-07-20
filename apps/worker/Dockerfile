@@ -107,7 +107,12 @@ RUN mkdir -p \
     /opt/mise \
     /opt/mise/cache \
     /home/roomote/.local/bin \
-  && chown -R roomote:roomote /sandbox /opt/mise /home/roomote
+  && chown -R roomote:roomote /sandbox /opt/mise /home/roomote \
+  # Chromium's GPU child drops all caps and must traverse $HOME when Chrome
+  # lives under ~/.agent-browser (permission-bit check only). Allow others
+  # execute (traverse-only) so ANGLE can load the bundled Vulkan/SwiftShader
+  # libs and WebGL works in software sandboxes.
+  && chmod o+x /home/roomote
 
 ENV MISE_DATA_DIR=/opt/mise
 ENV MISE_CACHE_DIR=/opt/mise/cache
@@ -222,6 +227,28 @@ RUN npm install --prefix /sandbox --no-save --no-package-lock \
     "opencode-ai@${OPENCODE_CLI_VERSION}" \
   && test -x /sandbox/node_modules/.bin/opencode \
   && test "$(/sandbox/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}"
+
+# Pre-seed OpenCode's global config-dir @opencode-ai/plugin install so first
+# POST /session does not block on a live npm registry fetch during bootstrap
+# waitForDependencies (see issue #379). Task runtimes copy this tree into the
+# per-task HOME config dir before opencode serve.
+RUN sudo mkdir -p /opt/roomote/opencode-plugin-seed \
+  && sudo chown roomote:roomote /opt/roomote /opt/roomote/opencode-plugin-seed \
+  && printf '%s\n' \
+    '{' \
+    '  "name": "opencode",' \
+    '  "private": true,' \
+    '  "dependencies": {' \
+    "    \"@opencode-ai/plugin\": \"${OPENCODE_CLI_VERSION}\"" \
+    '  }' \
+    '}' > /opt/roomote/opencode-plugin-seed/package.json \
+  && npm install --prefix /opt/roomote/opencode-plugin-seed \
+    --ignore-scripts --no-audit --no-fund \
+  && test -d "/opt/roomote/opencode-plugin-seed/node_modules/@opencode-ai/plugin" \
+  && test "$(node -p "require('/opt/roomote/opencode-plugin-seed/node_modules/@opencode-ai/plugin/package.json').version")" = "${OPENCODE_CLI_VERSION}" \
+  && test -f /opt/roomote/opencode-plugin-seed/package-lock.json
+
+ENV ROOMOTE_OPENCODE_PLUGIN_SEED_DIR=/opt/roomote/opencode-plugin-seed
 
 RUN cat <<'EOF' | sudo tee /usr/local/bin/opencode > /dev/null
 #!/bin/bash

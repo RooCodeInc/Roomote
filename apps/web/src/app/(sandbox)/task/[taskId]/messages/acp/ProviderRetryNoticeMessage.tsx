@@ -94,38 +94,40 @@ export function ProviderRetryNoticeMessage({
   const errorText = notice.errorSummary?.trim() ?? '';
   const statusText = getRetryingStatusText({ notice, remainingMs });
   const isCountingDown = remainingMs !== null && remainingMs > 0;
+  const hasDetails = Boolean(errorText) || Boolean(statusText);
 
   return (
     <div
-      className="w-fit max-w-2xl -ml-1 space-y-1 text-sm"
+      className="w-full min-w-0 text-sm text-muted-foreground"
       data-testid="provider-retry-notice"
       role="status"
     >
-      <div className="flex items-center gap-2">
-        <RefreshCw
-          className={cn(
-            'size-4 shrink-0 text-muted-foreground',
-            isCountingDown && 'animate-spin',
-          )}
-        />
-        <span className="font-medium" data-testid="provider-retry-notice-title">
+      <div className="flex min-w-0 items-center gap-2 py-1">
+        <span className="relative flex size-3 shrink-0 items-center justify-center">
+          <RefreshCw
+            className={cn('size-3', isCountingDown && 'animate-spin')}
+          />
+        </span>
+        <span
+          className="min-w-0 truncate font-light"
+          data-testid="provider-retry-notice-title"
+        >
           {getRetryTitle(notice)}
         </span>
       </div>
-      {errorText ? (
-        <p
-          className="whitespace-pre-wrap break-words pl-6 text-muted-foreground"
-          data-testid="provider-retry-notice-error"
-        >
-          {errorText}
-        </p>
+      {hasDetails ? (
+        <div className="space-y-1 border-l border-border px-4 ml-1.5 mb-1 mt-1 text-sm font-light">
+          {errorText ? (
+            <p
+              className="whitespace-pre-wrap break-words"
+              data-testid="provider-retry-notice-error"
+            >
+              {errorText}
+            </p>
+          ) : null}
+          <p data-testid="provider-retry-notice-status">{statusText}</p>
+        </div>
       ) : null}
-      <p
-        className="pl-6 text-muted-foreground"
-        data-testid="provider-retry-notice-status"
-      >
-        {statusText}
-      </p>
     </div>
   );
 }

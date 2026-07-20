@@ -53,7 +53,8 @@ export type BackgroundAgentFieldErrorKey =
   | 'sentryTriageProjectSlugs'
   | 'suggesterInstructions'
   | 'suggesterRoutingInstructions'
-  | 'announcerInstructions';
+  | 'announcerInstructions'
+  | 'issueFixerInstructions';
 
 export type BackgroundAgentFieldErrors = Partial<
   Record<BackgroundAgentFieldErrorKey, string>
@@ -243,6 +244,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   conflictResolverMaxPrAgeDays?: ConflictResolverMaxPrAgeDays;
   conflictResolverLabel: string;
   conflictResolverInstructions: string | null;
+  issueFixerInstructions?: string | null;
   channelAutoStartSlackChannels?: ChannelAutoStartInputRow[];
   /**
    * Optional with no default: older clients never send it, and their saves

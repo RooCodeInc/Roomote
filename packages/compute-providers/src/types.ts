@@ -74,6 +74,12 @@ export interface DestroyInstanceResult {
 
 export type OutputCallback = (event: CommandOutputEvent) => void;
 
+export interface CommandExitEvent {
+  exitCode: number;
+}
+
+export type ExitCallback = (event: CommandExitEvent) => void | Promise<void>;
+
 export interface RunCommandInput {
   instanceId: string;
   cmd: string;
@@ -83,6 +89,8 @@ export interface RunCommandInput {
   detached?: boolean;
   signal?: AbortSignal;
   onOutput?: OutputCallback;
+  /** Called when a detached command exits after launch has been reported. */
+  onExit?: ExitCallback;
 }
 
 export interface RunCommandResult {

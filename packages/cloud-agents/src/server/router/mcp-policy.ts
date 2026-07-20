@@ -1,3 +1,11 @@
+import {
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
+  parseDiscordMessagePermalink,
+  parseSlackChannelPermalink,
+  parseSlackMessagePermalink,
+} from '@roomote/types';
+
 export const ROUTER_MCP_ENABLED_SERVER_IDS = [
   'roomote',
   'linear',
@@ -13,7 +21,7 @@ type RouterMcpPolicyPurpose =
 
 type RouterMcpToolGroup =
   | 'roomote-platform-context'
-  | 'roomote-slack-thread-context'
+  | 'roomote-chat-context'
   | 'linear-issue-context'
   | 'linear-comment-context'
   | 'github-pr-context'
@@ -35,9 +43,9 @@ interface RouterMcpServerPolicy {
 
 const ROUTER_MCP_TOOL_GROUPS: Record<RouterMcpToolGroup, readonly string[]> = {
   'roomote-platform-context': ['get_about_me'],
-  'roomote-slack-thread-context': [
-    'get_slack_thread',
-    'get_slack_channel_messages',
+  'roomote-chat-context': [
+    CHAT_MESSAGE_CONTEXT_TOOL.name,
+    CHAT_CHANNEL_MESSAGES_TOOL.name,
   ],
   'linear-issue-context': ['get_issue', 'list_issues'],
   'linear-comment-context': ['list_comments'],
@@ -57,8 +65,8 @@ const ROUTER_MCP_TOOL_GROUPS: Record<RouterMcpToolGroup, readonly string[]> = {
 
 const ROUTER_ROOMOTE_ALLOWED_TOOLS = [
   'get_about_me',
-  'get_slack_channel_messages',
-  'get_slack_thread',
+  CHAT_CHANNEL_MESSAGES_TOOL.name,
+  CHAT_MESSAGE_CONTEXT_TOOL.name,
 ] as const;
 
 const ROUTER_LINEAR_ALLOWED_TOOLS = [
@@ -101,10 +109,7 @@ const ROUTER_MCP_SERVER_POLICIES: Record<
     purpose: 'roomote-platform-context',
     exposureMode: 'allowlist',
     allowedTools: ROUTER_ROOMOTE_ALLOWED_TOOLS,
-    requiredToolGroups: [
-      'roomote-platform-context',
-      'roomote-slack-thread-context',
-    ],
+    requiredToolGroups: ['roomote-platform-context', 'roomote-chat-context'],
   },
   linear: {
     enabled: true,
@@ -186,11 +191,6 @@ export function getMissingRequiredRouterMcpToolGroups(
   );
 }
 
-const SLACK_ARCHIVE_URL_REGEX =
-  /https?:\/\/[\w-]+\.slack\.com\/archives\/[A-Z0-9]+\/p\d+/i;
-const SLACK_APP_THREAD_URL_REGEX =
-  /https?:\/\/app\.slack\.com\/client\/[A-Z0-9]+\/[A-Z0-9]+\/thread\/[A-Z0-9]+-\d+(?:\.\d+)?/i;
-
 export function shouldIncludeRoomoteRouterLookup(
   externalReference: string | null,
 ): boolean {
@@ -198,8 +198,17 @@ export function shouldIncludeRoomoteRouterLookup(
     return false;
   }
 
-  return (
-    SLACK_ARCHIVE_URL_REGEX.test(externalReference) ||
-    SLACK_APP_THREAD_URL_REGEX.test(externalReference)
-  );
+  const candidates = [
+    externalReference,
+    ...(externalReference.match(/https?:\/\/[^\s<>'"\])}]+/gi) ?? []),
+  ];
+
+  return candidates.some((candidate) => {
+    const normalized = candidate.replace(/[.,;:!?]+$/, '');
+    return (
+      parseSlackMessagePermalink(normalized) !== null ||
+      parseSlackChannelPermalink(normalized) !== null ||
+      parseDiscordMessagePermalink(normalized) !== null
+    );
+  });
 }

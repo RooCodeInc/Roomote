@@ -75,6 +75,9 @@ const state = vi.hoisted(() => ({
         codeqlTriageFrequency: 'off' as const,
         codeqlTriageSlackChannelId: null,
         codeqlTriageDiscordChannelId: null,
+        issueFixerFrequency: 'off' as const,
+        issueFixerInstructions: null,
+
         securityAuditorFrequency: 'off' as const,
         securityAuditorSlackChannelId: null,
         securityAuditorDiscordChannelId: null,
@@ -109,6 +112,7 @@ const state = vi.hoisted(() => ({
         sentryTriageSlackChannel: null,
         dependabotTriageSlackChannel: null,
         codeqlTriageSlackChannel: null,
+
         securityAuditorSlackChannel: null,
         codeQualityAuditorSlackChannel: null,
         ciFailureTriageSlackChannel: null,
@@ -123,6 +127,7 @@ const state = vi.hoisted(() => ({
         sentryTriageSlackChannel: null,
         dependabotTriageSlackChannel: null,
         codeqlTriageSlackChannel: null,
+
         securityAuditorSlackChannel: null,
         codeQualityAuditorSlackChannel: null,
         ciFailureTriageSlackChannel: null,
@@ -573,7 +578,8 @@ describe('AutomationsSettings', () => {
   it('shows exception-only capability badges from the shared descriptors', async () => {
     render(<AutomationsSettings />);
 
-    // Dependabot, CodeQL, and CI failure triage stay GitHub-only; manager
+    // Dependabot, CodeQL, and CI failure triage stay GitHub-only; Issue Fixer
+    // supports GitHub/GitLab/Gitea; manager
     // stats is provider-neutral now and shows no source-control badge.
     expect((await screen.findAllByText('GitHub only')).length).toBe(3);
     // The suggester supports Slack and Discord destinations; the other

@@ -3,10 +3,7 @@ import {
   type DiscordGatewayEvent,
   type DiscordMessage,
 } from '@roomote/communication/discord-event';
-import {
-  DiscordApiError,
-  type DiscordCommunicationProvider,
-} from '@roomote/communication/discord-provider';
+import { type DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { getBackgroundAgentSettingsForDeployment } from '@roomote/db/server';
 import {
   AUTO_START_CHANNEL_CACHE_TTL_SECONDS,
@@ -20,6 +17,13 @@ import type { TaskInitiator } from '@roomote/types';
 import { apiLogger } from '../../logging.js';
 import { checkAutoStartChannelCache } from '../shared/auto-start-cache.js';
 import { evaluateChannelLaunchGate } from '../shared/channel-launch-gate.js';
+import {
+  buildDiscordChannelAutoStartLinkMessage,
+  claimAccountLinkDmSlot,
+  isDiscordDmBlockedError,
+  markAccountLinkDmSent,
+  releaseAccountLinkDmSlot,
+} from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import {
@@ -39,9 +43,6 @@ const CHANNEL_AUTO_START_MESSAGE_TYPES = new Set([0, 19]);
 const DISCORD_ROUTING_LOCK_PREFIX = 'discord:routing-lock:';
 const ROUTING_LOCK_TTL_SECONDS = 60;
 
-const LINK_NUDGE_DEDUPE_PREFIX = 'discord:auto-start-link-nudge:';
-const LINK_NUDGE_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
-
 function isBotMentioned(message: DiscordMessage, botUserId: string): boolean {
   return (
     message.mentions.some((mention) => mention.id === botUserId) ||
@@ -50,42 +51,22 @@ function isBotMentioned(message: DiscordMessage, botUserId: string): boolean {
   );
 }
 
-function isDmBlockedError(error: unknown): boolean {
-  return (
-    error instanceof DiscordApiError &&
-    (error.code === 50007 || error.code === '50007' || error.status === 403)
-  );
-}
-
 /**
  * Discord has no ephemeral channel messages, so the "connect your account"
  * nudge Slack shows inline arrives as a DM instead — at most once per user
- * per day, and never blocking: users who disallow DMs from server members
- * simply miss the nudge.
+ * per day (shared with the mention-flow link prompt), and never blocking:
+ * users who disallow DMs from server members simply miss the nudge.
  */
 async function sendLinkNudgeBestEffort(input: {
   provider: DiscordCommunicationProvider;
   discordUserId: string;
   channelName: string;
 }): Promise<void> {
-  const redis = getRedis();
-  const dedupeKey = `${LINK_NUDGE_DEDUPE_PREFIX}${input.discordUserId}`;
-
-  try {
-    const acquired = await redis.set(
-      dedupeKey,
-      '1',
-      'EX',
-      LINK_NUDGE_DEDUPE_TTL_SECONDS,
-      'NX',
-    );
-    if (acquired !== 'OK') {
-      return;
-    }
-  } catch (error) {
-    apiLogger.warn(
-      `[DiscordChannelAutoStart] Link-nudge dedupe check failed for ${input.discordUserId}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  const slot = await claimAccountLinkDmSlot(input.discordUserId);
+  if (slot !== 'claimed') {
+    // `sent_recently` / `in_flight`: another path owns or already finished the
+    // daily link DM. `unavailable`: this nudge is best-effort, so skip rather
+    // than risk DM spam while Redis cannot answer.
     return;
   }
 
@@ -95,16 +76,14 @@ async function sendLinkNudgeBestEffort(input: {
     );
     await input.provider.postMessage({
       channelId: dmChannel.id,
-      text: [
-        `Roomote watches **#${input.channelName}** and starts a task for each new message, but your Discord account is not linked to a Roomote account yet, so your message did not start one.`,
-        'Generate a code under **Settings → Personal → Linked Accounts** in Roomote, then reply here with `/link code:<code>`.',
-      ].join('\n\n'),
+      text: buildDiscordChannelAutoStartLinkMessage(input.channelName),
     });
+    await markAccountLinkDmSent(input.discordUserId);
   } catch (error) {
     // Let the next qualifying message retry instead of burning the daily slot
     // on a failed delivery.
-    await redis.del(dedupeKey).catch(() => undefined);
-    if (isDmBlockedError(error)) {
+    await releaseAccountLinkDmSlot(input.discordUserId);
+    if (isDiscordDmBlockedError(error)) {
       apiLogger.info(
         `[DiscordChannelAutoStart] Could not DM link nudge to ${input.discordUserId} (DMs blocked)`,
       );
@@ -324,12 +303,14 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         }
       }
 
+      let intakeAckPinned = false;
       try {
         await provider.addReaction({
           channelId: channel.channelId,
           messageId: message.id,
           name: '👀',
         });
+        intakeAckPinned = true;
       } catch {
         // The launch matters more than the acknowledgement.
       }
@@ -349,6 +330,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
             : {}),
           initiator,
         },
+        ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
       });
 
       if (started.status !== 'started') {

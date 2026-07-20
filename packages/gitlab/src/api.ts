@@ -50,7 +50,7 @@ const gitLabUserSchema = z.object({
   id: z.number(),
   username: z.string(),
 });
-const gitLabMergeRequestNoteSchema = z.object({
+const gitLabNoteSchema = z.object({
   id: z.number(),
 });
 const gitLabProjectHookSchema = z.object({
@@ -222,7 +222,44 @@ export async function createGitLabMergeRequestNote({
     params: {},
     token: gitLabToken,
     body: { body },
-    schema: gitLabMergeRequestNoteSchema,
+    schema: gitLabNoteSchema,
+  });
+
+  return data;
+}
+
+export async function createGitLabIssueNote({
+  projectId,
+  issueIid,
+  body,
+  token,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  projectId: string | number;
+  issueIid: number;
+  body: string;
+  token?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ id: number }> {
+  const gitLabToken = token ?? (await resolveGitLabToken());
+
+  if (!gitLabToken?.trim()) {
+    throw new Error(
+      'GitLab OAuth authorization is required to create issue notes.',
+    );
+  }
+
+  const { data } = await requestGitLabJson({
+    apiBaseUrl,
+    fetchImpl,
+    method: 'POST',
+    path: `/projects/${encodeURIComponent(String(projectId))}/issues/${issueIid}/notes`,
+    params: {},
+    token: gitLabToken,
+    body: { body },
+    schema: gitLabNoteSchema,
   });
 
   return data;
@@ -436,6 +473,7 @@ export async function listGitLabProjects({
 const GITLAB_WEBHOOK_EVENT_FLAGS = {
   merge_requests_events: true,
   note_events: true,
+  issues_events: true,
   push_events: false,
 } as const;
 

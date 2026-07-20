@@ -36,6 +36,7 @@ import {
   hasActiveSentryIntegration,
   hasActiveSlackInstallation,
 } from './automation-requirements';
+
 import {
   mergeLegacySingleChannelAutoStartRows,
   normalizeChannelAutoStartDiscordInputRows,
@@ -287,6 +288,11 @@ export async function updateBackgroundAgentSettingsCommand(
   if ((input.conflictResolverInstructions?.length ?? 0) > 8_000) {
     fieldErrors.conflictResolverInstructions =
       'Conflict resolver instructions are too long.';
+  }
+
+  if ((input.issueFixerInstructions?.length ?? 0) > 8_000) {
+    fieldErrors.issueFixerInstructions =
+      'Triage Issues instructions are too long.';
   }
 
   const channelAutoStartRows = shouldUpdateChannelAutoStart
@@ -760,6 +766,7 @@ export async function updateBackgroundAgentSettingsCommand(
   const sentryTriageFrequency = input.sentryTriageFrequency ?? 'off';
   const dependabotTriageFrequency = input.dependabotTriageFrequency ?? 'off';
   const codeqlTriageFrequency = input.codeqlTriageFrequency ?? 'off';
+  const issueFixerFrequency = input.issueFixerFrequency ?? 'off';
   const securityAuditorFrequency = input.securityAuditorFrequency ?? 'off';
   const codeQualityAuditorFrequency =
     input.codeQualityAuditorFrequency ?? 'off';
@@ -932,6 +939,19 @@ export async function updateBackgroundAgentSettingsCommand(
     fieldErrors.general =
       fieldErrors.general ||
       'Add at least one active repository before enabling Triage CodeQL Alerts.';
+  }
+
+  const issueFixerProviders =
+    getTriggerableBackgroundAutomationDescriptorByKey('issue_fixer')
+      ?.supportedSourceControlProviders ?? [];
+
+  if (
+    issueFixerFrequency !== 'off' &&
+    !(await hasActiveRepository(issueFixerProviders))
+  ) {
+    fieldErrors.general =
+      fieldErrors.general ||
+      'Add at least one active GitHub, GitLab, or Gitea repository before enabling Triage Issues.';
   }
   if (Object.keys(fieldErrors).length > 0) {
     return {
@@ -1115,6 +1135,18 @@ export async function updateBackgroundAgentSettingsCommand(
       enabled: codeqlTriageFrequency !== 'off',
       schedule: { mode: codeqlTriageFrequency },
       ...destinationUpsertFields('codeqlTriage'),
+      updatedAt: now,
+    });
+
+    await upsertAutomation(tx, {
+      key: 'issue_fixer',
+      enabled: issueFixerFrequency !== 'off',
+      schedule: { mode: issueFixerFrequency },
+      ...(input.issueFixerInstructions !== undefined
+        ? {
+            instructions: normalizeOptionalText(input.issueFixerInstructions),
+          }
+        : {}),
       updatedAt: now,
     });
 

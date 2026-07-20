@@ -7,6 +7,7 @@ const {
   mockHttpBatchLink,
   mockSendPromptMutate,
   mockSteerTaskMutate,
+  mockTrackLatestUserMessageForReplyQuote,
   mockTrackLatestUserMessageForSlackQuote,
   mockRestoreActingUserIdAfterFailedDelivery,
   mockUpdateActingUserIdIfNeeded,
@@ -20,6 +21,7 @@ const {
   mockHttpBatchLink: vi.fn((options) => options),
   mockSendPromptMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
+  mockTrackLatestUserMessageForReplyQuote: vi.fn(),
   mockTrackLatestUserMessageForSlackQuote: vi.fn(),
   mockRestoreActingUserIdAfterFailedDelivery: vi.fn(),
   mockUpdateActingUserIdIfNeeded: vi.fn(),
@@ -51,6 +53,10 @@ vi.mock('@trpc/client', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+}));
+
+vi.mock('@roomote/communication/messages', () => ({
+  trackLatestUserMessageForReplyQuote: mockTrackLatestUserMessageForReplyQuote,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -178,6 +184,7 @@ describe('sendMessageToTask', () => {
       linearOrganizationId: null,
     });
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
+    mockTrackLatestUserMessageForReplyQuote.mockResolvedValue(undefined);
     mockRestoreActingUserIdAfterFailedDelivery.mockResolvedValue(undefined);
     mockUpdateActingUserIdIfNeeded.mockImplementation(
       async ({ currentActingUserId, nextActingUserId, preserveActor }) =>
@@ -535,6 +542,7 @@ describe('sendMessageToTask', () => {
       userName: 'Alice',
       onError: expect.any(Function),
     });
+    expect(mockTrackLatestUserMessageForReplyQuote).not.toHaveBeenCalled();
     expect(mockCreateRunToken).toHaveBeenCalledWith({
       runId: 42,
       userId: 'user-1',
@@ -542,6 +550,39 @@ describe('sendMessageToTask', () => {
     });
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: 'Pause the implementation and inspect the failing test.',
+    });
+  });
+
+  it('stores the latest user message for Discord-linked tasks when the user replies from web', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'thread-1',
+          communicationMessageId: 'message-1',
+        },
+        slackThreadTs: null,
+      }),
+    );
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Do it',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { ok: true },
+    });
+    expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
+    expect(mockTrackLatestUserMessageForReplyQuote).toHaveBeenCalledWith({
+      provider: 'discord',
+      runId: 42,
+      text: 'Do it',
+      userName: 'Alice',
+      onError: expect.any(Function),
     });
   });
 

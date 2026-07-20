@@ -34,7 +34,7 @@ function formatQuestion(
 
 export function buildRequestUserInputTaskUrl(
   taskRun: TaskRun,
-  source: 'slack' | 'linear',
+  source: 'slack' | 'linear' | 'discord',
 ): string {
   const webPath =
     taskRun.payload &&
@@ -69,6 +69,28 @@ export function getRequestUserInputPromptSignature(
     requestId: request.requestId,
     questions: request.questions,
   });
+}
+
+/**
+ * OpenCode often emits the question tool first without full input, using this
+ * placeholder before structured choices arrive. Surfaces should wait for the
+ * richer update instead of posting this empty shell.
+ */
+export function isOpenCodeQuestionPlaceholderRequest(
+  request: Pick<AcpRequestUserInputPayload, 'questions'>,
+): boolean {
+  if (request.questions.length !== 1) {
+    return false;
+  }
+
+  const question = request.questions[0]!;
+  const hasOptions = Boolean(question.options && question.options.length > 0);
+
+  return (
+    !hasOptions &&
+    question.question.trim() === 'Provide the requested input.' &&
+    (question.id === 'response' || question.header === 'Response')
+  );
 }
 
 export function isSingleQuestionRequestUserInput(

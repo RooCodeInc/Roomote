@@ -1,6 +1,7 @@
-import type {
-  SetupModelProviderStatus,
-  SetupModelStatus,
+import {
+  OPENAI_COMPATIBLE_PROVIDER_ID,
+  type SetupModelProviderStatus,
+  type SetupModelStatus,
 } from '@roomote/types';
 
 export function splitInferenceProviders(
@@ -16,9 +17,21 @@ export function splitInferenceProviders(
       (provider) =>
         provider.runtimeApiKeySatisfied || provider.savedApiKeySatisfied,
     ),
-    availableProviders: providers.filter(
-      (provider) =>
-        !provider.runtimeApiKeySatisfied && !provider.savedApiKeySatisfied,
-    ),
+    // Only the OpenAI-compatible catalog template stays addable while
+    // connected, so operators can create another named instance. Named
+    // connected rows themselves stay out of the Add Provider list.
+    availableProviders: providers.filter((provider) => {
+      const isConnected =
+        provider.runtimeApiKeySatisfied || provider.savedApiKeySatisfied;
+
+      if (!isConnected) {
+        return true;
+      }
+
+      return (
+        provider.allowMultipleConnections === true &&
+        provider.id === OPENAI_COMPATIBLE_PROVIDER_ID
+      );
+    }),
   };
 }

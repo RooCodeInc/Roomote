@@ -20,7 +20,10 @@ import { cn } from '@/lib/utils';
 
 import type { EnvironmentWithMeta } from '@/trpc/commands/environments';
 
-import { useEnvironments } from '@/hooks/environments';
+import {
+  useAvailableEnvironments,
+  useEnvironments,
+} from '@/hooks/environments';
 import { useRepositories } from '@/hooks/source-control';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useWorkspaceStorage } from '@/hooks/useWorkspaceStorage';
@@ -74,7 +77,13 @@ export const SelectEnvironmentOrRepository = ({
   // re-apply the sole-environment default.
   const hasUserSelectedWorkspaceRef = useRef(false);
 
-  const environments = useEnvironments();
+  const fullEnvironments = useEnvironments({ enabled: isAdmin });
+  const availableEnvironments = useAvailableEnvironments(repositoryFilter);
+  // Members only receive the minimal availability shape; management controls
+  // below remain admin-only.
+  const environments = isAdmin
+    ? fullEnvironments
+    : (availableEnvironments as typeof fullEnvironments);
   const repositories = useRepositories();
   const allRepositories = useMemo(
     () =>
@@ -91,7 +100,7 @@ export const SelectEnvironmentOrRepository = ({
       environments.data
         ? [...environments.data]
             .filter((env) =>
-              repositoryFilter
+              repositoryFilter && isAdmin
                 ? (env.config?.repositories?.some(
                     (repo) => repo.repository === repositoryFilter,
                   ) ?? false)
@@ -99,7 +108,7 @@ export const SelectEnvironmentOrRepository = ({
             )
             .sort((a, b) => a.name.localeCompare(b.name))
         : [],
-    [environments.data, repositoryFilter],
+    [environments.data, isAdmin, repositoryFilter],
   );
 
   const selectedEnv = environments.data?.find(

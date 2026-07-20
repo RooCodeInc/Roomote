@@ -233,10 +233,6 @@ vi.mock('@/components/system', () => ({
   X: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
 }));
 
-vi.mock('./StepCompletedBadge', () => ({
-  StepCompletedBadge: ({ text }: { text: string }) => <div>{text}</div>,
-}));
-
 vi.mock('./StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <h1>{text}</h1>,
 }));

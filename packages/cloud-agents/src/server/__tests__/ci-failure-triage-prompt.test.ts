@@ -51,6 +51,7 @@ describe('buildCiFailureTriagePrompt', () => {
         runUrl: 'https://github.com/acme/api/actions/runs/42',
         headBranch: 'main',
         headSha: 'abc123',
+        provider: 'github',
       },
     });
 
@@ -61,6 +62,9 @@ describe('buildCiFailureTriagePrompt', () => {
       '<run_url>https://github.com/acme/api/actions/runs/42</run_url>',
     );
     expect(prompt).toContain('<head_sha>abc123</head_sha>');
+    expect(prompt).toContain(
+      '<source_control_provider>github</source_control_provider>',
+    );
     expect(prompt).toContain('Work only the failing run in triggering_run');
     expect(prompt).toContain('Do not dig through unrelated older runs');
     expect(prompt).not.toContain('submit_automation_work_items');

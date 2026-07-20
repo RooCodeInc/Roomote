@@ -154,7 +154,8 @@ type FieldErrors = Partial<
     | 'sentryTriageProjectSlugs'
     | 'suggesterInstructions'
     | 'suggesterRoutingInstructions'
-    | 'announcerInstructions',
+    | 'announcerInstructions'
+    | 'issueFixerInstructions',
     string
   >
 >;
@@ -736,7 +737,9 @@ function mapSettingsToFormState(
     ciFailureTriageSlackChannelId: string | null;
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
-  } & ScheduleOnlyAutomationFrequencyState,
+  } & ScheduleOnlyAutomationFrequencyState & {
+      issueFixerInstructions: string | null;
+    },
 ): FormState {
   return {
     reviewerEnabled: settings.reviewer.enabled,
@@ -760,6 +763,7 @@ function mapSettingsToFormState(
       DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
     conflictResolverLabel: settings.conflictResolverLabel,
     conflictResolverInstructions: settings.conflictResolverInstructions ?? '',
+    issueFixerInstructions: settings.issueFixerInstructions ?? '',
     channelAutoStartChannels: [
       ...settings.channelAutoStartSlackChannels.map(
         ({ channelId, instructions, launchMode, launchCriteria }) => ({
@@ -2716,6 +2720,97 @@ export function AutomationsSettings() {
                 ) : null}
               </div>
             </AutomationCard>
+
+            {(
+              [
+                'issueFixer',
+              ] as const satisfies readonly ScheduleOnlyBackgroundAutomationId[]
+            ).map((automationId) => {
+              const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
+              const automationUi =
+                SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id];
+              const frequency = formState[automation.frequencyField];
+              const isEnabled =
+                scheduleOnlyAutomationEnabledState[automation.id];
+              const fieldId = `${automation.automationKey.replaceAll('_', '-')}-frequency`;
+
+              return (
+                <AutomationCard
+                  key={automation.id}
+                  automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isOpen={openAutomationIds.has(automation.id)}
+                  onOpenChange={(open) =>
+                    setAutomationOpen(automation.id, open)
+                  }
+                  iconEnabled={iconEnabled[automation.id]}
+                  debugSection={renderDebugRunsSection(automation.id)}
+                  footer={
+                    <AutomationFooter
+                      isDirty={isDirty[automation.id]}
+                      isPending={
+                        updateMutation.isPending &&
+                        savingAutomation === automation.id
+                      }
+                      onSave={() => saveAgent(automation.id)}
+                      onReset={() => resetAgent(automation.id)}
+                    />
+                  }
+                >
+                  <ScheduleOnlyAutomationContent
+                    automationLabel={automation.label}
+                    control={
+                      automationUi.control.kind === 'schedule'
+                        ? {
+                            ...automationUi.control,
+                            scheduleOptions:
+                              SCHEDULE_ONLY_AUTOMATION_FREQUENCY_OPTIONS,
+                          }
+                        : automationUi.control
+                    }
+                    details={automationUi.details}
+                    frequency={frequency}
+                    isEnabled={isEnabled}
+                    disabled={false}
+                    fieldId={fieldId}
+                    onFrequencyChange={(nextFrequency) =>
+                      setScheduleOnlyAutomationFrequency(
+                        automation.id,
+                        nextFrequency,
+                      )
+                    }
+                  >
+                    {automation.id === 'issueFixer' ? (
+                      <div className="space-y-2">
+                        <Label htmlFor="issue-fixer-instructions">
+                          Additional instructions
+                        </Label>
+                        <Textarea
+                          id="issue-fixer-instructions"
+                          value={formState.issueFixerInstructions}
+                          onChange={(event) =>
+                            setFormState((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    issueFixerInstructions: event.target.value,
+                                  }
+                                : prev,
+                            )
+                          }
+                          rows={4}
+                          placeholder="Optional guidance for how to triage issues and write plans"
+                        />
+                        {fieldErrors.issueFixerInstructions ? (
+                          <p className="text-xs text-destructive">
+                            {fieldErrors.issueFixerInstructions}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </ScheduleOnlyAutomationContent>
+                </AutomationCard>
+              );
+            })}
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.conflictResolver}

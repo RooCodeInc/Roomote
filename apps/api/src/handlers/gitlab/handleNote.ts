@@ -1,9 +1,16 @@
-import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
+import {
+  buildMentionRequestBlock,
+  buildUntrustedContentPolicy,
+  enqueueTask,
+  escapeTaskContextText,
+  getTaskUrl,
+} from '@roomote/cloud-agents/server';
 import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
 import {
+  createGitLabIssueNote,
   createGitLabMergeRequestNote,
   getGitLabDeploymentUser,
 } from '@roomote/gitlab';
@@ -15,6 +22,8 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import { orchestrateIssueMention } from '../shared/issue-mention-orchestration';
 import {
   sendMessageToTask,
   steerMessageToTask,
@@ -23,7 +32,6 @@ import {
   getGitLabAutomationTargets,
   isRoomoteGitLabUsername,
 } from './getGitLabAutomationTargets';
-import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
 import { toHostFromUrl } from '../utils';
 import type { GitLabNoteWebhook } from './types';
 
@@ -38,6 +46,8 @@ type GitLabMrMentionReplyKind =
   | 'active_follow_up'
   | 'active_review'
   | 'review_started';
+
+type GitLabIssueMentionReplyKind = 'active_follow_up' | 'task_started';
 
 function isGitLabMention(noteBody: string): boolean {
   return noteBody.toLowerCase().includes(GITLAB_MENTION_HANDLE);
@@ -67,7 +77,7 @@ async function isDeploymentTokenAuthor(username: string): Promise<boolean> {
   }
 }
 
-async function postMentionResponseNote({
+async function postMergeRequestMentionResponseNote({
   projectId,
   mergeRequestIid,
   body,
@@ -85,6 +95,28 @@ async function postMentionResponseNote({
   } catch (error) {
     console.warn(
       `[handleGitLabNote] failed to post mention response note on project ${projectId} MR !${mergeRequestIid}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+async function postIssueMentionResponseNote({
+  projectId,
+  issueIid,
+  body,
+}: {
+  projectId: number;
+  issueIid: number;
+  body: string;
+}): Promise<void> {
+  try {
+    await createGitLabIssueNote({
+      projectId,
+      issueIid,
+      body,
+    });
+  } catch (error) {
+    console.warn(
+      `[handleGitLabNote] failed to post mention response note on project ${projectId} issue #${issueIid}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -147,23 +179,49 @@ function formatGitLabMrMentionReply(
   return `${replyCopy.intro} [See task](${link})`;
 }
 
+function formatGitLabIssueMentionReply(
+  kind: GitLabIssueMentionReplyKind,
+  link: string | null,
+): string {
+  const replyCopy = (() => {
+    switch (kind) {
+      case 'active_follow_up':
+        return {
+          intro:
+            "I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.",
+          fallback:
+            'I could not generate the task link for this note, but the follow-up was delivered.',
+        };
+      case 'task_started':
+        return {
+          intro:
+            "I'm on it. I started a task for this issue, and I'll keep updates here.",
+          fallback:
+            'I could not generate the task link for this note, but the task is already running.',
+        };
+    }
+  })();
+
+  if (!link) {
+    return `${replyCopy.intro} ${replyCopy.fallback}`;
+  }
+
+  return `${replyCopy.intro} [See task](${link})`;
+}
+
 function buildReviewerGateMissNote(): string {
   return `I saw the mention, but I could not start work on this merge request with the current ${PRODUCT_NAME} GitLab setup.`;
 }
 
-function buildTaskStartFailedNote(): string {
-  return 'I saw the mention, but I could not start a task for this merge request right now. Please try again in a moment.';
+function buildIssueGateMissNote(): string {
+  return `I saw the mention, but I could not start work on this issue with the current ${PRODUCT_NAME} GitLab setup.`;
 }
 
-function formatQuotedText(text: string): string {
-  return text
-    .trim()
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n');
+function buildTaskStartFailedNote(surface: 'merge request' | 'issue'): string {
+  return `I saw the mention, but I could not start a task for this ${surface} right now. Please try again in a moment.`;
 }
 
-function buildExistingTaskFollowUpMessage({
+function buildExistingMrTaskFollowUpMessage({
   repoFullName,
   mergeRequest,
   commenter,
@@ -175,8 +233,7 @@ function buildExistingTaskFollowUpMessage({
   noteBody: string;
 }): string {
   const lines = [
-    `${commenter} mentioned Roomote in a comment on GitLab merge request !${mergeRequest.iid} (${mergeRequest.title}) in ${repoFullName}:`,
-    formatQuotedText(noteBody),
+    `${commenter} mentioned Roomote in a comment on GitLab merge request !${mergeRequest.iid} (${escapeTaskContextText(mergeRequest.title)}) in ${repoFullName}.`,
     '',
     'Please act on this comment as a follow-up to your existing work on this merge request.',
   ];
@@ -187,56 +244,118 @@ function buildExistingTaskFollowUpMessage({
     );
   }
 
+  lines.push(
+    '',
+    'Mention comment (the request to act on):',
+    buildMentionRequestBlock(noteBody),
+    '',
+    buildUntrustedContentPolicy(),
+  );
+
   return lines.join('\n');
 }
 
-export async function handleGitLabNote(
-  payload: GitLabNoteWebhook,
-): Promise<WebhookResponse> {
-  const note = payload.object_attributes;
-  const mergeRequest = payload.merge_request;
+async function handleGitLabIssueNote({
+  payload,
+  note,
+  issue,
+  commenter,
+  repoFullName,
+}: {
+  payload: GitLabNoteWebhook;
+  note: GitLabNoteWebhook['object_attributes'];
+  issue: NonNullable<GitLabNoteWebhook['issue']>;
+  commenter: string;
+  repoFullName: string;
+}): Promise<WebhookResponse> {
+  const mentionResponseTarget = {
+    projectId: payload.project.id,
+    issueIid: issue.iid,
+  };
 
-  if (note.action && note.action !== 'create') {
-    return { status: 'ok', message: `unsupported_note_action:${note.action}` };
-  }
+  // Skip pr_review automation gates (review enabled / author policy). Issue
+  // mentions should only need a linked sender and a mapped environment, matching
+  // GitHub issue comment handling.
+  const targetsResult = await getGitLabAutomationTargets({
+    workflow: 'pr_conflict_resolve',
+    payload,
+    webhookHost: toHostFromUrl(issue.url ?? payload.project.web_url ?? ''),
+    ignoreAuthorPolicy: true,
+    requireLinkedSenderAccount: true,
+  });
 
-  // System notes are GitLab-generated activity (label changes, cross-references,
-  // "mentioned in ..." echoes). They can restate a user's @roomote text without
-  // being a real request, so never treat them as mentions.
-  if (note.system) {
-    return { status: 'ok', message: 'system_note' };
-  }
+  const target =
+    targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
 
-  if (note.noteable_type !== 'MergeRequest' || !mergeRequest) {
+  if (!target || !target.userId) {
+    await postIssueMentionResponseNote({
+      ...mentionResponseTarget,
+      body:
+        targetsResult.status === 'error' &&
+        targetsResult.code === 'account_link_required'
+          ? buildSourceControlAccountLinkRequiredMessage('gitlab')
+          : buildIssueGateMissNote(),
+    });
+
     return {
       status: 'ok',
-      message: `unsupported_noteable_type:${note.noteable_type}`,
+      message:
+        targetsResult.status === 'error' &&
+        targetsResult.code === 'account_link_required'
+          ? 'account_link_required'
+          : 'issue_gate_miss',
     };
   }
 
-  if (!isGitLabMention(note.note)) {
-    return { status: 'ok', message: 'no_mention' };
-  }
+  const issueUrl =
+    issue.url ??
+    (payload.project.web_url
+      ? `${payload.project.web_url}/-/issues/${issue.iid}`
+      : '');
+  const issueTitle = issue.title ?? `Issue #${issue.iid}`;
+  const issueBody = issue.description ?? null;
 
-  const commenter = payload.user?.username;
+  return orchestrateIssueMention({
+    provider: 'gitlab',
+    logPrefix: '[handleGitLabNote]',
+    repositoryId: target.repo.id,
+    repositoryFullName: repoFullName,
+    issueNumber: issue.iid,
+    issueTitle,
+    issueBody,
+    issueUrl,
+    commentBody: note.note,
+    commenterLogin: commenter,
+    commenterUserId: target.userId,
+    sourceControlHost: target.repo.host ?? null,
+    includeSourceControlOnPayload: true,
+    providerDisplayName: 'GitLab',
+    issueBodySource: 'gitlab_issue_description',
+    issueBodyContextLabel: 'Issue description (context only):',
+    postComment: (body) =>
+      postIssueMentionResponseNote({ ...mentionResponseTarget, body }),
+    formatFollowUpReply: (taskLink) =>
+      formatGitLabIssueMentionReply('active_follow_up', taskLink),
+    formatStartedReply: (taskLink) =>
+      formatGitLabIssueMentionReply('task_started', taskLink),
+    formatStartFailed: () => buildTaskStartFailedNote('issue'),
+    tryBuildTaskLink,
+  });
+}
 
-  if (!commenter) {
-    return { status: 'ok', message: 'no_note_author' };
-  }
-
-  if (
-    isGitLabRoomoteAuthoredNote(commenter) ||
-    (await isDeploymentTokenAuthor(commenter))
-  ) {
-    return { status: 'ok', message: 'roomote_authored_note' };
-  }
-
-  const repoFullName = payload.project.path_with_namespace;
-
-  if (!repoFullName) {
-    return { status: 'error', message: 'missing_project_path_with_namespace' };
-  }
-
+async function handleGitLabMergeRequestNote({
+  payload,
+  note,
+  mergeRequest,
+  commenter,
+  repoFullName,
+}: {
+  payload: GitLabNoteWebhook;
+  note: GitLabNoteWebhook['object_attributes'];
+  mergeRequest: NonNullable<GitLabNoteWebhook['merge_request']>;
+  commenter: string;
+  repoFullName: string;
+}): Promise<WebhookResponse> {
   const mentionResponseTarget = {
     projectId: payload.project.id,
     mergeRequestIid: mergeRequest.iid,
@@ -259,7 +378,7 @@ export async function handleGitLabNote(
 
   // requireLinkedSenderAccount guarantees a linked commenter here.
   if (!target || !target.userId) {
-    await postMentionResponseNote({
+    await postMergeRequestMentionResponseNote({
       ...mentionResponseTarget,
       body:
         targetsResult.status === 'error' &&
@@ -288,7 +407,7 @@ export async function handleGitLabNote(
   });
 
   if (activeOwner?.taskId) {
-    const followUpMessage = buildExistingTaskFollowUpMessage({
+    const followUpMessage = buildExistingMrTaskFollowUpMessage({
       repoFullName,
       mergeRequest,
       commenter,
@@ -312,7 +431,7 @@ export async function handleGitLabNote(
         });
 
     if (delivery.success) {
-      await postMentionResponseNote({
+      await postMergeRequestMentionResponseNote({
         ...mentionResponseTarget,
         body: formatGitLabMrMentionReply(
           'active_follow_up',
@@ -345,7 +464,7 @@ export async function handleGitLabNote(
     });
 
     if (activeReview?.taskId) {
-      await postMentionResponseNote({
+      await postMergeRequestMentionResponseNote({
         ...mentionResponseTarget,
         body: formatGitLabMrMentionReply(
           'active_review',
@@ -410,7 +529,7 @@ export async function handleGitLabNote(
       },
     });
 
-    await postMentionResponseNote({
+    await postMergeRequestMentionResponseNote({
       ...mentionResponseTarget,
       body: formatGitLabMrMentionReply(
         'review_started',
@@ -427,9 +546,9 @@ export async function handleGitLabNote(
       `[handleGitLabNote] failed to start MR review task for ${repoFullName}!${mergeRequest.iid}: ${error instanceof Error ? error.message : String(error)}`,
     );
 
-    await postMentionResponseNote({
+    await postMergeRequestMentionResponseNote({
       ...mentionResponseTarget,
-      body: buildTaskStartFailedNote(),
+      body: buildTaskStartFailedNote('merge request'),
     });
 
     return {
@@ -437,4 +556,71 @@ export async function handleGitLabNote(
       message: `review_start_failed:${error instanceof Error ? error.message : String(error)}`,
     };
   }
+}
+
+export async function handleGitLabNote(
+  payload: GitLabNoteWebhook,
+): Promise<WebhookResponse> {
+  const note = payload.object_attributes;
+  const mergeRequest = payload.merge_request;
+  const issue = payload.issue;
+
+  if (note.action && note.action !== 'create') {
+    return { status: 'ok', message: `unsupported_note_action:${note.action}` };
+  }
+
+  // System notes are GitLab-generated activity (label changes, cross-references,
+  // "mentioned in ..." echoes). They can restate a user's @roomote text without
+  // being a real request, so never treat them as mentions.
+  if (note.system) {
+    return { status: 'ok', message: 'system_note' };
+  }
+
+  if (!isGitLabMention(note.note)) {
+    return { status: 'ok', message: 'no_mention' };
+  }
+
+  const commenter = payload.user?.username;
+
+  if (!commenter) {
+    return { status: 'ok', message: 'no_note_author' };
+  }
+
+  if (
+    isGitLabRoomoteAuthoredNote(commenter) ||
+    (await isDeploymentTokenAuthor(commenter))
+  ) {
+    return { status: 'ok', message: 'roomote_authored_note' };
+  }
+
+  const repoFullName = payload.project.path_with_namespace;
+
+  if (!repoFullName) {
+    return { status: 'error', message: 'missing_project_path_with_namespace' };
+  }
+
+  if (note.noteable_type === 'Issue' && issue) {
+    return handleGitLabIssueNote({
+      payload,
+      note,
+      issue,
+      commenter,
+      repoFullName,
+    });
+  }
+
+  if (note.noteable_type === 'MergeRequest' && mergeRequest) {
+    return handleGitLabMergeRequestNote({
+      payload,
+      note,
+      mergeRequest,
+      commenter,
+      repoFullName,
+    });
+  }
+
+  return {
+    status: 'ok',
+    message: `unsupported_noteable_type:${note.noteable_type}`,
+  };
 }

@@ -73,6 +73,22 @@ export const SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS = {
       enabledLabel: 'Investigate CI failures as they happen',
     },
   },
+  issueFixer: {
+    description:
+      'When an issue is opened or reopened on GitHub, GitLab, or Gitea, investigate it and post a concrete implementation plan on the issue.',
+    details: [
+      'Runs immediately from the issue webhook — not on a daily or weekly batch schedule.',
+      'Supports GitHub, GitLab, and Gitea issues. Azure DevOps work items and Bitbucket issues are not covered yet.',
+      'Posts a plan only. It does not implement the fix or open a pull request automatically.',
+      'Only repositories covered by a configured Roomote environment are eligible.',
+    ],
+    icon: Wrench,
+    control: {
+      kind: 'toggle',
+      enabledFrequency: 'daily',
+      enabledLabel: 'Triage issues as they happen',
+    },
+  },
 } as const satisfies Record<string, ScheduleOnlyAutomationUiDefinition>;
 
 type ScheduleOnlyAutomationContentProps = {

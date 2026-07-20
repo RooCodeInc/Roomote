@@ -115,6 +115,11 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   same thread or DM; `yes`, `never mind`, and `use API instead` confirm, cancel,
   or revise the pending route
 - reply naturally inside a task thread, forum post, or DM to continue it
+  (same Slack-style rules: after someone else posts or is @mentioned in the
+  thread since Roomote's last reply, tag Roomote again to keep going)
+- paste a Discord message link (`https://discord.com/channels/.../.../...`) in a
+  task so the agent can pull that message and nearby channel/thread context
+  (lookups outside the originating task thread require a linked Discord account)
 - use `/help` to see the available commands
 
 Roomote does not quote every message it answers. In a task thread, the
@@ -123,7 +128,11 @@ Roomote in an existing thread, Roomote reads earlier messages in that thread
 (including supported attachments, up to a few hundred recent thread messages) so the agent
 has that background. Follow-ups in an active or resumed task thread also carry
 undelivered earlier Discord messages the same way Slack does, so the agent keeps
-full thread context across turns. Image attachments are passed to the task as
+full thread context across turns. Natural follow-ups without an @mention work
+for people already in the conversation with Roomote (the task owner, the thread
+starter, or anyone who tagged Roomote earlier). If somebody else posts or is
+mentioned after Roomote's last reply, tag Roomote again so side chat is not
+treated as a new instruction. Image attachments are passed to the task as
 image input, and supported documents are downloaded and added to the request.
 Attachment downloads are size-limited and restricted to Discord's media hosts.
 

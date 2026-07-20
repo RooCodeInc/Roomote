@@ -4,6 +4,7 @@ import {
   OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
   mapRecommendedTaskModels,
 } from './recommended-task-models';
+import { isOpenAiCompatibleProviderId } from './openai-compatible-providers';
 
 const TASK_MODEL_ID_PATTERN = /^[^/\s]+\/.+$/u;
 
@@ -30,6 +31,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'google',
   'xai',
   'github-copilot',
+  'openai-compatible',
   'litellm',
   'ollama',
   'vllm',
@@ -220,12 +222,32 @@ export function normalizeTaskModelId(modelId: string): string {
     trimmedModelId &&
     !trimmedModelId.startsWith('openrouter/') &&
     trimmedModelId.split('/').length === 2 &&
-    !DIRECT_TASK_MODEL_PROVIDER_ID_SET.has(trimmedModelId.split('/')[0]!)
+    !DIRECT_TASK_MODEL_PROVIDER_ID_SET.has(trimmedModelId.split('/')[0]!) &&
+    !isOpenAiCompatibleProviderId(trimmedModelId.split('/')[0]!)
   ) {
     return `openrouter/${trimmedModelId}`;
   }
 
   return trimmedModelId;
+}
+
+/**
+ * When LiteLLM is configured, bare OpenCode model names without a provider
+ * segment are treated as LiteLLM route names and rewritten to
+ * `litellm/<name>`. Explicit `provider/model` ids (including already-prefixed
+ * `litellm/...` values) are left unchanged.
+ */
+export function applyImplicitLiteLlmModelPrefix(
+  modelId: string,
+  isLiteLlmConfigured: boolean,
+): string {
+  const trimmedModelId = modelId.trim();
+
+  if (!trimmedModelId || !isLiteLlmConfigured || trimmedModelId.includes('/')) {
+    return trimmedModelId;
+  }
+
+  return `litellm/${trimmedModelId}`;
 }
 
 export function buildTaskModelOption(input: {

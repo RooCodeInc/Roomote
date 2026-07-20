@@ -16,13 +16,17 @@ import type {
   RunTokenContext,
   PullRequestStatus,
 } from '@roomote/types';
+import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
 import {
   TaskPayloadKind,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationProviderFromTaskPayload,
   isLinkedReviewResultsMessage,
   isExitedRunStatus,
   isSnapshotResumable,
   parseLinkedReviewResults,
+  populateSnapshotResumeCommunicationMetadata,
   populateSnapshotResumeSlackMetadata,
   resolveSourceControlProviderFromPayload,
   restoreSnapshotResumeVisiblePromptFields,
@@ -71,10 +75,17 @@ const SLACK_REPLY_QUOTE_SUPPRESSING_MODES = new Set<SendMessageSenderMode>([
   'github_pr_follow_up',
 ]);
 
-function shouldTrackSlackReplyQuoteContext(
+function shouldTrackReplyQuoteContext(
   senderMode?: SendMessageSenderMode,
 ): boolean {
   return !(senderMode && SLACK_REPLY_QUOTE_SUPPRESSING_MODES.has(senderMode));
+}
+
+function hasDiscordThreadReplyContext(payload: unknown): boolean {
+  return (
+    getCommunicationProviderFromTaskPayload(payload) === 'discord' &&
+    Boolean(getCommunicationChannelFromTaskPayload(payload))
+  );
 }
 
 function normalizeOptionalString(value?: string): string | undefined {
@@ -252,6 +263,50 @@ async function createSlackReplyQuoteContext(params: {
   }
 }
 
+async function createDiscordReplyQuoteContext(params: {
+  runId: number;
+  payload: Record<string, unknown> | null;
+  userId: string;
+  message: string;
+  userName?: string;
+}): Promise<void> {
+  if (!hasDiscordThreadReplyContext(params.payload)) {
+    return;
+  }
+
+  const text = params.message.trim();
+  if (!text) {
+    return;
+  }
+
+  try {
+    const userName =
+      params.userName ?? (await getTrackedUserDisplayName(params.userId));
+
+    await trackLatestUserMessageForReplyQuote({
+      provider: 'discord',
+      runId: params.runId,
+      text,
+      userName,
+      onError: (error) => {
+        logHandlerError(
+          'sendMessageToTask',
+          `Non-fatal Discord reply quote sync failure for task run ${params.runId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      },
+    });
+  } catch (error) {
+    logHandlerError(
+      'sendMessageToTask',
+      `Non-fatal Discord reply quote sync failure for task run ${params.runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 function getWrappedLinkedReviewTagValue(
   raw: string,
   tag: 'summary' | 'status_line',
@@ -309,6 +364,13 @@ async function createLinkedReviewHandoffQuoteContext(params: {
     userName: 'Review',
     message: quoteText,
   });
+  await createDiscordReplyQuoteContext({
+    runId: params.runId,
+    payload: params.payload,
+    userId: 'linked-review-handoff',
+    userName: 'Review',
+    message: quoteText,
+  });
 }
 
 async function maybeCreateSlackReplyQuoteContext(params: {
@@ -324,11 +386,12 @@ async function maybeCreateSlackReplyQuoteContext(params: {
     return;
   }
 
-  if (!shouldTrackSlackReplyQuoteContext(params.senderMode)) {
+  if (!shouldTrackReplyQuoteContext(params.senderMode)) {
     return;
   }
 
   await createSlackReplyQuoteContext(params);
+  await createDiscordReplyQuoteContext(params);
 }
 
 /**
@@ -473,6 +536,9 @@ async function resumeTaskFromSnapshot({
     sourcePayload,
     channel: channelBindings?.slackChannelId,
     threadTs: channelBindings?.slackThreadTs,
+  });
+  populateSnapshotResumeCommunicationMetadata(payload, {
+    sourcePayload,
   });
 
   await inheritSnapshotResumeVisiblePromptFields(

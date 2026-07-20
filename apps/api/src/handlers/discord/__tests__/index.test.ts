@@ -4,6 +4,8 @@ import {
   DiscordApiTransportError,
 } from '@roomote/communication/discord-provider';
 
+import { accountLinkDmInFlightWait } from '../account-link.js';
+
 const mocks = vi.hoisted(() => ({
   claimEvent: vi.fn(),
   completeEvent: vi.fn(),
@@ -29,16 +31,36 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(),
   getChannel: vi.fn(),
   addReaction: vi.fn(),
+  removeReaction: vi.fn(),
+  createDirectMessage: vi.fn(),
+  postMessage: vi.fn(),
   channelAutoStart: vi.fn(),
   findPendingRoutingReply: vi.fn(),
   hasPendingRouteCallback: vi.fn(),
   handleRoutingReply: vi.fn(),
   attachOutOfBand: vi.fn(),
   releaseOutOfBand: vi.fn(),
+  redisSet: vi.fn(),
+  redisGet: vi.fn(),
+  redisDel: vi.fn(),
   buildContinuation: vi.fn(),
   releaseContinuation: vi.fn(),
   markThreadHistoryDelivered: vi.fn(),
+  fetchThreadHistory: vi.fn(),
+  shouldRouteUnmentioned: vi.fn(),
 }));
+
+vi.mock('@roomote/redis', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/redis')>();
+  return {
+    ...actual,
+    getRedis: () => ({
+      set: mocks.redisSet,
+      get: mocks.redisGet,
+      del: mocks.redisDel,
+    }),
+  };
+});
 
 vi.mock('../event-gate.js', () => ({
   claimDiscordApiEvent: mocks.claimEvent,
@@ -103,8 +125,13 @@ vi.mock('../../tasks/communication-out-of-band-context.js', () => ({
 
 vi.mock('../thread-context.js', () => ({
   buildDiscordContinuationPrompt: mocks.buildContinuation,
+  fetchDiscordThreadHistoryBestEffort: mocks.fetchThreadHistory,
   releaseDiscordContinuationClaim: mocks.releaseContinuation,
   markDiscordThreadHistoryDelivered: mocks.markThreadHistoryDelivered,
+}));
+
+vi.mock('../unmentioned-thread-reply.js', () => ({
+  shouldRouteUnmentionedDiscordThreadReplyToAgent: mocks.shouldRouteUnmentioned,
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -129,6 +156,9 @@ app.route('/api/internal/discord', discord);
 const provider = {
   getChannel: mocks.getChannel,
   addReaction: mocks.addReaction,
+  removeReaction: mocks.removeReaction,
+  createDirectMessage: mocks.createDirectMessage,
+  postMessage: mocks.postMessage,
 };
 
 function envelope(
@@ -197,6 +227,7 @@ describe('Discord Gateway event handler', () => {
     mocks.findActiveRun.mockResolvedValue(undefined);
     mocks.findCompletedRun.mockResolvedValue(null);
     mocks.findSourceRun.mockResolvedValue(null);
+    mocks.removeReaction.mockResolvedValue(undefined);
     mocks.processAttachments.mockResolvedValue({
       images: [],
       attachmentTexts: [],
@@ -207,6 +238,11 @@ describe('Discord Gateway event handler', () => {
       launchResult: { id: 17, taskId: 'task-17' },
     });
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
+    mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
+    mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
+    mocks.redisSet.mockResolvedValue('OK');
+    mocks.redisGet.mockResolvedValue(null);
+    mocks.redisDel.mockResolvedValue(1);
     mocks.component.mockResolvedValue('handled');
     mocks.channelAutoStart.mockResolvedValue(false);
     mocks.findPendingRoutingReply.mockResolvedValue(null);
@@ -236,6 +272,8 @@ describe('Discord Gateway event handler', () => {
     );
     mocks.releaseContinuation.mockResolvedValue(undefined);
     mocks.markThreadHistoryDelivered.mockResolvedValue(undefined);
+    mocks.fetchThreadHistory.mockResolvedValue([]);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
     mocks.queueMessage.mockResolvedValue(true);
   });
 
@@ -283,6 +321,16 @@ describe('Discord Gateway event handler', () => {
         queuedMessage: expect.objectContaining({ text: 'use API instead' }),
       }),
     );
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
+    expect(mocks.removeReaction).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
@@ -417,6 +465,7 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         requesterDiscordUserId: 'discord-user-1',
         launchOwnerUserId: 'roomote-user-1',
+        intakeAckPinned: true,
         queuedMessage: expect.objectContaining({
           provider: 'discord',
           text: 'Fix the flaky tests',
@@ -445,6 +494,10 @@ describe('Discord Gateway event handler', () => {
       name: '👀',
     });
     expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
+    const startArgs = mocks.startNewTask.mock.calls.at(-1)?.[0] as {
+      intakeAckPinned?: boolean;
+    };
+    expect(startArgs.intakeAckPinned).toBeUndefined();
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         ok: true,
@@ -612,6 +665,44 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
+  it('ignores unmentioned task-thread follow-ups that Slack-style gating rejects', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'task-thread',
+      type: 11,
+    });
+    mocks.findActiveRun.mockResolvedValue({
+      id: 23,
+      taskId: 'task-23',
+      userId: 'roomote-user-1',
+      actingUserId: 'roomote-user-1',
+    });
+    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'keep going after chatter',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: 'discord_unmentioned_requires_mention',
+      }),
+    );
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalled();
+    expect(mocks.queueMessage).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
   it('nudges an unlinked mentioned user without launching work', async () => {
     mocks.findMappedUserId.mockResolvedValue(null);
     mocks.getChannel.mockResolvedValue({
@@ -633,8 +724,373 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
+    // Full setup instructions go to DM; the channel only gets a short ack.
+    expect(mocks.createDirectMessage).toHaveBeenCalledWith('discord-user-1');
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-private-1',
+        text: expect.stringContaining('/link'),
+      }),
+    );
+    // The pending claim expires quickly so a crashed claimant cannot wedge
+    // the slot for the full dedupe window; only confirmed delivery holds it
+    // for 24h.
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      'discord:account-link-dm:discord-user-1',
+      'pending',
+      'EX',
+      120,
+      'NX',
+    );
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      'discord:account-link-dm:discord-user-1',
+      'sent',
+      'EX',
+      24 * 60 * 60,
+    );
     expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringContaining('/link') }),
+      expect.objectContaining({
+        text: 'I sent you a DM to link your Discord account.',
+        replyToMessageId: 'message-1',
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('skips the duplicate link DM when one went out recently and still acks in channel', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    // Dedupe slot already holds a confirmed delivery.
+    mocks.redisSet.mockResolvedValue(null);
+    mocks.redisGet.mockResolvedValue('sent');
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'I sent you a DM to link your Discord account.',
+        replyToMessageId: 'message-1',
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('waits for an in-flight link DM before acknowledging it as sent', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    // Another path already claimed the pending slot.
+    mocks.redisSet.mockResolvedValue(null);
+    mocks.redisGet
+      .mockResolvedValueOnce('pending')
+      .mockResolvedValueOnce('pending')
+      .mockResolvedValue('sent');
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'I sent you a DM to link your Discord account.',
+      }),
+    );
+  });
+
+  it('does not claim a pending in-flight DM was sent when it never settles', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.redisSet.mockResolvedValue(null);
+    mocks.redisGet.mockResolvedValue('pending');
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const originalWait = { ...accountLinkDmInFlightWait };
+    accountLinkDmInFlightWait.timeoutMs = 20;
+    accountLinkDmInFlightWait.intervalMs = 5;
+    accountLinkDmInFlightWait.sleep = async () => undefined;
+
+    try {
+      const response = await postEvent(
+        envelope(
+          message({
+            channel_id: 'channel-1',
+            guild_id: 'guild-1',
+            content: '<@bot-1> fix this',
+            mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+          }),
+        ),
+      );
+
+      // Still pending after the wait window — keep the event so the Gateway can
+      // retry instead of lying that a DM went out.
+      expect(response.status).toBe(503);
+      expect(mocks.reply).not.toHaveBeenCalled();
+      expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    } finally {
+      accountLinkDmInFlightWait.timeoutMs = originalWait.timeoutMs;
+      accountLinkDmInFlightWait.intervalMs = originalWait.intervalMs;
+      accountLinkDmInFlightWait.sleep = originalWait.sleep;
+    }
+  });
+
+  it('sends the link DM even when the dedupe check is unavailable', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    // Redis down: the mention flow fails open so the user is not left silent.
+    mocks.redisSet.mockRejectedValue(new Error('redis unavailable'));
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createDirectMessage).toHaveBeenCalledWith('discord-user-1');
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'I sent you a DM to link your Discord account.',
+      }),
+    );
+  });
+
+  it('falls back to public link instructions when the account-link DM is blocked', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.createDirectMessage.mockRejectedValue(
+      new DiscordApiError({
+        method: 'POST',
+        path: '/users/@me/channels',
+        status: 403,
+        code: 50007,
+        message: 'Cannot send messages to this user',
+      }),
+    );
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    // The failed delivery releases the dedupe slot so a later attempt can
+    // retry once the user unblocks DMs.
+    expect(mocks.redisDel).toHaveBeenCalledWith(
+      'discord:account-link-dm:discord-user-1',
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('/link code:<code>'),
+        replyToMessageId: 'message-1',
+      }),
+    );
+    expect(mocks.reply.mock.calls[0]?.[0]?.text).toMatch(
+      /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 for a transient account-link DM failure so the Gateway can retry', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.createDirectMessage.mockRejectedValue(
+      new DiscordApiError({
+        method: 'POST',
+        path: '/users/@me/channels',
+        status: 503,
+        message: 'Service Unavailable',
+      }),
+    );
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(503);
+    // The slot is released before the rethrow so the Gateway retry can send
+    // the DM instead of skipping it as a duplicate.
+    expect(mocks.redisDel).toHaveBeenCalledWith(
+      'discord:account-link-dm:discord-user-1',
+    );
+    expect(mocks.reply).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('does not public-fallback on a non-blocked Discord 403 when opening the account-link DM', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.createDirectMessage.mockRejectedValue(
+      new DiscordApiError({
+        method: 'POST',
+        path: '/users/@me/channels',
+        status: 403,
+        code: 50001,
+        message: 'Missing Access',
+      }),
+    );
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: 'discord_resource_unavailable',
+      }),
+    );
+    expect(mocks.reply).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps the full link prompt in the existing DM for unlinked DM senders', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.getChannel.mockResolvedValue({
+      id: 'dm-1',
+      name: 'Direct message',
+      type: 1,
+    });
+
+    const response = await postEvent(envelope(message()));
+
+    expect(response.status).toBe(200);
+    expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('/link code:<code>'),
+        replyToMessageId: 'message-1',
+      }),
+    );
+    expect(mocks.reply.mock.calls[0]?.[0]?.text).toMatch(
+      /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('DMs the link prompt and acks through the interaction for an unlinked guild /new', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+    const interaction = {
+      id: 'interaction-new-unlinked',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'channel-1',
+      guild_id: 'guild-1',
+      member: {
+        user: { id: 'discord-user-1', username: 'matt' },
+      },
+      data: {
+        name: 'new',
+        type: 1,
+        options: [{ name: 'request', type: 3, value: 'Build a dashboard' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.createDirectMessage).toHaveBeenCalledWith('discord-user-1');
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-private-1',
+        text: expect.stringContaining('/link'),
+      }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: { interaction, interactionDeferred: true },
+        text: 'I sent you a DM to link your Discord account.',
+      }),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });

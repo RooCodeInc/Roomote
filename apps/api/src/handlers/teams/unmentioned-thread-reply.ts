@@ -11,6 +11,11 @@ import type {
   TeamsGraphMessageMention,
 } from '@roomote/communication/teams-graph-client';
 
+import {
+  compareNumericMessageIds,
+  evaluateUnmentionedThreadReplyRouting,
+  type UnmentionedThreadHistoryMessage,
+} from '../shared/unmentioned-thread-reply.js';
 import { findLatestTeamsThreadTaskRun } from './find-active-teams-run.js';
 
 /**
@@ -52,14 +57,40 @@ function isHumanAuthoredGraphMessage(message: TeamsGraphMessage): boolean {
   return Boolean(message.authorUserId) && !message.authorApplicationId;
 }
 
+function toSharedHistoryMessages(
+  threadMessages: TeamsGraphMessage[],
+  normalizedBotAppId: string,
+  senderAadObjectId: string,
+): UnmentionedThreadHistoryMessage[] {
+  return threadMessages.map((message) => {
+    const isBot = isBotAuthoredGraphMessage(message, normalizedBotAppId);
+    const isHuman = isHumanAuthoredGraphMessage(message);
+    return {
+      id: message.id,
+      authorUserId: isHuman
+        ? message.authorUserId
+        : isBot
+          ? normalizedBotAppId
+          : null,
+      isBot,
+      mentionsBot: message.mentions.some((mention) =>
+        isBotGraphMention(mention, normalizedBotAppId),
+      ),
+      mentionsSomebodyElse: message.mentions.some(
+        (mention) =>
+          !isBotGraphMention(mention, normalizedBotAppId) &&
+          (Boolean(mention.applicationId) ||
+            (Boolean(mention.userId) && mention.userId !== senderAadObjectId)),
+      ),
+    };
+  });
+}
+
 /**
  * Decides whether a Teams channel-thread reply that does not mention the bot
- * should still route to the agent, mirroring the Slack behavior in
- * `shouldRouteUnmentionedSlackThreadReplyToAgent`: replying to the bot needs
- * no @-mention unless somebody else sent a message or was mentioned since the
- * bot's last message in the thread, and the no-mention flow is limited to
- * senders already in conversation with the bot (the thread's task owner, the
- * thread starter, or someone who mentioned the bot earlier in the thread).
+ * should still route to the agent. Provider filters stay Teams-specific;
+ * eligibility and interjection window rules come from the shared Slack/Discord
+ * core in `handlers/shared/unmentioned-thread-reply`.
  *
  * Teams has no stored thread state, so the decision is computed from Graph
  * thread history each time. When history is unavailable (no delegated Graph
@@ -133,97 +164,31 @@ export async function shouldRouteUnmentionedTeamsThreadReplyToAgent(params: {
   // Graph channel message ids match Bot Framework activity ids and encode
   // the send time in epoch milliseconds, so numeric comparison gives message
   // ordering.
-  const eventIdValue = Number(messageId);
-
-  if (!Number.isFinite(eventIdValue)) {
+  if (!Number.isFinite(Number(messageId))) {
     return false;
   }
 
-  // The no-mention flow is limited to senders who are already in conversation
-  // with the bot in this thread: the thread's task owner, the thread starter,
-  // or someone who @-mentioned the bot earlier in the thread. Drive-by
-  // replies from anyone else still require an explicit mention.
-  const isThreadTaskOwner =
-    Boolean(ownedThreadRun.userId) &&
-    ownedThreadRun.userId === params.mappedUserId;
   const isThreadRootAuthor = threadMessages.some(
     (message) =>
       message.id === threadId &&
       isHumanAuthoredGraphMessage(message) &&
       message.authorUserId === senderAadObjectId,
   );
-  const hasMentionedBotEarlierInThread = threadMessages.some((message) => {
-    const idValue = Number(message.id);
 
-    return (
-      Number.isFinite(idValue) &&
-      idValue < eventIdValue &&
-      isHumanAuthoredGraphMessage(message) &&
-      message.authorUserId === senderAadObjectId &&
-      message.mentions.some((mention) =>
-        isBotGraphMention(mention, normalizedBotAppId),
-      )
-    );
+  const decision = evaluateUnmentionedThreadReplyRouting({
+    eventMessageId: messageId,
+    senderUserId: senderAadObjectId,
+    isThreadTaskOwner:
+      Boolean(ownedThreadRun.userId) &&
+      ownedThreadRun.userId === params.mappedUserId,
+    isThreadRootAuthor,
+    threadMessages: toSharedHistoryMessages(
+      threadMessages,
+      normalizedBotAppId,
+      senderAadObjectId,
+    ),
+    compareMessageIds: compareNumericMessageIds,
   });
 
-  if (
-    !isThreadTaskOwner &&
-    !isThreadRootAuthor &&
-    !hasMentionedBotEarlierInThread
-  ) {
-    return false;
-  }
-
-  // Replying to the bot needs no @-mention unless somebody else sent a
-  // message or was mentioned since the bot's last message in the thread.
-  // Each new bot reply reopens the no-mention window.
-  let latestBotMessageIdValue: number | null = null;
-  for (const message of threadMessages) {
-    if (!isBotAuthoredGraphMessage(message, normalizedBotAppId)) {
-      continue;
-    }
-
-    const idValue = Number(message.id);
-    if (!Number.isFinite(idValue) || idValue >= eventIdValue) {
-      continue;
-    }
-
-    if (latestBotMessageIdValue === null || idValue > latestBotMessageIdValue) {
-      latestBotMessageIdValue = idValue;
-    }
-  }
-
-  for (const message of threadMessages) {
-    const idValue = Number(message.id);
-
-    // When no bot message is identifiable in the fetched history, the whole
-    // thread is treated as the window on purpose (conservative: an
-    // interjection anywhere in the thread requires an explicit mention).
-    if (
-      !Number.isFinite(idValue) ||
-      idValue >= eventIdValue ||
-      (latestBotMessageIdValue !== null && idValue <= latestBotMessageIdValue)
-    ) {
-      continue;
-    }
-
-    if (!isHumanAuthoredGraphMessage(message)) {
-      continue;
-    }
-
-    const isMessageFromSomebodyElse =
-      message.authorUserId !== senderAadObjectId;
-    const mentionsSomebodyElse = message.mentions.some(
-      (mention) =>
-        !isBotGraphMention(mention, normalizedBotAppId) &&
-        (Boolean(mention.applicationId) ||
-          (Boolean(mention.userId) && mention.userId !== senderAadObjectId)),
-    );
-
-    if (isMessageFromSomebodyElse || mentionsSomebodyElse) {
-      return false;
-    }
-  }
-
-  return true;
+  return decision.shouldRoute;
 }

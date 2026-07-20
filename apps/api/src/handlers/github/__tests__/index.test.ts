@@ -5,6 +5,7 @@ const {
   mockHandleInstallationCreated,
   mockHandlePrComment,
   mockHandleGitHubIssueComment,
+  mockHandleGitHubIssueFixer,
   mockHandlePrMerge,
   mockHandlePrOpen,
   mockHandlePrReadyForReview,
@@ -36,6 +37,7 @@ const {
   mockHandleInstallationCreated: vi.fn(),
   mockHandlePrComment: vi.fn(),
   mockHandleGitHubIssueComment: vi.fn(),
+  mockHandleGitHubIssueFixer: vi.fn(),
   mockHandlePrMerge: vi.fn(),
   mockHandlePrOpen: vi.fn(),
   mockHandlePrReadyForReview: vi.fn(),
@@ -134,6 +136,10 @@ vi.mock('../handleGitHubIssueComment', () => ({
   handleGitHubIssueComment: mockHandleGitHubIssueComment,
 }));
 
+vi.mock('../handleGitHubIssueFixer', () => ({
+  handleGitHubIssueFixer: mockHandleGitHubIssueFixer,
+}));
+
 vi.mock('../handlePrMerge', () => ({
   handlePrMerge: mockHandlePrMerge,
 }));
@@ -182,6 +188,7 @@ describe('github webhook router', () => {
     mockHandleInstallationCreated.mockReset();
     mockHandlePrComment.mockReset();
     mockHandleGitHubIssueComment.mockReset();
+    mockHandleGitHubIssueFixer.mockReset();
     mockHandlePrMerge.mockReset();
     mockHandlePrOpen.mockReset();
     mockHandlePrReadyForReview.mockReset();
@@ -207,6 +214,7 @@ describe('github webhook router', () => {
     mockVerify.mockResolvedValue(true);
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueComment.mockResolvedValue({ status: 'ok' });
+    mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -359,6 +367,7 @@ describe('github webhook router', () => {
       issue: payload.issue,
       mentionBody: payload.issue.body,
     });
+    expect(mockHandleGitHubIssueFixer).toHaveBeenCalledWith(payload);
   });
 
   it('routes edited PR issue comments to the review-summary notifier without starting tasks', async () => {

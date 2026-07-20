@@ -181,6 +181,7 @@ export function EmailPasswordAuth({
         <Button
           type="button"
           className="w-full"
+          variant="outline"
           onClick={() => {
             setErrorMessage(null);
             setModeState(mode === 'sign-up' ? 'sign-in' : 'sign-up');

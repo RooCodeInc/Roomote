@@ -78,6 +78,12 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    resolveComputeProviderEnvValues: vi.fn(
+      async (
+        _provider: unknown,
+        options: { runtimeEnv: Record<string, unknown> },
+      ) => options.runtimeEnv,
+    ),
     db: {
       query: {
         ...actual.db.query,
@@ -95,6 +101,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('../compute-providers', () => ({
   cleanupStaleDockerSandboxes: vi.fn().mockResolvedValue(undefined),
+  DOCKER_SPAWN_TIMEOUT_MS: 15 * 60 * 1_000,
   spawnDaytonaWorker: (...args: unknown[]) => mockSpawnDaytonaWorker(...args),
   spawnDockerWorker: (...args: unknown[]) => mockSpawnDockerWorker(...args),
   spawnE2bWorker: (...args: unknown[]) => mockSpawnE2bWorker(...args),
@@ -194,6 +201,7 @@ describe('RoomoteController', () => {
         logMaxSize: '10m',
         logMaxFiles: 3,
         egressPolicy: 'internet',
+        signal: expect.any(AbortSignal),
       }),
     );
   });
@@ -484,6 +492,8 @@ describe('RoomoteController', () => {
         modalRegistryPassword: 'ghcr-token',
         modalRegions: 'us,us-west',
         modalVmMemoryMiB: 8192,
+        onWorkerExit: expect.any(Function),
+        onWorkerRestart: expect.any(Function),
       }),
     );
   });

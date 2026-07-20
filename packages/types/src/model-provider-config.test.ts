@@ -231,6 +231,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'google',
         'xai',
         'github-copilot',
+        'openai-compatible',
         'litellm',
         'ollama',
         'vllm',
@@ -1044,6 +1045,45 @@ describe('buildSetupModelStatus', () => {
       savedApiKeySatisfied: false,
     });
   });
+
+  it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is configured', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_MODEL: 'coding',
+        LITELLM_BASE_URL: 'http://localhost:4000',
+        LITELLM_API_KEY: 'litellm-key',
+      },
+    });
+
+    expect(status.runtimeRoomoteModel).toBe('litellm/coding');
+    expect(status.runtimeProviderId).toBe('litellm');
+    expect(status.preselectedProvider).toBe('litellm');
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
+    expect(status.setupSatisfied).toBe(true);
+    expect(
+      status.providers.find((provider) => provider.id === 'litellm'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: true,
+      savedApiKeySatisfied: false,
+    });
+  });
+
+  it('prefixes bare LiteLLM route names when LiteLLM is only persisted', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_MODEL: 'coding',
+      },
+      persistedEnvVarNames: ['LITELLM_BASE_URL', 'LITELLM_API_KEY'],
+      persistedEnvVarValues: {
+        LITELLM_BASE_URL: 'http://localhost:4000',
+      },
+    });
+
+    expect(status.runtimeRoomoteModel).toBe('litellm/coding');
+    expect(status.runtimeProviderId).toBe('litellm');
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+    expect(status.setupSatisfied).toBe(true);
+  });
 });
 
 describe('buildSetupModelStatus multi-credential providers', () => {
@@ -1170,5 +1210,45 @@ describe('collectSetupModelProviderCredentialValues', () => {
         action: 'save it',
       }),
     ).toThrow('Amazon Bedrock does not accept a DATABASE_URL value.');
+  });
+
+  it('ignores the primary endpoint env var when present in additionalEnvValues', () => {
+    const openaiCompatibleProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+      (provider) => provider.id === 'openai-compatible',
+    )!;
+
+    expect(
+      collectSetupModelProviderCredentialValues({
+        provider: openaiCompatibleProvider,
+        apiKey: 'https://proxy.example.com/v1',
+        additionalEnvValues: {
+          OPENAI_COMPATIBLE_BASE_URL: 'https://stale.example.com/v1',
+          OPENAI_COMPATIBLE_API_KEY: 'optional-key',
+        },
+        isEnvVarSatisfied: () => false,
+        action: 'save it',
+      }),
+    ).toEqual({
+      values: [
+        {
+          name: 'OPENAI_COMPATIBLE_BASE_URL',
+          value: 'https://proxy.example.com/v1',
+        },
+        { name: 'OPENAI_COMPATIBLE_API_KEY', value: 'optional-key' },
+      ],
+      clearedEnvVarNames: [],
+    });
+  });
+
+  it('still rejects a primary API-key env var submitted via additionalEnvValues', () => {
+    expect(() =>
+      collectSetupModelProviderCredentialValues({
+        provider: anthropicProvider,
+        apiKey: 'sk-ant-main',
+        additionalEnvValues: { ANTHROPIC_API_KEY: 'sk-ant-extra' },
+        isEnvVarSatisfied: () => false,
+        action: 'save it',
+      }),
+    ).toThrow('Anthropic does not accept a ANTHROPIC_API_KEY value.');
   });
 });

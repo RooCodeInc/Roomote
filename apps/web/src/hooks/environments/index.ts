@@ -1,4 +1,8 @@
-export { useEnvironments, useEnvironment } from './useEnvironments';
+export {
+  useAvailableEnvironments,
+  useEnvironments,
+  useEnvironment,
+} from './useEnvironments';
 export {
   useCreateEnvironment,
   useUpdateEnvironment,

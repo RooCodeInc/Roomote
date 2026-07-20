@@ -40,14 +40,16 @@ a provider never re-adds models you removed.
 
 ### Self-hosted and gateway providers
 
-LiteLLM, Ollama, and vLLM let you bring an endpoint that you operate or host on
-your own infrastructure. Their models are discovered from the configured
-endpoint instead of Roomote's recommended catalog. Connect the provider in
-**Settings > Models**, then select from the discovered models and choose the
-defaults and role mappings that fit your deployment.
+OpenAI-compatible endpoints let you bring any server that speaks the OpenAI
+`/v1` API — including LiteLLM, Ollama, vLLM, and custom proxies. Models are
+discovered from the configured endpoint instead of Roomote's recommended
+catalog. Connect the provider in **Settings > Models**, then select from the
+discovered models and choose the defaults and role mappings that fit your
+deployment.
 
 | Provider | Best for | Setup |
 | --- | --- | --- |
+| [OpenAI-compatible](/providers/inference/openai-compatible) | Any OpenAI API endpoint (LiteLLM, vLLM, custom proxies, local servers); multiple named connections supported | Connection name, endpoint URL, and optional API key |
 | [LiteLLM](/providers/inference/litellm) | A single gateway that routes to one or more model vendors | Endpoint URL and required API key |
 | [Ollama](/providers/inference/ollama) | Local or private model serving without provider API keys | Endpoint URL |
 | [vLLM](/providers/inference/vllm) | Serving OpenAI-compatible models on your own GPU infrastructure | Endpoint URL and optional API key |
@@ -134,6 +136,13 @@ list.
 - **Inference Providers** stores the provider credentials Roomote can use.
 - **Models** controls the provider/model pairs that are available, the default
   model, and specialized model roles.
+
+For subscription-based providers (ChatGPT, GitHub Copilot, and Kimi for
+Coding), the provider row also shows current plan usage when the provider
+reports it, such as remaining Copilot premium requests or the percent used of
+the ChatGPT 5-hour and weekly limits. These numbers come from unofficial
+provider endpoints, so the usage line is hidden whenever the provider does not
+return usable data.
 
 Admins can enable or disable models from the task model list. The default model
 must stay enabled, because Roomote uses it when a task does not request a

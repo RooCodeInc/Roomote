@@ -6,6 +6,7 @@ import { useSSE } from 'react-hooks-sse';
 import {
   RunStatus,
   getComputeProviderCapabilities,
+  isBootingRunStatus,
   isExitedRunStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
@@ -22,6 +23,26 @@ interface UseStartupProgressOptions {
   onStatusChange?: (status: RunStatus) => void;
 }
 
+function resolveBootStartedAtMs(
+  dequeuedAt?: TaskRun['dequeuedAt'] | null,
+  createdAt?: TaskRun['createdAt'] | null,
+): number | undefined {
+  for (const value of [dequeuedAt, createdAt]) {
+    if (!value) {
+      continue;
+    }
+
+    const ms =
+      value instanceof Date ? value.getTime() : new Date(value).getTime();
+
+    if (Number.isFinite(ms)) {
+      return ms;
+    }
+  }
+
+  return undefined;
+}
+
 export function useStartupProgress({
   runId,
   initialTaskRun,
@@ -35,6 +56,7 @@ export function useStartupProgress({
       completed: isExitedRunStatus(initialStatus),
     },
   ]);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const streamedTaskRun = useSSE<TaskRun | undefined>('message', undefined);
 
@@ -42,6 +64,7 @@ export function useStartupProgress({
   const status = taskRun?.status ?? initialStatus;
   const statusRef = useRef(status);
   const error = getTaskRunError(taskRun ?? initialTaskRun);
+  const errorCode = (taskRun ?? initialTaskRun)?.errorCode ?? undefined;
   const provider = resolveComputeProviderTarget(
     taskRun?.vendor ?? initialTaskRun?.vendor,
   );
@@ -92,6 +115,33 @@ export function useStartupProgress({
     });
   }, [status, onStatusChange]);
 
+  // Track elapsed boot time for temporary "Still booting…" feedback.
+  useEffect(() => {
+    if (!isBootingRunStatus(status)) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    // Prefer dequeuedAt for overall boot duration; fall back to createdAt.
+    // Status transitions keep the same timer so users see total boot wait.
+    const startedAtMs =
+      resolveBootStartedAtMs(taskRun?.dequeuedAt, taskRun?.createdAt) ??
+      Date.now();
+
+    const tick = () => {
+      setElapsedSeconds(
+        Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)),
+      );
+    };
+
+    tick();
+    const intervalId = window.setInterval(tick, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [status, taskRun?.dequeuedAt, taskRun?.createdAt]);
+
   const lastStep = steps[steps.length - 1];
   const lastStatus = lastStep?.status ?? RunStatus.Pending;
 
@@ -99,6 +149,8 @@ export function useStartupProgress({
     steps,
     lastStatus,
     error: error ?? undefined,
+    errorCode,
+    elapsedSeconds,
     showLogs: canStreamLogs,
     sandboxLogs,
     logsConnected,

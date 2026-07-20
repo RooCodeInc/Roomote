@@ -1,4 +1,5 @@
 import { prependCommunicationMessages } from '@roomote/communication/messages';
+import { prependCommunicationRequestUserInputAnswers } from '@roomote/communication/request-user-input';
 import type {
   CommunicationProvider,
   QueuedCommunicationMessage,
@@ -33,6 +34,21 @@ async function requeueCommunicationMessages(
   await prependCommunicationMessages(provider, runId, remainingQueueOrder);
 }
 
+async function requeueCommunicationRequestUserInputAnswers(
+  provider: Exclude<CommunicationProvider, 'slack'>,
+  runId: number,
+  queuedAnswers: Awaited<
+    ReturnType<typeof sdk.taskRuns.getCommunicationRequestUserInputAnswers>
+  >,
+  startIndex: number,
+): Promise<void> {
+  await prependCommunicationRequestUserInputAnswers(
+    provider,
+    runId,
+    queuedAnswers.slice(startIndex),
+  );
+}
+
 export function createCommunicationMessageInterval({
   provider,
   options,
@@ -40,8 +56,14 @@ export function createCommunicationMessageInterval({
   provider: Exclude<CommunicationProvider, 'slack'>;
   options: ListenerOptions;
 }): NodeJS.Timeout {
-  const { taskRun, sendPrompt, state, logger, prepareActorScopedTurn } =
-    options;
+  const {
+    taskRun,
+    sendPrompt,
+    state,
+    logger,
+    prepareActorScopedTurn,
+    answerUserInputRequest,
+  } = options;
   let stopping = false;
   let activePoll = Promise.resolve();
 
@@ -57,6 +79,97 @@ export function createCommunicationMessageInterval({
     }
 
     try {
+      if (
+        provider === 'discord' ||
+        provider === 'telegram' ||
+        provider === 'teams'
+      ) {
+        const queuedAnswers = await runPollingSdkCall({
+          execute: () =>
+            sdk.taskRuns.getCommunicationRequestUserInputAnswers({
+              runId: taskRun.id,
+              provider,
+            }),
+          stage: `listenFor${provider}Events`,
+          runId: taskRun.id,
+          sessionId: state.sessionId,
+          sdkMethod: 'taskRuns.getCommunicationRequestUserInputAnswers',
+          failurePoint: 'queuedCommunicationRequestUserInputAnswers',
+          logger,
+          message: `[listenFor${provider}Events] Failed to check for queued ${provider} request_user_input answers for job ${taskRun.id}`,
+        });
+
+        if (!queuedAnswers) {
+          return;
+        }
+
+        if (queuedAnswers.length > 0) {
+          logger.log(
+            `[listenFor${provider}Events] Found ${queuedAnswers.length} queued ${provider} request_user_input answer(s) for job ${taskRun.id}`,
+          );
+
+          for (const [index, answer] of queuedAnswers.entries()) {
+            const answerPrep = await prepareActorScopedTurn(answer.userId);
+
+            if (answerPrep === false || answerPrep.skippedMismatch) {
+              logger.warn(
+                `[listenFor${provider}Events] Delaying request_user_input answer for task ${state.sessionId} until actor-scoped turn preparation succeeds (requestId=${answer.requestId})`,
+              );
+
+              try {
+                await requeueCommunicationRequestUserInputAnswers(
+                  provider,
+                  taskRun.id,
+                  queuedAnswers,
+                  index,
+                );
+              } catch (error) {
+                logger.error(
+                  `[listenFor${provider}Events] Failed to requeue delayed ${provider} request_user_input answer for task run ${taskRun.id}: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                );
+              }
+
+              return;
+            }
+
+            const sent = answerUserInputRequest({
+              requestId: answer.requestId,
+              answers: answer.answers,
+              userId: answerPrep.effectiveUserId ?? undefined,
+            });
+
+            logger.log(
+              `[listenFor${provider}Events] answerUserInputRequest returned ${sent} for task ${state.sessionId} (requestId=${answer.requestId})`,
+            );
+
+            if (!sent) {
+              logger.warn(
+                `[listenFor${provider}Events] Failed to send request_user_input answer for task ${state.sessionId}; requeueing requestId=${answer.requestId}`,
+              );
+
+              try {
+                await requeueCommunicationRequestUserInputAnswers(
+                  provider,
+                  taskRun.id,
+                  queuedAnswers,
+                  index,
+                );
+              } catch (error) {
+                logger.error(
+                  `[listenFor${provider}Events] Failed to requeue ${provider} request_user_input answer for task run ${taskRun.id}: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                );
+              }
+
+              return;
+            }
+          }
+        }
+      }
+
       const messages = await runPollingSdkCall({
         execute: () =>
           sdk.taskRuns.getCommunicationMessages({

@@ -67,6 +67,7 @@ import type {
   McpConnectionRole,
   SourceControlProvider,
   TaskModelSettings,
+  TaskRunErrorCode,
   UserRole,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
@@ -151,8 +152,8 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // getInstanceAnalyticsId). Stable across versions, never derived from any
   // customer data, and never editable through any user-facing mutation.
   instanceAnalyticsId: text('instance_analytics_id'),
-  // Latest released app version reported by the Ping version-check endpoint,
-  // stored for a future "update available" surface. No UI reads this yet.
+  // Latest released app version reported by the Ping version-check endpoint.
+  // Read by the in-app "update available" notice for self-host admins.
   latestKnownVersion: text('latest_known_version'),
   latestVersionCheckedAt: timestamp('latest_version_checked_at'),
   setupCompletedAt: timestamp('setup_completed_at'),
@@ -929,6 +930,12 @@ export const taskRuns = pgTable(
     artifacts: jsonb('artifacts'),
     result: jsonb('result'),
     error: text('error'),
+    /**
+     * Machine-readable category for boot/spawn failures; `error` keeps the
+     * full diagnostic text. Null for runs that failed before this column
+     * existed or whose failure has no mapped category.
+     */
+    errorCode: text('error_code').$type<TaskRunErrorCode>(),
     machineId: text('machine_id'),
     sandboxCmdId: text('sandbox_cmd_id'), // Command ID from Vercel Sandbox for log retrieval.
     machineDomain: text('machine_domain'),

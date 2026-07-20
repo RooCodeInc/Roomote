@@ -70,6 +70,7 @@ describe('ModalClient', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     (
       ModalClient as unknown as {
         sandboxCache: { clear: () => void };
@@ -715,6 +716,51 @@ describe('ModalClient', () => {
     );
   });
 
+  it('reports a detached-process exit observed after launch', async () => {
+    vi.useFakeTimers();
+    let resolveExit!: (exitCode: number) => void;
+    const waitPromise = new Promise<number>((resolve) => {
+      resolveExit = resolve;
+    });
+    const onExit = vi.fn().mockResolvedValue(undefined);
+    const execMock = vi.fn().mockResolvedValue({
+      stdout: new ReadableStream<string>({ start: () => undefined }),
+      stderr: new ReadableStream<string>({ start: () => undefined }),
+      wait: vi.fn().mockReturnValue(waitPromise),
+    });
+
+    sandboxFromIdMock.mockResolvedValue({
+      sandboxId: 'modal-123',
+      exec: execMock,
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    const launchPromise = client.runCommand({
+      instanceId: 'modal-123',
+      cmd: 'worker',
+      args: ['run', '123'],
+      detached: true,
+      onExit,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(launchPromise).resolves.toEqual({
+      commandId: undefined,
+      exitCode: null,
+    });
+
+    resolveExit(1);
+    await vi.waitFor(() => {
+      expect(onExit).toHaveBeenCalledWith({ exitCode: 1 });
+    });
+    vi.useRealTimers();
+  });
+
   it('normalizes Modal exec failures into structured errors', async () => {
     const execMock = vi
       .fn()
@@ -828,6 +874,7 @@ describe('ModalClient', () => {
     expect(dockerfile).toContain(
       'ENV AGENT_BROWSER_EXECUTABLE_PATH="/opt/agent-browser/chrome"',
     );
+    expect(dockerfile).toContain('chmod o+x /home/roomote');
     expect(dockerfile).toContain('libatk1.0-0t64');
     expect(dockerfile).toContain('libatspi2.0-0t64');
     expect(dockerfile).toContain('libcups2t64');
@@ -839,6 +886,10 @@ describe('ModalClient', () => {
     expect(installBrowserAgentScript).toContain(
       'agent-browser@${AGENT_BROWSER_VERSION}',
     );
+    expect(installBrowserAgentScript).toContain(
+      'ensure_home_dir_traversable_for_gpu_process',
+    );
+    expect(installBrowserAgentScript).toContain('chmod o+x "$home_dir"');
     expect(installBrowserAgentScript).toContain('collect_cli_browser_args()');
     expect(installBrowserAgentScript).toContain(
       'AGENT_BROWSER_FORWARD_ARGS=()',
@@ -996,6 +1047,12 @@ describe('ModalClient', () => {
     expect(dockerfile).toContain('"opencode-ai@${OPENCODE_CLI_VERSION}"');
     expect(dockerfile).toContain(
       'test "$(/sandbox/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}"',
+    );
+    expect(dockerfile).toContain(
+      'npm install --prefix /opt/roomote/opencode-plugin-seed',
+    );
+    expect(dockerfile).toContain(
+      'ENV ROOMOTE_OPENCODE_PLUGIN_SEED_DIR=/opt/roomote/opencode-plugin-seed',
     );
     expect(dockerfile).toContain(
       'exec /sandbox/node_modules/.bin/opencode "$@"',

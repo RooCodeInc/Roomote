@@ -542,8 +542,33 @@ install_agent_browser_wrappers() {
   fi
 }
 
+# Chromium's GPU child process drops all capabilities, so it is subject to
+# normal permission bits when loading bundled Vulkan/SwiftShader libs under
+# $HOME/.agent-browser. Allow others execute (traverse-only) on $HOME so the
+# GPU process can reach those libraries. Files under $HOME keep their own
+# modes; this repairs older snapshots still shipped with a 750 home from
+# useradd.
+ensure_home_dir_traversable_for_gpu_process() {
+  local home_dir="${HOME:-}"
+  local mode
+
+  if [ -z "$home_dir" ] || [ ! -d "$home_dir" ]; then
+    return 0
+  fi
+
+  mode="$(stat -c '%a' "$home_dir" 2>/dev/null || true)"
+  case "${mode: -1}" in
+    1|3|5|7)
+      return 0
+      ;;
+  esac
+
+  chmod o+x "$home_dir" 2>/dev/null || true
+}
+
 main() {
   ensure_owned_directory "$AGENT_BROWSER_INSTALL_ROOT"
+  ensure_home_dir_traversable_for_gpu_process
 
   local real_cli_path
   real_cli_path="$(find_real_agent_browser_cli_path)"

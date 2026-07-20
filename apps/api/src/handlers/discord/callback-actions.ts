@@ -26,6 +26,10 @@ import {
   handleDiscordRoutingCallback,
   parseDiscordRouteCallbackData,
 } from './routing-confirmation.js';
+import {
+  hasPendingDiscordRequestUserInputCallback,
+  tryHandleDiscordRequestUserInputCallback,
+} from './request-user-input.js';
 import type { DiscordChannelContext } from './task-launch.js';
 import {
   discordMetadataForChannel,
@@ -370,6 +374,22 @@ export async function handleDiscordComponentInteraction(input: {
   channel: DiscordChannelContext;
 }): Promise<'handled' | 'unsupported'> {
   const customId = input.interaction.data?.custom_id;
+  if (hasPendingDiscordRequestUserInputCallback(customId)) {
+    const sender = input.interaction.member?.user ?? input.interaction.user;
+    const mappedUserId = sender?.id
+      ? await findDiscordMappedUserId(sender.id)
+      : null;
+    await tryHandleDiscordRequestUserInputCallback({
+      provider: input.provider,
+      applicationId: input.applicationId,
+      channel: input.channel,
+      interaction: input.interaction,
+      interactionDeferred: input.interactionDeferred,
+      customId,
+      userId: mappedUserId,
+    });
+    return 'handled';
+  }
   const cancelRunId = parseCancelCallbackData(customId);
   if (cancelRunId) {
     await handleCancelCallback({ ...input, runId: cancelRunId });

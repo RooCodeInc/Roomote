@@ -23,6 +23,10 @@ import {
 import type { WorkspaceConfig } from '../../workspace';
 import type { RepoLocalSkill } from '../../workspace/repo-local-skills';
 import { callbackMap } from '../../callbacks';
+import {
+  getCommunicationRunTaskCallbacks,
+  mergeRunTaskCallbacks,
+} from '../../callbacks/communication';
 import type { RunTaskCallbacks, RunTaskContext } from '../../run-task';
 import type { BackgroundEnvironmentSetupNotifier } from '../../run-task/types';
 import { createWorkerRuntimeEventRecorder } from '../../run-task/task-run-events';
@@ -333,7 +337,10 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     const { envVars } = jobContext;
     taskRun = jobContext.taskRun;
     const runIdForEvents = taskRun.id;
-    callbacks = callbackMap[taskRun.payloadKind as TaskPayloadKind];
+    callbacks = mergeRunTaskCallbacks(
+      callbackMap[taskRun.payloadKind as TaskPayloadKind] ?? {},
+      getCommunicationRunTaskCallbacks(taskRun),
+    );
 
     workerEnv = WorkerEnv.fromProcessEnv(process.env);
     startupLogger = createStartupLogger();

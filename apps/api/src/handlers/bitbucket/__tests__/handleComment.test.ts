@@ -4,15 +4,30 @@ const {
   mockCreateBitbucketPullRequestComment,
   mockGetBitbucketAutomationTargets,
   mockEnqueueTask,
+  mockFindActiveGitHubPrReviewTask,
+  mockFindReusableGitHubPrFollowUpOwner,
+  mockSendMessageToTask,
+  mockSteerMessageToTask,
 } = vi.hoisted(() => ({
   mockCreateBitbucketPullRequestComment: vi.fn(),
   mockGetBitbucketAutomationTargets: vi.fn(),
   mockEnqueueTask: vi.fn(),
+  mockFindActiveGitHubPrReviewTask: vi.fn(),
+  mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
+  mockSendMessageToTask: vi.fn(),
+  mockSteerMessageToTask: vi.fn(),
 }));
 
+// Prompt-framing fakes use distinctive markers so tests can assert the
+// handler routes each piece of text through the right builder; the real
+// escaping/wrapping behavior is unit-tested in @roomote/cloud-agents.
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
   getTaskUrl: vi.fn(),
+  buildMentionRequestBlock: (text: string) =>
+    `<mention_request>${text}</mention_request>`,
+  buildUntrustedContentPolicy: () => '<untrusted_content_policy/>',
+  escapeTaskContextText: (value: string) => value,
 }));
 
 vi.mock('@roomote/bitbucket', () => ({
@@ -24,10 +39,15 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...actual,
-    findActiveGitHubPrReviewTask: vi.fn(),
-    findReusableGitHubPrFollowUpOwner: vi.fn(),
+    findActiveGitHubPrReviewTask: mockFindActiveGitHubPrReviewTask,
+    findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
   };
 });
+
+vi.mock('../../tasks/sendMessageToTask', () => ({
+  sendMessageToTask: mockSendMessageToTask,
+  steerMessageToTask: mockSteerMessageToTask,
+}));
 
 vi.mock('../getBitbucketAutomationTargets', async () => {
   const actual = await vi.importActual<
@@ -39,6 +59,8 @@ vi.mock('../getBitbucketAutomationTargets', async () => {
     getBitbucketAutomationTargets: mockGetBitbucketAutomationTargets,
   };
 });
+
+import { RunStatus } from '@roomote/types';
 
 import { handleBitbucketComment } from '../handleComment';
 import type { BitbucketPullRequestCommentWebhook } from '../types';
@@ -74,12 +96,18 @@ describe('handleBitbucketComment', () => {
     mockCreateBitbucketPullRequestComment.mockReset();
     mockGetBitbucketAutomationTargets.mockReset();
     mockEnqueueTask.mockReset();
+    mockFindActiveGitHubPrReviewTask.mockReset();
+    mockFindReusableGitHubPrFollowUpOwner.mockReset();
+    mockSendMessageToTask.mockReset();
+    mockSteerMessageToTask.mockReset();
 
     mockGetBitbucketAutomationTargets.mockResolvedValue({
       status: 'error',
       code: 'account_link_required',
       message: 'Bitbucket user alice is not linked',
     });
+    mockFindActiveGitHubPrReviewTask.mockResolvedValue(null);
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
   });
 
   it('propagates a failed account-link response so the webhook is recorded as failed', async () => {
@@ -157,6 +185,55 @@ describe('handleBitbucketComment', () => {
     ).resolves.toEqual({ status: 'ok', message: 'account_link_required' });
 
     expect(mockCreateBitbucketPullRequestComment).toHaveBeenCalledOnce();
+  });
+
+  it('routes mentions into a reusable active task with untrusted-content framing', async () => {
+    mockGetBitbucketAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'bitbucket:pr_review:repo-1',
+          workflow: 'pr_review',
+          settings: null,
+          repo: {
+            id: 'repo-1',
+            host: 'bitbucket.org',
+          },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-existing',
+      status: RunStatus.Running,
+      taskPhase: 'running',
+    });
+    mockSteerMessageToTask.mockResolvedValue({ success: true, result: {} });
+    mockCreateBitbucketPullRequestComment.mockResolvedValue({ id: 7 });
+
+    const result = await handleBitbucketComment(
+      makeCommentPayload(),
+      'pullrequest:comment_created',
+    );
+
+    expect(result).toEqual({ status: 'ok', message: 'active_pr_owner_routed' });
+    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-existing',
+        userId: 'user-1',
+        message: expect.stringContaining(
+          '<mention_request>@roomote review this please</mention_request>',
+        ),
+        senderMode: 'github_pr_follow_up',
+      }),
+    );
+    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('<untrusted_content_policy/>'),
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('logs enqueue failures and posts a queue-specific response', async () => {

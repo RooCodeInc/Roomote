@@ -17,7 +17,8 @@ import {
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
   SETUP_AUTH_PROVIDER_IDS,
-  SETUP_MODEL_PROVIDER_IDS,
+  isSetupModelProviderId,
+  isOpenAiCompatibleProviderId,
   SUGGESTER_ROUTING_MODES,
   prActions,
   sourceControlProviderSchema,
@@ -133,6 +134,7 @@ import {
   getLinkedMicrosoftTeamsAccountCommand,
 } from '../commands/linked-accounts';
 import {
+  getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
   updatePersonalPreferencesCommand,
 } from '../commands/preferences';
@@ -140,6 +142,7 @@ import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
   getEnvironmentsCommand,
+  getAvailableEnvironmentsCommand,
   getEnvironmentNamesByIdsCommand,
   getEnvironmentByIdCommand,
   getEnvironmentConfigVersionCommand,
@@ -265,6 +268,7 @@ import {
   clearComputeConfigCommand,
   setDefaultComputeProviderCommand,
   setLocalDockerEnabledCommand,
+  validateDockerEnvironmentCommand,
 } from '../commands/compute';
 import {
   getTaskSuggestionFilterOptionsCommand,
@@ -307,6 +311,7 @@ import {
   suggestTaskModelsCommand,
   updateTaskModelSettingsCommand,
 } from '../commands/task-models';
+import { LOCAL_TASK_MODEL_PROVIDER_IDS } from '../commands/task-models/local-provider-discovery';
 import {
   disconnectChatGptSubscriptionCommand,
   getChatGptSubscriptionStatusCommand,
@@ -321,6 +326,8 @@ import {
   pollGitHubCopilotDeviceAuthCommand,
   startGitHubCopilotDeviceAuthCommand,
 } from '../commands/github-copilot-subscription';
+import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
+import { getProviderCreditBalancesCommand } from '../commands/provider-credits';
 import {
   getRouterDebugSettingsCommand,
   updateRouterDebugSettingsCommand,
@@ -348,9 +355,17 @@ import {
   getMiscSettingsCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
+import {
+  getReleaseNotesCommand,
+  getReleaseStatusCommand,
+} from '../commands/product-releases';
 
 const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
+
+function assertAdmin(auth: { isAdmin: boolean }) {
+  if (!auth.isAdmin) throw new Error('Unauthorized');
+}
 
 const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA = z.enum(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -505,6 +520,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
         suggesterDiscordChannel: z
@@ -594,37 +610,45 @@ export const appRouter = createRouter({
   analytics: createRouter({
     overview: protectedProcedure
       .input(analyticsOverviewInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsOverviewCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsOverviewCommand(auth, input);
+      }),
 
     pullRequestOverview: protectedProcedure
       .input(pullRequestAnalyticsOverviewInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getPullRequestAnalyticsOverviewCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getPullRequestAnalyticsOverviewCommand(auth, input);
+      }),
 
     chart: protectedProcedure
       .input(analyticsChartInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsChartCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsChartCommand(auth, input);
+      }),
 
     filters: protectedProcedure
       .input(analyticsFilterOptionsInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsFiltersCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsFiltersCommand(auth, input);
+      }),
 
     details: protectedProcedure
       .input(analyticsDetailsInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsDetailsCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsDetailsCommand(auth, input);
+      }),
 
     export: protectedProcedure
       .input(analyticsExportInputSchema)
-      .query(({ ctx: { auth }, input }) => exportAnalyticsCommand(auth, input)),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return exportAnalyticsCommand(auth, input);
+      }),
   }),
 
   tasks: createRouter({
@@ -1088,6 +1112,9 @@ export const appRouter = createRouter({
   }),
 
   preferences: createRouter({
+    accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPersonalAccountCapabilitiesCommand(auth),
+    ),
     getPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalPreferencesCommand(auth),
     ),
@@ -1118,6 +1145,12 @@ export const appRouter = createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       getEnvironmentsCommand(auth),
     ),
+
+    available: protectedProcedure
+      .input(z.object({ repository: z.string().optional() }).optional())
+      .query(({ ctx: { auth }, input }) =>
+        getAvailableEnvironmentsCommand(auth, input),
+      ),
 
     namesByIds: protectedProcedure
       .input(z.object({ ids: z.array(z.string()).max(20) }))
@@ -1555,6 +1588,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setLocalDockerEnabledCommand(auth, input),
       ),
+
+    validateDockerEnvironment: protectedProcedure.mutation(
+      ({ ctx: { auth } }) => validateDockerEnvironmentCommand(auth),
+    ),
   }),
 
   taskEnvVarRequests: createRouter({
@@ -1685,49 +1722,87 @@ export const appRouter = createRouter({
     saveProvider: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          provider: z
+            .string()
+            .trim()
+            .refine(isSetupModelProviderId, 'Invalid model provider.'),
           apiKey: z.string().trim().optional(),
           additionalEnvValues: z.record(z.string().trim()).optional(),
+          connectionName: z.string().trim().optional(),
           modelId: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        saveTaskModelProviderCommand(auth, input),
+        saveTaskModelProviderCommand(auth, {
+          ...input,
+          provider: input.provider,
+        }),
       ),
 
     deleteProvider: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          provider: z
+            .string()
+            .trim()
+            .refine(isSetupModelProviderId, 'Invalid model provider.'),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        deleteTaskModelProviderCommand(auth, input),
+        deleteTaskModelProviderCommand(auth, {
+          provider: input.provider,
+        }),
       ),
 
     discoverProviderModels: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(['ollama', 'vllm', 'litellm']),
+          provider: z
+            .string()
+            .trim()
+            .refine(
+              (value) =>
+                (LOCAL_TASK_MODEL_PROVIDER_IDS as readonly string[]).includes(
+                  value,
+                ) || isOpenAiCompatibleProviderId(value),
+              'Invalid local model provider.',
+            ),
           baseUrl: z.string().trim().optional(),
           apiKey: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        discoverProviderModelsCommand(auth, input),
+        discoverProviderModelsCommand(auth, {
+          ...input,
+          provider:
+            input.provider as (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number],
+        }),
       ),
 
     qualifyProviderModel: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(['ollama', 'vllm', 'litellm']),
+          provider: z
+            .string()
+            .trim()
+            .refine(
+              (value) =>
+                (LOCAL_TASK_MODEL_PROVIDER_IDS as readonly string[]).includes(
+                  value,
+                ) || isOpenAiCompatibleProviderId(value),
+              'Invalid local model provider.',
+            ),
           modelId: z.string().trim().min(1),
           baseUrl: z.string().trim().optional(),
           apiKey: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        qualifyProviderModelCommand(auth, input),
+        qualifyProviderModelCommand(auth, {
+          ...input,
+          provider:
+            input.provider as (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number],
+        }),
       ),
 
     lookup: protectedProcedure
@@ -1743,12 +1818,18 @@ export const appRouter = createRouter({
     suggest: protectedProcedure
       .input(
         z.object({
-          providerId: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          providerId: z
+            .string()
+            .trim()
+            .refine(isSetupModelProviderId, 'Invalid model provider.'),
           query: z.string().trim(),
         }),
       )
       .query(({ ctx: { auth }, input }) =>
-        suggestTaskModelsCommand(auth, input),
+        suggestTaskModelsCommand(auth, {
+          ...input,
+          providerId: input.providerId,
+        }),
       ),
 
     refreshMetadata: protectedProcedure.mutation(({ ctx: { auth } }) =>
@@ -1848,6 +1929,18 @@ export const appRouter = createRouter({
     ),
   }),
 
+  subscriptionUsage: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSubscriptionProviderUsageCommand(auth),
+    ),
+  }),
+
+  providerCredits: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      getProviderCreditBalancesCommand(auth),
+    ),
+  }),
+
   routerDebug: createRouter({
     getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
       getRouterDebugSettingsCommand(auth),
@@ -1939,14 +2032,21 @@ export const appRouter = createRouter({
     saveModelConfig: protectedProcedure
       .input(
         z.object({
-          provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
+          provider: z
+            .string()
+            .trim()
+            .refine(isSetupModelProviderId, 'Invalid model provider.'),
           apiKey: z.string().trim().optional(),
           additionalEnvValues: z.record(z.string().trim()).optional(),
+          connectionName: z.string().trim().optional(),
           modelId: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
-        saveSetupNewModelConfigCommand(auth, input),
+        saveSetupNewModelConfigCommand(auth, {
+          ...input,
+          provider: input.provider,
+        }),
       ),
 
     saveComputeProviderChoice: protectedProcedure
@@ -2327,6 +2427,19 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setAnonymousAnalyticsCommand(auth, input),
       ),
+  }),
+
+  releases: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getReleaseStatusCommand(auth),
+    ),
+    notes: protectedProcedure
+      .input(
+        z.object({
+          version: z.string().min(1).max(64),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getReleaseNotesCommand(auth, input)),
   }),
 });
 

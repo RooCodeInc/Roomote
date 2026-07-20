@@ -335,6 +335,37 @@ export async function handleTelegramCallbackQuery(
     return;
   }
 
+  // Structured request_user_input option buttons (discord:rui:...).
+  const chatId = query.message?.chat?.id;
+  if (chatId != null) {
+    const { resolveTelegramSenderUserId } = await import('./linked-user.js');
+    const { tryHandleTelegramRequestUserInputCallback } =
+      await import('./request-user-input.js');
+    const senderUserId = query.from?.id
+      ? await resolveTelegramSenderUserId(String(query.from.id))
+      : null;
+    const threadId =
+      query.message &&
+      'message_thread_id' in query.message &&
+      query.message.message_thread_id != null
+        ? String(query.message.message_thread_id)
+        : null;
+    const handled = await tryHandleTelegramRequestUserInputCallback({
+      customId: data,
+      userId: senderUserId,
+      chatId: String(chatId),
+      threadId,
+      callbackQueryId: query.id,
+      messageId:
+        query.message && 'message_id' in query.message
+          ? String(query.message.message_id)
+          : undefined,
+    });
+    if (handled) {
+      return;
+    }
+  }
+
   apiLogger.warn(
     `[telegram] Ignoring unknown Telegram callback data ${data || '<empty>'}`,
   );

@@ -7,6 +7,7 @@ import {
   getPrimaryPortFromConfig,
   portNameToSlug,
   SANDBOX_SERVER_NAMED_PORT,
+  TaskRunErrorCode,
   type NamedPort,
 } from '@roomote/types';
 import { Env, resolveAppEnv } from '@roomote/env';
@@ -27,6 +28,7 @@ import {
 import {
   getNamedPortsForTaskRun,
   shouldEnableAuthBypassForTaskRun,
+  clearTaskRunMachine,
   updateTaskRunMachine,
 } from '../utils';
 import { resolveFromWorkspaceRoot } from '../repo-paths';
@@ -36,15 +38,18 @@ import {
   buildDockerWorkerLabels,
   buildDockerWorkerResourceArgs,
   docker,
+  DockerBootError,
   getDockerTaskNetworkName,
   getDockerTaskDaemonContainerName,
   getDockerTaskWorkspaceVolumeName,
   getDockerWorkerContainerName,
+  isAbortError,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
   processListIncludesDockerWorkerRun,
   removeDockerSandboxResources,
   restoreDockerStandbyNetworking,
+  type DockerCommand,
   type DockerWorkerEgressPolicy,
 } from './docker-sandbox-security';
 import { taskNeedsNestedDocker } from './task-sandbox-resources';
@@ -54,9 +59,63 @@ const DOCKER_CONTAINER_READY_ARGS = ['infinity'];
 const DOCKER_WORKER_ARCHIVE_PATH = '/sandbox/worker.tar.gz';
 const DOCKER_WORKER_ROOT = '/sandbox';
 const DOCKER_INSTALL_WORKER_SCRIPT = `${DOCKER_WORKER_ROOT}/install-worker.sh`;
-const DOCKER_WORKER_START_TIMEOUT_MS = 15_000;
+// Image pulls and cold worker installs can exceed 15s on first boot (self-host).
+const DOCKER_WORKER_START_TIMEOUT_MS = 60_000;
 const DOCKER_WORKER_START_POLL_MS = 500;
 const DOCKER_TASK_DAEMON_IMAGE = 'docker:28-dind';
+/** Upper bound for fresh Docker provisioning so a stuck daemon cannot hang forever. */
+export const DOCKER_SPAWN_TIMEOUT_MS = 15 * 60 * 1_000;
+
+/**
+ * Fail fast, with precise categories, on environment problems that otherwise
+ * surface as opaque docker run failures or worker start timeouts. Runs before
+ * any sandbox resources are created so nothing needs cleanup on failure.
+ */
+export async function preflightDockerSpawn(
+  runDocker: DockerCommand,
+  image: string,
+): Promise<void> {
+  try {
+    await runDocker(['version', '--format', '{{.Server.Version}}']);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerDaemonUnreachable,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  // The daemon is reachable (checked above), so an empty inspect result means
+  // the image is absent locally. Pull explicitly so registry-hosted images
+  // still work and pull time is attributed to preflight, not the start wait.
+  const imageId = await runDocker(
+    ['image', 'inspect', '--format', '{{.Id}}', image],
+    { allowFailure: true },
+  );
+
+  if (imageId.trim()) {
+    return;
+  }
+
+  try {
+    await runDocker(['pull', image]);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerImageMissing,
+      [
+        `Docker worker image ${image} is not available locally and could not be pulled.`,
+        error instanceof Error ? error.message : String(error),
+      ].join('\n\n'),
+    );
+  }
+}
 
 export async function spawnDockerWorker(
   taskRun: TaskRun,
@@ -77,6 +136,7 @@ export async function spawnDockerWorker(
     egressPolicy: DockerWorkerEgressPolicy;
     localWorkerReleasePath?: string;
     deploymentSlug?: string;
+    signal?: AbortSignal;
   },
 ): Promise<{ containerId: string }> {
   if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
@@ -94,7 +154,8 @@ export async function spawnDockerWorker(
   }
 
   if (!isStandbyResume && !config.localWorkerReleasePath) {
-    throw new Error(
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerReleaseArchiveMissing,
       'Docker provider requires a local worker release archive. TaskRun pnpm dev without --use-release.',
     );
   }
@@ -104,7 +165,8 @@ export async function spawnDockerWorker(
     config.localWorkerReleasePath &&
     !existsSync(config.localWorkerReleasePath)
   ) {
-    throw new Error(
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerReleaseArchiveMissing,
       `Docker worker release archive does not exist: ${config.localWorkerReleasePath}`,
     );
   }
@@ -154,14 +216,28 @@ export async function spawnDockerWorker(
   const autoRemoveContainer = shouldAutoRemoveDockerWorkerContainer(
     resolveAppEnv(process.env),
   );
-  const dockerNetwork = isStandbyResume
+  // Propagate cancellation to every provisioning docker CLI invocation. Cleanup
+  // after failure intentionally uses the unbound docker() helper so an aborted
+  // signal cannot skip sandbox teardown.
+  const runDocker: DockerCommand = (args, options = {}) =>
+    docker(args, { ...options, signal: config.signal ?? options.signal });
+  const throwIfSpawnAborted = (): void => {
+    config.signal?.throwIfAborted();
+  };
+
+  throwIfSpawnAborted();
+
+  // Resume restarts a retained container, so daemon/image preflight only
+  // applies to fresh spawns.
+  if (!isStandbyResume) {
+    await preflightDockerSpawn(runDocker, config.image);
+  }
+
+  // Network name is deterministic so outer cleanup can tear it down even if
+  // prepare is interrupted before returning.
+  let dockerNetwork = isStandbyResume
     ? getDockerTaskNetworkName(sourceRunId)
-    : await prepareDockerTaskNetwork({
-        taskRunId: taskRun.id,
-        controlNetwork,
-        egressPolicy: config.egressPolicy,
-        autoRemove: autoRemoveContainer,
-      });
+    : getDockerTaskNetworkName(taskRun.id);
 
   console.log(
     `[spawnDockerWorker] Starting Docker worker container for task run #${taskRun.id} ${JSON.stringify(
@@ -180,7 +256,7 @@ export async function spawnDockerWorker(
 
   const startContainer = async (diskLimit?: string): Promise<string> =>
     (
-      await docker([
+      await runDocker([
         'run',
         '-d',
         ...(autoRemoveContainer ? ['--rm'] : []),
@@ -211,20 +287,40 @@ export async function spawnDockerWorker(
     ).trim();
 
   try {
+    throwIfSpawnAborted();
+
+    if (!isStandbyResume) {
+      dockerNetwork = await prepareDockerTaskNetwork(
+        {
+          taskRunId: taskRun.id,
+          controlNetwork,
+          egressPolicy: config.egressPolicy,
+          autoRemove: autoRemoveContainer,
+        },
+        runDocker,
+      );
+    }
+
     if (isStandbyResume) {
-      await docker(['start', containerName]);
+      // Retain ownership before `docker start`. If cancel aborts the start
+      // call after Docker has begun starting the retained snapshot, catch must
+      // still take the non-destructive resume path and never delete it.
       containerId = containerName;
-      await restoreDockerStandbyNetworking({
-        containerName,
-        taskNetwork: dockerNetwork,
-        controlNetwork,
-        egressPolicy: config.egressPolicy,
-        image: config.image,
-        platform: config.platform,
-      });
+      await runDocker(['start', containerName]);
+      await restoreDockerStandbyNetworking(
+        {
+          containerName,
+          taskNetwork: dockerNetwork,
+          controlNetwork,
+          egressPolicy: config.egressPolicy,
+          image: config.image,
+          platform: config.platform,
+        },
+        runDocker,
+      );
     } else {
       if (usesDockerProjects) {
-        await docker([
+        await runDocker([
           'volume',
           'create',
           ...buildDockerWorkerLabels({
@@ -251,23 +347,26 @@ export async function spawnDockerWorker(
         console.warn(
           `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; DOCKER_WORKER_ALLOW_UNBOUNDED_DISK is enabled, so this task will continue without --storage-opt size.`,
         );
-        await docker(['rm', '-f', containerName], { allowFailure: true });
+        await runDocker(['rm', '-f', containerName], { allowFailure: true });
         containerId = await startContainer();
       }
 
-      await attachDockerEgressPolicy({
-        containerName,
-        egressPolicy: config.egressPolicy,
-        image: config.image,
-        platform: config.platform,
-        blockDockerGateway: Boolean(controlNetwork),
-      });
-      await docker([
+      await attachDockerEgressPolicy(
+        {
+          containerName,
+          egressPolicy: config.egressPolicy,
+          image: config.image,
+          platform: config.platform,
+          blockDockerGateway: Boolean(controlNetwork),
+        },
+        runDocker,
+      );
+      await runDocker([
         'cp',
         `${resolveFromWorkspaceRoot('.docker/sandbox')}/.`,
         `${containerName}:${DOCKER_WORKER_ROOT}/`,
       ]);
-      await docker([
+      await runDocker([
         'cp',
         config.localWorkerReleasePath!,
         `${containerName}:${DOCKER_WORKER_ARCHIVE_PATH}`,
@@ -275,9 +374,11 @@ export async function spawnDockerWorker(
       // docker cp preserves host-side ownership on the copied tree, which on
       // macOS leaves /sandbox owned by the host uid instead of the image user
       // and makes install-worker.sh unable to create /sandbox/worker.
-      const workerOwner =
-        await resolveDockerWorkerOwnershipTarget(containerName);
-      await docker([
+      const workerOwner = await resolveDockerWorkerOwnershipTarget(
+        containerName,
+        runDocker,
+      );
+      await runDocker([
         'exec',
         '-u',
         'root',
@@ -287,7 +388,7 @@ export async function spawnDockerWorker(
         workerOwner,
         DOCKER_WORKER_ROOT,
       ]);
-      await docker([
+      await runDocker([
         'exec',
         containerName,
         'bash',
@@ -295,7 +396,7 @@ export async function spawnDockerWorker(
       ]);
 
       if (usesDockerProjects) {
-        await docker([
+        await runDocker([
           'run',
           '-d',
           ...(autoRemoveContainer ? ['--rm'] : []),
@@ -326,12 +427,14 @@ export async function spawnDockerWorker(
     }
 
     if (isStandbyResume && usesDockerProjects) {
-      await resumeDockerTaskDaemon(taskDaemonContainerName);
+      await resumeDockerTaskDaemon(taskDaemonContainerName, runDocker);
     }
+
+    throwIfSpawnAborted();
 
     const portMap = controlNetwork
       ? new Map<number, string>()
-      : await getPublishedPorts(containerName, namedPorts);
+      : await getPublishedPorts(containerName, namedPorts, runDocker);
     const sandboxServerUrl = buildDockerSandboxServerUrl({
       network: controlNetwork ? dockerNetwork : undefined,
       taskId: taskRun.taskId,
@@ -362,6 +465,8 @@ export async function spawnDockerWorker(
       runId: taskRun.id,
       field: 'provisionReadyAt',
     });
+
+    throwIfSpawnAborted();
 
     const workerTrpcUrl = resolveDockerWorkerTrpcUrl({
       trpcUrl: process.env.TRPC_URL ?? Env.TRPC_URL,
@@ -417,7 +522,7 @@ export async function spawnDockerWorker(
     // TRPC_URL without baking secrets into `docker inspect` Config.Env.
     // Operators checking a later plain `docker exec` shell will not see these
     // keys — that is expected and does not mean spawn skipped injection.
-    await docker([
+    await runDocker([
       'exec',
       '-d',
       ...buildDockerWorkerExecEnvArgs(workerEnv),
@@ -427,7 +532,7 @@ export async function spawnDockerWorker(
       `worker ${workerCommand} ${taskRun.id} > /proc/1/fd/1 2> /proc/1/fd/2`,
     ]);
 
-    await assertDetachedWorkerStarted(containerName, taskRun.id);
+    await assertDetachedWorkerStarted(containerName, taskRun.id, config.signal);
 
     console.log(
       `[spawnDockerWorker] Docker worker launched for task run #${taskRun.id} ${JSON.stringify(
@@ -442,7 +547,15 @@ export async function spawnDockerWorker(
 
     return { containerId: containerName };
   } catch (error) {
-    if (isStandbyResume && containerId) {
+    const aborted = config.signal?.aborted || isAbortError(error);
+    const cleanupMode = resolveDockerSpawnCleanupMode({
+      isStandbyResume,
+      aborted,
+      appEnv: resolveAppEnv(process.env),
+      hasContainerId: Boolean(containerId),
+    });
+
+    if (cleanupMode === 'stop-retained') {
       await docker(['stop', '--time', '10', containerName], {
         allowFailure: true,
       });
@@ -455,7 +568,9 @@ export async function spawnDockerWorker(
           allowFailure: true,
         });
       }
-    } else if (resolveAppEnv(process.env) === 'development' && containerId) {
+    } else if (cleanupMode === 'preserve-dev') {
+      // Keep ordinary local spawn failures for debugging, but never retain a
+      // canceled or timed-out partial provision (autoRemove is false).
       console.error(
         `[spawnDockerWorker] Preserving failed Docker worker container ${containerName} for local debugging`,
       );
@@ -464,9 +579,56 @@ export async function spawnDockerWorker(
         containerName,
         taskNetwork: dockerNetwork,
       });
+      // updateTaskRunMachine may have already persisted routing for this
+      // container before abort; terminal cancel leaves those fields in place.
+      await clearTaskRunMachine(taskRun.id);
     }
     throw error;
   }
+}
+
+type DockerSpawnCleanupMode = 'stop-retained' | 'preserve-dev' | 'remove';
+
+/**
+ * Snapshot resume always stops and keeps the retained worker. Fresh spawn may
+ * preserve ordinary development failures, but abort/timeout always tear down.
+ */
+export function resolveDockerSpawnCleanupMode(params: {
+  isStandbyResume: boolean;
+  aborted: boolean;
+  appEnv: string;
+  hasContainerId: boolean;
+}): DockerSpawnCleanupMode {
+  if (params.isStandbyResume) {
+    return 'stop-retained';
+  }
+
+  if (
+    shouldPreserveFailedDockerWorkerContainer({
+      aborted: params.aborted,
+      appEnv: params.appEnv,
+      hasContainerId: params.hasContainerId,
+    })
+  ) {
+    return 'preserve-dev';
+  }
+
+  return 'remove';
+}
+
+/**
+ * Development preserves non-abort fresh-spawn failures for inspection. Cancel
+ * and timeout must always tear down partial sandboxes because workers are not
+ * auto-removed.
+ */
+export function shouldPreserveFailedDockerWorkerContainer(params: {
+  aborted: boolean;
+  appEnv: string;
+  hasContainerId: boolean;
+}): boolean {
+  return (
+    !params.aborted && params.appEnv === 'development' && params.hasContainerId
+  );
 }
 
 export async function resumeDockerTaskDaemon(
@@ -497,12 +659,17 @@ export function shouldRetryDockerWorkerWithoutDiskLimit(params: {
 async function assertDetachedWorkerStarted(
   containerName: string,
   runId: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   const deadline = Date.now() + DOCKER_WORKER_START_TIMEOUT_MS;
   let processList = '';
+  const runDocker: DockerCommand = (args, options = {}) =>
+    docker(args, { ...options, signal: signal ?? options.signal });
 
   while (Date.now() < deadline) {
-    const containerState = await docker(
+    signal?.throwIfAborted();
+
+    const containerState = await runDocker(
       ['inspect', containerName, '--format', '{{.State.Running}}'],
       // An auto-removed (`--rm`) container that exits early no longer exists,
       // so treat a failed inspect as "not running" instead of throwing raw.
@@ -510,13 +677,15 @@ async function assertDetachedWorkerStarted(
     );
 
     if (containerState.trim() !== 'true') {
-      const logs = await docker(['logs', '--tail', '80', containerName], {
+      const logs = await runDocker(['logs', '--tail', '80', containerName], {
         allowFailure: true,
       });
 
-      throw new Error(
+      throw new DockerBootError(
+        classifyWorkerBootLogs(logs, TaskRunErrorCode.DockerWorkerExitedEarly),
         [
           `Docker worker container exited before task run #${runId} started.`,
+          'The sandbox container stopped during boot. Common causes include a missing worker image, a failed entrypoint, or the worker crashing on startup.',
           logs.trim() ? `Recent Docker logs:\n${logs.trim()}` : undefined,
         ]
           .filter(Boolean)
@@ -524,9 +693,12 @@ async function assertDetachedWorkerStarted(
       );
     }
 
-    processList = await docker(['exec', containerName, 'ps', '-eo', 'args'], {
-      allowFailure: true,
-    });
+    processList = await runDocker(
+      ['exec', containerName, 'ps', '-eo', 'args'],
+      {
+        allowFailure: true,
+      },
+    );
 
     if (processListIncludesDockerWorkerRun(processList, runId)) {
       return;
@@ -536,18 +708,22 @@ async function assertDetachedWorkerStarted(
       return;
     }
 
-    await new Promise((resolve) =>
-      setTimeout(resolve, DOCKER_WORKER_START_POLL_MS),
-    );
+    await sleep(DOCKER_WORKER_START_POLL_MS, signal);
   }
 
-  const logs = await docker(['logs', '--tail', '80', containerName], {
+  signal?.throwIfAborted();
+
+  const logs = await runDocker(['logs', '--tail', '80', containerName], {
     allowFailure: true,
   });
 
-  throw new Error(
+  const timeoutSeconds = Math.round(DOCKER_WORKER_START_TIMEOUT_MS / 1000);
+
+  throw new DockerBootError(
+    classifyWorkerBootLogs(logs, TaskRunErrorCode.DockerWorkerStartTimeout),
     [
-      `Docker worker command for task run #${runId} was not observed during startup.`,
+      `Docker worker for task run #${runId} did not start within ${timeoutSeconds}s.`,
+      'The container stayed running, but the Roomote worker process never appeared. Check that the local worker image and release archive are available, and inspect container logs for fetch/start failures.',
       processList.trim()
         ? `Docker process list:\n${processList.trim()}`
         : 'Docker process list was empty.',
@@ -556,6 +732,51 @@ async function assertDetachedWorkerStarted(
       .filter(Boolean)
       .join('\n\n'),
   );
+}
+
+/**
+ * A worker that dies (or never appears) because it cannot reach the Roomote
+ * API logs a `fetch failed` job error — a distinct, actionable category
+ * (networking from inside Docker) rather than a generic start failure.
+ */
+function classifyWorkerBootLogs(
+  logs: string,
+  fallback: TaskRunErrorCode,
+): TaskRunErrorCode {
+  return /failed:\s*fetch failed/i.test(logs)
+    ? TaskRunErrorCode.DockerWorkerFetchFailed
+    : fallback;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(
+        signal.reason instanceof Error ? signal.reason : createAbortError(),
+      );
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(
+        signal?.reason instanceof Error ? signal.reason : createAbortError(),
+      );
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function createAbortError(): Error {
+  const error = new Error('This operation was aborted');
+  error.name = 'AbortError';
+  return error;
 }
 
 async function hasTaskRunStarted(runId: number): Promise<boolean> {
@@ -597,11 +818,12 @@ export function buildDockerSandboxServerUrl(params: {
 async function getPublishedPorts(
   containerName: string,
   namedPorts: NamedPort[],
+  runDocker: DockerCommand = docker,
 ): Promise<Map<number, string>> {
   const ports = new Map<number, string>();
 
   for (const { port } of namedPorts) {
-    const output = await docker(['port', containerName, `${port}/tcp`], {
+    const output = await runDocker(['port', containerName, `${port}/tcp`], {
       allowFailure: true,
     });
     const match = output.match(/(?:127\.0\.0\.1|0\.0\.0\.0|\[::\]):(\d+)/);
@@ -616,13 +838,14 @@ async function getPublishedPorts(
 
 async function resolveDockerWorkerOwnershipTarget(
   containerName: string,
+  runDocker: DockerCommand = docker,
 ): Promise<string> {
-  if (await hasRoomoteUserAndGroup(containerName)) {
+  if (await hasRoomoteUserAndGroup(containerName, runDocker)) {
     return 'roomote:roomote';
   }
 
   const imageUser = (
-    await docker(['inspect', containerName, '--format', '{{.Config.User}}'])
+    await runDocker(['inspect', containerName, '--format', '{{.Config.User}}'])
   ).trim();
 
   if (!imageUser) {
@@ -633,7 +856,7 @@ async function resolveDockerWorkerOwnershipTarget(
     imageUser.includes(':') || /^\d+$/.test(imageUser)
       ? ''
       : (
-          await docker(
+          await runDocker(
             [
               'exec',
               '-u',
@@ -649,7 +872,7 @@ async function resolveDockerWorkerOwnershipTarget(
 
   const groupEntry = passwdEntry
     ? (
-        await docker(
+        await runDocker(
           [
             'exec',
             '-u',
@@ -671,15 +894,18 @@ async function resolveDockerWorkerOwnershipTarget(
   });
 }
 
-async function hasRoomoteUserAndGroup(containerName: string): Promise<boolean> {
+async function hasRoomoteUserAndGroup(
+  containerName: string,
+  runDocker: DockerCommand = docker,
+): Promise<boolean> {
   const passwdEntry = (
-    await docker(
+    await runDocker(
       ['exec', '-u', 'root', containerName, 'getent', 'passwd', 'roomote'],
       { allowFailure: true },
     )
   ).trim();
   const groupEntry = (
-    await docker(
+    await runDocker(
       ['exec', '-u', 'root', containerName, 'getent', 'group', 'roomote'],
       { allowFailure: true },
     )

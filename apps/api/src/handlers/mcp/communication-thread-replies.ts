@@ -1,6 +1,8 @@
 import {
   UnsupportedCommunicationOperationError,
+  clearLatestUserMessageForReplyQuoteIfId,
   getLatestInboundMessageId,
+  getLatestUserMessageForReplyQuote,
   type DiscordCommunicationProvider,
   type TelegramCommunicationProvider,
 } from '@roomote/communication';
@@ -28,11 +30,92 @@ import {
 
 const LOG_CONTEXT = 'communicationThreadReplies';
 const TEAMS_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'teams:thread_reply_footer_lock:';
+const DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH = 280;
 
 // Telegram clears a chat action after ~5s; re-send inside that window so the
 // "typing…" indicator spans the whole reply delivery (chunks, photo fetch,
 // message delivery) instead of lapsing partway through.
 const TELEGRAM_TYPING_HEARTBEAT_MS = 4_000;
+
+function normalizeDiscordQuoteText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function escapeDiscordMarkdownText(text: string): string {
+  return text
+    .replaceAll('\\', '\\\\')
+    .replaceAll('*', '\\*')
+    .replaceAll('_', '\\_')
+    .replaceAll('`', '\\`')
+    .replaceAll('~', '\\~')
+    .replaceAll('|', '\\|')
+    .replaceAll('>', '\\>');
+}
+
+function truncateDiscordQuoteText(text: string): string {
+  if (text.length <= DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH) {
+    return text;
+  }
+
+  return `${text.slice(0, DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH).trimEnd()}...`;
+}
+
+function buildDiscordThreadReplyQuote(params: {
+  username: string;
+  text: string;
+}): string | null {
+  const username = escapeDiscordMarkdownText(
+    normalizeDiscordQuoteText(params.username),
+  );
+  const text = escapeDiscordMarkdownText(
+    truncateDiscordQuoteText(normalizeDiscordQuoteText(params.text)),
+  );
+
+  if (!username || !text) {
+    return null;
+  }
+
+  // Discord markdown blockquote — matches Slack's ">*name:* text" shape.
+  return `> **${username}:** ${text}`;
+}
+
+async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
+  pendingUserMessage: { id: string; text: string; userName: string };
+  quote: string;
+} | null> {
+  try {
+    const latestUserMessage = await getLatestUserMessageForReplyQuote(
+      'discord',
+      params.runId,
+    );
+
+    if (!latestUserMessage || latestUserMessage.text.trim().length === 0) {
+      return null;
+    }
+
+    const quote = buildDiscordThreadReplyQuote({
+      username: latestUserMessage.userName,
+      text: latestUserMessage.text,
+    });
+
+    if (!quote) {
+      return null;
+    }
+
+    return {
+      pendingUserMessage: latestUserMessage,
+      quote,
+    };
+  } catch (error) {
+    console.error(
+      `[${LOG_CONTEXT}] Failed to build Discord reply quote: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return null;
+  }
+}
 
 /**
  * Show "typing…" while a Telegram reply is being delivered. Fires immediately,
@@ -345,6 +428,9 @@ async function sendDiscordThreadReply(params: {
   const threadId = getCommunicationThreadIdFromTaskPayload(
     params.taskRun.payload,
   );
+  const messageId = getCommunicationMessageIdFromTaskPayload(
+    params.taskRun.payload,
+  );
   if (!channelId) {
     return new Response(
       JSON.stringify({
@@ -379,6 +465,12 @@ async function sendDiscordThreadReply(params: {
     );
   }
 
+  const pendingQuote = text
+    ? await peekDiscordThreadReplyQuote({ runId: params.taskRun.id })
+    : null;
+  const textWithQuote =
+    text && pendingQuote ? `${pendingQuote.quote}\n\n${text}` : text;
+
   // The reply text is already composed by the worker; the only window the API
   // owns is this delivery. Show "typing…" across it so the message(s) don't
   // land abruptly after the silence, and stop the instant delivery finishes.
@@ -391,11 +483,34 @@ async function sendDiscordThreadReply(params: {
   try {
     reply = await provider.postMessage({
       channelId,
+      // Discord thread channels are real destinations (threadId). When the
+      // task only has a root message id (e.g. a channel investigating opener),
+      // attach via replyToMessageId so closeouts stay on that message instead
+      // of posting a free-floating channel message.
       ...(threadId ? { threadId } : {}),
-      ...(text ? { text } : {}),
+      ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
+      ...(textWithQuote ? { text: textWithQuote } : {}),
       textFormat: 'markdown',
       images,
     });
+
+    if (pendingQuote) {
+      try {
+        // Clear only the exact quote id delivered here. A newer web message
+        // (even with the same user + text) gets a new id and must remain.
+        await clearLatestUserMessageForReplyQuoteIfId(
+          'discord',
+          params.taskRun.id,
+          pendingQuote.pendingUserMessage.id,
+        );
+      } catch (error) {
+        console.error(
+          `[${LOG_CONTEXT}] Failed to clear Discord reply quote for task run ${params.taskRun.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
   } finally {
     stopTyping();
   }

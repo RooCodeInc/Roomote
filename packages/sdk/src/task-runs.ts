@@ -321,6 +321,34 @@ export const queueLinearRequestUserInputAnswer = (
   options: AppRouterInput['taskRuns']['queueLinearRequestUserInputAnswer'],
 ) => client.taskRuns.queueLinearRequestUserInputAnswer.mutate(options);
 
+export const publishDiscordRequestUserInput = (
+  options: AppRouterInput['taskRuns']['publishDiscordRequestUserInput'],
+) => client.taskRuns.publishDiscordRequestUserInput.mutate(options);
+
+export const publishCommunicationRequestUserInput = (
+  options: AppRouterInput['taskRuns']['publishCommunicationRequestUserInput'],
+) => client.taskRuns.publishCommunicationRequestUserInput.mutate(options);
+
+export const setPendingCommunicationRequestUserInput = (
+  options: AppRouterInput['taskRuns']['setPendingCommunicationRequestUserInput'],
+) => client.taskRuns.setPendingCommunicationRequestUserInput.mutate(options);
+
+export const clearPendingCommunicationRequestUserInput = (
+  options: AppRouterInput['taskRuns']['clearPendingCommunicationRequestUserInput'],
+) => client.taskRuns.clearPendingCommunicationRequestUserInput.mutate(options);
+
+export const clearCommunicationAckReaction = (
+  options: AppRouterInput['taskRuns']['clearCommunicationAckReaction'],
+) => client.taskRuns.clearCommunicationAckReaction.mutate(options);
+
+export const getCommunicationRequestUserInputAnswers = (
+  options: AppRouterInput['taskRuns']['getCommunicationRequestUserInputAnswers'],
+) => client.taskRuns.getCommunicationRequestUserInputAnswers.query(options);
+
+export const queueCommunicationRequestUserInputAnswer = (
+  options: AppRouterInput['taskRuns']['queueCommunicationRequestUserInputAnswer'],
+) => client.taskRuns.queueCommunicationRequestUserInputAnswer.mutate(options);
+
 export const fetchSnapshotEnv = (
   options: AppRouterInput['taskRuns']['fetchSnapshotEnv'],
 ) => client.taskRuns.fetchSnapshotEnv.query(options);

@@ -1,7 +1,9 @@
 import { asFiniteNumber, asRecord, asString } from '@roomote/types';
 
-const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES = 1;
+const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES = 3;
 const DEFAULT_OPENCODE_POLICY_REFUSAL_MAX_RETRIES = 2;
+export const DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS = 1_000;
+export const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS = 30_000;
 
 const OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT = [
   'Continue. The previous model request failed due to a provider error and was automatically retried.',
@@ -202,6 +204,24 @@ export function getOpenCodeProviderErrorRecovery(
     maxRetries: DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES,
     promptText: OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT,
   };
+}
+
+export function resolveOpenCodeProviderErrorRetryDelayMs(options: {
+  attemptNumber: number;
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+}): number {
+  const baseDelayMs = Math.max(
+    1_000,
+    options.baseDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS,
+  );
+  const maxDelayMs = Math.max(
+    baseDelayMs,
+    options.maxDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS,
+  );
+  const attemptNumber = Math.max(1, options.attemptNumber);
+
+  return Math.min(baseDelayMs * 2 ** (attemptNumber - 1), maxDelayMs);
 }
 
 const ERROR_SUMMARY_MAX_CHARS = 280;

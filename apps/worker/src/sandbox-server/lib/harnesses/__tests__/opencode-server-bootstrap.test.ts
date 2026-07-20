@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { DEFAULT_OPENCODE_CLI_VERSION } from '../../../../commands/setup/shared-runtime-packages';
+import { writeOpenCodePluginSeedFixture } from '../opencode-server/seed-opencode-plugin-deps';
+
 describe('opencode-server bootstrap', () => {
   const tempDirs: string[] = [];
   // Pinned literal contract: the Slack-posting tools excluded from every
@@ -32,6 +35,11 @@ describe('opencode-server bootstrap', () => {
       path.join(os.tmpdir(), 'roomote-direct-opencode-test-home-'),
     );
     tempDirs.push(tempDir);
+    // Satisfy the OpenCode plugin seed gate without hitting npm.
+    writeOpenCodePluginSeedFixture({
+      configDir: path.join(tempDir, '.config', 'opencode'),
+      version: DEFAULT_OPENCODE_CLI_VERSION,
+    });
     return tempDir;
   }
 
@@ -68,11 +76,26 @@ describe('opencode-server bootstrap', () => {
     );
   }
 
+  // The plugin seed gate probes `opencode --version` through OPENCODE_COMMAND.
+  // Pin the probe to a stub so the resolved version always matches the seed
+  // fixtures regardless of whatever opencode CLI the host machine has on PATH
+  // (a mismatch would send every test through a live npm install).
+  function writeOpenCodeVersionStub(homeDir: string): string {
+    const stubPath = path.join(homeDir, 'opencode-version-stub.sh');
+    fs.writeFileSync(
+      stubPath,
+      `#!/bin/bash\necho ${DEFAULT_OPENCODE_CLI_VERSION}\n`,
+      { mode: 0o755 },
+    );
+    return stubPath;
+  }
+
   function createDirectHarnessRuntimeEnv(
     homeDir: string,
   ): Record<string, string> {
     return {
       HOME: homeDir,
+      OPENCODE_COMMAND: writeOpenCodeVersionStub(homeDir),
       R_MODEL: 'test-provider/main-model',
       R_SMALL_MODEL: 'test-provider/small-model',
       PROVIDER_API_KEY: 'provider-key',
@@ -413,7 +436,7 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome and returns concise review findings.',
+        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/review-model',
@@ -441,6 +464,11 @@ describe('opencode-server bootstrap', () => {
         'Avoid open-ended repository exploration',
       ),
     });
+    expect(baseConfig.agent?.judge).toMatchObject({
+      prompt: expect.stringContaining(
+        'When visual-proof evidence is included, verify it as part of the check',
+      ),
+    });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.instructions).toEqual([
       judgeModelInstructionsPath,
@@ -451,6 +479,18 @@ describe('opencode-server bootstrap', () => {
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'Keep judge tool use minimal and targeted.',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'do not run the judge pass until that handoff has returned',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'verify kept screenshot and screencast evidence',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'If judge-driven fixes change repository files and this run requires a pre-delivery',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff',
     );
     expect(runtimeEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
     expect(runtimeEnv).not.toHaveProperty(
@@ -492,7 +532,7 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome and returns concise review findings.',
+        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/main-model',
@@ -528,7 +568,7 @@ describe('opencode-server bootstrap', () => {
       'falls back to the active coding model',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'Start from the shipped diff, the plan, and the validation state',
+      'Start from the shipped diff, the plan, the validation state, and the latest pre-delivery visual-proof result',
     );
   });
 
@@ -1739,5 +1779,53 @@ describe('opencode-server bootstrap', () => {
 
     expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
     expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
+  });
+
+  it('completes OpenCode plugin seed for the resolved version without network access', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+    const { isOpenCodePluginSeedComplete } =
+      await import('../opencode-server/seed-opencode-plugin-deps');
+
+    // Raw home on purpose (no seed fixture in the config dir): the seed gate
+    // must find the config dir incomplete and complete it by copying from the
+    // bake-dir source, exercising the image-seed path without touching npm.
+    const homeDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-direct-opencode-test-home-raw-'),
+    );
+    tempDirs.push(homeDir);
+    const bakeDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-plugin-seed-bake-'),
+    );
+    tempDirs.push(bakeDir);
+    writeOpenCodePluginSeedFixture({
+      configDir: bakeDir,
+      version: DEFAULT_OPENCODE_CLI_VERSION,
+    });
+
+    const logger = createLogger();
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        ROOMOTE_OPENCODE_PLUGIN_SEED_DIR: bakeDir,
+      },
+      workspacePath: '/tmp/workspace',
+      logger,
+    });
+
+    const configDir = path.join(homeDir, '.config', 'opencode');
+    await expect(
+      isOpenCodePluginSeedComplete({
+        configDir,
+        version: DEFAULT_OPENCODE_CLI_VERSION,
+      }),
+    ).resolves.toBe(true);
+    expect(commandEnv.HOME).toBe(homeDir);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('Copying OpenCode plugin seed'),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('pluginSeedVersion='),
+    );
   });
 });

@@ -2,8 +2,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+  applyImplicitLiteLlmModelPrefix,
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
+  buildOpenAiCompatibleProviderInstance,
   buildOpenCodeModelReasoningOptions,
   CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
@@ -13,16 +15,22 @@ import {
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
   getMcpIntegration,
+  getOpenAiCompatibleProviderInstance,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   type InferenceGatewayProvider,
+  isConfiguredEnvValue,
+  isOpenAiCompatibleProviderId,
   isTaskModelIdDisabled,
+  listOpenAiCompatibleProviderInstancesFromEnvNames,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
+  type OpenAiCompatibleProviderInstance,
   parseInferenceGatewayKeys,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
@@ -69,32 +77,151 @@ export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
-const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+/** Fallback direct-mode base URL for default and named OpenAI-compatible ids. */
+const OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL = 'http://127.0.0.1:4000/v1';
+
+const DEFAULT_OPENAI_COMPATIBLE_INSTANCE =
+  buildOpenAiCompatibleProviderInstance(null);
+
+/**
+ * Static OpenAI-compatible-style endpoint providers. Catalog entry names and
+ * env vars for the built-in `openai-compatible` id come from `@roomote/types`;
+ * ollama/vllm/litellm stay local here. Named `openai-compatible-<slug>`
+ * connections are discovered dynamically via the shared helpers.
+ */
+const STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+  [OPENAI_COMPATIBLE_PROVIDER_ID]: {
+    name: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.label,
+    baseUrlEnvVarName: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.baseUrlEnvVarName,
+    fallbackBaseUrl: OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL,
+    apiKeyEnvVarName: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.apiKeyEnvVarName as
+      | string
+      | undefined,
+    keyless: false,
+    // Arbitrary endpoints must not inherit OPENAI_* credentials. When the
+    // optional dedicated key is blank, omit the API key entirely so keyless
+    // servers that reject bearer auth match setup qualification behavior.
+    allowOpenAiEnvFallback: false,
+  },
   ollama: {
     name: 'Ollama',
     baseUrlEnvVarName: 'OLLAMA_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnvVarName: undefined,
+    apiKeyEnvVarName: undefined as string | undefined,
     keyless: true,
+    allowOpenAiEnvFallback: false,
   },
   vllm: {
     name: 'vLLM',
     baseUrlEnvVarName: 'VLLM_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:8000/v1',
-    apiKeyEnvVarName: 'VLLM_API_KEY',
+    apiKeyEnvVarName: 'VLLM_API_KEY' as string | undefined,
     keyless: false,
+    allowOpenAiEnvFallback: true,
   },
   litellm: {
     name: 'LiteLLM',
     baseUrlEnvVarName: 'LITELLM_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
-    apiKeyEnvVarName: 'LITELLM_API_KEY',
+    apiKeyEnvVarName: 'LITELLM_API_KEY' as string | undefined,
     keyless: false,
+    allowOpenAiEnvFallback: true,
   },
 } as const;
 
-type OpenAiCompatibleProviderId =
-  keyof typeof OPENAI_COMPATIBLE_PROVIDER_CONFIGS;
+type StaticOpenAiCompatibleProviderId =
+  keyof typeof STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS;
+
+type OpenAiCompatibleProviderRuntimeConfig = {
+  name: string;
+  baseUrlEnvVarName: string;
+  fallbackBaseUrl: string;
+  apiKeyEnvVarName: string | undefined;
+  keyless: boolean;
+  allowOpenAiEnvFallback: boolean;
+};
+
+function toNamedOpenAiCompatibleRuntimeConfig(
+  instance: OpenAiCompatibleProviderInstance,
+): OpenAiCompatibleProviderRuntimeConfig {
+  return {
+    name: instance.label,
+    baseUrlEnvVarName: instance.baseUrlEnvVarName,
+    fallbackBaseUrl: OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL,
+    apiKeyEnvVarName: instance.apiKeyEnvVarName,
+    keyless: false,
+    allowOpenAiEnvFallback: false,
+  };
+}
+
+function resolveNamedOpenAiCompatibleInstance(
+  providerId: string,
+  runtimeEnv: Record<string, string>,
+): OpenAiCompatibleProviderInstance | null {
+  const instance = getOpenAiCompatibleProviderInstance(providerId);
+  if (!instance?.slug) {
+    return null;
+  }
+
+  if (!instance.labelEnvVarName) {
+    return instance;
+  }
+
+  const label = runtimeEnv[instance.labelEnvVarName]?.trim();
+  if (!label) {
+    return instance;
+  }
+
+  return getOpenAiCompatibleProviderInstance(providerId, { label }) ?? instance;
+}
+
+function getOpenAiCompatibleRuntimeConfigs(
+  modelIds: Array<string | undefined>,
+  runtimeEnv: Record<string, string>,
+): Map<string, OpenAiCompatibleProviderRuntimeConfig> {
+  const configs = new Map<string, OpenAiCompatibleProviderRuntimeConfig>();
+
+  for (const [providerId, provider] of Object.entries(
+    STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
+  ) as Array<
+    [StaticOpenAiCompatibleProviderId, OpenAiCompatibleProviderRuntimeConfig]
+  >) {
+    configs.set(providerId, provider);
+  }
+
+  const candidateProviderIds = new Set<string>();
+
+  for (const modelId of modelIds) {
+    const providerId = modelId?.trim().split('/')[0];
+    if (providerId && isOpenAiCompatibleProviderId(providerId)) {
+      candidateProviderIds.add(providerId);
+    }
+  }
+
+  for (const instance of listOpenAiCompatibleProviderInstancesFromEnvNames(
+    Object.keys(runtimeEnv),
+  )) {
+    candidateProviderIds.add(instance.id);
+  }
+
+  for (const providerId of candidateProviderIds) {
+    if (configs.has(providerId)) {
+      continue;
+    }
+
+    const instance = resolveNamedOpenAiCompatibleInstance(
+      providerId,
+      runtimeEnv,
+    );
+    if (!instance) {
+      continue;
+    }
+
+    configs.set(providerId, toNamedOpenAiCompatibleRuntimeConfig(instance));
+  }
+
+  return configs;
+}
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -147,15 +274,17 @@ const ROOMOTE_OPENCODE_VISUAL_AGENT_PROMPT = [
 const ROOMOTE_OPENCODE_JUDGE_AGENT_PROMPT = [
   'You are Roomote implementation review support.',
   '',
-  'Compare the completed implementation against the parent task plan, checklist, or explicit requested outcome. Use any provided validation results as additional evidence.',
+  'Compare the completed implementation against the parent task plan, checklist, or explicit requested outcome. Use any provided validation results and visual-proof results as additional evidence.',
   '',
-  'Start from the shipped diff, the stated plan, and the validation state. This is a completion and sanity check, not a broad codebase review.',
+  'Start from the shipped diff, the stated plan, the validation state, and any provided visual-proof outcome. This is a completion and sanity check, not a broad codebase review.',
   '',
-  'Keep tool use minimal and targeted. Prefer reviewing the supplied diff and only read additional files when needed to resolve a specific ambiguity or verify an obvious risk. Avoid open-ended repository exploration.',
+  'When visual-proof evidence is included, verify it as part of the check: whether the kept screenshots or screencasts match the claimed outcome and shipped change, whether material UI states remain unproved, and whether a not-applicable, unnecessary, blocked, or missing proof result is honest for the change. When local screenshot or keyframe image paths are supplied, read those images when needed instead of relying only on captions.',
   '',
-  'Return concise review output with: 1) overall verdict, 2) what matches the plan, 3) gaps or regressions, 4) the smallest concrete follow-up fixes worth making now.',
+  'Keep tool use minimal and targeted. Prefer reviewing the supplied diff and proof evidence, and only read additional files when needed to resolve a specific ambiguity or verify an obvious risk. Avoid open-ended repository exploration.',
   '',
-  'Focus on request satisfaction, missing requirements, logic risks, edge cases, and mismatches between the plan and what was built. If the plan is incomplete or stale relative to the implementation, say so explicitly.',
+  'Return concise review output with: 1) overall verdict, 2) what matches the plan, 3) gaps or regressions including proof mismatches or missing required proof, 4) the smallest concrete follow-up fixes worth making now.',
+  '',
+  'Focus on request satisfaction, missing requirements, logic risks, edge cases, mismatches between the plan and what was built, and visual-proof adequacy when proof evidence or a pre-delivery proof handoff result is provided. If the plan is incomplete or stale relative to the implementation, say so explicitly. If the parent reports that background proof has not run yet, do not treat unfinished background proof alone as an implementation defect.',
   '',
   'Do not edit files, run shell commands, launch other agents, or make final product decisions. Keep your response focused on review findings and verdicts for the parent agent.',
 ].join('\n');
@@ -678,11 +807,12 @@ function mergeOpenAiCompatibleProviderConfig(
   modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
   let merged = providerConfig;
+  const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
+    modelIds,
+    runtimeEnv,
+  );
 
-  for (const providerId of Object.keys(
-    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
-  ) as OpenAiCompatibleProviderId[]) {
-    const provider = OPENAI_COMPATIBLE_PROVIDER_CONFIGS[providerId];
+  for (const [providerId, provider] of runtimeConfigs) {
     const prefix = `${providerId}/`;
     const modelIdsForProvider = [
       ...new Set(
@@ -706,6 +836,19 @@ function mergeOpenAiCompatibleProviderConfig(
     const directApiKey = provider.apiKeyEnvVarName
       ? runtimeEnv[provider.apiKeyEnvVarName]?.trim()
       : undefined;
+    const baseURL =
+      runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
+      (provider.allowOpenAiEnvFallback
+        ? runtimeEnv.OPENAI_BASE_URL?.trim()
+        : '') ||
+      provider.fallbackBaseUrl;
+    const apiKeyOptions = directApiKey
+      ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
+      : provider.keyless
+        ? { apiKey: 'ollama' }
+        : provider.allowOpenAiEnvFallback && runtimeEnv.OPENAI_API_KEY?.trim()
+          ? { apiKey: '{env:OPENAI_API_KEY}' }
+          : {};
 
     merged = {
       ...merged,
@@ -715,19 +858,10 @@ function mergeOpenAiCompatibleProviderConfig(
         name: provider.name,
         options: {
           ...existingOptions,
-          baseURL:
-            runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
-            (!provider.keyless ? runtimeEnv.OPENAI_BASE_URL?.trim() : '') ||
-            provider.fallbackBaseUrl,
+          baseURL,
           // OpenAI-compatible clients require an API key even though Ollama
           // itself accepts unauthenticated requests.
-          ...(directApiKey
-            ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
-            : provider.keyless
-              ? { apiKey: 'ollama' }
-              : runtimeEnv.OPENAI_API_KEY?.trim()
-                ? { apiKey: '{env:OPENAI_API_KEY}' }
-                : {}),
+          ...apiKeyOptions,
         },
         models: {
           ...existingModels,
@@ -840,9 +974,11 @@ function mergeInferenceGatewayProviderConfig(
   // These providers are configured explicitly because OpenCode has no catalog
   // entries for their arbitrary model IDs. Rebase only registered gateway
   // providers: vLLM stays direct until the gateway declares its route.
-  for (const providerId of Object.keys(
-    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
-  ) as OpenAiCompatibleProviderId[]) {
+  const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
+    modelIds,
+    runtimeEnv,
+  );
+  for (const providerId of runtimeConfigs.keys()) {
     const gatewayProvider = getInferenceGatewayProvider(providerId);
 
     if (
@@ -961,7 +1097,7 @@ function createJudgeAgentConfig(
 ): Record<string, unknown> {
   return {
     description:
-      'Compares completed implementation against a plan or requested outcome and returns concise review findings.',
+      'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
     mode: 'subagent',
     hidden: true,
     model,
@@ -1089,8 +1225,8 @@ function createProofRunnerAgentConfig(
       roomote_manage_environments: false,
       roomote_request_environment_variables: false,
       roomote_report_platform_issue: false,
-      roomote_get_slack_channel_messages: false,
-      roomote_get_slack_thread: false,
+      roomote_get_chat_channel_messages: false,
+      roomote_get_chat_message_context: false,
       roomote_add_reaction_to_slack_message: false,
     },
   };
@@ -1114,17 +1250,21 @@ function createJudgeModelInstructions(): string {
     '',
     'When `R_CODE_REVIEW_MODEL` is configured, the judge uses that review model. Otherwise it falls back to the active coding model for the task.',
     '',
-    `After implementation and validation, when the task has a concrete plan, checklist, or explicit requested outcome to compare against, delegate one focused compare pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool.`,
+    `After implementation, validation, and any required pre-delivery \`capture-visual-proof\` handoff, when the task has a concrete plan, checklist, or explicit requested outcome to compare against, delegate one focused compare pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool.`,
     '',
-    'Treat the judge as a narrow completion and sanity check. Start from the shipped diff, the plan, and the validation state instead of asking for an open-ended repo review.',
+    'When the active workflow requires a pre-delivery `capture-visual-proof` handoff for a repository-file change, do not run the judge pass until that handoff has returned a capture result, honest no-op, not-applicable, unnecessary, or blocked outcome. Include that proof outcome in the judge brief: the proof claim, applicability result, uploaded artifact URLs or local screenshot/screencast/keyframe paths when present, and any short proof captions from the proof report.',
+    '',
+    'Treat the judge as a narrow completion and sanity check. Start from the shipped diff, the plan, the validation state, and the latest pre-delivery visual-proof result instead of asking for an open-ended repo review. Ask the judge to verify kept screenshot and screencast evidence against the plan and shipped change, and to treat missing, weak, mismatched, or falsely claimed proof as a gap when proof should have applied.',
+    '',
+    'When background visual proof is explicitly configured to run after delivery, do not delay the delivery-time judge for unfinished background proof; note that background proof is pending so the judge does not treat unfinished screenshots alone as an implementation defect.',
     '',
     'Do not spawn the judge subagent when the current task is itself a pull-request or workspace code review (`review-code`, PR review, or PR re-review). Those workflows are already the review pass and must produce findings directly.',
     '',
-    'Keep judge tool use minimal and targeted. Prefer the supplied diff, and only read extra files to resolve a specific ambiguity or verify an obvious risk.',
+    'Keep judge tool use minimal and targeted. Prefer the supplied diff and proof evidence, and only read extra files to resolve a specific ambiguity or verify an obvious risk.',
     '',
-    'Ask it to review what was built against the plan or requested outcome, summarize what matches, call out missing or risky gaps, and return the smallest concrete follow-up fixes worth making now.',
+    'Ask it to review what was built against the plan or requested outcome, verify visual proof when a pre-delivery proof handoff result or proof artifacts are available, summarize what matches, call out missing or risky gaps, and return the smallest concrete follow-up fixes worth making now.',
     '',
-    'Treat the judge response as review input for the parent workflow. Keep orchestration, code changes, and final user-facing decisions in the parent agent.',
+    'Treat the judge response as review input for the parent workflow. If judge-driven fixes change repository files and this run requires a pre-delivery `capture-visual-proof` handoff, re-run that pre-delivery handoff for the updated shipped change, replace prior proof evidence with that latest result, then run one more focused judge pass against the refreshed diff, validation state, and refreshed proof result before delivery. If judge-driven fixes change repository files and background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff or block delivery on proof; re-review the updated diff, rerun the judge once without waiting for unfinished background proof when needed, deliver the judge-fixed diff, and let the post-delivery background `capture-visual-proof` capture that final shipped state. Keep orchestration, code changes, and final user-facing decisions in the parent agent.',
     '',
     "Do not paste the judge's full output into chat or any user-facing reply. The judge verdict is internal review material; surface at most a brief, parent-authored summary of the actionable outcome (what was fixed or what still needs attention), never the raw review dump.",
   ].join('\n');
@@ -1186,17 +1326,46 @@ function resolveModelBackedOpenCodeConfig(
   modelOverride?: string,
   reasoningEffortOverride?: ReasoningEffort,
 ): Record<string, unknown> | null {
-  const rawModel = runtimeEnv.R_MODEL?.trim();
+  const isLiteLlmConfigured = isConfiguredEnvValue(runtimeEnv.LITELLM_BASE_URL);
+  const rawModel = applyImplicitLiteLlmModelPrefix(
+    runtimeEnv.R_MODEL?.trim() ?? '',
+    isLiteLlmConfigured,
+  );
 
   if (!rawModel) {
     return null;
   }
 
-  const rawSmallModel = runtimeEnv.R_SMALL_MODEL?.trim();
-  const rawVisionModel = runtimeEnv.R_VISION_MODEL?.trim();
-  const rawCodeReviewModel = runtimeEnv.R_CODE_REVIEW_MODEL?.trim();
-  const rawExploreModel = runtimeEnv.R_EXPLORE_MODEL?.trim();
-  const rawPlanningModel = runtimeEnv.R_PLANNING_MODEL?.trim();
+  const rawSmallModel = runtimeEnv.R_SMALL_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_SMALL_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
+  const rawVisionModel = runtimeEnv.R_VISION_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_VISION_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
+  const rawCodeReviewModel = runtimeEnv.R_CODE_REVIEW_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_CODE_REVIEW_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
+  const rawExploreModel = runtimeEnv.R_EXPLORE_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_EXPLORE_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
+  const rawPlanningModel = runtimeEnv.R_PLANNING_MODEL?.trim()
+    ? applyImplicitLiteLlmModelPrefix(
+        runtimeEnv.R_PLANNING_MODEL.trim(),
+        isLiteLlmConfigured,
+      )
+    : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
     runtimeEnv.R_MODEL_REASONING_EFFORT?.trim(),
   );
@@ -1245,7 +1414,10 @@ function resolveModelBackedOpenCodeConfig(
   // override wins, then the coding model, then helper roles.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
   const normalizedModelOverride = modelOverride
-    ? collectOpenRouterVariantModelAlias(variantAliases, modelOverride)
+    ? collectOpenRouterVariantModelAlias(
+        variantAliases,
+        applyImplicitLiteLlmModelPrefix(modelOverride, isLiteLlmConfigured),
+      )
     : undefined;
   const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
   const smallModel = rawSmallModel

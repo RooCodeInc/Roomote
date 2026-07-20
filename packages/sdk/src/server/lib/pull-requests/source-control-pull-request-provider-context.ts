@@ -37,6 +37,7 @@ function purposeVerb(purpose: SourceControlApiPurpose): string {
 export async function resolveGitLabProviderContext(
   repository: RepositoryRow,
   purpose: SourceControlApiPurpose,
+  resourceLabel = 'GitLab merge requests',
 ): Promise<{ projectId: string; token: string; apiBaseUrl: string }> {
   if (!repository.externalRepoId) {
     throw new Error(
@@ -47,7 +48,7 @@ export async function resolveGitLabProviderContext(
   const token = await resolveGitLabToken();
   if (!token) {
     throw new Error(
-      `GITLAB_TOKEN is required to ${purposeVerb(purpose)} GitLab merge requests.`,
+      `GITLAB_TOKEN is required to ${purposeVerb(purpose)} ${resourceLabel}.`,
     );
   }
 
@@ -59,6 +60,7 @@ export async function resolveGitLabProviderContext(
 export async function resolveGiteaProviderContext(
   repository: RepositoryRow,
   purpose: SourceControlApiPurpose,
+  resourceLabel = 'Gitea pull requests',
 ): Promise<{
   apiBaseUrl: string;
   baseUrl: string;
@@ -69,14 +71,14 @@ export async function resolveGiteaProviderContext(
   const token = await resolveGiteaToken();
   if (!token) {
     throw new Error(
-      `GITEA_TOKEN is required to ${purposeVerb(purpose)} Gitea pull requests.`,
+      `GITEA_TOKEN is required to ${purposeVerb(purpose)} ${resourceLabel}.`,
     );
   }
 
   const baseUrl = await resolveGiteaBaseUrl();
   if (!baseUrl) {
     throw new Error(
-      `GITEA_BASE_URL is required to ${purposeVerb(purpose)} Gitea pull requests.`,
+      `GITEA_BASE_URL is required to ${purposeVerb(purpose)} ${resourceLabel}.`,
     );
   }
 

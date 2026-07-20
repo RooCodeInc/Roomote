@@ -319,10 +319,13 @@ describe('generateOpenCodeConfig provider support', () => {
         R_MODEL: 'ollama/qwen3-coder',
         R_SMALL_MODEL: 'vllm/meta-llama/Llama-3.3-70B-Instruct',
         R_VISION_MODEL: 'litellm/gpt-4.1-mini',
+        R_CODE_REVIEW_MODEL: 'openai-compatible/gpt-4o',
         VLLM_BASE_URL: 'https://vllm.example.com/v1',
         VLLM_API_KEY: 'vllm-key',
         LITELLM_BASE_URL: 'https://litellm.example.com/v1',
         LITELLM_API_KEY: 'litellm-key',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'compat-key',
       },
     });
     const config = JSON.parse(result.configContent) as {
@@ -346,6 +349,174 @@ describe('generateOpenCodeConfig provider support', () => {
         baseURL: 'https://litellm.example.com/v1',
         apiKey: '{env:LITELLM_API_KEY}',
       },
+    });
+    expect(config.provider['openai-compatible']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+        apiKey: '{env:OPENAI_COMPATIBLE_API_KEY}',
+      },
+      models: { 'gpt-4o': { name: 'gpt-4o' } },
+    });
+  });
+
+  it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is set', () => {
+    const homeDir = createHomeDir();
+    const result = generateOpenCodeConfig({
+      homeDir,
+      runtimeEnv: {
+        R_MODEL: 'qwen3.6-35b-local',
+        R_SMALL_MODEL: 'coding',
+        LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+        LITELLM_API_KEY: 'litellm-key',
+      },
+    });
+    const globalConfig = JSON.parse(
+      readFileSync(join(result.openCodeConfigDir, 'opencode.json'), 'utf8'),
+    ) as {
+      model: string;
+      small_model?: string;
+      provider: Record<string, { models?: Record<string, unknown> }>;
+    };
+
+    expect(globalConfig.model).toBe('litellm/qwen3.6-35b-local');
+    expect(globalConfig.small_model).toBe('litellm/coding');
+    expect(globalConfig.provider.litellm?.models).toMatchObject({
+      'qwen3.6-35b-local': { name: 'qwen3.6-35b-local' },
+      coding: { name: 'coding' },
+    });
+    expect(result.configContent).toContain('litellm');
+  });
+
+  it('configures named openai-compatible connections separately', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible-company-proxy/gpt-4o',
+        R_SMALL_MODEL: 'openai-compatible-local/qwen3',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL:
+          'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY: 'proxy-key',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_LABEL: 'Corp Proxy',
+        OPENAI_COMPATIBLE_LOCAL_BASE_URL: 'http://127.0.0.1:8080/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { name?: string; options: Record<string, unknown> }
+      >;
+    };
+
+    expect(config.provider['openai-compatible-company-proxy']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      name: 'OpenAI-compatible (Corp Proxy)',
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+        apiKey: '{env:OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY}',
+      },
+      models: { 'gpt-4o': { name: 'gpt-4o' } },
+    });
+    expect(config.provider['openai-compatible-local']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      name: 'OpenAI-compatible (Local)',
+      options: {
+        baseURL: 'http://127.0.0.1:8080/v1',
+      },
+      models: { qwen3: { name: 'qwen3' } },
+    });
+    expect(
+      config.provider['openai-compatible-local']?.options.apiKey,
+    ).toBeUndefined();
+  });
+
+  it('ignores invalid openai-compatible env segments from shared parsing', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/gpt-4o',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        // Double underscore is rejected by shared named-env validation
+        OPENAI_COMPATIBLE_BAD__SLUG_BASE_URL: 'https://bad.example.com/v1',
+        // Leading digit env segment is invalid
+        OPENAI_COMPATIBLE_9PROXY_BASE_URL: 'https://nine.example.com/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider['openai-compatible']).toBeDefined();
+    expect(config.provider['openai-compatible-bad--slug']).toBeUndefined();
+    expect(config.provider['openai-compatible-9proxy']).toBeUndefined();
+  });
+
+  it('does not fall back named openai-compatible connections to OPENAI_* credentials', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible-company-proxy/gpt-4o',
+        OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL:
+          'https://proxy.example.com/v1',
+        OPENAI_API_KEY: 'sk-openai-should-not-leak',
+        OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible-company-proxy']).toMatchObject({
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+      },
+    });
+    expect(
+      config.provider['openai-compatible-company-proxy']?.options.apiKey,
+    ).toBeUndefined();
+  });
+
+  it('does not fall back openai-compatible to OPENAI_* credentials', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/gpt-4o',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_API_KEY: 'sk-openai-should-not-leak',
+        OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+      },
+      models: { 'gpt-4o': { name: 'gpt-4o' } },
+    });
+    expect(
+      config.provider['openai-compatible']?.options.apiKey,
+    ).toBeUndefined();
+  });
+
+  it('rebases gateway-backed openai-compatible providers with the run token', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/gpt-4o',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible']?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/openai-compatible/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
   });
 

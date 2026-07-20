@@ -6,10 +6,20 @@
  */
 const AUTOMATION_LABEL_ACRONYMS = new Set(['pr', 'ci', 'mcp']);
 
+/** Full-key spellings when token title-casing would not match the product label. */
+const AUTOMATION_LABEL_KEY_OVERRIDES = new Map([
+  ['issue_fixer', 'Triage Issues'],
+]);
+
 /** Token spellings that are not plain UPPERCASE acronyms. */
 const AUTOMATION_LABEL_TOKEN_OVERRIDES = new Map([['codeql', 'CodeQL']]);
 
 export function formatAutomationLabel(key: string): string {
+  const keyOverride = AUTOMATION_LABEL_KEY_OVERRIDES.get(key);
+  if (keyOverride) {
+    return keyOverride;
+  }
+
   return key
     .split(/[_-]+/)
     .filter(Boolean)

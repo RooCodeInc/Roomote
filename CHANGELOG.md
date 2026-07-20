@@ -2,6 +2,48 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.14.1 (2026-07-19)
+
+### Patch changes
+
+- Quote web UI follow-ups into Discord-linked task threads (name + text blockquote) before the agent's next reply, matching Slack behavior and preserving quotes across web snapshot resume.
+- Stop stacking a second empty Discord question shell when request_user_input enriches options; edit the existing prompt so users see one question with real choices.
+- Support structured request_user_input on Discord end-to-end: post option buttons, accept button or text answers, and resume the paused agent so answering no longer leaves the run waiting.
+- Back off transient provider retry attempts with exponential delay (1s, 2s, 4s) instead of retrying immediately after capacity failures.
+- Fix sandbox WebGL by making the home directory traversable for Chromium's GPU process
+- Show self-review and PR review feedback summaries in the task web view for web-only tasks by always writing the summary into task message history, not only when a chat route exists.
+- Fix controller recovery scans for persisted worker-bootstrap restarts so the query no longer references invalid table aliases and bootstrap recovery can continue.
+
+## 0.14.0 (2026-07-19)
+
+### Minor changes
+
+- Handle @roomote mentions on GitLab issues (not only merge requests): the first mention starts a linked task and later mentions on the same issue resume that task.
+- Show ChatGPT, GitHub Copilot, and Kimi for Coding plan usage on Settings > Models, including remaining premium requests or rate-limit window percent used and reset times.
+
+### Patch changes
+
+- Apply the untrusted-content prompt framing to GitLab, Bitbucket, Azure DevOps, and Gitea comment follow-up messages, wrapping the triggering comment in a mention-request block and appending the shared injection-resistance policy
+
+## 0.13.0 (2026-07-19)
+
+### Minor changes
+
+- Make presentational widgets follow the selected Roomote theme and provide native layout classes and CSS variables for agent-generated UI.
+- Add an OpenAI-compatible inference provider option for any OpenAI API endpoint, including multiple named connections in Settings > Models.
+- Add Triage GitHub Issues automation under Review Code that posts clarifying questions or a proposed plan on env-backed issues when they open or reopen.
+
+### Patch changes
+
+- Stop Discord (and Teams/Telegram) task runs from posting duplicate closeout messages after PR delivery by using the same parent-owned single-closeout lifecycle as Slack.
+- Discord account-link setup instructions now arrive by DM with a short channel acknowledgement instead of full setup copy in public channels, deduplicated to one link DM per user per day, and turn Settings → Personal → Linked Accounts into a link to Personal settings
+- Rebuild Discord thread context on follow-ups and snapshot resumes so agents receive earlier undelivered messages, the latest Roomote reply, and prior attachments instead of only the latest user text.
+- Apply Slack-style unmentioned follow-up gating in Discord task threads so natural replies only work for people already in the conversation until the next @mention.
+- Reuse the original Roomote task when a second GitHub issue @mention lands on the same issue.
+- Recover stalled worker bootstraps promptly with bounded claim retries, a single fresh sandbox restart, and a provider-neutral bootstrap watchdog instead of waiting for the full orphan-recovery window.
+- Strip Discord/Teams/Telegram prompt wrappers so task transcripts show only the user message text.
+- Frame third-party text (issue bodies, PR discussion, automation source context) as untrusted data in agent prompts, with escaped delimiter blocks and a shared injection-resistance policy
+
 ## 0.12.1 (2026-07-18)
 
 ### Patch changes

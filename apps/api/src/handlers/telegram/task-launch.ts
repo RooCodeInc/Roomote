@@ -163,11 +163,18 @@ export async function launchTelegramTask(input: {
                 name: buildTelegramTaskTopicName(title),
               });
 
-              if (!renamed && !createdTopic) {
-                await rememberTelegramImplicitTopic({
-                  chatId: metadata.communicationChannelId,
-                  threadId: titleThreadId,
-                });
+              if (!renamed) {
+                if (!createdTopic) {
+                  await rememberTelegramImplicitTopic({
+                    chatId: metadata.communicationChannelId,
+                    threadId: titleThreadId,
+                  });
+                }
+                // Keep checkpoint 0 open so topic rename can retry on the
+                // first-message title refresh path.
+                throw new Error(
+                  `Failed to rename Telegram topic ${titleThreadId} with generated title`,
+                );
               }
             },
           }
