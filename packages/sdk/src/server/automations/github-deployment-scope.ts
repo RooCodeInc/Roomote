@@ -67,7 +67,7 @@ export async function getActiveGitHubRepositoryFullNames(): Promise<string[]> {
   );
 }
 
-export type ActiveRepositoryRef = {
+type ActiveRepositoryRef = {
   fullName: string;
   sourceControlProvider: SourceControlProvider;
 };
