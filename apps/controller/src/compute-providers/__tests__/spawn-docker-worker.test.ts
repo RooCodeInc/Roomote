@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { processListIncludesDockerWorkerRun } from '../docker-sandbox-security';
+import {
+  DockerBootError,
+  processListIncludesDockerWorkerRun,
+  type DockerCommand,
+} from '../docker-sandbox-security';
 import {
   buildDockerSandboxServerUrl,
   DOCKER_SPAWN_TIMEOUT_MS,
   getDockerWorkerCommand,
+  preflightDockerSpawn,
   resolveDockerSpawnCleanupMode,
   resolveDockerWorkerOwnershipTargetFromLookup,
   resumeDockerTaskDaemon,
@@ -13,7 +18,7 @@ import {
   shouldAutoRemoveDockerWorkerContainer,
   toContainerReachableUrl,
 } from '../spawn-docker-worker';
-import { TaskPayloadKind } from '@roomote/types';
+import { TaskPayloadKind, TaskRunErrorCode } from '@roomote/types';
 
 describe('processListIncludesDockerWorkerRun', () => {
   it('matches the shell launcher command while the Docker worker is starting', () => {
@@ -271,5 +276,127 @@ describe('resolveDockerWorkerOwnershipTargetFromLookup', () => {
         passwdEntry: 'ubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash',
       }),
     ).toBe('ubuntu:1000');
+  });
+});
+
+describe('preflightDockerSpawn', () => {
+  const IMAGE = 'roomote-worker:local';
+
+  const makeRunDocker = (
+    behavior: (args: string[]) => Promise<string>,
+  ): DockerCommand => {
+    return (args, options = {}) =>
+      behavior(args).catch((error) => {
+        if (options.allowFailure) {
+          return '';
+        }
+        throw error;
+      });
+  };
+
+  it('passes when the daemon responds and the image exists locally', async () => {
+    const calls: string[][] = [];
+    const runDocker = makeRunDocker(async (args) => {
+      calls.push(args);
+      if (args[0] === 'version') {
+        return '28.0.1\n';
+      }
+      if (args[0] === 'image') {
+        return 'sha256:abc\n';
+      }
+      throw new Error(`unexpected docker ${args[0]}`);
+    });
+
+    await expect(
+      preflightDockerSpawn(runDocker, IMAGE),
+    ).resolves.toBeUndefined();
+    expect(calls.some((args) => args[0] === 'pull')).toBe(false);
+  });
+
+  it('throws DockerDaemonUnreachable when the daemon does not respond', async () => {
+    const runDocker = makeRunDocker(async (args) => {
+      if (args[0] === 'version') {
+        throw new Error(
+          'Failed to run docker version.\n\nCannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?',
+        );
+      }
+      return '';
+    });
+
+    const failure = await preflightDockerSpawn(runDocker, IMAGE).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(DockerBootError);
+    expect((failure as DockerBootError).errorCode).toBe(
+      TaskRunErrorCode.DockerDaemonUnreachable,
+    );
+    expect((failure as Error).message).toContain(
+      'Cannot connect to the Docker daemon',
+    );
+  });
+
+  it('pulls a locally missing image before giving up', async () => {
+    const calls: string[][] = [];
+    const runDocker = makeRunDocker(async (args) => {
+      calls.push(args);
+      if (args[0] === 'version') {
+        return '28.0.1\n';
+      }
+      if (args[0] === 'image') {
+        throw new Error('No such image');
+      }
+      if (args[0] === 'pull') {
+        return 'Downloaded newer image\n';
+      }
+      throw new Error(`unexpected docker ${args[0]}`);
+    });
+
+    await expect(
+      preflightDockerSpawn(runDocker, IMAGE),
+    ).resolves.toBeUndefined();
+    expect(calls.some((args) => args[0] === 'pull' && args[1] === IMAGE)).toBe(
+      true,
+    );
+  });
+
+  it('throws DockerImageMissing when the image cannot be pulled', async () => {
+    const runDocker = makeRunDocker(async (args) => {
+      if (args[0] === 'version') {
+        return '28.0.1\n';
+      }
+      if (args[0] === 'image') {
+        throw new Error('No such image');
+      }
+      throw new Error(
+        "Failed to run docker pull.\n\npull access denied for roomote-worker, repository does not exist or may require 'docker login'",
+      );
+    });
+
+    const failure = await preflightDockerSpawn(runDocker, IMAGE).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(DockerBootError);
+    expect((failure as DockerBootError).errorCode).toBe(
+      TaskRunErrorCode.DockerImageMissing,
+    );
+    expect((failure as Error).message).toContain(IMAGE);
+    expect((failure as Error).message).toContain('pull access denied');
+  });
+
+  it('rethrows aborts without reclassifying them as boot failures', async () => {
+    const abortError = Object.assign(new Error('This operation was aborted'), {
+      name: 'AbortError',
+    });
+    const runDocker = makeRunDocker(async () => {
+      throw abortError;
+    });
+
+    await expect(preflightDockerSpawn(runDocker, IMAGE)).rejects.toBe(
+      abortError,
+    );
   });
 });

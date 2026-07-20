@@ -6,6 +6,7 @@ import {
   type ComputeProvider,
   RunStatus,
   TaskPayloadKind,
+  type TaskRunErrorCode,
   resolveComputeProviderTarget,
   SANDBOX_ORPHAN_SCAN_INTERVAL_MS,
   SANDBOX_TIMEOUT_MS,
@@ -39,7 +40,11 @@ import {
   captureControllerException,
   captureControllerMessage,
 } from './monitoring/sentry';
-import { formatSpawnWorkerError } from './compute-providers/docker-sandbox-security';
+import {
+  classifyDockerSpawnError,
+  formatSpawnWorkerError,
+  getTaskRunErrorCode,
+} from './compute-providers/docker-sandbox-security';
 import { resolveFromWorkspaceRoot } from './repo-paths';
 import { findPersistedWorkerBootstrapRestarts } from './worker-bootstrap-restarts';
 
@@ -547,6 +552,17 @@ export abstract class BaseController {
     error: unknown,
   ): Promise<void> {
     const errorMessage = formatSpawnWorkerError(error);
+    const errorCode =
+      getTaskRunErrorCode(error) ?? classifyDockerSpawnError(errorMessage);
+
+    // Drift signal: a docker spawn failure the classifiers no longer
+    // recognize means the UI falls back to raw diagnostics.
+    if (!errorCode && errorMessage.startsWith('Failed to run docker')) {
+      console.warn(
+        `[BaseController] Unclassified docker spawn failure for task run #${taskRun.id}`,
+      );
+    }
+
     // Report and rethrow a sanitized error so Sentry LinkedErrors never walks
     // a raw execFile/cause chain that embeds docker -e AUTH_TOKEN values.
     const reportError = new Error(errorMessage);
@@ -563,7 +579,7 @@ export abstract class BaseController {
       `[BaseController] ❌ Error spawning ${taskRun.payloadKind} worker for task run #${taskRun.id}: ${errorMessage}`,
     );
 
-    await this.finishFailedTaskRun(taskRun, errorMessage);
+    await this.finishFailedTaskRun(taskRun, errorMessage, errorCode);
 
     throw reportError;
   }
@@ -877,6 +893,7 @@ export abstract class BaseController {
   private async finishFailedTaskRun(
     taskRun: TaskRun,
     errorMessage: string,
+    errorCode?: TaskRunErrorCode,
   ): Promise<void> {
     // Use the centralized termination path so all side-effects (email, Slack,
     // Linear notifications, lock release, etc.) are applied consistently.
@@ -884,6 +901,7 @@ export abstract class BaseController {
       id: taskRun.id,
       status: RunStatus.Failed,
       error: errorMessage,
+      ...(errorCode ? { errorCode } : {}),
     });
 
     // Snapshot-specific: only fail snapshots that are currently pending.

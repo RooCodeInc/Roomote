@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { TaskRunErrorCode } from '@roomote/types';
+
 import { resolveFromWorkspaceRoot } from '../repo-paths';
 
 const execFileAsync = promisify(execFile);
@@ -180,6 +182,66 @@ export function formatDockerCommandError(
   details.push(`command:\n${command}`);
 
   return details.filter(Boolean).join('\n\n');
+}
+
+/**
+ * Boot/spawn failure with a machine-readable category. Thrown at the sites
+ * that know exactly what went wrong (preflight, worker start assertions) so
+ * the category survives to finishRun without re-parsing error prose.
+ */
+export class DockerBootError extends Error {
+  readonly errorCode: TaskRunErrorCode;
+
+  constructor(errorCode: TaskRunErrorCode, message: string) {
+    super(message);
+    this.name = 'DockerBootError';
+    this.errorCode = errorCode;
+  }
+}
+
+export function getTaskRunErrorCode(
+  error: unknown,
+): TaskRunErrorCode | undefined {
+  return error instanceof DockerBootError ? error.errorCode : undefined;
+}
+
+const SPAWN_ERROR_CLASSIFIERS: ReadonlyArray<{
+  code: TaskRunErrorCode;
+  pattern: RegExp;
+}> = [
+  {
+    code: TaskRunErrorCode.DockerDaemonUnreachable,
+    pattern:
+      /Cannot connect to the Docker daemon|failed to connect to the [Dd]ocker API|Is the docker daemon running|docker\.sock.*connect: no such file or directory/i,
+  },
+  {
+    code: TaskRunErrorCode.DockerImageMissing,
+    pattern:
+      /pull access denied|repository does not exist or may require ['"]?docker login['"]?|manifest for .+ not found|Unable to find image ['"].+['"] locally/i,
+  },
+  {
+    code: TaskRunErrorCode.DockerPortInUse,
+    pattern:
+      /port is already allocated|bind: address already in use|failed to bind host port/i,
+  },
+  {
+    code: TaskRunErrorCode.DockerReleaseArchiveMissing,
+    pattern:
+      /Docker worker release archive does not exist|Docker provider requires a local worker release archive/i,
+  },
+];
+
+/**
+ * Fallback categorization for spawn failures that were not raised as
+ * DockerBootError (e.g. a docker run failure surfacing daemon stderr).
+ * Single source of truth for these patterns — the web app matches on the
+ * persisted code, not on error prose.
+ */
+export function classifyDockerSpawnError(
+  message: string,
+): TaskRunErrorCode | undefined {
+  return SPAWN_ERROR_CLASSIFIERS.find(({ pattern }) => pattern.test(message))
+    ?.code;
 }
 
 /** Normalize spawn failures so finishRun stores a useful diagnostic message. */

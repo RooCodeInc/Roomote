@@ -7,6 +7,7 @@ import {
   getPrimaryPortFromConfig,
   portNameToSlug,
   SANDBOX_SERVER_NAMED_PORT,
+  TaskRunErrorCode,
   type NamedPort,
 } from '@roomote/types';
 import { Env, resolveAppEnv } from '@roomote/env';
@@ -37,6 +38,7 @@ import {
   buildDockerWorkerLabels,
   buildDockerWorkerResourceArgs,
   docker,
+  DockerBootError,
   getDockerTaskNetworkName,
   getDockerTaskDaemonContainerName,
   getDockerTaskWorkspaceVolumeName,
@@ -63,6 +65,57 @@ const DOCKER_WORKER_START_POLL_MS = 500;
 const DOCKER_TASK_DAEMON_IMAGE = 'docker:28-dind';
 /** Upper bound for fresh Docker provisioning so a stuck daemon cannot hang forever. */
 export const DOCKER_SPAWN_TIMEOUT_MS = 15 * 60 * 1_000;
+
+/**
+ * Fail fast, with precise categories, on environment problems that otherwise
+ * surface as opaque docker run failures or worker start timeouts. Runs before
+ * any sandbox resources are created so nothing needs cleanup on failure.
+ */
+export async function preflightDockerSpawn(
+  runDocker: DockerCommand,
+  image: string,
+): Promise<void> {
+  try {
+    await runDocker(['version', '--format', '{{.Server.Version}}']);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerDaemonUnreachable,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  // The daemon is reachable (checked above), so an empty inspect result means
+  // the image is absent locally. Pull explicitly so registry-hosted images
+  // still work and pull time is attributed to preflight, not the start wait.
+  const imageId = await runDocker(
+    ['image', 'inspect', '--format', '{{.Id}}', image],
+    { allowFailure: true },
+  );
+
+  if (imageId.trim()) {
+    return;
+  }
+
+  try {
+    await runDocker(['pull', image]);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerImageMissing,
+      [
+        `Docker worker image ${image} is not available locally and could not be pulled.`,
+        error instanceof Error ? error.message : String(error),
+      ].join('\n\n'),
+    );
+  }
+}
 
 export async function spawnDockerWorker(
   taskRun: TaskRun,
@@ -101,7 +154,8 @@ export async function spawnDockerWorker(
   }
 
   if (!isStandbyResume && !config.localWorkerReleasePath) {
-    throw new Error(
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerReleaseArchiveMissing,
       'Docker provider requires a local worker release archive. TaskRun pnpm dev without --use-release.',
     );
   }
@@ -111,7 +165,8 @@ export async function spawnDockerWorker(
     config.localWorkerReleasePath &&
     !existsSync(config.localWorkerReleasePath)
   ) {
-    throw new Error(
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerReleaseArchiveMissing,
       `Docker worker release archive does not exist: ${config.localWorkerReleasePath}`,
     );
   }
@@ -171,6 +226,12 @@ export async function spawnDockerWorker(
   };
 
   throwIfSpawnAborted();
+
+  // Resume restarts a retained container, so daemon/image preflight only
+  // applies to fresh spawns.
+  if (!isStandbyResume) {
+    await preflightDockerSpawn(runDocker, config.image);
+  }
 
   // Network name is deterministic so outer cleanup can tear it down even if
   // prepare is interrupted before returning.
@@ -608,7 +669,8 @@ async function assertDetachedWorkerStarted(
         allowFailure: true,
       });
 
-      throw new Error(
+      throw new DockerBootError(
+        classifyWorkerBootLogs(logs, TaskRunErrorCode.DockerWorkerExitedEarly),
         [
           `Docker worker container exited before task run #${runId} started.`,
           'The sandbox container stopped during boot. Common causes include a missing worker image, a failed entrypoint, or the worker crashing on startup.',
@@ -645,7 +707,8 @@ async function assertDetachedWorkerStarted(
 
   const timeoutSeconds = Math.round(DOCKER_WORKER_START_TIMEOUT_MS / 1000);
 
-  throw new Error(
+  throw new DockerBootError(
+    classifyWorkerBootLogs(logs, TaskRunErrorCode.DockerWorkerStartTimeout),
     [
       `Docker worker for task run #${runId} did not start within ${timeoutSeconds}s.`,
       'The container stayed running, but the Roomote worker process never appeared. Check that the local worker image and release archive are available, and inspect container logs for fetch/start failures.',
@@ -657,6 +720,20 @@ async function assertDetachedWorkerStarted(
       .filter(Boolean)
       .join('\n\n'),
   );
+}
+
+/**
+ * A worker that dies (or never appears) because it cannot reach the Roomote
+ * API logs a `fetch failed` job error — a distinct, actionable category
+ * (networking from inside Docker) rather than a generic start failure.
+ */
+function classifyWorkerBootLogs(
+  logs: string,
+  fallback: TaskRunErrorCode,
+): TaskRunErrorCode {
+  return /failed:\s*fetch failed/i.test(logs)
+    ? TaskRunErrorCode.DockerWorkerFetchFailed
+    : fallback;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

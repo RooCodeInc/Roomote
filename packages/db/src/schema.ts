@@ -67,6 +67,7 @@ import type {
   McpConnectionRole,
   SourceControlProvider,
   TaskModelSettings,
+  TaskRunErrorCode,
   UserRole,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
@@ -929,6 +930,12 @@ export const taskRuns = pgTable(
     artifacts: jsonb('artifacts'),
     result: jsonb('result'),
     error: text('error'),
+    /**
+     * Machine-readable category for boot/spawn failures; `error` keeps the
+     * full diagnostic text. Null for runs that failed before this column
+     * existed or whose failure has no mapped category.
+     */
+    errorCode: text('error_code').$type<TaskRunErrorCode>(),
     machineId: text('machine_id'),
     sandboxCmdId: text('sandbox_cmd_id'), // Command ID from Vercel Sandbox for log retrieval.
     machineDomain: text('machine_domain'),

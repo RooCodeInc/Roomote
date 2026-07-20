@@ -64,6 +64,7 @@ export function useStartupProgress({
   const status = taskRun?.status ?? initialStatus;
   const statusRef = useRef(status);
   const error = getTaskRunError(taskRun ?? initialTaskRun);
+  const errorCode = (taskRun ?? initialTaskRun)?.errorCode ?? undefined;
   const provider = resolveComputeProviderTarget(
     taskRun?.vendor ?? initialTaskRun?.vendor,
   );
@@ -148,6 +149,7 @@ export function useStartupProgress({
     steps,
     lastStatus,
     error: error ?? undefined,
+    errorCode,
     elapsedSeconds,
     showLogs: canStreamLogs,
     sandboxLogs,

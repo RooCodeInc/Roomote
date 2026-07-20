@@ -160,6 +160,8 @@ export type StartupPromptPreview = {
 interface StartupErrorMessageProps {
   status: RunStatus;
   error?: string;
+  /** Machine-readable failure category persisted with the run. */
+  errorCode?: string | null;
   prompt?: StartupPromptPreview | null;
   retryAction?: StartupRetryAction;
 }
@@ -167,12 +169,13 @@ interface StartupErrorMessageProps {
 export const StartupFailureMessage = ({
   status,
   error,
+  errorCode,
   prompt,
   retryAction,
 }: StartupErrorMessageProps) => {
   const isFailed = status === RunStatus.Failed;
   const isCanceled = status === RunStatus.Canceled;
-  const displayError = getTaskRunErrorDisplayMessage(error);
+  const displayError = getTaskRunErrorDisplayMessage(error, errorCode);
   const promptText = prompt?.text?.trim() || undefined;
   const promptImages = prompt?.images?.filter(Boolean) ?? [];
   const hasPrompt = Boolean(promptText) || promptImages.length > 0;
@@ -300,6 +303,8 @@ export const StartupFailureMessage = ({
 interface StartupSequenceProps {
   steps: StartupStep[];
   error?: string;
+  /** Machine-readable failure category persisted with the run. */
+  errorCode?: string | null;
   logs?: SandboxLogEntry[];
   logsConnected?: boolean;
   logsError?: string | null;
@@ -312,6 +317,7 @@ interface StartupSequenceProps {
 export const StartupSequence = ({
   steps,
   error,
+  errorCode,
   logs,
   logsConnected = true,
   logsError = null,
@@ -374,6 +380,7 @@ export const StartupSequence = ({
         <StartupFailureMessage
           status={status}
           error={error}
+          errorCode={errorCode}
           prompt={prompt}
           retryAction={retryAction}
         />

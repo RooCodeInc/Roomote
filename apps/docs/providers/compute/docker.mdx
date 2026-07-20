@@ -132,8 +132,32 @@ repositories.
 
 ## Common issues
 
-- **The worker image is missing.** Run the local dev server again, or publish
-  and configure a worker image for self-hosted production.
+Before creating any sandbox resources, Roomote preflights the Docker
+environment: it checks that the daemon responds, and that the worker image is
+available locally (pulling it when a registry hosts it). When a boot fails, the
+task startup screen explains the failure category; the sections below map each
+one to a fix.
+
+- **Roomote couldn't reach the Docker daemon.** Start Docker Desktop (or the
+  Docker Engine service) and confirm the host running the controller can access
+  the Docker socket. In production Compose, check the socket proxy container.
+- **Roomote couldn't find or pull the worker image.** Build or publish the
+  worker image configured in `DOCKER_WORKER_IMAGE` (for local development,
+  `pnpm dev` builds `roomote-worker:local`). For private registries, make sure
+  the host is logged in.
+- **A required host port is already in use.** Another process holds a port the
+  sandbox needs. Stop it, or change the conflicting service's port, then retry.
+- **The worker release archive is missing.** The Docker provider installs the
+  worker from a local release archive. For local development, run
+  `pnpm dev --use-release` (or the worker-release build step) so the archive
+  exists before starting tasks.
+- **The worker failed while contacting the Roomote API (`fetch failed`).**
+  The container cannot reach the API URL from inside Docker. Verify
+  `R_PUBLIC_URL`/the API address resolves from a container (often via
+  `host.docker.internal`) and that the API is running.
+- **The worker did not start in time, or the container exited during boot.**
+  Open the task's failure details for the container logs and process list —
+  they include the underlying crash, missing dependency, or fetch failure.
 - **The task cannot reach Roomote services.** Check `DOCKER_WORKER_NETWORK` and
   the Compose network used by the API and controller.
 - **A worker reports that its disk limit is unsupported.** Configure a Docker
