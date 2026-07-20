@@ -458,6 +458,9 @@ export async function launchDiscordTask(input: {
           ? {
               discordReactionChannelId: reactionTarget.channelId,
               discordReactionMessageId: reactionTarget.messageId,
+              // Eyes are only pinned before enqueue for MESSAGE_CREATE origin
+              // messages (index/auto-start), not for thread-starter placeholders.
+              ...(originReaction ? { discordIntakeAckPending: true } : {}),
             }
           : {}),
       },

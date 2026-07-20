@@ -3,6 +3,8 @@ import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getDiscordIntakeAckReactionTargetFromTaskPayload,
+  TaskPayloadKind,
   type CommunicationProvider,
 } from '@roomote/types';
 
@@ -29,10 +31,20 @@ function supportsCommunicationRequestUserInput(
   return Boolean(provider && COMMUNICATION_RUI_PROVIDERS.has(provider));
 }
 
-function supportsCommunicationAckReactionCleanup(
-  provider: CommunicationProvider | null | undefined,
-): provider is 'discord' {
-  return provider === 'discord';
+function supportsCommunicationAckReactionCleanup(taskRun: TaskRun): boolean {
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
+    return false;
+  }
+
+  const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
+  if (provider !== 'discord') {
+    return false;
+  }
+
+  // Only wire onStart when intake actually pinned eyes on a durable target.
+  return (
+    getDiscordIntakeAckReactionTargetFromTaskPayload(taskRun.payload) !== null
+  );
 }
 
 function getRequestUserInputPromptSignatures(
@@ -57,8 +69,7 @@ function getConversationId(taskRun: TaskRun): string | null {
 async function clearCommunicationAckReactionOnStart(
   taskRun: TaskRun,
 ): Promise<void> {
-  const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
-  if (!supportsCommunicationAckReactionCleanup(provider)) {
+  if (!supportsCommunicationAckReactionCleanup(taskRun)) {
     return;
   }
 
@@ -68,7 +79,7 @@ async function clearCommunicationAckReactionOnStart(
     });
   } catch (error) {
     console.error(
-      `[communicationCallbacks#onStart] Failed ${provider} ack reaction cleanup for task run ${taskRun.id}: ${
+      `[communicationCallbacks#onStart] Failed discord ack reaction cleanup for task run ${taskRun.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -155,7 +166,7 @@ export function getCommunicationRunTaskCallbacks(
 ): RunTaskCallbacks {
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
   const supportsRui = supportsCommunicationRequestUserInput(provider);
-  const supportsAckCleanup = supportsCommunicationAckReactionCleanup(provider);
+  const supportsAckCleanup = supportsCommunicationAckReactionCleanup(taskRun);
 
   if (!supportsRui && !supportsAckCleanup) {
     return {};

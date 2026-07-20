@@ -462,6 +462,7 @@ describe('launchDiscordTask', () => {
             discordTaskThread: true,
             discordReactionChannelId: 'channel-1',
             discordReactionMessageId: 'message-1',
+            discordIntakeAckPending: true,
           }),
         },
       }),

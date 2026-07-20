@@ -1,3 +1,5 @@
+import { TaskPayloadKind } from '@roomote/types';
+
 const { mockFindTaskRun, mockGetCommunicationProviderAdapter } = vi.hoisted(
   () => ({
     mockFindTaskRun: vi.fn(),
@@ -28,9 +30,31 @@ describe('clearCommunicationAckReaction', () => {
     );
   });
 
+  it('skips SnapshotResume runs', async () => {
+    mockFindTaskRun.mockResolvedValue({
+      id: 2,
+      payloadKind: TaskPayloadKind.SnapshotResume,
+      payload: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'chan',
+        communicationMessageId: 'resume-msg',
+        discordReactionChannelId: 'c-1',
+        discordReactionMessageId: 'm-1',
+        discordIntakeAckPending: true,
+      },
+    });
+
+    await expect(clearCommunicationAckReaction({ runId: 2 })).resolves.toEqual({
+      cleared: false,
+      reason: 'unsupported_run_kind',
+    });
+    expect(mockGetCommunicationProviderAdapter).not.toHaveBeenCalled();
+  });
+
   it('skips non-Discord providers', async () => {
     mockFindTaskRun.mockResolvedValue({
       id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: { communicationProvider: 'telegram' },
     });
 
@@ -41,14 +65,16 @@ describe('clearCommunicationAckReaction', () => {
     expect(mockGetCommunicationProviderAdapter).not.toHaveBeenCalled();
   });
 
-  it('removes eyes from the Discord reaction target', async () => {
+  it('removes eyes only when intake ack is pending on a dedicated target', async () => {
     const removeReaction = vi.fn().mockResolvedValue(undefined);
     mockFindTaskRun.mockResolvedValue({
       id: 7,
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: {
         communicationProvider: 'discord',
         discordReactionChannelId: 'c-1',
         discordReactionMessageId: 'm-1',
+        discordIntakeAckPending: true,
       },
     });
     mockGetCommunicationProviderAdapter.mockResolvedValue({
@@ -67,29 +93,42 @@ describe('clearCommunicationAckReaction', () => {
     });
   });
 
-  it('falls back to communication channel/message ids', async () => {
-    const removeReaction = vi.fn().mockResolvedValue(undefined);
+  it('does not use communication message ids as intake-ack targets', async () => {
     mockFindTaskRun.mockResolvedValue({
       id: 8,
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: {
         communicationProvider: 'discord',
         communicationChannelId: 'chan',
         communicationMessageId: 'origin',
       },
     });
-    mockGetCommunicationProviderAdapter.mockResolvedValue({
-      removeReaction,
-    });
 
     await expect(clearCommunicationAckReaction({ runId: 8 })).resolves.toEqual({
-      cleared: true,
+      cleared: false,
+      reason: 'missing_target',
+    });
+    expect(mockGetCommunicationProviderAdapter).not.toHaveBeenCalled();
+  });
+
+  it('skips when dedicated reaction targets exist without intake pending', async () => {
+    mockFindTaskRun.mockResolvedValue({
+      id: 10,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        communicationProvider: 'discord',
+        discordReactionChannelId: 'c-10',
+        discordReactionMessageId: 'm-10',
+      },
     });
 
-    expect(removeReaction).toHaveBeenCalledWith({
-      channelId: 'chan',
-      messageId: 'origin',
-      name: 'eyes',
-    });
+    await expect(clearCommunicationAckReaction({ runId: 10 })).resolves.toEqual(
+      {
+        cleared: false,
+        reason: 'missing_target',
+      },
+    );
+    expect(mockGetCommunicationProviderAdapter).not.toHaveBeenCalled();
   });
 
   it('retries once when removeReaction fails, then reports remove_failed', async () => {
@@ -101,10 +140,12 @@ describe('clearCommunicationAckReaction', () => {
 
     mockFindTaskRun.mockResolvedValue({
       id: 9,
+      payloadKind: TaskPayloadKind.StandardTask,
       payload: {
         communicationProvider: 'discord',
         discordReactionChannelId: 'c-9',
         discordReactionMessageId: 'm-9',
+        discordIntakeAckPending: true,
       },
     });
     mockGetCommunicationProviderAdapter.mockResolvedValue({

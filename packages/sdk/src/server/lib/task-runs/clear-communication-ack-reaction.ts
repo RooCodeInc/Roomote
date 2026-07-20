@@ -1,6 +1,7 @@
 import {
   getCommunicationProviderFromTaskPayload,
-  getDiscordReactionTargetFromTaskPayload,
+  getDiscordIntakeAckReactionTargetFromTaskPayload,
+  TaskPayloadKind,
 } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../communication-providers';
@@ -14,6 +15,7 @@ type ClearCommunicationAckReactionResult = {
   reason?:
     | 'run_not_found'
     | 'unsupported_provider'
+    | 'unsupported_run_kind'
     | 'missing_target'
     | 'provider_unavailable'
     | 'remove_unsupported'
@@ -24,6 +26,10 @@ type ClearCommunicationAckReactionResult = {
  * Removes the platform intake-ack reaction once a communication task runtime
  * has started. Mirrors Slack's worker onStart eyes cleanup for Discord:
  * eyes is a temporary "saw your message" marker, not a lasting status.
+ *
+ * Only runs for fresh Discord intake launches that recorded a pending eyes
+ * reaction. SnapshotResume and interaction launches without intake eyes are
+ * no-ops (they never pinned 👀 on the current origin message).
  */
 export async function clearCommunicationAckReaction(input: {
   runId: number;
@@ -33,12 +39,18 @@ export async function clearCommunicationAckReaction(input: {
     return { cleared: false, reason: 'run_not_found' };
   }
 
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
+    return { cleared: false, reason: 'unsupported_run_kind' };
+  }
+
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
   if (provider !== 'discord') {
     return { cleared: false, reason: 'unsupported_provider' };
   }
 
-  const target = getDiscordReactionTargetFromTaskPayload(taskRun.payload);
+  const target = getDiscordIntakeAckReactionTargetFromTaskPayload(
+    taskRun.payload,
+  );
   if (!target) {
     return { cleared: false, reason: 'missing_target' };
   }
