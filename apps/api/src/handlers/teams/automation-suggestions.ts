@@ -3,8 +3,11 @@ import {
   db,
   environments,
   eq,
+  getAutomationRuntime,
   inArray,
+  isNotNull,
   sql,
+  teamsInstallations,
   trackedMessages,
 } from '@roomote/db/server';
 import { getScheduledSuggestionBackgroundAutomationDescriptor } from '@roomote/types';
@@ -56,7 +59,39 @@ export async function postScheduledSuggestionsToTeams(params: {
     return;
   }
 
-  const conversation = await findTeamsPrimaryConversation();
+  const slackConfig = resolveScheduledSuggestionSlackConfig(
+    params.suggestionSource,
+  );
+  const runtime = await getAutomationRuntime(slackConfig.automationKey);
+  let conversation =
+    runtime.destination?.provider === 'teams'
+      ? await (async () => {
+          const [row] = await db
+            .select({
+              conversationId: teamsInstallations.conversationId,
+              serviceUrl: teamsInstallations.serviceUrl,
+            })
+            .from(teamsInstallations)
+            .where(
+              and(
+                eq(
+                  teamsInstallations.conversationId,
+                  runtime.destination!.channelId,
+                ),
+                eq(teamsInstallations.isActive, true),
+                isNotNull(teamsInstallations.serviceUrl),
+              ),
+            )
+            .limit(1);
+          return row?.serviceUrl
+            ? {
+                conversationId: row.conversationId,
+                serviceUrl: row.serviceUrl,
+              }
+            : null;
+        })()
+      : null;
+  conversation ??= await findTeamsPrimaryConversation();
 
   if (!conversation) {
     apiLogger.debug(
@@ -64,10 +99,6 @@ export async function postScheduledSuggestionsToTeams(params: {
     );
     return;
   }
-
-  const slackConfig = resolveScheduledSuggestionSlackConfig(
-    params.suggestionSource,
-  );
 
   const [existingSummaryMessage] = await db
     .select({ id: trackedMessages.id })

@@ -532,6 +532,11 @@ const automationsRouter = createRouter({
          * forum topic in the primary chat (no thread picker).
          */
         suggesterUseTelegram: z.boolean().optional(),
+        /**
+         * When true, Suggest Ideas posts to the primary Microsoft Teams
+         * conversation captured for this deployment.
+         */
+        suggesterUseTeams: z.boolean().optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
         suggesterRoutingMode: z.enum(SUGGESTER_ROUTING_MODES),
         suggesterRoutingInstructions: z.string().max(10_000).nullable(),

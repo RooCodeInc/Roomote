@@ -226,6 +226,14 @@ export function getAutomationTelegramChatTarget(
   );
 }
 
+export function getAutomationTeamsChannelTarget(
+  automation: Pick<Automation, 'targets'> | undefined,
+): string | null {
+  return (
+    getAutomationTargetRefs(automation, 'teams', 'teams_channel')[0] ?? null
+  );
+}
+
 /** Sticky Telegram forum-topic id owned by a telegram_chat target, if any. */
 export function getAutomationTelegramTopicThreadId(
   automation: Pick<Automation, 'targets'> | undefined,
@@ -942,6 +950,7 @@ export function normalizeBackgroundAgentSettings(
       }),
     ),
     suggesterTelegramChatId: getAutomationTelegramChatTarget(suggester),
+    suggesterTeamsChannelId: getAutomationTeamsChannelTarget(suggester),
   } as BackgroundAgentSettings;
 }
 

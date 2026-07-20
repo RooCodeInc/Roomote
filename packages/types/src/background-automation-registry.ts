@@ -151,9 +151,9 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // Provider-agnostic: suggestion scans work with any synced repository.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
-    // Slack/Discord pick an existing channel; Telegram auto-creates a
-    // sticky recurring forum topic in the primary chat (no thread picker).
-    supportedCommunicationProviders: ['slack', 'discord', 'telegram'],
+    // Full chat coverage: Slack/Discord pick an existing channel; Telegram
+    // auto-creates a sticky topic; Teams uses the primary conversation.
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'suggest_ideas',
   },

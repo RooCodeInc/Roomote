@@ -21,6 +21,7 @@ import {
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
+  findTeamsPrimaryConversation,
   findTelegramPrimaryChatId,
   resolveAutomationRuntimeDestination,
 } from '@roomote/sdk/server';
@@ -134,7 +135,7 @@ function buildSuggesterAutomationSettings(params: {
 function buildDestinationChannelTargets(
   slackChannelId: string | null | undefined,
   discordChannelId: string | null | undefined,
-  telegramTarget?: AutomationTarget | null,
+  extraTargets: readonly AutomationTarget[] = [],
 ): AutomationTarget[] {
   return [
     ...(slackChannelId
@@ -155,7 +156,7 @@ function buildDestinationChannelTargets(
           },
         ]
       : []),
-    ...(telegramTarget ? [telegramTarget] : []),
+    ...extraTargets,
   ];
 }
 
@@ -526,14 +527,17 @@ export async function updateBackgroundAgentSettingsCommand(
   const platformIssueDiscordResult =
     destinationResults.platformIssueAlerts.discord;
 
-  // Suggest Ideas may target Telegram via a sticky recurring topic in the
-  // primary chat (no thread picker). Resolve that before destination
-  // validation so Telegram counts as a configured destination.
+  // Suggest Ideas may target Telegram (sticky topic) or Teams (primary
+  // conversation) as one-of destinations alongside Slack/Discord channels.
   const savingSuggester = input.savingAutomation === 'suggester';
   const wantSuggesterTelegram = savingSuggester
     ? input.suggesterUseTelegram === true
     : Boolean(existingSettings.suggesterTelegramChatId);
+  const wantSuggesterTeams = savingSuggester
+    ? input.suggesterUseTeams === true
+    : Boolean(existingSettings.suggesterTeamsChannelId);
   let suggesterTelegramTarget: AutomationTarget | null = null;
+  let suggesterTeamsTarget: AutomationTarget | null = null;
 
   if (wantSuggesterTelegram) {
     const telegramChatId =
@@ -555,7 +559,29 @@ export async function updateBackgroundAgentSettingsCommand(
           topicName: 'Suggest Ideas',
         },
       };
-      // Telegram is one-of: clear Slack/Discord channel results for suggester.
+      destinationResults.suggester.slack = { channelId: null };
+      destinationResults.suggester.discord = { channelId: null };
+    }
+  } else if (wantSuggesterTeams) {
+    const teamsConversation =
+      (savingSuggester ? await findTeamsPrimaryConversation() : null) ??
+      (existingSettings.suggesterTeamsChannelId
+        ? {
+            conversationId: existingSettings.suggesterTeamsChannelId,
+            serviceUrl: '',
+            conversationType: null,
+          }
+        : null);
+
+    if (!teamsConversation?.conversationId) {
+      fieldErrors.suggesterUseTeams =
+        'Connect Microsoft Teams and capture a conversation before routing Suggest Ideas there.';
+    } else {
+      suggesterTeamsTarget = {
+        provider: 'teams',
+        targetKind: 'teams_channel',
+        externalRef: teamsConversation.conversationId,
+      };
       destinationResults.suggester.slack = { channelId: null };
       destinationResults.suggester.discord = { channelId: null };
     }
@@ -832,6 +858,7 @@ export async function updateBackgroundAgentSettingsCommand(
         suggesterChannelResult.channelId ??
         suggesterDiscordResult.channelId ??
         suggesterTelegramTarget?.externalRef ??
+        suggesterTeamsTarget?.externalRef ??
         null,
       field: 'suggesterSlackChannel',
     },
@@ -1021,20 +1048,29 @@ export async function updateBackgroundAgentSettingsCommand(
       throw new Error(`Missing destination descriptor for ${automationId}`);
     }
     const result = destinationResults[automationId];
-    const telegramTarget =
-      automationId === 'suggester' ? suggesterTelegramTarget : null;
+    const suggesterExtraTargets: AutomationTarget[] =
+      automationId === 'suggester'
+        ? [
+            ...(suggesterTelegramTarget ? [suggesterTelegramTarget] : []),
+            ...(suggesterTeamsTarget ? [suggesterTeamsTarget] : []),
+          ]
+        : [];
     return {
       targets: [
         ...buildDestinationChannelTargets(
           result.slack.channelId,
           result.discord.channelId,
-          telegramTarget,
+          suggesterExtraTargets,
         ),
         ...extraTargets,
       ],
       managedTargetKinds:
         automationId === 'suggester'
-          ? [...descriptor.managedTargetKinds, 'telegram_chat' as const]
+          ? [
+              ...descriptor.managedTargetKinds,
+              'telegram_chat' as const,
+              'teams_channel' as const,
+            ]
           : [...descriptor.managedTargetKinds],
     };
   }

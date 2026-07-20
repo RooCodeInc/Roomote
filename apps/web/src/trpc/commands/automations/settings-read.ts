@@ -20,6 +20,7 @@ import {
 import {
   findDiscordDestinationByChannelId,
   findTeamsConversationDisplayName,
+  findTeamsPrimaryConversation,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from '@roomote/sdk/server';
@@ -263,6 +264,7 @@ export async function getBackgroundAgentSettingsCommand(
     slackConnected: boolean;
     discordConnected: boolean;
     telegramConnected: boolean;
+    teamsConnected: boolean;
     sentryConnected: boolean;
     missingScopes: readonly string[];
     requiredScopes: string[];
@@ -298,6 +300,7 @@ export async function getBackgroundAgentSettingsCommand(
     slackInstallation,
     discordInstallation,
     telegramCredentials,
+    teamsPrimaryConversation,
     sentryConnected,
     recentRuns,
     status,
@@ -309,6 +312,7 @@ export async function getBackgroundAgentSettingsCommand(
       columns: { id: true },
     }),
     resolveTelegramRuntimeCredentials(),
+    findTeamsPrimaryConversation(),
     hasActiveSentryIntegration(),
     listRecentAutomationTasks(),
     buildAutomationStatus(),
@@ -396,6 +400,7 @@ export async function getBackgroundAgentSettingsCommand(
       slackConnected: Boolean(slackInstallation?.isActive),
       discordConnected: Boolean(discordInstallation),
       telegramConnected: Boolean(telegramCredentials.botToken),
+      teamsConnected: Boolean(teamsPrimaryConversation),
       sentryConnected,
       missingScopes,
       requiredScopes: [...REQUIRED_BACKGROUND_AGENT_SCOPES],

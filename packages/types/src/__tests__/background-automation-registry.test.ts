@@ -78,14 +78,15 @@ describe('background automation registry', () => {
     });
   });
 
-  it('allows Slack, Discord, and Telegram destinations for the suggester', () => {
+  it('allows all communication destinations for the suggester', () => {
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('suggester');
 
     expect(descriptor?.supportedCommunicationProviders).toEqual([
       'slack',
-      'discord',
+      'teams',
       'telegram',
+      'discord',
     ]);
   });
 
