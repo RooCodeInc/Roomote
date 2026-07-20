@@ -10,6 +10,7 @@ import {
   DEFAULT_OPENCODE_CLI_VERSION,
   resolveExpectedOpenCodeCliVersion,
 } from '../../../../commands/setup/shared-runtime-packages';
+import { resolveOpenCodeCommand } from './opencode-command';
 
 const OPENCODE_PLUGIN_PACKAGE_NAME = '@opencode-ai/plugin';
 const DEFAULT_OPENCODE_PLUGIN_SEED_TIMEOUT_MS = 60_000;
@@ -226,15 +227,19 @@ export async function resolveOpenCodePluginSeedVersion(options: {
 }): Promise<string> {
   const env = options.env ?? process.env;
   const expected = resolveExpectedOpenCodeCliVersion(env);
+  const probeEnv = {
+    ...env,
+    ...(options.pathEnv ? { PATH: options.pathEnv } : {}),
+  };
+  // Probe the same binary the harness will launch (`OPENCODE_COMMAND` wrapper
+  // or bare `opencode`), not a possibly different path-resolved CLI.
+  const probe = resolveOpenCodeCommand(['--version'], probeEnv);
 
   try {
-    const result = await execa('opencode', ['--version'], {
+    const result = await execa(probe.command, probe.args, {
       reject: false,
       stdin: 'ignore',
-      env: {
-        ...env,
-        ...(options.pathEnv ? { PATH: options.pathEnv } : {}),
-      },
+      env: probeEnv,
     });
 
     if (result.exitCode === 0) {
