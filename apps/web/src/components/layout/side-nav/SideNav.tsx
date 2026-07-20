@@ -21,6 +21,7 @@ import {
   SquareDashed,
 } from '@/components/system';
 import { ChatWidgetSideNavItem } from '@/components/layout/ChatWidgetButton';
+import { ReleaseNoticeSideNavItem } from '@/components/layout/release-notices';
 import { RoomoteWordmark, UserMenu } from '@/components/layout';
 import { useCommandPalette } from '@/components/layout/CommandPaletteContext';
 import {
@@ -407,6 +408,7 @@ export const SideNav = () => {
       <div className="w-full shrink-0">
         <div className={cn('mt-2 flex w-full flex-col gap-1 px-1')}>
           <ChatWidgetSideNavItem expanded={isSideNavExpanded} />
+          <ReleaseNoticeSideNavItem expanded={isSideNavExpanded} />
           <UserMenu expanded={isSideNavExpanded} />
         </div>
       </div>

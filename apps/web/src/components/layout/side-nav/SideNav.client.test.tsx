@@ -264,6 +264,10 @@ vi.mock('@/components/layout', () => ({
   UserMenu: () => <div data-testid="user-menu">user</div>,
 }));
 
+vi.mock('@/components/layout/release-notices', () => ({
+  ReleaseNoticeSideNavItem: () => null,
+}));
+
 vi.mock('@/components/layout/CommandPaletteContext', () => ({
   useCommandPalette: () => ({ setOpen: openCommandPaletteMock }),
 }));

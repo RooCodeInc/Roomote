@@ -172,6 +172,7 @@ This file tracks product releases for Roomote (single monorepo version). Automat
       '2026-07-11',
     )
     assert.match(section, /^## 0\.1\.0 \(2026-07-11\)/)
+    assert.match(section, /New capability\n\n### Highlights\n\n- New capability/)
     assert.match(section, /### Minor changes\n\n- New capability/)
     assert.match(section, /### Patch changes\n\n- Bug fix details/)
   })

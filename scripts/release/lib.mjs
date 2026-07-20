@@ -246,7 +246,30 @@ export function buildChangelogSection(pending, nextVersion, date) {
     byLevel[highest].push(summary);
   }
 
-  const lines = [`## ${nextVersion} (${date})`, ''];
+  const highlightSource =
+    byLevel.major[0] || byLevel.minor[0] || byLevel.patch[0] || null;
+  const releaseSummary = highlightSource
+    ? highlightSource
+    : '<one-sentence release summary — REPLACE ME>';
+  const highlights = (
+    highlightSource
+      ? [highlightSource, ...byLevel.major.slice(1), ...byLevel.minor.slice(1)]
+      : ['<highlight — REPLACE ME>']
+  ).slice(0, 4);
+
+  const lines = [
+    `## ${nextVersion} (${date})`,
+    '',
+    releaseSummary,
+    '',
+    '### Highlights',
+    '',
+  ];
+  for (const item of highlights) {
+    lines.push(`- ${item}`);
+  }
+  lines.push('');
+
   for (const [label, key] of [
     ['Major changes', 'major'],
     ['Minor changes', 'minor'],
