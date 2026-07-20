@@ -1612,12 +1612,26 @@ export function getDiscordReactionTargetFromTaskPayload(payload: unknown): {
   channelId: string;
   messageId: string;
 } | null {
+  const reactionChannelId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionChannelId',
+  );
+  const reactionMessageId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionMessageId',
+  );
+
+  // Dedicated reaction coordinates are one atomic target. Mixing one of them
+  // with communication metadata can pair a parent channel with a thread-only
+  // message and produce a Discord 404.
+  if (reactionChannelId && reactionMessageId) {
+    return { channelId: reactionChannelId, messageId: reactionMessageId };
+  }
+
   const channelId =
-    getNonEmptyTaskPayloadString(payload, 'discordReactionChannelId') ??
+    getCommunicationThreadIdFromTaskPayload(payload) ??
     getCommunicationChannelFromTaskPayload(payload);
-  const messageId =
-    getNonEmptyTaskPayloadString(payload, 'discordReactionMessageId') ??
-    getCommunicationMessageIdFromTaskPayload(payload);
+  const messageId = getCommunicationMessageIdFromTaskPayload(payload);
 
   if (!channelId || !messageId) {
     return null;

@@ -905,6 +905,21 @@ describe('taskSpecSchema', () => {
     expect(
       getDiscordReactionTargetFromTaskPayload({
         communicationChannelId: 'comm-chan',
+        communicationThreadId: 'comm-thread',
+        communicationMessageId: 'comm-msg',
+      }),
+    ).toEqual({ channelId: 'comm-thread', messageId: 'comm-msg' });
+    expect(
+      getDiscordReactionTargetFromTaskPayload({
+        discordReactionChannelId: 'incomplete-react-chan',
+        communicationChannelId: 'comm-chan',
+        communicationThreadId: 'comm-thread',
+        communicationMessageId: 'comm-msg',
+      }),
+    ).toEqual({ channelId: 'comm-thread', messageId: 'comm-msg' });
+    expect(
+      getDiscordReactionTargetFromTaskPayload({
+        communicationChannelId: 'comm-chan',
         communicationMessageId: 'comm-msg',
       }),
     ).toEqual({ channelId: 'comm-chan', messageId: 'comm-msg' });

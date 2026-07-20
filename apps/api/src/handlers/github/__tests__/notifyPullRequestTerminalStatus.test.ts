@@ -328,6 +328,7 @@ describe('notifyPullRequestTerminalStatus', () => {
         payload: {
           communicationProvider: 'discord',
           communicationChannelId: 'channel-9',
+          communicationThreadId: 'thread-9',
           communicationMessageId: 'origin-fallback',
         },
       },
@@ -336,7 +337,7 @@ describe('notifyPullRequestTerminalStatus', () => {
     await notifyPullRequestTerminalStatus(baseParams);
 
     expect(mockAddReaction).toHaveBeenCalledWith({
-      channelId: 'channel-9',
+      channelId: 'thread-9',
       messageId: 'origin-fallback',
       name: 'white_check_mark',
     });
