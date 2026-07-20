@@ -3,20 +3,14 @@ import {
   enqueueTask,
 } from '@roomote/cloud-agents/server';
 import {
-  asc,
   db,
-  environmentRepositoryMappings,
-  eq,
   getBackgroundAgentSettingsForDeployment,
   recordAutomationRunOutcome,
 } from '@roomote/db/server';
-import {
-  TaskPayloadKind,
-  type SourceControlProvider,
-  type TaskSurface,
-} from '@roomote/types';
+import { TaskPayloadKind, type SourceControlProvider } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { resolveMappedEnvironmentId } from './repository-environment';
 
 const LOG_PREFIX = '[issueFixerLaunch]';
 
@@ -35,28 +29,6 @@ type IssueFixerLaunchIssue = {
 };
 
 /**
- * Resolve environment coverage from the concrete repository row id so same
- * owner/repo names on different providers (or hosts) cannot pick the wrong env.
- */
-async function resolveMappedEnvironmentId(
-  repositoryId: string,
-): Promise<string | null> {
-  const mappings = await db
-    .select({
-      environmentId: environmentRepositoryMappings.environmentId,
-    })
-    .from(environmentRepositoryMappings)
-    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId))
-    .orderBy(asc(environmentRepositoryMappings.environmentId));
-
-  if (mappings.length === 0) {
-    return null;
-  }
-
-  return mappings[0]?.environmentId ?? null;
-}
-
-/**
  * Shared launch path for webhook-driven issue triage across supported SCMs.
  * Caller has already resolved the active Roomote repository row and normalized
  * the issue payload.
@@ -65,14 +37,16 @@ export async function launchIssueFixerTriage({
   sourceControlProvider,
   repositoryId,
   repositoryFullName,
+  sourceControlHost,
   issue,
   continueMention,
   githubAppSlug,
 }: {
   sourceControlProvider: IssueFixerSourceControlProvider;
-  /** Active Roomote repositories.id for provider/host-scoped env lookup. */
+  /** Internal id of the host-scoped repository row resolved by the webhook. */
   repositoryId: string;
   repositoryFullName: string;
+  sourceControlHost?: string | null;
   issue: IssueFixerLaunchIssue;
   /** Provider-native follow-up tag humans should use (e.g. `@roomote`). */
   continueMention?: string;
@@ -95,12 +69,8 @@ export async function launchIssueFixerTriage({
   }
 
   const repositoryCoverage = [
-    {
-      repositoryFullName,
-      targetEnvironmentId: environmentId,
-    },
+    { repositoryFullName, targetEnvironmentId: environmentId },
   ];
-  const surface = sourceControlProvider as TaskSurface;
 
   try {
     const description = buildIssueFixerFixPrompt({
@@ -133,11 +103,12 @@ export async function launchIssueFixerTriage({
             description,
             visibleInTranscript: false,
             sourceControlProvider,
+            ...(sourceControlHost ? { sourceControlHost } : {}),
           },
         },
         initiator: { kind: 'automation', key: 'issue_fixer' },
         workflow: 'standard',
-        surface,
+        surface: sourceControlProvider,
         trigger: 'webhook',
         visibility: 'hidden',
       },

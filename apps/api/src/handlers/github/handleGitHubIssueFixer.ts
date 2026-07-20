@@ -64,6 +64,7 @@ export async function handleGitHubIssueFixer(
     .select({
       repositoryId: repositories.id,
       repositoryFullName: repositories.fullName,
+      sourceControlHost: repositories.host,
     })
     .from(repositories)
     .innerJoin(
@@ -89,6 +90,7 @@ export async function handleGitHubIssueFixer(
     sourceControlProvider: 'github',
     repositoryId: match.repositoryId,
     repositoryFullName: match.repositoryFullName,
+    sourceControlHost: match.sourceControlHost,
     githubAppSlug,
     issue: {
       number: payload.issue.number,

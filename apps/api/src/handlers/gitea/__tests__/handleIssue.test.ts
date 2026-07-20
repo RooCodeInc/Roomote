@@ -74,6 +74,7 @@ describe('handleGiteaIssue', () => {
       sourceControlProvider: 'gitea',
       repositoryId: 'repo-row-id',
       repositoryFullName: 'acme/backend',
+      sourceControlHost: 'git.example.com',
       continueMention: '@roomote',
       issue: {
         number: 77,

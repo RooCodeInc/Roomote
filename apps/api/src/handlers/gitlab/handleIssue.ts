@@ -75,6 +75,7 @@ export async function handleGitLabIssue(
     sourceControlProvider: 'gitlab',
     repositoryId: repo.id,
     repositoryFullName: repo.fullName,
+    sourceControlHost: repo.host,
     continueMention: '@roomote',
     issue: {
       number: attrs.iid,

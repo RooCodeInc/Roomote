@@ -9,6 +9,7 @@ import {
   repositories,
   slackInstallations,
 } from '@roomote/db/server';
+import type { SourceControlProvider } from '@roomote/types';
 
 export async function hasActiveSlackInstallation() {
   const installation = await db.query.slackInstallations.findFirst({
@@ -32,30 +33,22 @@ export async function hasActiveGitHubInstallation() {
   return Boolean(installation);
 }
 
-export async function hasActiveRepository() {
+export async function hasActiveRepository(
+  sourceControlProviders?: readonly SourceControlProvider[],
+) {
+  if (sourceControlProviders?.length === 0) {
+    return false;
+  }
+
   const repository = await db.query.repositories.findFirst({
-    where: eq(repositories.isActive, true),
-    columns: { id: true },
-  });
-
-  return Boolean(repository);
-}
-
-/** Providers that can drive webhook-based Triage Issues today. */
-const ISSUE_TRIAGE_SOURCE_CONTROL_PROVIDERS = [
-  'github',
-  'gitlab',
-  'gitea',
-] as const;
-
-export async function hasActiveIssueTriageRepository() {
-  const repository = await db.query.repositories.findFirst({
-    where: and(
-      eq(repositories.isActive, true),
-      inArray(repositories.sourceControlProvider, [
-        ...ISSUE_TRIAGE_SOURCE_CONTROL_PROVIDERS,
-      ]),
-    ),
+    where: sourceControlProviders
+      ? and(
+          eq(repositories.isActive, true),
+          inArray(repositories.sourceControlProvider, [
+            ...sourceControlProviders,
+          ]),
+        )
+      : eq(repositories.isActive, true),
     columns: { id: true },
   });
 

@@ -1,99 +1,88 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockGetSettings, mockRecordOutcome, mockEnqueueTask, mockSelectFrom } =
-  vi.hoisted(() => ({
-    mockGetSettings: vi.fn(),
-    mockRecordOutcome: vi.fn(),
-    mockEnqueueTask: vi.fn(),
-    mockSelectFrom: vi.fn(),
-  }));
+const {
+  mockBuildIssueFixerFixPrompt,
+  mockEnqueueTask,
+  mockGetBackgroundAgentSettings,
+  mockRecordAutomationRunOutcome,
+  mockResolveMappedEnvironmentId,
+} = vi.hoisted(() => ({
+  mockBuildIssueFixerFixPrompt: vi.fn(),
+  mockEnqueueTask: vi.fn(),
+  mockGetBackgroundAgentSettings: vi.fn(),
+  mockRecordAutomationRunOutcome: vi.fn(),
+  mockResolveMappedEnvironmentId: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  buildIssueFixerFixPrompt: vi.fn(
-    ({ environmentId }: { environmentId: string }) =>
-      `prompt-for-${environmentId}`,
-  ),
+  buildIssueFixerFixPrompt: mockBuildIssueFixerFixPrompt,
   enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  asc: (value: unknown) => value,
-  db: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          orderBy: mockSelectFrom,
-        })),
-      })),
-    })),
-  },
-  environmentRepositoryMappings: {
-    environmentId: 'environmentId',
-    repositoryId: 'repositoryId',
-  },
-  eq: (...args: unknown[]) => args,
-  getBackgroundAgentSettingsForDeployment: mockGetSettings,
-  recordAutomationRunOutcome: mockRecordOutcome,
+  db: {},
+  getBackgroundAgentSettingsForDeployment: mockGetBackgroundAgentSettings,
+  recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
 }));
 
-vi.mock('@roomote/types', async () => {
-  const actual =
-    await vi.importActual<typeof import('@roomote/types')>('@roomote/types');
-  return {
-    ...actual,
-    TaskPayloadKind: actual.TaskPayloadKind,
-  };
-});
+vi.mock('../repository-environment', () => ({
+  resolveMappedEnvironmentId: mockResolveMappedEnvironmentId,
+}));
 
 import { launchIssueFixerTriage } from '../issue-fixer-launch';
 
 describe('launchIssueFixerTriage', () => {
   beforeEach(() => {
-    mockGetSettings.mockReset();
-    mockRecordOutcome.mockReset();
-    mockEnqueueTask.mockReset();
-    mockSelectFrom.mockReset();
-    mockGetSettings.mockResolvedValue({ issueFixerFrequency: 'daily' });
-    mockRecordOutcome.mockResolvedValue(undefined);
+    vi.clearAllMocks();
+    mockGetBackgroundAgentSettings.mockResolvedValue({
+      issueFixerFrequency: 'daily',
+    });
+    mockResolveMappedEnvironmentId.mockResolvedValue('env-host-scoped');
+    mockBuildIssueFixerFixPrompt.mockReturnValue('$issue-fixer\n<context />');
     mockEnqueueTask.mockResolvedValue({ taskId: 'task-1' });
+    mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
   });
 
-  it('resolves environment by repository id mapping, not full name alone', async () => {
-    mockSelectFrom.mockResolvedValue([{ environmentId: 'env-gitlab-only' }]);
-
+  it('preserves the resolved repository id, provider, and host through launch', async () => {
     await expect(
       launchIssueFixerTriage({
         sourceControlProvider: 'gitlab',
-        repositoryId: 'repo-gitlab-id',
+        repositoryId: 'repo-host-scoped',
         repositoryFullName: 'acme/backend',
+        sourceControlHost: 'git.example.com',
         continueMention: '@roomote',
         issue: {
-          number: 3,
-          title: 'Broken',
-          url: 'https://gitlab.com/acme/backend/-/issues/3',
+          number: 9,
+          title: 'Broken checkout',
+          url: 'https://git.example.com/acme/backend/-/issues/9',
         },
       }),
     ).resolves.toMatchObject({
       status: 'ok',
-      message: expect.stringContaining('Launched Triage Issues'),
+      metadata: { taskId: 'task-1' },
     });
 
+    expect(mockResolveMappedEnvironmentId).toHaveBeenCalledWith(
+      'repo-host-scoped',
+    );
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
-            environmentId: 'env-gitlab-only',
-            sourceControlProvider: 'gitlab',
             repo: 'acme/backend',
+            environmentId: 'env-host-scoped',
+            sourceControlProvider: 'gitlab',
+            sourceControlHost: 'git.example.com',
           }),
         }),
+        surface: 'gitlab',
       }),
-      expect.anything(),
+      { launchClass: 'automation' },
     );
   });
 
-  it('skips launch when the mapped repository has no environment', async () => {
-    mockSelectFrom.mockResolvedValue([]);
+  it('skips launch when the repository has no mapped environment', async () => {
+    mockResolveMappedEnvironmentId.mockResolvedValue(null);
 
     await expect(
       launchIssueFixerTriage({

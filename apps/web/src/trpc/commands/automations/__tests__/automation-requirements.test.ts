@@ -1,59 +1,83 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockFindFirst } = vi.hoisted(() => ({
+const { mockFindFirst, mockAnd, mockEq, mockInArray } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
+  mockAnd: vi.fn((...conditions: unknown[]) => ({ conditions })),
+  mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
+  mockInArray: vi.fn((column: unknown, values: unknown[]) => ({
+    column,
+    values,
+  })),
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  and: (...args: unknown[]) => args,
+  and: mockAnd,
+  eq: mockEq,
+  inArray: mockInArray,
+  isNull: vi.fn(),
   db: {
     query: {
-      repositories: {
-        findFirst: mockFindFirst,
-      },
-      githubInstallations: {
-        findFirst: vi.fn(),
-      },
-      slackInstallations: {
-        findFirst: vi.fn(),
-      },
-      mcpConnections: {
-        findFirst: vi.fn(),
-      },
+      repositories: { findFirst: mockFindFirst },
+      githubInstallations: { findFirst: vi.fn() },
+      mcpConnections: { findFirst: vi.fn() },
+      slackInstallations: { findFirst: vi.fn() },
     },
   },
-  eq: (...args: unknown[]) => args,
-  githubInstallations: {},
-  inArray: (...args: unknown[]) => args,
-  isNull: (...args: unknown[]) => args,
-  mcpConnections: {},
+  githubInstallations: { suspendedAt: 'suspendedAt' },
+  mcpConnections: {
+    mcpId: 'mcpId',
+    enabled: 'enabled',
+    authStatus: 'authStatus',
+    userId: 'userId',
+  },
   repositories: {
     isActive: 'isActive',
     sourceControlProvider: 'sourceControlProvider',
   },
-  slackInstallations: {},
+  slackInstallations: { isActive: 'isActive' },
 }));
 
-import {
-  hasActiveIssueTriageRepository,
-  hasActiveRepository,
-} from '../automation-requirements';
+import { hasActiveRepository } from '../automation-requirements';
 
-describe('automation repository requirements', () => {
+describe('hasActiveRepository', () => {
   beforeEach(() => {
-    mockFindFirst.mockReset();
+    vi.clearAllMocks();
+    mockFindFirst.mockResolvedValue({ id: 'repo-1' });
   });
 
-  it('hasActiveRepository accepts any active repository provider', async () => {
-    mockFindFirst.mockResolvedValue({ id: 'ado-repo' });
+  it('accepts any active provider when no capability filter is supplied', async () => {
     await expect(hasActiveRepository()).resolves.toBe(true);
+
+    expect(mockInArray).not.toHaveBeenCalled();
   });
 
-  it('hasActiveIssueTriageRepository requires an active GH/GL/Gitea repo', async () => {
-    mockFindFirst.mockResolvedValueOnce(null);
-    await expect(hasActiveIssueTriageRepository()).resolves.toBe(false);
+  it('filters by the automation supported source-control providers', async () => {
+    await expect(
+      hasActiveRepository(['github', 'gitlab', 'gitea']),
+    ).resolves.toBe(true);
 
-    mockFindFirst.mockResolvedValueOnce({ id: 'gl-repo' });
-    await expect(hasActiveIssueTriageRepository()).resolves.toBe(true);
+    expect(mockInArray).toHaveBeenCalledWith('sourceControlProvider', [
+      'github',
+      'gitlab',
+      'gitea',
+    ]);
+    expect(mockFindFirst).toHaveBeenCalledWith({
+      where: {
+        conditions: [
+          { column: 'isActive', value: true },
+          {
+            column: 'sourceControlProvider',
+            values: ['github', 'gitlab', 'gitea'],
+          },
+        ],
+      },
+      columns: { id: true },
+    });
+  });
+
+  it('fails closed when a capability descriptor has no providers', async () => {
+    await expect(hasActiveRepository([])).resolves.toBe(false);
+
+    expect(mockFindFirst).not.toHaveBeenCalled();
   });
 });

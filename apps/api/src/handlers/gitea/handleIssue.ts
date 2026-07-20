@@ -83,6 +83,7 @@ export async function handleGiteaIssue(
     sourceControlProvider: 'gitea',
     repositoryId: repo.id,
     repositoryFullName: repo.fullName,
+    sourceControlHost: repo.host,
     continueMention: '@roomote',
     issue: {
       number: issue.number,

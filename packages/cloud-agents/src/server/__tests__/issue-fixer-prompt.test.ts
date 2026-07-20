@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildIssueFixerFixPrompt } from '../issue-fixer-prompt';
 
 describe('buildIssueFixerFixPrompt', () => {
-  it('injects the configured GitHub app mention into comment templates', () => {
+  it('injects the configured GitHub app mention into provider-neutral context', () => {
     const prompt = buildIssueFixerFixPrompt({
       repositoryFullName: 'acme/api',
       environmentId: 'env-api',
@@ -24,23 +24,15 @@ describe('buildIssueFixerFixPrompt', () => {
       },
     });
 
-    expect(prompt).toContain(
-      '<github_app_mention>@roomote-roomote</github_app_mention>',
-    );
+    expect(prompt.startsWith('$issue-fixer')).toBe(true);
     expect(prompt).toContain(
       '<continue_mention>@roomote-roomote</continue_mention>',
     );
-    expect(prompt).toContain(
-      'Please tag @roomote-roomote in your response with the answers',
-    );
-    expect(prompt).toContain(
-      "Please tag @roomote-roomote if you'd like me to implement this",
-    );
-    expect(prompt).not.toContain('Please tag @roomote in your response');
-    expect(prompt).not.toContain("Please tag @roomote if you'd like me");
+    expect(prompt).not.toContain('<github_app_mention>');
+    expect(prompt).not.toContain('Comment formats');
   });
 
-  it('uses GitLab-specific continue mention and avoids gh guidance', () => {
+  it('uses provider-neutral GitLab context without duplicating tool guidance', () => {
     const prompt = buildIssueFixerFixPrompt({
       repositoryFullName: 'group/project',
       environmentId: 'env-api',
@@ -69,8 +61,9 @@ describe('buildIssueFixerFixPrompt', () => {
     );
     expect(prompt).toContain('<continue_mention>@roomote</continue_mention>');
     expect(prompt).toContain('Triage GitLab issue #9');
-    expect(prompt).toContain('Do not use `gh`');
     expect(prompt).toContain('source="gitlab_issue_body"');
+    expect(prompt).not.toContain('GITLAB_TOKEN');
+    expect(prompt).not.toContain('GitLab REST API');
   });
 
   it('escapes and delimits attacker-controlled issue fields', () => {

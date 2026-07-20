@@ -669,7 +669,8 @@ roomoteMcpServer.registerTool(
   {
     title: 'Manage Source Control',
     description:
-      'Provider-neutral pull request/merge request operations for the current task. ' +
+      'Provider-neutral issue and pull request/merge request operations for the current task. ' +
+      'Use "get_issue", "list_issue_comments", and "create_issue_comment" for plain issues. ' +
       'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
       'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
@@ -692,9 +693,12 @@ roomoteMcpServer.registerTool(
           'resolve_pull_request_thread',
           'submit_pull_request_review',
           'update_pull_request_comment',
+          'get_issue',
+          'list_issue_comments',
+          'create_issue_comment',
         ])
         .describe(
-          'create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level comment; resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -707,7 +711,15 @@ roomoteMcpServer.registerTool(
         .positive()
         .optional()
         .describe(
-          'Required for every action except create_or_update_pull_request and list_pull_requests: the PR/MR number (GitLab iid).',
+          'Required for single-PR/MR actions; unused by issue actions, create_or_update_pull_request, and list_pull_requests.',
+        ),
+      issueNumber: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Required for get_issue, list_issue_comments, and create_issue_comment.',
         ),
       state: z
         .literal('open')
@@ -770,7 +782,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'The text content: the PR/MR description for create_or_update_pull_request (required there), the comment text for reply/create comment actions (required there), or the optional review body for submit_pull_request_review.',
+          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, or the optional review body for submit_pull_request_review.',
         ),
       labels: z
         .array(z.string())

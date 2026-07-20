@@ -47,19 +47,6 @@ function resolveContinueMention({
   return '@roomote';
 }
 
-function commentHowTo(sourceControlProvider: SourceControlProvider): string {
-  switch (sourceControlProvider) {
-    case 'github':
-      return 'Post one top-level issue comment with `gh issue comment <number> --repo <owner/repo> --body "..."` (or the equivalent GitHub API). Do not use GitLab/Gitea CLIs.';
-    case 'gitlab':
-      return 'Post one issue note with the GitLab REST API (`POST /projects/:id/issues/:iid/notes`) using `GITLAB_TOKEN` / credential already in the environment, or `glab` if available. Do not use `gh`.';
-    case 'gitea':
-      return 'Post one issue comment with the Gitea REST API (`POST /api/v1/repos/{owner}/{repo}/issues/{index}/comments`) using `GITEA_TOKEN` / credential already in the environment. Do not use `gh`.';
-    default:
-      return 'Post one top-level comment on the issue using the source-control credentials already in the task environment. Do not use GitHub-only CLIs such as `gh` unless the provider is GitHub.';
-  }
-}
-
 /**
  * Builds the one-task Triage Issues prompt: investigate a named issue and post
  * either clarifying questions or a plan on that issue (provider-neutral).
@@ -120,7 +107,7 @@ export function buildIssueFixerFixPrompt({
   });
   const providerLabel = getSourceControlProviderLabel(sourceControlProvider);
 
-  return `$plan-repo-implementation
+  return `$issue-fixer
 
 <task_context>
   <source>issue_fixer</source>
@@ -130,7 +117,6 @@ export function buildIssueFixerFixPrompt({
   <repository_scope>${repositoryFullName}</repository_scope>
   <target_environment_id>${environmentId}</target_environment_id>
   <continue_mention>${appMention}</continue_mention>
-  <github_app_mention>${appMention}</github_app_mention>
   <issue>
     <url>${escapeTaskContextText(issue.url)}</url>
     <number>${issue.number}</number>
@@ -150,38 +136,5 @@ Issue body:
 ${issueBodySection}
 
 ${buildUntrustedContentPolicy()}
-
-Process:
-1. Re-fetch the live issue and read comments using the ${providerLabel} credentials already in the task environment.
-2. Explore the codebase enough to ground any plan in real files and patterns.
-3. If material details are missing (acceptance criteria, expected behavior, scope, constraints, ownership), post clarifying questions and stop. Do not invent product decisions.
-4. Otherwise post a proposed implementation plan and stop.
-5. Skip with a brief comment (or a terse internal note if a comment would be noise) when the issue is closed, is a pull request, already has a recent full plan or active fix PR, or is waiting on unanswered questions you already asked.
-6. Stay quiet on chat unless you need input outside the issue tracker, hit a blocker, or finish with a result.
-7. When asking humans to follow up so Roomote continues, tell them to tag ${appMention} (the configured continue_mention from task_context). Do not hard-code a different handle.
-8. ${commentHowTo(sourceControlProvider)}
-${environmentSection}
-Comment formats (post one issue comment using one of these body shapes):
-
-**When you need clarification:**
-
-I'd like to help with this issue, but I need some clarification to ensure I implement the right solution. Could you please provide more details on the following:
-
-- What is the expected behavior when [scenario]?
-- Could you provide more details about [unclear aspect]?
-- Are there any specific constraints or requirements I should be aware of?
-
-Please tag ${appMention} in your response with the answers, and I'll be happy to implement the fix once I have this information.
-
-**When you have a plan:**
-
-I've analyzed this issue and here's my proposed implementation plan:
-
-1. Modify [file/component] to [change]
-2. Add [functionality] to handle [scenario]
-3. Update [tests/docs] accordingly
-
-This approach will [explain the benefits and how it solves the issue].
-
-Please tag ${appMention} if you'd like me to implement this, or reply with feedback on the plan.`;
+${environmentSection}`;
 }

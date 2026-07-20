@@ -5,11 +5,14 @@ import { z } from 'zod';
 import {
   createOrUpdateSourceControlPullRequestForTaskRun,
   findTaskRunForSourceControlMutation,
+  manageSourceControlIssueForTaskRun,
   readSourceControlPullRequestForTaskRun,
+  sourceControlIssueInputSchema,
   sourceControlPullRequestMutationInputSchema,
   sourceControlPullRequestReadInputSchema,
   sourceControlPullRequestWriteInputSchema,
   SourceControlMutationError,
+  SourceControlIssueError,
   SourceControlReadError,
   SourceControlWriteError,
   writeSourceControlPullRequestForTaskRun,
@@ -27,9 +30,9 @@ import { logHandlerError } from '../utils';
 /**
  * POST /api/mcp/tasks/:taskId/source_control
  *
- * Mutate source-control state for the currently authenticated task run.
- * This keeps provider API tokens server-side while allowing sandboxes to
- * create or refresh provider-neutral PR/MR metadata.
+ * Read or mutate source-control state for the currently authenticated task
+ * run. This keeps provider API tokens server-side while allowing sandboxes to
+ * operate on provider-neutral issues and pull requests.
  */
 export async function manageSourceControl(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
@@ -56,6 +59,7 @@ export async function manageSourceControl(
         sourceControlPullRequestMutationInputSchema,
         sourceControlPullRequestReadInputSchema,
         sourceControlPullRequestWriteInputSchema,
+        sourceControlIssueInputSchema,
       ])
       .parse(await c.req.json());
     const taskRun = await findTaskRunForSourceControlMutation({
@@ -91,6 +95,15 @@ export async function manageSourceControl(
             input,
           }),
         );
+      case 'get_issue':
+      case 'list_issue_comments':
+      case 'create_issue_comment':
+        return c.json(
+          await manageSourceControlIssueForTaskRun({
+            taskRun,
+            input,
+          }),
+        );
     }
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -106,6 +119,7 @@ export async function manageSourceControl(
 
     if (
       error instanceof SourceControlMutationError ||
+      error instanceof SourceControlIssueError ||
       error instanceof SourceControlReadError ||
       error instanceof SourceControlWriteError
     ) {

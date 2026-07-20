@@ -32,7 +32,6 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   hasActiveGitHubInstallation,
-  hasActiveIssueTriageRepository,
   hasActiveRepository,
   hasActiveSentryIntegration,
   hasActiveSlackInstallation,
@@ -937,9 +936,13 @@ export async function updateBackgroundAgentSettingsCommand(
       'Add at least one active repository before enabling Triage CodeQL Alerts.';
   }
 
+  const issueFixerProviders =
+    getTriggerableBackgroundAutomationDescriptorByKey('issue_fixer')
+      ?.supportedSourceControlProviders ?? [];
+
   if (
     issueFixerFrequency !== 'off' &&
-    !(await hasActiveIssueTriageRepository())
+    !(await hasActiveRepository(issueFixerProviders))
   ) {
     fieldErrors.general =
       fieldErrors.general ||

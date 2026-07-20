@@ -91,6 +91,16 @@ export interface SourceControlPullRequestReadResponse {
   [key: string]: unknown;
 }
 
+export interface SourceControlIssueResponse {
+  success: true;
+  action: 'get_issue' | 'list_issue_comments' | 'create_issue_comment';
+  provider: SourceControlProvider;
+  repositoryFullName: string;
+  number: number;
+  warnings: string[];
+  [key: string]: unknown;
+}
+
 export interface LaunchTaskResponse {
   success: boolean;
   runId?: number;

@@ -74,6 +74,7 @@ describe('handleGitLabIssue', () => {
       sourceControlProvider: 'gitlab',
       repositoryId: 'repo-row-id',
       repositoryFullName: 'acme/backend',
+      sourceControlHost: 'gitlab.com',
       continueMention: '@roomote',
       issue: {
         number: 9,
