@@ -60,6 +60,7 @@ export function buildIssueFixerFixPrompt({
   sourceControlProvider = 'github',
   continueMention,
   githubAppSlug,
+  additionalInstructions,
 }: {
   repositoryFullName: string;
   environmentId: string;
@@ -71,6 +72,8 @@ export function buildIssueFixerFixPrompt({
   continueMention?: string;
   /** Deployment-configured GitHub App slug used for @mentions on GitHub. */
   githubAppSlug?: string;
+  /** Optional team instructions from Triage Issues automation settings. */
+  additionalInstructions?: string | null;
 }): string {
   const coverage =
     repositoryCoverage ??
@@ -106,6 +109,10 @@ export function buildIssueFixerFixPrompt({
     githubAppSlug,
   });
   const providerLabel = getSourceControlProviderLabel(sourceControlProvider);
+  const trimmedInstructions = additionalInstructions?.trim();
+  const additionalInstructionsSection = trimmedInstructions
+    ? `\nAdditional team instructions:\n${trimmedInstructions}\n`
+    : '';
 
   return `$issue-fixer
 
@@ -136,5 +143,5 @@ Issue body:
 ${issueBodySection}
 
 ${buildUntrustedContentPolicy()}
-${environmentSection}`;
+${additionalInstructionsSection}${environmentSection}`;
 }
