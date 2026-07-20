@@ -162,7 +162,7 @@ describe('TelegramCommunicationProvider', () => {
     );
   });
 
-  it('sends topic messages without duplicative reply quotes', async () => {
+  it('honors an explicit reply target on the first topic message', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -204,9 +204,42 @@ describe('TelegramCommunicationProvider', () => {
             is_disabled: true,
           },
           message_thread_id: 7,
+          reply_parameters: {
+            message_id: 42,
+            allow_sending_without_reply: true,
+          },
         }),
       }),
     );
+  });
+
+  it('leaves messages free-floating when no reply target is supplied', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: {
+          message_id: 99,
+          message_thread_id: 7,
+        },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '-100456',
+      threadId: '7',
+      text: 'hello from Roomote',
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { reply_parameters?: unknown };
+
+    expect(body.reply_parameters).toBeUndefined();
   });
 
   it('sends markdown text as Telegram HTML when textFormat is markdown', async () => {
@@ -316,7 +349,10 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: unknown };
 
-    expect(firstBody.reply_parameters).toBeUndefined();
+    expect(firstBody.reply_parameters).toEqual({
+      message_id: 42,
+      allow_sending_without_reply: true,
+    });
     expect(secondBody.reply_parameters).toBeUndefined();
   });
 
@@ -392,7 +428,10 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: { message_id: number } };
 
-    expect(photoBody.reply_parameters).toBeUndefined();
+    expect(photoBody.reply_parameters).toEqual({
+      message_id: 42,
+      allow_sending_without_reply: true,
+    });
   });
 
   it('falls back to a link message when sendPhoto fails', async () => {

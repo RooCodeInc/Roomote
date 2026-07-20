@@ -681,6 +681,7 @@ async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
   }
 
   const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
+  const messageId = getCommunicationMessageIdFromTaskPayload(run.payload);
   const failureText = hasReachedTaskRuntime(run)
     ? TASK_RUNTIME_FAILURE_TEXT
     : TASK_STARTUP_FAILURE_TEXT;
@@ -695,6 +696,7 @@ async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
   await provider.postMessage({
     channelId,
     ...(threadId ? { threadId } : {}),
+    ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
     text,
     textFormat: 'markdown',
   });
