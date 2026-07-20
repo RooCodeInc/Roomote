@@ -63,3 +63,12 @@ export function useEnvironment(id: string | undefined) {
     ),
   );
 }
+
+export function useAvailableEnvironments(repository?: string) {
+  const trpc = useTRPC();
+  return useQuery(
+    trpc.environments.available.queryOptions(
+      repository ? { repository } : undefined,
+    ),
+  );
+}

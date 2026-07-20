@@ -89,6 +89,7 @@ function AuthorizedCommandPalette() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const { recentTaskIds } = useRecentTasks();
+  const { user } = useUser();
   const shouldDisableAutoFocus = useShouldDisableCommandPaletteAutoFocus();
   const [selectedValue, setSelectedValue] = useState('');
   const hadTasksRef = useRef(false);
@@ -97,12 +98,18 @@ function AuthorizedCommandPalette() {
     const items: NavItem[] = [
       { icon: Plus, label: 'New Task', href: '/' },
       { icon: GalleryVerticalEnd, label: 'Tasks', href: '/tasks' },
-      { icon: ChartColumnIncreasing, label: 'Analytics', href: '/analytics' },
       { icon: Settings, label: 'Settings', href: '/settings' },
       { icon: HelpCircle, label: 'Help', action: 'contact-support' },
     ];
+    if (user?.isAdmin) {
+      items.splice(2, 0, {
+        icon: ChartColumnIncreasing,
+        label: 'Analytics',
+        href: '/analytics',
+      });
+    }
     return items;
-  }, []);
+  }, [user?.isAdmin]);
 
   // Debounce search input
   useEffect(() => {

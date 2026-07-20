@@ -111,10 +111,6 @@ vi.mock('./StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
 }));
 
-vi.mock('./StepCompletedBadge', () => ({
-  StepCompletedBadge: ({ text }: { text: string }) => <div>{text}</div>,
-}));
-
 vi.mock('@/components/system', () => ({
   Alert: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   AlertCircle: () => <span>AlertCircle</span>,
@@ -368,27 +364,33 @@ describe('Setup StepInvoke', () => {
     });
   });
 
-  it('clarifies that GitHub mentions work on any PR', () => {
+  it('shows a concrete GitHub comment example', () => {
     render(<StepInvoke sourceControlProviders={['github']} />);
 
     expect(
-      screen.getByText('Mention @roomote in a comment on any PR.'),
+      screen.getByText(
+        'On a pull request, comment: @roomote address the PR feedback above',
+      ),
     ).toBeInTheDocument();
   });
 
-  it('clarifies that GitLab mentions work on any merge request', () => {
+  it('shows a concrete GitLab comment example', () => {
     render(<StepInvoke sourceControlProviders={['gitlab']} />);
 
     expect(
-      screen.getByText('Mention @roomote in a comment on any merge request.'),
+      screen.getByText(
+        'On a merge request, comment: @roomote address the feedback above.',
+      ),
     ).toBeInTheDocument();
   });
 
-  it('clarifies that Bitbucket Cloud mentions work on any pull request', () => {
+  it('shows a concrete Bitbucket Cloud comment example', () => {
     render(<StepInvoke sourceControlProviders={['bitbucket']} />);
 
     expect(
-      screen.getByText('Mention @roomote in a comment on any pull request.'),
+      screen.getByText(
+        'On a pull request, comment: @roomote address the feedback above.',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -417,16 +419,14 @@ describe('Setup StepInvoke', () => {
     ]);
   });
 
-  it('discovers configured Discord and explains task threads', () => {
+  it('discovers configured Discord and shows a concrete prompt example', () => {
     environmentState.commsProviders = [{ id: 'discord', setupSatisfied: true }];
 
     render(<StepInvoke />);
 
     expect(screen.getByText(/^Discord:/)).toBeInTheDocument();
     expect(
-      screen.getByText(
-        'mention it in a server channel, use /new, or continue work in a task thread.',
-      ),
+      screen.getByText('Try: @roomote Add support for a reset password flow.'),
     ).toBeInTheDocument();
   });
 

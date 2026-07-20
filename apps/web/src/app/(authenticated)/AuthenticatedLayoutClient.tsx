@@ -28,6 +28,13 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   const { authStatus, isSignedIn, user } = useUser();
   const trpc = useTRPC();
   const shouldCheckSetup = isSignedIn && user.isAdmin;
+  const shouldCheckOnboarding = isSignedIn && !user.isAdmin;
+  const { data: onboardingStatus, isLoading: isOnboardingLoading } = useQuery(
+    trpc.onboarding.status.queryOptions(undefined, {
+      enabled: shouldCheckOnboarding,
+      staleTime: 30_000,
+    }),
+  );
   const {
     data: setupStatus,
     isLoading: isSetupLoading,
@@ -49,20 +56,36 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
     setupRedirectPath !== null &&
     pathname !== setupRedirectPath &&
     !pathname.startsWith(`${setupRedirectPath}/`);
+  const isRedirectingForOnboarding =
+    shouldCheckOnboarding &&
+    !isOnboardingLoading &&
+    onboardingStatus?.onboardingCompletedAt == null &&
+    !pathname.startsWith('/onboarding');
 
   useRedirectToSignIn(authStatus === 'signed-out');
 
   useEffect(() => {
     if (isRedirectingForSetup && setupRedirectPath) {
       router.replace(setupRedirectPath);
+    } else if (isRedirectingForOnboarding) {
+      router.replace('/onboarding');
     }
-  }, [isRedirectingForSetup, router, setupRedirectPath]);
+  }, [
+    isRedirectingForOnboarding,
+    isRedirectingForSetup,
+    router,
+    setupRedirectPath,
+  ]);
 
   if (!isSignedIn) {
     return null;
   }
 
-  if (shouldCheckSetup && (isSetupLoading || isRedirectingForSetup)) {
+  if (
+    (shouldCheckSetup && (isSetupLoading || isRedirectingForSetup)) ||
+    (shouldCheckOnboarding &&
+      (isOnboardingLoading || isRedirectingForOnboarding))
+  ) {
     return null;
   }
 

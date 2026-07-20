@@ -165,7 +165,8 @@ async function ensureDeploymentIdentity({
           entity: userEntity,
           metadata: {},
           role: insertRole,
-          onboardingCompletedAt: now,
+          // New Members link their personal accounts before using Roomote.
+          onboardingCompletedAt: insertRole === 'member' ? null : now,
           invitedByInviteId: invitedByInviteId ?? null,
         })
         .onConflictDoNothing({ target: users.id })
@@ -212,7 +213,9 @@ async function ensureDeploymentIdentity({
       email,
       imageUrl: imageUrl ?? existingUser.imageUrl,
       entity: userEntity,
-      onboardingCompletedAt: existingUser.onboardingCompletedAt ?? now,
+      // A null timestamp is intentional for an incomplete Member. Do not turn
+      // later authentication checks into an implicit onboarding completion.
+      onboardingCompletedAt: existingUser.onboardingCompletedAt,
       updatedAt: now,
       ...(admittedViaBootstrap && existingUser.role !== 'admin'
         ? { role }

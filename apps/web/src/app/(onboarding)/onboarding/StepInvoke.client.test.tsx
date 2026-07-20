@@ -4,11 +4,7 @@ const replaceMock = vi.fn();
 const setQueryDataMock = vi.fn();
 const invalidateQueriesMock = vi.fn().mockResolvedValue(undefined);
 const removeQueriesMock = vi.fn();
-const fetchQueryMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
-const environmentState = vi.hoisted(() => ({
-  environments: [{ id: 'env-1' }],
-}));
 
 const queryKeys = {
   onboardingStatus: ['onboarding.status'],
@@ -26,28 +22,26 @@ vi.mock('@tanstack/react-query', async () => {
 
   return {
     ...actual,
+    useQuery: () => ({
+      data: {
+        invocationIdentities: [
+          {
+            provider: 'github',
+            examplePrompt: '@roomote-app address the PR feedback above',
+          },
+        ],
+      },
+    }),
     useMutation: (options: { onSuccess?: () => Promise<void> | void }) => ({
       mutate: async () => {
         await options.onSuccess?.();
       },
       isPending: false,
     }),
-    useQuery: () => ({
-      data: {
-        invocationIdentities: [
-          {
-            provider: 'github',
-            mentionText: '@roomote',
-            examplePrompt: '@roomote address the PR feedback above',
-          },
-        ],
-      },
-    }),
     useQueryClient: () => ({
       setQueryData: setQueryDataMock,
       invalidateQueries: invalidateQueriesMock,
       removeQueries: removeQueriesMock,
-      fetchQuery: fetchQueryMock,
     }),
   };
 });
@@ -62,36 +56,21 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => queryKeys.onboardingStatus,
       },
     },
-    comms: {
-      status: {
-        queryOptions: () => ({ queryKey: ['comms.status'] }),
-      },
-    },
     github: {
       installations: {
         queryKey: () => queryKeys.githubInstallations,
       },
     },
-    environments: {
-      list: {
-        queryOptions: () => ({ queryKey: ['environments.list'] }),
+    comms: {
+      status: {
+        queryOptions: vi.fn(() => ({ queryKey: ['comms.status'] })),
       },
     },
   }),
 }));
 
-vi.mock('@/hooks/environments/useEnvironments', () => ({
-  useEnvironments: () => ({
-    data: environmentState.environments,
-  }),
-}));
-
 vi.mock('../setup/StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
-}));
-
-vi.mock('../setup/StepCompletedBadge', () => ({
-  StepCompletedBadge: ({ text }: { text: string }) => <div>{text}</div>,
 }));
 
 vi.mock('@/components/system', () => ({
@@ -124,10 +103,6 @@ describe('Onboarding StepInvoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateQueriesMock.mockResolvedValue(undefined);
-    environmentState.environments = [{ id: 'env-1' }];
-    fetchQueryMock.mockImplementation(
-      async () => environmentState.environments,
-    );
   });
 
   it('optimistically completes onboarding before routing away', async () => {
@@ -168,26 +143,16 @@ describe('Onboarding StepInvoke', () => {
       queryKey: queryKeys.githubInstallations,
     });
 
-    expect(replaceMock).toHaveBeenCalledWith('/?environmentId=env-1');
+    expect(replaceMock).toHaveBeenCalledWith('/');
   });
 
-  it('routes to the first environment when multiple environments exist', async () => {
-    environmentState.environments = [{ id: 'env-newer' }, { id: 'env-older' }];
-
-    render(<StepInvoke />);
-
-    fireEvent.click(screen.getByRole('button', { name: /try it out/i }));
-
-    await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith('/?environmentId=env-newer');
-    });
-  });
-
-  it('clarifies that GitHub mentions work on any PR', () => {
+  it('uses the configured GitHub app identity in its invocation example', () => {
     render(<StepInvoke sourceControlProviders={['github']} />);
 
     expect(
-      screen.getByText('Mention @roomote in a comment on any PR.'),
+      screen.getByText(
+        'On a pull request, comment: @roomote-app address the PR feedback above',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -199,20 +164,56 @@ describe('Onboarding StepInvoke', () => {
       />,
     );
 
-    expect(screen.getByText('Microsoft Teams')).toBeInTheDocument();
-    expect(screen.getByText('GitLab')).toBeInTheDocument();
+    expect(
+      screen.getByText('Microsoft Teams:', { exact: false }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('GitLab:', { exact: false })).toBeInTheDocument();
     expect(screen.queryByText('Slack')).not.toBeInTheDocument();
     expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
 
     const methodHeadings = screen
-      .getAllByText(/^(Microsoft Teams|GitLab|Automations|Web UI)$/)
+      .getAllByText(/^(Microsoft Teams|GitLab|Automations|Web UI):$/)
       .map((node) => node.textContent);
 
     expect(methodHeadings).toEqual([
-      'Microsoft Teams',
-      'GitLab',
-      'Automations',
-      'Web UI',
+      'Microsoft Teams: ',
+      'GitLab: ',
+      'Automations: ',
+      'Web UI: ',
     ]);
+  });
+
+  it('lists every configured communication and source-control provider without Linear', () => {
+    render(
+      <StepInvoke
+        communicationProviders={['slack', 'microsoft', 'telegram', 'discord']}
+        sourceControlProviders={[
+          'github',
+          'gitlab',
+          'gitea',
+          'bitbucket',
+          'ado',
+        ]}
+        includeAutomations={false}
+      />,
+    );
+
+    for (const provider of [
+      'Slack',
+      'Microsoft Teams',
+      'Telegram',
+      'Discord',
+      'GitHub',
+      'GitLab',
+      'Gitea',
+      'Bitbucket Cloud',
+      'Azure DevOps',
+    ]) {
+      expect(
+        screen.getByText(`${provider}:`, { exact: false }),
+      ).toBeInTheDocument();
+    }
+
+    expect(screen.queryByText('Linear')).not.toBeInTheDocument();
   });
 });

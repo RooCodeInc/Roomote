@@ -103,14 +103,14 @@ describe('NavbarDrawer', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('keeps analytics visible for non-admins', () => {
+  it('hides analytics from non-admins', () => {
     state.user.isAdmin = false;
 
     render(<NavbarDrawer />);
 
     expect(
-      screen.getByRole('link', { name: /analytics/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole('link', { name: /analytics/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('hides automations from non-admins', () => {
