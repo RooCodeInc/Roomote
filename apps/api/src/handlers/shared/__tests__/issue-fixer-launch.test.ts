@@ -36,6 +36,7 @@ describe('launchIssueFixerTriage', () => {
     vi.clearAllMocks();
     mockGetBackgroundAgentSettings.mockResolvedValue({
       issueFixerFrequency: 'daily',
+      issueFixerInstructions: 'Focus on acceptance criteria first.',
     });
     mockResolveMappedEnvironmentId.mockResolvedValue('env-host-scoped');
     mockBuildIssueFixerFixPrompt.mockReturnValue('$issue-fixer\n<context />');
@@ -64,6 +65,13 @@ describe('launchIssueFixerTriage', () => {
 
     expect(mockResolveMappedEnvironmentId).toHaveBeenCalledWith(
       'repo-host-scoped',
+    );
+    expect(mockBuildIssueFixerFixPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        additionalInstructions: 'Focus on acceptance criteria first.',
+        repositoryFullName: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+      }),
     );
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({

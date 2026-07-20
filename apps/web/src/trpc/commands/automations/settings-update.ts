@@ -290,6 +290,11 @@ export async function updateBackgroundAgentSettingsCommand(
       'Conflict resolver instructions are too long.';
   }
 
+  if ((input.issueFixerInstructions?.length ?? 0) > 8_000) {
+    fieldErrors.issueFixerInstructions =
+      'Triage Issues instructions are too long.';
+  }
+
   const channelAutoStartRows = shouldUpdateChannelAutoStart
     ? normalizeChannelAutoStartInputRows({
         rows: input.channelAutoStartSlackChannels,
@@ -1137,6 +1142,11 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'issue_fixer',
       enabled: issueFixerFrequency !== 'off',
       schedule: { mode: issueFixerFrequency },
+      ...(input.issueFixerInstructions !== undefined
+        ? {
+            instructions: normalizeOptionalText(input.issueFixerInstructions),
+          }
+        : {}),
       updatedAt: now,
     });
 

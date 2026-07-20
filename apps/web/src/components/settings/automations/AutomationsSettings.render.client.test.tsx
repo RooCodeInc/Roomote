@@ -76,6 +76,7 @@ const state = vi.hoisted(() => ({
         codeqlTriageSlackChannelId: null,
         codeqlTriageDiscordChannelId: null,
         issueFixerFrequency: 'off' as const,
+        issueFixerInstructions: null,
 
         securityAuditorFrequency: 'off' as const,
         securityAuditorSlackChannelId: null,

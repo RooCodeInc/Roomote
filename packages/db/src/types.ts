@@ -492,6 +492,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   codeqlTriageDiscordChannelId: string | null;
   codeqlTriageLastRunAt: Date | null;
   issueFixerFrequency: IssueFixerFrequency;
+  issueFixerInstructions: string | null;
   issueFixerLastRunAt: Date | null;
   issueFixerScanCursor?: CiFailureTriageScanCursor | null;
   securityAuditorFrequency: SecurityAuditorFrequency;

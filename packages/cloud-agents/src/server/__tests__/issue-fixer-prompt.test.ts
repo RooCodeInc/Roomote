@@ -100,4 +100,55 @@ describe('buildIssueFixerFixPrompt', () => {
     expect(prompt.match(/<\/task_context>/g)).toHaveLength(1);
     expect(prompt).toContain('<untrusted_content_policy>');
   });
+
+  it('appends additional team instructions when configured', () => {
+    const prompt = buildIssueFixerFixPrompt({
+      repositoryFullName: 'acme/api',
+      environmentId: 'env-api',
+      trigger: 'webhook',
+      sourceControlProvider: 'github',
+      githubAppSlug: 'roomote',
+      additionalInstructions:
+        'Prefer minimal plans. Always ask about impact on billing first.',
+      repositoryCoverage: [
+        { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
+      ],
+      issue: {
+        repositoryFullName: 'acme/api',
+        number: 12,
+        title: 'Broken checkout',
+        url: 'https://github.com/acme/api/issues/12',
+        body: 'Checkout fails on empty carts.',
+        labels: ['bug'],
+        authorLogin: 'alice',
+      },
+    });
+
+    expect(prompt).toContain('Additional team instructions:');
+    expect(prompt).toContain(
+      'Prefer minimal plans. Always ask about impact on billing first.',
+    );
+  });
+
+  it('omits additional team instructions when blank', () => {
+    const prompt = buildIssueFixerFixPrompt({
+      repositoryFullName: 'acme/api',
+      environmentId: 'env-api',
+      trigger: 'webhook',
+      sourceControlProvider: 'github',
+      githubAppSlug: 'roomote',
+      additionalInstructions: '   ',
+      repositoryCoverage: [
+        { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
+      ],
+      issue: {
+        repositoryFullName: 'acme/api',
+        number: 12,
+        title: 'Broken checkout',
+        url: 'https://github.com/acme/api/issues/12',
+      },
+    });
+
+    expect(prompt).not.toContain('Additional team instructions:');
+  });
 });

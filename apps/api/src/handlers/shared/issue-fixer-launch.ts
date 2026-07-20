@@ -81,6 +81,7 @@ export async function launchIssueFixerTriage({
       continueMention,
       githubAppSlug,
       repositoryCoverage,
+      additionalInstructions: settings.issueFixerInstructions,
       issue: {
         repositoryFullName,
         number: issue.number,
