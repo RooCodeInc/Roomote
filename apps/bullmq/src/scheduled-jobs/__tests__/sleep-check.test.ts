@@ -463,6 +463,48 @@ describe('sleepCheckJob', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it('does not fail runs when instance status probing throws', async () => {
+    mockJobQueries({
+      dueJobs: [
+        {
+          id: 77,
+          machineId: 'roomote-worker-77',
+          payloadKind: TaskPayloadKind.StandardTask,
+          status: RunStatus.Running,
+          taskPhase: 'executing',
+          vendor: 'docker',
+          snapshotId: null,
+          sleepRequestedAt: null,
+          snapshotRequestedAt: null,
+        },
+      ],
+    });
+    mockGetInstanceStatus.mockRejectedValue(
+      new Error(
+        'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?',
+      ),
+    );
+
+    await sleepCheckJob();
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 77,
+        eventType: 'decision',
+        source: 'sleep_check',
+        message: expect.stringContaining('instance status probe error'),
+      }),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Instance status probe failed for task run #77'),
+      expect.stringContaining('Cannot connect to the Docker daemon'),
+    );
+  });
+
   it('skips idle completion when another process already claimed the row', async () => {
     mockJobQueries({
       dueJobs: [

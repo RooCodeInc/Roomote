@@ -47,6 +47,8 @@ jq -e '
     .key] == ["docker-proxy"]) and
   (.services.controller.environment.DOCKER_HOST == "tcp://docker-proxy:2375") and
   (.services.controller.networks | has("docker-api")) and
+  (.services.bullmq.environment.DOCKER_HOST == "tcp://docker-proxy:2375") and
+  (.services.bullmq.networks | has("docker-api")) and
   (.services["docker-proxy"].networks | has("docker-api")) and
   (.networks["docker-api"].internal == true) and
 

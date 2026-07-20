@@ -67,7 +67,7 @@ migrations) runs from the shared non-root `roomote-app` image; the container
 command and `ROOMOTE_SERVICE` select the service and its environment contract.
 Privilege separation lives in the Compose files: read-only filesystems,
 dropped capabilities, per-service env contracts, and a Docker socket proxy
-reachable only from the controller service.
+reachable only from the controller and bullmq services.
 
 Do not deploy `latest`. Pushes to `develop` automatically publish
 `develop-<short-sha>` image tags built with `R_APP_ENV=preview` for preview soak

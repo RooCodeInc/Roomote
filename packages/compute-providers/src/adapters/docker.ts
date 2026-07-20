@@ -40,6 +40,27 @@ function getTaskWorkspaceVolumeName(instanceId: string): string {
   return `${instanceId}-workspace`;
 }
 
+function formatDockerError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const stderr =
+    'stderr' in error && typeof error.stderr === 'string'
+      ? error.stderr
+      : 'stderr' in error && Buffer.isBuffer(error.stderr)
+        ? error.stderr.toString('utf8')
+        : '';
+
+  return [error.message, stderr].filter(Boolean).join('\n');
+}
+
+/** True when `docker inspect` (or similar) reports the object is gone. */
+export function isDockerMissingObjectError(error: unknown): boolean {
+  const text = formatDockerError(error);
+  return /no such (?:object|container|network|volume|image)/i.test(text);
+}
+
 async function docker(
   args: string[],
   options: { signal?: AbortSignal; allowFailure?: boolean } = {},
@@ -70,13 +91,26 @@ export class DockerClient implements ComputeProviderClient {
     return Promise.resolve([]);
   }
 
-  public getInstanceStatus(
+  public async getInstanceStatus(
     input: GetInstanceStatusInput,
   ): Promise<GetInstanceStatusResult> {
-    return docker(
-      ['inspect', '--format', '{{.State.Status}}', input.instanceId],
-      { signal: input.signal, allowFailure: true },
-    ).then((status) => ({
+    let status: string;
+    try {
+      status = await docker(
+        ['inspect', '--format', '{{.State.Status}}', input.instanceId],
+        { signal: input.signal },
+      );
+    } catch (error) {
+      // Missing container is a real lifecycle signal. Daemon/CLI failures
+      // (e.g. no DOCKER_HOST) must not look like "instance gone" — callers
+      // such as SleepCheck treat non-running as fatal for the task run.
+      if (isDockerMissingObjectError(error)) {
+        return { status: 'stopped' };
+      }
+      throw error;
+    }
+
+    return {
       status:
         status === 'running'
           ? 'running'
@@ -85,7 +119,7 @@ export class DockerClient implements ComputeProviderClient {
             : status === 'exited' || status === 'dead'
               ? 'stopped'
               : 'unknown',
-    }));
+    };
   }
 
   public createInstance(_input: CreateInstanceInput): Promise<CreatedInstance> {

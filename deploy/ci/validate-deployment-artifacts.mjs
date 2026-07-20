@@ -140,8 +140,7 @@ function validateComposeShape(shape) {
       // Coolify uses platform magic vars that compose does not interpolate here.
       if (
         !shape.coolify &&
-        'R_DISCORD_GATEWAY_SECRET' in
-          (config.services.bullmq.environment ?? {})
+        'R_DISCORD_GATEWAY_SECRET' in (config.services.bullmq.environment ?? {})
       ) {
         assert(
           config.services.bullmq.environment?.R_DISCORD_GATEWAY_SECRET ===
@@ -271,6 +270,64 @@ assert(
     ),
   'coolify: Docker proxy environment must match production Compose',
 );
+
+function networkNames(service) {
+  const networks = service?.networks;
+  if (Array.isArray(networks)) {
+    return networks.map((entry) =>
+      typeof entry === 'string' ? entry : (entry?.name ?? String(entry)),
+    );
+  }
+  return Object.keys(networks ?? {});
+}
+
+// YAML.parse does not expand compose merge anchors, so production compose
+// assertions use the rendered `docker compose config` output as well as the
+// coolify raw tree (which inlines DOCKER_HOST on controller/bullmq).
+function assertDockerProxyConsumer(shapeName, service, serviceName) {
+  assert(service, `${shapeName}: missing ${serviceName}`);
+  assert(
+    service.environment?.DOCKER_HOST === 'tcp://docker-proxy:2375',
+    `${shapeName}: ${serviceName} must use DOCKER_HOST=tcp://docker-proxy:2375`,
+  );
+  assert(
+    networkNames(service).includes('docker-api'),
+    `${shapeName}: ${serviceName} must join the docker-api network`,
+  );
+}
+
+const productionComposeRendered = JSON.parse(
+  execFileSync(
+    'docker',
+    [
+      'compose',
+      '-f',
+      join(root, 'deploy/compose/docker-compose.prod.yml'),
+      'config',
+      '--format',
+      'json',
+    ],
+    {
+      cwd: root,
+      env: composeEnv,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  ),
+);
+
+for (const serviceName of ['controller', 'bullmq']) {
+  assertDockerProxyConsumer(
+    'production compose',
+    productionComposeRendered.services?.[serviceName],
+    serviceName,
+  );
+  assertDockerProxyConsumer(
+    'coolify',
+    coolify.services?.[serviceName],
+    serviceName,
+  );
+}
 
 const fly = parseToml(read('deploy/fly/fly.toml'));
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {

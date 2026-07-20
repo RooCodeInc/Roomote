@@ -7,9 +7,9 @@
 # variables and are generated or resolved by Coolify at deploy time.
 #
 # Design notes:
-# - Web, api, bullmq, and the db-migrate one-shot use the non-root
-#   compatibility image. The controller uses its dedicated non-root image,
-#   which is the only control-plane image containing the Docker CLI.
+# - Web, api, controller, bullmq, and the db-migrate one-shot share the
+#   non-root roomote-app image (entrypoint + ROOMOTE_SERVICE selects each
+#   role). That image ships the Docker CLI used by controller and bullmq.
 # - Coolify's proxy is the HTTPS edge. There is no bundled Caddy and no
 #   `/_roomote-api` path routing: web, api, and minio each get their own
 #   public domain through `SERVICE_FQDN_*` declarations, and `TRPC_URL`
@@ -20,7 +20,7 @@
 #   (unlike Railway's per-occurrence `secret()` template function).
 # - The Coolify host has a Docker socket, so the `docker` sandbox provider
 #   works and is the template default. Only a restricted internal proxy mounts
-#   the raw socket; the controller reaches its allowed API sections over the
+#   the raw socket; controller and bullmq reach allowed API sections over the
 #   docker-api network. Hosted sandboxes (modal/e2b/daytona) are a config-only
 #   swap; see "Task execution" in README.md.
 # - No openssl provisioning step. `R_AUTO_GENERATE_KEYS=true` makes
@@ -256,13 +256,19 @@ services:
     image: *roomote-app-image
     restart: unless-stopped
     command: bullmq
+    # SleepCheck / standby management need the same Docker proxy path as the
+    # controller (inspect, stop, rm).
     depends_on:
       redis:
         condition: service_started
       db-migrate:
         condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
+    networks: [default, docker-api]
     environment:
       <<: *roomote-shared-env
+      DOCKER_HOST: tcp://docker-proxy:2375
       PORT: 3002
     healthcheck:
       test:

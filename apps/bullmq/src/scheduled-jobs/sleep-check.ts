@@ -436,6 +436,9 @@ export const sleepCheckJob = async () => {
         failed += result.failed;
       }
     } catch (error) {
+      // Do not finalize the run on transient probe / adapter failures (for
+      // example Docker daemon unreachable). finishRun is only called from the
+      // dedicated handlers when instance status is read successfully.
       await db
         .update(taskRuns)
         .set({
@@ -449,24 +452,17 @@ export const sleepCheckJob = async () => {
 
       await recordSleepCheckEvent(
         preferredJob,
-        'failed',
-        `${describeSleepCheckPath(fallbackPath)} handling failed for task run #${preferredJob.id}.`,
+        'decision',
+        `${describeSleepCheckPath(fallbackPath)} skipped finalized recovery for task run #${preferredJob.id} after an instance status probe error; will retry on the next cycle.`,
         {
           path: fallbackPath,
-          decision:
-            fallbackPath === 'hard_limit'
-              ? 'hard_limit_failed'
-              : fallbackPath === 'due_sleep'
-                ? 'due_sleep_failed'
-                : fallbackPath === 'booting_no_heartbeat'
-                  ? 'booting_no_heartbeat_recovery_failed'
-                  : 'stale_worker_recovery_failed',
+          decision: 'instance_status_probe_failed',
           error: error instanceof Error ? error.message : String(error),
           ...buildSleepCheckDetails(preferredJob),
         },
       );
       console.error(
-        `[sleepCheck] Failed for task run #${preferredJob.id}:`,
+        `[sleepCheck] Instance status probe failed for task run #${preferredJob.id}; skipping destructive recovery this cycle:`,
         error instanceof Error ? error.message : String(error),
       );
     }

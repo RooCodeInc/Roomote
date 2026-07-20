@@ -206,6 +206,8 @@ x-roomote-bullmq-env: &roomote-bullmq-env
   DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
   DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  # SleepCheck / standby management call the Docker CLI (inspect, stop, rm).
+  DOCKER_HOST: tcp://docker-proxy:2375
   R_TELEGRAM_BOT_TOKEN: ${R_TELEGRAM_BOT_TOKEN:-}
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
   R_DISCORD_GATEWAY_SECRET: ${R_DISCORD_GATEWAY_SECRET:-}
@@ -295,8 +297,8 @@ services:
         mc mb --ignore-existing "roomote/$$S3_BUCKET_ARTIFACTS"
 
   # The only service with the host Docker socket. Its API is reachable solely
-  # from the controller over an internal network, and all unrelated Docker API
-  # sections remain denied by the proxy defaults.
+  # from the controller and bullmq over an internal network, and all unrelated
+  # Docker API sections remain denied by the proxy defaults.
   docker-proxy:
     image: ghcr.io/tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
     restart: unless-stopped
@@ -427,11 +429,16 @@ services:
     <<: *roomote-service
     image: *roomote-app-image
     command: ['bullmq']
+    # SleepCheck, standby retention, and snapshot jobs need Docker API access
+    # through the socket proxy (same path as the controller).
+    networks: [default, docker-api]
     depends_on:
       redis:
         condition: service_started
       db-migrate:
         condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
     environment:
       <<: *roomote-bullmq-env
       ROOMOTE_SERVICE: bullmq
@@ -512,7 +519,7 @@ networks:
     name: roomote_worker
     driver: bridge
   # No published ports and no route to application/datastore networks. Only
-  # the controller and the socket proxy join this network.
+  # the controller, bullmq, and the socket proxy join this network.
   docker-api:
     name: roomote_docker_api
     driver: bridge
