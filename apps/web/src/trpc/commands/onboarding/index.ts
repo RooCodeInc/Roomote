@@ -145,6 +145,7 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
 
   return {
     onboardingCompletedAt: userResult[0]?.onboardingCompletedAt ?? null,
+    isAdmin: auth.isAdmin,
     orgHasSlack: slackInstallationResult.length > 0,
     orgHasLinear: linearInstallationResult.length > 0,
     userHasLinkedGitHub: githubLinkedResult.length > 0,

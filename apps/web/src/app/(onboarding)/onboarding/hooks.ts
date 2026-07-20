@@ -58,6 +58,7 @@ export function useOnboardingFlow() {
   const shouldSkip = useCallback(
     (s: OnboardingStep): boolean => {
       if (!status) return false;
+      if (s === 'welcome' && !status.isAdmin) return true;
       // Skip the welcome screen when the user has already linked any account,
       // so returning from an OAuth callback doesn't restart the flow.
       if (s === 'welcome') {

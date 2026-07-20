@@ -11,6 +11,7 @@ import {
 } from '@roomote/db/server';
 import {
   type DeploymentAccessPolicy,
+  type UserRole,
   normalizeDeploymentAccessPolicy,
 } from '@roomote/types';
 
@@ -251,6 +252,14 @@ export async function canVisitorSignUp(): Promise<boolean> {
   }
 
   return false;
+}
+
+/** The sign-in page may describe an invite, but must never expose its token. */
+export async function getRequestInviteSummary(): Promise<{
+  role: UserRole;
+} | null> {
+  const invite = await findUsableInviteByToken(await getRequestInviteToken());
+  return invite ? { role: invite.role } : null;
 }
 
 /**

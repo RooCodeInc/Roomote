@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 
 import { authorize } from '@/lib/server/auth-context';
 
@@ -10,6 +10,7 @@ export default async function Page() {
   if (!authorizedUser.success) {
     notFound();
   }
+  if (!authorizedUser.isAdmin) redirect('/settings/personal');
 
   return <Analytics />;
 }

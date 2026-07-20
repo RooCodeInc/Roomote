@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type {
   SetupAuthProviderId,
@@ -9,7 +9,6 @@ import type {
 } from '@roomote/types';
 import { Button, Loader2, ArrowRight } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
-import { useEnvironments } from '@/hooks/environments/useEnvironments';
 import { StepCompletedBadge } from '../setup/StepCompletedBadge';
 import { StepTitle } from '../setup/StepTitle';
 import { buildInvokeMethods } from '../invokeMethods';
@@ -19,22 +18,22 @@ export function StepInvoke({
   communicationProviders = [],
   sourceControlProviders = [],
   includeLinear = false,
+  includeAutomations = true,
 }: {
   previousStepCompleted?: string;
   communicationProviders?: readonly SetupAuthProviderId[];
   sourceControlProviders?: readonly SourceControlProvider[];
   includeLinear?: boolean;
+  includeAutomations?: boolean;
 }) {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const environments = useEnvironments();
-  const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const methods = buildInvokeMethods({
     communicationProviders,
     sourceControlProviders,
     includeLinear,
-    invocationIdentities: commsStatus.data?.invocationIdentities,
+    includeAutomations,
   });
 
   const completeOnboarding = useMutation(
@@ -55,27 +54,7 @@ export function StepInvoke({
           queryKey: trpc.github.installations.queryKey(),
         });
 
-        // Environment may have just been created; refresh so Home can default
-        // to the sole environment via environmentId immediately after setup.
-        let envs = environments.data;
-        try {
-          const refreshed = await queryClient.fetchQuery(
-            trpc.environments.list.queryOptions(undefined, { staleTime: 0 }),
-          );
-          if (Array.isArray(refreshed)) {
-            envs = refreshed;
-          }
-        } catch {
-          // Fall back to whatever is already cached.
-        }
-
-        const targetEnv = envs?.[0];
-
-        if (targetEnv) {
-          router.replace(`/?environmentId=${targetEnv.id}`);
-        } else {
-          router.replace('/');
-        }
+        router.replace('/');
       },
     }),
   );

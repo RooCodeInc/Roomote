@@ -111,6 +111,7 @@ export function buildInvokeMethods({
   communicationProviders = [],
   sourceControlProviders = [],
   includeLinear = false,
+  includeAutomations = true,
   invocationIdentities = [],
 }: {
   communicationProviders?: readonly (
@@ -124,6 +125,7 @@ export function buildInvokeMethods({
     | undefined
   )[];
   includeLinear?: boolean;
+  includeAutomations?: boolean;
   invocationIdentities?: readonly InvocationIdentity[];
 }): InvokeMethod[] {
   return [
@@ -162,11 +164,15 @@ export function buildInvokeMethods({
           },
         ]
       : []),
-    {
-      icon: Zap,
-      title: 'Automations',
-      description: `Let ${PRODUCT_NAME} work proactively for you, handling alerts, taking on tasks and finding issues. No prompting needed look at the Automations tab.`,
-    },
+    ...(includeAutomations
+      ? [
+          {
+            icon: Zap,
+            title: 'Automations',
+            description: `Let ${PRODUCT_NAME} work proactively for you, handling alerts, taking on tasks and finding issues. No prompting needed look at the Automations tab.`,
+          },
+        ]
+      : []),
     {
       icon: AppWindow,
       title: 'Web UI',

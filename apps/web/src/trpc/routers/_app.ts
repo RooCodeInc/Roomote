@@ -141,6 +141,7 @@ import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
   getEnvironmentsCommand,
+  getAvailableEnvironmentsCommand,
   getEnvironmentNamesByIdsCommand,
   getEnvironmentByIdCommand,
   getEnvironmentConfigVersionCommand,
@@ -355,6 +356,10 @@ import {
 
 const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
+
+function assertAdmin(auth: { isAdmin: boolean }) {
+  if (!auth.isAdmin) throw new Error('Unauthorized');
+}
 
 const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA = z.enum(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -598,37 +603,45 @@ export const appRouter = createRouter({
   analytics: createRouter({
     overview: protectedProcedure
       .input(analyticsOverviewInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsOverviewCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsOverviewCommand(auth, input);
+      }),
 
     pullRequestOverview: protectedProcedure
       .input(pullRequestAnalyticsOverviewInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getPullRequestAnalyticsOverviewCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getPullRequestAnalyticsOverviewCommand(auth, input);
+      }),
 
     chart: protectedProcedure
       .input(analyticsChartInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsChartCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsChartCommand(auth, input);
+      }),
 
     filters: protectedProcedure
       .input(analyticsFilterOptionsInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsFiltersCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsFiltersCommand(auth, input);
+      }),
 
     details: protectedProcedure
       .input(analyticsDetailsInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsDetailsCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsDetailsCommand(auth, input);
+      }),
 
     export: protectedProcedure
       .input(analyticsExportInputSchema)
-      .query(({ ctx: { auth }, input }) => exportAnalyticsCommand(auth, input)),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return exportAnalyticsCommand(auth, input);
+      }),
   }),
 
   tasks: createRouter({
@@ -1122,6 +1135,12 @@ export const appRouter = createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       getEnvironmentsCommand(auth),
     ),
+
+    available: protectedProcedure
+      .input(z.object({ repository: z.string().optional() }).optional())
+      .query(({ ctx: { auth }, input }) =>
+        getAvailableEnvironmentsCommand(auth, input),
+      ),
 
     namesByIds: protectedProcedure
       .input(z.object({ ids: z.array(z.string()).max(20) }))

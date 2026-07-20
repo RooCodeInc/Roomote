@@ -9,7 +9,9 @@ import {
   invites,
   isNotNull,
   isNull,
+  gt,
   lt,
+  or,
   sql,
   users,
 } from '@roomote/db/server';
@@ -165,6 +167,7 @@ export async function redeemInvite(
       and(
         eq(invites.id, inviteId),
         isNull(invites.revokedAt),
+        or(isNull(invites.expiresAt), gt(invites.expiresAt, new Date())),
         lt(invites.usedCount, invites.maxUses),
       ),
     )

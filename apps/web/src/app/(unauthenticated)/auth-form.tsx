@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   SETUP_AUTH_PROVIDER_CATALOG,
   type SetupAuthProviderId,
+  type UserRole,
 } from '@roomote/types';
 
 import { authClient } from '@/lib/auth-client';
@@ -66,6 +67,7 @@ function getAuthErrorMessage(
 export function AuthForm({
   enabledProviders = SOCIAL_PROVIDERS.map((provider) => provider.id),
   canSignUp = false,
+  inviteRole = null,
   hideModeSwitchMessage = false,
   noticeMessage = null,
 }: {
@@ -78,6 +80,7 @@ export function AuthForm({
    * new accounts on every method.
    */
   canSignUp?: boolean;
+  inviteRole?: UserRole | null;
   hideModeSwitchMessage?: boolean;
   /**
    * Server-determined notice shown above the form (e.g. the deployment is at
@@ -148,9 +151,15 @@ export function AuthForm({
       <div className="relative w-full max-w-2xl space-y-6 py-2 text-left md:py-0">
         <h1 className="relative text-3xl font-bold tracking-tighter">
           <span className="relative flex items-center gap-3">
-            Welcome! Come on in.
+            {inviteRole ? "You're invited to Roomote." : 'Welcome! Come on in.'}
           </span>
         </h1>
+        {inviteRole && (
+          <p className="max-w-xl text-muted-foreground">
+            You will join this deployment as an{' '}
+            {inviteRole === 'admin' ? 'Admin' : 'Member'}.
+          </p>
+        )}
         <div className="max-w-xl space-y-4">
           <div className="space-y-2">
             <OriginMismatchAlert />
@@ -188,7 +197,7 @@ export function AuthForm({
                         <AuthProviderIcon provider={provider.icon} />
                       )}
                       <span className="grow truncate text-left font-medium">
-                        Login with {provider.label}
+                        Continue with {provider.label}
                       </span>
                     </span>
                     <ArrowRight />
@@ -203,7 +212,7 @@ export function AuthForm({
               >
                 <Mail />
                 <span className="grow text-left font-medium">
-                  Log in with email
+                  Continue with email
                 </span>
                 <ArrowRight />
               </Button>
@@ -216,7 +225,9 @@ export function AuthForm({
                 redirectUrl={redirectUrl}
                 allowSignUp={canSignUp}
                 labelsAsPlaceholders={true}
-                hideModeSwitchMessage={hideModeSwitchMessage}
+                hideModeSwitchMessage={
+                  hideModeSwitchMessage || inviteRole !== null
+                }
                 defaultMode={
                   canSignUp && searchParams.get('invited')
                     ? 'sign-up'

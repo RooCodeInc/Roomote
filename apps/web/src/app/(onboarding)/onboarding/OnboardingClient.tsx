@@ -80,6 +80,7 @@ export function OnboardingClient({ githubAppSlug }: { githubAppSlug: string }) {
                 status?.userHasLinkedLinear ||
                 linearConnected
               }
+              includeAutomations={status?.isAdmin === true}
             />
           )}
         </motion.div>
