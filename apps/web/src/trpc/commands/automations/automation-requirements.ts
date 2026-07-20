@@ -3,6 +3,7 @@ import {
   db,
   eq,
   githubInstallations,
+  inArray,
   isNull,
   mcpConnections,
   repositories,
@@ -34,6 +35,27 @@ export async function hasActiveGitHubInstallation() {
 export async function hasActiveRepository() {
   const repository = await db.query.repositories.findFirst({
     where: eq(repositories.isActive, true),
+    columns: { id: true },
+  });
+
+  return Boolean(repository);
+}
+
+/** Providers that can drive webhook-based Triage Issues today. */
+const ISSUE_TRIAGE_SOURCE_CONTROL_PROVIDERS = [
+  'github',
+  'gitlab',
+  'gitea',
+] as const;
+
+export async function hasActiveIssueTriageRepository() {
+  const repository = await db.query.repositories.findFirst({
+    where: and(
+      eq(repositories.isActive, true),
+      inArray(repositories.sourceControlProvider, [
+        ...ISSUE_TRIAGE_SOURCE_CONTROL_PROVIDERS,
+      ]),
+    ),
     columns: { id: true },
   });
 

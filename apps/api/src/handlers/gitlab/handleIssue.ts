@@ -73,6 +73,7 @@ export async function handleGitLabIssue(
 
   return launchIssueFixerTriage({
     sourceControlProvider: 'gitlab',
+    repositoryId: repo.id,
     repositoryFullName: repo.fullName,
     continueMention: '@roomote',
     issue: {

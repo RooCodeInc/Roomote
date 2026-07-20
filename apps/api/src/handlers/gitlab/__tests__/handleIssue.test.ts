@@ -43,6 +43,7 @@ describe('handleGitLabIssue', () => {
   it('launches triage for open issues on active GitLab repos', async () => {
     mockFindMany.mockResolvedValue([
       {
+        id: 'repo-row-id',
         fullName: 'acme/backend',
         host: 'gitlab.com',
       },
@@ -71,6 +72,7 @@ describe('handleGitLabIssue', () => {
 
     expect(mockLaunchIssueFixerTriage).toHaveBeenCalledWith({
       sourceControlProvider: 'gitlab',
+      repositoryId: 'repo-row-id',
       repositoryFullName: 'acme/backend',
       continueMention: '@roomote',
       issue: {

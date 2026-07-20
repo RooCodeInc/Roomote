@@ -43,6 +43,7 @@ describe('handleGiteaIssue', () => {
   it('launches triage for open issues on active Gitea repos', async () => {
     mockFindMany.mockResolvedValue([
       {
+        id: 'repo-row-id',
         fullName: 'acme/backend',
         host: 'git.example.com',
       },
@@ -71,6 +72,7 @@ describe('handleGiteaIssue', () => {
 
     expect(mockLaunchIssueFixerTriage).toHaveBeenCalledWith({
       sourceControlProvider: 'gitea',
+      repositoryId: 'repo-row-id',
       repositoryFullName: 'acme/backend',
       continueMention: '@roomote',
       issue: {

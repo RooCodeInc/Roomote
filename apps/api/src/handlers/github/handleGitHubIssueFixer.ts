@@ -62,6 +62,7 @@ export async function handleGitHubIssueFixer(
 
   const [match] = await db
     .select({
+      repositoryId: repositories.id,
       repositoryFullName: repositories.fullName,
     })
     .from(repositories)
@@ -86,6 +87,7 @@ export async function handleGitHubIssueFixer(
 
   return launchIssueFixerTriage({
     sourceControlProvider: 'github',
+    repositoryId: match.repositoryId,
     repositoryFullName: match.repositoryFullName,
     githubAppSlug,
     issue: {

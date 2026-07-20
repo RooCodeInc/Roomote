@@ -1,10 +1,12 @@
 import {
   buildIssueFixerFixPrompt,
-  buildRepositoryCoverage,
   enqueueTask,
 } from '@roomote/cloud-agents/server';
 import {
+  asc,
   db,
+  environmentRepositoryMappings,
+  eq,
   getBackgroundAgentSettingsForDeployment,
   recordAutomationRunOutcome,
 } from '@roomote/db/server';
@@ -33,18 +35,43 @@ type IssueFixerLaunchIssue = {
 };
 
 /**
+ * Resolve environment coverage from the concrete repository row id so same
+ * owner/repo names on different providers (or hosts) cannot pick the wrong env.
+ */
+async function resolveMappedEnvironmentId(
+  repositoryId: string,
+): Promise<string | null> {
+  const mappings = await db
+    .select({
+      environmentId: environmentRepositoryMappings.environmentId,
+    })
+    .from(environmentRepositoryMappings)
+    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId))
+    .orderBy(asc(environmentRepositoryMappings.environmentId));
+
+  if (mappings.length === 0) {
+    return null;
+  }
+
+  return mappings[0]?.environmentId ?? null;
+}
+
+/**
  * Shared launch path for webhook-driven issue triage across supported SCMs.
  * Caller has already resolved the active Roomote repository row and normalized
  * the issue payload.
  */
 export async function launchIssueFixerTriage({
   sourceControlProvider,
+  repositoryId,
   repositoryFullName,
   issue,
   continueMention,
   githubAppSlug,
 }: {
   sourceControlProvider: IssueFixerSourceControlProvider;
+  /** Active Roomote repositories.id for provider/host-scoped env lookup. */
+  repositoryId: string;
   repositoryFullName: string;
   issue: IssueFixerLaunchIssue;
   /** Provider-native follow-up tag humans should use (e.g. `@roomote`). */
@@ -58,10 +85,7 @@ export async function launchIssueFixerTriage({
     return { status: 'ok', message: 'Triage Issues is disabled' };
   }
 
-  const repositoryCoverage = await buildRepositoryCoverage([
-    repositoryFullName,
-  ]);
-  const environmentId = repositoryCoverage[0]?.targetEnvironmentId;
+  const environmentId = await resolveMappedEnvironmentId(repositoryId);
 
   if (!environmentId) {
     return {
@@ -70,6 +94,12 @@ export async function launchIssueFixerTriage({
     };
   }
 
+  const repositoryCoverage = [
+    {
+      repositoryFullName,
+      targetEnvironmentId: environmentId,
+    },
+  ];
   const surface = sourceControlProvider as TaskSurface;
 
   try {

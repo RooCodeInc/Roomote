@@ -32,10 +32,12 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   hasActiveGitHubInstallation,
+  hasActiveIssueTriageRepository,
   hasActiveRepository,
   hasActiveSentryIntegration,
   hasActiveSlackInstallation,
 } from './automation-requirements';
+
 import {
   mergeLegacySingleChannelAutoStartRows,
   normalizeChannelAutoStartDiscordInputRows,
@@ -935,7 +937,10 @@ export async function updateBackgroundAgentSettingsCommand(
       'Add at least one active repository before enabling Triage CodeQL Alerts.';
   }
 
-  if (issueFixerFrequency !== 'off' && !(await hasActiveRepository())) {
+  if (
+    issueFixerFrequency !== 'off' &&
+    !(await hasActiveIssueTriageRepository())
+  ) {
     fieldErrors.general =
       fieldErrors.general ||
       'Add at least one active GitHub, GitLab, or Gitea repository before enabling Triage Issues.';

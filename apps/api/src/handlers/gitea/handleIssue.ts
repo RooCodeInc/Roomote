@@ -81,6 +81,7 @@ export async function handleGiteaIssue(
 
   return launchIssueFixerTriage({
     sourceControlProvider: 'gitea',
+    repositoryId: repo.id,
     repositoryFullName: repo.fullName,
     continueMention: '@roomote',
     issue: {
