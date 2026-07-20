@@ -18,16 +18,12 @@ import type { WebhookResponse } from '../../types';
 
 const LOG_PREFIX = '[issueFixerLaunch]';
 
-export const ISSUE_FIXER_SOURCE_CONTROL_PROVIDERS = [
-  'github',
-  'gitlab',
-  'gitea',
-] as const satisfies readonly SourceControlProvider[];
+type IssueFixerSourceControlProvider = Extract<
+  SourceControlProvider,
+  'github' | 'gitlab' | 'gitea'
+>;
 
-export type IssueFixerSourceControlProvider =
-  (typeof ISSUE_FIXER_SOURCE_CONTROL_PROVIDERS)[number];
-
-export type IssueFixerLaunchIssue = {
+type IssueFixerLaunchIssue = {
   number: number;
   title: string;
   url: string;
