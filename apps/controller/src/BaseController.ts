@@ -39,6 +39,7 @@ import {
   captureControllerException,
   captureControllerMessage,
 } from './monitoring/sentry';
+import { formatSpawnWorkerError } from './compute-providers/docker-sandbox-security';
 import { resolveFromWorkspaceRoot } from './repo-paths';
 import { findPersistedWorkerBootstrapRestarts } from './worker-bootstrap-restarts';
 
@@ -545,9 +546,12 @@ export abstract class BaseController {
     taskRun: TaskRun,
     error: unknown,
   ): Promise<void> {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = formatSpawnWorkerError(error);
+    // Report and rethrow a sanitized error so Sentry LinkedErrors never walks
+    // a raw execFile/cause chain that embeds docker -e AUTH_TOKEN values.
+    const reportError = new Error(errorMessage);
 
-    captureControllerException(error, {
+    captureControllerException(reportError, {
       runId: taskRun.id,
       payloadKind: taskRun.payloadKind,
       provider: taskRun.vendor,
@@ -561,7 +565,7 @@ export abstract class BaseController {
 
     await this.finishFailedTaskRun(taskRun, errorMessage);
 
-    throw error;
+    throw reportError;
   }
 
   /**

@@ -75,6 +75,149 @@ const BLOCKED_PRIVATE_ROUTES = [
   '192.168.0.0/16',
 ] as const;
 
+type DockerExecFailure = {
+  code?: string | number | null;
+  cmd?: string;
+  stdout?: string | Buffer;
+  stderr?: string | Buffer;
+  message?: string;
+  killed?: boolean;
+  signal?: NodeJS.Signals | null;
+};
+
+function bufferToString(value: string | Buffer | undefined): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value.toString('utf8');
+  }
+
+  return '';
+}
+
+/** Hide env values from docker CLI diagnostics so auth tokens never reach the UI. */
+export function sanitizeDockerCommandForDisplay(
+  command: string | string[],
+): string {
+  if (Array.isArray(command)) {
+    const sanitized: string[] = [];
+
+    for (let index = 0; index < command.length; index += 1) {
+      const arg = command[index] ?? '';
+
+      if ((arg === '-e' || arg === '--env') && index + 1 < command.length) {
+        sanitized.push(arg);
+        const next = command[index + 1] ?? '';
+        const eq = next.indexOf('=');
+        sanitized.push(
+          eq > 0 ? `${next.slice(0, eq)}=<redacted>` : '<redacted>',
+        );
+        index += 1;
+        continue;
+      }
+
+      sanitized.push(arg);
+    }
+
+    return `docker ${sanitized.join(' ')}`.trim();
+  }
+
+  // Unquoted values are redacted to the next whitespace only: worker env
+  // values must stay space-free or the remainder would survive redaction.
+  return command
+    .replace(
+      /(^|\s)(-e|--env)\s+([A-Za-z_][\w]*)=(?:"[^"]*"|'[^']*'|\S+)/g,
+      '$1$2 $3=<redacted>',
+    )
+    .replace(
+      /(^|\s)(-e|--env)=([A-Za-z_][\w]*)=(?:"[^"]*"|'[^']*'|\S+)/g,
+      '$1$2=$3=<redacted>',
+    )
+    .trim();
+}
+
+/**
+ * Prefer Docker's diagnostic output (stderr/stdout) over the full argv list
+ * so spawn failures surface *why* the command failed in the product UI.
+ */
+export function formatDockerCommandError(
+  args: string[],
+  error: unknown,
+): string {
+  const failure = (error ?? {}) as DockerExecFailure;
+  const stderr = sanitizeDockerCommandForDisplay(
+    bufferToString(failure.stderr).trim(),
+  );
+  const stdout = sanitizeDockerCommandForDisplay(
+    bufferToString(failure.stdout).trim(),
+  );
+  const command =
+    typeof failure.cmd === 'string' && failure.cmd.trim()
+      ? sanitizeDockerCommandForDisplay(failure.cmd)
+      : sanitizeDockerCommandForDisplay(args);
+  const operation = args[0] ? `docker ${args[0]}` : 'docker';
+  // Node's execFile error.message embeds the full argv (including -e secrets)
+  // when stderr/stdout are empty — always redact before surfacing.
+  const reason = sanitizeDockerCommandForDisplay(
+    stderr ||
+      stdout ||
+      (typeof failure.message === 'string' ? failure.message.trim() : '') ||
+      `${operation} failed`,
+  );
+
+  const details: string[] = [`Failed to run ${operation}.`, reason];
+
+  if (stdout && stdout !== reason) {
+    details.push(`stdout:\n${stdout}`);
+  }
+
+  if (failure.code !== undefined && failure.code !== null) {
+    details.push(`exit code: ${String(failure.code)}`);
+  }
+
+  details.push(`command:\n${command}`);
+
+  return details.filter(Boolean).join('\n\n');
+}
+
+/** Normalize spawn failures so finishRun stores a useful diagnostic message. */
+export function formatSpawnWorkerError(error: unknown): string {
+  if (error instanceof Error) {
+    const failure = error as Error & DockerExecFailure;
+    const stderr = sanitizeDockerCommandForDisplay(
+      bufferToString(failure.stderr).trim(),
+    );
+    const stdout = sanitizeDockerCommandForDisplay(
+      bufferToString(failure.stdout).trim(),
+    );
+    const message = error.message.trim();
+
+    // Already formatted by formatDockerCommandError / spawn-docker-worker.
+    if (message.startsWith('Failed to run docker')) {
+      return sanitizeDockerCommandForDisplay(message);
+    }
+
+    if (stderr || stdout) {
+      return formatDockerCommandError(
+        typeof failure.cmd === 'string'
+          ? failure.cmd.replace(/^docker\s+/, '').split(/\s+/)
+          : [],
+        error,
+      );
+    }
+
+    return sanitizeDockerCommandForDisplay(message) || 'Worker spawn failed';
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return sanitizeDockerCommandForDisplay(error.trim());
+  }
+
+  return String(error);
+}
+
 export async function docker(
   args: string[],
   options: { allowFailure?: boolean; signal?: AbortSignal } = {},
@@ -98,7 +241,9 @@ export async function docker(
       return '';
     }
 
-    throw error;
+    // Do not attach the raw execFile error as `cause`: Sentry LinkedErrors
+    // would serialize the unredacted argv (including AUTH_TOKEN) from it.
+    throw new Error(formatDockerCommandError(args, error));
   }
 }
 

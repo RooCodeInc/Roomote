@@ -152,13 +152,21 @@ const StartupInner = ({
   const restoreSnapshot = useRestoreTaskRunSnapshot();
   const retryFailedStart = useRetryFailedTaskStart();
 
-  const { steps, error, showLogs, sandboxLogs, logsConnected, logsError } =
-    useStartupProgress({ runId, initialTaskRun, onStatusChange });
+  const {
+    steps,
+    error,
+    elapsedSeconds,
+    showLogs,
+    sandboxLogs,
+    logsConnected,
+    logsError,
+  } = useStartupProgress({ runId, initialTaskRun, onStatusChange });
 
   return (
     <StartupSequence
       steps={steps}
       error={error}
+      elapsedSeconds={elapsedSeconds}
       logs={showLogs ? sandboxLogs : undefined}
       logsConnected={logsConnected}
       logsError={logsError}

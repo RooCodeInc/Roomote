@@ -17,6 +17,21 @@ const OPENAI_ADMIN_ERROR_PREFIX =
 const MISSING_REMOTE_BRANCH_DURING_WORKSPACE_PREP =
   /^Failed to prepare 1 workspace repository:\n- (?<repository>[^:]+):[\s\S]*?git checkout -B (?<branch>\S+) origin\/\S+[\s\S]*?stderr -> fatal: 'origin\/[^']+' is not a commit and a branch '[^']+' cannot be created from it$/;
 
+const DOCKER_DAEMON_UNAVAILABLE =
+  /Cannot connect to the Docker daemon|failed to connect to the [Dd]ocker API|Is the docker daemon running|connect: no such file or directory.*docker\.sock/i;
+const DOCKER_IMAGE_MISSING_OR_UNAUTHORIZED =
+  /pull access denied|repository does not exist or may require ['"]?docker login['"]?|manifest for .+ not found|Unable to find image ['"].+['"] locally/i;
+const DOCKER_PORT_IN_USE =
+  /port is already allocated|bind: address already in use|failed to bind host port/i;
+const DOCKER_WORKER_START_TIMEOUT =
+  /Docker worker for task run #\d+ did not start within \d+s|Docker worker command for task run #\d+ was not observed during startup/i;
+const DOCKER_WORKER_EXITED_EARLY =
+  /Docker worker container exited before task run #\d+ started/i;
+const DOCKER_RELEASE_ARCHIVE_MISSING =
+  /Docker worker release archive does not exist|Docker provider requires a local worker release archive/i;
+const DOCKER_FETCH_FAILED_IN_LOGS =
+  /Job\s+<\s*unknown\s*>\s*failed:\s*fetch failed|❌[^\n]*failed:\s*fetch failed/i;
+
 function parseOpenAiAdminErrorBody(
   body: string,
 ): OpenAiAdminErrorResponse | null {
@@ -44,6 +59,92 @@ function getWorkspacePreparationDisplayMessage(
   }
 
   return `Roomote couldn't start because the configured branch \`${branch}\` for \`${repository}\` no longer exists on GitHub. Update the repository branch setting, or leave it blank to use the repository's default branch.`;
+}
+
+function extractDockerDiagnosticReason(error: string): string | undefined {
+  const reasonBlocks = error
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  for (const block of reasonBlocks) {
+    if (
+      /^Failed to run docker\b/i.test(block) ||
+      /^command:\s*$/i.test(block) ||
+      /^command:\n/i.test(block) ||
+      /^exit code:/i.test(block) ||
+      /^stdout:/i.test(block) ||
+      /^stderr:/i.test(block)
+    ) {
+      continue;
+    }
+
+    if (
+      /pull access denied|Unable to find image|Error response from daemon|Cannot connect to the Docker daemon|failed to connect to the docker API|port is already allocated|fetch failed/i.test(
+        block,
+      )
+    ) {
+      return block;
+    }
+  }
+
+  return undefined;
+}
+
+function getDockerSpawnDisplayMessage(error: string): string | undefined {
+  if (DOCKER_DAEMON_UNAVAILABLE.test(error)) {
+    return "Roomote couldn't reach the Docker daemon. Make sure Docker Desktop (or the Docker Engine) is running and that this host can access the Docker socket.";
+  }
+
+  if (DOCKER_IMAGE_MISSING_OR_UNAUTHORIZED.test(error)) {
+    return "Roomote couldn't find or pull the worker image. For local/self-hosted setups, build the worker image first (for example `roomote-worker:local`) and confirm the image name matches your configuration.";
+  }
+
+  if (DOCKER_PORT_IN_USE.test(error)) {
+    return "Roomote couldn't start the sandbox because a required host port is already in use. Stop the other process using that port, then retry.";
+  }
+
+  // Prefer the more specific worker-side fetch failure over generic timeout/exit.
+  if (DOCKER_FETCH_FAILED_IN_LOGS.test(error)) {
+    return 'The sandbox worker failed while contacting the Roomote API (`fetch failed`). Confirm the worker can reach the API URL from inside Docker (often via `host.docker.internal`) and that the API is running.';
+  }
+
+  if (DOCKER_WORKER_START_TIMEOUT.test(error)) {
+    return 'The sandbox container started, but the Roomote worker did not come up in time. Check that the worker image and local worker release archive are present, then retry. Diagnostic details are included below when available.';
+  }
+
+  if (DOCKER_WORKER_EXITED_EARLY.test(error)) {
+    return 'The sandbox container exited during boot before the worker started. Review the recent Docker logs below for the underlying crash or missing dependency.';
+  }
+
+  if (DOCKER_RELEASE_ARCHIVE_MISSING.test(error)) {
+    return 'Roomote is missing the local worker release archive required to boot Docker sandboxes. Build the worker release (for example via the local development worker-release step) and retry.';
+  }
+
+  return undefined;
+}
+
+/**
+ * Prefer a short, action-oriented explanation and keep useful Docker
+ * diagnostics attached so self-hosted operators can still see the raw cause.
+ */
+function composeDockerDisplayMessage(friendly: string, error: string): string {
+  const diagnostic = extractDockerDiagnosticReason(error);
+
+  if (!diagnostic || friendly.includes(diagnostic)) {
+    // The controller attaches "Recent Docker logs:" on early container exit
+    // and "Docker process list:" on worker start timeout — keep either one.
+    const trailerMatch = error.match(
+      /(Recent Docker logs|Docker process list):\n([\s\S]+)$/i,
+    );
+    if (trailerMatch?.[2]?.trim()) {
+      return `${friendly}\n\n${trailerMatch[1]}:\n${trailerMatch[2].trim()}`;
+    }
+
+    return friendly;
+  }
+
+  return `${friendly}\n\nDetails:\n${diagnostic}`;
 }
 
 export function getTaskRunError(
@@ -82,6 +183,24 @@ export function getTaskRunErrorDisplayMessage(
 
   if (workspacePreparationMessage) {
     return workspacePreparationMessage;
+  }
+
+  const dockerFriendly = getDockerSpawnDisplayMessage(stripped);
+
+  if (dockerFriendly) {
+    return composeDockerDisplayMessage(dockerFriendly, stripped);
+  }
+
+  // Promote Docker diagnostics ahead of the raw argv "command:" trailer.
+  if (/^Failed to run docker\b/i.test(stripped)) {
+    const diagnostic = extractDockerDiagnosticReason(stripped);
+    if (diagnostic) {
+      const withoutCommandOnly = stripped.replace(
+        /\n\ncommand:\n[\s\S]*$/i,
+        '',
+      );
+      return withoutCommandOnly.trim() || diagnostic;
+    }
   }
 
   const openAiMatch = stripped.match(OPENAI_ADMIN_ERROR_PREFIX);
