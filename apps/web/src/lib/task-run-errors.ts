@@ -114,7 +114,7 @@ const DOCKER_ERROR_CODE_MESSAGES: Record<TaskRunErrorCode, string> = {
 function resolveDockerErrorCodeMessage(
   errorCode?: string | null,
 ): string | undefined {
-  return errorCode && errorCode in DOCKER_ERROR_CODE_MESSAGES
+  return errorCode && Object.hasOwn(DOCKER_ERROR_CODE_MESSAGES, errorCode)
     ? DOCKER_ERROR_CODE_MESSAGES[errorCode as TaskRunErrorCode]
     : undefined;
 }

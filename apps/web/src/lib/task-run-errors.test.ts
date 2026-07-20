@@ -93,6 +93,15 @@ describe('getTaskRunErrorDisplayMessage with error codes', () => {
     expect(display).toContain("couldn't reach the Docker daemon");
   });
 
+  it('ignores prototype-chain property names as error codes', () => {
+    const display = getTaskRunErrorDisplayMessage(
+      'some opaque failure text',
+      'toString',
+    );
+
+    expect(display).toBe('some opaque failure text');
+  });
+
   it('ignores unknown error codes and falls back to text matching', () => {
     const error = `Failed to run docker run.
 
