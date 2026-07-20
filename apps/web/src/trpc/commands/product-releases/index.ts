@@ -23,14 +23,14 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
 
 const PRODUCT_VERSION_PATTERN = /^v?\d+\.\d+\.\d+(?:-[\w.]+)?$/i;
 
-export type ReleaseStatus = {
+type ReleaseStatus = {
   runningVersion: string | null;
   latestKnownVersion: string | null;
   latestVersionCheckedAt: string | null;
   updateAvailable: boolean;
 };
 
-export type ReleaseNotes = {
+type ReleaseNotes = {
   version: string;
   tagName: string;
   title: string;
@@ -258,5 +258,3 @@ export async function getReleaseNotesCommand(
   );
   return null;
 }
-
-export { PRODUCT_VERSION_PATTERN };

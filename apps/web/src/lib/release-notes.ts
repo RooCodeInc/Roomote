@@ -5,7 +5,7 @@
 
 const STUB_MARKER = /REPLACE ME/i;
 
-export type ParsedReleaseNotes = {
+type ParsedReleaseNotes = {
   summary: string | null;
   highlights: string[];
   detailsMarkdown: string;
