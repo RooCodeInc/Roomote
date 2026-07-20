@@ -82,6 +82,10 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
   steerMessageToTask: mockSteerMessageToTask,
 }));
 
+vi.mock('../../tasks/helpers', () => ({
+  findLatestTaskRun: vi.fn(),
+}));
+
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { handleGitLabNote } from '../handleNote';
