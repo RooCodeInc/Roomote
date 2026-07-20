@@ -97,4 +97,43 @@ describe('upsertAutomation target preservation', () => {
       expect.objectContaining({ targets: [slackTarget] }),
     );
   });
+
+  it('merges sticky Telegram topic ids that the next write omitted', async () => {
+    const priorTelegram: AutomationTarget = {
+      provider: 'telegram',
+      targetKind: 'telegram_chat',
+      externalRef: '-100123',
+      metadata: { threadId: 'topic-7', topicName: 'Suggest Ideas' },
+    };
+    const nextTelegram: AutomationTarget = {
+      provider: 'telegram',
+      targetKind: 'telegram_chat',
+      externalRef: '-100123',
+      metadata: { topicName: 'Suggest Ideas' },
+    };
+    const { tx, values } = buildFakeTx([priorTelegram]);
+
+    await upsertAutomation(tx, {
+      key: 'suggester',
+      enabled: true,
+      targets: [nextTelegram],
+      managedTargetKinds: ['telegram_chat', 'slack_channel', 'discord_channel'],
+    });
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targets: [
+          {
+            provider: 'telegram',
+            targetKind: 'telegram_chat',
+            externalRef: '-100123',
+            metadata: {
+              topicName: 'Suggest Ideas',
+              threadId: 'topic-7',
+            },
+          },
+        ],
+      }),
+    );
+  });
 });

@@ -34,6 +34,14 @@ async function enqueueSuggestionRoute(params: {
   destinationPayloadFields?: Record<string, string>;
 }): Promise<{ error?: string; success: boolean; taskId?: string }> {
   try {
+    const destinationFields = params.destinationPayloadFields ?? {};
+    // Non-Slack destinations stamp communicationProvider/ChannelId. Only attach
+    // Slack channel metadata when the scan actually reports to Slack — otherwise
+    // workers poll the wrong surface using a Telegram/Discord chat id.
+    const isSlackDestination =
+      !destinationFields.communicationProvider ||
+      destinationFields.communicationProvider === 'slack';
+
     // Suggestion scans run as the deployment service principal.
     const launchResult = await enqueueTask({
       task: {
@@ -65,10 +73,12 @@ async function enqueueSuggestionRoute(params: {
           }),
           trigger: 'scheduled',
           notifySlack: true,
-          slackChannel: params.route.channelId,
           suggestionSource: 'suggest_ideas',
           visibleInTranscript: false,
-          ...(params.destinationPayloadFields ?? {}),
+          ...(isSlackDestination
+            ? { slackChannel: params.route.channelId }
+            : {}),
+          ...destinationFields,
         },
       },
       initiator: { kind: 'automation', key: 'suggester' },
@@ -76,7 +86,9 @@ async function enqueueSuggestionRoute(params: {
       surface: 'system',
       trigger: params.triggerKind === 'manual' ? 'manual' : 'schedule',
       visibility: 'hidden',
-      channels: { slackChannelId: params.route.channelId },
+      ...(isSlackDestination
+        ? { channels: { slackChannelId: params.route.channelId } }
+        : {}),
     });
 
     return { success: true, taskId: launchResult.taskId };

@@ -15,7 +15,6 @@ import {
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   deploymentSettings,
   getAutomationRuntime,
-  getAutomationTelegramTopicThreadId,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
   upsertAutomation,
@@ -545,21 +544,16 @@ export async function updateBackgroundAgentSettingsCommand(
       fieldErrors.suggesterUseTelegram =
         'Connect Telegram and capture a primary chat before routing Suggest Ideas there.';
     } else {
-      const existingRuntime = await getAutomationRuntime('suggester');
-      const stickyThreadId =
-        getAutomationTelegramTopicThreadId(existingRuntime);
+      // Sticky topic id is merged at upsert time from the latest DB row so a
+      // concurrent first delivery that persists threadId is not clobbered by a
+      // stale pre-transaction snapshot.
       suggesterTelegramTarget = {
         provider: 'telegram',
         targetKind: 'telegram_chat',
         externalRef: telegramChatId,
-        ...(stickyThreadId
-          ? {
-              metadata: {
-                threadId: stickyThreadId,
-                topicName: 'Suggest Ideas',
-              },
-            }
-          : {}),
+        metadata: {
+          topicName: 'Suggest Ideas',
+        },
       };
       // Telegram is one-of: clear Slack/Discord channel results for suggester.
       destinationResults.suggester.slack = { channelId: null };

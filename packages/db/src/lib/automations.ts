@@ -509,10 +509,49 @@ export async function upsertAutomation(
       columns: { targets: true },
       where: eq(automations.key, input.key),
     });
-    const preserved = (existing?.targets ?? []).filter(
+    const existingTargets = existing?.targets ?? [];
+    const preserved = existingTargets.filter(
       (target) => !managedKinds.has(target.targetKind),
     );
-    targets = [...preserved, ...input.targets];
+    // Merge sticky Telegram topic metadata when a write omits threadId but the
+    // DB already has one for the same chat. Concurrent first-delivery topic
+    // persistence must outlive an overlapping settings save.
+    const nextManaged = input.targets.map((target) => {
+      if (
+        target.provider !== 'telegram' ||
+        target.targetKind !== 'telegram_chat'
+      ) {
+        return target;
+      }
+
+      const incomingThreadId = asString(asObject(target.metadata).threadId);
+      if (incomingThreadId?.trim()) {
+        return target;
+      }
+
+      const prior = existingTargets.find(
+        (entry) =>
+          entry.provider === 'telegram' &&
+          entry.targetKind === 'telegram_chat' &&
+          entry.externalRef === target.externalRef,
+      );
+      const priorThreadId = asString(
+        asObject(prior?.metadata).threadId,
+      )?.trim();
+      if (!prior || !priorThreadId) {
+        return target;
+      }
+
+      return {
+        ...target,
+        metadata: {
+          ...asObject(prior.metadata),
+          ...asObject(target.metadata),
+          threadId: priorThreadId,
+        },
+      };
+    });
+    targets = [...preserved, ...nextManaged];
   }
 
   const values: typeof automations.$inferInsert = {
