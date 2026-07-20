@@ -556,8 +556,29 @@ export async function attachDockerEgressPolicy(
             ...BLOCKED_PRIVATE_ROUTES.map(
               (route) => `ip route replace blackhole ${route}`,
             ),
-            `gateway="$(ip route show default | awk 'NR == 1 { print $3 }')"`,
-            'if [ -n "$gateway" ]; then ip route replace blackhole "$gateway/32"; fi',
+            // Do not blackhole the default gateway as a host route: on Linux
+            // that /32 is more specific than the on-link bridge subnet and
+            // breaks next-hop resolution for public egress (git clone, HTTPS).
+            // Drop only packets destined TO the gateway IP so host hairpin is
+            // blocked while using the gateway as default next-hop still works.
+            [
+              'gateway="$(ip route show default | awk \'NR == 1 { print $3 }\')"',
+              'if [ -n "$gateway" ]; then',
+              '  if ! command -v iptables >/dev/null 2>&1; then',
+              '    if command -v apk >/dev/null 2>&1; then',
+              '      apk add --no-cache iptables >/dev/null',
+              '    fi',
+              '  fi',
+              '  if command -v iptables >/dev/null 2>&1; then',
+              '    iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
+              '  else',
+              '    echo "iptables unavailable; cannot block docker gateway $gateway" >&2',
+              '    exit 1',
+              '  fi',
+              'fi',
+            ]
+              .map((line) => line.trim())
+              .join(' '),
           ]
         : []),
     ].join(' && '),

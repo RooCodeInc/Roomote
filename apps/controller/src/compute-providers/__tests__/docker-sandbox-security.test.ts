@@ -270,7 +270,12 @@ describe('attachDockerEgressPolicy', () => {
     expect(routeScript).toContain('ip route replace blackhole 169.254.0.0/16');
     expect(routeScript).toContain('ip route replace blackhole 10.0.0.0/8');
     expect(routeScript).toContain('ip route show default');
-    expect(routeScript).toContain('ip route replace blackhole "$gateway/32"');
+    expect(routeScript).not.toContain(
+      'ip route replace blackhole "$gateway/32"',
+    );
+    expect(routeScript).toContain(
+      'iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
+    );
   });
 
   it('keeps private host routes reachable for host-based local development', async () => {

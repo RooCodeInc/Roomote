@@ -179,10 +179,38 @@ describe.runIf(runIntegrationTests)('Docker task network isolation', () => {
     expect(routes).toContain('blackhole 192.168.0.0/16');
     const defaultGateway = routes.match(/default via ([\d.]+)/)?.[1];
     expect(defaultGateway).toBeTruthy();
-    expect(routes).toContain(`blackhole ${defaultGateway}`);
+    // Gateway must not be a blackhole host route (that breaks public egress).
+    expect(routes).not.toContain(`blackhole ${defaultGateway}`);
     await expect(
       docker(['exec', sourceContainer, 'ip', 'route', 'get', '1.1.1.1']),
     ).resolves.toContain('via');
+    await expect(
+      docker([
+        'exec',
+        sourceContainer,
+        'iptables',
+        '-C',
+        'OUTPUT',
+        '-d',
+        defaultGateway!,
+        '-j',
+        'DROP',
+      ]),
+    ).resolves.toBe('');
+    // Public next-hop still works; destination traffic to the bridge gateway
+    // IP itself is blocked (short timeout so a hang fails the test).
+    await expect(
+      docker(
+        [
+          'exec',
+          sourceContainer,
+          'sh',
+          '-c',
+          `nc -z -w 1 ${defaultGateway} 1; echo exit:$?`,
+        ],
+        { allowFailure: true },
+      ),
+    ).resolves.not.toMatch(/exit:0\b/);
     await expect(
       docker(['exec', sourceContainer, 'nc', '-z', '-w', '1', 'api', '7777']),
     ).resolves.toBe('');
