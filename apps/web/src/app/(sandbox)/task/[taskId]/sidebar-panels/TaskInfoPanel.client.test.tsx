@@ -395,6 +395,99 @@ describe('TaskInfoPanel', () => {
     expect(screen.getByText('Last Error')).toBeInTheDocument();
   });
 
+  it('links titled work items from the task payload', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={
+          {
+            ...baseTaskRun,
+            payload: {
+              ...baseTaskRun.payload,
+              linkedWorkItems: [
+                {
+                  provider: 'github',
+                  identifier: '42',
+                  repository: 'RooCodeInc/Roomote',
+                  title: 'Keep GitHub issue follow-ups on one task',
+                  url: 'https://github.com/RooCodeInc/Roomote/issues/42',
+                },
+                {
+                  provider: 'linear',
+                  identifier: 'ENG-123',
+                  title: 'Show linked work in Task Info',
+                  url: 'https://linear.app/roomote/issue/ENG-123',
+                },
+              ],
+            },
+          } as never
+        }
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Linked Work')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', {
+        name: 'Keep GitHub issue follow-ups on one task RooCodeInc/Roomote#42',
+      }),
+    ).toHaveAttribute(
+      'href',
+      'https://github.com/RooCodeInc/Roomote/issues/42',
+    );
+    expect(
+      screen.getByRole('link', {
+        name: 'Show linked work in Task Info ENG-123',
+      }),
+    ).toHaveAttribute('href', 'https://linear.app/roomote/issue/ENG-123');
+  });
+
+  it('shows an identifier when linked work has no title or URL', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={
+          {
+            ...baseTaskRun,
+            payload: {
+              ...baseTaskRun.payload,
+              linkedWorkItems: [
+                {
+                  provider: 'github',
+                  identifier: '42',
+                  repository: 'RooCodeInc/Roomote',
+                  url: '   ',
+                },
+              ],
+            },
+          } as never
+        }
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('RooCodeInc/Roomote#42')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('hides linked work when the task has no linked items', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Linked Work')).not.toBeInTheDocument();
+  });
+
   it('shows the runtime row when debug UI is enabled', () => {
     showDebugUiState.isDebugUIVisible = true;
 
