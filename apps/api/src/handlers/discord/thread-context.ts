@@ -116,9 +116,50 @@ export function toDiscordAttachmentsFromHistory(
   return attachments;
 }
 
+function toDiscordThreadHistoryMessage(message: {
+  id: string;
+  user: string;
+  username?: string;
+  text: string;
+  botId?: string;
+  files?: Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    size: number;
+    url?: string;
+  }>;
+}): DiscordThreadHistoryMessage {
+  return {
+    id: message.id,
+    user: message.user,
+    ...(message.username ? { username: message.username } : {}),
+    text: message.text,
+    ...(message.botId ? { botId: message.botId } : {}),
+    attachments: (message.files ?? [])
+      .filter((file) => Boolean(file.url?.trim()))
+      .map((file) => ({
+        id: file.id,
+        filename: file.name,
+        size: file.size,
+        url: file.url!,
+        ...(file.mimeType && file.mimeType !== 'application/octet-stream'
+          ? { content_type: file.mimeType }
+          : {}),
+      })),
+  };
+}
+
 export async function fetchDiscordThreadHistoryBestEffort(input: {
   provider: DiscordCommunicationProvider;
   channelId: string;
+  /**
+   * Parent channel of a thread. Threads anchored to a channel message share
+   * their id with the starter message, which lives in the parent channel and
+   * never appears in the thread's own listing; pass the parent so the starter
+   * can be recovered from there.
+   */
+  parentChannelId?: string;
 }): Promise<DiscordThreadHistoryMessage[]> {
   // Discord returns newest-first pages of up to 100. Walk backward with `before`
   // so a long thread still becomes agent context (Slack fetches full reply chains).
@@ -134,24 +175,7 @@ export async function fetchDiscordThreadHistoryBestEffort(input: {
       });
       if (result.messages.length === 0) break;
 
-      const page = result.messages.map((message) => ({
-        id: message.id,
-        user: message.user,
-        ...(message.username ? { username: message.username } : {}),
-        text: message.text,
-        ...(message.botId ? { botId: message.botId } : {}),
-        attachments: (message.files ?? [])
-          .filter((file) => Boolean(file.url?.trim()))
-          .map((file) => ({
-            id: file.id,
-            filename: file.name,
-            size: file.size,
-            url: file.url!,
-            ...(file.mimeType && file.mimeType !== 'application/octet-stream'
-              ? { content_type: file.mimeType }
-              : {}),
-          })),
-      }));
+      const page = result.messages.map(toDiscordThreadHistoryMessage);
 
       // Pages arrive newest-last after provider reverse; prepend so overall
       // order stays oldest -> newest while we walk earlier pages.
@@ -161,10 +185,33 @@ export async function fetchDiscordThreadHistoryBestEffort(input: {
       if (!before) break;
     }
 
-    if (collected.length > MAX_THREAD_HISTORY_MESSAGES) {
-      return collected.slice(-MAX_THREAD_HISTORY_MESSAGES);
+    const capped =
+      collected.length > MAX_THREAD_HISTORY_MESSAGES
+        ? collected.slice(-MAX_THREAD_HISTORY_MESSAGES)
+        : collected;
+
+    // Forum posts carry their starter inside the thread listing; message-
+    // anchored threads never do, so recover it from the parent channel.
+    if (
+      input.parentChannelId &&
+      !collected.some((message) => message.id === input.channelId)
+    ) {
+      // Independently best-effort: a missing or unreadable starter must not
+      // discard the thread history that was already collected.
+      const starter = await Promise.resolve()
+        .then(() =>
+          input.provider.fetchMessage({
+            channelId: input.parentChannelId!,
+            messageId: input.channelId,
+          }),
+        )
+        .catch(() => null);
+      if (starter) {
+        capped.unshift(toDiscordThreadHistoryMessage(starter));
+      }
     }
-    return collected;
+
+    return capped;
   } catch (error) {
     console.warn(
       `[discord] Failed to fetch thread history for channel ${input.channelId}: ${
@@ -205,6 +252,8 @@ type DiscordContinuationPromptResult = {
 export async function buildDiscordContinuationPrompt(input: {
   provider: DiscordCommunicationProvider;
   channelId: string;
+  /** Parent channel of a thread; lets history recover the starter message. */
+  parentChannelId?: string;
   botUserId?: string;
   queuedMessage: QueuedCommunicationMessage;
   /**
@@ -218,6 +267,9 @@ export async function buildDiscordContinuationPrompt(input: {
   const history = await fetchDiscordThreadHistoryBestEffort({
     provider: input.provider,
     channelId: input.channelId,
+    ...(input.parentChannelId
+      ? { parentChannelId: input.parentChannelId }
+      : {}),
   });
 
   const earlier = history.filter(

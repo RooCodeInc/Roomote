@@ -535,6 +535,11 @@ export class MockDiscordServer {
     }
 
     const message = /^\/channels\/([^/]+)\/messages\/([^/]+)$/u.exec(path);
+    if (message && method === 'GET') {
+      const existing = this.findMessage(message[1] ?? '', message[2] ?? '');
+      if (!existing) return jsonResponse({ message: 'Unknown Message' }, 404);
+      return jsonResponse(existing);
+    }
     if (message && method === 'PATCH') {
       const existing = this.findMessage(message[1] ?? '', message[2] ?? '');
       if (!existing) return jsonResponse({ message: 'Unknown Message' }, 404);
