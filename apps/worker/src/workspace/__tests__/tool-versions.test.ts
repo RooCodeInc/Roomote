@@ -52,6 +52,7 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     repositories: {
       findRepository: vi.fn(),
+      reportDefaultBranch: vi.fn().mockResolvedValue({ updatedCount: 1 }),
     },
   },
 }));
@@ -275,6 +276,7 @@ describe('WorkspaceManager tool versions', () => {
     it('clones repositories with git transport instead of gh repo clone', async () => {
       vi.mocked(existsSync).mockReturnValue(false);
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -345,6 +347,7 @@ describe('WorkspaceManager tool versions', () => {
     it('clones Gitea repositories from synced repository metadata', async () => {
       vi.mocked(existsSync).mockReturnValue(false);
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
         cloneUrl: 'https://git.example.com/acme/backend.git',
@@ -391,6 +394,7 @@ describe('WorkspaceManager tool versions', () => {
     it('clones Azure DevOps repositories from synced repository metadata', async () => {
       vi.mocked(existsSync).mockReturnValue(false);
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/Platform/backend',
         defaultBranch: 'main',
         cloneUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
@@ -437,6 +441,7 @@ describe('WorkspaceManager tool versions', () => {
     it('keeps explicitly requested default branches untouched', async () => {
       vi.mocked(existsSync).mockReturnValue(false);
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -456,6 +461,7 @@ describe('WorkspaceManager tool versions', () => {
     it('uses the resolved remote HEAD when the requested branch is blank', async () => {
       vi.mocked(existsSync).mockReturnValue(false);
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -479,11 +485,16 @@ describe('WorkspaceManager tool versions', () => {
       expect(mockExecuteAll).toHaveBeenCalledWith(
         buildRepositorySyncCommands('trunk'),
       );
+      expect(sdk.repositories.reportDefaultBranch).toHaveBeenCalledWith({
+        repositoryId: 'repo-1',
+        defaultBranch: 'trunk',
+      });
     });
 
     it('keeps explicitly requested non-default branches untouched', async () => {
       vi.mocked(existsSync).mockReturnValue(false);
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -509,6 +520,7 @@ describe('WorkspaceManager tool versions', () => {
       vi.mocked(existsSync).mockReturnValue(true);
 
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -540,6 +552,7 @@ describe('WorkspaceManager tool versions', () => {
       );
 
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -575,6 +588,7 @@ describe('WorkspaceManager tool versions', () => {
       );
 
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -606,6 +620,7 @@ describe('WorkspaceManager tool versions', () => {
       );
 
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -638,6 +653,7 @@ describe('WorkspaceManager tool versions', () => {
       );
 
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/backend',
         defaultBranch: 'main',
       } as never);
@@ -669,6 +685,7 @@ describe('WorkspaceManager tool versions', () => {
       );
 
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+        id: 'repo-1',
         fullName: 'acme/acme',
         defaultBranch: 'main',
       } as never);
