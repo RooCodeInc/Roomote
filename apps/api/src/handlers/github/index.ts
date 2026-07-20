@@ -36,6 +36,9 @@ import {
 import { handlePushConflictCheck } from './handlePushConflictCheck';
 import { handleWorkflowRunCompleted } from './handleWorkflowRunCompleted';
 
+// Repository metadata sync:
+import { handleRepositoryEdited } from './handleRepositoryEdited';
+
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
@@ -451,6 +454,12 @@ github.post('/', async (c) => {
 
     webhooks.on('push', ({ id, name, payload }) =>
       recordWebhook(id, name, payload, () => handlePushConflictCheck(payload)),
+    );
+
+    webhooks.on('repository.edited', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+        handleRepositoryEdited(payload),
+      ),
     );
 
     webhooks.on('workflow_run.completed', ({ id, name, payload }) =>
