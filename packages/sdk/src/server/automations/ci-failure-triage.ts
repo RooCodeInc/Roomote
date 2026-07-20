@@ -1,9 +1,7 @@
 import {
   buildCiFailureTriageFingerprint,
   buildCiFailureTriagePrompt,
-  buildRepositoryCoverage,
   enqueueTask,
-  getEnvironmentBackedCoverage,
   releaseCiFailureTriageInvestigation,
   tryClaimCiFailureTriageInvestigation,
   type CiFailureTriageTriggeringRun,
@@ -28,7 +26,10 @@ import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
 } from './destination';
-import { getActiveRepositoriesForProviders } from './github-deployment-scope';
+import {
+  findEnvironmentIdForRepositoryId,
+  getActiveRepositoriesForProviders,
+} from './github-deployment-scope';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -88,33 +89,20 @@ export async function ciFailureTriageJob(
       return result;
     }
 
-    const repositoryCoverage = await buildRepositoryCoverage(
-      selectedRepositories.map((repo) => repo.fullName),
-    );
-    const environmentByFullName = new Map(
-      getEnvironmentBackedCoverage(repositoryCoverage).map((coverage) => [
-        coverage.repositoryFullName,
-        coverage,
-      ]),
-    );
-
-    if (environmentByFullName.size === 0) {
-      result.skippedReason =
-        'no repositories are covered by a configured environment';
-      return result;
-    }
-
     const channelId = destination.channelId;
     let launched = 0;
+    let consideredWithEnvironment = 0;
 
-    // Walk every provider+host+fullName identity. Environment mapping is still
-    // fullName-keyed, but collapsing hosts earlier would drop failing instances.
+    // Walk every provider+host+fullName identity and resolve coverage through
+    // the repository-id environment mapping (not fullName).
     for (const selectedRepository of selectedRepositories) {
-      const coverage = environmentByFullName.get(selectedRepository.fullName);
-      const environmentId = coverage?.targetEnvironmentId;
+      const environmentId = await findEnvironmentIdForRepositoryId(
+        selectedRepository.id,
+      );
       if (!environmentId) {
         continue;
       }
+      consideredWithEnvironment += 1;
 
       const sourceControlProvider = selectedRepository.sourceControlProvider;
       let triggeringRun: CiFailureTriageTriggeringRun | undefined;
@@ -267,13 +255,18 @@ export async function ciFailureTriageJob(
       }
     }
 
+    if (consideredWithEnvironment === 0 && launched === 0) {
+      result.skippedReason =
+        'no repositories are covered by a configured environment';
+    }
+
     await recordAutomationRunOutcome(db, {
       key: 'ci_failure_triage',
       status: 'succeeded',
       at: new Date(),
     });
 
-    if (launched === 0) {
+    if (launched === 0 && !result.skippedReason) {
       result.skippedReason =
         result.errors.length > 0
           ? 'Failed to launch the CI failure fix task.'

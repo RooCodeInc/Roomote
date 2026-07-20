@@ -1,11 +1,13 @@
 import {
   and,
   db,
+  environmentRepositoryMappings,
   eq,
   githubInstallations,
   inArray,
   isNull,
   repositories,
+  sql,
 } from '@roomote/db/server';
 import type { SourceControlProvider } from '@roomote/types';
 
@@ -68,6 +70,7 @@ export async function getActiveGitHubRepositoryFullNames(): Promise<string[]> {
 }
 
 type ActiveRepositoryRef = {
+  id: string;
   fullName: string;
   sourceControlProvider: SourceControlProvider;
   externalRepoId: string | null;
@@ -87,6 +90,7 @@ export async function getActiveRepositoriesForProviders(
 
   const rows = await db
     .select({
+      id: repositories.id,
       fullName: repositories.fullName,
       sourceControlProvider: repositories.sourceControlProvider,
       externalRepoId: repositories.externalRepoId,
@@ -120,6 +124,7 @@ export async function getActiveRepositoriesForProviders(
     }
     seen.add(identityKey);
     result.push({
+      id: row.id,
       fullName: row.fullName,
       sourceControlProvider: row.sourceControlProvider as SourceControlProvider,
       externalRepoId: row.externalRepoId,
@@ -128,4 +133,48 @@ export async function getActiveRepositoriesForProviders(
     });
   }
   return result;
+}
+
+/**
+ * Resolve the environment mapped to a specific repository row (provider+host
+ * scoped). When multiple environments map the same repository, prefer the
+ * most specific mapping (fewest repositories), then a stable environment id.
+ */
+export async function findEnvironmentIdForRepositoryId(
+  repositoryId: string,
+): Promise<string | undefined> {
+  const directMappings = await db
+    .select({
+      environmentId: environmentRepositoryMappings.environmentId,
+    })
+    .from(environmentRepositoryMappings)
+    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId));
+
+  if (directMappings.length === 0) {
+    return undefined;
+  }
+
+  if (directMappings.length === 1) {
+    return directMappings[0]!.environmentId;
+  }
+
+  const environmentIds = [
+    ...new Set(directMappings.map((row) => row.environmentId)),
+  ];
+  const counts = await db
+    .select({
+      environmentId: environmentRepositoryMappings.environmentId,
+      repoCount: sql<number>`count(*)::int`,
+    })
+    .from(environmentRepositoryMappings)
+    .where(inArray(environmentRepositoryMappings.environmentId, environmentIds))
+    .groupBy(environmentRepositoryMappings.environmentId);
+
+  counts.sort(
+    (left, right) =>
+      left.repoCount - right.repoCount ||
+      left.environmentId.localeCompare(right.environmentId),
+  );
+
+  return counts[0]?.environmentId;
 }
