@@ -11,18 +11,13 @@ import {
   resolveExpectedOpenCodeCliVersion,
 } from '../../../../commands/setup/shared-runtime-packages';
 
-export const OPENCODE_PLUGIN_PACKAGE_NAME = '@opencode-ai/plugin';
-export const DEFAULT_OPENCODE_PLUGIN_SEED_TIMEOUT_MS = 60_000;
-export const ROOMOTE_OPENCODE_PLUGIN_SEED_DIR_ENV =
-  'ROOMOTE_OPENCODE_PLUGIN_SEED_DIR';
+const OPENCODE_PLUGIN_PACKAGE_NAME = '@opencode-ai/plugin';
+const DEFAULT_OPENCODE_PLUGIN_SEED_TIMEOUT_MS = 60_000;
+const ROOMOTE_OPENCODE_PLUGIN_SEED_DIR_ENV = 'ROOMOTE_OPENCODE_PLUGIN_SEED_DIR';
 /** Default image-baked seed directory for worker sandboxes. */
-export const DEFAULT_OPENCODE_PLUGIN_SEED_DIR =
-  '/opt/roomote/opencode-plugin-seed';
+const DEFAULT_OPENCODE_PLUGIN_SEED_DIR = '/opt/roomote/opencode-plugin-seed';
 
-export type OpenCodePluginSeedResult =
-  | 'already-complete'
-  | 'copied'
-  | 'installed';
+type OpenCodePluginSeedResult = 'already-complete' | 'copied' | 'installed';
 
 type PackageJson = {
   dependencies?: Record<string, string>;
@@ -43,7 +38,7 @@ type PackageLockJson = {
   >;
 };
 
-export type SeedOpenCodePluginDependenciesOptions = {
+type SeedOpenCodePluginDependenciesOptions = {
   configDir: string;
   version: string;
   logger: HarnessLogger;
