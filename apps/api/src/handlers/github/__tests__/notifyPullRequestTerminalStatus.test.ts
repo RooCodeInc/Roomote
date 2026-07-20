@@ -305,6 +305,43 @@ describe('notifyPullRequestTerminalStatus', () => {
     });
   });
 
+  it('still places Discord merge checkmark when eyes cleanup fails', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: discordPayload }] as any);
+    mockRemoveReaction.mockRejectedValueOnce(new Error('already gone'));
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'origin-msg-1',
+      name: 'white_check_mark',
+    });
+  });
+
+  it('falls back to Discord communication message for terminal reactions', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([
+      {
+        payload: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-9',
+          communicationMessageId: 'origin-fallback',
+        },
+      },
+    ] as any);
+
+    await notifyPullRequestTerminalStatus(baseParams);
+
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channelId: 'channel-9',
+      messageId: 'origin-fallback',
+      name: 'white_check_mark',
+    });
+  });
+
   it('emits a Linear closing response activity', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);

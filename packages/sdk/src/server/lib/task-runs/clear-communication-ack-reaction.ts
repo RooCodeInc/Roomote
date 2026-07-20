@@ -9,7 +9,7 @@ import { findTaskRun } from './find-task-run';
 /** Fixed intake-ack emoji used by Discord message launches (👀). */
 const DISCORD_ACK_REACTION = 'eyes';
 
-export type ClearCommunicationAckReactionResult = {
+type ClearCommunicationAckReactionResult = {
   cleared: boolean;
   reason?:
     | 'run_not_found'
