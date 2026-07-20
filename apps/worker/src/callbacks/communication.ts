@@ -29,6 +29,12 @@ function supportsCommunicationRequestUserInput(
   return Boolean(provider && COMMUNICATION_RUI_PROVIDERS.has(provider));
 }
 
+function supportsCommunicationAckReactionCleanup(
+  provider: CommunicationProvider | null | undefined,
+): provider is 'discord' {
+  return provider === 'discord';
+}
+
 function getRequestUserInputPromptSignatures(
   context: RunTaskContext,
 ): Map<string, string> {
@@ -46,6 +52,27 @@ function getConversationId(taskRun: TaskRun): string | null {
   const threadId = getCommunicationThreadIdFromTaskPayload(taskRun.payload);
   const channelId = getCommunicationChannelFromTaskPayload(taskRun.payload);
   return threadId?.trim() || channelId?.trim() || null;
+}
+
+async function clearCommunicationAckReactionOnStart(
+  taskRun: TaskRun,
+): Promise<void> {
+  const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
+  if (!supportsCommunicationAckReactionCleanup(provider)) {
+    return;
+  }
+
+  try {
+    await sdk.taskRuns.clearCommunicationAckReaction({
+      runId: taskRun.id,
+    });
+  } catch (error) {
+    console.error(
+      `[communicationCallbacks#onStart] Failed ${provider} ack reaction cleanup for task run ${taskRun.id}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 async function handleRequestUserInput(
@@ -127,38 +154,52 @@ export function getCommunicationRunTaskCallbacks(
   taskRun: TaskRun,
 ): RunTaskCallbacks {
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
-  if (!supportsCommunicationRequestUserInput(provider)) {
+  const supportsRui = supportsCommunicationRequestUserInput(provider);
+  const supportsAckCleanup = supportsCommunicationAckReactionCleanup(provider);
+
+  if (!supportsRui && !supportsAckCleanup) {
     return {};
   }
 
   return {
-    onMessage: async (run, _taskId, event, context) => {
-      if (event.type === 'request_user_input') {
-        await handleRequestUserInput(run, event, context);
-      }
-      if (event.type === 'request_user_input_response') {
-        await handleRequestUserInputResponse(run, event);
-      }
-    },
-    onExit: async (run) => {
-      const conversationId = getConversationId(run);
-      if (!conversationId) {
-        return;
-      }
-      try {
-        await sdk.taskRuns.clearPendingCommunicationRequestUserInput({
-          runId: run.id,
-          provider,
-          conversationId,
-        });
-      } catch (error) {
-        console.error(
-          `[communicationCallbacks#onExit] Failed to clear ${provider} request_user_input: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    },
+    ...(supportsAckCleanup
+      ? {
+          onStart: async (run) => {
+            await clearCommunicationAckReactionOnStart(run);
+          },
+        }
+      : {}),
+    ...(supportsRui
+      ? {
+          onMessage: async (run, _taskId, event, context) => {
+            if (event.type === 'request_user_input') {
+              await handleRequestUserInput(run, event, context);
+            }
+            if (event.type === 'request_user_input_response') {
+              await handleRequestUserInputResponse(run, event);
+            }
+          },
+          onExit: async (run) => {
+            const conversationId = getConversationId(run);
+            if (!conversationId) {
+              return;
+            }
+            try {
+              await sdk.taskRuns.clearPendingCommunicationRequestUserInput({
+                runId: run.id,
+                provider,
+                conversationId,
+              });
+            } catch (error) {
+              console.error(
+                `[communicationCallbacks#onExit] Failed to clear ${provider} request_user_input: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            }
+          },
+        }
+      : {}),
   };
 }
 

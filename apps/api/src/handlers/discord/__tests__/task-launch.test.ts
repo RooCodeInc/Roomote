@@ -647,11 +647,9 @@ describe('launchDiscordTask', () => {
       expect.anything(),
     );
     expect(mocks.dbUpdate).toHaveBeenCalled();
-    expect(provider.addReaction).toHaveBeenCalledWith({
-      channelId: 'dm-1',
-      messageId: 'ack-dm-1',
-      name: '👀',
-    });
+    // Intake eyes stay MESSAGE_CREATE-only; interaction launches only need a
+    // durable reaction target for terminal/cancel, not a post-enqueue 👀.
+    expect(provider.addReaction).not.toHaveBeenCalled();
   });
 
   it('falls back to a detached thread when the anchor message was deleted', async () => {

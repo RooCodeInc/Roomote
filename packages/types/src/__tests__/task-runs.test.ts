@@ -9,6 +9,7 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getDiscordReactionTargetFromTaskPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
   getTaskToolActionIdFromInvocation,
@@ -892,6 +893,21 @@ describe('taskSpecSchema', () => {
         thread_ts: '111.222',
       }),
     ).toBe('111.222');
+    expect(
+      getDiscordReactionTargetFromTaskPayload({
+        discordReactionChannelId: 'react-chan',
+        discordReactionMessageId: 'react-msg',
+        communicationChannelId: 'comm-chan',
+        communicationMessageId: 'comm-msg',
+      }),
+    ).toEqual({ channelId: 'react-chan', messageId: 'react-msg' });
+    expect(
+      getDiscordReactionTargetFromTaskPayload({
+        communicationChannelId: 'comm-chan',
+        communicationMessageId: 'comm-msg',
+      }),
+    ).toEqual({ channelId: 'comm-chan', messageId: 'comm-msg' });
+    expect(getDiscordReactionTargetFromTaskPayload({})).toBeNull();
   });
 
   it('populates canonical SnapshotResume Slack metadata from a source payload', () => {

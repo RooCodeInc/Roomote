@@ -1597,6 +1597,29 @@ export function getCommunicationMessageIdFromTaskPayload(
   );
 }
 
+/**
+ * Discord channel + message that intake (👀) and terminal platform reactions
+ * target. Prefer the dedicated reaction fields (always real message ids) over
+ * communication message metadata, which can lag for interaction launches.
+ */
+export function getDiscordReactionTargetFromTaskPayload(payload: unknown): {
+  channelId: string;
+  messageId: string;
+} | null {
+  const channelId =
+    getNonEmptyTaskPayloadString(payload, 'discordReactionChannelId') ??
+    getCommunicationChannelFromTaskPayload(payload);
+  const messageId =
+    getNonEmptyTaskPayloadString(payload, 'discordReactionMessageId') ??
+    getCommunicationMessageIdFromTaskPayload(payload);
+
+  if (!channelId || !messageId) {
+    return null;
+  }
+
+  return { channelId, messageId };
+}
+
 export function getSlackChannelFromTaskPayload(
   payload: unknown,
 ): string | null {

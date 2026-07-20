@@ -81,6 +81,7 @@ import {
 import {
   findTaskRun,
   findTaskRunRuntimeState,
+  clearCommunicationAckReaction,
   updateTaskRun,
   updateTaskRunRuntimeState,
   touchTaskRunHeartbeat,
@@ -974,6 +975,16 @@ export const taskRunsRouter = router({
       input.requestId ? { requestId: input.requestId } : undefined,
     ),
   ),
+  /**
+   * Worker onStart hook: drop the Discord intake 👀 reaction once the runtime
+   * is live (Slack parity). Soft/no-op for non-Discord runs.
+   */
+  clearCommunicationAckReaction: runScoped(
+    z.object({
+      runId: z.number(),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => clearCommunicationAckReaction(input)),
   getCommunicationRequestUserInputAnswers: runScoped(
     z.object({
       runId: z.number(),
