@@ -206,6 +206,11 @@ x-roomote-bullmq-env: &roomote-bullmq-env
   DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}
   ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
   DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  # Mirrors the controller's worker image/release resolution so the
+  # "Validate environment" checks report what task boots will actually use.
+  DOCKER_WORKER_IMAGE: ${DOCKER_WORKER_IMAGE:-}
+  ROOMOTE_WORKER_IMAGE_REPO: ${ROOMOTE_WORKER_IMAGE_REPO:-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-worker}
+  DOCKER_WORKER_RELEASE_PATH: ${DOCKER_WORKER_RELEASE_PATH:-/roomote/releases/worker-current.tar.gz}
   R_TELEGRAM_BOT_TOKEN: ${R_TELEGRAM_BOT_TOKEN:-}
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
   R_DISCORD_GATEWAY_SECRET: ${R_DISCORD_GATEWAY_SECRET:-}
@@ -295,8 +300,8 @@ services:
         mc mb --ignore-existing "roomote/$$S3_BUCKET_ARTIFACTS"
 
   # The only service with the host Docker socket. Its API is reachable solely
-  # from the controller over an internal network, and all unrelated Docker API
-  # sections remain denied by the proxy defaults.
+  # from the controller and bullmq over an internal network, and all unrelated
+  # Docker API sections remain denied by the proxy defaults.
   docker-proxy:
     image: ghcr.io/tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
     restart: unless-stopped
@@ -427,15 +432,22 @@ services:
     <<: *roomote-service
     image: *roomote-app-image
     command: ['bullmq']
+    # Docker standby retention and the settings "Validate environment" checks
+    # run here; both reach Docker through the restricted socket proxy, never
+    # the raw socket.
+    networks: [default, docker-api]
     depends_on:
       redis:
         condition: service_started
       db-migrate:
         condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
     environment:
       <<: *roomote-bullmq-env
       ROOMOTE_SERVICE: bullmq
       PORT: 3002
+      DOCKER_HOST: tcp://docker-proxy:2375
     healthcheck:
       test:
         [

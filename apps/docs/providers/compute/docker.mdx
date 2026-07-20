@@ -125,10 +125,16 @@ repositories.
 ## Verify setup
 
 1. select Docker as the sandbox provider
-2. start a small task from an environment
-3. confirm the task can clone the repository and run a simple command
-4. open task logs and verify output streams back to Roomote
-5. check that the worker container stops after the task completes
+2. use **Validate environment** in Settings → Sandboxes (Local Docker
+   section) to check the Docker daemon, worker image, and worker release
+   archive before starting anything
+3. start a small task from an environment
+4. confirm the task can clone the repository and run a simple command
+5. open task logs and verify output streams back to Roomote
+6. check that the worker container stops after the task completes
+
+The validation runs in the background worker service (the process with Docker
+socket access), so it reflects exactly what task boots will see.
 
 ## Common issues
 
