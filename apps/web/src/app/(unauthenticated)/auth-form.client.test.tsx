@@ -45,7 +45,9 @@ describe('AuthForm', () => {
 
     render(<AuthForm />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login with Slack' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with Slack' }),
+    );
 
     await waitFor(() => {
       expect(signInOauth2Mock).toHaveBeenCalledWith({
@@ -62,7 +64,7 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Login with Microsoft Teams' }),
+      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
     );
 
     await waitFor(() => {
@@ -79,7 +81,7 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Login with Microsoft Teams' }),
+      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
     );
 
     await waitFor(() => {
@@ -96,7 +98,7 @@ describe('AuthForm', () => {
     render(<AuthForm />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Login with Microsoft Teams' }),
+      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
     );
 
     await waitFor(() => {
@@ -113,7 +115,9 @@ describe('AuthForm', () => {
 
     render(<AuthForm />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login with Slack' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with Slack' }),
+    );
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith(
@@ -131,7 +135,9 @@ describe('AuthForm', () => {
 
     render(<AuthForm />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Login with Slack' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with Slack' }),
+    );
 
     expect(await screen.findByText('Provider is not configured')).toBeVisible();
     expect(replaceMock).not.toHaveBeenCalled();
@@ -146,7 +152,7 @@ describe('AuthForm', () => {
       }),
     ).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Log in with email' }),
+      screen.getByRole('button', { name: 'Continue with email' }),
     ).toBeVisible();
     expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
@@ -155,19 +161,21 @@ describe('AuthForm', () => {
   it('reveals email sign-in from the provider selection list', () => {
     render(<AuthForm />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Log in with email' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
 
     expect(screen.getByLabelText('Email')).toBeVisible();
     expect(screen.getByLabelText('Password')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
     expect(
-      screen.queryByRole('button', { name: 'Log in with email' }),
+      screen.queryByRole('button', { name: 'Continue with email' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Login with Slack' }),
+      screen.queryByRole('button', { name: 'Continue with Slack' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Login with Microsoft Teams' }),
+      screen.queryByRole('button', { name: 'Continue with Microsoft Teams' }),
     ).not.toBeInTheDocument();
   });
 
@@ -175,13 +183,13 @@ describe('AuthForm', () => {
     render(<AuthForm enabledProviders={[]} />);
 
     expect(
-      screen.queryByRole('button', { name: 'Login with Slack' }),
+      screen.queryByRole('button', { name: 'Continue with Slack' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Continue with Telegram' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Login with Microsoft Teams' }),
+      screen.queryByRole('button', { name: 'Continue with Microsoft Teams' }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole('heading', {
@@ -214,7 +222,9 @@ describe('AuthForm', () => {
   it('offers account creation to invited visitors', () => {
     render(<AuthForm canSignUp />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Log in with email' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
 
     expect(
       screen.getByRole('button', { name: 'Need an account? Create one' }),
@@ -227,7 +237,9 @@ describe('AuthForm', () => {
   it('hides account creation and points at an admin without an invite', () => {
     render(<AuthForm />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Log in with email' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
 
     expect(
       screen.queryByRole('button', { name: /create/i }),
@@ -255,7 +267,9 @@ describe('AuthForm', () => {
 
     render(<AuthForm canSignUp />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Log in with email' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
 
     expect(screen.getByLabelText('Name')).toBeVisible();
     expect(
@@ -268,7 +282,9 @@ describe('AuthForm', () => {
 
     render(<AuthForm />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Log in with email' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
 
     expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
@@ -281,7 +297,9 @@ describe('AuthForm', () => {
 
     expect(screen.getByText(/reached its licensed user limit/)).toBeVisible();
     // Sign-in stays available: existing users are never blocked by the gate.
-    fireEvent.click(screen.getByRole('button', { name: 'Log in with email' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with email' }),
+    );
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
   });
 

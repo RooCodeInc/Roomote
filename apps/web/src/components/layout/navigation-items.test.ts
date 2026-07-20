@@ -16,16 +16,12 @@ describe('getVisiblePrimaryNavItems', () => {
     ]);
   });
 
-  it('keeps analytics visible for non-admins', () => {
+  it('hides analytics from non-admins', () => {
     const items = getVisiblePrimaryNavItems(featureFlags, {
       isAdmin: false,
     });
 
-    expect(items.map((item) => item.href)).toEqual([
-      '/',
-      '/tasks',
-      '/analytics',
-    ]);
+    expect(items.map((item) => item.href)).toEqual(['/', '/tasks']);
   });
 
   it('hides automations from non-admins', () => {
@@ -33,10 +29,6 @@ describe('getVisiblePrimaryNavItems', () => {
       isAdmin: false,
     });
 
-    expect(items.map((item) => item.href)).toEqual([
-      '/',
-      '/tasks',
-      '/analytics',
-    ]);
+    expect(items.map((item) => item.href)).toEqual(['/', '/tasks']);
   });
 });
