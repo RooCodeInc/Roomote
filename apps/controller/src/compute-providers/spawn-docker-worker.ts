@@ -468,6 +468,10 @@ export async function spawnDockerWorker(
 
     throwIfSpawnAborted();
 
+    const workerTrpcUrl = resolveDockerWorkerTrpcUrl({
+      trpcUrl: process.env.TRPC_URL ?? Env.TRPC_URL,
+      controlNetwork,
+    });
     const workerEnv = buildDockerWorkerEnv({
       authToken,
       sandboxExpiresAtMs: Date.now() + config.dockerTimeoutMs,
@@ -476,7 +480,7 @@ export async function spawnDockerWorker(
       image: config.image,
       extraEnv: {
         SANDBOX_TIMEOUT_MS: String(config.dockerTimeoutMs),
-        TRPC_URL: toContainerReachableUrl(process.env.TRPC_URL ?? Env.TRPC_URL),
+        TRPC_URL: workerTrpcUrl,
         // Mock-Slack parity: worker-side SlackNotifier calls (question blocks,
         // reactions) must reach the same mock harness the API uses.
         ...(process.env.SLACK_API_BASE_URL && {
@@ -511,14 +515,17 @@ export async function spawnDockerWorker(
       },
     });
 
+    assertDockerWorkerLaunchEnv(workerEnv);
+
     const workerCommand = getDockerWorkerCommand(taskRun.payloadKind);
+    // Inject via `docker exec -e` so the worker process gets AUTH_TOKEN /
+    // TRPC_URL without baking secrets into `docker inspect` Config.Env.
+    // Operators checking a later plain `docker exec` shell will not see these
+    // keys — that is expected and does not mean spawn skipped injection.
     await runDocker([
       'exec',
       '-d',
-      ...Object.entries(workerEnv).flatMap(([key, value]) => [
-        '-e',
-        `${key}=${value}`,
-      ]),
+      ...buildDockerWorkerExecEnvArgs(workerEnv),
       containerName,
       'bash',
       '-lc',
@@ -529,7 +536,12 @@ export async function spawnDockerWorker(
 
     console.log(
       `[spawnDockerWorker] Docker worker launched for task run #${taskRun.id} ${JSON.stringify(
-        { containerName, containerId },
+        {
+          containerName,
+          containerId,
+          trpcUrl: sanitizeDockerWorkerTrpcUrlForLog(workerTrpcUrl),
+          envKeys: Object.keys(workerEnv).sort(),
+        },
       )}`,
     );
 
@@ -959,6 +971,77 @@ export function getDockerWorkerCommand(
   payloadKind: TaskPayloadKind,
 ): 'resume' | 'run' {
   return payloadKind === TaskPayloadKind.SnapshotResume ? 'resume' : 'run';
+}
+
+/**
+ * Docker Compose self-host/prod attaches the `api` service to each task
+ * network. When a control network is configured, egress policy blackholes the
+ * docker bridge gateway so sandboxes cannot hairpin through the public edge.
+ * Workers must call the in-network API alias directly (no `/_roomote-api`
+ * prefix — that path only exists on the public reverse proxy).
+ */
+export const DOCKER_CONTROL_PLANE_TRPC_URL = 'http://api:3001';
+
+export function resolveDockerWorkerTrpcUrl(params: {
+  trpcUrl: string | undefined;
+  controlNetwork?: string;
+}): string {
+  // Control-plane isolation only trusts the `api` service on the task
+  // network at the app origin/root. Public reverse-proxy path prefixes such
+  // as `/_roomote-api` must not be preserved even when hostname is already
+  // `api`.
+  if (params.controlNetwork?.trim()) {
+    return DOCKER_CONTROL_PLANE_TRPC_URL;
+  }
+
+  return toContainerReachableUrl(params.trpcUrl);
+}
+
+/**
+ * Log-safe view of the worker TRPC URL: drops userinfo credentials and
+ * query/hash so operator logs never capture embedded secrets while still
+ * showing host + path for spawn diagnosis.
+ */
+export function sanitizeDockerWorkerTrpcUrlForLog(trpcUrl: string): string {
+  try {
+    const url = new URL(trpcUrl);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return trimTrailingSlash(url.toString());
+  } catch {
+    return '[invalid-trpc-url]';
+  }
+}
+
+const REQUIRED_DOCKER_WORKER_LAUNCH_ENV_KEYS = [
+  'AUTH_TOKEN',
+  'TRPC_URL',
+  'R_APP_URL',
+] as const;
+
+export function assertDockerWorkerLaunchEnv(
+  workerEnv: Record<string, string>,
+): void {
+  const missing = REQUIRED_DOCKER_WORKER_LAUNCH_ENV_KEYS.filter(
+    (key) => !workerEnv[key]?.trim(),
+  );
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Docker worker launch env missing required value(s): ${missing.join(', ')}`,
+    );
+  }
+}
+
+export function buildDockerWorkerExecEnvArgs(
+  workerEnv: Record<string, string>,
+): string[] {
+  return Object.entries(workerEnv).flatMap(([key, value]) => [
+    '-e',
+    `${key}=${value}`,
+  ]);
 }
 
 export function toContainerReachableUrl(value: string | undefined): string {
