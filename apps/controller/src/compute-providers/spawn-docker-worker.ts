@@ -539,7 +539,7 @@ export async function spawnDockerWorker(
         {
           containerName,
           containerId,
-          trpcUrl: workerTrpcUrl,
+          trpcUrl: sanitizeDockerWorkerTrpcUrlForLog(workerTrpcUrl),
           envKeys: Object.keys(workerEnv).sort(),
         },
       )}`,
@@ -995,6 +995,24 @@ export function resolveDockerWorkerTrpcUrl(params: {
   }
 
   return toContainerReachableUrl(params.trpcUrl);
+}
+
+/**
+ * Log-safe view of the worker TRPC URL: drops userinfo credentials and
+ * query/hash so operator logs never capture embedded secrets while still
+ * showing host + path for spawn diagnosis.
+ */
+export function sanitizeDockerWorkerTrpcUrlForLog(trpcUrl: string): string {
+  try {
+    const url = new URL(trpcUrl);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return trimTrailingSlash(url.toString());
+  } catch {
+    return '[invalid-trpc-url]';
+  }
 }
 
 const REQUIRED_DOCKER_WORKER_LAUNCH_ENV_KEYS = [

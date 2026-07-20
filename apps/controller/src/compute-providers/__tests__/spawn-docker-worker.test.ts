@@ -16,6 +16,7 @@ import {
   resolveDockerSpawnCleanupMode,
   resolveDockerWorkerOwnershipTargetFromLookup,
   resolveDockerWorkerTrpcUrl,
+  sanitizeDockerWorkerTrpcUrlForLog,
   resumeDockerTaskDaemon,
   shouldPreserveFailedDockerWorkerContainer,
   shouldRetryDockerWorkerWithoutDiskLimit,
@@ -258,6 +259,28 @@ describe('resolveDockerWorkerTrpcUrl', () => {
         trpcUrl: 'http://localhost:13001',
       }),
     ).toBe('http://host.docker.internal:13001');
+  });
+});
+
+describe('sanitizeDockerWorkerTrpcUrlForLog', () => {
+  it('strips URL userinfo credentials and query/hash before logging', () => {
+    expect(
+      sanitizeDockerWorkerTrpcUrlForLog(
+        'https://worker:s3cret@api.example.com:8443/_roomote-api?token=abc#frag',
+      ),
+    ).toBe('https://api.example.com:8443/_roomote-api');
+  });
+
+  it('keeps plain in-network control-plane URLs unchanged', () => {
+    expect(
+      sanitizeDockerWorkerTrpcUrlForLog(DOCKER_CONTROL_PLANE_TRPC_URL),
+    ).toBe(DOCKER_CONTROL_PLANE_TRPC_URL);
+  });
+
+  it('returns a stable placeholder for unparseable values', () => {
+    expect(sanitizeDockerWorkerTrpcUrlForLog('not a url')).toBe(
+      '[invalid-trpc-url]',
+    );
   });
 });
 
