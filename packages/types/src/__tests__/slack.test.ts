@@ -1,4 +1,8 @@
-import { buildSlackThreadPermalink } from '../slack';
+import {
+  buildSlackThreadPermalink,
+  parseSlackChannelPermalink,
+  parseSlackMessagePermalink,
+} from '../slack';
 
 describe('buildSlackThreadPermalink', () => {
   it('builds an app.slack.com permalink when no workspace domain is available', () => {
@@ -48,6 +52,72 @@ describe('buildSlackThreadPermalink', () => {
         slackChannelId: 'C123456',
         threadTs: null,
       }),
+    ).toBeNull();
+  });
+});
+
+describe('parseSlackMessagePermalink', () => {
+  it('parses workspace and app archive permalinks', () => {
+    expect(
+      parseSlackMessagePermalink(
+        'https://acme.slack.com/archives/C123/p1710000000000100?thread_ts=1710000000.000000',
+      ),
+    ).toEqual({
+      teamId: null,
+      channelId: 'C123',
+      messageId: '1710000000.000100',
+    });
+
+    expect(
+      parseSlackMessagePermalink(
+        'https://app.slack.com/archives/C456/p1710000000000200',
+      ),
+    ).toEqual({
+      teamId: null,
+      channelId: 'C456',
+      messageId: '1710000000.000200',
+    });
+  });
+
+  it('parses app client thread links', () => {
+    expect(
+      parseSlackMessagePermalink(
+        'https://app.slack.com/client/T123/C456/thread/C456-1710000000.000100',
+      ),
+    ).toEqual({
+      teamId: 'T123',
+      channelId: 'C456',
+      messageId: '1710000000.000100',
+    });
+  });
+
+  it('rejects unrelated and malformed links', () => {
+    expect(
+      parseSlackMessagePermalink(
+        'https://example.com/archives/C123/p1710000000000100',
+      ),
+    ).toBeNull();
+    expect(
+      parseSlackMessagePermalink('https://app.slack.com/archives/C123/nope'),
+    ).toBeNull();
+  });
+});
+
+describe('parseSlackChannelPermalink', () => {
+  it('parses workspace archive and app client channel links', () => {
+    expect(
+      parseSlackChannelPermalink('https://acme.slack.com/archives/C123'),
+    ).toEqual({ teamId: null, channelId: 'C123' });
+    expect(
+      parseSlackChannelPermalink('https://app.slack.com/client/T123/C456'),
+    ).toEqual({ teamId: 'T123', channelId: 'C456' });
+  });
+
+  it('does not treat a message link as a channel-only link', () => {
+    expect(
+      parseSlackChannelPermalink(
+        'https://acme.slack.com/archives/C123/p1710000000000100',
+      ),
     ).toBeNull();
   });
 });

@@ -1,4 +1,8 @@
-import type { SourceControlProvider, TaskArtifactType } from '@roomote/types';
+import type {
+  CommunicationProvider,
+  SourceControlProvider,
+  TaskArtifactType,
+} from '@roomote/types';
 
 export interface ArtifactConfig {
   token: string;
@@ -145,52 +149,42 @@ export interface SlackReactionAddResponse {
   name: string;
 }
 
-export interface SlackThreadLookupMessage {
-  ts: string;
+export interface CommunicationLookupMessage {
+  provider: CommunicationProvider;
+  id: string;
   user: string;
   username?: string;
   botId?: string;
   text: string;
+  channelId: string;
+  threadId?: string;
   fileCount: number;
   files?: Array<{
     id: string;
     name: string;
-    mimetype: string;
-    filetype: string;
+    mimeType: string;
     size: number;
+    url?: string;
   }>;
 }
 
-export interface SlackThreadLookupResponse {
+export interface CommunicationMessageContextResponse {
+  provider: CommunicationProvider;
   channelId: string;
-  requestedMessageTs: string;
-  threadTs: string;
+  requestedMessageId: string;
+  threadId: string;
   matchedMessageIndex: number;
   messageCount: number;
-  messages: SlackThreadLookupMessage[];
+  messages: CommunicationLookupMessage[];
 }
 
-export interface SlackChannelMessagesResponse {
+export interface CommunicationChannelMessagesResponse {
+  provider: CommunicationProvider;
   channelId: string;
   requestedOldest?: string;
   requestedLatest?: string;
   messageCount: number;
-  messages: Array<{
-    ts: string;
-    user: string;
-    username?: string;
-    botId?: string;
-    threadTs?: string;
-    text: string;
-    fileCount: number;
-    files?: Array<{
-      id: string;
-      name: string;
-      mimetype: string;
-      filetype: string;
-      size: number;
-    }>;
-  }>;
+  messages: CommunicationLookupMessage[];
 }
 
 export interface TaskMessage {
