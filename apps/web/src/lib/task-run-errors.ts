@@ -1,7 +1,8 @@
-import { stripRunErrorMarkers } from '@roomote/types';
+import { TaskRunErrorCode, stripRunErrorMarkers } from '@roomote/types';
 
 interface TaskRunErrorSource {
   error?: string | null;
+  errorCode?: string | null;
   result?: unknown | null;
 }
 
@@ -91,34 +92,66 @@ function extractDockerDiagnosticReason(error: string): string | undefined {
   return undefined;
 }
 
+const DOCKER_ERROR_CODE_MESSAGES: Record<TaskRunErrorCode, string> = {
+  [TaskRunErrorCode.DockerDaemonUnreachable]:
+    "Roomote couldn't reach the Docker daemon. Make sure Docker Desktop (or the Docker Engine) is running and that this host can access the Docker socket.",
+  [TaskRunErrorCode.DockerImageMissing]:
+    "Roomote couldn't find or pull the worker image. For local/self-hosted setups, build the worker image first (for example `roomote-worker:local`) and confirm the image name matches your configuration.",
+  [TaskRunErrorCode.DockerPortInUse]:
+    "Roomote couldn't start the sandbox because a required host port is already in use. Stop the other process using that port, then retry.",
+  [TaskRunErrorCode.DockerWorkerFetchFailed]:
+    'The sandbox worker failed while contacting the Roomote API (`fetch failed`). Confirm the worker can reach the API URL from inside Docker (often via `host.docker.internal`) and that the API is running.',
+  [TaskRunErrorCode.DockerWorkerStartTimeout]:
+    'The sandbox container started, but the Roomote worker did not come up in time. Check that the worker image and local worker release archive are present, then retry. Diagnostic details are included below when available.',
+  [TaskRunErrorCode.DockerWorkerExitedEarly]:
+    'The sandbox container exited during boot before the worker started. Review the recent Docker logs below for the underlying crash or missing dependency.',
+  [TaskRunErrorCode.DockerReleaseArchiveMissing]:
+    'Roomote is missing the local worker release archive required to boot Docker sandboxes. Build the worker release (for example via the local development worker-release step) and retry.',
+};
+
+/** The persisted code may come from a newer or older release — trust it only
+ * when this build knows its copy. */
+function resolveDockerErrorCodeMessage(
+  errorCode?: string | null,
+): string | undefined {
+  return errorCode && errorCode in DOCKER_ERROR_CODE_MESSAGES
+    ? DOCKER_ERROR_CODE_MESSAGES[errorCode as TaskRunErrorCode]
+    : undefined;
+}
+
+/** Text-inference fallback for runs persisted before error codes existed. */
 function getDockerSpawnDisplayMessage(error: string): string | undefined {
   if (DOCKER_DAEMON_UNAVAILABLE.test(error)) {
-    return "Roomote couldn't reach the Docker daemon. Make sure Docker Desktop (or the Docker Engine) is running and that this host can access the Docker socket.";
+    return DOCKER_ERROR_CODE_MESSAGES[TaskRunErrorCode.DockerDaemonUnreachable];
   }
 
   if (DOCKER_IMAGE_MISSING_OR_UNAUTHORIZED.test(error)) {
-    return "Roomote couldn't find or pull the worker image. For local/self-hosted setups, build the worker image first (for example `roomote-worker:local`) and confirm the image name matches your configuration.";
+    return DOCKER_ERROR_CODE_MESSAGES[TaskRunErrorCode.DockerImageMissing];
   }
 
   if (DOCKER_PORT_IN_USE.test(error)) {
-    return "Roomote couldn't start the sandbox because a required host port is already in use. Stop the other process using that port, then retry.";
+    return DOCKER_ERROR_CODE_MESSAGES[TaskRunErrorCode.DockerPortInUse];
   }
 
   // Prefer the more specific worker-side fetch failure over generic timeout/exit.
   if (DOCKER_FETCH_FAILED_IN_LOGS.test(error)) {
-    return 'The sandbox worker failed while contacting the Roomote API (`fetch failed`). Confirm the worker can reach the API URL from inside Docker (often via `host.docker.internal`) and that the API is running.';
+    return DOCKER_ERROR_CODE_MESSAGES[TaskRunErrorCode.DockerWorkerFetchFailed];
   }
 
   if (DOCKER_WORKER_START_TIMEOUT.test(error)) {
-    return 'The sandbox container started, but the Roomote worker did not come up in time. Check that the worker image and local worker release archive are present, then retry. Diagnostic details are included below when available.';
+    return DOCKER_ERROR_CODE_MESSAGES[
+      TaskRunErrorCode.DockerWorkerStartTimeout
+    ];
   }
 
   if (DOCKER_WORKER_EXITED_EARLY.test(error)) {
-    return 'The sandbox container exited during boot before the worker started. Review the recent Docker logs below for the underlying crash or missing dependency.';
+    return DOCKER_ERROR_CODE_MESSAGES[TaskRunErrorCode.DockerWorkerExitedEarly];
   }
 
   if (DOCKER_RELEASE_ARCHIVE_MISSING.test(error)) {
-    return 'Roomote is missing the local worker release archive required to boot Docker sandboxes. Build the worker release (for example via the local development worker-release step) and retry.';
+    return DOCKER_ERROR_CODE_MESSAGES[
+      TaskRunErrorCode.DockerReleaseArchiveMissing
+    ];
   }
 
   return undefined;
@@ -171,11 +204,13 @@ export function getTaskRunError(
 
 export function getTaskRunErrorDisplayMessage(
   error?: string | null,
+  errorCode?: string | null,
 ): string | undefined {
   const stripped = stripRunErrorMarkers(error);
 
   if (!stripped) {
-    return undefined;
+    // A categorized failure is still explainable without diagnostic text.
+    return resolveDockerErrorCodeMessage(errorCode);
   }
 
   const workspacePreparationMessage =
@@ -185,7 +220,11 @@ export function getTaskRunErrorDisplayMessage(
     return workspacePreparationMessage;
   }
 
-  const dockerFriendly = getDockerSpawnDisplayMessage(stripped);
+  // The persisted category is authoritative; text inference covers runs
+  // that failed before error codes existed.
+  const dockerFriendly =
+    resolveDockerErrorCodeMessage(errorCode) ??
+    getDockerSpawnDisplayMessage(stripped);
 
   if (dockerFriendly) {
     return composeDockerDisplayMessage(dockerFriendly, stripped);
@@ -232,5 +271,8 @@ export function getTaskRunErrorDisplayMessage(
 export function getTaskRunDisplayError(
   taskRun?: TaskRunErrorSource | null,
 ): string | undefined {
-  return getTaskRunErrorDisplayMessage(getTaskRunError(taskRun));
+  return getTaskRunErrorDisplayMessage(
+    getTaskRunError(taskRun),
+    taskRun?.errorCode,
+  );
 }

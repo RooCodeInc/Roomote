@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind, TaskRunErrorCode } from '@roomote/types';
 import type { TaskRun } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -118,6 +118,7 @@ vi.mock('../monitoring/sentry', () => ({
 // ── Import after mocks ──────────────────────────────────────────────────────
 
 import { BaseController } from '../BaseController';
+import { DockerBootError } from '../compute-providers/docker-sandbox-security';
 
 // Create a concrete subclass for testing the abstract BaseController.
 class TestController extends BaseController {
@@ -348,6 +349,43 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       status: RunStatus.Failed,
       error: 'string error',
     });
+  });
+
+  it('persists the machine-readable code carried by DockerBootError', async () => {
+    const job = makeTaskRun({ id: 11 });
+    const error = new DockerBootError(
+      TaskRunErrorCode.DockerImageMissing,
+      'Docker worker image roomote-worker:local is not available locally and could not be pulled.',
+    );
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(job, error),
+    ).rejects.toThrow('could not be pulled');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 11,
+        status: RunStatus.Failed,
+        errorCode: TaskRunErrorCode.DockerImageMissing,
+      }),
+    );
+  });
+
+  it('classifies untyped docker failures from the formatted message', async () => {
+    const job = makeTaskRun({ id: 12 });
+    const error = new Error(
+      'Failed to run docker run.\n\nCannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n\ncommand:\ndocker run -d roomote-worker:local',
+    );
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(job, error),
+    ).rejects.toThrow();
+
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: TaskRunErrorCode.DockerDaemonUnreachable,
+      }),
+    );
   });
 
   it('resolves local release paths from the repo root even when cwd is apps/controller', () => {

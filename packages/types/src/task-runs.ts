@@ -1936,6 +1936,25 @@ export const bootingRunStatuses = [
   RunStatus.Connecting,
 ] as const;
 
+/**
+ * Machine-readable category for a failed run's boot/spawn error, persisted on
+ * task_runs.error_code alongside the full diagnostic text in `error`. The web
+ * app maps codes to actionable copy instead of pattern-matching error prose.
+ * Values are stored in the database — treat them as stable identifiers.
+ */
+export const TaskRunErrorCode = {
+  DockerDaemonUnreachable: 'docker_daemon_unreachable',
+  DockerImageMissing: 'docker_image_missing',
+  DockerPortInUse: 'docker_port_in_use',
+  DockerReleaseArchiveMissing: 'docker_release_archive_missing',
+  DockerWorkerStartTimeout: 'docker_worker_start_timeout',
+  DockerWorkerExitedEarly: 'docker_worker_exited_early',
+  DockerWorkerFetchFailed: 'docker_worker_fetch_failed',
+} as const;
+
+export type TaskRunErrorCode =
+  (typeof TaskRunErrorCode)[keyof typeof TaskRunErrorCode];
+
 export const activeRunStatuses = [
   ...bootingRunStatuses,
   RunStatus.Running,

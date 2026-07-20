@@ -155,6 +155,7 @@ const StartupInner = ({
   const {
     steps,
     error,
+    errorCode,
     elapsedSeconds,
     showLogs,
     sandboxLogs,
@@ -166,6 +167,7 @@ const StartupInner = ({
     <StartupSequence
       steps={steps}
       error={error}
+      errorCode={errorCode}
       elapsedSeconds={elapsedSeconds}
       logs={showLogs ? sandboxLogs : undefined}
       logsConnected={logsConnected}

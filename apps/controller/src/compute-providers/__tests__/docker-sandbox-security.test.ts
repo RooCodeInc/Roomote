@@ -4,10 +4,13 @@ import {
   attachDockerEgressPolicy,
   buildDockerTaskDaemonResourceArgs,
   buildDockerWorkerResourceArgs,
+  classifyDockerSpawnError,
   cleanupStaleDockerSandboxes,
+  DockerBootError,
   formatDockerCommandError,
   formatSpawnWorkerError,
   getDockerTaskNetworkName,
+  getTaskRunErrorCode,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
   removeDockerSandboxResources,
@@ -15,6 +18,7 @@ import {
   sanitizeDockerCommandForDisplay,
   type DockerCommand,
 } from '../docker-sandbox-security';
+import { TaskRunErrorCode } from '@roomote/types';
 
 describe('buildDockerWorkerResourceArgs', () => {
   it('enforces CPU, memory, swap, PID, configured disk, log, and capability bounds', () => {
@@ -769,5 +773,49 @@ describe('docker spawn error wrapping', () => {
     expect(thrown.message).toContain('AUTH_TOKEN=<redacted>');
     expect(thrown.message).not.toContain('super-secret');
     expect(thrown.cause).toBeUndefined();
+  });
+});
+
+describe('classifyDockerSpawnError', () => {
+  it('categorizes daemon, image, port, and archive failures', () => {
+    expect(
+      classifyDockerSpawnError(
+        'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?',
+      ),
+    ).toBe(TaskRunErrorCode.DockerDaemonUnreachable);
+    expect(
+      classifyDockerSpawnError(
+        "pull access denied for roomote-worker, repository does not exist or may require 'docker login'",
+      ),
+    ).toBe(TaskRunErrorCode.DockerImageMissing);
+    expect(
+      classifyDockerSpawnError(
+        'driver failed programming external connectivity: Bind for 127.0.0.1:13000 failed: port is already allocated',
+      ),
+    ).toBe(TaskRunErrorCode.DockerPortInUse);
+    expect(
+      classifyDockerSpawnError(
+        'Docker worker release archive does not exist: /releases/worker.tar.gz',
+      ),
+    ).toBe(TaskRunErrorCode.DockerReleaseArchiveMissing);
+  });
+
+  it('returns undefined for failures with no mapped category', () => {
+    expect(classifyDockerSpawnError('Machine unavailable')).toBeUndefined();
+  });
+});
+
+describe('DockerBootError', () => {
+  it('carries a code readable via getTaskRunErrorCode', () => {
+    const error = new DockerBootError(
+      TaskRunErrorCode.DockerImageMissing,
+      'Docker worker image roomote-worker:local is not available locally and could not be pulled.',
+    );
+
+    expect(getTaskRunErrorCode(error)).toBe(
+      TaskRunErrorCode.DockerImageMissing,
+    );
+    expect(getTaskRunErrorCode(new Error('plain'))).toBeUndefined();
+    expect(getTaskRunErrorCode('string error')).toBeUndefined();
   });
 });

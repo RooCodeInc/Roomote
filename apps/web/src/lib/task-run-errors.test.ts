@@ -82,3 +82,52 @@ Recent Docker logs:
     expect(display).toContain('host.docker.internal');
   });
 });
+
+describe('getTaskRunErrorDisplayMessage with error codes', () => {
+  it('prefers the persisted error code over text inference', () => {
+    const display = getTaskRunErrorDisplayMessage(
+      'some opaque failure text with no recognizable docker phrasing',
+      'docker_daemon_unreachable',
+    );
+
+    expect(display).toContain("couldn't reach the Docker daemon");
+  });
+
+  it('ignores unknown error codes and falls back to text matching', () => {
+    const error = `Failed to run docker run.
+
+Unable to find image 'roomote-worker:local' locally
+
+command:
+docker run -d roomote-worker:local`;
+
+    const display = getTaskRunErrorDisplayMessage(error, 'some_future_code');
+
+    expect(display).toContain("couldn't find or pull the worker image");
+  });
+
+  it('explains categorized failures even without error text', () => {
+    expect(
+      getTaskRunErrorDisplayMessage(
+        undefined,
+        'docker_release_archive_missing',
+      ),
+    ).toContain('missing the local worker release archive');
+    expect(getTaskRunErrorDisplayMessage(undefined, undefined)).toBeUndefined();
+  });
+
+  it('keeps docker diagnostics attached when the code supplies the copy', () => {
+    const error = `Docker worker container exited before task run #3 started.
+
+Recent Docker logs:
+worker crashed: missing dependency libfoo`;
+
+    const display = getTaskRunErrorDisplayMessage(
+      error,
+      'docker_worker_exited_early',
+    );
+
+    expect(display).toContain('exited during boot');
+    expect(display).toContain('missing dependency libfoo');
+  });
+});
