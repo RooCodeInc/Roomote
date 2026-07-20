@@ -3,7 +3,11 @@ import { sourceControlProviderSchema } from '@roomote/types';
 
 import { authenticatedProcedure, router } from '../trpc';
 
-import { listRepositories, findRepository } from '../lib/repositories';
+import {
+  listRepositories,
+  findRepository,
+  updateRepositoryDefaultBranch,
+} from '../lib/repositories';
 
 export const repositoriesRouter = router({
   listRepositories: authenticatedProcedure
@@ -31,5 +35,21 @@ export const repositoriesRouter = router({
         : findRepository(ctx.auth, input.fullName, {
             sourceControlProvider: input.sourceControlProvider,
           }),
+    ),
+  reportDefaultBranch: authenticatedProcedure
+    .input(
+      z.object({
+        repositoryId: z.string().min(1),
+        // Sanity bounds only: the value is the branch git itself resolved
+        // from origin/HEAD on the worker, not free-form user input.
+        defaultBranch: z
+          .string()
+          .min(1)
+          .max(512)
+          .regex(/^[^\s]+$/, 'Branch names cannot contain whitespace'),
+      }),
+    )
+    .mutation(({ ctx, input }) =>
+      updateRepositoryDefaultBranch(ctx.auth, input),
     ),
 });

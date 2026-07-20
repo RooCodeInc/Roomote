@@ -11,3 +11,7 @@ export const listRepositories = (
 export const findRepository = (
   options: AppRouterInput['repositories']['findRepository'],
 ) => client.repositories.findRepository.query(options);
+
+export const reportDefaultBranch = (
+  options: AppRouterInput['repositories']['reportDefaultBranch'],
+) => client.repositories.reportDefaultBranch.mutate(options);

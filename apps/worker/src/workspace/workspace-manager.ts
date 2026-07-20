@@ -645,6 +645,7 @@ export class WorkspaceManager {
         repoFullName: fullName,
         targetBranch,
         sha,
+        repositoryId: repo?.id,
         allowRemoteHeadFallback: usesStoredDefaultBranch,
         setDefaultRemote:
           sourceControlProvider === 'github' &&
@@ -751,6 +752,7 @@ export class WorkspaceManager {
     repoFullName,
     targetBranch,
     sha,
+    repositoryId,
     allowRemoteHeadFallback,
     setDefaultRemote,
   }: {
@@ -758,6 +760,7 @@ export class WorkspaceManager {
     repoFullName: string;
     targetBranch: string;
     sha?: string;
+    repositoryId?: string;
     allowRemoteHeadFallback: boolean;
     setDefaultRemote: boolean;
   }): Promise<void> {
@@ -774,6 +777,23 @@ export class WorkspaceManager {
       targetBranch,
       allowRemoteHeadFallback,
     });
+
+    if (
+      allowRemoteHeadFallback &&
+      repositoryId &&
+      checkoutBranch !== targetBranch
+    ) {
+      // The task used stored default-branch metadata and origin/HEAD
+      // disagreed with it, so the stored row is stale. Report the resolved
+      // branch so the control plane self-heals; never block or fail the
+      // task on this.
+      this.reportResolvedDefaultBranch({
+        repositoryId,
+        repoFullName,
+        defaultBranch: checkoutBranch,
+      });
+    }
+
     const remoteBranchRef = `origin/${checkoutBranch}`;
 
     await this.timed(`prepare ${repoFullName}: git checkout/reset`, () =>
@@ -851,9 +871,7 @@ export class WorkspaceManager {
       return targetBranch;
     }
 
-    const originHeadBranch =
-      (await this.resolveLocalOriginHeadBranch(executor)) ??
-      (await this.resolveRemoteOriginHeadBranch(executor));
+    const originHeadBranch = await this.resolveOriginHeadBranch(executor);
 
     if (originHeadBranch && originHeadBranch !== targetBranch) {
       console.warn(
@@ -872,6 +890,66 @@ export class WorkspaceManager {
     throw new Error(
       `Could not determine the default branch for ${repoFullName}: origin/HEAD was unavailable and stored branch origin/${targetBranch} does not exist.`,
     );
+  }
+
+  private reportResolvedDefaultBranch({
+    repositoryId,
+    repoFullName,
+    defaultBranch,
+  }: {
+    repositoryId: string;
+    repoFullName: string;
+    defaultBranch: string;
+  }): void {
+    sdk.repositories
+      .reportDefaultBranch({
+        repositoryId,
+        defaultBranch,
+      })
+      .then(
+        ({ updatedCount }) => {
+          if (updatedCount > 0) {
+            console.log(
+              `Updated stored default branch for ${repoFullName} to ${defaultBranch}.`,
+            );
+          }
+        },
+        (error: unknown) => {
+          console.warn(
+            `Failed to report resolved default branch for ${repoFullName}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        },
+      );
+  }
+
+  /**
+   * `git fetch` never rewrites the clone-time origin/HEAD symbolic ref, so a
+   * reused workspace could keep trusting a default branch the remote moved
+   * away from while the old branch still exists. Refresh the ref first; a
+   * refreshed local ref is authoritative. When the refresh fails (offline,
+   * rate-limited), fall back to the remote HEAD lookup before accepting the
+   * possibly-stale cached ref, which is still verified against the
+   * remote-tracking refs as a last resort.
+   */
+  private async resolveOriginHeadBranch(
+    executor: CommandExecutor,
+  ): Promise<string | null> {
+    const refreshResult = await executor.execute({
+      name: 'Git refresh origin/HEAD',
+      run: 'git remote set-head origin --auto',
+      timeout: 60,
+      continue_on_error: true,
+    });
+
+    const localBranch = await this.resolveLocalOriginHeadBranch(executor);
+
+    if (refreshResult.success && localBranch) {
+      return localBranch;
+    }
+
+    return (await this.resolveRemoteOriginHeadBranch(executor)) ?? localBranch;
   }
 
   private async resolveLocalOriginHeadBranch(

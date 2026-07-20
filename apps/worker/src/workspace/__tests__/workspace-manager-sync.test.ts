@@ -11,15 +11,25 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     repositories: {
       findRepository: vi.fn(),
+      reportDefaultBranch: vi.fn(),
     },
   },
 }));
+
+import { sdk } from '@roomote/sdk/client';
 
 const GIT_FETCH_COMMAND = {
   name: 'Git fetch',
   run: 'git fetch --all --tags --prune --force',
   timeout: 300,
   continue_on_error: false,
+} as const;
+
+const GIT_REFRESH_ORIGIN_HEAD_COMMAND = {
+  name: 'Git refresh origin/HEAD',
+  run: 'git remote set-head origin --auto',
+  timeout: 60,
+  continue_on_error: true,
 } as const;
 
 const GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND = {
@@ -107,6 +117,7 @@ type PrivateWorkspaceManagerMethods = {
     repoFullName: string;
     targetBranch: string;
     sha?: string;
+    repositoryId?: string;
     allowRemoteHeadFallback: boolean;
     setDefaultRemote: boolean;
   }) => Promise<void>;
@@ -131,6 +142,9 @@ describe('WorkspaceManager git synchronization', () => {
 
     sleepSpy = vi.spyOn(privateManager, 'sleep').mockResolvedValue(undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(sdk.repositories.reportDefaultBranch)
+      .mockReset()
+      .mockResolvedValue({ updatedCount: 1 });
   });
 
   afterEach(() => {
@@ -152,6 +166,7 @@ describe('WorkspaceManager git synchronization', () => {
       executor,
       repoFullName: 'acme/backend',
       targetBranch: 'main',
+      repositoryId: 'repo-1',
       allowRemoteHeadFallback: false,
       setDefaultRemote: false,
     });
@@ -174,6 +189,7 @@ describe('WorkspaceManager git synchronization', () => {
       executor,
       repoFullName: 'acme/backend',
       targetBranch: 'main',
+      repositoryId: 'repo-1',
       allowRemoteHeadFallback: false,
       setDefaultRemote: false,
     });
@@ -183,6 +199,7 @@ describe('WorkspaceManager git synchronization', () => {
     expect(executor.executeAll).toHaveBeenCalledWith(
       buildCheckoutCommands('main'),
     );
+    expect(sdk.repositories.reportDefaultBranch).not.toHaveBeenCalled();
   });
 
   it('retries repository not found failures as token propagation delays before succeeding', async () => {
@@ -201,6 +218,7 @@ describe('WorkspaceManager git synchronization', () => {
       executor,
       repoFullName: 'acme/backend',
       targetBranch: 'main',
+      repositoryId: 'repo-1',
       allowRemoteHeadFallback: false,
       setDefaultRemote: false,
     });
@@ -229,6 +247,7 @@ describe('WorkspaceManager git synchronization', () => {
         executor,
         repoFullName: 'acme/backend',
         targetBranch: 'main',
+        repositoryId: 'repo-1',
         allowRemoteHeadFallback: false,
         setDefaultRemote: false,
       }),
@@ -253,6 +272,13 @@ describe('WorkspaceManager git synchronization', () => {
         stderr: '',
       })
       .mockResolvedValueOnce({
+        command: GIT_REFRESH_ORIGIN_HEAD_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
         command: GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND,
         success: true,
         duration: 5,
@@ -271,11 +297,16 @@ describe('WorkspaceManager git synchronization', () => {
       executor,
       repoFullName: 'acme/backend',
       targetBranch: 'main',
+      repositoryId: 'repo-1',
       allowRemoteHeadFallback: true,
       setDefaultRemote: false,
     });
 
-    expect(executor.execute).toHaveBeenCalledTimes(3);
+    expect(executor.execute).toHaveBeenCalledTimes(4);
+    expect(executor.execute).toHaveBeenNthCalledWith(
+      2,
+      GIT_REFRESH_ORIGIN_HEAD_COMMAND,
+    );
     expect(executor.execute).not.toHaveBeenCalledWith(
       GIT_RESOLVE_REMOTE_HEAD_COMMAND,
     );
@@ -284,6 +315,146 @@ describe('WorkspaceManager git synchronization', () => {
     );
     expect(console.warn).toHaveBeenCalledWith(
       'Resolved origin/HEAD for acme/backend to develop; ignoring stale default branch main.',
+    );
+    expect(sdk.repositories.reportDefaultBranch).toHaveBeenCalledWith({
+      repositoryId: 'repo-1',
+      defaultBranch: 'develop',
+    });
+  });
+
+  it('does not block the sync when reporting the resolved default branch fails', async () => {
+    vi.mocked(sdk.repositories.reportDefaultBranch).mockRejectedValue(
+      new Error('control plane unavailable'),
+    );
+
+    executor.execute
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: true, stdout: 'origin/develop\n' })
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/backend',
+      targetBranch: 'main',
+      repositoryId: 'repo-1',
+      allowRemoteHeadFallback: true,
+      setDefaultRemote: false,
+    });
+
+    expect(executor.executeAll).toHaveBeenCalledWith(
+      buildCheckoutCommands('develop'),
+    );
+    await vi.waitFor(() => {
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Failed to report resolved default branch for acme/backend',
+        ),
+      );
+    });
+  });
+
+  it('prefers the remote HEAD over a cached local ref when the refresh fails', async () => {
+    executor.execute
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({
+        command: GIT_REFRESH_ORIGIN_HEAD_COMMAND,
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: 'fatal: could not query remote',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: 'origin/develop\n',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: buildVerifyRemoteBranchCommand('develop'),
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_RESOLVE_REMOTE_HEAD_COMMAND,
+        success: true,
+        duration: 5,
+        stdout:
+          'ref: refs/heads/master\tHEAD\n0123456789abcdef0123456789abcdef01234567\tHEAD\n',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: buildVerifyRemoteBranchCommand('master'),
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/backend',
+      targetBranch: 'main',
+      repositoryId: 'repo-1',
+      allowRemoteHeadFallback: true,
+      setDefaultRemote: false,
+    });
+
+    expect(executor.executeAll).toHaveBeenCalledWith(
+      buildCheckoutCommands('master'),
+    );
+    expect(sdk.repositories.reportDefaultBranch).toHaveBeenCalledWith({
+      repositoryId: 'repo-1',
+      defaultBranch: 'master',
+    });
+  });
+
+  it('falls back to the verified cached local ref when refresh and remote lookup fail', async () => {
+    executor.execute
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({
+        command: GIT_REFRESH_ORIGIN_HEAD_COMMAND,
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: 'fatal: could not query remote',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: 'origin/develop\n',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: buildVerifyRemoteBranchCommand('develop'),
+        success: true,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_RESOLVE_REMOTE_HEAD_COMMAND,
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/backend',
+      targetBranch: 'main',
+      repositoryId: 'repo-1',
+      allowRemoteHeadFallback: true,
+      setDefaultRemote: false,
+    });
+
+    expect(executor.executeAll).toHaveBeenCalledWith(
+      buildCheckoutCommands('develop'),
     );
   });
 
@@ -295,6 +466,13 @@ describe('WorkspaceManager git synchronization', () => {
         duration: 5,
         stdout: '',
         stderr: '',
+      })
+      .mockResolvedValueOnce({
+        command: GIT_REFRESH_ORIGIN_HEAD_COMMAND,
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: 'fatal: could not query remote',
       })
       .mockResolvedValueOnce({
         command: GIT_RESOLVE_LOCAL_ORIGIN_HEAD_COMMAND,
@@ -323,6 +501,7 @@ describe('WorkspaceManager git synchronization', () => {
       executor,
       repoFullName: 'acme/backend',
       targetBranch: 'main',
+      repositoryId: 'repo-1',
       allowRemoteHeadFallback: true,
       setDefaultRemote: false,
     });
@@ -337,12 +516,14 @@ describe('WorkspaceManager git synchronization', () => {
       .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' });
 
     await syncRepositoryGitState({
       executor,
       repoFullName: 'acme/backend',
       targetBranch: 'main',
+      repositoryId: 'repo-1',
       allowRemoteHeadFallback: true,
       setDefaultRemote: false,
     });
@@ -353,11 +534,13 @@ describe('WorkspaceManager git synchronization', () => {
     expect(executor.executeAll).toHaveBeenCalledWith(
       buildCheckoutCommands('main'),
     );
+    expect(sdk.repositories.reportDefaultBranch).not.toHaveBeenCalled();
   });
 
   it('fails before checkout when origin/HEAD is unavailable and the stored default does not exist', async () => {
     executor.execute
       .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' });
@@ -367,6 +550,7 @@ describe('WorkspaceManager git synchronization', () => {
         executor,
         repoFullName: 'acme/backend',
         targetBranch: 'main',
+        repositoryId: 'repo-1',
         allowRemoteHeadFallback: true,
         setDefaultRemote: false,
       }),
@@ -382,6 +566,7 @@ describe('WorkspaceManager git synchronization', () => {
       executor,
       repoFullName: 'acme/backend',
       targetBranch: 'main',
+      repositoryId: 'repo-1',
       sha: '0123456789abcdef0123456789abcdef01234567',
       allowRemoteHeadFallback: false,
       setDefaultRemote: false,
