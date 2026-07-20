@@ -185,7 +185,7 @@ export async function fetchDiscordThreadHistoryBestEffort(input: {
       if (!before) break;
     }
 
-    const capped =
+    let capped =
       collected.length > MAX_THREAD_HISTORY_MESSAGES
         ? collected.slice(-MAX_THREAD_HISTORY_MESSAGES)
         : collected;
@@ -207,7 +207,13 @@ export async function fetchDiscordThreadHistoryBestEffort(input: {
         )
         .catch(() => null);
       if (starter) {
-        capped.unshift(toDiscordThreadHistoryMessage(starter));
+        // The starter takes a slot inside the cap rather than on top of it.
+        capped = [
+          toDiscordThreadHistoryMessage(starter),
+          ...capped.slice(
+            Math.max(0, capped.length - (MAX_THREAD_HISTORY_MESSAGES - 1)),
+          ),
+        ];
       }
     }
 
