@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { DEFAULT_OPENCODE_CLI_VERSION } from '../../../../commands/setup/shared-runtime-packages';
+import { writeOpenCodePluginSeedFixture } from '../opencode-server/seed-opencode-plugin-deps';
+
 describe('opencode-server bootstrap', () => {
   const tempDirs: string[] = [];
   // Pinned literal contract: the Slack-posting tools excluded from every
@@ -32,6 +35,11 @@ describe('opencode-server bootstrap', () => {
       path.join(os.tmpdir(), 'roomote-direct-opencode-test-home-'),
     );
     tempDirs.push(tempDir);
+    // Satisfy the OpenCode plugin seed gate without hitting npm.
+    writeOpenCodePluginSeedFixture({
+      configDir: path.join(tempDir, '.config', 'opencode'),
+      version: DEFAULT_OPENCODE_CLI_VERSION,
+    });
     return tempDir;
   }
 
@@ -1756,5 +1764,51 @@ describe('opencode-server bootstrap', () => {
 
     expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
     expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
+  });
+
+  it('completes OpenCode plugin seed for the resolved version without network access', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+    const { isOpenCodePluginSeedComplete } =
+      await import('../opencode-server/seed-opencode-plugin-deps');
+
+    // Empty home on purpose: fixture-free so wiring is exercised for
+    // incomplete trees. Resolve expects the default CLI version and
+    // installs via the injectable path only if network is reachable —
+    // here we rely on inject... actually we'll stub via baking seed source.
+    const homeDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-direct-opencode-test-home-raw-'),
+    );
+    tempDirs.push(homeDir);
+    const bakeDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-plugin-seed-bake-'),
+    );
+    tempDirs.push(bakeDir);
+    writeOpenCodePluginSeedFixture({
+      configDir: bakeDir,
+      version: DEFAULT_OPENCODE_CLI_VERSION,
+    });
+
+    const logger = createLogger();
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        ROOMOTE_OPENCODE_PLUGIN_SEED_DIR: bakeDir,
+      },
+      workspacePath: '/tmp/workspace',
+      logger,
+    });
+
+    const configDir = path.join(homeDir, '.config', 'opencode');
+    await expect(
+      isOpenCodePluginSeedComplete({
+        configDir,
+        version: DEFAULT_OPENCODE_CLI_VERSION,
+      }),
+    ).resolves.toBe(true);
+    expect(commandEnv.HOME).toBe(homeDir);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('pluginSeedVersion='),
+    );
   });
 });

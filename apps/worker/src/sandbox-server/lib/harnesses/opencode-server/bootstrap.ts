@@ -22,6 +22,10 @@ import {
   resolveHeaderEnvVarNameForOpenCode,
 } from './mcp-config';
 import type { DirectMcpConfig } from '../direct-mcp-config';
+import {
+  resolveOpenCodePluginSeedVersion,
+  seedOpenCodePluginDependencies,
+} from './seed-opencode-plugin-deps';
 
 const OPENCODE_BASH_ENV_FILE_NAME = 'roomote-opencode-env.sh';
 
@@ -226,10 +230,25 @@ export async function prepareOpenCodeCommandEnv(options: {
 
   await materializeOpenCodeBashEnvOverlay({ commandEnv, homeDir });
 
+  // OpenCode always Arborist-installs @opencode-ai/plugin into the config dir
+  // and waits on that work when any plugins (including Roomote file plugins)
+  // are present. Pre-complete the seed so first POST /session does not hang
+  // on a sticky registry fetch.
+  const pluginSeedVersion = await resolveOpenCodePluginSeedVersion({
+    env: commandEnv,
+    pathEnv: commandEnv.PATH,
+  });
+  await seedOpenCodePluginDependencies({
+    configDir: openCodeConfigDir,
+    version: pluginSeedVersion,
+    logger: options.logger,
+    env: commandEnv,
+  });
+
   options.logger.info(
     `Prepared OpenCode config overlayDir=${openCodeConfigDir} workspace=${options.workspacePath} mcpServers=${
       Object.keys(parsedMcpServers).length
-    } model=${model ?? 'roomote-model-default'}`,
+    } model=${model ?? 'roomote-model-default'} pluginSeedVersion=${pluginSeedVersion}`,
   );
 
   return { commandEnv, model };
