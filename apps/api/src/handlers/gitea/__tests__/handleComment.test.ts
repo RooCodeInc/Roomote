@@ -392,6 +392,13 @@ describe('handleGiteaComment', () => {
     expect(mockCreateGiteaPullRequestComment).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining(
+          'before issue and pull request comments can start work here',
+        ),
+      }),
+    );
+    expect(mockCreateGiteaPullRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining(
           'ask an admin to add the Gitea OAuth client credentials',
         ),
       }),
@@ -584,6 +591,13 @@ describe('handleGiteaComment', () => {
     expect(mockCreateGiteaIssueComment).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining('settings?service=gitea'),
+      }),
+    );
+    expect(mockCreateGiteaIssueComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining(
+          'before issue and pull request comments can start work here',
+        ),
       }),
     );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
