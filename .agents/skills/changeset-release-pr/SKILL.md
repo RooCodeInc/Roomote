@@ -136,7 +136,11 @@ user-facing copy before opening the PR:
 
 - **Summary**: one plain-language sentence about what this release delivers.
 - **Highlights**: 1–4 bullets of the most important changes operators and users
-  should notice. Avoid internal jargon, commit SHAs, and package names.
+  should notice. Avoid internal jargon, commit SHAs, and package names. Always
+  include this section; if there is nothing more specific to call out, use the
+  single bullet `Bug fixes and small improvements.`
+- Omit any Major/Minor/Patch section with no bullets; never use placeholders or
+  filler such as `Nothing of note.`
 
 These fields power the in-app What's new / Update available dialogs (they ship
 through GitHub Releases via `extract-changelog-section`). Leave
@@ -149,7 +153,7 @@ Then verify:
   (`patch` increments patch, `minor` increments minor and zeros patch, `major`
   increments major and zeros minor and patch)
 - the new top `CHANGELOG.md` section contains every intended note under the
-  correct bump-level heading, plus an edited summary paragraph and
+  correct bump-level heading, plus an edited summary paragraph and a
   `### Highlights` list suitable for in-app display
 - every pending changeset was consumed and `.changeset/README.md` remains
 - workspace package versions did not change
