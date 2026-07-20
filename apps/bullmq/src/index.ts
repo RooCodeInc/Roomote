@@ -42,6 +42,7 @@ import { slackSuggestedTasksOnboardingFollowupJob } from './jobs/slack-suggested
 import { telegramSuggestedTasksOnboardingFollowupJob } from './jobs/telegram-suggested-tasks-onboarding-followup';
 import { teamsSuggestedTasksOnboardingFollowupJob } from './jobs/teams-suggested-tasks-onboarding-followup';
 import { startSnapshotQueue } from './snapshot-queue';
+import { startDockerValidationQueue } from './docker-validation-queue';
 import { startSlackPrInactivityQueue } from './slack-pr-inactivity-queue';
 import { startPrReviewNotificationQueue } from './pr-review-notification-queue';
 import { startTaskSleepQueue } from './task-sleep-queue';
@@ -99,6 +100,11 @@ const {
 
 const { snapshotQueue, snapshotWorker, snapshotQueueEvents } =
   startSnapshotQueue();
+const {
+  dockerValidationQueue,
+  dockerValidationWorker,
+  dockerValidationQueueEvents,
+} = startDockerValidationQueue();
 const {
   queue: taskSleepQueue,
   worker: taskSleepWorker,
@@ -161,6 +167,7 @@ createBullBoard({
     new BullMQAdapter(schedulerQueue, { readOnlyMode: false }),
     new BullMQAdapter(sandboxOidcRefreshQueue, { readOnlyMode: false }),
     new BullMQAdapter(snapshotQueue, { readOnlyMode: false }),
+    new BullMQAdapter(dockerValidationQueue, { readOnlyMode: false }),
     new BullMQAdapter(taskSleepQueue, { readOnlyMode: false }),
     new BullMQAdapter(slackAccountLinkEducationQueue, { readOnlyMode: false }),
     new BullMQAdapter(discordSuggestedTasksOnboardingFollowupQueue, {
@@ -309,6 +316,9 @@ async function gracefulShutdown() {
     await snapshotWorker.close();
     await snapshotQueueEvents.close();
     await snapshotQueue.close();
+    await dockerValidationWorker.close();
+    await dockerValidationQueueEvents.close();
+    await dockerValidationQueue.close();
     await taskSleepWorker.close();
     await taskSleepQueueEvents.close();
     await taskSleepQueue.close();

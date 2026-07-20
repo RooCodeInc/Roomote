@@ -411,6 +411,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
             channelId: channel.channelId,
+            ...(channel.parentChannelId
+              ? { parentChannelId: channel.parentChannelId }
+              : {}),
           });
           return history.length > 0 ? history : null;
         },
@@ -571,6 +574,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       const continuation = await buildDiscordContinuationPrompt({
         provider: resolved.provider,
         channelId: channel.channelId,
+        ...(channel.parentChannelId
+          ? { parentChannelId: channel.parentChannelId }
+          : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
       });
@@ -637,6 +643,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       const continuation = await buildDiscordContinuationPrompt({
         provider: resolved.provider,
         channelId: channel.channelId,
+        ...(channel.parentChannelId
+          ? { parentChannelId: channel.parentChannelId }
+          : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
       });

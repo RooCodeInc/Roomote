@@ -28,3 +28,9 @@ export const SNAPSHOT_JOB_RETRY_OPTIONS = {
   attempts: 3,
   backoff: { type: 'exponential' as const, delay: 5_000 },
 } as const;
+
+/**
+ * BullMQ queue for on-demand Docker environment validation requested from the
+ * settings UI. Shared between the web producer and the bullmq consumer.
+ */
+export const DOCKER_VALIDATION_QUEUE_NAME = 'docker-validation-jobs';

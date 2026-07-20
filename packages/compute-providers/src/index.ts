@@ -1,4 +1,5 @@
 export * from './types';
+export * from './docker-environment-validation';
 export * from './mutation-events';
 export * from './errors';
 export * from './environment-machine';

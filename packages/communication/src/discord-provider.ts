@@ -927,6 +927,24 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     };
   }
 
+  /**
+   * Fetches one message by id. A message-anchored thread's starter message
+   * shares the thread's id but lives in the parent channel, so it never
+   * appears in the thread's own message listing and must be read here.
+   */
+  async fetchMessage(input: {
+    channelId: string;
+    messageId: string;
+  }): Promise<CommunicationMessage> {
+    const raw = await this.request<DiscordApiMessage>(
+      'GET',
+      `/channels/${input.channelId}/messages/${input.messageId}`,
+      undefined,
+      { retryNetworkErrors: true, retryServerErrors: true },
+    );
+    return toCommunicationMessage(raw);
+  }
+
   async fetchChannelMessages(input: {
     channelId: string;
     oldest?: string;
