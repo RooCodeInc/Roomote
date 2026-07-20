@@ -88,11 +88,11 @@ export function ReleaseNoticeSideNavItem({
       ? (latestKnownVersion ?? runningVersion)
       : runningVersion;
 
-  if (!noticeKind || !iconVersion) {
-    return null;
-  }
-
   const openDialog = () => {
+    if (!noticeKind) {
+      return;
+    }
+
     const version =
       noticeKind === 'update-available'
         ? (latestKnownVersion ?? runningVersion)
@@ -110,25 +110,27 @@ export function ReleaseNoticeSideNavItem({
 
   return (
     <>
-      <SideNavItem
-        icon={noticeKind === 'whats-new' ? Sparkles : Astroid}
-        className="relative -left-0.5 [&_svg]:stroke-1"
-        label={noticeKind === 'whats-new' ? "What's new" : 'Update available'}
-        tooltip={
-          noticeKind === 'whats-new'
-            ? `What's new in Roomote ${toReleaseTag(runningVersion ?? iconVersion)}`
-            : `Roomote ${toReleaseTag(iconVersion)} is available`
-        }
-        description={
-          noticeKind === 'whats-new'
-            ? 'See what changed in this release'
-            : "Find out what's new"
-        }
-        expanded={expanded}
-        active={false}
-        highlight
-        onClick={openDialog}
-      />
+      {noticeKind && iconVersion ? (
+        <SideNavItem
+          icon={noticeKind === 'whats-new' ? Sparkles : Astroid}
+          className="relative -left-0.5 [&_svg]:stroke-1"
+          label={noticeKind === 'whats-new' ? "What's new" : 'Update available'}
+          tooltip={
+            noticeKind === 'whats-new'
+              ? `What's new in Roomote ${toReleaseTag(runningVersion ?? iconVersion)}`
+              : `Roomote ${toReleaseTag(iconVersion)} is available`
+          }
+          description={
+            noticeKind === 'whats-new'
+              ? 'See what changed in this release'
+              : "Find out what's in the upgrade"
+          }
+          expanded={expanded}
+          active={false}
+          highlight={noticeKind != 'whats-new'}
+          onClick={openDialog}
+        />
+      ) : null}
       {activeDialog ? (
         <ReleaseNotesDialog
           open

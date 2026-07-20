@@ -7,7 +7,6 @@ import {
   Astroid,
   Button,
   ChevronDown,
-  ChevronRight,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -152,11 +151,11 @@ export function ReleaseNotesDialog({
     notesQuery.data?.htmlUrl ?? `${GITHUB_RELEASES_BASE_URL}/tag/${tag}`;
   const title =
     mode === 'whats-new'
-      ? `What's new in Roomote ${tag}`
+      ? `See what's new on Roomote`
       : `A new version of Roomote is available`;
   const description =
     mode === 'whats-new'
-      ? 'Highlights from the release now running in this deployment.'
+      ? 'Your deployment was just upgraded.'
       : runningVersion
         ? `You are on ${toReleaseTag(runningVersion)}. You may want to upgrade.`
         : 'A newer release is ready to install.';
@@ -179,16 +178,14 @@ export function ReleaseNotesDialog({
         />
 
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" asChild>
-              <a href={htmlUrl} target="_blank" rel="noreferrer">
-                Go to the release
-                <SquareArrowOutUpRight />
-              </a>
-            </Button>
-          </div>
+          <Button variant="outline" asChild>
+            <a href={htmlUrl} target="_blank" rel="noreferrer">
+              Go to the release
+              <SquareArrowOutUpRight />
+            </a>
+          </Button>
           <Button type="button" onClick={() => onOpenChange(false)}>
-            {mode === 'whats-new' ? 'Got it' : 'Upgrade later'}
+            Close
           </Button>
         </DialogFooter>
       </DialogContent>
