@@ -12,17 +12,18 @@ import {
   getAutomationRuntime,
   recordAutomationRunOutcome,
 } from '@roomote/db/server';
-import { TaskPayloadKind } from '@roomote/types';
+import {
+  getTriggerableBackgroundAutomationDescriptorByKey,
+  TaskPayloadKind,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 import {
   buildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
 } from './destination';
-import {
-  getActiveRepositoryFullNames,
-  hasActiveGitHubInstallation,
-} from './github-deployment-scope';
+import { getActiveRepositoriesForProviders } from './github-deployment-scope';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -67,15 +68,31 @@ export async function ciFailureTriageJob(
       return result;
     }
 
-    if (!(await hasActiveGitHubInstallation())) {
-      result.skippedReason = 'GitHub is not configured';
+    const supportedProviders =
+      (getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage')
+        ?.supportedSourceControlProviders ?? [
+        'github',
+      ]) as SourceControlProvider[];
+
+    const selectedRepositories =
+      await getActiveRepositoriesForProviders(supportedProviders);
+
+    if (selectedRepositories.length === 0) {
+      result.skippedReason =
+        'No active repositories for supported source-control providers.';
       return result;
     }
 
-    const selectedRepositories = await getActiveRepositoryFullNames();
-    const repositoryCoverage =
-      await buildRepositoryCoverage(selectedRepositories);
+    const repositoryCoverage = await buildRepositoryCoverage(
+      selectedRepositories.map((repo) => repo.fullName),
+    );
     const environmentBacked = getEnvironmentBackedCoverage(repositoryCoverage);
+    const providerByFullName = new Map(
+      selectedRepositories.map((repo) => [
+        repo.fullName,
+        repo.sourceControlProvider,
+      ]),
+    );
 
     if (environmentBacked.length === 0) {
       result.skippedReason =
@@ -92,6 +109,9 @@ export async function ciFailureTriageJob(
         continue;
       }
 
+      const sourceControlProvider =
+        providerByFullName.get(coverage.repositoryFullName) ?? 'github';
+
       // Repo claim blocks double-start against an active webhook investigation.
       const fingerprint = buildCiFailureTriageFingerprint({
         repositoryFullName: coverage.repositoryFullName,
@@ -99,7 +119,7 @@ export async function ciFailureTriageJob(
         headBranch: 'default',
       });
       const claimed = await tryClaimCiFailureTriageInvestigation({
-        provider: 'github',
+        provider: sourceControlProvider,
         repositoryFullName: coverage.repositoryFullName,
         fingerprint,
         marker: `manual:${coverage.repositoryFullName}`,
@@ -128,12 +148,16 @@ export async function ciFailureTriageJob(
                 repo: coverage.repositoryFullName,
                 environmentId,
                 selectedRepositories: [coverage.repositoryFullName],
+                ...(sourceControlProvider !== 'github'
+                  ? { sourceControlProvider }
+                  : {}),
                 description: buildCiFailureTriagePrompt({
                   channelId,
                   repositoryFullNames: [coverage.repositoryFullName],
                   repositoryCoverage: coverageSlice,
                   trigger: 'manual',
                   destinationProvider: destination.provider,
+                  sourceControlProvider,
                 }),
                 ...buildDestinationTaskPayloadFields(destination),
                 visibleInTranscript: false,
@@ -157,7 +181,7 @@ export async function ciFailureTriageJob(
         break;
       } catch (enqueueError) {
         await releaseCiFailureTriageInvestigation({
-          provider: 'github',
+          provider: sourceControlProvider,
           repositoryFullName: coverage.repositoryFullName,
           fingerprint,
         }).catch(() => undefined);

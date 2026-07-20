@@ -9,10 +9,12 @@ import { recordWebhook } from '../github/recordWebhook';
 import { handleGitLabIssue } from './handleIssue';
 import { handleGitLabMergeRequest } from './handleMergeRequest';
 import { handleGitLabNote } from './handleNote';
+import { handleGitLabPipeline } from './handlePipeline';
 import {
   gitLabIssueWebhookSchema,
   gitLabMergeRequestWebhookSchema,
   gitLabNoteWebhookSchema,
+  gitLabPipelineWebhookSchema,
 } from './types';
 import { verifyGitLabWebhook } from './verifyWebhook';
 
@@ -84,6 +86,21 @@ gitlab.post('/', async (c) => {
         `issue.${action}`,
         payload,
         () => handleGitLabIssue(payload),
+        { provider: 'gitlab' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === 'Pipeline Hook') {
+      const payload = gitLabPipelineWebhookSchema.parse(parsedJson);
+      const status = payload.object_attributes.status ?? 'unknown';
+
+      await recordWebhook(
+        deliveryId,
+        `pipeline.${status}`,
+        payload,
+        () => handleGitLabPipeline(payload),
         { provider: 'gitlab' },
       );
 

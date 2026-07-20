@@ -3,9 +3,11 @@ import {
   db,
   eq,
   githubInstallations,
+  inArray,
   isNull,
   repositories,
 } from '@roomote/db/server';
+import type { SourceControlProvider } from '@roomote/types';
 
 export async function hasActiveGitHubInstallation(): Promise<boolean> {
   const [installation] = await db
@@ -63,4 +65,48 @@ export async function getActiveGitHubRepositoryFullNames(): Promise<string[]> {
   return [...new Set(rows.map((row) => row.fullName).filter(Boolean))].sort(
     (left, right) => left.localeCompare(right),
   );
+}
+
+export type ActiveRepositoryRef = {
+  fullName: string;
+  sourceControlProvider: SourceControlProvider;
+};
+
+/**
+ * Active repositories limited to the given source-control providers.
+ */
+export async function getActiveRepositoriesForProviders(
+  providers: readonly SourceControlProvider[],
+): Promise<ActiveRepositoryRef[]> {
+  if (providers.length === 0) {
+    return [];
+  }
+
+  const rows = await db
+    .select({
+      fullName: repositories.fullName,
+      sourceControlProvider: repositories.sourceControlProvider,
+    })
+    .from(repositories)
+    .where(
+      and(
+        eq(repositories.isActive, true),
+        inArray(repositories.sourceControlProvider, [...providers]),
+      ),
+    )
+    .orderBy(repositories.fullName);
+
+  const seen = new Set<string>();
+  const result: ActiveRepositoryRef[] = [];
+  for (const row of rows) {
+    if (!row.fullName || seen.has(row.fullName)) {
+      continue;
+    }
+    seen.add(row.fullName);
+    result.push({
+      fullName: row.fullName,
+      sourceControlProvider: row.sourceControlProvider as SourceControlProvider,
+    });
+  }
+  return result;
 }

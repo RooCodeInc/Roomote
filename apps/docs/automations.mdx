@@ -123,13 +123,15 @@ surfaces).
 
 Cards also show capability badges for what each automation supports today:
 the chat surfaces it can report to and the source-control providers it works
-with. Triage Dependabot Alerts, Triage CodeQL Alerts, and CI Failure Triage are
-GitHub-only by nature. Triage Issues supports GitHub, GitLab, and Gitea issues.
+with. Triage Dependabot Alerts and Triage CodeQL Alerts are GitHub-only by
+nature. CI Failure Triage supports GitHub Actions and GitLab Pipelines.
+Triage Issues supports GitHub, GitLab, and Gitea issues.
 Security Auditor, Code Quality Auditor, Weekly Manager
 Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
 any connected source-control provider. Resolve PR Conflicts supports GitHub,
 GitLab, and Azure DevOps. CI Failure Triage reacts immediately to GitHub
-webhooks rather than running on a daily or weekly schedule.
+Actions and GitLab Pipeline webhooks rather than running on a daily or weekly
+schedule.
 
 **Code Quality Auditor** inspects recently merged PR diffs and only posts
 high-confidence maintainability issues worth a real follow-up task. It is
@@ -153,13 +155,14 @@ scan.
 **Security Auditor** reviews recently merged PRs for concrete security issues
 and secure-by-default gaps that are worth a real follow-up task.
 
-**CI Failure Triage** reacts the moment a CI workflow run fails on a
-repository's default branch. When a failure persists (it is not already fixed
-by a newer run and is not a one-off flake), Roomote starts a fix task that
-reproduces the failing job inside the repository's configured environment,
-finds the root cause, opens a PR with the fix, and posts one summary to the
-Manager Channel when it finishes. Only repositories that belong to a
-configured Roomote environment are triaged.
+**CI Failure Triage** reacts the moment CI fails on a repository's default
+branch (GitHub Actions workflow runs and GitLab Pipelines). When a failure
+persists (it is not already fixed by a newer run and is not a one-off flake),
+Roomote starts a fix task that reproduces the failing job inside the
+repository's configured environment, finds the root cause, opens a PR with the
+fix, and posts one summary to the Manager Channel when it finishes. Only
+repositories that belong to a configured Roomote environment are triaged. For
+GitLab, ensure Pipeline Hooks are enabled on the webhook Roomote receives.
 
 ## Add instructions to reduce noise
 

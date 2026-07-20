@@ -6,8 +6,7 @@ const {
   mockListConnectedCommunicationProviders,
   mockResolveAutomationRuntimeDestination,
   mockBuildDestinationTaskPayloadFields,
-  mockHasActiveGitHubInstallation,
-  mockGetActiveRepositoryFullNames,
+  mockGetActiveRepositoriesForProviders,
   mockBuildRepositoryCoverage,
   mockGetEnvironmentBackedCoverage,
   mockTryClaimCiFailureTriageInvestigation,
@@ -21,8 +20,7 @@ const {
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
   mockBuildDestinationTaskPayloadFields: vi.fn(),
-  mockHasActiveGitHubInstallation: vi.fn(),
-  mockGetActiveRepositoryFullNames: vi.fn(),
+  mockGetActiveRepositoriesForProviders: vi.fn(),
   mockBuildRepositoryCoverage: vi.fn(),
   mockGetEnvironmentBackedCoverage: vi.fn(),
   mockTryClaimCiFailureTriageInvestigation: vi.fn(),
@@ -56,8 +54,7 @@ vi.mock('../destination', () => ({
 }));
 
 vi.mock('../github-deployment-scope', () => ({
-  getActiveRepositoryFullNames: mockGetActiveRepositoryFullNames,
-  hasActiveGitHubInstallation: mockHasActiveGitHubInstallation,
+  getActiveRepositoriesForProviders: mockGetActiveRepositoriesForProviders,
 }));
 
 import { ciFailureTriageJob } from '../ci-failure-triage';
@@ -72,8 +69,9 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       destination: null,
     });
     mockListConnectedCommunicationProviders.mockResolvedValue(['teams']);
-    mockHasActiveGitHubInstallation.mockResolvedValue(true);
-    mockGetActiveRepositoryFullNames.mockResolvedValue(['acme/api']);
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { fullName: 'acme/api', sourceControlProvider: 'github' },
+    ]);
     mockBuildRepositoryCoverage.mockResolvedValue([
       {
         repositoryFullName: 'acme/api',
@@ -113,6 +111,10 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     expect(result.errors).toEqual([]);
 
     expect(mockListConnectedCommunicationProviders).toHaveBeenCalled();
+    expect(mockGetActiveRepositoriesForProviders).toHaveBeenCalledWith([
+      'github',
+      'gitlab',
+    ]);
     expect(mockResolveAutomationRuntimeDestination).toHaveBeenCalledWith({
       runtime: expect.objectContaining({ enabled: true }),
       slackConnected: false,
@@ -140,6 +142,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       ],
       trigger: 'manual',
       destinationProvider: 'teams',
+      sourceControlProvider: 'github',
     });
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       {
@@ -165,6 +168,51 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       { launchClass: 'automation' },
     );
     expect(mockEnqueueTask.mock.calls[0]?.[0]).not.toHaveProperty('channels');
+  });
+
+  it('stamps GitLab provider on the payload for GitLab repos', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      { fullName: 'acme/gitlab-api', sourceControlProvider: 'gitlab' },
+    ]);
+    mockBuildRepositoryCoverage.mockResolvedValue([
+      {
+        repositoryFullName: 'acme/gitlab-api',
+        targetEnvironmentId: 'env-gl',
+      },
+    ]);
+    mockGetEnvironmentBackedCoverage.mockReturnValue([
+      {
+        repositoryFullName: 'acme/gitlab-api',
+        targetEnvironmentId: 'env-gl',
+      },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockTryClaimCiFailureTriageInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'gitlab',
+        repositoryFullName: 'acme/gitlab-api',
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/gitlab-api',
+            sourceControlProvider: 'gitlab',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
   });
 
   it('still stamps channels.slackChannelId for Slack destinations', async () => {

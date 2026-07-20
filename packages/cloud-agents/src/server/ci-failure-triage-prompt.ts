@@ -51,6 +51,7 @@ export function buildCiFailureTriagePrompt({
   triggeringRun,
   hasAnnouncementThread,
   destinationProvider = 'slack',
+  sourceControlProvider,
 }: {
   channelId: string;
   repositoryFullNames: string[];
@@ -64,6 +65,8 @@ export function buildCiFailureTriagePrompt({
   hasAnnouncementThread?: boolean;
   /** Manager destination surface; defaults to Slack for webhook path. */
   destinationProvider?: CommunicationProvider;
+  /** Repository SCM provider for manual runs without a triggering_run. */
+  sourceControlProvider?: string;
 }): string {
   const repository =
     repositoryFullNames[0] ??
@@ -91,9 +94,25 @@ export function buildCiFailureTriagePrompt({
   </triggering_run>`
     : '';
 
-  const focus = triggeringRun
-    ? `Work only the failing run in triggering_run. Inspect it with \`gh run view\` / \`gh run view --log-failed\`. Do not dig through unrelated older runs.`
-    : `In ${repository}, use \`gh run list\` against the default branch to find failing runs, then take only the single most recent failure and inspect it with \`gh run view\` / \`gh run view --log-failed\`. Skip older failures.`;
+  const providerHint = triggeringRun?.provider ?? sourceControlProvider;
+
+  const focus = (() => {
+    if (triggeringRun) {
+      if (triggeringRun.provider === 'gitlab') {
+        return `Work only the failing run in triggering_run. Prefer any injected failure evidence first. For deeper inspection, use the GitLab pipeline UI/API or \`glab ci\` when available. Do not dig through unrelated older pipelines.`;
+      }
+      if (triggeringRun.provider && triggeringRun.provider !== 'github') {
+        return `Work only the failing run in triggering_run. Prefer injected failure evidence when available, then the provider-native CI UI/API. Do not dig through unrelated older runs.`;
+      }
+      return `Work only the failing run in triggering_run. Inspect it with \`gh run view\` / \`gh run view --log-failed\` (or injected failure evidence when present). Do not dig through unrelated older runs.`;
+    }
+
+    if (providerHint === 'gitlab') {
+      return `In ${repository}, find the latest failing default-branch pipeline (GitLab Pipelines / \`glab ci\` when available), take only that single most recent failure, and inspect its failed jobs. Skip older failures.`;
+    }
+
+    return `In ${repository}, use \`gh run list\` against the default branch to find failing runs, then take only the single most recent failure and inspect it with \`gh run view\` / \`gh run view --log-failed\`. Skip older failures.`;
+  })();
 
   const { channelTag, surfaceLabel } =
     destinationPromptContext(destinationProvider);
@@ -112,7 +131,7 @@ export function buildCiFailureTriagePrompt({
   <repository>${repository}</repository>
 </task_context>
 
-You own this CI failure end-to-end in this environment-backed workspace. Investigate and, when the failure is real and fixable, fix and open a PR in this same task. Do not re-run GitHub Actions workflows.
+You own this CI failure end-to-end in this environment-backed workspace. Investigate and, when the failure is real and fixable, fix and open a PR in this same task. Do not re-run remote CI workflows/pipelines.
 
 ${focus}
 

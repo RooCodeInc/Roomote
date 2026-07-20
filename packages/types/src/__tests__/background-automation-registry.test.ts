@@ -98,7 +98,10 @@ describe('background automation registry', () => {
       'telegram',
       'discord',
     ]);
-    expect(descriptor?.supportedSourceControlProviders).toEqual(['github']);
+    expect(descriptor?.supportedSourceControlProviders).toEqual([
+      'github',
+      'gitlab',
+    ]);
   });
 
   it('supports GitHub, GitLab, and Gitea for issue triage', () => {

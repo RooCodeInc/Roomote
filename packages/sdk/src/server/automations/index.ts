@@ -27,6 +27,7 @@ export {
 } from './automation-thread-feedback';
 export {
   getActiveRepositoryFullNames,
+  getActiveRepositoriesForProviders,
   hasActiveGitHubInstallation,
 } from './github-deployment-scope';
 export type {
