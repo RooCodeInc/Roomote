@@ -1,13 +1,13 @@
 import type { SourceControlProvider } from '@roomote/types';
 
-export const ONBOARDING_COMMUNICATION_PROVIDER_IDS = [
+const ONBOARDING_COMMUNICATION_PROVIDER_IDS = [
   'slack',
   'microsoft',
   'telegram',
   'discord',
 ] as const;
 
-export const ONBOARDING_SOURCE_CONTROL_PROVIDER_IDS = [
+const ONBOARDING_SOURCE_CONTROL_PROVIDER_IDS = [
   'github',
   'gitlab',
   'gitea',
@@ -20,7 +20,6 @@ export const ONBOARDING_PROVIDER_IDS = [
   ...ONBOARDING_SOURCE_CONTROL_PROVIDER_IDS,
 ] as const;
 
-export type OnboardingProviderId = (typeof ONBOARDING_PROVIDER_IDS)[number];
 export type OnboardingCommunicationProviderId =
   (typeof ONBOARDING_COMMUNICATION_PROVIDER_IDS)[number];
 export type OnboardingLinkableProvider =

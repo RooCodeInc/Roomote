@@ -73,10 +73,6 @@ vi.mock('../setup/StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
 }));
 
-vi.mock('../setup/StepCompletedBadge', () => ({
-  StepCompletedBadge: ({ text }: { text: string }) => <div>{text}</div>,
-}));
-
 vi.mock('@/components/system', () => ({
   Button: ({
     children,

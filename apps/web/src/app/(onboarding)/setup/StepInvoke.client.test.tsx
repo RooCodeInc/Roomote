@@ -111,10 +111,6 @@ vi.mock('./StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
 }));
 
-vi.mock('./StepCompletedBadge', () => ({
-  StepCompletedBadge: ({ text }: { text: string }) => <div>{text}</div>,
-}));
-
 vi.mock('@/components/system', () => ({
   Alert: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   AlertCircle: () => <span>AlertCircle</span>,
