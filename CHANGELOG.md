@@ -2,6 +2,30 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.16.0 (2026-07-21)
+
+Custom automations and wider CI triage coverage help teams automate more recurring work, with reliability improvements across task startup and integrations.
+
+### Highlights
+
+- Create custom automations with their own prompts, schedules, and destination channels for recurring work.
+- Investigate failed Azure DevOps and Bitbucket Pipelines automatically with CI Failure Triage.
+- Send Suggest Ideas results to Telegram and Microsoft Teams, and benefit from more reliable task startup and integrations.
+
+### Minor changes
+
+- Add CI Failure Triage for Azure DevOps and Bitbucket Pipelines, extending automated failed-build investigation to more source-control providers.
+- Add custom automations with their own prompts, schedules, and destination channels so recurring work can run and report where teams need it.
+- Let Suggest Ideas send its results to Telegram and Microsoft Teams destinations as well as existing supported channels.
+
+### Patch changes
+
+- Allow manual custom-automation runs to start while an earlier run is active, and keep report threads and footers tied to the correct automation.
+- Fix Discord task reactions and pull-request notification rendering so task status and bracketed titles display correctly.
+- Recover task runs whose workers stop responding during preparation so tasks no longer remain stuck indefinitely.
+- Reject pull requests on plain-issue `list_issue_comments` and `create_issue_comment` for GitHub and Gitea so agents cannot read or post PR discussion through the issue-only tool paths.
+- Improve self-hosted task startup and integrations by handling Docker bootstrap failures, public-edge OAuth callbacks, and non-GitHub webhook URLs correctly.
+
 ## 0.15.0 (2026-07-21)
 
 Multi-SCM triage and mentions, richer chat and release UX, and more reliable self-hosted Docker boots and agent context.
