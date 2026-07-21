@@ -91,6 +91,16 @@ export type FormState = {
   codeqlTriageFrequency: CodeqlTriageFrequency;
   suggesterFrequency: SuggesterFrequency;
   suggesterInstructions: string;
+  /**
+   * When true, Suggest Ideas delivers to a sticky Telegram forum topic
+   * (created once, reused). Mutually exclusive with Slack/Discord channels.
+   */
+  suggesterUseTelegram: boolean;
+  /**
+   * When true, Suggest Ideas delivers to the primary Teams conversation.
+   * Mutually exclusive with Slack/Discord/Telegram destinations.
+   */
+  suggesterUseTeams: boolean;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string;
   announcerFrequency: AnnouncerFrequency;
@@ -163,6 +173,8 @@ const CODEQL_TRIAGE_FIELDS: Array<keyof FormState> = [
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.suggester,
+  'suggesterUseTelegram',
+  'suggesterUseTeams',
   'suggesterInstructions',
   'suggesterRoutingMode',
   'suggesterRoutingInstructions',
@@ -339,6 +351,8 @@ export function buildAutomationSettingsSaveInput(
     issueFixerInstructions: stateToSave.issueFixerInstructions.trim() || null,
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
+    suggesterUseTelegram: stateToSave.suggesterUseTelegram,
+    suggesterUseTeams: stateToSave.suggesterUseTeams,
     suggesterRoutingMode: stateToSave.suggesterRoutingMode,
     suggesterRoutingInstructions:
       stateToSave.suggesterRoutingInstructions.trim() || null,

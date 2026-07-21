@@ -31,8 +31,17 @@ async function enqueueSuggestionRoute(params: {
   repositoryFullNames: string[];
   route: SuggestionDispatchRoute;
   triggerKind: 'manual' | 'scheduled';
+  destinationPayloadFields?: Record<string, string>;
 }): Promise<{ error?: string; success: boolean; taskId?: string }> {
   try {
+    const destinationFields = params.destinationPayloadFields ?? {};
+    // Non-Slack destinations stamp communicationProvider/ChannelId. Only attach
+    // Slack channel metadata when the scan actually reports to Slack — otherwise
+    // workers poll the wrong surface using a Telegram/Discord chat id.
+    const isSlackDestination =
+      !destinationFields.communicationProvider ||
+      destinationFields.communicationProvider === 'slack';
+
     // Suggestion scans run as the deployment service principal.
     const launchResult = await enqueueTask({
       task: {
@@ -40,7 +49,9 @@ async function enqueueSuggestionRoute(params: {
         payload: {
           repo: ALL_REPOSITORIES,
           selectedRepositories: params.repositoryFullNames,
-          teamId: params.deployment.slackTeamId,
+          ...(params.deployment.slackTeamId
+            ? { teamId: params.deployment.slackTeamId }
+            : {}),
           description: buildSuggestedTasksPrompt({
             repositoryFullNames: params.repositoryFullNames,
             repositoryCoverage: params.repositoryCoverage,
@@ -62,9 +73,12 @@ async function enqueueSuggestionRoute(params: {
           }),
           trigger: 'scheduled',
           notifySlack: true,
-          slackChannel: params.route.channelId,
           suggestionSource: 'suggest_ideas',
           visibleInTranscript: false,
+          ...(isSlackDestination
+            ? { slackChannel: params.route.channelId }
+            : {}),
+          ...destinationFields,
         },
       },
       initiator: { kind: 'automation', key: 'suggester' },
@@ -72,7 +86,9 @@ async function enqueueSuggestionRoute(params: {
       surface: 'system',
       trigger: params.triggerKind === 'manual' ? 'manual' : 'schedule',
       visibility: 'hidden',
-      channels: { slackChannelId: params.route.channelId },
+      ...(isSlackDestination
+        ? { channels: { slackChannelId: params.route.channelId } }
+        : {}),
     });
 
     return { success: true, taskId: launchResult.taskId };
@@ -97,6 +113,7 @@ export async function dispatchSuggestionRoutes(params: {
   repositoryFullNames: string[];
   routePlan: SuggestionDispatchPlan;
   triggerKind: 'manual' | 'scheduled';
+  destinationPayloadFields?: Record<string, string>;
 }): Promise<{
   errors: string[];
   firstLaunchedTaskId: string | null;
@@ -121,6 +138,7 @@ export async function dispatchSuggestionRoutes(params: {
           )),
       },
       triggerKind: params.triggerKind,
+      destinationPayloadFields: params.destinationPayloadFields,
     });
 
     if (result.success) {

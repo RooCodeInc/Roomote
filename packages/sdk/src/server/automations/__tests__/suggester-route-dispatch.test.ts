@@ -217,6 +217,47 @@ describe('dispatchSuggestionRoutes', () => {
     consoleSpy.mockRestore();
   });
 
+  it('omits Slack channel metadata when the destination is Telegram', async () => {
+    const params = {
+      ...buildParams(),
+      routePlan: {
+        ...buildParams().routePlan,
+        routes: [
+          {
+            ...buildParams().routePlan.routes[0]!,
+            channelId: '-100123',
+            channelName: '-100123',
+          },
+        ],
+      },
+      destinationPayloadFields: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '-100123',
+      },
+    };
+
+    await dispatchSuggestionRoutes(params);
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationProvider: 'telegram',
+            communicationChannelId: '-100123',
+            notifySlack: true,
+            suggestionSource: 'suggest_ideas',
+          }),
+        }),
+      }),
+    );
+    const enqueueArg = mockEnqueueTask.mock.calls[0]![0] as {
+      task: { payload: Record<string, unknown> };
+      channels?: { slackChannelId?: string };
+    };
+    expect(enqueueArg.task.payload.slackChannel).toBeUndefined();
+    expect(enqueueArg.channels).toBeUndefined();
+  });
+
   it('records a failed pass when every route fails', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const params = buildParams();

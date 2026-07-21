@@ -151,10 +151,9 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // Provider-agnostic: suggestion scans work with any synced repository.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
-    // Scheduled suggestion delivery supports a per-automation Slack or
-    // Discord destination target; Teams/Telegram remain fallback-only
-    // surfaces without a configurable destination.
-    supportedCommunicationProviders: ['slack', 'discord'],
+    // Full chat coverage: Slack/Discord pick an existing channel; Telegram
+    // auto-creates a sticky topic; Teams uses the primary conversation.
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'suggest_ideas',
   },

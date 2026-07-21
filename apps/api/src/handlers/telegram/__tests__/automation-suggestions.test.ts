@@ -3,10 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   envMock,
   findTelegramPrimaryChatIdMock,
+  getAutomationRuntimeMock,
+  getAutomationTelegramTopicThreadIdMock,
+  persistAutomationTelegramTopicThreadMock,
+  createTelegramForumTopicBestEffortMock,
+  postTelegramMessageBestEffortMock,
   insertMock,
   insertOnConflictDoNothingMock,
   insertValuesMock,
-  postTelegramMessageBestEffortMock,
   selectLimitMock,
   buildRootMessageMock,
 } = vi.hoisted(() => ({
@@ -14,10 +18,14 @@ const {
     R_TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
   },
   findTelegramPrimaryChatIdMock: vi.fn(),
+  getAutomationRuntimeMock: vi.fn(),
+  getAutomationTelegramTopicThreadIdMock: vi.fn(),
+  persistAutomationTelegramTopicThreadMock: vi.fn(),
+  createTelegramForumTopicBestEffortMock: vi.fn(),
+  postTelegramMessageBestEffortMock: vi.fn(),
   insertMock: vi.fn(),
   insertOnConflictDoNothingMock: vi.fn(),
   insertValuesMock: vi.fn(),
-  postTelegramMessageBestEffortMock: vi.fn(),
   selectLimitMock: vi.fn(),
   buildRootMessageMock: vi.fn(),
 }));
@@ -45,6 +53,10 @@ vi.mock('@roomote/db/server', () => ({
     webhookSecret: null,
     botUsername: null,
   })),
+  getAutomationRuntime: getAutomationRuntimeMock,
+  getAutomationTelegramTopicThreadId: getAutomationTelegramTopicThreadIdMock,
+  persistAutomationTelegramTopicThread:
+    persistAutomationTelegramTopicThreadMock,
   db: {
     insert: insertMock,
     select: vi.fn(() => ({
@@ -60,14 +72,18 @@ vi.mock('../primary-chat.js', () => ({
 }));
 
 vi.mock('../replies.js', () => ({
-  postTelegramMessageInNewTopicBestEffort: postTelegramMessageBestEffortMock,
+  createTelegramForumTopicBestEffort: createTelegramForumTopicBestEffortMock,
+  postTelegramMessageBestEffort: postTelegramMessageBestEffortMock,
 }));
 
 vi.mock('../../tasks/scheduled-suggestion-root-summary.js', () => ({
   buildScheduledSuggestionRootMessage: buildRootMessageMock,
 }));
 
-import { postScheduledSuggestionsToTelegram } from '../automation-suggestions';
+import {
+  postScheduledSuggestionsToTelegram,
+  SUGGEST_IDEAS_TELEGRAM_TOPIC_NAME,
+} from '../automation-suggestions';
 
 function buildSuggestion(id: string, title: string) {
   return {
@@ -84,21 +100,27 @@ describe('postScheduledSuggestionsToTelegram', () => {
     vi.clearAllMocks();
     envMock.R_TELEGRAM_BOT_TOKEN = 'bot-token';
     findTelegramPrimaryChatIdMock.mockResolvedValue('8846357662');
+    getAutomationRuntimeMock.mockResolvedValue({
+      destination: null,
+      targets: [],
+    });
+    getAutomationTelegramTopicThreadIdMock.mockReturnValue(null);
+    persistAutomationTelegramTopicThreadMock.mockResolvedValue(undefined);
+    createTelegramForumTopicBestEffortMock.mockResolvedValue({
+      threadId: '88',
+    });
+    postTelegramMessageBestEffortMock.mockResolvedValue({
+      messageId: '950',
+    });
     insertMock.mockReturnValue({ values: insertValuesMock });
     insertValuesMock.mockReturnValue({
       onConflictDoNothing: insertOnConflictDoNothingMock,
     });
     insertOnConflictDoNothingMock.mockResolvedValue(undefined);
-    postTelegramMessageBestEffortMock.mockResolvedValue({
-      messageId: '950',
-      threadId: '88',
-    });
     buildRootMessageMock.mockResolvedValue({
       summaryText: 'I triaged the latest Sentry issues.',
       actionFooterText: 'footer',
     });
-    // The only `.limit()` lookup is now the dedup query (Slack self-suppression
-    // was removed; surface precedence is owned by the caller).
     selectLimitMock.mockResolvedValue([]);
   });
 
@@ -113,41 +135,66 @@ describe('postScheduledSuggestionsToTelegram', () => {
       ],
     });
 
+    expect(createTelegramForumTopicBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Suggested tasks' }),
+    );
     expect(postTelegramMessageBestEffortMock).toHaveBeenCalledTimes(1);
     const posted = postTelegramMessageBestEffortMock.mock.calls[0]![0] as {
-      topicName: string;
       text: string;
       buttons: Array<Array<{ callbackData?: string }>>;
+      threadId?: string;
     };
 
     expect(posted.text).toContain('I triaged the latest Sentry issues.');
     expect(posted.text).toContain('Fix crash');
-    expect(posted.topicName).toBe('Suggested tasks');
+    expect(posted.threadId).toBe('88');
     expect(posted.buttons).toEqual([
       [expect.objectContaining({ callbackData: 'idea:aaa' })],
       [expect.objectContaining({ callbackData: 'idea:bbb' })],
     ]);
+  });
 
-    const rows = insertValuesMock.mock.calls[0]![0] as Array<{
-      kind: string;
-      surface: string;
-      dedupeKey: string;
-      messageTs: string;
-      workItemId: string;
-      metadata: { suggestionType: string; suggestionKey: string };
-    }>;
-    expect(rows.map((row) => row.metadata.suggestionType)).toEqual([
-      'sentry_triage',
-      'sentry_triage',
-    ]);
-    expect(rows.every((row) => row.kind === 'suggestion_card')).toBe(true);
-    expect(rows.every((row) => row.surface === 'telegram')).toBe(true);
-    expect(rows.map((row) => row.workItemId)).toEqual(['aaa', 'bbb']);
-    expect(new Set(rows.map((row) => row.dedupeKey)).size).toBe(2);
+  it('reuses a sticky Suggest Ideas topic on later runs', async () => {
+    getAutomationTelegramTopicThreadIdMock.mockReturnValue('topic-7');
+
+    await postScheduledSuggestionsToTelegram({
+      sourceTaskId: 'task-2',
+      createdByUserId: 'user-1',
+      suggestionSource: 'suggest_ideas',
+      suggestions: [buildSuggestion('aaa', 'Ship idea')],
+    });
+
+    expect(createTelegramForumTopicBestEffortMock).not.toHaveBeenCalled();
+    expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 'topic-7',
+        text: expect.stringContaining('Ship idea'),
+      }),
+    );
+    expect(persistAutomationTelegramTopicThreadMock).not.toHaveBeenCalled();
+  });
+
+  it('creates and persists a sticky Suggest Ideas topic when none exists', async () => {
+    await postScheduledSuggestionsToTelegram({
+      sourceTaskId: 'task-3',
+      createdByUserId: null,
+      suggestionSource: 'suggest_ideas',
+      suggestions: [buildSuggestion('aaa', 'First idea')],
+    });
+
+    expect(createTelegramForumTopicBestEffortMock).toHaveBeenCalledWith({
+      chatId: '8846357662',
+      name: SUGGEST_IDEAS_TELEGRAM_TOPIC_NAME,
+    });
+    expect(persistAutomationTelegramTopicThreadMock).toHaveBeenCalledWith({
+      automationKey: 'suggester',
+      chatId: '8846357662',
+      threadId: '88',
+      topicName: SUGGEST_IDEAS_TELEGRAM_TOPIC_NAME,
+    });
   });
 
   it('skips when tracked messages already exist for the source task', async () => {
-    // The dedup lookup finds a tracked row (Slack self-suppression removed).
     selectLimitMock.mockResolvedValueOnce([{ id: 'install-1' }]);
 
     const delivered = await postScheduledSuggestionsToTelegram({
@@ -158,9 +205,72 @@ describe('postScheduledSuggestionsToTelegram', () => {
     });
 
     expect(postTelegramMessageBestEffortMock).not.toHaveBeenCalled();
-    // Already delivered on a prior run -> reported as delivered so Teams stays
-    // suppressed.
     expect(delivered).toBe(true);
+  });
+
+  it('recreates and persists a sticky topic when an existing topic post fails', async () => {
+    getAutomationTelegramTopicThreadIdMock.mockReturnValue('stale-topic');
+    postTelegramMessageBestEffortMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ messageId: '999' });
+    createTelegramForumTopicBestEffortMock.mockResolvedValue({
+      threadId: 'fresh-topic',
+    });
+
+    const delivered = await postScheduledSuggestionsToTelegram({
+      sourceTaskId: 'task-repair',
+      createdByUserId: null,
+      suggestionSource: 'suggest_ideas',
+      suggestions: [buildSuggestion('aaa', 'Repair idea')],
+    });
+
+    expect(delivered).toBe(true);
+    expect(createTelegramForumTopicBestEffortMock).toHaveBeenCalledWith({
+      chatId: '8846357662',
+      name: SUGGEST_IDEAS_TELEGRAM_TOPIC_NAME,
+    });
+    expect(persistAutomationTelegramTopicThreadMock).toHaveBeenCalledWith({
+      automationKey: 'suggester',
+      chatId: '8846357662',
+      threadId: 'fresh-topic',
+      topicName: SUGGEST_IDEAS_TELEGRAM_TOPIC_NAME,
+    });
+    expect(postTelegramMessageBestEffortMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ threadId: 'stale-topic' }),
+    );
+    expect(postTelegramMessageBestEffortMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ threadId: 'fresh-topic' }),
+    );
+  });
+
+  it('falls back to the parent chat when topic creation is unavailable', async () => {
+    createTelegramForumTopicBestEffortMock.mockResolvedValue(null);
+    postTelegramMessageBestEffortMock.mockResolvedValue({ messageId: '111' });
+
+    const delivered = await postScheduledSuggestionsToTelegram({
+      sourceTaskId: 'task-fallback',
+      createdByUserId: null,
+      suggestionSource: 'suggest_ideas',
+      suggestions: [buildSuggestion('aaa', 'Chat idea')],
+    });
+
+    expect(delivered).toBe(true);
+    expect(persistAutomationTelegramTopicThreadMock).not.toHaveBeenCalled();
+    expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: '8846357662',
+        text: expect.stringContaining('Chat idea'),
+      }),
+    );
+    expect(
+      (
+        postTelegramMessageBestEffortMock.mock.calls[0]![0] as {
+          threadId?: string;
+        }
+      ).threadId,
+    ).toBeUndefined();
   });
 
   it('caps buttons at five and notes the overflow', async () => {

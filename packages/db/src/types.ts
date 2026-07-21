@@ -464,6 +464,10 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannelId: string | null;
   suggesterDiscordChannelId: string | null;
+  /** Primary Telegram chat id when Suggest Ideas posts to a sticky topic. */
+  suggesterTelegramChatId: string | null;
+  /** Primary Teams conversation id when Suggest Ideas posts to Teams. */
+  suggesterTeamsChannelId: string | null;
   suggesterInstructions: string | null;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string | null;

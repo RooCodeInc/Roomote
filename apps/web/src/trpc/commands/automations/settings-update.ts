@@ -21,6 +21,8 @@ import {
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
+  findTeamsPrimaryConversation,
+  findTelegramPrimaryChatId,
   resolveAutomationRuntimeDestination,
 } from '@roomote/sdk/server';
 import { validateSuggestionRoutingInstructions } from '@roomote/cloud-agents/server';
@@ -134,6 +136,7 @@ function buildSuggesterAutomationSettings(params: {
 function buildDestinationChannelTargets(
   slackChannelId: string | null | undefined,
   discordChannelId: string | null | undefined,
+  extraTargets: readonly AutomationTarget[] = [],
 ): AutomationTarget[] {
   return [
     ...(slackChannelId
@@ -154,6 +157,7 @@ function buildDestinationChannelTargets(
           },
         ]
       : []),
+    ...extraTargets,
   ];
 }
 
@@ -529,6 +533,66 @@ export async function updateBackgroundAgentSettingsCommand(
   const platformIssueDiscordResult =
     destinationResults.platformIssueAlerts.discord;
 
+  // Suggest Ideas may target Telegram (sticky topic) or Teams (primary
+  // conversation) as one-of destinations alongside Slack/Discord channels.
+  const savingSuggester = input.savingAutomation === 'suggester';
+  const wantSuggesterTelegram = savingSuggester
+    ? input.suggesterUseTelegram === true
+    : Boolean(existingSettings.suggesterTelegramChatId);
+  const wantSuggesterTeams = savingSuggester
+    ? input.suggesterUseTeams === true
+    : Boolean(existingSettings.suggesterTeamsChannelId);
+  let suggesterTelegramTarget: AutomationTarget | null = null;
+  let suggesterTeamsTarget: AutomationTarget | null = null;
+
+  if (wantSuggesterTelegram) {
+    const telegramChatId =
+      (savingSuggester ? await findTelegramPrimaryChatId() : null) ??
+      existingSettings.suggesterTelegramChatId;
+
+    if (!telegramChatId) {
+      fieldErrors.suggesterUseTelegram =
+        'Connect Telegram and capture a primary chat before routing Suggest Ideas there.';
+    } else {
+      // Sticky topic id is merged at upsert time from the latest DB row so a
+      // concurrent first delivery that persists threadId is not clobbered by a
+      // stale pre-transaction snapshot.
+      suggesterTelegramTarget = {
+        provider: 'telegram',
+        targetKind: 'telegram_chat',
+        externalRef: telegramChatId,
+        metadata: {
+          topicName: 'Suggest Ideas',
+        },
+      };
+      destinationResults.suggester.slack = { channelId: null };
+      destinationResults.suggester.discord = { channelId: null };
+    }
+  } else if (wantSuggesterTeams) {
+    const teamsConversation =
+      (savingSuggester ? await findTeamsPrimaryConversation() : null) ??
+      (existingSettings.suggesterTeamsChannelId
+        ? {
+            conversationId: existingSettings.suggesterTeamsChannelId,
+            serviceUrl: '',
+            conversationType: null,
+          }
+        : null);
+
+    if (!teamsConversation?.conversationId) {
+      fieldErrors.suggesterUseTeams =
+        'Connect Microsoft Teams and capture a conversation before routing Suggest Ideas there.';
+    } else {
+      suggesterTeamsTarget = {
+        provider: 'teams',
+        targetKind: 'teams_channel',
+        externalRef: teamsConversation.conversationId,
+      };
+      destinationResults.suggester.slack = { channelId: null };
+      destinationResults.suggester.discord = { channelId: null };
+    }
+  }
+
   for (const result of Object.values(destinationResults)) {
     if (result.discord.error) {
       fieldErrors[result.discord.error.field] = result.discord.error.message;
@@ -797,7 +861,11 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'suggester',
       frequency: effectiveSuggesterFrequency,
       channelId:
-        suggesterChannelResult.channelId ?? suggesterDiscordResult.channelId,
+        suggesterChannelResult.channelId ??
+        suggesterDiscordResult.channelId ??
+        suggesterTelegramTarget?.externalRef ??
+        suggesterTeamsTarget?.externalRef ??
+        null,
       field: 'suggesterSlackChannel',
     },
     {
@@ -987,15 +1055,30 @@ export async function updateBackgroundAgentSettingsCommand(
       throw new Error(`Missing destination descriptor for ${automationId}`);
     }
     const result = destinationResults[automationId];
+    const suggesterExtraTargets: AutomationTarget[] =
+      automationId === 'suggester'
+        ? [
+            ...(suggesterTelegramTarget ? [suggesterTelegramTarget] : []),
+            ...(suggesterTeamsTarget ? [suggesterTeamsTarget] : []),
+          ]
+        : [];
     return {
       targets: [
         ...buildDestinationChannelTargets(
           result.slack.channelId,
           result.discord.channelId,
+          suggesterExtraTargets,
         ),
         ...extraTargets,
       ],
-      managedTargetKinds: [...descriptor.managedTargetKinds],
+      managedTargetKinds:
+        automationId === 'suggester'
+          ? [
+              ...descriptor.managedTargetKinds,
+              'telegram_chat' as const,
+              'teams_channel' as const,
+            ]
+          : [...descriptor.managedTargetKinds],
     };
   }
 

@@ -1308,33 +1308,45 @@ export async function submitTaskSuggestions(
         resolveScheduledSuggestionSlackConfig(payload.suggestionSource)
           .automationKey,
       );
-      const slackDelivered =
-        suggestionRuntime.destination?.provider === 'discord'
-          ? false
-          : await postSuggestedTasksSummaryToSlack({
-              sourceTaskId: taskId,
-              createdByUserId,
-              suggestionSource: payload.suggestionSource,
-              historicalThreadFeedbackDebugSnippet:
-                payload.historicalThreadFeedbackDebugSnippet ?? null,
-              suggestions: persistedSuggestions,
-            });
-
-      if (!slackDelivered) {
-        const discordDelivered = await postScheduledSuggestionsToDiscord({
-          sourceTaskId: taskId,
-          createdByUserId,
-          suggestionSource: payload.suggestionSource,
-          suggestions: persistedSuggestions,
-        });
-
-        if (!discordDelivered) {
-          const telegramDelivered = await postScheduledSuggestionsToTelegram({
+      // An automation with its own non-Slack destination skips higher-precedence
+      // surfaces — the summary belongs on that surface.
+      const preferredProvider = suggestionRuntime.destination?.provider;
+      const preferredNonSlack =
+        preferredProvider === 'discord' ||
+        preferredProvider === 'telegram' ||
+        preferredProvider === 'teams';
+      const slackDelivered = preferredNonSlack
+        ? false
+        : await postSuggestedTasksSummaryToSlack({
             sourceTaskId: taskId,
             createdByUserId,
             suggestionSource: payload.suggestionSource,
+            historicalThreadFeedbackDebugSnippet:
+              payload.historicalThreadFeedbackDebugSnippet ?? null,
             suggestions: persistedSuggestions,
           });
+
+      if (!slackDelivered) {
+        const discordDelivered =
+          preferredProvider === 'telegram' || preferredProvider === 'teams'
+            ? false
+            : await postScheduledSuggestionsToDiscord({
+                sourceTaskId: taskId,
+                createdByUserId,
+                suggestionSource: payload.suggestionSource,
+                suggestions: persistedSuggestions,
+              });
+
+        if (!discordDelivered) {
+          const telegramDelivered =
+            preferredProvider === 'teams'
+              ? false
+              : await postScheduledSuggestionsToTelegram({
+                  sourceTaskId: taskId,
+                  createdByUserId,
+                  suggestionSource: payload.suggestionSource,
+                  suggestions: persistedSuggestions,
+                });
 
           if (!telegramDelivered) {
             await postScheduledSuggestionsToTeams({
