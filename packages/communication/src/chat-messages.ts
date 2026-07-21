@@ -14,7 +14,7 @@ function identity(value: string): string {
 }
 
 export function formatMarkdownLink(label: string, url: string): string {
-  return `[${label}](${url})`;
+  return `[${label.replace(/[\\[\]]/g, '\\$&')}](${url})`;
 }
 
 export function buildAccountLinkConnectCopy({
