@@ -1,4 +1,4 @@
-import { asc, count, eq } from 'drizzle-orm';
+import { and, asc, count, eq, isNull, lt, or, sql } from 'drizzle-orm';
 
 import {
   isScheduleOnlyBackgroundAutomationFrequency,
@@ -20,6 +20,9 @@ export {
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   MAX_CUSTOM_AUTOMATIONS,
 };
+
+/** Stale launch claims older than this may be reclaimed by a later launcher. */
+export const CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS = 10 * 60 * 1000;
 
 export type CustomAutomationWriteInput = {
   name: string;
@@ -222,6 +225,7 @@ export async function recordCustomAutomationRunOutcome(
   const at = params.at ?? new Date();
   const update: Partial<typeof customAutomations.$inferInsert> = {
     updatedAt: at,
+    launchClaimedAt: null,
   };
 
   if (params.lastRunAt !== 'skip') {
@@ -249,6 +253,68 @@ export async function recordCustomAutomationRunOutcome(
     .where(eq(customAutomations.id, params.id));
 }
 
+/**
+ * Atomically claim a custom automation launch. Succeeds only when no other
+ * launcher holds a fresh claim and there is no active previous task.
+ * Returns the claim fencing token (`launchClaimedAt`) on success, or null.
+ */
+export async function tryClaimCustomAutomationLaunch(
+  id: string,
+  client: DatabaseOrTransaction = db,
+): Promise<Date | null> {
+  const now = new Date();
+  const staleBefore = new Date(
+    now.getTime() - CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS,
+  );
+
+  const [claimed] = await client
+    .update(customAutomations)
+    .set({
+      launchClaimedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(customAutomations.id, id),
+        or(
+          isNull(customAutomations.launchClaimedAt),
+          lt(customAutomations.launchClaimedAt, staleBefore),
+        )!,
+        sql`(
+          ${customAutomations.lastLaunchedTaskId} IS NULL
+          OR NOT EXISTS (
+            SELECT 1
+            FROM tasks t
+            WHERE t.id = ${customAutomations.lastLaunchedTaskId}
+              AND t.state = 'active'
+          )
+        )`,
+      ),
+    )
+    .returning({ launchClaimedAt: customAutomations.launchClaimedAt });
+
+  return claimed?.launchClaimedAt ?? null;
+}
+
+export async function releaseCustomAutomationLaunchClaim(
+  id: string,
+  launchClaimedAt: Date,
+  client: DatabaseOrTransaction = db,
+): Promise<void> {
+  await client
+    .update(customAutomations)
+    .set({
+      launchClaimedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(customAutomations.id, id),
+        eq(customAutomations.launchClaimedAt, launchClaimedAt),
+      ),
+    );
+}
+
 export function getCustomAutomationFrequency(
   automation: Pick<CustomAutomation, 'enabled' | 'scheduleMode'>,
 ): ScheduleOnlyBackgroundAutomationFrequency {
@@ -262,8 +328,7 @@ export function getCustomAutomationFrequency(
 }
 
 /**
- * Returns true when the previously launched task is still active and a new
- * tick should wait.
+ * Returns true when the previously launched task is still active.
  */
 export async function isCustomAutomationPreviousRunActive(
   automation: Pick<CustomAutomation, 'lastLaunchedTaskId'>,

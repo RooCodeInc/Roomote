@@ -15,15 +15,17 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: vi.fn(),
   getCustomAutomationFrequency: vi.fn(),
-  isCustomAutomationPreviousRunActive: vi.fn(),
   listEnabledCustomAutomations: vi.fn(),
   recordCustomAutomationRunOutcome: vi.fn(),
+  releaseCustomAutomationLaunchClaim: vi.fn(),
+  tryClaimCustomAutomationLaunch: vi.fn(),
   slackInstallations: {},
 }));
 
 vi.mock('../destination', () => ({
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),
-  listConnectedCommunicationProviders: vi.fn(async () => ['slack']),
+  findTeamsConversationServiceUrl: vi.fn(),
+  listConnectedCommunicationProviders: vi.fn(async () => ['slack', 'teams']),
 }));
 
 vi.mock('../scheduling-utils', () => ({
@@ -36,9 +38,10 @@ import {
   db,
   getCustomAutomationById,
   getCustomAutomationFrequency,
-  isCustomAutomationPreviousRunActive,
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
+  releaseCustomAutomationLaunchClaim,
+  tryClaimCustomAutomationLaunch,
 } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
@@ -46,6 +49,10 @@ import {
   customAutomationsJob,
   runCustomAutomationNow,
 } from '../custom-automations';
+import {
+  buildDestinationTaskPayloadFields,
+  findTeamsConversationServiceUrl,
+} from '../destination';
 import { isRunDue } from '../scheduling-utils';
 
 const automation = {
@@ -66,6 +73,7 @@ const automation = {
   lastFailedAt: null,
   lastError: null,
   lastLaunchedTaskId: null,
+  launchClaimedAt: null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
@@ -77,7 +85,7 @@ describe('customAutomationsJob', () => {
       automation as never,
     ]);
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('daily');
-    vi.mocked(isCustomAutomationPreviousRunActive).mockResolvedValue(false);
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(new Date());
     vi.mocked(isRunDue).mockReturnValue(true);
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: automation.environmentId,
@@ -94,6 +102,13 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result.launchedTaskId).toBe('task_abc');
+    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(automation.id);
+    expect(isRunDue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        frequency: 'daily',
+        scheduleHourLocal: 3,
+      }),
+    );
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
@@ -129,8 +144,21 @@ describe('customAutomationsJob', () => {
     );
   });
 
-  it('skips when previous run is still active', async () => {
-    vi.mocked(isCustomAutomationPreviousRunActive).mockResolvedValue(true);
+  it('uses hour-0 boundary for hourly schedules', async () => {
+    vi.mocked(getCustomAutomationFrequency).mockReturnValue('every_hour');
+
+    await customAutomationsJob();
+
+    expect(isRunDue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        frequency: 'every_hour',
+        scheduleHourLocal: 0,
+      }),
+    );
+  });
+
+  it('skips when another launcher already claimed the row', async () => {
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(null);
 
     const result = await customAutomationsJob();
 
@@ -144,7 +172,71 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result.launchedTaskId).toBeNull();
+    expect(tryClaimCustomAutomationLaunch).not.toHaveBeenCalled();
     expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('resolves Teams service URL before launch', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {
+          provider: 'teams',
+          targetKind: 'teams_channel',
+          externalRef: '19:abc@thread.tacv2',
+        },
+      } as never,
+    ]);
+    vi.mocked(findTeamsConversationServiceUrl).mockResolvedValue(
+      'https://smba.trafficmanager.net/amer/',
+    );
+    vi.mocked(buildDestinationTaskPayloadFields).mockReturnValue({
+      communicationProvider: 'teams',
+      communicationChannelId: '19:abc@thread.tacv2',
+      communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+    });
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(findTeamsConversationServiceUrl).toHaveBeenCalledWith(
+      '19:abc@thread.tacv2',
+    );
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('fails Teams launch when service URL cannot be resolved', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {
+          provider: 'teams',
+          targetKind: 'teams_channel',
+          externalRef: '19:abc@thread.tacv2',
+        },
+      } as never,
+    ]);
+    vi.mocked(findTeamsConversationServiceUrl).mockResolvedValue(null);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        status: 'failed',
+        error: expect.stringContaining('service URL'),
+      }),
+    );
   });
 });
 
@@ -153,7 +245,7 @@ describe('runCustomAutomationNow', () => {
     vi.clearAllMocks();
     vi.mocked(getCustomAutomationById).mockResolvedValue(automation as never);
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('daily');
-    vi.mocked(isCustomAutomationPreviousRunActive).mockResolvedValue(false);
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(new Date());
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: automation.environmentId,
     } as never);
@@ -176,8 +268,8 @@ describe('runCustomAutomationNow', () => {
     );
   });
 
-  it('skips manual run when previous task is still active', async () => {
-    vi.mocked(isCustomAutomationPreviousRunActive).mockResolvedValue(true);
+  it('skips manual run when claim fails because previous task is active', async () => {
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(null);
 
     const result = await runCustomAutomationNow(automation.id);
 
@@ -186,6 +278,20 @@ describe('runCustomAutomationNow', () => {
       reason: 'Previous run is still active.',
     });
     expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('releases the launch claim when enqueue fails', async () => {
+    const claimAt = new Date('2026-07-21T00:00:00.000Z');
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
+    vi.mocked(enqueueTask).mockRejectedValue(new Error('queue down'));
+
+    const result = await runCustomAutomationNow(automation.id);
+
+    expect(result.outcome).toBe('failed');
+    expect(releaseCustomAutomationLaunchClaim).toHaveBeenCalledWith(
+      automation.id,
+      claimAt,
+    );
   });
 
   it('fails when automation is disabled', async () => {

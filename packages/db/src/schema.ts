@@ -2665,6 +2665,12 @@ export const customAutomations = pgTable(
       () => tasks.id,
       { onDelete: 'set null' },
     ),
+    /**
+     * Fencing token for concurrent launch claims. Set to NOW() when a launcher
+     * reserves the row; cleared on finalize/release. Stale claims older than
+     * the recovery window may be reclaimed.
+     */
+    launchClaimedAt: timestamp('launch_claimed_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

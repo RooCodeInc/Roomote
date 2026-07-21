@@ -5,10 +5,11 @@ import {
   eq,
   getCustomAutomationById,
   getCustomAutomationFrequency,
-  isCustomAutomationPreviousRunActive,
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
+  releaseCustomAutomationLaunchClaim,
   slackInstallations,
+  tryClaimCustomAutomationLaunch,
   type CustomAutomation,
 } from '@roomote/db/server';
 import {
@@ -19,6 +20,7 @@ import {
 
 import {
   buildDestinationTaskPayloadFields,
+  findTeamsConversationServiceUrl,
   listConnectedCommunicationProviders,
   type ResolvedAutomationDestination,
 } from './destination';
@@ -31,7 +33,8 @@ import {
 } from './types';
 
 const LOG_PREFIX = '[custom-automations]';
-const SCHEDULE_HOUR_LOCAL = 3;
+/** Applied only to daily/weekly due-gating so hourly modes are not held until 3am. */
+const DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL = 3;
 
 const WINDOW_DAYS: Record<string, number> = {
   every_hour: 1 / 24,
@@ -40,9 +43,19 @@ const WINDOW_DAYS: Record<string, number> = {
   weekly: 7,
 };
 
-function targetToDestination(
+function scheduleHourLocalForFrequency(frequency: string): number {
+  if (frequency === 'daily' || frequency === 'weekly') {
+    return DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL;
+  }
+
+  // isRunDue always requires the local hour boundary; hour 0 means any time
+  // after midnight local is eligible, so hourly windows run as soon as due.
+  return 0;
+}
+
+async function resolveDestination(
   target: AutomationTarget,
-): ResolvedAutomationDestination | null {
+): Promise<ResolvedAutomationDestination | null> {
   if (!target.provider || !target.externalRef) {
     return null;
   }
@@ -55,6 +68,27 @@ function targetToDestination(
     provider !== 'telegram'
   ) {
     return null;
+  }
+
+  if (provider === 'teams') {
+    const metadataServiceUrl =
+      typeof target.metadata?.serviceUrl === 'string'
+        ? target.metadata.serviceUrl.trim()
+        : '';
+    const serviceUrl =
+      metadataServiceUrl ||
+      (await findTeamsConversationServiceUrl(target.externalRef));
+
+    if (!serviceUrl) {
+      return null;
+    }
+
+    return {
+      provider,
+      channelId: target.externalRef,
+      source: 'automation_target',
+      serviceUrl,
+    };
   }
 
   return {
@@ -108,18 +142,13 @@ async function launchCustomAutomationRow(
         timeZone: timezone,
         frequency,
         lastRunAt: automation.lastRunAt,
-        scheduleHourLocal: SCHEDULE_HOUR_LOCAL,
+        scheduleHourLocal: scheduleHourLocalForFrequency(frequency),
         windowDays: WINDOW_DAYS,
       })
     ) {
       result.skippedReason = 'Not due yet.';
       return result;
     }
-  }
-
-  if (await isCustomAutomationPreviousRunActive(automation)) {
-    result.skippedReason = 'Previous run is still active.';
-    return result;
   }
 
   if (!automation.environmentId) {
@@ -149,14 +178,18 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  const destination = targetToDestination(automation.target);
+  const destination = await resolveDestination(automation.target);
   if (!destination) {
-    result.skippedReason = 'Report destination is not configured.';
-    result.errors.push('Report destination is not configured.');
+    const message =
+      automation.target.provider === 'teams'
+        ? 'Teams report destination is missing a resolvable service URL.'
+        : 'Report destination is not configured.';
+    result.skippedReason = message;
+    result.errors.push(message);
     await recordCustomAutomationRunOutcome(db, {
       id: automation.id,
       status: 'failed',
-      error: 'Report destination is not configured.',
+      error: message,
     });
     return result;
   }
@@ -174,42 +207,53 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  const launchResult = await enqueueTask({
-    task: {
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        repo: '',
-        environmentId: automation.environmentId,
-        description: automation.prompt,
-        ...buildDestinationTaskPayloadFields(destination),
-      },
-    },
-    title: automation.name,
-    initiator: {
-      kind: 'automation',
-      key: 'custom_automation',
-      actor: {
-        externalId: automation.id,
-        displayName: automation.name,
-      },
-    },
-    workflow: 'standard',
-    surface: 'system',
-    trigger: opts.manualTrigger ? 'manual' : 'schedule',
-    ...(destination.provider === 'slack'
-      ? { channels: { slackChannelId: destination.channelId } }
-      : {}),
-  });
+  const launchClaimedAt = await tryClaimCustomAutomationLaunch(automation.id);
+  if (!launchClaimedAt) {
+    result.skippedReason = 'Previous run is still active.';
+    return result;
+  }
 
-  await recordCustomAutomationRunOutcome(db, {
-    id: automation.id,
-    status: 'succeeded',
-    lastLaunchedTaskId: launchResult.taskId,
-  });
+  try {
+    const launchResult = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: '',
+          environmentId: automation.environmentId,
+          description: automation.prompt,
+          ...buildDestinationTaskPayloadFields(destination),
+        },
+      },
+      title: automation.name,
+      initiator: {
+        kind: 'automation',
+        key: 'custom_automation',
+        actor: {
+          externalId: automation.id,
+          displayName: automation.name,
+        },
+      },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: opts.manualTrigger ? 'manual' : 'schedule',
+      ...(destination.provider === 'slack'
+        ? { channels: { slackChannelId: destination.channelId } }
+        : {}),
+    });
 
-  result.launchedTaskId = launchResult.taskId;
-  result.completed = true;
-  return result;
+    await recordCustomAutomationRunOutcome(db, {
+      id: automation.id,
+      status: 'succeeded',
+      lastLaunchedTaskId: launchResult.taskId,
+    });
+
+    result.launchedTaskId = launchResult.taskId;
+    result.completed = true;
+    return result;
+  } catch (error) {
+    await releaseCustomAutomationLaunchClaim(automation.id, launchClaimedAt);
+    throw error;
+  }
 }
 
 export async function customAutomationsJob(

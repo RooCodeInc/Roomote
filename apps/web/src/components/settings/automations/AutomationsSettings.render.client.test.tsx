@@ -257,13 +257,16 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: (queryOptions: { queryKey?: string[] }) => {
-    if (queryOptions.queryKey?.[1] === 'listSlackChannels') {
-      return state.slackChannelsQuery;
+  useQuery: (queryOptions: { queryKey?: unknown[] }) => {
+    const key1 = queryOptions.queryKey?.[1];
+    if (key1 === 'listSlackChannels' || key1 === 'listDiscordChannels') {
+      return key1 === 'listSlackChannels'
+        ? state.slackChannelsQuery
+        : state.discordChannelsQuery;
     }
 
-    if (queryOptions.queryKey?.[1] === 'listDiscordChannels') {
-      return state.discordChannelsQuery;
+    if (key1 === 'listCustomAutomations') {
+      return { isPending: false, data: [] };
     }
 
     if (queryOptions.queryKey?.[0] === 'comms') {
@@ -282,6 +285,18 @@ vi.mock('@tanstack/react-query', () => ({
           ],
         },
       };
+    }
+
+    if (
+      queryOptions.queryKey?.[0] === 'environments' ||
+      key1 === 'list' ||
+      (Array.isArray(queryOptions.queryKey) &&
+        queryOptions.queryKey.includes('environments'))
+    ) {
+      // environments.list and any leftover channel listszheimer
+      if (queryOptions.queryKey?.[0] === 'environments') {
+        return { isPending: false, data: [] };
+      }
     }
 
     return state.settingsQuery;
@@ -338,6 +353,24 @@ vi.mock('@/trpc/client', () => ({
           queryKey: ['automations', 'listDiscordChannels'],
         }),
       },
+      listCustomAutomations: {
+        queryOptions: () => ({
+          queryKey: ['automations', 'listCustomAutomations'],
+        }),
+        queryKey: () => ['automations', 'listCustomAutomations'],
+      },
+      createCustomAutomation: {
+        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
+      updateCustomAutomation: {
+        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
+      deleteCustomAutomation: {
+        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
+      triggerCustomAutomation: {
+        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
       updateSettings: {
         mutationOptions: (options?: Record<string, unknown>) => {
           mutations.latestSettingsOptions =
@@ -353,6 +386,13 @@ vi.mock('@/trpc/client', () => ({
 
           return options ?? {};
         },
+      },
+    },
+    environments: {
+      list: {
+        queryOptions: () => ({
+          queryKey: ['environments', 'list'],
+        }),
       },
     },
     comms: {
