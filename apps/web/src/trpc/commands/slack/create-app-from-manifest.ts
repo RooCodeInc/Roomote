@@ -6,6 +6,7 @@ import { db } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { buildSlackAppManifest } from '@/lib/slack-app-manifest';
 import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
 
@@ -201,7 +202,7 @@ export async function createSlackAppFromManifest({
       };
     }
 
-    const publicOrigin = Env.R_APP_URL?.trim();
+    const publicOrigin = getPublicAppUrl(Env).trim();
 
     if (!publicOrigin) {
       return {
