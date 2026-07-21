@@ -266,16 +266,16 @@ const bitbucketPipelineSchema = z
             pattern: z.string().optional(),
           })
           .passthrough()
-          .optional(),
+          .nullish(),
         commit: z
           .object({
             hash: z.string().optional(),
           })
           .passthrough()
-          .optional(),
+          .nullish(),
       })
       .passthrough()
-      .optional(),
+      .nullish(),
     state: z
       .object({
         name: z.string().optional(),
@@ -286,10 +286,10 @@ const bitbucketPipelineSchema = z
             type: z.string().optional(),
           })
           .passthrough()
-          .optional(),
+          .nullish(),
       })
       .passthrough()
-      .optional(),
+      .nullish(),
     links: z
       .object({
         self: z
@@ -304,7 +304,7 @@ const bitbucketPipelineSchema = z
           .optional(),
       })
       .passthrough()
-      .optional(),
+      .nullish(),
   })
   .passthrough();
 
@@ -326,10 +326,10 @@ const bitbucketPipelineStepSchema = z
             name: z.string().optional(),
           })
           .passthrough()
-          .optional(),
+          .nullish(),
       })
       .passthrough()
-      .optional(),
+      .nullish(),
   })
   .passthrough();
 
@@ -409,7 +409,16 @@ export async function getLatestBitbucketPipeline(params: {
     },
   );
 
-  if ([401, 403, 404].includes(response.status)) {
+  // Bitbucket answers a missing `pipeline` OAuth scope with 401/403. Throw so
+  // callers surface a credential/scope problem instead of reading it as "no
+  // failed pipeline"; only an unknown repository/pipeline maps to null.
+  if ([401, 403].includes(response.status)) {
+    throw new Error(
+      `Bitbucket rejected the Pipelines API request (status ${response.status}). Confirm the OAuth consumer has the pipeline scope and the connection has been re-authorized.`,
+    );
+  }
+
+  if (response.status === 404) {
     return null;
   }
 
@@ -460,7 +469,16 @@ export async function getBitbucketPipeline(params: {
     },
   );
 
-  if ([401, 403, 404].includes(response.status)) {
+  // Bitbucket answers a missing `pipeline` OAuth scope with 401/403. Throw so
+  // callers surface a credential/scope problem instead of reading it as "no
+  // failed pipeline"; only an unknown repository/pipeline maps to null.
+  if ([401, 403].includes(response.status)) {
+    throw new Error(
+      `Bitbucket rejected the Pipelines API request (status ${response.status}). Confirm the OAuth consumer has the pipeline scope and the connection has been re-authorized.`,
+    );
+  }
+
+  if (response.status === 404) {
     return null;
   }
 
@@ -473,7 +491,9 @@ export async function getBitbucketPipeline(params: {
 
 /**
  * Resolve a pipeline by build number on a branch (status webhook URLs often
- * only include the numeric results id).
+ * only include the numeric results id). Scans only the newest 20 pipelines on
+ * the branch, so a long-delayed webhook on a busy repository can miss; the
+ * webhook handler retries on the default branch and then skips.
  */
 export async function getBitbucketPipelineByBuildNumber(params: {
   repositoryFullName: string;
@@ -519,7 +539,16 @@ export async function getBitbucketPipelineByBuildNumber(params: {
     },
   );
 
-  if ([401, 403, 404].includes(response.status)) {
+  // Bitbucket answers a missing `pipeline` OAuth scope with 401/403. Throw so
+  // callers surface a credential/scope problem instead of reading it as "no
+  // failed pipeline"; only an unknown repository/pipeline maps to null.
+  if ([401, 403].includes(response.status)) {
+    throw new Error(
+      `Bitbucket rejected the Pipelines API request (status ${response.status}). Confirm the OAuth consumer has the pipeline scope and the connection has been re-authorized.`,
+    );
+  }
+
+  if (response.status === 404) {
     return null;
   }
 

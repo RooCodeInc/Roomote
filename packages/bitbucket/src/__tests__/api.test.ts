@@ -141,6 +141,68 @@ describe('pipeline helpers', () => {
     );
   });
 
+  it('throws on rejected credentials instead of reading them as no pipeline', async () => {
+    const fetchImpl = (async () =>
+      new Response('{"type": "error"}', { status: 403 })) as typeof fetch;
+
+    await expect(
+      getLatestBitbucketPipeline({
+        repositoryFullName: 'acme/roomote',
+        branch: 'main',
+        token: 'token',
+        username: 'bot',
+        baseUrl: 'https://bitbucket.org',
+        fetchImpl,
+      }),
+    ).rejects.toThrow('pipeline scope');
+  });
+
+  it('returns null for unknown repositories or pipelines', async () => {
+    const fetchImpl = (async () =>
+      new Response('{}', { status: 404 })) as typeof fetch;
+
+    await expect(
+      getLatestBitbucketPipeline({
+        repositoryFullName: 'acme/roomote',
+        branch: 'main',
+        token: 'token',
+        username: 'bot',
+        baseUrl: 'https://bitbucket.org',
+        fetchImpl,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('tolerates null nested objects on real pipeline payloads', async () => {
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          values: [
+            {
+              uuid: '{pipe-null}',
+              build_number: 4,
+              target: null,
+              state: { name: 'COMPLETED', result: null },
+              links: null,
+            },
+          ],
+        }),
+        { status: 200 },
+      )) as typeof fetch;
+
+    const latest = await getLatestBitbucketPipeline({
+      repositoryFullName: 'acme/roomote',
+      branch: 'main',
+      token: 'token',
+      username: 'bot',
+      baseUrl: 'https://bitbucket.org',
+      fetchImpl,
+    });
+
+    expect(latest?.build_number).toBe(4);
+    expect(getBitbucketPipelineResultName(latest!)).toBe('COMPLETED');
+  });
+
   it('loads the latest branch pipeline and failure evidence', async () => {
     const jsonResponse = (body: unknown) =>
       new Response(JSON.stringify(body), { status: 200 });

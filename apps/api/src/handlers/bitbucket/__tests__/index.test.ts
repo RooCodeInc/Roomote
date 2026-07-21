@@ -153,7 +153,8 @@ describe('bitbucket webhook router', () => {
       commit_status: {
         name: 'Pipeline',
         state: 'FAILED',
-        url: 'https://bitbucket.org/ws/repo/addon/pipelines/home#!/results/7',
+        key: 'BB-PIPE',
+        url: 'https://bitbucket.org/ws/repo/addon/pipelines/home#!/results/42',
         refname: 'main',
         commit: { hash: 'abc123' },
       },
@@ -184,6 +185,7 @@ describe('bitbucket webhook router', () => {
       expect.any(Function),
       { provider: 'bitbucket' },
     );
+    expect(handleBitbucketPullRequest).not.toHaveBeenCalled();
   });
 
   it('rejects invalid signatures', async () => {
