@@ -42,6 +42,16 @@ export const SLACK_PR_CLOSED_REACTION_EMOJI = '-1';
 
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 
+function formatDiscordPullRequestLink(label: string, url: string): string {
+  const match = label.match(/^(\[[^\]]+\])\s+(.+)$/);
+
+  if (match) {
+    return `${match[1]} [${match[2]}](${url})`;
+  }
+
+  return `[${label}](${url})`;
+}
+
 interface NotifyPullRequestTerminalStatusParams {
   /**
    * Source control provider that owns the terminal PR/MR. Used to scope the
@@ -499,7 +509,7 @@ async function deliverDiscordTerminalStatus({
     prUrl,
     status,
     actorLogin: resolvedActorLogin,
-    formatLink: formatMarkdownLink,
+    formatLink: formatDiscordPullRequestLink,
     formatStatus: (value) => `**${value}**`,
   });
   // Match Slack terminal reactions: check on merge, thumbsdown on closed.

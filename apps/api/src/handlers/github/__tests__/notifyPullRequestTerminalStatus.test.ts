@@ -305,6 +305,24 @@ describe('notifyPullRequestTerminalStatus', () => {
     });
   });
 
+  it('keeps a bracketed PR tag outside the Discord link label', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: discordPayload }] as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      prTitle: '[Fix] Discord link formatting',
+    });
+
+    expect(mockPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'discord-thread-1',
+      text: '[Fix] [Discord link formatting](https://github.com/owner/repo/pull/42) was **merged** by merger',
+      textFormat: 'markdown',
+    });
+  });
+
   it('still places Discord merge checkmark when eyes cleanup fails', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
