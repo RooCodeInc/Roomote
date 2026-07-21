@@ -60,15 +60,20 @@ export async function githubPrReviewFollowUp({
     commentBody,
   });
 
-  const issueNumber = pr.closingIssuesReferences[0]?.number;
-
-  const issue = issueNumber
-    ? await GitHubCli.fetchIssue({ ...params, issueNumber })
-    : null;
+  const closingIssueRefs = pr.closingIssuesReferences ?? [];
+  const linkedIssues = (
+    await Promise.all(
+      closingIssueRefs.map((ref) =>
+        GitHubCli.fetchIssue({ ...params, issueNumber: ref.number }).catch(
+          () => null,
+        ),
+      ),
+    )
+  ).filter((issue): issue is NonNullable<typeof issue> => issue !== null);
   const linkedWorkItems = mergeLinkedWorkItems(
     payloadLinkedWorkItems,
     getGitHubLinkedWorkItemsFromClosingIssues({
-      closingIssuesReferences: pr.closingIssuesReferences,
+      closingIssuesReferences: closingIssueRefs,
       fallbackRepository: fullName,
     }),
   );
@@ -90,6 +95,12 @@ export async function githubPrReviewFollowUp({
     : undefined;
 
   const revertCommitBaseUrl = `${Env.R_APP_URL}/revert-commit?repo=${fullName}&prNumber=${prNumber}`;
+  const linkedIssueDetails =
+    linkedIssues.length > 0
+      ? linkedIssues
+          .map((issue) => getIssueDetails(fullName, issue))
+          .join('\n\n')
+      : getIssueDetails(fullName, null);
   const taskContext = {
     repository: fullName,
     pull_request_number: prNumber,
@@ -111,7 +122,7 @@ export async function githubPrReviewFollowUp({
       changedFiles.length > 0
         ? changedFiles.map((file) => `- \`${file}\``).join('\n')
         : 'Unable to determine changed files. Use the appropriate git commands to incrementally view the changed files.',
-    linked_issue: getIssueDetails(fullName, issue),
+    linked_issue: linkedIssueDetails,
     pull_request_diff: getDiff({
       prNumber,
       repo: fullName,
