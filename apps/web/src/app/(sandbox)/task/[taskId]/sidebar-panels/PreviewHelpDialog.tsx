@@ -82,9 +82,7 @@ export function PreviewHelpDialog({
         {setupTask ? (
           <div className="space-y-2 text-sm">
             <p className="font-medium">
-              {setupTask.kind === 'preview'
-                ? `An agent is already working on live previews${environmentName ? ` for ${environmentName}` : ''}.`
-                : `${environmentName ?? 'This environment'} is still being set up. Previews may not work until setup completes.`}
+              {`An agent is already working on live previews${environmentName ? ` for ${environmentName}` : ''}.`}
             </p>
             {setupTask.taskId ? (
               <Button asChild variant="outline" size="sm">
