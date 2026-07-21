@@ -7,6 +7,7 @@ import {
   db,
   eq,
   findBackgroundAutomationSlackThread,
+  getCustomAutomationById,
   slackInstallations,
   taskRuns,
   tasks,
@@ -214,6 +215,29 @@ async function buildLateBoundAutomationRootFooterBlocks(params: {
   });
   return buildAutomationRootFooterBlocks({
     automationLabel,
+    taskUrl: params.taskUrl,
+    linkedPrUrl: linkedPr?.prUrl ?? null,
+  });
+}
+
+async function buildLateBoundCustomAutomationRootFooterBlocks(params: {
+  customAutomationId: string;
+  taskUrl: string;
+  taskId: string;
+}): Promise<SlackBlock[] | null> {
+  const automation = await getCustomAutomationById(params.customAutomationId);
+
+  if (!automation) {
+    return null;
+  }
+
+  const linkedPr = await resolveSlackThreadLinkedPr({
+    taskId: params.taskId,
+    prRepo: null,
+    prNumber: null,
+  });
+  return buildAutomationRootFooterBlocks({
+    automationLabel: automation.name,
     taskUrl: params.taskUrl,
     linkedPrUrl: linkedPr?.prUrl ?? null,
   });
@@ -872,6 +896,9 @@ slackMcp.post('/thread_reply', async (c) => {
   const automationWorkItemId = getAutomationWorkItemIdFromTaskPayload(
     taskRun.payload,
   );
+  const customAutomationId = getCustomAutomationIdFromTaskPayload(
+    taskRun.payload,
+  );
   const existingThreadTs = slackReplyTarget.threadTs;
   let messageTs: string;
   let outboundThreadTs = existingThreadTs ?? '';
@@ -884,7 +911,13 @@ slackMcp.post('/thread_reply', async (c) => {
             taskUrl,
             taskId: taskRun.taskId,
           })
-        : null;
+        : includeFooter && customAutomationId
+          ? await buildLateBoundCustomAutomationRootFooterBlocks({
+              customAutomationId,
+              taskUrl,
+              taskId: taskRun.taskId,
+            })
+          : null;
     const rootFooterBlocks =
       lateBoundAutomationFooterBlocks ??
       (includeFooter

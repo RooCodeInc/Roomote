@@ -533,6 +533,9 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     senderUserId: event.user,
     isThreadTaskOwner,
     isThreadRootAuthor,
+    isAutomationReportThread: Boolean(
+      roomoteThreadMatch?.isCustomAutomationThread,
+    ),
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
