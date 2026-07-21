@@ -5,6 +5,7 @@ import {
   getBitbucketPipelineFailureEvidence,
   getBitbucketPipelineResultName,
   getBitbucketPipelineWebUrl,
+  resolveBitbucketInstanceHost,
   stripUuidBraces,
 } from '@roomote/bitbucket';
 import { and, db, eq, or, repositories } from '@roomote/db/server';
@@ -19,18 +20,54 @@ function stripGitRef(refName: string | null | undefined): string {
   return (refName ?? '').trim().replace(/^refs\/heads\//, '');
 }
 
+function normalizeHost(host: string | null | undefined): string {
+  return (host ?? '').trim().toLowerCase();
+}
+
+/**
+ * True when statusHost is the configured Bitbucket web host (or www.apex).
+ */
+function isBitbucketPipelineStatusHost(
+  statusHost: string | null | undefined,
+  configuredHost: string,
+): boolean {
+  const status = normalizeHost(statusHost);
+  const configured = normalizeHost(configuredHost);
+  if (!status || !configured) {
+    return false;
+  }
+  if (status === configured) {
+    return true;
+  }
+  if (status === `www.${configured}` || configured === `www.${status}`) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Parse a Bitbucket Pipelines results URL into build number or UUID.
  * Examples:
  * - .../addon/pipelines/home#!/results/42
  * - .../pipelines/results/{uuid}
+ *
+ * When `configuredHost` is set, the URL host must match that Bitbucket host
+ * before any path is trusted (blocks external CI URLs with a similar path).
  */
 export function parseBitbucketPipelineIdentityFromUrl(
   url: string | null | undefined,
+  configuredHost?: string | null,
 ): { buildNumber?: number; pipelineUuid?: string } {
   const href = (url ?? '').trim();
   if (!href) {
     return {};
+  }
+
+  if (configuredHost !== undefined && configuredHost !== null) {
+    const statusHost = toHostFromUrl(href);
+    if (!isBitbucketPipelineStatusHost(statusHost, configuredHost)) {
+      return {};
+    }
   }
 
   // UUID segments can start with hex digits; match them before bare build
@@ -76,7 +113,22 @@ export async function handleBitbucketCommitStatus(
     };
   }
 
-  const identity = parseBitbucketPipelineIdentityFromUrl(status.url);
+  let configuredHost: string;
+  try {
+    configuredHost = await resolveBitbucketInstanceHost();
+  } catch (error) {
+    logApiError('[Bitbucket] Failed to resolve Bitbucket instance host', error);
+    return {
+      status: 'ok',
+      message:
+        'Ignoring Bitbucket commit status because the instance host is unavailable',
+    };
+  }
+
+  const identity = parseBitbucketPipelineIdentityFromUrl(
+    status.url,
+    configuredHost,
+  );
   if (
     identity.pipelineUuid === undefined &&
     identity.buildNumber === undefined
@@ -84,7 +136,7 @@ export async function handleBitbucketCommitStatus(
     return {
       status: 'ok',
       message:
-        'Ignoring failed Bitbucket commit status that is not a Pipelines result URL',
+        'Ignoring failed Bitbucket commit status that is not a Pipelines result URL on the configured host',
     };
   }
 

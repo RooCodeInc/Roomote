@@ -27,6 +27,7 @@ vi.mock('@roomote/bitbucket', () => ({
     mockGetBitbucketPipelineResultName(...args),
   getBitbucketPipelineWebUrl: (...args: unknown[]) =>
     mockGetBitbucketPipelineWebUrl(...args),
+  resolveBitbucketInstanceHost: async () => 'bitbucket.org',
   stripUuidBraces: (value: string) => value.replace(/^\{|\}$/g, ''),
 }));
 
@@ -127,8 +128,34 @@ describe('parseBitbucketPipelineIdentityFromUrl', () => {
     expect(
       parseBitbucketPipelineIdentityFromUrl(
         'https://ci.example.com/job/acme-api/results/42/',
+        'bitbucket.org',
       ),
     ).toEqual({});
+  });
+
+  it('returns empty identity for Pipelines-shaped URLs on a non-Bitbucket host', () => {
+    expect(
+      parseBitbucketPipelineIdentityFromUrl(
+        'https://ci.example.com/addon/pipelines/home#!/results/42',
+        'bitbucket.org',
+      ),
+    ).toEqual({});
+
+    expect(
+      parseBitbucketPipelineIdentityFromUrl(
+        'https://ci.example.com/ws/repo/pipelines/results/42',
+        'bitbucket.org',
+      ),
+    ).toEqual({});
+  });
+
+  it('accepts Pipelines URLs on the configured Bitbucket host', () => {
+    expect(
+      parseBitbucketPipelineIdentityFromUrl(
+        'https://bitbucket.org/acme/api/addon/pipelines/home#!/results/42',
+        'bitbucket.org',
+      ),
+    ).toEqual({ buildNumber: 42 });
   });
 });
 
