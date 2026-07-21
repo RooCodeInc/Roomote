@@ -168,6 +168,9 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload.description).toContain(
       'do not post progress updates',
     );
+    expect(enqueued.task.payload.description).toContain(
+      'do not mention this automation',
+    );
   });
 
   it('launches without channel anchoring when no report channel is configured', async () => {

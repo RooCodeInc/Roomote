@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { Env } from '@roomote/env';
 import {
   and,
+  asc,
   db,
   eq,
   findBackgroundAutomationSlackThread,
@@ -398,10 +399,35 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   const trackedAutomationKey =
     trackedThread?.automationKey ?? boundTaskAutomationKey ?? null;
   const automationKey = trackedAutomationKey ?? 'automation';
-  const automationLabel = trackedAutomationKey
-    ? getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
-        ?.label
+  let automationLabel: string | null = trackedAutomationKey
+    ? (getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
+        ?.label ?? null)
     : null;
+
+  // Custom automation runs have no registry descriptor, so the key would
+  // render as "custom automation"; label the footer with the automation's
+  // own name instead. Resume runs do not copy the marker into their
+  // payloads, so scan the sibling runs (oldest first: the originating
+  // launch run carries it) rather than reading one arbitrary row.
+  if (!automationLabel) {
+    const runs = await db
+      .select({ payload: taskRuns.payload })
+      .from(taskRuns)
+      .where(eq(taskRuns.taskId, params.taskId))
+      .orderBy(asc(taskRuns.createdAt))
+      .limit(10);
+    const customAutomationId =
+      runs
+        .map((run) => getCustomAutomationIdFromTaskPayload(run.payload))
+        .find((id) => id !== null) ?? null;
+
+    if (customAutomationId) {
+      const customAutomation =
+        await getCustomAutomationById(customAutomationId);
+      automationLabel = customAutomation?.name ?? null;
+    }
+  }
+
   const updated = await refreshAutomationRootFooter({
     slack: params.slack,
     channelId: params.channel,
