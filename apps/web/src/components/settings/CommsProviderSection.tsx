@@ -513,8 +513,11 @@ export function CommsProviderSection({
         }
 
         setCreatedSlackAppSettingsUrl(result.appSettingsUrl);
+        setCreatedSlackAppIconSet(result.iconSet);
         toast.success(
-          'Slack app created and credentials saved. Add the Roomote icon, then connect it to your workspace.',
+          result.iconSet
+            ? 'Slack app created with the Roomote icon. Connect it to your workspace next.'
+            : 'Slack app created and credentials saved. Add the Roomote icon, then connect it to your workspace.',
         );
         await queryClient.invalidateQueries({
           queryKey: trpc.comms.status.queryKey(),
@@ -563,6 +566,9 @@ export function CommsProviderSection({
   >({});
   const [createdSlackAppSettingsUrl, setCreatedSlackAppSettingsUrl] = useState<
     string | null
+  >(null);
+  const [createdSlackAppIconSet, setCreatedSlackAppIconSet] = useState<
+    boolean | null
   >(null);
   const previousConfiguredValues = useRef<{
     providerId: CommsProviderId;
@@ -757,6 +763,7 @@ export function CommsProviderSection({
               clearedSavedValues={clearedSavedValues}
               teamsAppPackageHref={teamsAppPackageHref}
               createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
+              createdSlackAppIconSet={createdSlackAppIconSet}
               createSlackAppPending={createSlackApp.isPending}
               surface="settings"
               envVarsInfoNote={

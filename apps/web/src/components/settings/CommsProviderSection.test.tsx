@@ -139,6 +139,7 @@ vi.mock('@tanstack/react-query', () => ({
           success: true,
           appId: 'A0NEWAPP',
           appSettingsUrl: 'https://api.slack.com/apps/A0NEWAPP',
+          iconSet: true,
         });
         return;
       }
@@ -611,7 +612,7 @@ describe('CommsProviderSection', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('shows logo actions after creating a Slack app from a config token', async () => {
+    it('shows icon-applied status after creating a Slack app from a config token', async () => {
       const { rerender } = render(
         <CommsProviderSection
           provider={buildSlackProvider()}
@@ -629,8 +630,13 @@ describe('CommsProviderSection', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create Slack app' }));
 
       expect(
-        await screen.findByRole('link', { name: /the Roomote logo/i }),
-      ).toHaveAttribute('href', '/api/setup/roomote-logo');
+        await screen.findByText(
+          /Your Slack app is ready with the Roomote icon applied/i,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('link', { name: /the Roomote logo/i }),
+      ).not.toBeInTheDocument();
       expect(screen.getByRole('link', { name: /the app/i })).toHaveAttribute(
         'href',
         'https://api.slack.com/apps/A0NEWAPP',

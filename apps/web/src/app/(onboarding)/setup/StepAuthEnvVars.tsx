@@ -72,6 +72,9 @@ export function StepAuthEnvVars({
   const [createdSlackAppSettingsUrl, setCreatedSlackAppSettingsUrl] = useState<
     string | null
   >(null);
+  const [createdSlackAppIconSet, setCreatedSlackAppIconSet] = useState<
+    boolean | null
+  >(null);
   const createSlackApp = useMutation(
     (bootstrapMode
       ? trpc.setupBootstrap.createSlackAppFromManifest
@@ -89,6 +92,7 @@ export function StepAuthEnvVars({
             : trpc.setupNew.status.queryKey(),
         });
         setCreatedSlackAppSettingsUrl(result.appSettingsUrl);
+        setCreatedSlackAppIconSet(result.iconSet);
       },
       onError: (error) => {
         toast.error(error.message);
@@ -331,6 +335,7 @@ export function StepAuthEnvVars({
           clearedSavedValues={clearedSavedValues}
           teamsAppPackageHref={teamsAppPackageHref}
           createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
+          createdSlackAppIconSet={createdSlackAppIconSet}
           createSlackAppPending={
             createSlackApp.isPending || saveAuthConfig.isPending
           }
