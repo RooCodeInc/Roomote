@@ -7,7 +7,6 @@ import {
   type SetupAuthStatus,
 } from '@roomote/types';
 
-import { buildSlackManifestPrefillUrl } from '@/lib/slack-app-manifest';
 import {
   ArrowLeft,
   BasicTooltip,
@@ -297,9 +296,16 @@ type ProviderSetupExperienceProps = {
   createdSlackAppIconSet?: boolean | null;
   createSlackAppPending?: boolean;
   showMicrosoftAdvancedConfig?: boolean;
+  /**
+   * When true, Slack shows the config-token create flow even if credentials are
+   * already saved (settings recreate path). Parent surfaces own the toggle so
+   * Save/Remove can hide while create is active.
+   */
+  slackCreateWithConfigToken?: boolean;
   surface?: 'setup' | 'settings';
   envVarsInfoNote?: React.ReactNode;
   onCreateSlackApp?: (configToken: string) => void;
+  onSlackCreateWithConfigTokenChange?: (active: boolean) => void;
   onToggleMicrosoftAdvancedConfig?: () => void;
   onValueChange: (envVarName: string, value: string) => void;
   onEditingSavedValueChange: (envVarName: string, editing: boolean) => void;
@@ -331,10 +337,167 @@ function ProviderSetupTitle({
   return surface === 'settings' ? null : <StepTitle text={text} />;
 }
 
-function SlackSetupExperience(props: ProviderSetupExperienceProps) {
+function SlackConfigTokenCreateExperience({
+  props,
+  canCancelToConfigured,
+}: {
+  props: ProviderSetupExperienceProps;
+  canCancelToConfigured: boolean;
+}) {
   const [configToken, setConfigToken] = useState('');
+  const createSlackAppPending = props.createSlackAppPending === true;
+  const createSlackAppDisabled =
+    !props.onCreateSlackApp || props.disabled || createSlackAppPending;
+  const submitConfigToken = () => {
+    const normalizedConfigToken = configToken.trim();
+
+    if (createSlackAppDisabled || !normalizedConfigToken) {
+      return;
+    }
+
+    props.onCreateSlackApp?.(normalizedConfigToken);
+  };
+  const handleBack = () => {
+    if (canCancelToConfigured) {
+      props.onSlackCreateWithConfigTokenChange?.(false);
+      return;
+    }
+
+    props.onBack?.();
+  };
+  const showBack = canCancelToConfigured || Boolean(props.onBack);
+
+  return (
+    <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
+      <ProviderSetupTitle surface={props.surface} text="Create Slack app" />
+
+      <div className="space-y-4 max-w-xl">
+        <p>
+          Because Roomote is self-hosted, we can&apos;t offer you an
+          out-of-the-box Slack app – you need your own. But with just an app
+          configuration token, we&apos;ll create it for you.
+        </p>
+        <NumberedStep number={1}>
+          <p className="font-semibold">Get an app token.</p>
+          <div className="space-y-3 max-w-xl">
+            <p className="text-sm text-muted-foreground">
+              Go to the{' '}
+              <a
+                href="https://api.slack.com/apps"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground underline font-semibold"
+              >
+                Slack Apps portal
+                <ExternalLink className="inline size-3 -mt-1 ml-1" />
+              </a>{' '}
+              → Your App Configuration Tokens (at the bottom of the page) →{' '}
+              <span className="font-semibold">Generate Token</span>, picking the
+              workspace you want to connect.
+            </p>
+          </div>
+        </NumberedStep>
+        <NumberedStep number={2}>
+          <p className="font-semibold">Copy it....</p>
+          <p className="text-sm text-muted-foreground">...and paste it here:</p>
+          <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center max-w-xl">
+            <div className="text-sm font-medium">Access token</div>
+            <Input
+              secret
+              className="font-mono"
+              aria-label="App configuration token"
+              value={configToken}
+              onChange={(event) => setConfigToken(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  submitConfigToken();
+                }
+              }}
+              placeholder="xoxe.xoxp-..."
+              disabled={props.disabled || createSlackAppPending}
+              data-1p-ignore
+            />
+          </div>
+        </NumberedStep>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
+        {showBack ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleBack}
+            disabled={createSlackAppPending}
+          >
+            <ArrowLeft />
+            Back
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          onClick={submitConfigToken}
+          disabled={createSlackAppDisabled || configToken.trim().length === 0}
+        >
+          {createSlackAppPending ? <Spinner /> : <Sparkles />}
+          Create Slack app
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SlackConfiguredCredentialsExperience(
+  props: ProviderSetupExperienceProps,
+) {
+  const fields = getSetupVisibleFields(props.provider);
+  const canCreateWithConfigToken = Boolean(props.onCreateSlackApp);
+
+  return (
+    <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
+      <ProviderSetupTitle surface={props.surface} text="Configure Slack app" />
+
+      <div className="space-y-4 max-w-xl">
+        <p className="text-sm text-muted-foreground">
+          Credentials for the Slack app Roomote uses for sign-in and messaging.
+          {canCreateWithConfigToken ? (
+            <>
+              {' '}
+              To replace them with a newly created app, use a configuration
+              token.
+            </>
+          ) : null}
+        </p>
+        <ProviderFields fields={fields} {...props} />
+        {props.surface === 'settings' ? (
+          <SettingsEnvVarsInfoNote
+            runtimeConfigured={props.provider.runtimeSatisfied}
+          />
+        ) : null}
+        {canCreateWithConfigToken ? (
+          <div className="pt-1">
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
+              onClick={() => props.onSlackCreateWithConfigTokenChange?.(true)}
+              disabled={props.disabled || props.createSlackAppPending === true}
+            >
+              Create a new Slack app with a configuration token
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SlackSetupExperience(props: ProviderSetupExperienceProps) {
   const createdSlackAppSettingsUrl = props.createdSlackAppSettingsUrl ?? null;
   const createdSlackAppIconSet = props.createdSlackAppIconSet === true;
+  const hasConfiguredValues =
+    props.provider.runtimeSatisfied || props.provider.savedSatisfied;
+  const showConfigTokenCreate =
+    Boolean(props.slackCreateWithConfigToken) || !hasConfiguredValues;
 
   if (createdSlackAppSettingsUrl) {
     return (
@@ -383,103 +546,18 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
     );
   }
 
-  if (!props.provider.runtimeSatisfied && !props.provider.savedSatisfied) {
-    const createSlackAppPending = props.createSlackAppPending === true;
-    const createSlackAppDisabled =
-      !props.onCreateSlackApp || props.disabled || createSlackAppPending;
-    const submitConfigToken = () => {
-      const normalizedConfigToken = configToken.trim();
-
-      if (createSlackAppDisabled || !normalizedConfigToken) {
-        return;
-      }
-
-      props.onCreateSlackApp?.(normalizedConfigToken);
-    };
-
+  if (showConfigTokenCreate) {
     return (
-      <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-        <ProviderSetupTitle surface={props.surface} text="Create Slack app" />
-
-        <div className="space-y-4 max-w-xl">
-          <p>
-            Because Roomote is self-hosted, we can&apos;t offer you an
-            out-of-the-box Slack app – you need your own. But with just an app
-            configuration token, we&apos;ll create it for you.
-          </p>
-          <NumberedStep number={1}>
-            <p className="font-semibold">Get an app token.</p>
-            <div className="space-y-3 max-w-xl">
-              <p className="text-sm text-muted-foreground">
-                Go to the{' '}
-                <a
-                  href="https://api.slack.com/apps"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-foreground underline font-semibold"
-                >
-                  Slack Apps portal
-                  <ExternalLink className="inline size-3 -mt-1 ml-1" />
-                </a>{' '}
-                → Your App Configuration Tokens (at the bottom of the page) →{' '}
-                <span className="font-semibold">Generate Token</span>, picking
-                the workspace you want to connect.
-              </p>
-            </div>
-          </NumberedStep>
-          <NumberedStep number={2}>
-            <p className="font-semibold">Copy it....</p>
-            <p className="text-sm text-muted-foreground">
-              ...and paste it here:
-            </p>
-            <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center max-w-xl">
-              <div className="text-sm font-medium">Access token</div>
-              <Input
-                secret
-                className="font-mono"
-                aria-label="App configuration token"
-                value={configToken}
-                onChange={(event) => setConfigToken(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    submitConfigToken();
-                  }
-                }}
-                placeholder="xoxe.xoxp-..."
-                disabled={props.disabled || createSlackAppPending}
-                data-1p-ignore
-              />
-            </div>
-          </NumberedStep>
-        </div>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
-          {props.onBack ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={props.onBack}
-              disabled={createSlackAppPending}
-            >
-              <ArrowLeft />
-              Back
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            onClick={submitConfigToken}
-            disabled={createSlackAppDisabled || configToken.trim().length === 0}
-          >
-            {createSlackAppPending ? <Spinner /> : <Sparkles />}
-            Create Slack app
-          </Button>
-        </div>
-      </div>
+      <SlackConfigTokenCreateExperience
+        props={props}
+        canCancelToConfigured={
+          hasConfiguredValues && Boolean(props.slackCreateWithConfigToken)
+        }
+      />
     );
   }
 
-  return <GenericSetupExperience {...props} />;
+  return <SlackConfiguredCredentialsExperience {...props} />;
 }
 
 function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
@@ -653,12 +731,6 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
   const providerSetupLabel =
     providerSetupCopy?.setupLabel ?? `${props.provider.label} app`;
   const fields = getSetupVisibleFields(props.provider);
-  const slackManifestPrefillUrl =
-    props.provider.id === 'slack'
-      ? buildSlackManifestPrefillUrl({
-          publicOrigin: props.publicOrigin,
-        })
-      : null;
 
   return (
     <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
@@ -666,22 +738,6 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
         surface={props.surface}
         text={`Configure ${providerSetupLabel}`}
       />
-
-      {slackManifestPrefillUrl ? (
-        <p className="text-sm text-muted-foreground max-w-xl">
-          Prefer not to use a configuration token? Create the app in
-          Slack&apos;s UI from a{' '}
-          <a
-            href={slackManifestPrefillUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-foreground underline"
-          >
-            prefilled manifest
-          </a>{' '}
-          and enter its credentials manually.
-        </p>
-      ) : null}
 
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">

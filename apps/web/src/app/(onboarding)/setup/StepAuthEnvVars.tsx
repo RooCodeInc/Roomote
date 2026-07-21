@@ -75,6 +75,8 @@ export function StepAuthEnvVars({
   const [createdSlackAppIconSet, setCreatedSlackAppIconSet] = useState<
     boolean | null
   >(null);
+  const [slackCreateWithConfigToken, setSlackCreateWithConfigToken] =
+    useState(false);
   const createSlackApp = useMutation(
     (bootstrapMode
       ? trpc.setupBootstrap.createSlackAppFromManifest
@@ -93,6 +95,7 @@ export function StepAuthEnvVars({
         });
         setCreatedSlackAppSettingsUrl(result.appSettingsUrl);
         setCreatedSlackAppIconSet(result.iconSet);
+        setSlackCreateWithConfigToken(false);
       },
       onError: (error) => {
         toast.error(error.message);
@@ -269,6 +272,8 @@ export function StepAuthEnvVars({
       : null;
   useEffect(() => {
     setCreatedSlackAppSettingsUrl(null);
+    setCreatedSlackAppIconSet(null);
+    setSlackCreateWithConfigToken(false);
   }, [effectiveSelectedProviderId]);
 
   const selectedProviderRuntimeConfigured =
@@ -279,16 +284,13 @@ export function StepAuthEnvVars({
     visibleFields.some((field) => !field.runtimeSatisfied) ?? false;
   const showingCreatedSlackAppStep =
     selectedProvider?.id === 'slack' && createdSlackAppSettingsUrl !== null;
-  // Slack "owns" the step actions only while its intro screen is shown, which
-  // is the same condition SlackSetupExperience uses to render that intro. If a
-  // saved (or runtime) config is being edited instead, the intro is hidden and
-  // this step must render its own action button — otherwise there is no way to
-  // continue. Keep this in sync with SlackSetupExperience's intro guard.
+  // Slack owns_step actions while the config-token create flow is showing
+  // (first-time or recreate). Keep this in_sync with SlackSetupExperience.
   const providerOwnsActions =
     selectedProvider?.id === 'slack' &&
     !showingCreatedSlackAppStep &&
-    !selectedProvider.runtimeSatisfied &&
-    !selectedProvider.savedSatisfied;
+    (slackCreateWithConfigToken ||
+      (!selectedProvider.runtimeSatisfied && !selectedProvider.savedSatisfied));
   const continueDisabled = showingCreatedSlackAppStep
     ? saveAuthConfig.isPending
     : isActionDisabled;
@@ -339,6 +341,7 @@ export function StepAuthEnvVars({
           createSlackAppPending={
             createSlackApp.isPending || saveAuthConfig.isPending
           }
+          slackCreateWithConfigToken={slackCreateWithConfigToken}
           showMicrosoftAdvancedConfig={showMicrosoftAdvancedConfig}
           onCreateSlackApp={(configToken) =>
             createSlackApp.mutate({
@@ -346,6 +349,7 @@ export function StepAuthEnvVars({
               ...(bootstrapMode && setupToken ? { setupToken } : {}),
             })
           }
+          onSlackCreateWithConfigTokenChange={setSlackCreateWithConfigToken}
           onToggleMicrosoftAdvancedConfig={() =>
             setShowMicrosoftAdvancedConfig((current) => !current)
           }

@@ -1058,6 +1058,98 @@ describe('CommsProviderSection', () => {
       );
 
       expect(screen.getByDisplayValue('A123.CLIENT')).toBeInTheDocument();
+      expect(
+        screen.getByText(/Credentials for the Slack app Roomote uses/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/Prefer not to use a configuration token/i),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('Create a new Slack app.'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('Enter the values below:'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', {
+          name: /Create a new Slack app with a configuration token/i,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it('opens the config-token create flow from saved Slack credentials', () => {
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+            fields: [
+              {
+                envVarName: 'R_SLACK_CLIENT_ID',
+                acceptedEnvVarNames: ['R_SLACK_CLIENT_ID'],
+                label: 'Slack Client ID',
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: 'A123.CLIENT',
+                satisfiedByEnvVarName: 'R_SLACK_CLIENT_ID',
+              },
+              {
+                envVarName: 'R_SLACK_CLIENT_SECRET',
+                acceptedEnvVarNames: ['R_SLACK_CLIENT_SECRET'],
+                label: 'Slack Client Secret',
+                secret: true,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: null,
+                satisfiedByEnvVarName: 'R_SLACK_CLIENT_SECRET',
+              },
+              {
+                envVarName: 'R_SLACK_SIGNING_SECRET',
+                acceptedEnvVarNames: ['R_SLACK_SIGNING_SECRET'],
+                label: 'Slack Signing Secret',
+                secret: true,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: null,
+                satisfiedByEnvVarName: 'R_SLACK_SIGNING_SECRET',
+              },
+            ],
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: /Create a new Slack app with a configuration token/i,
+        }),
+      );
+
+      expect(
+        screen.getByLabelText('App configuration token'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Create Slack app' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /^Back$/ }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /^Save$/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /^Remove$/ }),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /^Back$/ }));
+
+      expect(screen.getByDisplayValue('A123.CLIENT')).toBeInTheDocument();
+      expect(
+        screen.queryByLabelText('App configuration token'),
+      ).not.toBeInTheDocument();
     });
   });
 
