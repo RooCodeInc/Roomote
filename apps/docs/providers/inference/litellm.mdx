@@ -19,7 +19,8 @@ LITELLM_API_KEY=...
 ```
 
 `LITELLM_API_KEY` is required. The endpoint must be reachable from the Roomote
-deployment. For a Compose deployment, use a service DNS name such as
+deployment. Roomote accepts either the LiteLLM service root or its `/v1` API
+path, so a Compose deployment can use `http://litellm:4000` or
 `http://litellm:4000/v1` when LiteLLM runs on the same private network. Do not
 use `localhost` unless LiteLLM runs in the same network namespace as the
 Roomote service that proxies inference requests.
@@ -73,8 +74,8 @@ overrides.
 
 ## Common issues
 
-- **No models appear.** Confirm the endpoint URL includes the LiteLLM `/v1`
-  API path and that the API key can list models.
+- **No models appear.** Confirm the endpoint URL is the LiteLLM service root
+  or its `/v1` API path and that the API key can list models.
 - **Tasks cannot reach LiteLLM.** Check DNS, container networking, firewall
   rules, and whether the endpoint is reachable from the Roomote deployment.
 - **Costs are missing or unexpected.** Check LiteLLM's model pricing and

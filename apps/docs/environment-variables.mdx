@@ -189,7 +189,7 @@ as per-task auth tokens or workspace paths.
 | `GOOGLE_GENERATIVE_AI_API_KEY`         | Provider key | Alternate Google/Gemini provider key forwarded when configured or inferred.                                                             |
 | `AWS_BEARER_TOKEN_BEDROCK`             | Provider key | Amazon Bedrock Mantle API key. Can also be saved from **Settings > Models**.                                                            |
 | `AWS_REGION`                           | Provider key | AWS region where the Bedrock API key was created. Defaults to `us-east-1` at runtime when unset.                                        |
-| `LITELLM_BASE_URL`                     | LiteLLM      | LiteLLM endpoint URL, usually including its `/v1` path.                                                                                 |
+| `LITELLM_BASE_URL`                     | LiteLLM      | LiteLLM service root or endpoint URL; both `http://litellm:4000` and `http://litellm:4000/v1` are accepted.                              |
 | `LITELLM_API_KEY`                      | LiteLLM      | LiteLLM gateway API key. Required when configuring LiteLLM.                                                                              |
 | `OLLAMA_BASE_URL`                      | Ollama       | Ollama endpoint URL. Use the service root, for example `http://ollama:11434`.                                                           |
 | `OPENAI_COMPATIBLE_<NAME>_BASE_URL`    | OpenAI-compatible | Endpoint URL for a named OpenAI-compatible connection (see Settings > Models). Example: `OPENAI_COMPATIBLE_COMPANY_PROXY_BASE_URL`. |

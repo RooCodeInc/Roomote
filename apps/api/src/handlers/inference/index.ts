@@ -365,16 +365,13 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       c.req.header('x-initiator') === 'agent' ? 'agent' : 'user';
   }
 
-  // GitHub Copilot's OAuth path normally labels vision traffic. Gateway mode
-  // holds that token server-side, so inspect the request body here and restore
-  // the same header OpenCode would have set.
-  let requestBody: BodyInit | null = c.req.raw.body;
-  let useDuplexHalf = Boolean(c.req.raw.body);
+  // Buffer the incoming payload before forwarding it. Passing the original
+  // request stream through can yield an empty upstream body after middleware
+  // or runtime stream handling has observed it.
+  const requestBody = c.req.raw.body ? await c.req.arrayBuffer() : null;
 
   if (providerId === 'github-copilot' && method === 'POST') {
-    const bodyText = await c.req.text();
-    requestBody = bodyText;
-    useDuplexHalf = false;
+    const bodyText = new TextDecoder().decode(requestBody ?? undefined);
 
     if (copilotRequestBodyHasVisionContent(bodyText)) {
       injectedHeaders['Copilot-Vision-Request'] = 'true';
@@ -392,8 +389,6 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
         ),
         body: requestBody,
         signal: c.req.raw.signal,
-        // Required by undici when streaming a request body.
-        ...(useDuplexHalf ? { duplex: 'half' as const } : {}),
       },
     );
 

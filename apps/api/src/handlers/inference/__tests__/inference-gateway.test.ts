@@ -246,6 +246,10 @@ describe('inference gateway', () => {
       expect(new Headers(init.headers).get('authorization')).toBe(
         'Bearer provider-secret-key',
       );
+      expect(await new Response(init.body).json()).toEqual({
+        model: 'claude-sonnet-5',
+        max_tokens: 16,
+      });
     }
   });
 
@@ -484,6 +488,36 @@ describe('inference gateway', () => {
     expect(new Headers(init.headers).get('authorization')).toBe(
       'Bearer litellm-key',
     );
+  });
+
+  it('proxies named OpenAI-compatible endpoints without duplicating /v1 or dropping messages', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('OPENAI_COMPATIBLE_LM_STUDIO_BASE_URL')
+          ? 'http://lm-studio.internal:1234/v1/'
+          : undefined;
+      },
+    );
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/openai-compatible-lm-studio/v1/chat/completions',
+      {
+        model: 'local-model',
+        messages: [{ role: 'user', content: 'Hello' }],
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://lm-studio.internal:1234/v1/chat/completions');
+    expect(await new Response(init.body).json()).toEqual({
+      model: 'local-model',
+      messages: [{ role: 'user', content: 'Hello' }],
+    });
   });
 
   it('records a positive LiteLLM response cost without delaying the proxy', async () => {
