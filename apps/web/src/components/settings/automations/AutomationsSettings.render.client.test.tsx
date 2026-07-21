@@ -631,11 +631,17 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('Slack only')).toBeNull();
     expect(screen.queryByText('Slack · Discord · Telegram only')).toBeNull();
     expect(screen.queryByText(/Telegram only$/)).toBeNull();
-    // conflict_resolver and ci_failure_triage support GitHub, GitLab, and
-    // Azure DevOps (no Gitea/Bitbucket signal).
+    // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no
+    // Gitea/Bitbucket conflict signal); ci_failure_triage additionally
+    // supports Bitbucket Pipelines (no Gitea signal).
     expect(
       screen.getAllByText('GitHub · GitLab · Azure DevOps only').length,
-    ).toBe(2);
+    ).toBe(1);
+    expect(
+      screen.getAllByText(
+        'GitHub · GitLab · Azure DevOps · Bitbucket Cloud only',
+      ).length,
+    ).toBe(1);
     // Full coverage shows nothing — absence of a warning is the signal.
     expect(screen.queryByText('All chat channels')).toBeNull();
     expect(screen.queryByText('All source control')).toBeNull();

@@ -20,6 +20,14 @@ import {
   stripAdoGitRef,
 } from '@roomote/ado';
 import {
+  getBitbucketPipelineFailureEvidence,
+  getBitbucketPipelineResultName,
+  getBitbucketPipelineWebUrl,
+  getLatestBitbucketPipeline,
+  resolveBitbucketInstanceHost,
+  stripUuidBraces,
+} from '@roomote/bitbucket';
+import {
   getGitLabPipelineFailureEvidence,
   getLatestGitLabPipeline,
   isNestedGitLabPipelineSource,
@@ -107,6 +115,7 @@ export async function ciFailureTriageJob(
     // that host can be inspected with it.
     let deploymentGitLabHost: string | undefined;
     let deploymentAdoHost: string | undefined;
+    let deploymentBitbucketHost: string | undefined;
 
     // Walk every provider+host+fullName identity and resolve coverage through
     // the repository-id environment mapping (not fullName).
@@ -291,6 +300,86 @@ export async function ciFailureTriageJob(
             error instanceof Error ? error.message : String(error);
           result.errors.push(
             `${selectedRepository.fullName}: failed to inspect Azure DevOps build (${message})`,
+          );
+          continue;
+        }
+      }
+
+      if (sourceControlProvider === 'bitbucket') {
+        try {
+          deploymentBitbucketHost ??= await resolveBitbucketInstanceHost();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to resolve the Bitbucket instance host (${message})`,
+          );
+          continue;
+        }
+
+        const repositoryHost = selectedRepository.host?.trim().toLowerCase();
+        if (repositoryHost !== deploymentBitbucketHost) {
+          console.log(
+            `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: repository host ${repositoryHost ?? 'unknown'} does not match the deployment Bitbucket instance ${deploymentBitbucketHost}`,
+          );
+          continue;
+        }
+
+        try {
+          const latestPipeline = await getLatestBitbucketPipeline({
+            repositoryFullName: selectedRepository.fullName,
+            branch: selectedRepository.defaultBranch,
+          });
+          const resultName = latestPipeline
+            ? getBitbucketPipelineResultName(latestPipeline)
+            : '';
+
+          if (
+            !latestPipeline ||
+            (resultName !== 'FAILED' && resultName !== 'ERROR')
+          ) {
+            console.log(
+              `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: latest Bitbucket default-branch pipeline is not failed`,
+            );
+            continue;
+          }
+
+          const failureEvidence = await getBitbucketPipelineFailureEvidence({
+            repositoryFullName: selectedRepository.fullName,
+            pipelineUuid: stripUuidBraces(latestPipeline.uuid),
+          });
+          workflowName =
+            latestPipeline.target?.selector?.pattern?.trim() ||
+            latestPipeline.target?.selector?.type?.trim() ||
+            (latestPipeline.build_number !== undefined
+              ? `pipeline ${latestPipeline.build_number}`
+              : 'pipeline');
+          headBranch =
+            (latestPipeline.target?.ref_name ?? '')
+              .replace(/^refs\/heads\//, '')
+              .trim() ||
+            selectedRepository.defaultBranch ||
+            'main';
+          const runUrl = getBitbucketPipelineWebUrl({
+            repositoryFullName: selectedRepository.fullName,
+            pipeline: latestPipeline,
+          });
+          claimMarker = runUrl;
+          triggeringRun = {
+            repositoryFullName: selectedRepository.fullName,
+            workflowName,
+            runUrl,
+            headBranch,
+            headSha:
+              (latestPipeline.target?.commit?.hash ?? '').trim() || 'unknown',
+            provider: 'bitbucket',
+            failureEvidence,
+          };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to inspect Bitbucket pipeline (${message})`,
           );
           continue;
         }

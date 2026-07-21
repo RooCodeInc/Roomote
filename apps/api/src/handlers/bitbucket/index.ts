@@ -7,8 +7,10 @@ import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import { apiLogger, logApiError } from '../../logging';
 import { recordWebhook } from '../github/recordWebhook';
 import { handleBitbucketComment } from './handleComment';
+import { handleBitbucketCommitStatus } from './handleCommitStatus';
 import { handleBitbucketPullRequest } from './handlePullRequest';
 import {
+  bitbucketCommitStatusWebhookSchema,
   bitbucketPullRequestCommentWebhookSchema,
   bitbucketPullRequestWebhookSchema,
 } from './types';
@@ -26,6 +28,11 @@ const BITBUCKET_PULLREQUEST_EVENTS = new Set([
 const BITBUCKET_COMMENT_EVENTS = new Set([
   'pullrequest:comment_created',
   'pullrequest:comment_updated',
+]);
+
+const BITBUCKET_COMMIT_STATUS_EVENTS = new Set([
+  'repo:commit_status_created',
+  'repo:commit_status_updated',
 ]);
 
 function getBitbucketDeliveryId({
@@ -79,6 +86,20 @@ bitbucket.post('/', async (c) => {
         eventName,
         payload,
         () => handleBitbucketComment(payload, eventName),
+        { provider: 'bitbucket' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (BITBUCKET_COMMIT_STATUS_EVENTS.has(eventName)) {
+      const payload = bitbucketCommitStatusWebhookSchema.parse(parsedJson);
+
+      await recordWebhook(
+        deliveryId,
+        eventName,
+        payload,
+        () => handleBitbucketCommitStatus(payload),
         { provider: 'bitbucket' },
       );
 

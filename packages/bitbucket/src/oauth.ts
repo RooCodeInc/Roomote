@@ -15,6 +15,8 @@ const DEFAULT_SCOPES = [
   'pullrequest',
   'pullrequest:write',
   'webhook',
+  // CI Failure Triage reads Pipelines and step logs.
+  'pipeline',
 ] as const;
 
 export type BitbucketOAuthConnectionStatus =

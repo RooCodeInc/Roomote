@@ -104,6 +104,7 @@ describe('background automation registry', () => {
       'github',
       'gitlab',
       'ado',
+      'bitbucket',
     ]);
   });
 

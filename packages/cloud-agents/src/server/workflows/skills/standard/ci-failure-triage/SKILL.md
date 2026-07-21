@@ -10,7 +10,7 @@ Investigate one CI failure and fix it in this same task when it is real.
 </role>
 
 <workflow>
-  <overview>Use the source-control tools already available in the environment. Prefer injected failure evidence when present. For GitHub, prefer `gh run view` / `gh run view --log-failed` (or `gh run list` for the latest default-branch failure when no trigger is provided). For GitLab, prefer the pipeline UI/API or `glab ci` when available. For Azure DevOps, prefer injected failure evidence and the build/pipeline UI or REST when authenticated access is already available. Do not invent new CLI surfaces.</overview>
+  <overview>Use the source-control tools already available in the environment. Prefer injected failure evidence when present. For GitHub, prefer `gh run view` / `gh run view --log-failed` (or `gh run list` for the latest default-branch failure when no trigger is provided). For GitLab, prefer the pipeline UI/API or `glab ci` when available. For Azure DevOps, prefer injected failure evidence and the build/pipeline UI or REST when authenticated access is already available. For Bitbucket, prefer injected failure evidence and Bitbucket Pipelines UI/API when authenticated access is already available. Do not invent new CLI surfaces.</overview>
 
   <phase name="triage">
     <steps>
