@@ -23,10 +23,10 @@ import {
   isLocalPreviewDomain,
   PREVIEW_DOMAIN_ENV_VAR,
   PREVIEW_PROXY_BASE_URL_ENV_VAR,
+  RunStatus,
   TaskPayloadKind,
   type EnvironmentConfig,
   type PreviewRuntimeConfigFields,
-  type RunStatus,
 } from '@roomote/types';
 
 import {
@@ -457,6 +457,27 @@ function getEnvironmentIdFromPayload(payload: unknown): string | null {
 }
 
 /**
+ * Preview pane + launch de-dupe only care about an in-environment preview
+ * setup/repair agent that is still actively working. Idle leftover sessions
+ * (common after the agent finishes) must not keep the empty-state spinner or
+ * block a new repair launch.
+ */
+function getInFlightPreviewSetupAgent(
+  activeAgentTask: Awaited<ReturnType<typeof getActiveEnvironmentAgentTask>>,
+): NonNullable<
+  Awaited<ReturnType<typeof getActiveEnvironmentAgentTask>>
+> | null {
+  if (
+    !activeAgentTask?.isPreviewSetupTask ||
+    activeAgentTask.status === RunStatus.Idle
+  ) {
+    return null;
+  }
+
+  return activeAgentTask;
+}
+
+/**
  * Whether preview infrastructure is ready, matching the controller-side gate
  * that decides if environment ports publish preview domains. Deliberately skips
  * the DNS probe so this stays cheap enough to poll from the task page.
@@ -528,8 +549,7 @@ export async function getTaskPreviewStatusCommand(
     getActiveEnvironmentAgentTask(db, environmentId),
   ]);
 
-  const previewSetupAgent =
-    activeAgentTask?.isPreviewSetupTask === true ? activeAgentTask : null;
+  const previewSetupAgent = getInFlightPreviewSetupAgent(activeAgentTask);
 
   return {
     runtimeReady,
@@ -559,9 +579,9 @@ type PreviewSetupTaskMode = 'configure' | 'repair';
  * for the task's environment. Admin-only, matching the rest of environment
  * management. The environment id is derived server-side from the task run, so
  * callers cannot target arbitrary environments. If a preview setup/repair
- * agent is already running in this environment, returns that task instead of
- * launching a duplicate. Initial environment creation/verification tasks are
- * not de-duped here — they use a different workspace model.
+ * agent is already actively running in this environment, returns that task
+ * instead of launching a duplicate. Idle leftover sessions and initial
+ * environment creation/verification tasks are not de-duped here.
  *
  * Mode 'configure' (default) adds preview ports to an environment without
  * them; mode 'repair' diagnoses a configured preview that does not load or
@@ -620,9 +640,10 @@ export async function startPreviewSetupTaskCommand(
 
   return withEnvironmentVerificationRetryLock(environment.id, async (tx) => {
     const activeTask = await getActiveEnvironmentAgentTask(tx, environment.id);
+    const inFlightPreviewSetup = getInFlightPreviewSetupAgent(activeTask);
 
-    if (activeTask?.isPreviewSetupTask) {
-      return { taskId: activeTask.taskId, alreadyRunning: true };
+    if (inFlightPreviewSetup) {
+      return { taskId: inFlightPreviewSetup.taskId, alreadyRunning: true };
     }
 
     const launchResult = await enqueueTask({

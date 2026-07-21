@@ -226,6 +226,25 @@ describe('getTaskPreviewStatusCommand', () => {
       kind: 'preview',
     });
   });
+
+  it('ignores an idle preview setup agent that has finished its turn', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    await createActiveSetupTask(environment.id, {
+      runsInEnvironment: true,
+      status: RunStatus.Idle,
+    });
+
+    const status = await getTaskPreviewStatusCommand(adminAuth, {
+      taskId: task.id,
+    });
+
+    expect(status.setupTask).toBeNull();
+  });
 });
 
 describe('startPreviewSetupTaskCommand', () => {
@@ -292,6 +311,32 @@ describe('startPreviewSetupTaskCommand', () => {
       startPreviewSetupTaskCommand(adminAuth, { taskId: task.id }),
     ).resolves.toEqual({
       taskId: 'launched-beside-env-setup',
+      alreadyRunning: false,
+    });
+
+    expect(vi.mocked(enqueueTask)).toHaveBeenCalled();
+  });
+
+  it('launches preview setup when only an idle preview setup session is open', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    await createActiveSetupTask(environment.id, {
+      runsInEnvironment: true,
+      status: RunStatus.Idle,
+    });
+    vi.mocked(enqueueTask).mockResolvedValueOnce({
+      taskId: 'launched-after-idle-preview',
+      id: 1002,
+    } as never);
+
+    await expect(
+      startPreviewSetupTaskCommand(adminAuth, { taskId: task.id }),
+    ).resolves.toEqual({
+      taskId: 'launched-after-idle-preview',
       alreadyRunning: false,
     });
 
