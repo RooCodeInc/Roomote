@@ -338,10 +338,9 @@ function ProviderSetupTitle({
 }
 
 function SlackConfigTokenCreateExperience({
-  props,
   canCancelToConfigured,
-}: {
-  props: ProviderSetupExperienceProps;
+  ...props
+}: ProviderSetupExperienceProps & {
   canCancelToConfigured: boolean;
 }) {
   const [configToken, setConfigToken] = useState('');
@@ -549,7 +548,7 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
   if (showConfigTokenCreate) {
     return (
       <SlackConfigTokenCreateExperience
-        props={props}
+        {...props}
         canCancelToConfigured={
           hasConfiguredValues && Boolean(props.slackCreateWithConfigToken)
         }
