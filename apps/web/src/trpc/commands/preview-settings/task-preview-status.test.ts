@@ -54,7 +54,10 @@ async function createEnvironmentBackedTask(params: {
 
 async function createActiveSetupTask(
   environmentId: string,
-  options: { runsInEnvironment?: boolean } = {},
+  options: {
+    runsInEnvironment?: boolean;
+    status?: RunStatus;
+  } = {},
 ) {
   const task = await taskFactory.create({ workflow: 'setup_onboarding' });
   const run = await runFactory.create({
@@ -68,7 +71,7 @@ async function createActiveSetupTask(
   });
   await db
     .update(taskRuns)
-    .set({ status: RunStatus.Running })
+    .set({ status: options.status ?? RunStatus.Running })
     .where(eq(taskRuns.id, run.id));
   return task;
 }
@@ -227,6 +230,71 @@ describe('getTaskPreviewStatusCommand', () => {
       kind: 'preview',
     });
   });
+
+  it('does not treat an idle setup task as in progress once the environment is verified', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+      isVerified: true,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    await createActiveSetupTask(environment.id, { status: RunStatus.Idle });
+
+    const adminStatus = await getTaskPreviewStatusCommand(adminAuth, {
+      taskId: task.id,
+    });
+    const memberStatus = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(adminStatus.setupTask).toBeNull();
+    expect(memberStatus.setupTask).toBeNull();
+  });
+
+  it('still reports a running setup task when the environment is already verified', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+      isVerified: true,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    const setupTask = await createActiveSetupTask(environment.id);
+
+    const status = await getTaskPreviewStatusCommand(adminAuth, {
+      taskId: task.id,
+    });
+
+    expect(status.setupTask).toEqual({
+      taskId: setupTask.id,
+      status: RunStatus.Running,
+      kind: 'environment',
+    });
+  });
+
+  it('still reports an idle setup task when the environment is not verified', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+      isVerified: false,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    const setupTask = await createActiveSetupTask(environment.id, {
+      status: RunStatus.Idle,
+    });
+
+    const status = await getTaskPreviewStatusCommand(adminAuth, {
+      taskId: task.id,
+    });
+
+    expect(status.setupTask).toEqual({
+      taskId: setupTask.id,
+      status: RunStatus.Idle,
+      kind: 'environment',
+    });
+  });
 });
 
 describe('startPreviewSetupTaskCommand', () => {
@@ -272,6 +340,30 @@ describe('startPreviewSetupTaskCommand', () => {
       taskId: setupTask.id,
       alreadyRunning: true,
     });
+  });
+
+  it('launches preview setup when only an idle verified setup session is open', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+      isVerified: true,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    await createActiveSetupTask(environment.id, { status: RunStatus.Idle });
+    vi.mocked(enqueueTask).mockResolvedValueOnce({
+      taskId: 'launched-after-idle',
+      id: 1001,
+    } as never);
+
+    await expect(
+      startPreviewSetupTaskCommand(adminAuth, { taskId: task.id }),
+    ).resolves.toEqual({
+      taskId: 'launched-after-idle',
+      alreadyRunning: false,
+    });
+
+    expect(vi.mocked(enqueueTask)).toHaveBeenCalled();
   });
 
   it('launches with the repair change request in repair mode', async () => {

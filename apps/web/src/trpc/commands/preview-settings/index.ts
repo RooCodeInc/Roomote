@@ -23,10 +23,10 @@ import {
   isLocalPreviewDomain,
   PREVIEW_DOMAIN_ENV_VAR,
   PREVIEW_PROXY_BASE_URL_ENV_VAR,
+  RunStatus,
   TaskPayloadKind,
   type EnvironmentConfig,
   type PreviewRuntimeConfigFields,
-  type RunStatus,
 } from '@roomote/types';
 
 import {
@@ -481,6 +481,7 @@ async function loadDeploymentEnvironment(environmentId: string) {
       id: environments.id,
       name: environments.name,
       config: environments.config,
+      isVerified: environments.isVerified,
     })
     .from(environments)
     .where(and(eq(environments.id, environmentId), isNull(environments.userId)))
@@ -489,6 +490,25 @@ async function loadDeploymentEnvironment(environmentId: string) {
   return environment
     ? { ...environment, config: environment.config as EnvironmentConfig }
     : null;
+}
+
+/**
+ * Whether a live environment agent should still block Live Preview empty-state
+ * progress and preview-setup launch de-dupe.
+ *
+ * Idle sessions remain "active" for session presence, but after verification
+ * succeeds the setup agent is done — treating it as still setting up keeps
+ * sibling tasks on the spinner indefinitely.
+ */
+function isEnvironmentAgentBlockingForPreview(input: {
+  status: RunStatus;
+  isVerified: boolean;
+}): boolean {
+  if (input.status === RunStatus.Idle) {
+    return !input.isVerified;
+  }
+
+  return true;
 }
 
 /**
@@ -524,6 +544,16 @@ export async function getTaskPreviewStatusCommand(
     getActiveEnvironmentAgentTask(db, environmentId),
   ]);
 
+  const blockingAgent =
+    activeAgentTask &&
+    (!environment ||
+      isEnvironmentAgentBlockingForPreview({
+        status: activeAgentTask.status,
+        isVerified: environment.isVerified,
+      }))
+      ? activeAgentTask
+      : null;
+
   return {
     runtimeReady,
     environment: environment
@@ -535,11 +565,11 @@ export async function getTaskPreviewStatusCommand(
         }
       : null,
     runHasPreviewDomains,
-    setupTask: activeAgentTask
+    setupTask: blockingAgent
       ? {
-          taskId: auth.isAdmin ? activeAgentTask.taskId : null,
-          status: activeAgentTask.status,
-          kind: activeAgentTask.isPreviewSetupTask ? 'preview' : 'environment',
+          taskId: auth.isAdmin ? blockingAgent.taskId : null,
+          status: blockingAgent.status,
+          kind: blockingAgent.isPreviewSetupTask ? 'preview' : 'environment',
         }
       : null,
   };
@@ -612,8 +642,21 @@ export async function startPreviewSetupTaskCommand(
 
   return withEnvironmentVerificationRetryLock(environment.id, async (tx) => {
     const activeTask = await getActiveEnvironmentAgentTask(tx, environment.id);
+    const [lockedEnvironment] = await tx
+      .select({ isVerified: environments.isVerified })
+      .from(environments)
+      .where(
+        and(eq(environments.id, environment.id), isNull(environments.userId)),
+      )
+      .limit(1);
 
-    if (activeTask) {
+    if (
+      activeTask &&
+      isEnvironmentAgentBlockingForPreview({
+        status: activeTask.status,
+        isVerified: lockedEnvironment?.isVerified ?? environment.isVerified,
+      })
+    ) {
       return { taskId: activeTask.taskId, alreadyRunning: true };
     }
 
