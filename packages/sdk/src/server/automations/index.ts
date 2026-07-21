@@ -1,4 +1,8 @@
 export { announcerJob } from './announcer';
+export {
+  customAutomationsJob,
+  runCustomAutomationNow,
+} from './custom-automations';
 export { ciFailureTriageJob } from './ci-failure-triage';
 export {
   launchCiFailureTriageForFailedRun,

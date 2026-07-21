@@ -68,6 +68,7 @@ import {
   ScheduleOnlyAutomationContent,
   SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS,
 } from './ScheduleOnlyAutomationContent';
+import { CustomAutomationsSection } from './CustomAutomationsSection';
 import { SlackChannelSelect } from './SlackChannelSelect';
 
 import {
@@ -3406,6 +3407,8 @@ export function AutomationsSettings() {
                 </AutomationCard>
               );
             })}
+
+            <CustomAutomationsSection />
 
             <h2 className="pt-2 text-base font-semibold text-foreground">
               Channel automations

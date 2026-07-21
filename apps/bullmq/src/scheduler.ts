@@ -5,6 +5,7 @@ import {
   codeQualityAuditorJob,
   codeqlTriageJob,
   conflictScanJob,
+  customAutomationsJob,
   dependabotTriageJob,
   managerStatsJob,
   securityAuditorJob,
@@ -144,6 +145,11 @@ async function createJobs(queue: Queue): Promise<void> {
   );
 
   await queue.upsertJobScheduler(
+    ScheduledJobName.CustomAutomations,
+    { every: 60 * 60 * 1000 }, // Every 60 minutes.
+  );
+
+  await queue.upsertJobScheduler(
     ScheduledJobName.PullRequestAnalyticsSync,
     { every: 15 * 60 * 1000 }, // Every 15 minutes.
   );
@@ -185,6 +191,9 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return webhookCleanupJob();
     case ScheduledJobName.StandbyRetention:
       return standbyRetentionJob();
+    case ScheduledJobName.CustomAutomations:
+      await customAutomationsJob();
+      return;
     default:
       throw new Error(`Unknown job type: ${job.name}`);
   }

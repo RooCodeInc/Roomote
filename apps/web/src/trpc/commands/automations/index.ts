@@ -15,3 +15,14 @@ export type {
   SlackChannelDisplayNames,
 } from './types';
 export { triggerAutomationCommand } from './trigger-agent';
+export {
+  createCustomAutomationCommand,
+  deleteCustomAutomationCommand,
+  listCustomAutomationsCommand,
+  triggerCustomAutomationCommand,
+  updateCustomAutomationCommand,
+} from './custom-automations';
+export type {
+  CustomAutomationListItem,
+  CustomAutomationWriteInput,
+} from './custom-automations';

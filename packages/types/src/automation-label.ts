@@ -9,6 +9,7 @@ const AUTOMATION_LABEL_ACRONYMS = new Set(['pr', 'ci', 'mcp']);
 /** Full-key spellings when token title-casing would not match the product label. */
 const AUTOMATION_LABEL_KEY_OVERRIDES = new Map([
   ['issue_fixer', 'Triage Issues'],
+  ['custom_automation', 'Custom'],
 ]);
 
 /** Token spellings that are not plain UPPERCASE acronyms. */

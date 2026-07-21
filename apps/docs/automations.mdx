@@ -57,6 +57,24 @@ conflict resolution, and remove it when a human should handle the conflict
 instead. Roomote only tries this on labeled PRs that are still active, and it
 skips PRs older than the age cap you set.
 
+## Custom automations
+
+Create arbitrary scheduled agent runs with:
+
+- a clear **name**
+- the **prompt** Roomote should run
+- a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
+- one required **environment**
+- one **report destination** channel (Slack, Discord, Teams, or Telegram)
+
+On each due tick, Roomote launches a normal task with that prompt in that
+environment and reports progress and the final result to the destination
+channel. Use **Run now** on an enabled automation to test it immediately.
+
+Daily and weekly custom automations use the same local-hour window as the
+other scheduled automations (around 3am in the workspace timezone). Cap is
+25 custom automations per deployment.
+
 ## Channel automations
 
 The channel section starts with **Auto-respond to channels**.
@@ -192,18 +210,19 @@ Roomote posted and what should happen next.
 If the automation creates a task, review the same evidence you would review for
 manual work: transcript, logs, diffs, previews, artifacts, and final summary.
 
-## Use Slack workflows for custom triggers
+## Use Slack workflows for event-driven custom triggers
 
-For workflows that are specific to your team, use Slack's own workflow
-builder and end the workflow with a Roomote mention.
+For **scheduled** work with a fixed prompt, prefer **Custom automations**
+above. For **event-driven** team workflows, use Slack's own workflow builder
+and end the workflow with a Roomote mention.
 
-Good custom triggers include:
+Good custom event triggers include:
 
 - send new bug-channel posts to Roomote for triage
 - turn operational requests from another system into Roomote tasks
 - ask Roomote to gather diagnostics when a support escalation arrives
 
-This keeps custom routing in Slack while still letting Roomote run a normal,
+This keeps event routing in Slack while still letting Roomote run a normal,
 reviewable task.
 
 ## Possible issues
