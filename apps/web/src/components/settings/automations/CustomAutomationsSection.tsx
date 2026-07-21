@@ -626,11 +626,6 @@ export function CustomAutomationsSection() {
                     </Button>
                   </div>
                 </CardHeader>
-                <CardContent>
-                  <p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">
-                    {row.prompt}
-                  </p>
-                </CardContent>
               </Card>
             );
           })}
