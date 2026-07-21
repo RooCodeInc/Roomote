@@ -710,7 +710,9 @@ export async function getBitbucketPipelineFailureEvidence(params: {
           {
             method: 'GET',
             headers: {
-              Accept: 'text/plain',
+              // The step log endpoint serves application/octet-stream and
+              // responds 406 to Accept: text/plain.
+              Accept: 'application/octet-stream',
               Authorization:
                 auth.authScheme === 'bearer'
                   ? `Bearer ${auth.token}`

@@ -206,7 +206,7 @@ describe('pipeline helpers', () => {
   it('loads the latest branch pipeline and failure evidence', async () => {
     const jsonResponse = (body: unknown) =>
       new Response(JSON.stringify(body), { status: 200 });
-    const fetchImpl = (async (input: RequestInfo | URL) => {
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
       if (url.includes('/pipelines/') && url.includes('pagelen=1')) {
@@ -227,9 +227,15 @@ describe('pipeline helpers', () => {
       }
 
       if (url.includes('/pipelines/%7Bpipe-1%7D/steps/%7Bstep-1%7D/log')) {
+        // Bitbucket serves step logs as application/octet-stream and rejects
+        // Accept: text/plain with 406 Not Acceptable.
+        const accept = new Headers(init?.headers).get('accept');
+        if (accept !== null && accept !== 'application/octet-stream') {
+          return new Response('{"code": 406}', { status: 406 });
+        }
         return new Response('Assertion failed at line 12', {
           status: 200,
-          headers: { 'Content-Type': 'text/plain' },
+          headers: { 'Content-Type': 'application/octet-stream' },
         });
       }
 
