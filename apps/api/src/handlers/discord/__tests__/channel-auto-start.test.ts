@@ -266,6 +266,28 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     expect(mocks.evaluateGate).not.toHaveBeenCalled();
   });
 
+  it('forwards message_reference into startNewDiscordTask for reply launches', async () => {
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          type: 19,
+          message_reference: {
+            message_id: 'parent-message-1',
+            channel_id: MONITORED_CHANNEL_ID,
+          },
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyToMessageId: 'parent-message-1',
+        replyToChannelId: MONITORED_CHANNEL_ID,
+      }),
+    );
+  });
+
   it('DMs an unlinked human a link nudge and never launches', async () => {
     mocks.findMappedUserId.mockResolvedValue(null);
 
