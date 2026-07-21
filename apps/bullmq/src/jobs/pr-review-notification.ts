@@ -134,6 +134,7 @@ export const prReviewNotificationJob = async (
     taskId: data.taskId,
     repository: data.repository,
     prNumber: data.prNumber,
+    ...(data.immediate ? { immediate: true } : {}),
   };
 
   const latestJob = await db.query.taskRuns.findFirst({

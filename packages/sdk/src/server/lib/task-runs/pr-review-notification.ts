@@ -18,6 +18,12 @@ import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 export const PR_REVIEW_NOTIFICATION_QUEUE_NAME = 'pr-review-notification-jobs';
 
 /**
+ * Debounce window for ordinary PR review activity so related review comments
+ * collapse into one notification.
+ */
+export const PR_REVIEW_NOTIFICATION_DEBOUNCE_MS = 1 * 60 * 1000;
+
+/**
  * Delay before re-checking an owner task that is still actively running when
  * the notification job fires. The notification is intentionally held until
  * the task goes idle.
@@ -62,12 +68,20 @@ export const prReviewNotificationRequestSchema = z.object({
   prNumber: z.number().int().positive(),
   prUrl: z.string(),
   deferrals: z.number().int().min(0).default(0),
+  immediate: z.boolean().optional(),
   sourceControlProvider: sourceControlProviderSchema.optional(),
 });
 
 export type PrReviewNotificationRequest = z.infer<
   typeof prReviewNotificationRequestSchema
 >;
+
+type PrReviewNotificationTarget = {
+  taskId: string;
+  repository: string;
+  prNumber: number;
+  immediate?: boolean;
+};
 
 export const enqueuePrReviewNotificationInputSchema = z.object({
   repository: z.string(),
@@ -129,27 +143,16 @@ function buildTargetKeySuffix({
   taskId,
   repository,
   prNumber,
-}: {
-  taskId: string;
-  repository: string;
-  prNumber: number;
-}): string {
-  return `${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}`;
+  immediate = false,
+}: PrReviewNotificationTarget): string {
+  return `${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}${immediate ? ':immediate' : ''}`;
 }
 
-function buildPendingEventsKey(target: {
-  taskId: string;
-  repository: string;
-  prNumber: number;
-}): string {
+function buildPendingEventsKey(target: PrReviewNotificationTarget): string {
   return `pr-review-notification:pending:${buildTargetKeySuffix(target)}`;
 }
 
-function buildScheduledMarkerKey(target: {
-  taskId: string;
-  repository: string;
-  prNumber: number;
-}): string {
+function buildScheduledMarkerKey(target: PrReviewNotificationTarget): string {
   return `pr-review-notification:scheduled:${buildTargetKeySuffix(target)}`;
 }
 
@@ -272,7 +275,7 @@ async function appendPendingEventAndClaimSchedule({
   target,
   event,
 }: {
-  target: { taskId: string; repository: string; prNumber: number };
+  target: PrReviewNotificationTarget;
   event: PrReviewActivityEvent;
 }): Promise<boolean> {
   const redis = getRedis();
@@ -296,11 +299,9 @@ async function appendPendingEventAndClaimSchedule({
  * Atomically drains the pending review-activity events for the task and
  * clears the scheduled marker so later events schedule a fresh notification.
  */
-export async function consumePendingPrReviewActivity(target: {
-  taskId: string;
-  repository: string;
-  prNumber: number;
-}): Promise<PrReviewActivityEvent[]> {
+export async function consumePendingPrReviewActivity(
+  target: PrReviewNotificationTarget,
+): Promise<PrReviewActivityEvent[]> {
   const redis = getRedis();
   const pendingKey = buildPendingEventsKey(target);
   const markerKey = buildScheduledMarkerKey(target);
@@ -348,7 +349,7 @@ export async function requeuePendingPrReviewActivity({
   target,
   events,
 }: {
-  target: { taskId: string; repository: string; prNumber: number };
+  target: PrReviewNotificationTarget;
   events: PrReviewActivityEvent[];
 }): Promise<void> {
   if (events.length === 0) {
@@ -368,7 +369,9 @@ export async function requeuePendingPrReviewActivity({
 /**
  * Records PR review activity (submitted reviews and review comments) for the
  * tasks that own the pull request, and schedules a notification job per task.
- * Chat delivery still needs an originating conversation route, but
+ * Roomote-authored self-review activity uses an independent immediate queue so
+ * ordinary review activity cannot hold it behind the debounce window. Chat
+ * delivery still needs an originating conversation route, but
  * web-only tasks are enqueued too so the summary can land in task history.
  * The notification is informational only: it tells the user about the review
  * feedback once the task is idle. No agent turn is started.
@@ -399,10 +402,12 @@ export async function enqueuePrReviewNotification(
   let notifiedTaskCount = 0;
 
   for (const taskId of taskIds) {
+    const immediate = parsedInput.event.roomoteAuthored === true;
     const target = {
       taskId,
       repository: parsedInput.repository,
       prNumber: parsedInput.prNumber,
+      immediate,
     };
 
     const claimed = await appendPendingEventAndClaimSchedule({
@@ -418,9 +423,10 @@ export async function enqueuePrReviewNotification(
             ...target,
             prUrl: parsedInput.prUrl,
             deferrals: 0,
+            immediate,
             sourceControlProvider: parsedInput.sourceControlProvider,
           },
-          { delay: 0 },
+          { delay: immediate ? 0 : PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
         );
       } catch (error) {
         const redis = getRedis();
