@@ -279,11 +279,16 @@ import {
   triggerTaskSuggestionsCommand,
 } from '../commands/task-suggestions';
 import {
+  createCustomAutomationCommand,
+  deleteCustomAutomationCommand,
   getBackgroundAgentSettingsCommand,
   listAutomationDiscordChannelsCommand,
+  listCustomAutomationsCommand,
   listSlackChannelsCommand,
+  triggerCustomAutomationCommand,
   updateBackgroundAgentSettingsCommand,
   triggerAutomationCommand,
+  updateCustomAutomationCommand,
 } from '../commands/automations';
 import {
   getAgentBehaviorSettingsCommand,
@@ -530,6 +535,16 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
+        /**
+         * When true, Suggest Ideas posts to Telegram via a sticky recurring
+         * forum topic in the primary chat (no thread picker).
+         */
+        suggesterUseTelegram: z.boolean().optional(),
+        /**
+         * When true, Suggest Ideas posts to the primary Microsoft Teams
+         * conversation captured for this deployment.
+         */
+        suggesterUseTeams: z.boolean().optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
         suggesterRoutingMode: z.enum(SUGGESTER_ROUTING_MODES),
         suggesterRoutingInstructions: z.string().max(10_000).nullable(),
@@ -603,6 +618,85 @@ const automationsRouter = createRouter({
     )
     .mutation(({ ctx: { auth }, input }) =>
       triggerAutomationCommand(auth, input),
+    ),
+
+  listCustomAutomations: protectedProcedure.query(({ ctx: { auth } }) =>
+    listCustomAutomationsCommand(auth),
+  ),
+
+  createCustomAutomation: protectedProcedure
+    .input(
+      z.object({
+        name: z.string().trim().min(1).max(100),
+        prompt: z.string().trim().min(1).max(8_000),
+        enabled: z.boolean(),
+        scheduleMode: z.enum([
+          'off',
+          'every_hour',
+          'every_6_hours',
+          'daily',
+          'weekly',
+        ]),
+        environmentId: z.string().uuid(),
+        targetProvider: z
+          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .optional(),
+        targetChannelId: z.string().trim().min(1).max(160).optional(),
+        targetServiceUrl: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .nullable()
+          .optional(),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) =>
+      createCustomAutomationCommand(auth, input),
+    ),
+
+  updateCustomAutomation: protectedProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        name: z.string().trim().min(1).max(100),
+        prompt: z.string().trim().min(1).max(8_000),
+        enabled: z.boolean(),
+        scheduleMode: z.enum([
+          'off',
+          'every_hour',
+          'every_6_hours',
+          'daily',
+          'weekly',
+        ]),
+        environmentId: z.string().uuid(),
+        targetProvider: z
+          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .optional(),
+        targetChannelId: z.string().trim().min(1).max(160).optional(),
+        targetServiceUrl: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .nullable()
+          .optional(),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) =>
+      updateCustomAutomationCommand(auth, input),
+    ),
+
+  deleteCustomAutomation: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      deleteCustomAutomationCommand(auth, input),
+    ),
+
+  triggerCustomAutomation: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      triggerCustomAutomationCommand(auth, input),
     ),
 });
 

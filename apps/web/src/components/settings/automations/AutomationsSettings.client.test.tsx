@@ -78,6 +78,8 @@ const baseFormState: FormState = {
   suggesterFrequency: 'off',
   suggesterSlackChannel: '',
   suggesterDiscordChannel: '',
+  suggesterUseTelegram: false,
+  suggesterUseTeams: false,
   suggesterInstructions: '',
   suggesterRoutingMode: DEFAULT_SUGGESTER_ROUTING_MODE,
   suggesterRoutingInstructions: '',

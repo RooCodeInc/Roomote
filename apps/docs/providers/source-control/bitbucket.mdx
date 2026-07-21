@@ -1,7 +1,7 @@
 ---
 title: Bitbucket Cloud
 icon: 'https://api.iconify.design/simple-icons:bitbucket.svg?color=currentColor'
-description: Configure Bitbucket Cloud repository sync and pull request webhooks for Roomote.
+description: Configure Bitbucket Cloud repository sync and pull request webhooks and pipeline failure triage for Roomote.
 ---
 
 Bitbucket Cloud support uses one deployment-scoped OAuth client. The
@@ -26,6 +26,7 @@ Grant these scopes:
 | `repository` and `repository:write` | repository sync and Git operations |
 | `pullrequest` and `pullrequest:write` | pull request workflows |
 | `webhook` | automatic webhook setup |
+| `pipeline` | CI Failure Triage (read pipelines and step logs) |
 
 Save the client values in setup or deployment environment variables:
 
@@ -42,8 +43,7 @@ first configured.
 
 After saving the consumer values, an admin is redirected to Bitbucket to
 authorize the deployment. The callback exchanges and encrypts the OAuth
-connection, synchronizes all accessible repositories, and registers pull
-request webhooks before returning to setup.
+connection, synchronizes all accessible repositories, and registers repository webhooks (including `repo:commit_status_created` and `repo:commit_status_updated` for Pipelines) before returning to setup.
 
 Bitbucket-backed tasks use `x-token-auth` for Git HTTPS credentials. OAuth API
 requests use bearer authentication.
@@ -53,6 +53,10 @@ requests use bearer authentication.
 Users may link personal Bitbucket accounts separately for commenter identity
 and access-policy checks. Linked accounts do not provide deployment source
 control credentials.
+
+## CI Failure Triage
+
+When enabled, Roomote triages failed default-branch Bitbucket Pipelines via `repo:commit_status_created` / `repo:commit_status_updated` webhooks and Manual Run now. Only environment-mapped repositories are included.
 
 ## Current limits
 

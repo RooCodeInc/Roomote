@@ -258,6 +258,20 @@ describe('TaskInfoPanel', () => {
     expect(screen.getByText('Local Docker')).toBeInTheDocument();
   });
 
+  it('labels the roomote sandbox provider as Roomote Cloud', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={{ ...baseTaskRun, vendor: 'roomote' } as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Roomote Cloud')).toBeInTheDocument();
+  });
+
   it('shows the task model beneath the sandbox provider', () => {
     render(
       <TaskInfoPanel

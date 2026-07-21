@@ -151,10 +151,9 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // Provider-agnostic: suggestion scans work with any synced repository.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
-    // Scheduled suggestion delivery supports a per-automation Slack or
-    // Discord destination target; Teams/Telegram remain fallback-only
-    // surfaces without a configurable destination.
-    supportedCommunicationProviders: ['slack', 'discord'],
+    // Full chat coverage: Slack/Discord pick an existing channel; Telegram
+    // auto-creates a sticky topic; Teams uses the primary conversation.
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'suggest_ideas',
   },
@@ -221,8 +220,9 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
     // Webhook-driven on new issues only (no Run now / batch scan).
     // Plans are posted on the issue itself, not as Slack suggestion cards.
-    // GitHub, GitLab, and Gitea issue webhooks are wired today; ADO work items
-    // and Bitbucket issues are not yet supported.
+    // GitHub/GitLab/Gitea issue open events launch issue_fixer triage.
+    // ADO work-item @mentions start StandardTask (not issue_fixer); Bitbucket
+    // issues are not yet supported.
     manualTriggerRequirements: [],
     usesManagerChannel: false,
     supportedCommunicationProviders: [],
@@ -257,12 +257,13 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'CI Failure Triage',
     availability: 'stable',
     scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
-    // GitHub workflow_run and GitLab Pipeline hooks are wired; open-ended
-    // SCM requirement so GitLab-only deployments can still Run now.
+    // GitHub workflow_run, GitLab Pipeline, Azure DevOps build.complete, and
+    // Bitbucket Pipelines commit-status hooks are wired; open-ended SCM
+    // requirement so non-GitHub-only deployments can still Run now.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
-    supportedSourceControlProviders: ['github', 'gitlab'],
+    supportedSourceControlProviders: ['github', 'gitlab', 'ado', 'bitbucket'],
     scheduledSuggestionSource: 'ci_failure_triage',
   },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];

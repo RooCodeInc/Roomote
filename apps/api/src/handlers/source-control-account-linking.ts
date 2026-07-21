@@ -33,7 +33,7 @@ const sourceControlCommentProviderCopy = {
   },
   ado: {
     accountLabel: 'Azure DevOps',
-    commentSurface: 'pull request comments',
+    commentSurface: 'work item and pull request comments',
     settingsQuery: 'ado',
   },
 } satisfies Record<

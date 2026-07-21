@@ -30,7 +30,8 @@ describe('clearCommunicationAckReaction', () => {
     );
   });
 
-  it('skips SnapshotResume runs', async () => {
+  it('clears eyes for SnapshotResume Discord wakes with a pending intake ack', async () => {
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
     mockFindTaskRun.mockResolvedValue({
       id: 2,
       payloadKind: TaskPayloadKind.SnapshotResume,
@@ -43,10 +44,34 @@ describe('clearCommunicationAckReaction', () => {
         discordIntakeAckPending: true,
       },
     });
+    mockGetCommunicationProviderAdapter.mockResolvedValue({
+      removeReaction,
+    });
 
     await expect(clearCommunicationAckReaction({ runId: 2 })).resolves.toEqual({
+      cleared: true,
+    });
+    expect(removeReaction).toHaveBeenCalledWith({
+      channelId: 'c-1',
+      messageId: 'm-1',
+      name: 'eyes',
+    });
+  });
+
+  it('no-ops SnapshotResume wakes without a pending intake ack flag', async () => {
+    mockFindTaskRun.mockResolvedValue({
+      id: 3,
+      payloadKind: TaskPayloadKind.SnapshotResume,
+      payload: {
+        communicationProvider: 'discord',
+        discordReactionChannelId: 'c-1',
+        discordReactionMessageId: 'm-1',
+      },
+    });
+
+    await expect(clearCommunicationAckReaction({ runId: 3 })).resolves.toEqual({
       cleared: false,
-      reason: 'unsupported_run_kind',
+      reason: 'missing_target',
     });
     expect(mockGetCommunicationProviderAdapter).not.toHaveBeenCalled();
   });

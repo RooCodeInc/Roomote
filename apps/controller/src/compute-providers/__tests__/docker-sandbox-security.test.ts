@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -19,6 +22,8 @@ import {
   type DockerCommand,
 } from '../docker-sandbox-security';
 import { TaskRunErrorCode } from '@roomote/types';
+
+const execFileAsync = promisify(execFile);
 
 describe('buildDockerWorkerResourceArgs', () => {
   it('enforces CPU, memory, swap, PID, configured disk, log, and capability bounds', () => {
@@ -263,6 +268,7 @@ describe('attachDockerEgressPolicy', () => {
         'ALL',
         '--cap-add',
         'NET_ADMIN',
+        'NET_RAW',
         'roomote-worker:test',
       ]),
     );
@@ -270,7 +276,48 @@ describe('attachDockerEgressPolicy', () => {
     expect(routeScript).toContain('ip route replace blackhole 169.254.0.0/16');
     expect(routeScript).toContain('ip route replace blackhole 10.0.0.0/8');
     expect(routeScript).toContain('ip route show default');
-    expect(routeScript).toContain('ip route replace blackhole "$gateway/32"');
+    expect(routeScript).not.toContain(
+      'ip route replace blackhole "$gateway/32"',
+    );
+    expect(routeScript).toContain(
+      'iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
+    );
+    expect(routeScript).toContain(
+      'iptables -C FORWARD -d "$gateway" -j DROP 2>/dev/null || iptables -A FORWARD -d "$gateway" -j DROP',
+    );
+    // Upgrades must heal netns state left by controllers that blackholed the
+    // gateway route in retained standby workers.
+    expect(routeScript).toContain(
+      'ip route del blackhole "$gateway/32" 2>/dev/null || true',
+    );
+  });
+
+  it('generates a syntactically valid shell script for the egress helper', async () => {
+    for (const blockDockerGateway of [true, false]) {
+      const runDocker = vi.fn<DockerCommand>().mockResolvedValue('');
+
+      await attachDockerEgressPolicy(
+        {
+          containerName: 'roomote-worker-92',
+          egressPolicy: 'internet',
+          image: 'roomote-worker:test',
+          platform: 'linux/amd64',
+          blockDockerGateway,
+        },
+        runDocker,
+      );
+
+      const helperRun = runDocker.mock.calls
+        .map(([args]) => args)
+        .find((args) => args[0] === 'run');
+      const routeScript = helperRun?.at(-1);
+      expect(routeScript).toBeTruthy();
+      // `sh -n` parses without executing; a syntax error here would make every
+      // sandbox spawn fail inside the egress helper container.
+      await expect(
+        execFileAsync('sh', ['-n', '-c', routeScript!]),
+      ).resolves.toBeTruthy();
+    }
   });
 
   it('keeps private host routes reachable for host-based local development', async () => {

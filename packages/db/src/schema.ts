@@ -52,6 +52,7 @@ import type {
   LinearPendingSelectionStep,
   AutomationScanCursor,
   AutomationTarget,
+  OptionalAutomationTarget,
   BackgroundAutomationKey,
   PlatformIssueReport,
   WorkspaceReadiness,
@@ -2630,6 +2631,74 @@ export const automationsRelations = relations(automations, ({ many }) => ({
   workItems: many(workItems),
   trackedMessages: many(trackedMessages),
 }));
+
+/**
+ * custom_automations
+ *
+ * User-defined prompt + cadence + environment + destination automations.
+ * Separate from the fixed-catalog `automations` key table. Launched tasks
+ * stamp initiator_automation = 'custom_automation' (internal seeded key)
+ * and carry the row id/name via actorExternalId/actorDisplayName.
+ */
+export const customAutomations = pgTable(
+  'custom_automations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    prompt: text('prompt').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    scheduleMode: text('schedule_mode').notNull().default('off'),
+    environmentId: uuid('environment_id').references(() => environments.id, {
+      onDelete: 'set null',
+    }),
+    target: jsonb('target')
+      .notNull()
+      .default(sql`'{}'::jsonb`)
+      .$type<OptionalAutomationTarget>(),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    lastRunAt: timestamp('last_run_at'),
+    lastSucceededAt: timestamp('last_succeeded_at'),
+    lastFailedAt: timestamp('last_failed_at'),
+    lastError: text('last_error'),
+    lastLaunchedTaskId: text('last_launched_task_id').references(
+      () => tasks.id,
+      { onDelete: 'set null' },
+    ),
+    /**
+     * Fencing token for concurrent launch claims. Set to NOW() when a launcher
+     * reserves the row; cleared on finalize/release. Stale claims older than
+     * the recovery window may be reclaimed.
+     */
+    launchClaimedAt: timestamp('launch_claimed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('custom_automations_name_unique_idx').on(table.name),
+    index('custom_automations_enabled_idx').on(table.enabled),
+    index('custom_automations_environment_id_idx').on(table.environmentId),
+  ],
+);
+
+export const customAutomationsRelations = relations(
+  customAutomations,
+  ({ one }) => ({
+    environment: one(environments, {
+      fields: [customAutomations.environmentId],
+      references: [environments.id],
+    }),
+    createdByUser: one(users, {
+      fields: [customAutomations.createdByUserId],
+      references: [users.id],
+    }),
+    lastLaunchedTask: one(tasks, {
+      fields: [customAutomations.lastLaunchedTaskId],
+      references: [tasks.id],
+    }),
+  }),
+);
 
 export type ManagerMcpSetupNotificationReason =
   | 'deployment_disabled'

@@ -21,6 +21,7 @@ import {
 } from '@roomote/sdk/server';
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { hydrateLinearMcpConnectionAfterOauth } from '@/lib/server/mcp-linear';
 
 export const runtime = 'nodejs';
@@ -83,7 +84,7 @@ export async function GET(request: NextRequest) {
   const errorDescription =
     request.nextUrl.searchParams.get('error_description');
 
-  const webUrl = webEnv.R_APP_URL;
+  const webUrl = getPublicAppUrl(webEnv);
   const redirectPath = readRedirectPathFromState(state);
 
   // Handle OAuth errors
@@ -183,7 +184,7 @@ export async function GET(request: NextRequest) {
     }
 
     const serverMetadata = await discoverOAuthEndpoints(integration.url);
-    const redirectUri = `${webEnv.R_APP_URL}/api/mcp-oauth/callback`;
+    const redirectUri = new URL('/api/mcp-oauth/callback', webUrl).toString();
 
     const tokens = await exchangeCodeForTokens(
       serverMetadata.token_endpoint,

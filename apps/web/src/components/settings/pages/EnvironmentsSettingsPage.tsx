@@ -1,6 +1,7 @@
 'use client';
 
 import { SettingsShell } from '@/components/settings/SettingsShell';
+import { EnvVars } from '@/components/settings/EnvVars';
 import { Environments } from '@/components/settings/environments';
 import { DOCS_ENVIRONMENT_DEFINITION_URL } from '@/lib/docs';
 
@@ -20,6 +21,7 @@ export function EnvironmentsSettingsPage() {
           </a>
           .
         </p>
+        <EnvVars />
         <Environments />
       </div>
     </SettingsShell>

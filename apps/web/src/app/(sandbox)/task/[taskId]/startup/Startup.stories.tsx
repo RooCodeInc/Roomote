@@ -326,23 +326,6 @@ docker run -d --name roomote-worker-12 roomote-worker:local sleep infinity`}
   ),
 };
 
-/** Active boot after 10s shows elapsed still-booting feedback. */
-export const StillBootingElapsed: Story = {
-  name: 'Still booting – elapsed',
-  render: () => (
-    <StartupSequence
-      steps={[
-        mockStep(RunStatus.Pending, true),
-        mockStep(RunStatus.Dequeued, true),
-        mockStep(RunStatus.Processing, true),
-        mockStep(RunStatus.Preparing, true),
-        mockStep(RunStatus.Spawning, false),
-      ]}
-      elapsedSeconds={42}
-    />
-  ),
-};
-
 /** Failed boot without a specific error message — shows fallback copy. */
 export const FailedWithoutError: Story = {
   name: 'Failed boot without error message',

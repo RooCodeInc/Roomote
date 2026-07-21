@@ -11,6 +11,7 @@ export enum ScheduledJobName {
   InstancePing = 'InstancePing',
   WebhookCleanup = 'WebhookCleanup',
   StandbyRetention = 'StandbyRetention',
+  CustomAutomations = 'custom_automations',
 }
 
 /**

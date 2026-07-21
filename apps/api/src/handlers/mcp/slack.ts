@@ -4,9 +4,11 @@ import { Hono } from 'hono';
 import { Env } from '@roomote/env';
 import {
   and,
+  asc,
   db,
   eq,
   findBackgroundAutomationSlackThread,
+  getCustomAutomationById,
   slackInstallations,
   taskRuns,
   tasks,
@@ -219,6 +221,29 @@ async function buildLateBoundAutomationRootFooterBlocks(params: {
   });
 }
 
+async function buildLateBoundCustomAutomationRootFooterBlocks(params: {
+  customAutomationId: string;
+  taskUrl: string;
+  taskId: string;
+}): Promise<SlackBlock[] | null> {
+  const automation = await getCustomAutomationById(params.customAutomationId);
+
+  if (!automation) {
+    return null;
+  }
+
+  const linkedPr = await resolveSlackThreadLinkedPr({
+    taskId: params.taskId,
+    prRepo: null,
+    prNumber: null,
+  });
+  return buildAutomationRootFooterBlocks({
+    automationLabel: automation.name,
+    taskUrl: params.taskUrl,
+    linkedPrUrl: linkedPr?.prUrl ?? null,
+  });
+}
+
 function getAutomationWorkItemIdFromTaskPayload(
   payload: unknown,
 ): string | null {
@@ -227,6 +252,15 @@ function getAutomationWorkItemIdFromTaskPayload(
   }
 
   const value = (payload as Record<string, unknown>).automationWorkItemId;
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function getCustomAutomationIdFromTaskPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const value = (payload as Record<string, unknown>).customAutomationId;
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
@@ -365,10 +399,35 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   const trackedAutomationKey =
     trackedThread?.automationKey ?? boundTaskAutomationKey ?? null;
   const automationKey = trackedAutomationKey ?? 'automation';
-  const automationLabel = trackedAutomationKey
-    ? getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
-        ?.label
+  let automationLabel: string | null = trackedAutomationKey
+    ? (getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
+        ?.label ?? null)
     : null;
+
+  // Custom automation runs have no registry descriptor, so the key would
+  // render as "custom automation"; label the footer with the automation's
+  // own name instead. Resume runs do not copy the marker into their
+  // payloads, so scan the sibling runs (oldest first: the originating
+  // launch run carries it) rather than reading one arbitrary row.
+  if (!automationLabel) {
+    const runs = await db
+      .select({ payload: taskRuns.payload })
+      .from(taskRuns)
+      .where(eq(taskRuns.taskId, params.taskId))
+      .orderBy(asc(taskRuns.createdAt))
+      .limit(10);
+    const customAutomationId =
+      runs
+        .map((run) => getCustomAutomationIdFromTaskPayload(run.payload))
+        .find((id) => id !== null) ?? null;
+
+    if (customAutomationId) {
+      const customAutomation =
+        await getCustomAutomationById(customAutomationId);
+      automationLabel = customAutomation?.name ?? null;
+    }
+  }
+
   const updated = await refreshAutomationRootFooter({
     slack: params.slack,
     channelId: params.channel,
@@ -799,10 +858,12 @@ slackMcp.post('/thread_reply', async (c) => {
   }
 
   // Creating a brand-new top-level channel message is reserved for late-bound
-  // automation execution tasks, marked by automationWorkItemId in the payload.
+  // automation tasks: execution tasks marked by automationWorkItemId and
+  // custom automation runs marked by customAutomationId in the payload.
   if (
     !slackReplyTarget.threadTs &&
-    !getAutomationWorkItemIdFromTaskPayload(taskRun.payload)
+    !getAutomationWorkItemIdFromTaskPayload(taskRun.payload) &&
+    !getCustomAutomationIdFromTaskPayload(taskRun.payload)
   ) {
     return c.json(
       {
@@ -861,6 +922,9 @@ slackMcp.post('/thread_reply', async (c) => {
   const automationWorkItemId = getAutomationWorkItemIdFromTaskPayload(
     taskRun.payload,
   );
+  const customAutomationId = getCustomAutomationIdFromTaskPayload(
+    taskRun.payload,
+  );
   const existingThreadTs = slackReplyTarget.threadTs;
   let messageTs: string;
   let outboundThreadTs = existingThreadTs ?? '';
@@ -873,7 +937,13 @@ slackMcp.post('/thread_reply', async (c) => {
             taskUrl,
             taskId: taskRun.taskId,
           })
-        : null;
+        : includeFooter && customAutomationId
+          ? await buildLateBoundCustomAutomationRootFooterBlocks({
+              customAutomationId,
+              taskUrl,
+              taskId: taskRun.taskId,
+            })
+          : null;
     const rootFooterBlocks =
       lateBoundAutomationFooterBlocks ??
       (includeFooter

@@ -1383,6 +1383,124 @@ describe('runTask', () => {
     );
   });
 
+  it('marks Slack custom automation runs as silent with a required terminal closeout', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_789);
+
+    try {
+      await runTask({
+        taskRun: {
+          id: 110,
+          taskId: 'task-110',
+          payloadKind: TaskPayloadKind.StandardTask,
+          harness: 'opencode-server',
+          payload: {
+            repo: '',
+            description: 'scan for flaky tests',
+            slackChannel: 'C123',
+            channel: 'C123',
+            customAutomationId: 'custom-automation-1',
+          },
+          result: null,
+        } as never,
+        envVars: {},
+        workspacePath: '/tmp/workspace',
+        prompt: '',
+        harnessInstructions: undefined,
+        agentInstructions: undefined,
+        environmentConfig: undefined,
+        callbacks: {},
+        context: {},
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          log: vi.fn(),
+        } as never,
+        harnessSessionId: 'session-110',
+        workerEnv: {
+          authToken: 'cloud-token',
+          roomoteAppUrl: 'https://api.example.test',
+          trpcUrl: 'https://web.example.test',
+          buildUserFacingEnv: vi.fn(() => ({
+            HOME: '/tmp/home',
+            PATH: '/usr/bin',
+          })),
+        } as never,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      '/tmp/workspace/.roomote-runtime-home/.config/opencode/roomote-slack-reply-satisfaction.json',
+      JSON.stringify({
+        startedAtMs: 456_789,
+        currentTurnRequiresInitialAck: false,
+        requiresTerminalCloseoutWithoutTurn: true,
+      }),
+      'utf8',
+    );
+  });
+
+  it('marks non-Slack custom automation runs as silent with a required terminal closeout', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(567_891);
+
+    try {
+      await runTask({
+        taskRun: {
+          id: 111,
+          taskId: 'task-111',
+          payloadKind: TaskPayloadKind.StandardTask,
+          harness: 'opencode-server',
+          payload: {
+            repo: '',
+            description: 'scan for flaky tests',
+            communicationProvider: 'telegram',
+            communicationChannelId: 'chat-1',
+            customAutomationId: 'custom-automation-1',
+          },
+          result: null,
+        } as never,
+        envVars: {},
+        workspacePath: '/tmp/workspace',
+        prompt: '',
+        harnessInstructions: undefined,
+        agentInstructions: undefined,
+        environmentConfig: undefined,
+        callbacks: {},
+        context: {},
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          log: vi.fn(),
+        } as never,
+        harnessSessionId: 'session-111',
+        workerEnv: {
+          authToken: 'cloud-token',
+          roomoteAppUrl: 'https://api.example.test',
+          trpcUrl: 'https://web.example.test',
+          buildUserFacingEnv: vi.fn(() => ({
+            HOME: '/tmp/home',
+            PATH: '/usr/bin',
+          })),
+        } as never,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      '/tmp/workspace/.roomote-runtime-home/.config/opencode/roomote-slack-reply-satisfaction.json',
+      JSON.stringify({
+        startedAtMs: 567_891,
+        currentTurnRequiresInitialAck: false,
+        requiresTerminalCloseoutWithoutTurn: true,
+      }),
+      'utf8',
+    );
+  });
+
   it('checks Slack drain during sleep fallback when the worker started before thread ts was persisted', async () => {
     waitForExternalSleepActionMock.mockResolvedValueOnce({
       claimed: true,
@@ -2450,6 +2568,64 @@ describe('runTask', () => {
         codingHarness: 'opencode-server',
       }),
     );
+  });
+
+  it('does not inject mid-task notices when background environment setup settles', async () => {
+    const onSettled = vi.fn();
+
+    await runTask({
+      taskRun: {
+        id: 205,
+        taskId: 'task-205',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: 'do work',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      backgroundEnvironmentSetup: {
+        hasPendingBackgroundSetup: true,
+        onSettled,
+      },
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      workerEnv: {
+        buildUserFacingEnv: vi.fn(() => ({})),
+        roomoteAppUrl: 'http://localhost:3000',
+        trpcUrl: 'http://localhost:3001',
+        authToken: 'auth-token',
+        appEnv: 'test',
+        setRuntimeEnv: vi.fn(),
+      } as never,
+    });
+
+    const manager = harnessManagerInstances[0]!;
+
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(manager.sendFollowUpPrompt).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'environment-setup' }),
+    );
+    expect(
+      manager.sendFollowUpPrompt.mock.calls.some((call) => {
+        const prompt = call[0]?.prompt;
+
+        return (
+          typeof prompt === 'string' &&
+          prompt.includes('Environment setup update:')
+        );
+      }),
+    ).toBe(false);
   });
 
   it('coerces an explicit legacy direct harness into the sandbox server', async () => {

@@ -53,6 +53,7 @@ import type {
   environmentConfigVersions,
   environmentRepositoryMappings,
   automations,
+  customAutomations,
   trackedMessages,
 } from './schema';
 
@@ -463,6 +464,10 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannelId: string | null;
   suggesterDiscordChannelId: string | null;
+  /** Primary Telegram chat id when Suggest Ideas posts to a sticky topic. */
+  suggesterTelegramChatId: string | null;
+  /** Primary Teams conversation id when Suggest Ideas posts to Teams. */
+  suggesterTeamsChannelId: string | null;
   suggesterInstructions: string | null;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string | null;
@@ -525,3 +530,14 @@ export type CiFailureTriageScanCursor = SecurityAuditorScanCursor;
 export type Automation = typeof automations.$inferSelect;
 
 export type CreateAutomation = Omit<typeof automations.$inferInsert, Timestamp>;
+
+/**
+ * custom_automations
+ */
+
+export type CustomAutomation = typeof customAutomations.$inferSelect;
+
+export type CreateCustomAutomation = Omit<
+  typeof customAutomations.$inferInsert,
+  Timestamp
+>;

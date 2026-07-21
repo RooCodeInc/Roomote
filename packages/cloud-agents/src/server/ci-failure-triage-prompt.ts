@@ -118,6 +118,12 @@ export function buildCiFailureTriagePrompt({
       if (triggeringRun.provider === 'gitlab') {
         return `Work only the failing run in triggering_run. Start from failure_evidence when present, then inspect the repository's GitLab CI configuration and reproduce the relevant commands locally. Use the remote pipeline UI/API only when authenticated access is already available. Do not dig through unrelated older pipelines.`;
       }
+      if (triggeringRun.provider === 'ado') {
+        return `Work only the failing run in triggering_run. Start from failure_evidence when present, then inspect Azure Pipelines / classic build definitions in the repository and reproduce the relevant commands locally. Use the remote Azure DevOps build UI/API only when authenticated access is already available. Do not dig through unrelated older builds.`;
+      }
+      if (triggeringRun.provider === 'bitbucket') {
+        return `Work only the failing run in triggering_run. Start from failure_evidence when present, then inspect bitbucket-pipelines.yml and pipeline steps and reproduce the relevant commands locally. Use the Bitbucket Pipelines UI/API only when authenticated access is already available. Do not dig through unrelated older pipelines.`;
+      }
       if (triggeringRun.provider && triggeringRun.provider !== 'github') {
         return `Work only the failing run in triggering_run. Prefer injected failure evidence when available, then the provider-native CI UI/API. Do not dig through unrelated older runs.`;
       }
@@ -126,6 +132,14 @@ export function buildCiFailureTriagePrompt({
 
     if (providerHint === 'gitlab') {
       return `In ${repository}, work only the latest failed default-branch pipeline identified in task context. Start from injected failure evidence, inspect the repository's GitLab CI configuration, and reproduce the relevant commands locally. Skip older failures.`;
+    }
+
+    if (providerHint === 'ado') {
+      return `In ${repository}, work only the latest failed default-branch Azure DevOps build identified in task context. Start from injected failure evidence, inspect Azure Pipelines / classic build definitions, and reproduce the relevant commands locally. Skip older failures.`;
+    }
+
+    if (providerHint === 'bitbucket') {
+      return `In ${repository}, work only the latest failed default-branch Bitbucket Pipeline identified in task context. Start from injected failure evidence, inspect bitbucket-pipelines.yml, and reproduce the relevant commands locally. Skip older failures.`;
     }
 
     return `In ${repository}, use \`gh run list\` against the default branch to find failing runs, then take only the single most recent failure and inspect it with \`gh run view\` / \`gh run view --log-failed\`. Skip older failures.`;

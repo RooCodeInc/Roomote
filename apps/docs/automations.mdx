@@ -57,6 +57,30 @@ conflict resolution, and remove it when a human should handle the conflict
 instead. Roomote only tries this on labeled PRs that are still active, and it
 skips PRs older than the age cap you set.
 
+## Custom automations
+
+Create arbitrary scheduled agent runs with:
+
+- a clear **name**
+- the **prompt** Roomote should run
+- a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
+- one required **environment**
+- an optional **report destination** channel (Slack, Discord, Teams, or
+  Telegram)
+
+On each due tick, Roomote launches a normal task with that prompt in that
+environment. When a report destination is set, the run is anchored to that
+channel: Roomote's first message (the final result, or a blocker or question
+that needs input) starts a thread, later updates continue that same thread,
+and you can reply in the thread to talk to the task. There is no progress
+chatter in between. Without a destination, the run happens silently and its
+results appear only in the task view. Use **Run now** on an enabled
+automation to test it immediately.
+
+Daily and weekly custom automations use the same local-hour window as the
+other scheduled automations (around 3am in the workspace timezone). Cap is
+25 custom automations per deployment.
+
 ## Channel automations
 
 The channel section starts with **Auto-respond to channels**.
@@ -121,16 +145,25 @@ Discord channel (see
 [Communications](/communications#supported-providers) for connecting those
 surfaces).
 
+**Suggest Ideas** can also report to Teams or Telegram as first-class
+destinations. When you select Telegram, Roomote creates a sticky **Suggest
+Ideas** forum topic in your primary Telegram chat (create once, reuse on later
+runs) and posts digests there. You cannot pick an existing Telegram thread —
+Roomote owns the recurring topic. When you select Teams, digests go to the
+primary Teams conversation captured for the deployment.
+
 Cards also show capability badges for what each automation supports today:
 the chat surfaces it can report to and the source-control providers it works
 with. Triage Dependabot Alerts and Triage CodeQL Alerts are GitHub-only by
-nature. CI Failure Triage supports GitHub Actions and GitLab Pipelines.
-Triage Issues supports GitHub, GitLab, and Gitea issues.
+nature. CI Failure Triage supports GitHub Actions, GitLab Pipelines, Azure
+DevOps builds, and Bitbucket Pipelines. Triage Issues supports GitHub, GitLab,
+and Gitea issues.
 Security Auditor, Code Quality Auditor, Weekly Manager
 Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
 any connected source-control provider. Resolve PR Conflicts supports GitHub,
 GitLab, and Azure DevOps. CI Failure Triage reacts immediately to GitHub
-Actions and GitLab Pipeline webhooks rather than running on a daily or weekly
+Actions, GitLab Pipeline, Azure DevOps `build.complete`, and Bitbucket
+Pipelines commit-status webhooks rather than running on a daily or weekly
 schedule.
 
 **Code Quality Auditor** inspects recently merged PR diffs and only posts
@@ -156,13 +189,16 @@ scan.
 and secure-by-default gaps that are worth a real follow-up task.
 
 **CI Failure Triage** reacts the moment CI fails on a repository's default
-branch (GitHub Actions workflow runs and GitLab Pipelines). When a failure
-persists (it is not already fixed by a newer run and is not a one-off flake),
-Roomote starts a fix task that reproduces the failing job inside the
-repository's configured environment, finds the root cause, opens a PR with the
-fix, and posts one summary to the Manager Channel when it finishes. Only
-repositories that belong to a configured Roomote environment are triaged. For
-GitLab, ensure Pipeline Hooks are enabled on the webhook Roomote receives.
+branch (GitHub Actions workflow runs, GitLab Pipelines, Azure DevOps
+builds, and Bitbucket Pipelines). When a failure persists (it is not already fixed by a newer run and is
+not a one-off flake), Roomote starts a fix task that reproduces the failing
+job inside the repository's configured environment, finds the root cause, opens
+a PR with the fix, and posts one summary to the Manager Channel when it
+finishes. Only repositories that belong to a configured Roomote environment are
+triaged. For GitLab, ensure Pipeline Hooks are enabled on the webhook Roomote
+receives. For Azure DevOps, Roomote ensures the project-scoped
+`build.complete` service hook when Azure DevOps repositories are synced. For Bitbucket, repository webhooks include `repo:commit_status_created` and
+`repo:commit_status_updated`, and the OAuth client needs the Pipelines scope.
 
 ## Add instructions to reduce noise
 
@@ -192,18 +228,19 @@ Roomote posted and what should happen next.
 If the automation creates a task, review the same evidence you would review for
 manual work: transcript, logs, diffs, previews, artifacts, and final summary.
 
-## Use Slack workflows for custom triggers
+## Use Slack workflows for event-driven custom triggers
 
-For workflows that are specific to your team, use Slack's own workflow
-builder and end the workflow with a Roomote mention.
+For **scheduled** work with a fixed prompt, prefer **Custom automations**
+above. For **event-driven** team workflows, use Slack's own workflow builder
+and end the workflow with a Roomote mention.
 
-Good custom triggers include:
+Good custom event triggers include:
 
 - send new bug-channel posts to Roomote for triage
 - turn operational requests from another system into Roomote tasks
 - ask Roomote to gather diagnostics when a support escalation arrives
 
-This keeps custom routing in Slack while still letting Roomote run a normal,
+This keeps event routing in Slack while still letting Roomote run a normal,
 reviewable task.
 
 ## Possible issues

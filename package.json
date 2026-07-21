@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -118,7 +118,7 @@
       "router>path-to-regexp": "8.4.0",
       "socket.io>socket.io-adapter": "2.5.8",
       "socket.io-adapter>ws": "8.21.0",
-      "tar": "7.5.16",
+      "tar": "7.5.20",
       "zod": "^3.25.76",
       "astro>zod": "^4.3.6",
       "knip>zod": "^4.1.11",

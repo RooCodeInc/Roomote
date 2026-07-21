@@ -14,11 +14,13 @@ import {
   getBackgroundAgentSettingsForDeployment,
   inArray,
   listAutomations,
+  resolveTelegramRuntimeCredentials,
   tasks,
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
   findTeamsConversationDisplayName,
+  findTeamsPrimaryConversation,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from '@roomote/sdk/server';
@@ -192,6 +194,10 @@ async function resolveDestinationDisplayName(
       : null;
   }
 
+  if (destination.provider === 'telegram') {
+    return 'Telegram · Suggest Ideas topic';
+  }
+
   // Telegram chats have no reliable display name; the UI shows the chat id.
   return null;
 }
@@ -257,6 +263,8 @@ export async function getBackgroundAgentSettingsCommand(
   capabilities: {
     slackConnected: boolean;
     discordConnected: boolean;
+    telegramConnected: boolean;
+    teamsConnected: boolean;
     sentryConnected: boolean;
     missingScopes: readonly string[];
     requiredScopes: string[];
@@ -291,6 +299,8 @@ export async function getBackgroundAgentSettingsCommand(
     settings,
     slackInstallation,
     discordInstallation,
+    telegramCredentials,
+    teamsPrimaryConversation,
     sentryConnected,
     recentRuns,
     status,
@@ -301,6 +311,8 @@ export async function getBackgroundAgentSettingsCommand(
       where: eq(discordInstallations.isActive, true),
       columns: { id: true },
     }),
+    resolveTelegramRuntimeCredentials(),
+    findTeamsPrimaryConversation(),
     hasActiveSentryIntegration(),
     listRecentAutomationTasks(),
     buildAutomationStatus(),
@@ -387,6 +399,8 @@ export async function getBackgroundAgentSettingsCommand(
     capabilities: {
       slackConnected: Boolean(slackInstallation?.isActive),
       discordConnected: Boolean(discordInstallation),
+      telegramConnected: Boolean(telegramCredentials.botToken),
+      teamsConnected: Boolean(teamsPrimaryConversation),
       sentryConnected,
       missingScopes,
       requiredScopes: [...REQUIRED_BACKGROUND_AGENT_SCOPES],

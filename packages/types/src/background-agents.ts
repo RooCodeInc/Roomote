@@ -61,6 +61,16 @@ export function isScheduleOnlyBackgroundAutomationFrequency(
     SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES as readonly string[]
   ).includes(value);
 }
+
+/** Cadence presets supported by user-defined custom automations. */
+export type CustomAutomationScheduleMode =
+  ScheduleOnlyBackgroundAutomationFrequency;
+
+export const MAX_CUSTOM_AUTOMATIONS = 25;
+
+export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;
+
+export const CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH = 8_000;
 export type SecurityAuditorFrequency =
   ScheduleOnlyBackgroundAutomationFrequency;
 
@@ -108,6 +118,9 @@ export const INTERNAL_AUTOMATION_KEYS = [
   'snapshot_refresh',
   'mcp_recommendations',
   'slack_workflow',
+  // Seeds automations.key so custom-automation task launches can FK-stamp
+  // initiator_automation. User-defined definitions live in custom_automations.
+  'custom_automation',
 ] as const;
 
 export const BACKGROUND_AUTOMATION_KEYS = [
@@ -157,6 +170,19 @@ export type AutomationTarget = {
   externalRef: string;
   metadata?: Record<string, unknown>;
 };
+
+/**
+ * A custom automation's stored report destination: a full AutomationTarget,
+ * or the empty object (the column default) when no report channel is
+ * configured.
+ */
+export type OptionalAutomationTarget = AutomationTarget | Record<string, never>;
+
+export function isConfiguredAutomationTarget(
+  target: OptionalAutomationTarget | null | undefined,
+): target is AutomationTarget {
+  return Boolean(target?.provider && target?.targetKind && target?.externalRef);
+}
 
 /**
  * Merged-PR scan resume cursor stored in automations.scan_cursor

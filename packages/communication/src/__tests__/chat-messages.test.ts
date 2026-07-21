@@ -14,6 +14,7 @@ import {
   buildTaskLaunchAcknowledgementText,
   buildTaskStartingText,
   buildThreadReplyFooterText,
+  formatMarkdownLink,
   getUserRequestedModelDisplayName,
   resolveUserFacingModelDisplayName,
 } from '../chat-messages';
@@ -266,6 +267,17 @@ describe('chat message copy builders', () => {
       }),
     ).toBe(
       '_Working on a <https://preview.roomote.dev|live preview>, reply or use the <https://roomote.dev/task/123|web app>._',
+    );
+  });
+
+  it('escapes Markdown link labels', () => {
+    expect(
+      formatMarkdownLink(
+        '[Fix] Discord \\ formatting',
+        'https://github.com/org/repo/pull/1',
+      ),
+    ).toBe(
+      '[\\[Fix\\] Discord \\\\ formatting](https://github.com/org/repo/pull/1)',
     );
   });
 

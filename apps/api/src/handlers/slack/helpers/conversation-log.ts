@@ -57,6 +57,12 @@ export function getInboundSlackConversationSource(
 type RoomoteOwnedSlackThreadMatch = {
   userId: string | null;
   slackUserId: string | null;
+  /**
+   * True when the thread-bound task was launched by a custom automation.
+   * These report threads have a bot-authored root and no owning Slack user,
+   * so unmentioned-reply routing treats any human reply as eligible.
+   */
+  isCustomAutomationThread: boolean;
 };
 
 export async function findRoomoteOwnedSlackThread(params: {
@@ -84,6 +90,18 @@ export async function findRoomoteOwnedSlackThread(params: {
     userId: row.initiatorUserId ?? row.actingUserId,
   }));
 
+  const isCustomAutomationThread = existingSlackTaskRuns.some((job) => {
+    const payload = job.payload as
+      | { channel?: unknown; customAutomationId?: unknown }
+      | undefined;
+
+    return (
+      payload?.channel === params.channelId &&
+      typeof payload.customAutomationId === 'string' &&
+      payload.customAutomationId.trim().length > 0
+    );
+  });
+
   let fallbackMatch: RoomoteOwnedSlackThreadMatch | null = null;
 
   for (const job of existingSlackTaskRuns) {
@@ -99,6 +117,7 @@ export async function findRoomoteOwnedSlackThread(params: {
       const match = {
         userId: job.userId,
         slackUserId: typeof payload.user === 'string' ? payload.user : null,
+        isCustomAutomationThread,
       } satisfies RoomoteOwnedSlackThreadMatch;
 
       if (match.slackUserId) {
@@ -134,6 +153,7 @@ export async function findRoomoteOwnedSlackThread(params: {
       return {
         userId: sourceTaskRun.userId,
         slackUserId: null,
+        isCustomAutomationThread,
       };
     }
 
@@ -158,6 +178,7 @@ export async function findRoomoteOwnedSlackThread(params: {
         userId:
           sourceTaskRunById.initiatorUserId ?? sourceTaskRunById.actingUserId,
         slackUserId: null,
+        isCustomAutomationThread,
       };
     }
   }
@@ -172,6 +193,7 @@ export async function findRoomoteOwnedSlackThread(params: {
       fallbackMatch ?? {
         userId: null,
         slackUserId: null,
+        isCustomAutomationThread,
       }
     );
   }

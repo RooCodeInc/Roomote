@@ -179,12 +179,113 @@ describe.runIf(runIntegrationTests)('Docker task network isolation', () => {
     expect(routes).toContain('blackhole 192.168.0.0/16');
     const defaultGateway = routes.match(/default via ([\d.]+)/)?.[1];
     expect(defaultGateway).toBeTruthy();
-    expect(routes).toContain(`blackhole ${defaultGateway}`);
+    // Gateway must not be a blackhole host route (that breaks public egress).
+    expect(routes).not.toContain(`blackhole ${defaultGateway}`);
     await expect(
       docker(['exec', sourceContainer, 'ip', 'route', 'get', '1.1.1.1']),
     ).resolves.toContain('via');
+    // The worker container drops NET_ADMIN/NET_RAW and the test image has no
+    // iptables binary, so the rule check needs a helper container sharing the
+    // worker's network namespace, mirroring how the policy is applied.
+    await expect(
+      docker([
+        'run',
+        '--rm',
+        '--network',
+        `container:${sourceContainer}`,
+        '--user',
+        'root',
+        '--cap-drop',
+        'ALL',
+        '--cap-add',
+        'NET_ADMIN',
+        '--cap-add',
+        'NET_RAW',
+        '--entrypoint',
+        '/bin/sh',
+        dockerImage,
+        '-c',
+        [
+          'command -v iptables >/dev/null 2>&1 || apk add --no-cache iptables >/dev/null 2>&1',
+          `iptables -C OUTPUT -d ${defaultGateway} -j DROP`,
+          `iptables -C FORWARD -d ${defaultGateway} -j DROP`,
+        ].join(' && '),
+      ]),
+    ).resolves.toBe('');
+    // Real public egress, not just a route lookup: `ip route get` never sends
+    // a packet, and issue #558 was a hang with a healthy-looking route table.
+    await expect(
+      docker([
+        'exec',
+        sourceContainer,
+        'nc',
+        '-z',
+        '-w',
+        '5',
+        '1.1.1.1',
+        '443',
+      ]),
+    ).resolves.toBe('');
+    // Public next-hop still works; destination traffic to the bridge gateway
+    // IP itself is blocked (short timeout so a hang fails the test).
+    await expect(
+      docker(
+        [
+          'exec',
+          sourceContainer,
+          'sh',
+          '-c',
+          `nc -z -w 1 ${defaultGateway} 1; echo exit:$?`,
+        ],
+        { allowFailure: true },
+      ),
+    ).resolves.not.toMatch(/exit:0\b/);
     await expect(
       docker(['exec', sourceContainer, 'nc', '-z', '-w', '1', 'api', '7777']),
+    ).resolves.toBe('');
+
+    // Controller upgrade path: a netns provisioned by an older controller
+    // still carries the gateway blackhole route. Re-applying the policy (as
+    // the standby-restore path does) must remove it so egress heals without
+    // recreating the container.
+    await docker([
+      'run',
+      '--rm',
+      '--network',
+      `container:${sourceContainer}`,
+      '--user',
+      'root',
+      '--cap-drop',
+      'ALL',
+      '--cap-add',
+      'NET_ADMIN',
+      '--entrypoint',
+      '/bin/sh',
+      dockerImage,
+      '-c',
+      `ip route replace blackhole ${defaultGateway}/32`,
+    ]);
+    await attachDockerEgressPolicy({
+      containerName: sourceContainer,
+      egressPolicy: 'internet',
+      image: dockerImage,
+      platform: process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+      blockDockerGateway: true,
+    });
+    await expect(
+      docker(['exec', sourceContainer, 'ip', 'route', 'show']),
+    ).resolves.not.toContain(`blackhole ${defaultGateway}`);
+    await expect(
+      docker([
+        'exec',
+        sourceContainer,
+        'nc',
+        '-z',
+        '-w',
+        '5',
+        '1.1.1.1',
+        '443',
+      ]),
     ).resolves.toBe('');
 
     // Compose and Coolify replace control-plane containers during deploys.

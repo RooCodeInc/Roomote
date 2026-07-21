@@ -100,7 +100,7 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
-  it('schedules notifications for web-only tasks without an originating conversation', async () => {
+  it('debounces ordinary notifications for web-only tasks without an originating conversation', async () => {
     const result = await enqueuePrReviewNotification(baseInput);
 
     expect(result).toEqual({ notifiedTaskCount: 1 });
@@ -112,6 +112,7 @@ describe('enqueuePrReviewNotification', () => {
         prNumber: 42,
         prUrl: 'https://github.com/owner/repo/pull/42',
         deferrals: 0,
+        immediate: false,
       },
       { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
     );
@@ -124,7 +125,7 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockQueueAdd).toHaveBeenCalled();
   });
 
-  it('appends the event and schedules a debounced notification job', async () => {
+  it('appends ordinary events and schedules a debounced notification job', async () => {
     const result = await enqueuePrReviewNotification(baseInput);
 
     expect(result).toEqual({ notifiedTaskCount: 1 });
@@ -141,9 +142,68 @@ describe('enqueuePrReviewNotification', () => {
         prNumber: 42,
         prUrl: 'https://github.com/owner/repo/pull/42',
         deferrals: 0,
+        immediate: false,
       },
       { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
     );
+  });
+
+  it('schedules terminal Roomote self-review summaries immediately', async () => {
+    const result = await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+      },
+    });
+
+    expect(result).toEqual({ notifiedTaskCount: 1 });
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'notify-pr-review-activity',
+      expect.objectContaining({ immediate: true }),
+      { delay: 0 },
+    );
+  });
+
+  it('debounces Roomote-authored inline review activity', async () => {
+    const result = await enqueuePrReviewNotification({
+      ...baseInput,
+      event: { ...baseInput.event, roomoteAuthored: true },
+    });
+
+    expect(result).toEqual({ notifiedTaskCount: 1 });
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'notify-pr-review-activity',
+      expect.objectContaining({ immediate: false }),
+      { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+    );
+  });
+
+  it('keeps immediate self-review activity separate from ordinary activity', async () => {
+    await enqueuePrReviewNotification(baseInput);
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+      },
+    });
+
+    const pendingKeys = multiCalls
+      .filter((call) => call.command === 'rpush')
+      .map((call) => String(call.args[0]));
+    const markerKeys = mockRedisSet.mock.calls.map((call) => String(call[0]));
+
+    expect(pendingKeys).toEqual([
+      expect.not.stringContaining(':immediate'),
+      expect.stringContaining(':immediate'),
+    ]);
+    expect(markerKeys).toEqual([
+      expect.not.stringContaining(':immediate'),
+      expect.stringContaining(':immediate'),
+    ]);
   });
 
   it('does not schedule a second job while one is already pending', async () => {

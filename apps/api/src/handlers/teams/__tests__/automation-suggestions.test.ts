@@ -3,25 +3,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   buildRootMessageMock,
   findPrimaryConversationMock,
-  findTelegramPrimaryChatIdMock,
+  getAutomationRuntimeMock,
   insertMock,
   insertOnConflictDoNothingMock,
   insertValuesMock,
   postMessageMock,
   selectLimitMock,
   selectWhereRowsMock,
-  telegramCredentialsMock,
 } = vi.hoisted(() => ({
   buildRootMessageMock: vi.fn(),
   findPrimaryConversationMock: vi.fn(),
-  findTelegramPrimaryChatIdMock: vi.fn(),
+  getAutomationRuntimeMock: vi.fn(),
   insertMock: vi.fn(),
   insertOnConflictDoNothingMock: vi.fn(),
   insertValuesMock: vi.fn(),
   postMessageMock: vi.fn(),
   selectLimitMock: vi.fn(),
   selectWhereRowsMock: vi.fn(),
-  telegramCredentialsMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -39,16 +37,21 @@ vi.mock('@roomote/db/server', () => ({
     metadata: 'metadata',
   },
   environments: { id: 'id', name: 'name' },
-  slackInstallations: { id: 'id', isActive: 'isActive' },
+  teamsInstallations: {
+    conversationId: 'conversationId',
+    serviceUrl: 'serviceUrl',
+    isActive: 'isActive',
+  },
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   eq: vi.fn((left: unknown, right: unknown) => ({ eq: [left, right] })),
   inArray: vi.fn((column: unknown, values: unknown) => ({
     inArray: [column, values],
   })),
+  isNotNull: vi.fn((column: unknown) => ({ isNotNull: column })),
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     sql: [Array.from(strings), values],
   })),
-  resolveTelegramRuntimeCredentials: telegramCredentialsMock,
+  getAutomationRuntime: getAutomationRuntimeMock,
   db: {
     insert: insertMock,
     select: vi.fn(() => ({
@@ -75,10 +78,6 @@ vi.mock('../automation-messaging.js', () => ({
   postTeamsAutomationMessageBestEffort: postMessageMock,
 }));
 
-vi.mock('../../telegram/primary-chat.js', () => ({
-  findTelegramPrimaryChatId: findTelegramPrimaryChatIdMock,
-}));
-
 vi.mock('../../tasks/scheduled-suggestion-root-summary.js', () => ({
   buildScheduledSuggestionRootMessage: buildRootMessageMock,
 }));
@@ -99,15 +98,10 @@ function buildSuggestion(id: string, title: string) {
 describe('postScheduledSuggestionsToTeams', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // The only `.limit()` lookup is now the dedup query (Slack/Telegram
-    // self-suppression was removed; precedence is owned by the caller).
+    // The primary-conversation path only performs the dedup lookup. A
+    // configured Teams target adds one installation lookup before it.
     selectLimitMock.mockResolvedValue([]);
-    telegramCredentialsMock.mockResolvedValue({
-      botToken: null,
-      webhookSecret: null,
-      botUsername: null,
-    });
-    findTelegramPrimaryChatIdMock.mockResolvedValue(null);
+    getAutomationRuntimeMock.mockResolvedValue({ destination: null });
     findPrimaryConversationMock.mockResolvedValue({
       conversationId: '19:channel@thread.tacv2',
       serviceUrl: 'https://smba.trafficmanager.net/amer/',
@@ -165,6 +159,39 @@ describe('postScheduledSuggestionsToTeams', () => {
     expect(new Set(rows.map((row) => row.dedupeKey)).size).toBe(2);
     expect(rows.map((row) => row.workItemId)).toEqual(['aaa', 'bbb']);
     expect(rows[0]!.channelId).toBe('19:channel@thread.tacv2');
+  });
+
+  it('uses the configured Teams destination instead of the primary conversation', async () => {
+    getAutomationRuntimeMock.mockResolvedValue({
+      destination: {
+        provider: 'teams',
+        channelId: '19:configured@thread.tacv2',
+        source: 'automation_target',
+      },
+    });
+    selectLimitMock
+      .mockResolvedValueOnce([
+        {
+          conversationId: '19:configured@thread.tacv2',
+          serviceUrl: 'https://smba.trafficmanager.net/configured/',
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    await postScheduledSuggestionsToTeams({
+      sourceTaskId: 'task-configured',
+      createdByUserId: 'user-1',
+      suggestionSource: 'suggest_ideas',
+      suggestions: [buildSuggestion('aaa', 'Fix crash')],
+    });
+
+    expect(findPrimaryConversationMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: '19:configured@thread.tacv2',
+        serviceUrl: 'https://smba.trafficmanager.net/configured/',
+      }),
+    );
   });
 
   it('skips when tracked messages already exist for the source task', async () => {

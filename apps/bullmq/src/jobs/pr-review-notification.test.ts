@@ -74,6 +74,7 @@ vi.mock('@roomote/sdk/server', () => ({
     prNumber: z.number(),
     prUrl: z.string(),
     deferrals: z.number().default(0),
+    immediate: z.boolean().optional(),
   }),
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
@@ -194,6 +195,17 @@ describe('prReviewNotificationJob', () => {
       messageTs: '999.888',
     });
     expect(mockSchedule).not.toHaveBeenCalled();
+  });
+
+  it('consumes immediate self-review activity from its independent queue', async () => {
+    await prReviewNotificationJob(makeJob({ immediate: true }) as never);
+
+    expect(mockConsumePending).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      immediate: true,
+    });
   });
 
   it('posts to Teams conversations with markdown formatting', async () => {

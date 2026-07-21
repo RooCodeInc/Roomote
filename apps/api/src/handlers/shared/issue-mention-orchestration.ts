@@ -29,7 +29,7 @@ const EXISTING_TASK_WAIT_POLL_MS = 500;
 
 type IssueMentionProvider = Extract<
   SourceControlProvider,
-  'github' | 'gitlab' | 'gitea'
+  'github' | 'gitlab' | 'gitea' | 'ado'
 >;
 
 type IssueMentionOrchestrationInput = {
@@ -63,6 +63,11 @@ type IssueMentionOrchestrationInput = {
   /** Human provider name in task prompts (“GitHub”, “GitLab”, “Gitea”). */
   providerDisplayName: string;
   /**
+   * Noun for the work unit in prompts (“issue”, “work item”). Defaults to
+   * “issue”.
+   */
+  resourceLabel?: string;
+  /**
    * Untrusted block source id for the issue body/description context section.
    * e.g. `github_issue_body`, `gitlab_issue_description`.
    */
@@ -91,6 +96,7 @@ type IssueMentionOrchestrationInput = {
 
 function buildIssueMentionPrompt({
   providerDisplayName,
+  resourceLabel,
   repositoryFullName,
   issueNumber,
   issueTitle,
@@ -104,6 +110,7 @@ function buildIssueMentionPrompt({
   linkedReferencesSource,
 }: {
   providerDisplayName: string;
+  resourceLabel: string;
   repositoryFullName: string;
   issueNumber: number;
   issueTitle: string;
@@ -143,8 +150,8 @@ function buildIssueMentionPrompt({
     : [];
 
   return [
-    `${commenterLogin} mentioned Roomote on ${providerDisplayName} issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
-    `Issue URL: ${issueUrl}`,
+    `${commenterLogin} mentioned Roomote on ${providerDisplayName} ${resourceLabel} #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
+    `${resourceLabel.charAt(0).toUpperCase()}${resourceLabel.slice(1)} URL: ${issueUrl}`,
     '',
     'Mention comment (the request to act on):',
     buildMentionRequestBlock(trimmedCommentBody),
@@ -157,6 +164,7 @@ function buildIssueMentionPrompt({
 
 function buildIssueFollowUpMessage({
   providerDisplayName,
+  resourceLabel,
   repositoryFullName,
   issueNumber,
   issueTitle,
@@ -167,6 +175,7 @@ function buildIssueFollowUpMessage({
   linkedReferencesSource,
 }: {
   providerDisplayName: string;
+  resourceLabel: string;
   repositoryFullName: string;
   issueNumber: number;
   issueTitle: string;
@@ -189,10 +198,10 @@ function buildIssueFollowUpMessage({
     : [''];
 
   return [
-    `${commenterLogin} mentioned Roomote again on ${providerDisplayName} issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
-    `Issue URL: ${issueUrl}`,
+    `${commenterLogin} mentioned Roomote again on ${providerDisplayName} ${resourceLabel} #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
+    `${resourceLabel.charAt(0).toUpperCase()}${resourceLabel.slice(1)} URL: ${issueUrl}`,
     '',
-    'This is a follow-up on the existing Roomote task for this issue. Continue that work instead of starting a separate task.',
+    `This is a follow-up on the existing Roomote task for this ${resourceLabel}. Continue that work instead of starting a separate task.`,
     '',
     'Mention comment (the request to act on):',
     buildMentionRequestBlock(commentBody),
@@ -358,6 +367,7 @@ export async function orchestrateIssueMention(
     followUpCommenterDisplayName,
     retrySandboxBoot = false,
     providerDisplayName,
+    resourceLabel = 'issue',
     issueBodySource,
     issueBodyContextLabel,
     linkedReferencesSection,
@@ -392,6 +402,7 @@ export async function orchestrateIssueMention(
   if (existingIssueOwner?.taskId) {
     const followUpMessage = buildIssueFollowUpMessage({
       providerDisplayName,
+      resourceLabel,
       repositoryFullName,
       issueNumber,
       issueTitle,
@@ -432,6 +443,7 @@ export async function orchestrateIssueMention(
 
   const prompt = buildIssueMentionPrompt({
     providerDisplayName,
+    resourceLabel,
     repositoryFullName,
     issueNumber,
     issueTitle,

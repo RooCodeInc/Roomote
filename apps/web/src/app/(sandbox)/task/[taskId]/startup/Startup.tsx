@@ -156,7 +156,6 @@ const StartupInner = ({
     steps,
     error,
     errorCode,
-    elapsedSeconds,
     showLogs,
     sandboxLogs,
     logsConnected,
@@ -168,7 +167,6 @@ const StartupInner = ({
       steps={steps}
       error={error}
       errorCode={errorCode}
-      elapsedSeconds={elapsedSeconds}
       logs={showLogs ? sandboxLogs : undefined}
       logsConnected={logsConnected}
       logsError={logsError}

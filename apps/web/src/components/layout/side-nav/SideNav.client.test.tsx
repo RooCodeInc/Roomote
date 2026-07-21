@@ -729,9 +729,13 @@ describe('SideNav quick access tasks', () => {
 
     render(<SideNav />);
 
-    expect(
-      screen.getByTestId('task-item-task-3').parentElement?.parentElement,
-    ).toHaveClass('overflow-y-auto', 'scroll-thin');
+    const taskItem = screen.getByTestId('task-item-task-3');
+    const scrollRegion = taskItem.closest('.overflow-y-auto');
+
+    expect(scrollRegion).toHaveClass('overflow-y-auto', 'scroll-thin');
+    expect(scrollRegion?.parentElement?.parentElement).toHaveClass(
+      'overflow-clip',
+    );
   });
 
   it('opens the expanded side nav from the collapsed header control', () => {

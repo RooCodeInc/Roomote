@@ -2,7 +2,7 @@ import { SlackNotifier } from '@roomote/slack';
 
 import { getRedis } from '@roomote/redis';
 
-export interface SlackDeploymentContext {
+interface SlackDeploymentContext {
   slackBotToken: string;
   slackTeamId: string;
 }

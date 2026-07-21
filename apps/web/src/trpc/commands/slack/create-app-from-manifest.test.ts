@@ -26,7 +26,8 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@/lib/server', () => ({
   Env: {
-    R_APP_URL: 'https://roomote.example.com/',
+    R_APP_URL: 'http://localhost:3000/',
+    R_PUBLIC_URL: 'https://roomote.example.com/',
   },
 }));
 
@@ -155,7 +156,14 @@ describe('createSlackAppFromManifestCommand', () => {
           request_url: 'https://roomote.example.com/api/webhooks/slack',
         },
       },
+      oauth_config: {
+        redirect_urls: [
+          'https://roomote.example.com/api/auth/oauth2/callback/slack',
+          'https://roomote.example.com/api/slack/callback',
+        ],
+      },
     });
+    expect(JSON.stringify(manifest)).not.toContain('localhost');
 
     const [iconUrl, iconInit] = mockFetch.mock.calls[1] as [
       string,

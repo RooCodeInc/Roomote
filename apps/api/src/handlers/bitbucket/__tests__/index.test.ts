@@ -15,6 +15,9 @@ const handleBitbucketPullRequest = vi.fn(async () => ({
   status: 'ok' as const,
 }));
 const handleBitbucketComment = vi.fn(async () => ({ status: 'ok' as const }));
+const handleBitbucketCommitStatus = vi.fn(async () => ({
+  status: 'ok' as const,
+}));
 const resolveDeploymentEnvVar = vi.fn();
 
 vi.mock('../../github/recordWebhook', () => ({
@@ -34,6 +37,12 @@ vi.mock('../handleComment', () => ({
   ): ReturnType<typeof handleBitbucketComment> =>
     handleBitbucketComment(...args),
 }));
+vi.mock('../handleCommitStatus', () => ({
+  handleBitbucketCommitStatus: (
+    ...args: Parameters<typeof handleBitbucketCommitStatus>
+  ): ReturnType<typeof handleBitbucketCommitStatus> =>
+    handleBitbucketCommitStatus(...args),
+}));
 vi.mock('@roomote/db/server', () => ({
   resolveDeploymentEnvVar: (
     ...args: Parameters<typeof resolveDeploymentEnvVar>
@@ -51,6 +60,7 @@ describe('bitbucket webhook router', () => {
     recordWebhook.mockClear();
     handleBitbucketPullRequest.mockClear();
     handleBitbucketComment.mockClear();
+    handleBitbucketCommitStatus.mockClear();
     resolveDeploymentEnvVar.mockImplementation(async (name: string) =>
       name === 'BITBUCKET_WEBHOOK_SECRET' ? 'bitbucket-secret' : null,
     );
@@ -136,6 +146,46 @@ describe('bitbucket webhook router', () => {
 
     expect(response.status).toBe(200);
     expect(handleBitbucketComment).toHaveBeenCalledOnce();
+  });
+
+  it('routes repo:commit_status_updated events', async () => {
+    const body = JSON.stringify({
+      commit_status: {
+        name: 'Pipeline',
+        state: 'FAILED',
+        key: 'BB-PIPE',
+        url: 'https://bitbucket.org/ws/repo/addon/pipelines/home#!/results/42',
+        refname: 'main',
+        commit: { hash: 'abc123' },
+      },
+      repository: { full_name: 'ws/repo', uuid: '{uuid}' },
+    });
+
+    const app = await mountApp();
+    const response = await app.request(
+      'http://localhost/api/webhooks/bitbucket',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': `sha256=${sign(body)}`,
+          'x-event-key': 'repo:commit_status_updated',
+          'x-request-uuid': 'delivery-status-1',
+        },
+        body,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(handleBitbucketCommitStatus).toHaveBeenCalledOnce();
+    expect(recordWebhook).toHaveBeenCalledWith(
+      'delivery-status-1',
+      'repo:commit_status_updated',
+      expect.any(Object),
+      expect.any(Function),
+      { provider: 'bitbucket' },
+    );
+    expect(handleBitbucketPullRequest).not.toHaveBeenCalled();
   });
 
   it('rejects invalid signatures', async () => {

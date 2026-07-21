@@ -1,4 +1,8 @@
 export { announcerJob } from './announcer';
+export {
+  customAutomationsJob,
+  runCustomAutomationNow,
+} from './custom-automations';
 export { ciFailureTriageJob } from './ci-failure-triage';
 export {
   launchCiFailureTriageForFailedRun,
@@ -16,7 +20,9 @@ export { sentryTriageJob } from './sentry-triage';
 export { suggesterJob } from './suggester';
 export { getAutomationRunner, runAutomationNow } from './run-now';
 export {
+  buildDestinationTaskPayloadFields,
   findTeamsConversationDisplayName,
+  findTeamsConversationServiceUrl,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,

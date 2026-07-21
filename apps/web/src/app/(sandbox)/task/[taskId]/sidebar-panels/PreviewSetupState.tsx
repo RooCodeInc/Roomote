@@ -116,23 +116,17 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
     );
   }
 
-  // An agent is already working on this environment: either a preview
-  // setup/repair agent or the environment's own setup/verification task.
+  // A preview setup/repair agent is already working on this environment.
   if (status.setupTask) {
-    const isPreviewAgent = status.setupTask.kind === 'preview';
-
     return (
       <CenteredMessage>
         <Spinner className="size-5" />
         <p className="text-sm font-medium">
-          {isPreviewAgent
-            ? `An agent is setting up live previews for ${status.environment.name}`
-            : `${status.environment.name} is still being set up`}
+          {`An agent is setting up live previews for ${status.environment.name}`}
         </p>
         <p className="text-sm text-muted-foreground">
-          {isPreviewAgent
-            ? 'Once it finishes, new tasks in this environment will include a live preview.'
-            : 'Live previews become available once the environment is ready.'}
+          Once it finishes, new tasks in this environment will include a live
+          preview.
         </p>
         {status.setupTask.taskId ? (
           <Button asChild variant="outline" size="sm">

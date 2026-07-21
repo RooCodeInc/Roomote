@@ -12,6 +12,9 @@ const {
   mockGetLatestGitLabPipeline,
   mockGetGitLabPipelineFailureEvidence,
   mockResolveGitLabInstanceHost,
+  mockGetLatestAdoBuild,
+  mockGetAdoBuildFailureEvidence,
+  mockResolveAdoInstanceHost,
   mockTryClaimCiFailureTriageInvestigation,
   mockReleaseCiFailureTriageInvestigation,
   mockBuildCiFailureTriageFingerprint,
@@ -29,6 +32,9 @@ const {
   mockGetLatestGitLabPipeline: vi.fn(),
   mockGetGitLabPipelineFailureEvidence: vi.fn(),
   mockResolveGitLabInstanceHost: vi.fn(),
+  mockGetLatestAdoBuild: vi.fn(),
+  mockGetAdoBuildFailureEvidence: vi.fn(),
+  mockResolveAdoInstanceHost: vi.fn(),
   mockTryClaimCiFailureTriageInvestigation: vi.fn(),
   mockReleaseCiFailureTriageInvestigation: vi.fn(),
   mockBuildCiFailureTriageFingerprint: vi.fn(),
@@ -78,6 +84,19 @@ vi.mock('@roomote/gitlab', () => ({
   },
 }));
 
+vi.mock('@roomote/ado', () => ({
+  getLatestAdoBuild: mockGetLatestAdoBuild,
+  getAdoBuildFailureEvidence: mockGetAdoBuildFailureEvidence,
+  resolveAdoInstanceHost: mockResolveAdoInstanceHost,
+  getAdoBuildWebUrl: (build: {
+    id: number;
+    url?: string;
+    _links?: { web?: { href?: string } };
+  }) => build._links?.web?.href ?? build.url ?? `build/${build.id}`,
+  stripAdoGitRef: (ref: string | null | undefined) =>
+    (ref ?? '').replace(/^refs\/heads\//, '').trim() || '',
+}));
+
 import { ciFailureTriageJob } from '../ci-failure-triage';
 
 describe('ciFailureTriageJob multi-comms destinations', () => {
@@ -106,6 +125,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
         if (repositoryId === 'repo-gl-cloud') return 'env-gl-cloud';
         if (repositoryId === 'repo-gl-self') return 'env-gl-self';
         if (repositoryId === 'repo-gl-1') return 'env-gl';
+        if (repositoryId === 'repo-ado-1') return 'env-ado';
         return undefined;
       },
     );
@@ -123,6 +143,22 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       'job="test" id=21\nAssertionError',
     );
     mockResolveGitLabInstanceHost.mockResolvedValue('gitlab.com');
+    mockGetLatestAdoBuild.mockResolvedValue({
+      id: 88,
+      result: 'failed',
+      sourceBranch: 'refs/heads/main',
+      sourceVersion: 'ado-sha',
+      definition: { name: 'CI' },
+      _links: {
+        web: {
+          href: 'https://dev.azure.com/acme/Platform/_build/results?buildId=88',
+        },
+      },
+    });
+    mockGetAdoBuildFailureEvidence.mockResolvedValue(
+      'task="Test"\nAssertionError',
+    );
+    mockResolveAdoInstanceHost.mockResolvedValue('dev.azure.com');
     mockBuildCiFailureTriageFingerprint.mockReturnValue('fp-manual');
     mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(true);
     mockBuildCiFailureTriagePrompt.mockReturnValue('$ci-failure-triage prompt');
@@ -454,6 +490,129 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     expect(result.skippedReason).toContain('no repositories are covered');
     expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
     expect(mockGetLatestGitLabPipeline).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('stamps Azure DevOps provider on the payload for ADO repos with failed builds', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-ado-1',
+        fullName: 'acme/Platform/backend',
+        sourceControlProvider: 'ado',
+        externalRepoId: 'repo-guid-1',
+        host: 'dev.azure.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockGetLatestAdoBuild).toHaveBeenCalledWith({
+      repositoryFullName: 'acme/Platform/backend',
+      repositoryId: 'repo-guid-1',
+      branch: 'main',
+    });
+    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceControlProvider: 'ado',
+        triggeringRun: expect.objectContaining({
+          provider: 'ado',
+          workflowName: 'CI',
+          headSha: 'ado-sha',
+          failureEvidence: 'task="Test"\nAssertionError',
+        }),
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/Platform/backend',
+            environmentId: 'env-ado',
+            sourceControlProvider: 'ado',
+            sourceControlHost: 'dev.azure.com',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('skips Azure DevOps manual Run now when the latest build is green', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-ado-1',
+        fullName: 'acme/Platform/backend',
+        sourceControlProvider: 'ado',
+        externalRepoId: 'repo-guid-1',
+        host: 'dev.azure.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockGetLatestAdoBuild.mockResolvedValue({
+      id: 88,
+      result: 'succeeded',
+      sourceBranch: 'refs/heads/main',
+      sourceVersion: 'ado-sha',
+      definition: { name: 'CI' },
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockGetAdoBuildFailureEvidence).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('skips Azure DevOps repos whose host does not match the deployment instance', async () => {
+    mockResolveAdoInstanceHost.mockResolvedValue('dev.azure.com');
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-ado-1',
+        fullName: 'acme/Platform/backend',
+        sourceControlProvider: 'ado',
+        externalRepoId: 'repo-guid-1',
+        host: 'ado.example.com',
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-ado-legacy',
+        fullName: 'acme/Platform/legacy',
+        sourceControlProvider: 'ado',
+        externalRepoId: 'repo-guid-legacy',
+        host: null,
+        defaultBranch: 'main',
+      },
+    ]);
+    mockFindEnvironmentIdForRepositoryId.mockImplementation(
+      async (repositoryId: string) => {
+        if (repositoryId === 'repo-ado-1') return 'env-ado';
+        if (repositoryId === 'repo-ado-legacy') return 'env-ado-legacy';
+        return undefined;
+      },
+    );
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockGetLatestAdoBuild).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 });

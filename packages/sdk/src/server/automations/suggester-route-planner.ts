@@ -2,13 +2,15 @@ import { planSuggestionRoutes } from '@roomote/cloud-agents/server';
 import { SlackNotifier } from '@roomote/slack';
 
 import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback';
-import type { SlackDeploymentContext } from './scheduling-utils';
 
 const LOG_PREFIX = '[suggester]';
 const DEFAULT_FALLBACK_ROUTE_INSTRUCTIONS =
   'Only surface ideas that do not clearly belong to any defined routed group. Use this fallback route for ambiguous or uncategorized ideas.';
 
-export type SuggesterDeploymentContext = SlackDeploymentContext;
+export type SuggesterDeploymentContext = {
+  slackBotToken: string | null;
+  slackTeamId: string | null;
+};
 
 export type RepositoryCoverage = Array<{
   repositoryFullName: string;
@@ -71,6 +73,10 @@ async function buildGroupedSuggestionDispatchRoutes(params: {
   repositoryCoverage: RepositoryCoverage;
   routingInstructions: string;
 }): Promise<SuggestionDispatchRoute[] | null> {
+  if (!params.deployment.slackBotToken) {
+    return null;
+  }
+
   try {
     const notifier = new SlackNotifier(params.deployment.slackBotToken);
     const [availableChannels, managerChannelName] = await Promise.all([

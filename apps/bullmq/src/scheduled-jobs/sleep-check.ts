@@ -52,6 +52,10 @@ const BOOTING_NO_HEARTBEAT_STATUSES = [
   RunStatus.Spawning,
   RunStatus.Connecting,
 ];
+const STALE_WORKER_STATUSES = [
+  ...ACTIVE_SLEEP_CHECK_STATUSES,
+  ...BOOTING_NO_HEARTBEAT_STATUSES,
+];
 
 const SLEEP_CHECK_PROVIDERS = sleepCheckManagedComputeProviders;
 
@@ -214,7 +218,7 @@ export const sleepCheckJob = async () => {
     .from(taskRuns)
     .where(
       and(
-        ...getBaseSleepCheckCandidateConditions(),
+        ...getBaseSleepCheckCandidateConditions(STALE_WORKER_STATUSES),
         isNotNull(taskRuns.workerHeartbeatAt),
         lte(
           taskRuns.workerHeartbeatAt,

@@ -181,7 +181,7 @@ describe('StepComputeProvider', () => {
       providers: [
         buildProvider({
           provider: 'roomote',
-          label: 'Roomote',
+          label: 'Roomote Cloud',
           infrastructureSatisfied: configSatisfied,
           configSatisfied,
           // Deployment-managed: no operator-editable fields.
@@ -212,6 +212,6 @@ describe('StepComputeProvider', () => {
         onContinue={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: /roomote/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /roomote cloud/i })).toBeTruthy();
   });
 });

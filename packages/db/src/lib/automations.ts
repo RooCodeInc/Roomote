@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import {
   type AnnouncerFrequency,
@@ -42,6 +42,19 @@ import type {
   CodeQualityAuditorScanCursor,
   SecurityAuditorScanCursor,
 } from '../types';
+
+function automationTargetsLockKey(key: BackgroundAutomationKey): string {
+  return `automation-targets:${key}`;
+}
+
+async function lockAutomationTargets(
+  tx: DatabaseOrTransaction,
+  key: BackgroundAutomationKey,
+): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${automationTargetsLockKey(key)}))`,
+  );
+}
 
 function getScheduleModes<TMode extends string>(
   automationKey: TriggerableBackgroundAutomationKey,
@@ -216,6 +229,92 @@ export function getAutomationDiscordChannelTarget(
   return (
     getAutomationTargetRefs(automation, 'discord', 'discord_channel')[0] ?? null
   );
+}
+
+export function getAutomationTelegramChatTarget(
+  automation: Pick<Automation, 'targets'> | undefined,
+): string | null {
+  return (
+    getAutomationTargetRefs(automation, 'telegram', 'telegram_chat')[0] ?? null
+  );
+}
+
+export function getAutomationTeamsChannelTarget(
+  automation: Pick<Automation, 'targets'> | undefined,
+): string | null {
+  return (
+    getAutomationTargetRefs(automation, 'teams', 'teams_channel')[0] ?? null
+  );
+}
+
+/** Sticky Telegram forum-topic id owned by a telegram_chat target, if any. */
+export function getAutomationTelegramTopicThreadId(
+  automation: Pick<Automation, 'targets'> | undefined,
+): string | null {
+  const target = (automation?.targets ?? []).find(
+    (entry) =>
+      entry.provider === 'telegram' && entry.targetKind === 'telegram_chat',
+  );
+  if (!target) {
+    return null;
+  }
+  const threadId = asString(asObject(target.metadata).threadId);
+  return threadId?.trim() || null;
+}
+
+/**
+ * Persist (or replace) the sticky Telegram forum topic id on the automation's
+ * telegram_chat target. Creates the target when missing so first-run topic
+ * creation can survive a save-with-openai race.
+ */
+export async function persistAutomationTelegramTopicThread(params: {
+  automationKey: BackgroundAutomationKey;
+  chatId: string;
+  threadId: string;
+  topicName?: string;
+}): Promise<void> {
+  const chatId = params.chatId.trim();
+  const threadId = params.threadId.trim();
+  if (!chatId || !threadId) {
+    return;
+  }
+
+  await db.transaction(async (tx) => {
+    await lockAutomationTargets(tx, params.automationKey);
+
+    const existing = await tx.query.automations.findFirst({
+      columns: { targets: true },
+      where: eq(automations.key, params.automationKey),
+    });
+    const targets = [...(existing?.targets ?? [])];
+    const index = targets.findIndex(
+      (target) =>
+        target.provider === 'telegram' && target.targetKind === 'telegram_chat',
+    );
+    const topicName = params.topicName?.trim();
+    const nextMetadata = {
+      ...(index >= 0 ? asObject(targets[index]?.metadata) : {}),
+      threadId,
+      ...(topicName ? { topicName } : {}),
+    };
+    const nextTarget: AutomationTarget = {
+      provider: 'telegram',
+      targetKind: 'telegram_chat',
+      externalRef: chatId,
+      metadata: nextMetadata,
+    };
+
+    if (index >= 0) {
+      targets[index] = nextTarget;
+    } else {
+      targets.push(nextTarget);
+    }
+
+    await tx
+      .update(automations)
+      .set({ targets, updatedAt: new Date() })
+      .where(eq(automations.key, params.automationKey));
+  });
 }
 
 /**
@@ -425,6 +524,21 @@ export async function upsertAutomation(
   tx: DatabaseOrTransaction,
   input: UpsertAutomationInput,
 ): Promise<void> {
+  if (input.targets !== undefined && input.managedTargetKinds !== undefined) {
+    await tx.transaction(async (lockedTx) => {
+      await lockAutomationTargets(lockedTx, input.key);
+      await upsertAutomationValues(lockedTx, input);
+    });
+    return;
+  }
+
+  await upsertAutomationValues(tx, input);
+}
+
+async function upsertAutomationValues(
+  tx: DatabaseOrTransaction,
+  input: UpsertAutomationInput,
+): Promise<void> {
   const now = input.updatedAt ?? new Date();
   const schedule = input.enabled ? (input.schedule ?? {}) : {};
 
@@ -435,10 +549,49 @@ export async function upsertAutomation(
       columns: { targets: true },
       where: eq(automations.key, input.key),
     });
-    const preserved = (existing?.targets ?? []).filter(
+    const existingTargets = existing?.targets ?? [];
+    const preserved = existingTargets.filter(
       (target) => !managedKinds.has(target.targetKind),
     );
-    targets = [...preserved, ...input.targets];
+    // Merge sticky Telegram topic metadata when a write omits threadId but the
+    // DB already has one for the same chat. Concurrent first-delivery topic
+    // persistence must outlive an overlapping settings save.
+    const nextManaged = input.targets.map((target) => {
+      if (
+        target.provider !== 'telegram' ||
+        target.targetKind !== 'telegram_chat'
+      ) {
+        return target;
+      }
+
+      const incomingThreadId = asString(asObject(target.metadata).threadId);
+      if (incomingThreadId?.trim()) {
+        return target;
+      }
+
+      const prior = existingTargets.find(
+        (entry) =>
+          entry.provider === 'telegram' &&
+          entry.targetKind === 'telegram_chat' &&
+          entry.externalRef === target.externalRef,
+      );
+      const priorThreadId = asString(
+        asObject(prior?.metadata).threadId,
+      )?.trim();
+      if (!prior || !priorThreadId) {
+        return target;
+      }
+
+      return {
+        ...target,
+        metadata: {
+          ...asObject(prior.metadata),
+          ...asObject(target.metadata),
+          threadId: priorThreadId,
+        },
+      };
+    });
+    targets = [...preserved, ...nextManaged];
   }
 
   const values: typeof automations.$inferInsert = {
@@ -829,6 +982,8 @@ export function normalizeBackgroundAgentSettings(
         ];
       }),
     ),
+    suggesterTelegramChatId: getAutomationTelegramChatTarget(suggester),
+    suggesterTeamsChannelId: getAutomationTeamsChannelTarget(suggester),
   } as BackgroundAgentSettings;
 }
 
