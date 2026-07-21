@@ -328,10 +328,16 @@ export async function updateAuthStatus(
 }
 
 /**
- * Get stored client information
+ * Get stored client information.
+ * When `expectedRedirectUri` is set and the stored oauth_client registration
+ * was recorded against a different callback, return undefined so callers can
+ * re-register or re-store for the current public callback origin.
  */
 export async function getClientInformation(
   connectionId: string,
+  options?: {
+    expectedRedirectUri?: string;
+  },
 ): Promise<OAuthClientInformation | undefined> {
   const connection = await db.query.mcpConnections.findFirst({
     where: eq(mcpConnections.id, connectionId),
@@ -343,6 +349,15 @@ export async function getClientInformation(
 
   const config = connection.authConfig;
   if ('type' in config && config.type === 'oauth_client' && config.client_id) {
+    if (
+      options?.expectedRedirectUri &&
+      typeof config.registered_redirect_uri === 'string' &&
+      config.registered_redirect_uri.length > 0 &&
+      config.registered_redirect_uri !== options.expectedRedirectUri
+    ) {
+      return undefined;
+    }
+
     const tokenEndpointAuthMethod =
       config.token_endpoint_auth_method ??
       (config.client_secret ? 'client_secret_post' : 'none');

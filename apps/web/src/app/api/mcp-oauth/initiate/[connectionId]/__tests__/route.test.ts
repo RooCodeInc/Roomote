@@ -11,9 +11,11 @@ const {
   getMcpIntegrationMock,
   getMcpIntegrationOauthScopeModeMock,
   getMcpIntegrationOauthScopesMock,
+  getPreferredTokenEndpointAuthMethodMock,
   isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegrationMock,
   mcpConnectionsFindFirstMock,
+  registerOAuthClientMock,
   resolveStaticOauthClientInformationMock,
   storeClientInformationMock,
   storeOAuthStateWithIdMock,
@@ -30,9 +32,11 @@ const {
   getMcpIntegrationMock: vi.fn(),
   getMcpIntegrationOauthScopeModeMock: vi.fn(),
   getMcpIntegrationOauthScopesMock: vi.fn(),
+  getPreferredTokenEndpointAuthMethodMock: vi.fn(),
   isDeploymentScopedMcpIntegrationMock: vi.fn(),
   isSelfServeMcpIntegrationMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
+  registerOAuthClientMock: vi.fn(),
   resolveStaticOauthClientInformationMock: vi.fn(),
   storeClientInformationMock: vi.fn(),
   storeOAuthStateWithIdMock: vi.fn(),
@@ -66,8 +70,8 @@ vi.mock('@roomote/sdk/server', () => ({
   discoverOAuthEndpoints: discoverOAuthEndpointsMock,
   discoverOAuthProtectedResourceMetadata:
     discoverOAuthProtectedResourceMetadataMock,
-  registerOAuthClient: vi.fn(),
-  getPreferredTokenEndpointAuthMethod: vi.fn(),
+  registerOAuthClient: registerOAuthClientMock,
+  getPreferredTokenEndpointAuthMethod: getPreferredTokenEndpointAuthMethodMock,
   generateCodeVerifier: generateCodeVerifierMock,
   generateCodeChallenge: generateCodeChallengeMock,
   generateState: generateStateMock,
@@ -125,12 +129,14 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     discoverOAuthEndpointsMock.mockResolvedValue({
       authorization_endpoint: 'https://mcp.linear.app/authorize',
       token_endpoint: 'https://mcp.linear.app/token',
+      registration_endpoint: 'https://mcp.linear.app/register',
       scopes_supported: ['read', 'write'],
     });
     discoverOAuthProtectedResourceMetadataMock.mockResolvedValue(undefined);
     getClientInformationMock.mockResolvedValue({
       client_id: 'client-1',
     });
+    getPreferredTokenEndpointAuthMethodMock.mockReturnValue('none');
     getMcpIntegrationOauthScopesMock.mockReturnValue(undefined);
     getMcpIntegrationOauthScopeModeMock.mockReturnValue(undefined);
     getMcpIntegrationAuthorizationParametersMock.mockReturnValue([]);
@@ -139,6 +145,10 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     generateStateMock.mockReturnValue('state-value');
     storeOAuthStateWithIdMock.mockResolvedValue(undefined);
     resolveStaticOauthClientInformationMock.mockReturnValue(undefined);
+    registerOAuthClientMock.mockResolvedValue({
+      client_id: 'fresh-client',
+    });
+    storeClientInformationMock.mockResolvedValue(undefined);
   });
 
   it('builds redirect_uri from R_PUBLIC_URL when set with loopback R_APP_URL', async () => {
@@ -154,6 +164,38 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     expect(authUrl.searchParams.get('redirect_uri')).toBe(PUBLIC_CALLBACK);
     expect(authUrl.searchParams.get('client_id')).toBe('client-1');
     expect(authUrl.searchParams.get('state')).toBe('state-value');
+    expect(getClientInformationMock).toHaveBeenCalledWith(CONNECTION_ID, {
+      expectedRedirectUri: PUBLIC_CALLBACK,
+    });
+  });
+
+  it('re-registers when stored client was registered against a different callback', async () => {
+    getClientInformationMock.mockResolvedValue(undefined);
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(getClientInformationMock).toHaveBeenCalledWith(CONNECTION_ID, {
+      expectedRedirectUri: PUBLIC_CALLBACK,
+    });
+    expect(registerOAuthClientMock).toHaveBeenCalledWith(
+      'https://mcp.linear.app/register',
+      expect.objectContaining({
+        redirect_uris: [PUBLIC_CALLBACK],
+      }),
+    );
+    expect(storeClientInformationMock).toHaveBeenCalledWith(
+      CONNECTION_ID,
+      expect.objectContaining({ client_id: 'fresh-client' }),
+      PUBLIC_CALLBACK,
+    );
+
+    const location = response.headers.get('location');
+    expect(location).toBeTruthy();
+    const authUrl = new URL(location!);
+    expect(authUrl.searchParams.get('client_id')).toBe('fresh-client');
+    expect(authUrl.searchParams.get('redirect_uri')).toBe(PUBLIC_CALLBACK);
   });
 
   it('falls back to R_APP_URL for redirect_uri when R_PUBLIC_URL is unset', async () => {

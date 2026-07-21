@@ -198,7 +198,9 @@ export async function GET(
     );
 
     let clientInfo: OAuthClientInformation | undefined =
-      await getClientInformation(connectionId);
+      await getClientInformation(connectionId, {
+        expectedRedirectUri: redirectUri,
+      });
 
     if (!clientInfo) {
       const staticClientInfo = getStaticClientInformation(webEnv, integration);
