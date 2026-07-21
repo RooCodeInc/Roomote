@@ -282,6 +282,14 @@ describe('attachDockerEgressPolicy', () => {
     expect(routeScript).toContain(
       'iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
     );
+    expect(routeScript).toContain(
+      'iptables -C FORWARD -d "$gateway" -j DROP 2>/dev/null || iptables -A FORWARD -d "$gateway" -j DROP',
+    );
+    // Upgrades must heal netns state left by controllers that blackholed the
+    // gateway route in retained standby workers.
+    expect(routeScript).toContain(
+      'ip route del blackhole "$gateway/32" 2>/dev/null || true',
+    );
   });
 
   it('generates a syntactically valid shell script for the egress helper', async () => {

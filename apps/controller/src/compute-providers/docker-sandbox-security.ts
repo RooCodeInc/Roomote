@@ -569,6 +569,10 @@ export async function attachDockerEgressPolicy(
             [
               'gateway="$(ip route show default | awk \'NR == 1 { print $3 }\')"',
               'if [ -n "$gateway" ]; then',
+              // Heal namespaces set up by controllers that still blackholed
+              // the gateway as a route; retained standby workers keep their
+              // netns across controller upgrades.
+              '  ip route del blackhole "$gateway/32" 2>/dev/null || true',
               '  if ! command -v iptables >/dev/null 2>&1; then',
               '    if command -v apk >/dev/null 2>&1; then',
               '      apk add --no-cache iptables >/dev/null',
@@ -576,6 +580,9 @@ export async function attachDockerEgressPolicy(
               '  fi',
               '  if command -v iptables >/dev/null 2>&1; then',
               '    iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
+              // The route blackhole also covered forwarded traffic; keep that
+              // property in case the worker netns ever routes packets.
+              '    iptables -C FORWARD -d "$gateway" -j DROP 2>/dev/null || iptables -A FORWARD -d "$gateway" -j DROP',
               '  else',
               '    echo "iptables unavailable; cannot block docker gateway $gateway" >&2',
               '    exit 1',
