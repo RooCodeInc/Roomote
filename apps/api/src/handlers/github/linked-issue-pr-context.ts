@@ -4,7 +4,7 @@ const TIMELINE_PAGE_SIZE = 100;
 /** Bound webhook latency; most timelines finish within one page. */
 const TIMELINE_MAX_PAGES = 3;
 
-export type GitHubLinkedReference = {
+type GitHubLinkedReference = {
   kind: 'issue' | 'pull_request';
   number: number;
   title?: string;
