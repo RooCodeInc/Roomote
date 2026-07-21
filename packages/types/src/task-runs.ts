@@ -939,9 +939,9 @@ const sharedTaskPayloadSchema = z.object({
    */
   discordReactionMessageId: z.string().optional(),
   /**
-   * True when intake pinned 👀 on the origin reaction target before launch.
-   * Worker onStart clears that eyes reaction only when this flag is set so
-   * resume runs and interaction launches without intake eyes do not DELETE 404s.
+   * True when platform pinned 👀 on the origin (or snapshot-wake) reaction
+   * target before enqueue. Worker onStart clears that eyes reaction only when
+   * this flag is set so launches without a successful 👀 pin do not DELETE 404s.
    */
   discordIntakeAckPending: z.boolean().optional(),
   /** True when the Telegram topic was created specifically for this task. */
@@ -1642,9 +1642,9 @@ export function getDiscordReactionTargetFromTaskPayload(payload: unknown): {
 }
 
 /**
- * Origin of a real Discord intake 👀 reaction to clear on worker start.
+ * Origin of a real Discord intake/wake 👀 reaction to clear on worker start.
  * Requires the dedicated reaction target plus the intake-pending flag set at
- * enqueue when eyes were actually pinned (not resume / interaction-only targets).
+ * enqueue when eyes were actually pinned (not interaction-only targets).
  */
 export function getDiscordIntakeAckReactionTargetFromTaskPayload(
   payload: unknown,

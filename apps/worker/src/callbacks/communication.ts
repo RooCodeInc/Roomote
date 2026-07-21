@@ -4,7 +4,6 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getDiscordIntakeAckReactionTargetFromTaskPayload,
-  TaskPayloadKind,
   type CommunicationProvider,
 } from '@roomote/types';
 
@@ -32,16 +31,12 @@ function supportsCommunicationRequestUserInput(
 }
 
 function supportsCommunicationAckReactionCleanup(taskRun: TaskRun): boolean {
-  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
-    return false;
-  }
-
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
   if (provider !== 'discord') {
     return false;
   }
 
-  // Only wire onStart when intake actually pinned eyes on a durable target.
+  // Wire onStart when intake or snapshot-wake pinned eyes on a durable target.
   return (
     getDiscordIntakeAckReactionTargetFromTaskPayload(taskRun.payload) !== null
   );
