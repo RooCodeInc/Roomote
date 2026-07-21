@@ -825,6 +825,7 @@ roomoteMcpServer.registerTool(
         action: params.action,
         repositoryFullName: params.repositoryFullName,
         prNumber: params.prNumber,
+        issueNumber: params.issueNumber,
         state: params.state,
         limit: params.limit,
         threadId: params.threadId,

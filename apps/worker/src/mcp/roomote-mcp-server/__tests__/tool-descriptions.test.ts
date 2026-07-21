@@ -777,4 +777,60 @@ describe('roomote MCP tool descriptions', () => {
       'Optional hidden implementation context for the implementing agent. This is not shown to Slack users.',
     );
   });
+
+  it('forwards issueNumber from manage_source_control tool params', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'get_issue',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 640,
+          warnings: [],
+          title: 'Example issue',
+          state: 'open',
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    expect(sourceControlTool.handler).toBeDefined();
+    const result = await sourceControlTool.handler?.({
+      action: 'get_issue',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      issueNumber: 640,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'get_issue',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          issueNumber: 640,
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      content: [
+        {
+          type: 'text',
+          text: expect.stringContaining('"number":640'),
+        },
+      ],
+    });
+  });
 });
