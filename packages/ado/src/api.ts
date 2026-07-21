@@ -52,6 +52,18 @@ const ADO_PULL_REQUEST_SERVICE_HOOK_EVENTS: readonly {
   { eventType: 'ms.vss-code.git-pullrequest-comment-event' },
 ] as const;
 
+/** Project-scoped events (no repository publisher input). */
+const ADO_WORK_ITEM_SERVICE_HOOK_EVENTS: readonly {
+  eventType: string;
+  publisherInputs?: Record<string, string>;
+}[] = [{ eventType: 'workitem.commented' }] as const;
+
+const adoWorkItemCommentSchema = z
+  .object({
+    id: z.union([z.string(), z.number()]).optional(),
+  })
+  .passthrough();
+
 const adoProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -878,6 +890,63 @@ export async function createAdoPullRequestComment({
   };
 }
 
+export async function createAdoWorkItemComment({
+  project,
+  workItemId,
+  body,
+  token,
+  organization,
+  baseUrl,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  project: string;
+  workItemId: number;
+  body: string;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ commentId: string | null }> {
+  const adoToken = token ?? (await resolveAdoToken());
+
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to create Azure DevOps work item comments.',
+    );
+  }
+
+  const resolvedOrganizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl(
+    {
+      organization,
+      baseUrl,
+      organizationApiBaseUrl,
+    },
+  );
+
+  if (!resolvedOrganizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to create Azure DevOps work item comments.',
+    );
+  }
+
+  const { data } = await requestAdoJson({
+    organizationApiBaseUrl: resolvedOrganizationApiBaseUrl,
+    fetchImpl,
+    method: 'POST',
+    path: `/${encodeURIComponent(project)}/_apis/wit/workItems/${workItemId}/comments`,
+    params: { 'api-version': '7.1-preview.4' },
+    token: adoToken,
+    body: { text: body },
+    schema: adoWorkItemCommentSchema,
+  });
+
+  return {
+    commentId: data.id != null ? String(data.id) : null,
+  };
+}
+
 export async function listAdoRepositories({
   token,
   organization,
@@ -959,7 +1028,7 @@ function buildAdoServiceHookSubscriptionBody({
   webhookUrl,
   secretToken,
 }: {
-  repositoryId: string;
+  repositoryId?: string;
   projectId: string;
   eventType: string;
   publisherInputs?: Record<string, string>;
@@ -974,7 +1043,7 @@ function buildAdoServiceHookSubscriptionBody({
     consumerActionId: ADO_SERVICE_HOOK_CONSUMER_ACTION_ID,
     publisherInputs: {
       projectId,
-      repository: repositoryId,
+      ...(repositoryId ? { repository: repositoryId } : {}),
       ...publisherInputs,
     },
     consumerInputs: {
@@ -1022,16 +1091,22 @@ function hasMatchingAdoPublisherInputs({
   publisherInputs,
 }: {
   subscription: AdoServiceHookSubscription;
-  repositoryId: string;
+  repositoryId?: string;
   projectId: string;
   publisherInputs?: Record<string, string>;
 }): boolean {
   const existingInputs = subscription.publisherInputs ?? {};
 
-  if (
-    existingInputs.projectId !== projectId ||
-    existingInputs.repository !== repositoryId
-  ) {
+  if (existingInputs.projectId !== projectId) {
+    return false;
+  }
+
+  if (repositoryId) {
+    if (existingInputs.repository !== repositoryId) {
+      return false;
+    }
+  } else if (existingInputs.repository) {
+    // Project-scoped hooks must not match repository-scoped subscriptions.
     return false;
   }
 
@@ -1055,7 +1130,7 @@ function findAdoServiceHookSubscription({
 }: {
   subscriptions: AdoServiceHookSubscription[];
   eventType: string;
-  repositoryId: string;
+  repositoryId?: string;
   projectId: string;
   publisherInputs?: Record<string, string>;
   webhookUrl: string;
@@ -1079,6 +1154,76 @@ function findAdoServiceHookSubscription({
         publisherInputs,
       }),
   );
+}
+
+async function upsertAdoServiceHookSubscription({
+  repositoryId,
+  projectId,
+  eventType,
+  publisherInputs,
+  webhookUrl,
+  secretToken,
+  subscriptions,
+  token,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryId?: string;
+  projectId: string;
+  eventType: string;
+  publisherInputs?: Record<string, string>;
+  webhookUrl: string;
+  secretToken: string;
+  subscriptions: AdoServiceHookSubscription[];
+  token: string;
+  organizationApiBaseUrl: string;
+  fetchImpl?: typeof fetch;
+}): Promise<'created' | 'updated'> {
+  const body = buildAdoServiceHookSubscriptionBody({
+    repositoryId,
+    projectId,
+    eventType,
+    publisherInputs,
+    webhookUrl,
+    secretToken,
+  });
+  const existingSubscription = findAdoServiceHookSubscription({
+    subscriptions,
+    eventType,
+    repositoryId,
+    projectId,
+    publisherInputs,
+    webhookUrl,
+    legacyWebhookUrl: webhookUrl,
+  });
+
+  if (!existingSubscription) {
+    await requestAdoJson({
+      organizationApiBaseUrl,
+      fetchImpl,
+      method: 'POST',
+      path: '/_apis/hooks/subscriptions',
+      params: { 'api-version': ADO_API_VERSION },
+      token,
+      body,
+      schema: adoServiceHookSubscriptionSchema,
+    });
+    return 'created';
+  }
+
+  await requestAdoJson({
+    organizationApiBaseUrl,
+    fetchImpl,
+    method: 'PUT',
+    path: `/_apis/hooks/subscriptions/${encodeURIComponent(
+      existingSubscription.id,
+    )}`,
+    params: { 'api-version': ADO_API_VERSION },
+    token,
+    body,
+    schema: adoServiceHookSubscriptionSchema,
+  });
+  return 'updated';
 }
 
 async function ensureAdoRepositoryServiceHooks({
@@ -1107,52 +1252,58 @@ async function ensureAdoRepositoryServiceHooks({
       webhookUrl,
       queryParams: descriptor.webhookQueryParams,
     });
-    const body = buildAdoServiceHookSubscriptionBody({
-      repositoryId,
-      projectId,
-      eventType: descriptor.eventType,
-      publisherInputs: descriptor.publisherInputs,
-      webhookUrl: descriptorWebhookUrl,
-      secretToken,
-    });
-    const existingSubscription = findAdoServiceHookSubscription({
-      subscriptions,
-      eventType: descriptor.eventType,
-      repositoryId,
-      projectId,
-      publisherInputs: descriptor.publisherInputs,
-      webhookUrl: descriptorWebhookUrl,
-      legacyWebhookUrl: webhookUrl,
-    });
-
-    if (!existingSubscription) {
-      await requestAdoJson({
+    statuses.push(
+      await upsertAdoServiceHookSubscription({
+        repositoryId,
+        projectId,
+        eventType: descriptor.eventType,
+        publisherInputs: descriptor.publisherInputs,
+        webhookUrl: descriptorWebhookUrl,
+        secretToken,
+        subscriptions,
+        token,
         organizationApiBaseUrl,
         fetchImpl,
-        method: 'POST',
-        path: '/_apis/hooks/subscriptions',
-        params: { 'api-version': ADO_API_VERSION },
-        token,
-        body,
-        schema: adoServiceHookSubscriptionSchema,
-      });
-      statuses.push('created');
-      continue;
-    }
+      }),
+    );
+  }
 
-    await requestAdoJson({
-      organizationApiBaseUrl,
-      fetchImpl,
-      method: 'PUT',
-      path: `/_apis/hooks/subscriptions/${encodeURIComponent(
-        existingSubscription.id,
-      )}`,
-      params: { 'api-version': ADO_API_VERSION },
-      token,
-      body,
-      schema: adoServiceHookSubscriptionSchema,
-    });
-    statuses.push('updated');
+  return statuses.includes('created') ? 'created' : 'updated';
+}
+
+async function ensureAdoProjectWorkItemServiceHooks({
+  projectId,
+  subscriptions,
+  webhookUrl,
+  secretToken,
+  token,
+  organizationApiBaseUrl,
+  fetchImpl,
+}: {
+  projectId: string;
+  subscriptions: AdoServiceHookSubscription[];
+  webhookUrl: string;
+  secretToken: string;
+  token: string;
+  organizationApiBaseUrl: string;
+  fetchImpl?: typeof fetch;
+}): Promise<'created' | 'updated'> {
+  const statuses: ('created' | 'updated')[] = [];
+
+  for (const descriptor of ADO_WORK_ITEM_SERVICE_HOOK_EVENTS) {
+    statuses.push(
+      await upsertAdoServiceHookSubscription({
+        projectId,
+        eventType: descriptor.eventType,
+        publisherInputs: descriptor.publisherInputs,
+        webhookUrl,
+        secretToken,
+        subscriptions,
+        token,
+        organizationApiBaseUrl,
+        fetchImpl,
+      }),
+    );
   }
 
   return statuses.includes('created') ? 'created' : 'updated';
@@ -1245,6 +1396,38 @@ export async function ensureAdoServiceHooksForRepositories({
         ),
       )),
     );
+  }
+
+  // Work-item @mentions are project-scoped. Ensure once per project after the
+  // per-repository PR hooks so multi-repo projects only create a single hook.
+  const projectIds = [
+    ...new Set(repositories.map((repository) => repository.projectId)),
+  ];
+  for (const projectId of projectIds) {
+    try {
+      await ensureAdoProjectWorkItemServiceHooks({
+        projectId,
+        subscriptions,
+        webhookUrl,
+        secretToken,
+        token: adoToken,
+        organizationApiBaseUrl,
+        fetchImpl,
+      });
+    } catch (error) {
+      // Reflect open failures on every repository result from the same project
+      // so webhook setup reports something went wrong instead of silent miss.
+      const message = error instanceof Error ? error.message : String(error);
+      for (const result of results) {
+        const repository = repositories.find(
+          (entry) => entry.repositoryFullName === result.repositoryFullName,
+        );
+        if (repository?.projectId === projectId && result.status !== 'failed') {
+          result.status = 'failed';
+          result.error = message;
+        }
+      }
+    }
   }
 
   return results;
@@ -1354,6 +1537,13 @@ export async function removeAdoServiceHooksForRepositories({
 
   const results: AdoServiceHookRemoveResult[] = [];
 
+  const workItemEventTypes = new Set(
+    ADO_WORK_ITEM_SERVICE_HOOK_EVENTS.map((event) => event.eventType),
+  );
+  // Track project-level WI hooks deleted once so multi-repo same-project
+  // removals don't 404 on a second delete of the same subscription.
+  const deletedWorkItemSubscriptionIds = new Set<string>();
+
   for (const repository of repositories) {
     const matching = subscriptions.filter(
       (subscription) =>
@@ -1370,7 +1560,26 @@ export async function removeAdoServiceHooksForRepositories({
         ),
     );
 
-    if (matching.length === 0) {
+    // Project-scoped work-item hooks have no repository publisher input.
+    // Remove them with unmapped repos; ensure recreates for projects that
+    // still have mapped repositories afterward.
+    const workItemMatching = subscriptions.filter(
+      (subscription) =>
+        subscription.publisherId === ADO_SERVICE_HOOK_PUBLISHER_ID &&
+        subscription.consumerId === ADO_SERVICE_HOOK_CONSUMER_ID &&
+        subscription.consumerActionId === ADO_SERVICE_HOOK_CONSUMER_ACTION_ID &&
+        workItemEventTypes.has(subscription.eventType) &&
+        !(subscription.publisherInputs?.repository ?? '') &&
+        (subscription.publisherInputs?.projectId ?? '') ===
+          repository.projectId &&
+        isRoomoteAdoSubscriptionUrl(
+          subscription.consumerInputs?.url,
+          webhookUrl,
+        ) &&
+        !deletedWorkItemSubscriptionIds.has(subscription.id),
+    );
+
+    if (matching.length === 0 && workItemMatching.length === 0) {
       results.push({
         repositoryFullName: repository.repositoryFullName,
         status: 'not_found',
@@ -1379,7 +1588,7 @@ export async function removeAdoServiceHooksForRepositories({
     }
 
     try {
-      for (const subscription of matching) {
+      for (const subscription of [...matching, ...workItemMatching]) {
         const response = await fetchImpl(
           buildAdoApiUrl(
             organizationApiBaseUrl,
@@ -1399,6 +1608,10 @@ export async function removeAdoServiceHooksForRepositories({
           throw new Error(
             `Azure DevOps API request failed: ${response.status} ${response.statusText}`,
           );
+        }
+
+        if (workItemEventTypes.has(subscription.eventType)) {
+          deletedWorkItemSubscriptionIds.add(subscription.id);
         }
       }
 

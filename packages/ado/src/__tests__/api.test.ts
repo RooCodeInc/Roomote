@@ -828,7 +828,7 @@ describe('Azure DevOps API helpers', () => {
           'https://dev.azure.com/acme/_apis/hooks/subscriptions?api-version=7.1' &&
         init?.method === 'POST',
     );
-    expect(createCalls).toHaveLength(3);
+    expect(createCalls).toHaveLength(4);
     const createBodies = createCalls.map(([, init]) =>
       JSON.parse(String(init?.body)),
     ) as Array<{
@@ -864,6 +864,14 @@ describe('Azure DevOps API helpers', () => {
       createBodies.some(
         (body) =>
           body.eventType === 'ms.vss-code.git-pullrequest-comment-event',
+      ),
+    ).toBe(true);
+    expect(
+      createBodies.some(
+        (body) =>
+          body.eventType === 'workitem.commented' &&
+          body.publisherInputs.projectId === 'project-1' &&
+          !body.publisherInputs.repository,
       ),
     ).toBe(true);
   });

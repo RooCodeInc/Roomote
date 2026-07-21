@@ -136,3 +136,70 @@ export type AdoPullRequestResource = z.infer<
 >;
 export type AdoPullRequestComment = z.infer<typeof adoPullRequestCommentSchema>;
 export type AdoIdentity = z.infer<typeof adoIdentitySchema>;
+
+const adoWorkItemFieldsSchema = z
+  .object({
+    'System.Id': z.union([z.string(), z.number()]).optional(),
+    'System.Title': z.string().optional(),
+    'System.Description': z.string().nullable().optional(),
+    'System.History': z.string().optional(),
+    'System.TeamProject': z.string().optional(),
+    'System.WorkItemType': z.string().optional(),
+    'System.State': z.string().optional(),
+    'System.ChangedBy': z.union([adoIdentitySchema, z.string()]).optional(),
+    'System.CreatedBy': z.union([adoIdentitySchema, z.string()]).optional(),
+  })
+  .passthrough();
+
+const adoWorkItemRevisionFieldSchema = z
+  .object({
+    oldValue: z.unknown().optional(),
+    newValue: z.unknown().optional(),
+  })
+  .passthrough();
+
+const adoWorkItemResourceSchema = z
+  .object({
+    id: z.union([z.string(), z.number()]).optional(),
+    rev: z.union([z.string(), z.number()]).optional(),
+    fields: adoWorkItemFieldsSchema.optional(),
+    // Some Azure DevOps deployments deliver comment events in the
+    // work-item-update shape with per-field old/new values.
+    revision: z
+      .object({
+        fields: z.record(adoWorkItemRevisionFieldSchema).optional(),
+        revisedBy: adoIdentitySchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+    revisedBy: adoIdentitySchema.optional(),
+    url: z.string().optional(),
+    _links: z
+      .object({
+        html: adoLinkSchema.optional(),
+        self: adoLinkSchema.optional(),
+        web: adoLinkSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const adoWorkItemCommentedWebhookSchema = z
+  .object({
+    resource: adoWorkItemResourceSchema,
+    message: z
+      .object({
+        text: z.string().optional(),
+        html: z.string().optional(),
+        markdown: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .merge(adoWebhookBaseSchema);
+
+export type AdoWorkItemCommentedWebhook = z.infer<
+  typeof adoWorkItemCommentedWebhookSchema
+>;
+export type AdoWorkItemResource = z.infer<typeof adoWorkItemResourceSchema>;

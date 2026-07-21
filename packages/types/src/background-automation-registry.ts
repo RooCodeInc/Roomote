@@ -221,8 +221,9 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
     // Webhook-driven on new issues only (no Run now / batch scan).
     // Plans are posted on the issue itself, not as Slack suggestion cards.
-    // GitHub, GitLab, and Gitea issue webhooks are wired today; ADO work items
-    // and Bitbucket issues are not yet supported.
+    // GitHub/GitLab/Gitea issue open events launch issue_fixer triage.
+    // ADO work-item @mentions start StandardTask (not issue_fixer); Bitbucket
+    // issues are not yet supported.
     manualTriggerRequirements: [],
     usesManagerChannel: false,
     supportedCommunicationProviders: [],

@@ -328,7 +328,9 @@ export async function findReusableGitHubIssueTaskOwner({
   // to GitHub for historical issue-mention rows that predated multi-provider
   // support.
   const linkedWorkItemProvider =
-    sourceControlProvider === 'gitlab' || sourceControlProvider === 'gitea'
+    sourceControlProvider === 'gitlab' ||
+    sourceControlProvider === 'gitea' ||
+    sourceControlProvider === 'ado'
       ? sourceControlProvider
       : 'github';
   const linkedWorkItemMatch = JSON.stringify([
