@@ -3,3 +3,8 @@
 
 # Mark Drizzle meta snapshot files as generated
 packages/db/drizzle/meta/*_snapshot.json linguist-generated=true
+
+# Shell scripts must retain LF endings so Bash works in Windows Git checkouts.
+*.sh text eol=lf
+deploy/host/roomote text eol=lf
+deploy/scripts/roomote-deploy text eol=lf
