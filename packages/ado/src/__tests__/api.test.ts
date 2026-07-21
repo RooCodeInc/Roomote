@@ -737,7 +737,7 @@ describe('Azure DevOps API helpers', () => {
     ]);
   });
 
-  it('creates or refreshes Azure DevOps pull request service hooks for repositories', async () => {
+  it('keeps project-scoped work item hooks when another repository in the project stays mapped', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -745,7 +745,7 @@ describe('Azure DevOps API helpers', () => {
           JSON.stringify({
             value: [
               {
-                id: 'subscription-1',
+                id: 'subscription-repo',
                 publisherId: 'tfs',
                 eventType: 'git.pullrequest.created',
                 consumerId: 'webHooks',
@@ -758,31 +758,170 @@ describe('Azure DevOps API helpers', () => {
                   url: 'https://roomote.example.com/api/webhooks/ado',
                 },
               },
+              {
+                id: 'subscription-work-item',
+                publisherId: 'tfs',
+                eventType: 'workitem.commented',
+                consumerId: 'webHooks',
+                consumerActionId: 'httpRequest',
+                publisherInputs: {
+                  projectId: 'project-1',
+                },
+                consumerInputs: {
+                  url: 'https://roomote.example.com/api/webhooks/ado',
+                },
+              },
             ],
           }),
           { status: 200 },
         ),
       )
-      .mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({
-              id: 'subscription-response',
-              publisherId: 'tfs',
-              eventType: 'git.pullrequest.created',
-              consumerId: 'webHooks',
-              consumerActionId: 'httpRequest',
-              publisherInputs: {
-                projectId: 'project-1',
-                repository: 'repo-1',
+      .mockImplementation(async () => new Response(null, { status: 204 }));
+
+    await expect(
+      removeAdoServiceHooksForRepositories({
+        repositories: [
+          {
+            repositoryFullName: 'acme/Platform/backend',
+            repositoryId: 'repo-1',
+            projectId: 'project-1',
+          },
+        ],
+        retainProjectIds: ['project-1'],
+        webhookUrl: 'https://roomote.example.com/api/webhooks/ado',
+        token: 'ado_test',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual([
+      { repositoryFullName: 'acme/Platform/backend', status: 'removed' },
+    ]);
+
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([, init]) => init?.method === 'DELETE',
+    );
+    expect(deleteCalls.map(([url]) => url)).toEqual([
+      'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-repo?api-version=7.1',
+    ]);
+  });
+
+  it('removes project-scoped work item hooks when the project has no retained mapped repositories', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            value: [
+              {
+                id: 'subscription-repo',
+                publisherId: 'tfs',
+                eventType: 'git.pullrequest.created',
+                consumerId: 'webHooks',
+                consumerActionId: 'httpRequest',
+                publisherInputs: {
+                  projectId: 'project-1',
+                  repository: 'repo-1',
+                },
+                consumerInputs: {
+                  url: 'https://roomote.example.com/api/webhooks/ado',
+                },
               },
-              consumerInputs: {
-                url: 'https://roomote.example.com/api/webhooks/ado',
+              {
+                id: 'subscription-work-item',
+                publisherId: 'tfs',
+                eventType: 'workitem.commented',
+                consumerId: 'webHooks',
+                consumerActionId: 'httpRequest',
+                publisherInputs: {
+                  projectId: 'project-1',
+                },
+                consumerInputs: {
+                  url: 'https://roomote.example.com/api/webhooks/ado',
+                },
               },
-            }),
-            { status: 200 },
-          ),
-      );
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockImplementation(async () => new Response(null, { status: 204 }));
+
+    await expect(
+      removeAdoServiceHooksForRepositories({
+        repositories: [
+          {
+            repositoryFullName: 'acme/Platform/backend',
+            repositoryId: 'repo-1',
+            projectId: 'project-1',
+          },
+        ],
+        retainProjectIds: [],
+        webhookUrl: 'https://roomote.example.com/api/webhooks/ado',
+        token: 'ado_test',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual([
+      { repositoryFullName: 'acme/Platform/backend', status: 'removed' },
+    ]);
+
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([, init]) => init?.method === 'DELETE',
+    );
+    expect(deleteCalls.map(([url]) => url)).toEqual([
+      'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-repo?api-version=7.1',
+      'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-work-item?api-version=7.1',
+    ]);
+  });
+
+  it('creates or refreshes Azure DevOps pull request service hooks for repositories', async () => {
+    const listBody = {
+      value: [
+        {
+          id: 'subscription-1',
+          publisherId: 'tfs',
+          eventType: 'git.pullrequest.created',
+          consumerId: 'webHooks',
+          consumerActionId: 'httpRequest',
+          publisherInputs: {
+            projectId: 'project-1',
+            repository: 'repo-1',
+          },
+          consumerInputs: {
+            url: 'https://roomote.example.com/api/webhooks/ado',
+          },
+        },
+      ],
+    };
+    const upsertBody = {
+      id: 'subscription-response',
+      publisherId: 'tfs',
+      eventType: 'git.pullrequest.created',
+      consumerId: 'webHooks',
+      consumerActionId: 'httpRequest',
+      publisherInputs: {
+        projectId: 'project-1',
+        repository: 'repo-1',
+      },
+      consumerInputs: {
+        url: 'https://roomote.example.com/api/webhooks/ado',
+      },
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (url, init) => {
+        const method = (init?.method ?? 'GET').toUpperCase();
+        if (
+          method === 'GET' &&
+          String(url).includes('/_apis/hooks/subscriptions')
+        ) {
+          return new Response(JSON.stringify(listBody), { status: 200 });
+        }
+
+        return new Response(JSON.stringify(upsertBody), { status: 200 });
+      });
 
     await expect(
       ensureAdoServiceHooksForRepositories({

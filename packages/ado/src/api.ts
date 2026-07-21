@@ -1400,6 +1400,13 @@ export async function ensureAdoServiceHooksForRepositories({
 
   // Work-item @mentions are project-scoped. Ensure once per project after the
   // per-repository PR hooks so multi-repo projects only create a single hook.
+  // Re-list subscriptions so IDs removed by a preceding unmapped-repo cleanup
+  // (or concurrent DELETE) are not PUT-updated as if they still exist.
+  const workItemSubscriptions = await listAdoServiceHookSubscriptions({
+    organizationApiBaseUrl,
+    token: adoToken,
+    fetchImpl,
+  });
   const projectIds = [
     ...new Set(repositories.map((repository) => repository.projectId)),
   ];
@@ -1407,7 +1414,7 @@ export async function ensureAdoServiceHooksForRepositories({
     try {
       await ensureAdoProjectWorkItemServiceHooks({
         projectId,
-        subscriptions,
+        subscriptions: workItemSubscriptions,
         webhookUrl,
         secretToken,
         token: adoToken,
@@ -1486,10 +1493,16 @@ function isRoomoteAdoSubscriptionUrl(
  * environment mapping get their Roomote subscriptions removed instead of
  * refreshed. Failures are collected per repository instead of failing the
  * whole batch.
+ *
+ * Project-scoped `workitem.commented` hooks are removed only when the project
+ * is not in `retainProjectIds` (projects that still have mapped repositories).
+ * Deleting them while a mapped repo remains leaves ensure unable to update the
+ * deleted subscription id from a stale list and can drop the work-item hook.
  */
 export async function removeAdoServiceHooksForRepositories({
   repositories,
   webhookUrl,
+  retainProjectIds,
   token,
   organization,
   baseUrl,
@@ -1501,6 +1514,12 @@ export async function removeAdoServiceHooksForRepositories({
     projectId: string;
   }[];
   webhookUrl: string;
+  /**
+   * Project IDs that still have environment-mapped repositories. Work-item
+   * hooks for these projects are left in place so a partial unmap does not
+   * tear down @roomote intake for the whole project.
+   */
+  retainProjectIds?: Iterable<string>;
   token?: string;
   organization?: string;
   baseUrl?: string;
@@ -1540,6 +1559,9 @@ export async function removeAdoServiceHooksForRepositories({
   const workItemEventTypes = new Set(
     ADO_WORK_ITEM_SERVICE_HOOK_EVENTS.map((event) => event.eventType),
   );
+  const retainedProjects = new Set(
+    [...(retainProjectIds ?? [])].filter((id) => Boolean(id?.trim())),
+  );
   // Track project-level WI hooks deleted once so multi-repo same-project
   // removals don't 404 on a second delete of the same subscription.
   const deletedWorkItemSubscriptionIds = new Set<string>();
@@ -1560,24 +1582,26 @@ export async function removeAdoServiceHooksForRepositories({
         ),
     );
 
-    // Project-scoped work-item hooks have no repository publisher input.
-    // Remove them with unmapped repos; ensure recreates for projects that
-    // still have mapped repositories afterward.
-    const workItemMatching = subscriptions.filter(
-      (subscription) =>
-        subscription.publisherId === ADO_SERVICE_HOOK_PUBLISHER_ID &&
-        subscription.consumerId === ADO_SERVICE_HOOK_CONSUMER_ID &&
-        subscription.consumerActionId === ADO_SERVICE_HOOK_CONSUMER_ACTION_ID &&
-        workItemEventTypes.has(subscription.eventType) &&
-        !(subscription.publisherInputs?.repository ?? '') &&
-        (subscription.publisherInputs?.projectId ?? '') ===
-          repository.projectId &&
-        isRoomoteAdoSubscriptionUrl(
-          subscription.consumerInputs?.url,
-          webhookUrl,
-        ) &&
-        !deletedWorkItemSubscriptionIds.has(subscription.id),
-    );
+    // Only tear down project-scoped work-item hooks when no mapped repository
+    // remains for this project (caller omits projectId from retainProjectIds).
+    const workItemMatching = retainedProjects.has(repository.projectId)
+      ? []
+      : subscriptions.filter(
+          (subscription) =>
+            subscription.publisherId === ADO_SERVICE_HOOK_PUBLISHER_ID &&
+            subscription.consumerId === ADO_SERVICE_HOOK_CONSUMER_ID &&
+            subscription.consumerActionId ===
+              ADO_SERVICE_HOOK_CONSUMER_ACTION_ID &&
+            workItemEventTypes.has(subscription.eventType) &&
+            !(subscription.publisherInputs?.repository ?? '') &&
+            (subscription.publisherInputs?.projectId ?? '') ===
+              repository.projectId &&
+            isRoomoteAdoSubscriptionUrl(
+              subscription.consumerInputs?.url,
+              webhookUrl,
+            ) &&
+            !deletedWorkItemSubscriptionIds.has(subscription.id),
+        );
 
     if (matching.length === 0 && workItemMatching.length === 0) {
       results.push({
