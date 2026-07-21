@@ -281,7 +281,7 @@ export function getDefaultAvailableComputeProvider(
 export const SETUP_COMPUTE_PROVIDER_CATALOG = [
   {
     provider: 'roomote',
-    label: 'Roomote',
+    label: 'Roomote Cloud',
     description:
       'Managed sandboxes preconfigured by your deployment, with snapshot support. Nothing to set up.',
     supportsSnapshots: true,
