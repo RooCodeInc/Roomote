@@ -65,11 +65,17 @@ Create arbitrary scheduled agent runs with:
 - the **prompt** Roomote should run
 - a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
 - one required **environment**
-- one **report destination** channel (Slack, Discord, Teams, or Telegram)
+- an optional **report destination** channel (Slack, Discord, Teams, or
+  Telegram)
 
 On each due tick, Roomote launches a normal task with that prompt in that
-environment and reports progress and the final result to the destination
-channel. Use **Run now** on an enabled automation to test it immediately.
+environment. When a report destination is set, the run is anchored to that
+channel: Roomote's first message (the final result, or a blocker or question
+that needs input) starts a thread, later updates continue that same thread,
+and you can reply in the thread to talk to the task. There is no progress
+chatter in between. Without a destination, the run happens silently and its
+results appear only in the task view. Use **Run now** on an enabled
+automation to test it immediately.
 
 Daily and weekly custom automations use the same local-hour window as the
 other scheduled automations (around 3am in the workspace timezone). Cap is

@@ -40,7 +40,7 @@ type CustomAutomationFormState = {
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string;
-  targetProvider: 'slack' | 'discord' | 'teams' | 'telegram';
+  targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetChannelId: string;
   targetServiceUrl: string;
 };
@@ -78,6 +78,10 @@ function targetFromRow(row: CustomAutomationListItem): {
   channelId: string;
   serviceUrl: string;
 } {
+  if (!row.target.provider || !row.target.externalRef) {
+    return { provider: 'none', channelId: '', serviceUrl: '' };
+  }
+
   const provider =
     row.target.provider === 'discord' ||
     row.target.provider === 'teams' ||
@@ -251,8 +255,10 @@ export function CustomAutomationsSection() {
       toast.error('Choose an environment.');
       return;
     }
-    if (!form.targetChannelId.trim()) {
-      toast.error('Choose a destination channel.');
+    if (form.targetProvider !== 'none' && !form.targetChannelId.trim()) {
+      toast.error(
+        'Choose a destination channel, or set the destination to None.',
+      );
       return;
     }
 
@@ -262,8 +268,12 @@ export function CustomAutomationsSection() {
       enabled: form.enabled,
       scheduleMode: form.scheduleMode,
       environmentId: form.environmentId,
-      targetProvider: form.targetProvider,
-      targetChannelId: form.targetChannelId,
+      ...(form.targetProvider !== 'none'
+        ? {
+            targetProvider: form.targetProvider,
+            targetChannelId: form.targetChannelId,
+          }
+        : {}),
       ...(form.targetProvider === 'teams' && form.targetServiceUrl.trim()
         ? { targetServiceUrl: form.targetServiceUrl.trim() }
         : {}),
@@ -389,6 +399,7 @@ export function CustomAutomationsSection() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="none">None</SelectItem>
                 <SelectItem value="slack">Slack</SelectItem>
                 <SelectItem value="discord">Discord</SelectItem>
                 <SelectItem value="teams">Teams</SelectItem>
@@ -397,60 +408,69 @@ export function CustomAutomationsSection() {
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label>Destination channel</Label>
-            {form.targetProvider === 'slack' ? (
-              <SlackChannelSelect
-                value={form.targetChannelId || null}
-                options={slackOptions}
-                disabled={busy}
-                onChange={(value) =>
-                  setForm((current) => ({
-                    ...current,
-                    targetChannelId: value ?? '',
-                  }))
-                }
-              />
-            ) : form.targetProvider === 'discord' ? (
-              <Select
-                value={form.targetChannelId || undefined}
-                disabled={busy}
-                onValueChange={(value) =>
-                  setForm((current) => ({
-                    ...current,
-                    targetChannelId: value,
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select Discord channel" />
-                </SelectTrigger>
-                <SelectContent>
-                  {discordOptions.map((channel) => (
-                    <SelectItem key={channel.id} value={channel.id}>
-                      {channel.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                value={form.targetChannelId}
-                disabled={busy}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    targetChannelId: event.target.value,
-                  }))
-                }
-                placeholder={
-                  form.targetProvider === 'teams'
-                    ? 'Teams conversation ID'
-                    : 'Telegram chat ID'
-                }
-              />
-            )}
-          </div>
+          {form.targetProvider === 'none' ? (
+            <div className="space-y-2">
+              <Label>Destination channel</Label>
+              <p className="pt-2 text-sm text-muted-foreground">
+                Results appear only in the task view.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>Destination channel</Label>
+              {form.targetProvider === 'slack' ? (
+                <SlackChannelSelect
+                  value={form.targetChannelId || null}
+                  options={slackOptions}
+                  disabled={busy}
+                  onChange={(value) =>
+                    setForm((current) => ({
+                      ...current,
+                      targetChannelId: value ?? '',
+                    }))
+                  }
+                />
+              ) : form.targetProvider === 'discord' ? (
+                <Select
+                  value={form.targetChannelId || undefined}
+                  disabled={busy}
+                  onValueChange={(value) =>
+                    setForm((current) => ({
+                      ...current,
+                      targetChannelId: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Discord channel" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {discordOptions.map((channel) => (
+                      <SelectItem key={channel.id} value={channel.id}>
+                        {channel.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  value={form.targetChannelId}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      targetChannelId: event.target.value,
+                    }))
+                  }
+                  placeholder={
+                    form.targetProvider === 'teams'
+                      ? 'Teams conversation ID'
+                      : 'Telegram chat ID'
+                  }
+                />
+              )}
+            </div>
+          )}
         </div>
 
         {form.targetProvider === 'teams' ? (
@@ -515,8 +535,8 @@ export function CustomAutomationsSection() {
           </h2>
           <p className="text-sm text-muted-foreground">
             Create your own scheduled agent runs with a prompt, cadence,
-            environment, and report channel. Daily and weekly runs fire around
-            local 3am, matching the other automations.
+            environment, and optional report channel. Daily and weekly runs fire
+            around local 3am, matching the other automations.
           </p>
         </div>
         {!isCreating && !editingId ? (
@@ -558,17 +578,19 @@ export function CustomAutomationsSection() {
               )?.name ?? 'Environment missing';
             const target = targetFromRow(row);
             const destinationLabel =
-              target.provider === 'slack'
-                ? (slackOptions.find(
-                    (option) =>
-                      option.id === target.channelId ||
-                      option.name === target.channelId,
-                  )?.label ?? target.channelId)
-                : target.provider === 'discord'
-                  ? (discordOptions.find(
-                      (option) => option.id === target.channelId,
+              target.provider === 'none'
+                ? 'no report channel'
+                : target.provider === 'slack'
+                  ? (slackOptions.find(
+                      (option) =>
+                        option.id === target.channelId ||
+                        option.name === target.channelId,
                     )?.label ?? target.channelId)
-                  : target.channelId;
+                  : target.provider === 'discord'
+                    ? (discordOptions.find(
+                        (option) => option.id === target.channelId,
+                      )?.label ?? target.channelId)
+                    : target.channelId;
 
             return (
               <Card key={row.id}>
@@ -579,7 +601,10 @@ export function CustomAutomationsSection() {
                     </CardTitle>
                     <p className="text-xs text-muted-foreground">
                       {scheduleLabel(row.scheduleMode)} · {environmentName} ·{' '}
-                      {target.provider}:{destinationLabel} · {statusLine(row)}
+                      {target.provider === 'none'
+                        ? destinationLabel
+                        : `${target.provider}:${destinationLabel}`}{' '}
+                      · {statusLine(row)}
                     </p>
                   </div>
                   <div className="flex items-center gap-1">

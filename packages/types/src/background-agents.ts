@@ -172,6 +172,19 @@ export type AutomationTarget = {
 };
 
 /**
+ * A custom automation's stored report destination: a full AutomationTarget,
+ * or the empty object (the column default) when no report channel is
+ * configured.
+ */
+export type OptionalAutomationTarget = AutomationTarget | Record<string, never>;
+
+export function isConfiguredAutomationTarget(
+  target: OptionalAutomationTarget | null | undefined,
+): target is AutomationTarget {
+  return Boolean(target?.provider && target?.targetKind && target?.externalRef);
+}
+
+/**
  * Merged-PR scan resume cursor stored in automations.scan_cursor
  * (security_auditor / code_quality_auditor).
  */

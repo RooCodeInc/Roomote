@@ -52,6 +52,7 @@ import type {
   LinearPendingSelectionStep,
   AutomationScanCursor,
   AutomationTarget,
+  OptionalAutomationTarget,
   BackgroundAutomationKey,
   PlatformIssueReport,
   WorkspaceReadiness,
@@ -2653,7 +2654,7 @@ export const customAutomations = pgTable(
     target: jsonb('target')
       .notNull()
       .default(sql`'{}'::jsonb`)
-      .$type<AutomationTarget>(),
+      .$type<OptionalAutomationTarget>(),
     createdByUserId: text('created_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),

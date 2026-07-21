@@ -23,6 +23,11 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../destination', () => ({
+  buildDestinationPromptContext: vi.fn(() => ({
+    channelTag: 'slack_channel_id',
+    postToolName: 'post_to_slack_channel',
+    surfaceLabel: 'Slack',
+  })),
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),
   findTeamsConversationServiceUrl: vi.fn(),
   listConnectedCommunicationProviders: vi.fn(async () => ['slack', 'teams']),
@@ -115,8 +120,11 @@ describe('customAutomationsJob', () => {
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
             environmentId: automation.environmentId,
-            description: automation.prompt,
+            description: expect.stringContaining(automation.prompt),
             repo: '',
+            customAutomationId: automation.id,
+            channel: 'C123',
+            slackChannel: 'C123',
           }),
         }),
         initiator: {
@@ -143,6 +151,40 @@ describe('customAutomationsJob', () => {
         launchClaimedAt: expect.any(Date),
       }),
     );
+  });
+
+  it('anchors the prompt to the configured report channel', async () => {
+    await customAutomationsJob();
+
+    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
+      task: { payload: { description: string } };
+    };
+    expect(enqueued.task.payload.description).toContain(
+      '<slack_channel_id>C123</slack_channel_id>',
+    );
+    expect(enqueued.task.payload.description).toContain('send_chat_reply');
+    expect(enqueued.task.payload.description).toContain(
+      'do not post progress updates',
+    );
+  });
+
+  it('launches without channel anchoring when no report channel is configured', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, target: {} } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
+      task: { payload: Record<string, unknown> };
+      channels?: unknown;
+    };
+    expect(enqueued.task.payload.description).toBe(automation.prompt);
+    expect(enqueued.task.payload.customAutomationId).toBeUndefined();
+    expect(enqueued.task.payload.channel).toBeUndefined();
+    expect(enqueued.channels).toBeUndefined();
+    expect(buildDestinationTaskPayloadFields).not.toHaveBeenCalled();
   });
 
   it('uses hour-0 boundary for hourly schedules', async () => {

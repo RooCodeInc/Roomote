@@ -13,12 +13,14 @@ import {
   type CustomAutomation,
 } from '@roomote/db/server';
 import {
+  isConfiguredAutomationTarget,
   TaskPayloadKind,
   type AutomationTarget,
   type CommunicationProvider,
 } from '@roomote/types';
 
 import {
+  buildDestinationPromptContext,
   buildDestinationTaskPayloadFields,
   findTeamsConversationServiceUrl,
   listConnectedCommunicationProviders,
@@ -101,6 +103,27 @@ async function resolveDestination(
   };
 }
 
+/**
+ * Anchors a custom automation's prompt to its configured report channel,
+ * mirroring how the built-in channel automations tell the agent which surface
+ * and posting tool to report through.
+ */
+function buildChannelAnchoredDescription(
+  prompt: string,
+  destination: ResolvedAutomationDestination,
+): string {
+  const promptContext = buildDestinationPromptContext(destination);
+
+  return `${prompt}
+
+<task_context>
+  <source>background-automation</source>
+  <${promptContext.channelTag}>${destination.channelId}</${promptContext.channelTag}>
+</task_context>
+
+This run is anchored to the ${promptContext.surfaceLabel} channel above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post to any other channel. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that channel, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread.`;
+}
+
 async function resolveTimezone(): Promise<string> {
   const installation = await db.query.slackInstallations.findFirst({
     columns: { botAccessToken: true, teamId: true },
@@ -178,33 +201,38 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  const destination = await resolveDestination(automation.target);
-  if (!destination) {
-    const message =
-      automation.target.provider === 'teams'
-        ? 'Teams report destination is missing a resolvable service URL.'
-        : 'Report destination is not configured.';
-    result.skippedReason = message;
-    result.errors.push(message);
-    await recordCustomAutomationRunOutcome(db, {
-      id: automation.id,
-      status: 'failed',
-      error: message,
-    });
-    return result;
-  }
+  // A report destination is optional: automations without one run silently
+  // and surface results only in the task UI.
+  let destination: ResolvedAutomationDestination | null = null;
+  if (isConfiguredAutomationTarget(automation.target)) {
+    destination = await resolveDestination(automation.target);
+    if (!destination) {
+      const message =
+        automation.target.provider === 'teams'
+          ? 'Teams report destination is missing a resolvable service URL.'
+          : 'Report destination could not be resolved.';
+      result.skippedReason = message;
+      result.errors.push(message);
+      await recordCustomAutomationRunOutcome(db, {
+        id: automation.id,
+        status: 'failed',
+        error: message,
+      });
+      return result;
+    }
 
-  const connected = await listConnectedCommunicationProviders();
-  if (!connected.includes(destination.provider)) {
-    const message = `${destination.provider} is not connected.`;
-    result.skippedReason = message;
-    result.errors.push(message);
-    await recordCustomAutomationRunOutcome(db, {
-      id: automation.id,
-      status: 'failed',
-      error: message,
-    });
-    return result;
+    const connected = await listConnectedCommunicationProviders();
+    if (!connected.includes(destination.provider)) {
+      const message = `${destination.provider} is not connected.`;
+      result.skippedReason = message;
+      result.errors.push(message);
+      await recordCustomAutomationRunOutcome(db, {
+        id: automation.id,
+        status: 'failed',
+        error: message,
+      });
+      return result;
+    }
   }
 
   const launchClaimedAt = await tryClaimCustomAutomationLaunch(automation.id);
@@ -220,8 +248,25 @@ async function launchCustomAutomationRow(
         payload: {
           repo: '',
           environmentId: automation.environmentId,
-          description: automation.prompt,
-          ...buildDestinationTaskPayloadFields(destination),
+          description: destination
+            ? buildChannelAnchoredDescription(automation.prompt, destination)
+            : automation.prompt,
+          ...(destination
+            ? buildDestinationTaskPayloadFields(destination)
+            : {}),
+          // customAutomationId authorizes the Slack late-bound thread flow:
+          // the run's first send_chat_reply posts a root message in the
+          // destination channel and binds it as the task thread, so later
+          // updates continue the thread and user replies route back into the
+          // task. The channel/slackChannel payload fields give the sandbox
+          // its Slack reply context (ROOMOTE_SLACK_CHANNEL).
+          ...(destination ? { customAutomationId: automation.id } : {}),
+          ...(destination?.provider === 'slack'
+            ? {
+                channel: destination.channelId,
+                slackChannel: destination.channelId,
+              }
+            : {}),
         },
       },
       title: automation.name,
@@ -236,7 +281,7 @@ async function launchCustomAutomationRow(
       workflow: 'standard',
       surface: 'system',
       trigger: opts.manualTrigger ? 'manual' : 'schedule',
-      ...(destination.provider === 'slack'
+      ...(destination?.provider === 'slack'
         ? { channels: { slackChannelId: destination.channelId } }
         : {}),
     });

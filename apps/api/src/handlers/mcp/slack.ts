@@ -230,6 +230,15 @@ function getAutomationWorkItemIdFromTaskPayload(
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+function getCustomAutomationIdFromTaskPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const value = (payload as Record<string, unknown>).customAutomationId;
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
 function normalizeSlackQuoteText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -799,10 +808,12 @@ slackMcp.post('/thread_reply', async (c) => {
   }
 
   // Creating a brand-new top-level channel message is reserved for late-bound
-  // automation execution tasks, marked by automationWorkItemId in the payload.
+  // automation tasks: execution tasks marked by automationWorkItemId and
+  // custom automation runs marked by customAutomationId in the payload.
   if (
     !slackReplyTarget.threadTs &&
-    !getAutomationWorkItemIdFromTaskPayload(taskRun.payload)
+    !getAutomationWorkItemIdFromTaskPayload(taskRun.payload) &&
+    !getCustomAutomationIdFromTaskPayload(taskRun.payload)
   ) {
     return c.json(
       {
