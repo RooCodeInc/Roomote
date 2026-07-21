@@ -107,7 +107,9 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result.launchedTaskId).toBe('task_abc');
-    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(automation.id);
+    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(automation.id, {
+      allowWhilePreviousRunActive: false,
+    });
     expect(isRunDue).toHaveBeenCalledWith(
       expect.objectContaining({
         frequency: 'daily',
@@ -297,12 +299,15 @@ describe('runCustomAutomationNow', () => {
     } as never);
   });
 
-  it('launches with manual trigger', async () => {
+  it('launches with manual trigger, bypassing the previous-run-active gate', async () => {
     const result = await runCustomAutomationNow(automation.id);
 
     expect(result).toEqual({
       outcome: 'launched',
       taskId: 'task_manual',
+    });
+    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(automation.id, {
+      allowWhilePreviousRunActive: true,
     });
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -311,14 +316,14 @@ describe('runCustomAutomationNow', () => {
     );
   });
 
-  it('skips manual run when claim fails because previous task is active', async () => {
+  it('skips manual run when a concurrent launch holds the claim', async () => {
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(null);
 
     const result = await runCustomAutomationNow(automation.id);
 
     expect(result).toEqual({
       outcome: 'skipped',
-      reason: 'Previous run is still active.',
+      reason: 'Another launch is already in progress.',
     });
     expect(enqueueTask).not.toHaveBeenCalled();
   });
