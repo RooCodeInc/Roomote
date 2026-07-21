@@ -59,6 +59,7 @@ import {
 } from './promptPlaceholders';
 
 const FALLBACK_PROMPT_PLACEHOLDER = 'What do you want to do?';
+const ENVIRONMENT_SETUP_COMMAND_PATTERN = /^\s*[$/]environment-setup(?:\s|$)/i;
 
 type RoutingFlowState = 'idle' | 'routing_pending' | 'launching';
 
@@ -107,9 +108,6 @@ export function Home({
   const environments = useEnvironments();
   const { cloudEnabled } = useAuthorizedUser();
 
-  const { isDebugUIVisible } = useShowDebugUI();
-  const canSelectBranch = isDebugUIVisible;
-
   // Keep option order identical to the setup catalog so the first fallback
   // matches the first visible Sandbox provider row.
   const catalogComputeProviders = SETUP_COMPUTE_PROVIDER_CATALOG.map(
@@ -136,6 +134,9 @@ export function Home({
   const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
 
   const [promptText, setPromptText] = useState(promptParam);
+  const isEnvironmentSetup = ENVIRONMENT_SETUP_COMMAND_PATTERN.test(promptText);
+  const { isDebugUIVisible } = useShowDebugUI();
+  const canSelectBranch = isDebugUIVisible || isEnvironmentSetup;
   const [isExiting, setIsExiting] = useState(false);
   const [routingState, setRoutingState] = useState<RoutingFlowState>('idle');
   const [selectedComputeProvider, setSelectedComputeProvider] =
@@ -626,6 +627,7 @@ export function Home({
               <div ref={workspaceRef}>
                 <SelectWorkspace
                   allowAuto
+                  showRepositories={isEnvironmentSetup}
                   allowBranchSelection={canSelectBranch}
                 />
               </div>

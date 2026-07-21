@@ -1,6 +1,12 @@
 import { useEffect } from 'react';
 import { FormProvider, useForm, useFormContext } from 'react-hook-form';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -57,11 +63,17 @@ vi.mock('@/components/system', async () => {
     DropdownMenuItem: ({
       children,
       className,
+      onSelect,
     }: {
       children: React.ReactNode;
       className?: string;
+      onSelect?: () => void;
     }) => (
-      <div data-slot="dropdown-menu-item" className={className}>
+      <div
+        data-slot="dropdown-menu-item"
+        className={className}
+        onClick={onSelect}
+      >
         {children}
       </div>
     ),
@@ -111,11 +123,13 @@ const WorkspaceValuesProbe = ({
 
 const SelectEnvironmentOrRepositoryHarness = ({
   allowAuto = false,
+  showRepositories = false,
   repositoryFilter,
   defaultValues,
   onValuesChange,
 }: {
   allowAuto?: boolean;
+  showRepositories?: boolean;
   /** Omit for no filter (homepage Auto). Pass a repo full name to filter. */
   repositoryFilter?: string;
   defaultValues: Partial<CreateTaskFormValues>;
@@ -134,6 +148,7 @@ const SelectEnvironmentOrRepositoryHarness = ({
       <SelectEnvironmentOrRepository
         repositoryFilter={repositoryFilter}
         allowAuto={allowAuto}
+        showRepositories={showRepositories}
         onCreate={vi.fn()}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
@@ -512,5 +527,47 @@ describe('SelectEnvironmentOrRepository', () => {
       '__separator__',
       'Auto',
     ]);
+  });
+
+  it('keeps individual repositories out of the ordinary workspace menu', () => {
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        defaultValues={{}}
+        onValuesChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(REPOSITORY)).not.toBeInTheDocument();
+    expect(screen.queryByText('Repositories')).not.toBeInTheDocument();
+  });
+
+  it('lists and selects individual repositories during environment setup', async () => {
+    let latestValues: WorkspaceSelectionValues | undefined;
+
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        showRepositories
+        defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Repositories')).toBeInTheDocument();
+    fireEvent.click(screen.getByText(REPOSITORY));
+
+    await waitFor(() => {
+      expect(latestValues).toMatchObject({
+        environmentId: undefined,
+        repository: REPOSITORY,
+      });
+    });
+
+    expect(setWorkspace).toHaveBeenCalledWith({
+      workspace: { type: 'repository', value: REPOSITORY },
+    });
   });
 });

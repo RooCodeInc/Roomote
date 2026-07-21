@@ -150,9 +150,11 @@ vi.mock('@/components/tasks', async () => {
     SelectWorkspace: ({
       allowAuto,
       allowBranchSelection,
+      showRepositories,
     }: {
       allowAuto?: boolean;
       allowBranchSelection?: boolean;
+      showRepositories?: boolean;
     }) => {
       const { watch, setValue } = useFormContext();
       const repository = watch('repository');
@@ -176,6 +178,9 @@ vi.mock('@/components/tasks', async () => {
           <span data-testid="allow-branch-selection">
             {String(Boolean(allowBranchSelection))}
           </span>
+          <span data-testid="show-repositories">
+            {String(Boolean(showRepositories))}
+          </span>
           <button
             type="button"
             onClick={() => {
@@ -195,6 +200,16 @@ vi.mock('@/components/tasks', async () => {
             }}
           >
             Use all repositories workspace
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setValue('repository', 'Roomote/example-app');
+              setValue('environmentId', undefined);
+              setValue('branch', 'develop');
+            }}
+          >
+            Use repository workspace
           </button>
           <button
             type="button"
@@ -778,6 +793,41 @@ describe('Home', () => {
     expect(screen.getByTestId('allow-branch-selection')).toHaveTextContent(
       'false',
     );
+  });
+
+  it('shows repository and branch choices only for environment setup commands', async () => {
+    const { unmount } = render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('show-repositories')).toHaveTextContent('false');
+    expect(screen.getByTestId('allow-branch-selection')).toHaveTextContent(
+      'false',
+    );
+
+    unmount();
+    currentSearchParams = 'prompt=%24environment-setup';
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.getByTestId('show-repositories')).toHaveTextContent('true');
+    expect(screen.getByTestId('allow-branch-selection')).toHaveTextContent(
+      'true',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use repository workspace' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'Roomote/example-app',
+            branch: 'develop',
+          }),
+        }),
+      );
+    });
   });
 
   it('shows the compute provider selector outside cloud mode', () => {

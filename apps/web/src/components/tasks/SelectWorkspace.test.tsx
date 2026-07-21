@@ -17,7 +17,18 @@ vi.mock('@/components/settings/environments', () => ({
 }));
 
 vi.mock('./SelectEnvironmentOrRepository', () => ({
-  SelectEnvironmentOrRepository: () => <div>Workspace picker</div>,
+  SelectEnvironmentOrRepository: ({
+    showRepositories,
+  }: {
+    showRepositories?: boolean;
+  }) => (
+    <div
+      data-testid="workspace-picker"
+      data-show-repositories={showRepositories}
+    >
+      Workspace picker
+    </div>
+  ),
 }));
 
 vi.mock('./SelectBranch', () => ({
@@ -48,11 +59,13 @@ const DEFAULT_VALUES: CreateTaskFormValues = {
 const SelectWorkspaceHarness = ({
   defaultValues,
   allowBranchSelection,
+  showRepositories,
   environmentBranchRepositoryFullName,
   environmentBranchDefault,
 }: {
   defaultValues: Partial<CreateTaskFormValues>;
   allowBranchSelection?: boolean;
+  showRepositories?: boolean;
   environmentBranchRepositoryFullName?: string;
   environmentBranchDefault?: string;
 }) => {
@@ -67,6 +80,7 @@ const SelectWorkspaceHarness = ({
     <FormProvider {...form}>
       <SelectWorkspace
         allowBranchSelection={allowBranchSelection}
+        showRepositories={showRepositories}
         environmentBranchRepositoryFullName={
           environmentBranchRepositoryFullName
         }
@@ -77,6 +91,20 @@ const SelectWorkspaceHarness = ({
 };
 
 describe('SelectWorkspace', () => {
+  it('only asks the workspace picker to show repositories when requested', () => {
+    render(
+      <SelectWorkspaceHarness
+        showRepositories
+        defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
+      />,
+    );
+
+    expect(screen.getByTestId('workspace-picker')).toHaveAttribute(
+      'data-show-repositories',
+      'true',
+    );
+  });
+
   it('shows a branch selector for a selected single-repo environment', () => {
     render(
       <SelectWorkspaceHarness

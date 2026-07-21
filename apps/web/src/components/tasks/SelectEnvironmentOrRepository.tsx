@@ -51,6 +51,7 @@ interface SelectEnvironmentOrRepositoryProps {
   repositoryFilter?: string;
   lockedBranch?: string;
   allowAuto?: boolean;
+  showRepositories?: boolean;
   onCreate: () => void;
   onEdit: (e: React.MouseEvent, envId: string) => void;
   onDelete: (e: React.MouseEvent, env: EnvironmentWithMeta) => void;
@@ -60,6 +61,7 @@ export const SelectEnvironmentOrRepository = ({
   repositoryFilter,
   lockedBranch,
   allowAuto = false,
+  showRepositories = false,
   onCreate,
   onEdit,
   onDelete,
@@ -459,6 +461,44 @@ export const SelectEnvironmentOrRepository = ({
             )}
 
             {sortedEnvironments.length > 0 && hasRepositoryWorkspaceOptions && (
+              <DropdownMenuSeparator />
+            )}
+
+            {showRepositories && allRepositories.length > 0 && (
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Repositories</DropdownMenuLabel>
+                {allRepositories.map((availableRepository) => (
+                  <DropdownMenuItem
+                    key={availableRepository.fullName}
+                    onSelect={() =>
+                      handleValueChange(
+                        `${REPO_PREFIX}${availableRepository.fullName}`,
+                      )
+                    }
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      {repository === availableRepository.fullName &&
+                      !environmentId ? (
+                        <Check
+                          className="size-3.5 shrink-0 text-accent-foreground"
+                          strokeWidth={1.5}
+                        />
+                      ) : (
+                        <BookMarked
+                          className="size-3.5 shrink-0 text-muted-foreground"
+                          strokeWidth={1.5}
+                        />
+                      )}
+                      <span className="truncate">
+                        {availableRepository.fullName}
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+            )}
+
+            {showRepositories && allRepositories.length > 0 && (
               <DropdownMenuSeparator />
             )}
 
