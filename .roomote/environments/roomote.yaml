@@ -68,10 +68,6 @@ repositories:
         run: pnpm --filter @roomote/db db:push:test
         timeout: 600
         continue_on_error: false
-      - name: Install Mintlify CLI for docs
-        run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint
-        timeout: 600
-        continue_on_error: true
       - name: Start Redis
         run: mkdir -p /tmp/redis-data && redis-server --port 16379 --dir /tmp/redis-data --appendonly no
         timeout: 600
@@ -107,7 +103,8 @@ repositories:
         detached: true
         logfile: /tmp/roomote-controller.log
       - name: Start Mintlify docs preview
-        run: cd apps/docs && mise exec node@22.20.0 -- mint dev --port 3333 --no-open
+        # Mint is needed only for this optional final service.
+        run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint && cd apps/docs && mise exec node@22.20.0 -- mint dev --port 3333 --no-open
         timeout: 600
         continue_on_error: true
         detached: true
