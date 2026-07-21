@@ -228,6 +228,7 @@ export async function manageSourceControlIssueForTaskRun({
         provider,
         issueNumber: input.issueNumber,
         body: input.body!,
+        fetchImpl,
       });
   }
 }
@@ -372,6 +373,13 @@ async function listIssueComments({
   issueNumber: number;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlIssueCommentsResult> {
+  await assertTargetIsPlainIssue({
+    repository,
+    provider,
+    issueNumber,
+    fetchImpl,
+  });
+
   switch (provider) {
     case 'github': {
       const { octokit, owner, repo } =
@@ -466,12 +474,21 @@ async function createIssueComment({
   provider,
   issueNumber,
   body,
+  fetchImpl,
 }: {
   repository: RepositoryRow;
   provider: IssueProvider;
   issueNumber: number;
   body: string;
+  fetchImpl: FetchImpl;
 }): Promise<SourceControlIssueCommentWriteResult> {
+  await assertTargetIsPlainIssue({
+    repository,
+    provider,
+    issueNumber,
+    fetchImpl,
+  });
+
   switch (provider) {
     case 'github': {
       const { octokit, owner, repo } =
@@ -537,6 +554,64 @@ async function createIssueComment({
         url: null,
       });
     }
+  }
+}
+
+async function assertTargetIsPlainIssue({
+  repository,
+  provider,
+  issueNumber,
+  fetchImpl,
+}: {
+  repository: RepositoryRow;
+  provider: IssueProvider;
+  issueNumber: number;
+  fetchImpl: FetchImpl;
+}): Promise<void> {
+  switch (provider) {
+    case 'github': {
+      const { octokit, owner, repo } =
+        await createGitHubIssueClient(repository);
+      const { data } = await octokit.rest.issues.get({
+        owner,
+        repo,
+        issue_number: issueNumber,
+      });
+
+      if (data.pull_request) {
+        throw new SourceControlIssueError(
+          400,
+          'The requested issue is a pull request.',
+        );
+      }
+      return;
+    }
+    case 'gitea': {
+      const { apiBaseUrl, owner, repo, token } =
+        await resolveGiteaProviderContext(repository, 'read', 'Gitea issues');
+      const issue = await requestSourceControlJson({
+        fetchImpl,
+        method: 'GET',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}`,
+          {},
+        ),
+        tokenHeader: { name: 'Authorization', value: `token ${token}` },
+        schema: giteaIssueSchema,
+        acceptedStatuses: [200],
+      });
+
+      if (issue.pull_request) {
+        throw new SourceControlIssueError(
+          400,
+          'The requested issue is a pull request.',
+        );
+      }
+      return;
+    }
+    case 'gitlab':
+      return;
   }
 }
 
