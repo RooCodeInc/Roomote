@@ -1,6 +1,7 @@
 import { and, asc, count, eq, isNull, lt, or, sql } from 'drizzle-orm';
 
 import {
+  activeRunStatuses,
   isConfiguredAutomationTarget,
   isScheduleOnlyBackgroundAutomationFrequency,
   type CustomAutomationScheduleMode,
@@ -281,9 +282,14 @@ export async function recordCustomAutomationRunOutcome(
 /**
  * Atomically claim a custom automation launch. Succeeds only when no other
  * launcher holds a fresh claim and, unless `allowWhilePreviousRunActive` is
- * set, there is no active previous task. Manual "Run now" launches pass that
- * flag: an explicit human trigger should not be blocked by an in-flight (or
- * stuck-active) previous run, while scheduled ticks stay single-flight.
+ * set, the previous task has no active (non-terminal) run. Manual "Run now"
+ * launches pass that flag: an explicit human trigger should not be blocked
+ * by an in-flight previous run, while scheduled ticks stay single-flight.
+ *
+ * The gate checks run statuses rather than `tasks.state`: a resumable task
+ * that idled out and went to sleep keeps `state='active'` (so thread replies
+ * can wake it) even though its run completed with a snapshot, and a sleeping
+ * previous run must not block the next scheduled launch forever.
  * Returns the claim fencing token (`launchClaimedAt`) on success, or null.
  */
 export async function tryClaimCustomAutomationLaunch(
@@ -316,9 +322,12 @@ export async function tryClaimCustomAutomationLaunch(
           ${customAutomations.lastLaunchedTaskId} IS NULL
           OR NOT EXISTS (
             SELECT 1
-            FROM tasks t
-            WHERE t.id = ${customAutomations.lastLaunchedTaskId}
-              AND t.state = 'active'
+            FROM task_runs r
+            WHERE r.task_id = ${customAutomations.lastLaunchedTaskId}
+              AND r.status IN (${sql.join(
+                activeRunStatuses.map((status) => sql`${status}`),
+                sql`, `,
+              )})
           )
         )`,
             ]),

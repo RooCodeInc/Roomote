@@ -9,11 +9,14 @@ import {
   tryClaimCustomAutomationLaunch,
   updateCustomAutomation,
 } from '../custom-automations';
+import { RunStatus } from '@roomote/types';
+
 import {
   customAutomations,
   db,
   environments,
   eq,
+  runFactory,
   taskFactory,
 } from '../../server';
 
@@ -98,7 +101,7 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
-  it('lets manual claims bypass the previous-run-active gate', async () => {
+  it('gates scheduled claims on active runs and lets manual claims bypass', async () => {
     const [environment] = await db
       .insert(environments)
       .values({
@@ -119,16 +122,41 @@ describe('custom automations helpers', () => {
       target: {},
     });
 
-    const activeTask = await taskFactory.create({ state: 'active' });
+    // A sleeping previous task (still state='active' for snapshot resume,
+    // but its run completed) must not block the next scheduled launch.
+    const sleepingTask = await taskFactory.create({ state: 'active' });
+    await runFactory.create({
+      taskId: sleepingTask.id,
+      status: RunStatus.Completed,
+    });
     await db
       .update(customAutomations)
-      .set({ lastLaunchedTaskId: activeTask.id })
+      .set({ lastLaunchedTaskId: sleepingTask.id })
       .where(eq(customAutomations.id, created.id));
 
-    // Scheduled-style claims stay single-flight behind the active task.
+    const claimPastSleepingTask = await tryClaimCustomAutomationLaunch(
+      created.id,
+    );
+    expect(claimPastSleepingTask).toBeInstanceOf(Date);
+    await releaseCustomAutomationLaunchClaim(
+      created.id,
+      claimPastSleepingTask!,
+    );
+
+    // A previous task with a genuinely active run blocks scheduled claims.
+    const runningTask = await taskFactory.create({ state: 'active' });
+    await runFactory.create({
+      taskId: runningTask.id,
+      status: RunStatus.Running,
+    });
+    await db
+      .update(customAutomations)
+      .set({ lastLaunchedTaskId: runningTask.id })
+      .where(eq(customAutomations.id, created.id));
+
     expect(await tryClaimCustomAutomationLaunch(created.id)).toBeNull();
 
-    // A manual claim launches despite the active previous task.
+    // A manual claim launches despite the active run.
     const manualClaim = await tryClaimCustomAutomationLaunch(created.id, {
       allowWhilePreviousRunActive: true,
     });
