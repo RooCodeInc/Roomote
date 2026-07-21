@@ -1055,14 +1055,14 @@ describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
     delete process.env.ADO_BASE_URL;
   });
 
-  it('reads the newest failed default-branch build for a repository', async () => {
+  it('reads the newest completed default-branch build without filtering by result', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
         JSON.stringify({
           value: [
             {
               id: 88,
-              result: 'failed',
+              result: 'succeeded',
               sourceBranch: 'refs/heads/main',
               sourceVersion: 'abc123',
               definition: { name: 'CI' },
@@ -1086,6 +1086,7 @@ describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
     });
 
     expect(build?.id).toBe(88);
+    expect(build?.result).toBe('succeeded');
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
       '/Platform/_apis/build/builds',
     );
@@ -1093,8 +1094,9 @@ describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
       'repositoryId=repo-guid-1',
     );
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
-      'resultFilter=failed',
+      'statusFilter=completed',
     );
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('resultFilter=');
   });
 
   it('formats failed timeline tasks and log tails', async () => {

@@ -1593,8 +1593,10 @@ export function getAdoBuildWebUrl(build: AdoBuild): string {
 }
 
 /**
- * Newest completed failed build for a Git repository on the given branch.
- * Uses the deployment Azure DevOps credential. Null when none match.
+ * Newest completed build for a Git repository on the given branch.
+ * Does not filter by result so callers can detect already-green tips before
+ * launching triage. Uses the deployment Azure DevOps credential. Null when
+ * none match.
  */
 export async function getLatestAdoBuild(params: {
   repositoryFullName: string;
@@ -1635,7 +1637,6 @@ export async function getLatestAdoBuild(params: {
         repositoryType: 'TfsGit',
         branchName: buildAdoBranchRef(params.branch),
         statusFilter: 'completed',
-        resultFilter: 'failed',
         queryOrder: 'finishTimeDescending',
         $top: 1,
       },
