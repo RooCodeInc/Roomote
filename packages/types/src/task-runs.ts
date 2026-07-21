@@ -762,6 +762,7 @@ export const linkedWorkItemProviderSchema = z.enum([
   'github',
   'gitlab',
   'gitea',
+  'ado',
   'linear',
   'jira',
   'asana',

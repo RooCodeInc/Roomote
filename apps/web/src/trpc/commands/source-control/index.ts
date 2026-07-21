@@ -483,11 +483,23 @@ async function configureAdoWebhooks(
           ]
         : [];
     },
-    removeWebhooks: ({ targets, webhookUrl }) =>
-      Ado.removeAdoServiceHooksForRepositories({
+    removeWebhooks: async ({ targets, webhookUrl }) => {
+      // Keep project-scoped work-item hooks when any repository in that project
+      // is still environment-mapped; partial unmaps must not drop @roomote WI intake.
+      const mappedRepositoryIds = await getEnvironmentMappedRepositoryIds();
+      const retainProjectIds = new Set(
+        repositories
+          .filter((repository) => mappedRepositoryIds.has(repository.id))
+          .map((repository) => getAdoProjectId(repository.permissions))
+          .filter((projectId): projectId is string => Boolean(projectId)),
+      );
+
+      return Ado.removeAdoServiceHooksForRepositories({
         repositories: targets,
         webhookUrl,
-      }),
+        retainProjectIds,
+      });
+    },
     ensureWebhooks: ({ targets, webhookUrl, secretToken }) =>
       Ado.ensureAdoServiceHooksForRepositories({
         repositories: targets,

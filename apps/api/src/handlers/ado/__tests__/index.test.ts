@@ -3,11 +3,13 @@ import { Hono } from 'hono';
 const {
   mockHandleAdoComment,
   mockHandleAdoPullRequest,
+  mockHandleAdoWorkItemComment,
   mockRecordWebhook,
   mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
   mockHandleAdoComment: vi.fn(),
   mockHandleAdoPullRequest: vi.fn(),
+  mockHandleAdoWorkItemComment: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
 }));
@@ -35,6 +37,10 @@ vi.mock('../handleComment', () => ({
   handleAdoComment: mockHandleAdoComment,
 }));
 
+vi.mock('../handleWorkItemComment', () => ({
+  handleAdoWorkItemComment: mockHandleAdoWorkItemComment,
+}));
+
 describe('ado webhook router', () => {
   let app: Hono;
 
@@ -42,6 +48,7 @@ describe('ado webhook router', () => {
     vi.resetModules();
     mockHandleAdoComment.mockReset();
     mockHandleAdoPullRequest.mockReset();
+    mockHandleAdoWorkItemComment.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
@@ -49,6 +56,7 @@ describe('ado webhook router', () => {
     );
     mockHandleAdoComment.mockResolvedValue({ status: 'ok' });
     mockHandleAdoPullRequest.mockResolvedValue({ status: 'ok' });
+    mockHandleAdoWorkItemComment.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -240,6 +248,64 @@ describe('ado webhook router', () => {
     expect(mockHandleAdoPullRequest).not.toHaveBeenCalled();
   });
 
+  it('records and routes work item commented webhooks', async () => {
+    const payload = {
+      id: 'wi-delivery-1',
+      eventType: 'workitem.commented',
+      publisherId: 'tfs',
+      resourceContainers: {
+        account: {
+          baseUrl: 'https://dev.azure.com/acme/',
+        },
+        project: {
+          id: 'project-1',
+          baseUrl: 'https://dev.azure.com/acme/Platform/',
+        },
+      },
+      resource: {
+        id: 77,
+        fields: {
+          'System.Title': 'Investigate failed deploy',
+          'System.History': '@roomote investigate failed deploy',
+          'System.TeamProject': 'Platform',
+          'System.ChangedBy': {
+            uniqueName: 'alice@acme.example',
+            displayName: 'Alice',
+          },
+        },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/ado', {
+      method: 'POST',
+      headers: {
+        'x-roomote-webhook-secret': 'ado-secret',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'wi-delivery-1',
+      'workitem.commented',
+      expect.objectContaining({
+        eventType: 'workitem.commented',
+      }),
+      expect.any(Function),
+      { provider: 'ado' },
+    );
+    expect(mockHandleAdoWorkItemComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'workitem.commented',
+        resource: expect.objectContaining({
+          id: 77,
+        }),
+      }),
+    );
+    expect(mockHandleAdoComment).not.toHaveBeenCalled();
+    expect(mockHandleAdoPullRequest).not.toHaveBeenCalled();
+  });
+
   it('records merge-attempted ADO events without routing to pull request handling', async () => {
     const payload = {
       id: 'merged-delivery-1',
@@ -279,6 +345,7 @@ describe('ado webhook router', () => {
     );
     expect(mockHandleAdoPullRequest).not.toHaveBeenCalled();
     expect(mockHandleAdoComment).not.toHaveBeenCalled();
+    expect(mockHandleAdoWorkItemComment).not.toHaveBeenCalled();
   });
 
   it('rejects invalid secrets', async () => {
