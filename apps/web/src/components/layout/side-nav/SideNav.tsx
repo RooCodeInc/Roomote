@@ -324,9 +324,9 @@ export const SideNav = () => {
         )}
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-clip">
         {isSideNavExpanded && quickAccessTasks.length > 0 && (
-          <div className="flex h-full min-h-0 mt-4 flex-col w-(--sidebar-width) ">
+          <div className="flex h-full min-h-0 flex-col pt-4 w-(--sidebar-width)">
             <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto scroll-thin pr-1 space-y-4">
               {pinnedQuickAccessTasks.length > 0 && (
                 <div className="flex flex-col gap-1">
@@ -405,7 +405,7 @@ export const SideNav = () => {
         )}
       </div>
 
-      <div className="w-full shrink-0">
+      <div className="relative z-10 w-full shrink-0 bg-card">
         <div className={cn('mt-2 flex w-full flex-col gap-1 px-1')}>
           <ChatWidgetSideNavItem expanded={isSideNavExpanded} />
           <ReleaseNoticeSideNavItem expanded={isSideNavExpanded} />
