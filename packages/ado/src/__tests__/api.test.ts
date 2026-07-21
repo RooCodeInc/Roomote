@@ -993,6 +993,7 @@ describe('Azure DevOps API helpers', () => {
       eventType: string;
       publisherInputs: Record<string, string>;
       consumerInputs: Record<string, string>;
+      resourceVersion?: string;
     }>;
     expect(
       createBodies.some((body) =>
@@ -1037,7 +1038,10 @@ describe('Azure DevOps API helpers', () => {
         (body) =>
           body.eventType === 'build.complete' &&
           body.publisherInputs.projectId === 'project-1' &&
-          !body.publisherInputs.repository,
+          !body.publisherInputs.repository &&
+          // 1.0 sends the legacy XAML build shape without result/sourceBranch/
+          // repository; the handler needs the 2.0 Build resource.
+          body.resourceVersion === '2.0',
       ),
     ).toBe(true);
   });
@@ -1241,6 +1245,43 @@ describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
     expect(evidence).toContain('task="Build job"');
     expect(evidence).toContain('Job aborted');
     expect(evidence).not.toContain('Build stage');
+  });
+
+  it('tolerates null log and issues fields on real timeline records', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              // Real ADO sends explicit nulls on wrapper/pending records.
+              { name: 'Stage', type: 'Stage', result: 'failed', log: null },
+              {
+                name: 'Test',
+                type: 'Task',
+                result: 'failed',
+                log: { id: 7 },
+                issues: null,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes('/logs/7')) {
+        return new Response('AssertionError: boom\n', { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Test"');
+    expect(evidence).toContain('AssertionError: boom');
   });
 
   it('keeps a peer job-level failure alongside an unrelated task failure', async () => {
