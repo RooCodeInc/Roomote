@@ -59,10 +59,14 @@ const ADO_PULL_REQUEST_SERVICE_HOOK_EVENTS: readonly {
 const ADO_PROJECT_SERVICE_HOOK_EVENTS: readonly {
   eventType: string;
   publisherInputs?: Record<string, string>;
+  resourceVersion?: string;
 }[] = [
   { eventType: 'workitem.commented' },
   // CI Failure Triage: completed builds (result filtered in the handler).
-  { eventType: 'build.complete' },
+  // resourceVersion 1.0 sends the legacy XAML build shape with no `result`,
+  // `sourceBranch`, or `repository`; 2.0 sends the modern Build resource the
+  // build.complete handler parses.
+  { eventType: 'build.complete', resourceVersion: '2.0' },
 ] as const;
 
 const adoWorkItemCommentSchema = z
@@ -1032,6 +1036,7 @@ function buildAdoServiceHookSubscriptionBody({
   projectId,
   eventType,
   publisherInputs = {},
+  resourceVersion,
   webhookUrl,
   secretToken,
 }: {
@@ -1039,13 +1044,14 @@ function buildAdoServiceHookSubscriptionBody({
   projectId: string;
   eventType: string;
   publisherInputs?: Record<string, string>;
+  resourceVersion?: string;
   webhookUrl: string;
   secretToken: string;
 }) {
   return {
     publisherId: ADO_SERVICE_HOOK_PUBLISHER_ID,
     eventType,
-    resourceVersion: '1.0',
+    resourceVersion: resourceVersion ?? '1.0',
     consumerId: ADO_SERVICE_HOOK_CONSUMER_ID,
     consumerActionId: ADO_SERVICE_HOOK_CONSUMER_ACTION_ID,
     publisherInputs: {
@@ -1168,6 +1174,7 @@ async function upsertAdoServiceHookSubscription({
   projectId,
   eventType,
   publisherInputs,
+  resourceVersion,
   webhookUrl,
   secretToken,
   subscriptions,
@@ -1179,6 +1186,7 @@ async function upsertAdoServiceHookSubscription({
   projectId: string;
   eventType: string;
   publisherInputs?: Record<string, string>;
+  resourceVersion?: string;
   webhookUrl: string;
   secretToken: string;
   subscriptions: AdoServiceHookSubscription[];
@@ -1191,6 +1199,7 @@ async function upsertAdoServiceHookSubscription({
     projectId,
     eventType,
     publisherInputs,
+    resourceVersion,
     webhookUrl,
     secretToken,
   });
@@ -1303,6 +1312,7 @@ async function ensureAdoProjectServiceHooks({
         projectId,
         eventType: descriptor.eventType,
         publisherInputs: descriptor.publisherInputs,
+        resourceVersion: descriptor.resourceVersion,
         webhookUrl,
         secretToken,
         subscriptions,
@@ -1539,13 +1549,15 @@ const adoTimelineRecordSchema = z
     type: z.string().optional(),
     result: z.string().nullable().optional(),
     state: z.string().optional(),
+    // Real timelines send `"log": null` on records without logs; a plain
+    // .optional() rejects that and fails the whole timeline parse.
     log: z
       .object({
         id: z.number().optional(),
         url: z.string().optional(),
       })
       .passthrough()
-      .optional(),
+      .nullish(),
     issues: z
       .array(
         z
@@ -1556,7 +1568,7 @@ const adoTimelineRecordSchema = z
           })
           .passthrough(),
       )
-      .optional(),
+      .nullish(),
   })
   .passthrough();
 
