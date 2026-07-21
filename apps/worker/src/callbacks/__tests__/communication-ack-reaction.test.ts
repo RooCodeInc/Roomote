@@ -55,7 +55,27 @@ describe('getCommunicationRunTaskCallbacks ack reaction cleanup', () => {
     });
   });
 
-  it('does not register onStart for SnapshotResume Discord runs', () => {
+  it('clears Discord wake eyes on start for SnapshotResume runs with intake pending', async () => {
+    const run = makeTaskRun(
+      {
+        communicationProvider: 'discord',
+        discordReactionChannelId: 'chan-1',
+        discordReactionMessageId: 'resume-msg',
+        discordIntakeAckPending: true,
+      },
+      TaskPayloadKind.SnapshotResume,
+    );
+    const callbacks = getCommunicationRunTaskCallbacks(run);
+
+    expect(callbacks.onStart).toBeTypeOf('function');
+    await callbacks.onStart?.(run, 'task_abc', {});
+
+    expect(clearCommunicationAckReactionMock).toHaveBeenCalledWith({
+      runId: 42,
+    });
+  });
+
+  it('does not register onStart for SnapshotResume without pending wake ack', () => {
     expect(
       getCommunicationRunTaskCallbacks(
         makeTaskRun(

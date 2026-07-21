@@ -174,4 +174,91 @@ describe('resumeCommunicationTaskFromSnapshot', () => {
       messageIds: ['oob-1'],
     });
   });
+
+  it('records Discord wake eyes targets when the resume ack was pinned', async () => {
+    await resumeCommunicationTaskFromSnapshot({
+      provider: 'discord',
+      completedRun: {
+        id: 41,
+        taskId: 'task-1',
+        payload: {
+          repo: 'acme/repo',
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'thread-1',
+        },
+        port: null,
+        snapshotId: 'snapshot-1',
+      },
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Make one more change',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-resume',
+      },
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-resume',
+      guildId: 'guild-1',
+      discordWakeAckReaction: {
+        channelId: 'thread-1',
+        messageId: 'message-resume',
+        intakeAckPinned: true,
+      },
+    });
+
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationSourceEventId: 'message-resume',
+            discordReactionChannelId: 'thread-1',
+            discordReactionMessageId: 'message-resume',
+            discordIntakeAckPending: true,
+          }),
+        }),
+      }),
+      { launchClass: 'human' },
+    );
+  });
+
+  it('omits discordIntakeAckPending when wake eyes were not pinned', async () => {
+    await resumeCommunicationTaskFromSnapshot({
+      provider: 'discord',
+      completedRun: {
+        id: 41,
+        taskId: 'task-1',
+        payload: {
+          repo: 'acme/repo',
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+        },
+        port: null,
+        snapshotId: 'snapshot-1',
+      },
+      queuedMessage: {
+        provider: 'discord',
+        text: 'try again',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-resume-2',
+      },
+      channelId: 'channel-1',
+      discordWakeAckReaction: {
+        channelId: 'channel-1',
+        messageId: 'message-resume-2',
+        intakeAckPinned: false,
+      },
+    });
+
+    const payload = mocks.enqueueTask.mock.calls[0]?.[0]?.task?.payload as {
+      discordIntakeAckPending?: boolean;
+      discordReactionChannelId?: string;
+      discordReactionMessageId?: string;
+    };
+    expect(payload.discordReactionChannelId).toBe('channel-1');
+    expect(payload.discordReactionMessageId).toBe('message-resume-2');
+    expect(payload.discordIntakeAckPending).toBeUndefined();
+  });
 });

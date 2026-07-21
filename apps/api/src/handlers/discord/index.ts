@@ -647,6 +647,21 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       channelId: string;
       claimedMessageIds: string[];
     } | null = null;
+    // Match Slack wake-up: temporary 👀 on the follow-up that resumes a
+    // sleeping task. Worker onStart clears it via discordIntakeAckPending.
+    let wakeAckPinned = false;
+    if (message?.id) {
+      try {
+        await resolved.provider.addReaction({
+          channelId: channel.channelId,
+          messageId: message.id,
+          name: '👀',
+        });
+        wakeAckPinned = true;
+      } catch {
+        // Soft ack only; resume still proceeds without a pending cleanup flag.
+      }
+    }
     try {
       const continuation = await buildDiscordContinuationPrompt({
         provider: resolved.provider,
@@ -687,6 +702,15 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         messageId: metadata.communicationMessageId,
         guildId: metadata.communicationGuildId,
         preservePayloadFlags: ['discordTaskThread'],
+        ...(message?.id
+          ? {
+              discordWakeAckReaction: {
+                channelId: channel.channelId,
+                messageId: message.id,
+                intakeAckPinned: wakeAckPinned,
+              },
+            }
+          : {}),
       });
       await markDiscordThreadHistoryDelivered({
         channelId: channel.channelId,
@@ -695,6 +719,15 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       return { ok: true, resumed: true, runId: resumed.id };
     } catch (error) {
       await releaseDiscordContinuationClaim(continuationClaim);
+      if (wakeAckPinned && message?.id && resolved.provider.removeReaction) {
+        await resolved.provider
+          .removeReaction({
+            channelId: channel.channelId,
+            messageId: message.id,
+            name: 'eyes',
+          })
+          .catch(() => undefined);
+      }
       throw error;
     }
   }
