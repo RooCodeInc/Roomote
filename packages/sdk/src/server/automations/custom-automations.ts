@@ -235,9 +235,17 @@ async function launchCustomAutomationRow(
     }
   }
 
-  const launchClaimedAt = await tryClaimCustomAutomationLaunch(automation.id);
+  // Manual "Run now" bypasses the previous-run-active gate: an explicit
+  // human trigger should launch even when the last task is still (or is
+  // stuck) active. Scheduled ticks stay single-flight. The short claim
+  // fence still prevents two concurrent launchers from double-launching.
+  const launchClaimedAt = await tryClaimCustomAutomationLaunch(automation.id, {
+    allowWhilePreviousRunActive: opts.manualTrigger === true,
+  });
   if (!launchClaimedAt) {
-    result.skippedReason = 'Previous run is still active.';
+    result.skippedReason = opts.manualTrigger
+      ? 'Another launch is already in progress.'
+      : 'Previous run is still active.';
     return result;
   }
 

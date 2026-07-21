@@ -5,9 +5,17 @@ import {
   deleteCustomAutomation,
   getCustomAutomationById,
   listCustomAutomations,
+  releaseCustomAutomationLaunchClaim,
+  tryClaimCustomAutomationLaunch,
   updateCustomAutomation,
 } from '../custom-automations';
-import { db, environments } from '../../server';
+import {
+  customAutomations,
+  db,
+  environments,
+  eq,
+  taskFactory,
+} from '../../server';
 
 describe('custom automations helpers', () => {
   it('creates, lists, updates, and deletes a custom automation', async () => {
@@ -87,6 +95,53 @@ describe('custom automations helpers', () => {
 
     expect(created.target).toEqual({});
 
+    await deleteCustomAutomation(created.id);
+  });
+
+  it('lets manual claims bypass the previous-run-active gate', async () => {
+    const [environment] = await db
+      .insert(environments)
+      .values({
+        name: `custom-auto-env-claim-${Date.now()}`,
+        config: {
+          name: 'test',
+          repositories: [],
+        },
+      })
+      .returning();
+
+    const created = await createCustomAutomation({
+      name: `Claim gate ${Date.now()}`,
+      prompt: 'Scan for flaky tests.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: environment!.id,
+      target: {},
+    });
+
+    const activeTask = await taskFactory.create({ state: 'active' });
+    await db
+      .update(customAutomations)
+      .set({ lastLaunchedTaskId: activeTask.id })
+      .where(eq(customAutomations.id, created.id));
+
+    // Scheduled-style claims stay single-flight behind the active task.
+    expect(await tryClaimCustomAutomationLaunch(created.id)).toBeNull();
+
+    // A manual claim launches despite the active previous task.
+    const manualClaim = await tryClaimCustomAutomationLaunch(created.id, {
+      allowWhilePreviousRunActive: true,
+    });
+    expect(manualClaim).toBeInstanceOf(Date);
+
+    // The claim fence still guards concurrent launches, manual included.
+    expect(
+      await tryClaimCustomAutomationLaunch(created.id, {
+        allowWhilePreviousRunActive: true,
+      }),
+    ).toBeNull();
+
+    await releaseCustomAutomationLaunchClaim(created.id, manualClaim!);
     await deleteCustomAutomation(created.id);
   });
 
