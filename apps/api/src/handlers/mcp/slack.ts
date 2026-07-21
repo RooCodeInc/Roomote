@@ -398,10 +398,30 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   const trackedAutomationKey =
     trackedThread?.automationKey ?? boundTaskAutomationKey ?? null;
   const automationKey = trackedAutomationKey ?? 'automation';
-  const automationLabel = trackedAutomationKey
-    ? getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
-        ?.label
+  let automationLabel: string | null = trackedAutomationKey
+    ? (getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
+        ?.label ?? null)
     : null;
+
+  // Custom automation runs have no registry descriptor, so the key would
+  // render as "custom automation"; label the footer with the automation's
+  // own name instead.
+  if (!automationLabel) {
+    const run = await db.query.taskRuns.findFirst({
+      columns: { payload: true },
+      where: eq(taskRuns.taskId, params.taskId),
+    });
+    const customAutomationId = getCustomAutomationIdFromTaskPayload(
+      run?.payload,
+    );
+
+    if (customAutomationId) {
+      const customAutomation =
+        await getCustomAutomationById(customAutomationId);
+      automationLabel = customAutomation?.name ?? null;
+    }
+  }
+
   const updated = await refreshAutomationRootFooter({
     slack: params.slack,
     channelId: params.channel,
