@@ -226,7 +226,9 @@ export function resolveTaskCreatorDisplay(
     return {
       kind: 'automation',
       label: task.initiatorAutomation
-        ? formatAutomationAttributionLabel(task.initiatorAutomation)
+        ? formatAutomationAttributionLabel(task.initiatorAutomation, {
+            actorDisplayName: task.actorDisplayName,
+          })
         : '',
     };
   }

@@ -98,7 +98,9 @@ export function getTaskInitiatorDimensionValue(input: {
   if (input.initiatorKind === 'automation') {
     const key = input.initiatorAutomation ?? PRODUCT_NAME;
     const label = input.initiatorAutomation
-      ? formatAutomationLabel(input.initiatorAutomation)
+      ? formatAutomationLabel(input.initiatorAutomation, {
+          actorDisplayName: input.actorDisplayName,
+        })
       : PRODUCT_NAME;
 
     return createDimensionValue(`automation:${key}`, label);
@@ -364,6 +366,7 @@ export function resolveDimensionLabelCollisions<TRow extends AnalyticsRow>(
 export function getTaskTypeDimensionValue(task: {
   initiatorKind: 'user' | 'automation' | null;
   initiatorAutomation: string | null;
+  actorDisplayName?: string | null;
 }) {
   if (!task.initiatorKind) {
     return createLabelBackedDimensionValue('Unknown');
@@ -374,7 +377,9 @@ export function getTaskTypeDimensionValue(task: {
     return createDimensionValue(
       `automation:${key}`,
       task.initiatorAutomation
-        ? formatAutomationLabel(task.initiatorAutomation)
+        ? formatAutomationLabel(task.initiatorAutomation, {
+            actorDisplayName: task.actorDisplayName,
+          })
         : 'Unknown',
     );
   }
