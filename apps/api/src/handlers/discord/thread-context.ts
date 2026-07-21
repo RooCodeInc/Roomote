@@ -150,6 +150,55 @@ function toDiscordThreadHistoryMessage(message: {
   };
 }
 
+/**
+ * Best-effort load of the Discord message a user explicitly replied to via the
+ * client reply UI (`message_reference`). Failures stay silent so a deleted or
+ * unreadable target does not block task intake or continuation.
+ */
+export async function fetchDiscordRepliedToMessageBestEffort(input: {
+  provider: DiscordCommunicationProvider;
+  /**
+   * Channel that holds the referenced message. Prefer
+   * `message_reference.channel_id` when present; otherwise the reply's channel
+   * (or parent channel for message-anchored threads).
+   */
+  channelId: string;
+  messageId: string;
+}): Promise<DiscordThreadHistoryMessage | null> {
+  try {
+    const message = await input.provider.fetchMessage({
+      channelId: input.channelId,
+      messageId: input.messageId,
+    });
+    return toDiscordThreadHistoryMessage(message);
+  } catch (error) {
+    console.warn(
+      `[discord] Failed to fetch replied-to message ${input.messageId} in ${input.channelId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Inserts a replied-to message into history when it is missing, keeping
+ * chronological snowflake order. Used so channel-level reply mentions and
+ * mid-thread jump replies still surface the referenced turn.
+ */
+export function mergeDiscordRepliedToMessage(input: {
+  messages: DiscordThreadHistoryMessage[];
+  repliedTo: DiscordThreadHistoryMessage | null | undefined;
+}): DiscordThreadHistoryMessage[] {
+  if (!input.repliedTo) return input.messages;
+  if (input.messages.some((message) => message.id === input.repliedTo!.id)) {
+    return input.messages;
+  }
+  const next = [...input.messages, input.repliedTo];
+  next.sort((left, right) => compareDiscordSnowflakes(left.id, right.id));
+  return next;
+}
+
 export async function fetchDiscordThreadHistoryBestEffort(input: {
   provider: DiscordCommunicationProvider;
   channelId: string;
@@ -253,7 +302,9 @@ type DiscordContinuationPromptResult = {
  * Build a Slack-parity Discord follow-up prompt: undelivered earlier human/bot
  * side messages in `<thread_context>`, latest Roomote reply in `<replying_to>`,
  * prior supported attachments as images/text, and the current turn wrapped as
- * a communication_message.
+ * a communication_message. When the user used Discord's reply UI, the referenced
+ * message is always surfaced (own-bot text via `<replying_to>`, otherwise in
+ * `<thread_context>`) even if it was already delivered on a prior turn.
  */
 export async function buildDiscordContinuationPrompt(input: {
   provider: DiscordCommunicationProvider;
@@ -268,14 +319,38 @@ export async function buildDiscordContinuationPrompt(input: {
    * delivered so follow-ups do not re-inject it.
    */
   claimUndelivered?: boolean;
+  /**
+   * Discord `message_reference.message_id` from the inbound message when the
+   * user explicitly replied to another turn with the client reply UI.
+   */
+  replyToMessageId?: string;
+  /**
+   * Discord `message_reference.channel_id` when present; otherwise the reply
+   * lives in `channelId` / parent channel.
+   */
+  replyToChannelId?: string;
 }): Promise<DiscordContinuationPromptResult> {
   const claimUndelivered = input.claimUndelivered !== false;
-  const history = await fetchDiscordThreadHistoryBestEffort({
-    provider: input.provider,
-    channelId: input.channelId,
-    ...(input.parentChannelId
-      ? { parentChannelId: input.parentChannelId }
-      : {}),
+  const [historyBase, repliedToMessage] = await Promise.all([
+    fetchDiscordThreadHistoryBestEffort({
+      provider: input.provider,
+      channelId: input.channelId,
+      ...(input.parentChannelId
+        ? { parentChannelId: input.parentChannelId }
+        : {}),
+    }),
+    input.replyToMessageId
+      ? fetchDiscordRepliedToMessageBestEffort({
+          provider: input.provider,
+          channelId:
+            input.replyToChannelId ?? input.parentChannelId ?? input.channelId,
+          messageId: input.replyToMessageId,
+        })
+      : Promise.resolve(null),
+  ]);
+  const history = mergeDiscordRepliedToMessage({
+    messages: historyBase,
+    repliedTo: repliedToMessage,
   });
 
   const earlier = history.filter(
@@ -294,6 +369,15 @@ export async function buildDiscordContinuationPrompt(input: {
     ownBotEarlier.length > 0
       ? ownBotEarlier[ownBotEarlier.length - 1]
       : undefined;
+  // Prefer the message the user explicitly replied to when it is our bot.
+  const explicitOwnBotReply =
+    repliedToMessage &&
+    input.botUserId &&
+    repliedToMessage.botId === input.botUserId &&
+    repliedToMessage.text.trim().length > 0
+      ? repliedToMessage
+      : undefined;
+  const highlightedOwnBotReply = explicitOwnBotReply ?? latestOwnBotReply;
 
   // Match Slack: own bot text lives in <replying_to>, but attachment-carrying
   // Roomote replies (including the latest) must still be claimable so their
@@ -325,9 +409,39 @@ export async function buildDiscordContinuationPrompt(input: {
   }
 
   const claimedSet = new Set(claimedIds);
-  const claimedMessages = contextCandidates.filter((message) =>
+  let claimedMessages = contextCandidates.filter((message) =>
     claimedSet.has(message.id),
   );
+
+  // Always surface an explicit non-bot reply target in thread_context, even when
+  // it was already delivered on an earlier follow-up. Bot text stays in
+  // <replying_to> instead.
+  if (
+    repliedToMessage &&
+    messageHasThreadDeliveryContent(repliedToMessage) &&
+    compareDiscordSnowflakes(repliedToMessage.id, input.queuedMessage.ts) < 0 &&
+    !(input.botUserId && repliedToMessage.botId === input.botUserId)
+  ) {
+    claimedMessages = mergeDiscordRepliedToMessage({
+      messages: claimedMessages,
+      repliedTo: repliedToMessage,
+    });
+  }
+
+  // Attachment-only own-bot reply targets still need their files even when the
+  // claim set skipped them as already delivered.
+  if (
+    repliedToMessage &&
+    input.botUserId &&
+    repliedToMessage.botId === input.botUserId &&
+    repliedToMessage.attachments.length > 0 &&
+    !claimedMessages.some((message) => message.id === repliedToMessage.id)
+  ) {
+    claimedMessages = mergeDiscordRepliedToMessage({
+      messages: claimedMessages,
+      repliedTo: repliedToMessage,
+    });
+  }
 
   const historyAttachments = toDiscordAttachmentsFromHistory(claimedMessages);
   const processedAttachments = historyAttachments.length
@@ -338,7 +452,7 @@ export async function buildDiscordContinuationPrompt(input: {
   }
 
   // Keep own-bot text out of <thread_context> (it is already in <replying_to>
-  // for the latest reply). Attachment filenames from claimed human/side
+  // for the highlighted reply). Attachment filenames from claimed human/side
   // messages still appear; bot attachments still process via files above.
   const threadContextMessages = claimedMessages
     .filter(
@@ -356,14 +470,14 @@ export async function buildDiscordContinuationPrompt(input: {
   });
 
   const replyingToBlock =
-    latestOwnBotReply &&
+    highlightedOwnBotReply &&
     formatDiscordReplyingTo({
-      displayName: messageDisplayName(latestOwnBotReply),
-      text: latestOwnBotReply.text,
-      messageId: latestOwnBotReply.id,
+      displayName: messageDisplayName(highlightedOwnBotReply),
+      text: highlightedOwnBotReply.text,
+      messageId: highlightedOwnBotReply.id,
     });
 
-  const hasPriorBotReply = Boolean(latestOwnBotReply);
+  const hasPriorBotReply = Boolean(highlightedOwnBotReply);
   const turnPolicy = {
     reactionsAllowed: hasPriorBotReply,
   };
