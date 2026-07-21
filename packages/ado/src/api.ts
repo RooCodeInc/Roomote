@@ -1795,14 +1795,24 @@ export async function getAdoBuildFailureEvidence(params: {
   }
 
   const timeline = adoTimelineSchema.parse(await timelineResponse.json());
-  const failedRecords = (timeline.records ?? [])
-    .filter((record) => (record.result ?? '').toLowerCase() === 'failed')
-    .filter((record) => {
-      const type = (record.type ?? '').toLowerCase();
-      // Prefer task/job rows; skip phase wrappers without useful names.
-      return type === 'task' || type === 'job' || Boolean(record.name?.trim());
-    })
-    .slice(0, ADO_FAILURE_EVIDENCE_MAX_TASKS);
+  const failed = (timeline.records ?? []).filter(
+    (record) => (record.result ?? '').toLowerCase() === 'failed',
+  );
+  // A failing task cascades failed results up through its Job/Stage/Phase
+  // wrapper records; keep only the innermost level available so wrappers do
+  // not crowd the record cap with duplicate parent logs.
+  const failedOfType = (type: string) =>
+    failed.filter((record) => (record.type ?? '').toLowerCase() === type);
+  const failedTasks = failedOfType('task');
+  const failedJobs = failedOfType('job');
+  const failedNamed = failed.filter((record) => Boolean(record.name?.trim()));
+  const failedRecords = (
+    failedTasks.length > 0
+      ? failedTasks
+      : failedJobs.length > 0
+        ? failedJobs
+        : failedNamed
+  ).slice(0, ADO_FAILURE_EVIDENCE_MAX_TASKS);
 
   if (failedRecords.length === 0) {
     return null;

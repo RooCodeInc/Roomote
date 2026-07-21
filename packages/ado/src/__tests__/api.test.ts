@@ -1139,6 +1139,78 @@ describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
     expect(evidence).toContain('Assertion failed');
     expect(evidence).toContain('AssertionError: boom');
   });
+
+  it('keeps failed task records over cascaded job/stage/phase wrappers', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              { name: 'Build stage', type: 'Stage', result: 'failed' },
+              { name: 'Build phase', type: 'Phase', result: 'failed' },
+              { name: 'Build job', type: 'Job', result: 'failed' },
+              {
+                name: 'Test',
+                type: 'Task',
+                result: 'failed',
+                log: { id: 7 },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes('/logs/7')) {
+        return new Response('AssertionError: boom\n', { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Test"');
+    expect(evidence).not.toContain('Build stage');
+    expect(evidence).not.toContain('Build phase');
+    expect(evidence).not.toContain('Build job');
+  });
+
+  it('falls back to failed job wrappers when no failed task record exists', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              { name: 'Build stage', type: 'Stage', result: 'failed' },
+              {
+                name: 'Build job',
+                type: 'Job',
+                result: 'failed',
+                issues: [{ message: 'Job aborted' }],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Build job"');
+    expect(evidence).toContain('Job aborted');
+    expect(evidence).not.toContain('Build stage');
+  });
 });
 
 describe('normalizeAdoLinkedAccountKey', () => {
