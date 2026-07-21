@@ -18,13 +18,6 @@ import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 export const PR_REVIEW_NOTIFICATION_QUEUE_NAME = 'pr-review-notification-jobs';
 
 /**
- * Debounce window between the first observed review event and the chat
- * notification so a review submission with several inline comments collapses
- * into a single message.
- */
-export const PR_REVIEW_NOTIFICATION_DEBOUNCE_MS = 1 * 60 * 1000;
-
-/**
  * Delay before re-checking an owner task that is still actively running when
  * the notification job fires. The notification is intentionally held until
  * the task goes idle.
@@ -292,9 +285,7 @@ async function appendPendingEventAndClaimSchedule({
     .expire(pendingKey, PENDING_EVENTS_TTL_SECONDS)
     .exec();
 
-  const markerTtlSeconds =
-    Math.ceil(PR_REVIEW_NOTIFICATION_DEBOUNCE_MS / 1000) +
-    SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
+  const markerTtlSeconds = SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
 
   const claim = await redis.set(markerKey, '1', 'EX', markerTtlSeconds, 'NX');
 
@@ -376,8 +367,8 @@ export async function requeuePendingPrReviewActivity({
 
 /**
  * Records PR review activity (submitted reviews and review comments) for the
- * tasks that own the pull request, and schedules a debounced notification job
- * per task. Chat delivery still needs an originating conversation route, but
+ * tasks that own the pull request, and schedules a notification job per task.
+ * Chat delivery still needs an originating conversation route, but
  * web-only tasks are enqueued too so the summary can land in task history.
  * The notification is informational only: it tells the user about the review
  * feedback once the task is idle. No agent turn is started.
@@ -429,7 +420,7 @@ export async function enqueuePrReviewNotification(
             deferrals: 0,
             sourceControlProvider: parsedInput.sourceControlProvider,
           },
-          { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+          { delay: 0 },
         );
       } catch (error) {
         const redis = getRedis();

@@ -60,7 +60,6 @@ vi.mock('../slack-task-run-routing', () => ({
 }));
 
 import {
-  PR_REVIEW_NOTIFICATION_DEBOUNCE_MS,
   consumePendingPrReviewActivity,
   enqueuePrReviewNotification,
   formatPrReviewActivityMessage,
@@ -100,7 +99,7 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
-  it('schedules notifications for web-only tasks without an originating conversation', async () => {
+  it('schedules notifications immediately for web-only tasks without an originating conversation', async () => {
     const result = await enqueuePrReviewNotification(baseInput);
 
     expect(result).toEqual({ notifiedTaskCount: 1 });
@@ -113,7 +112,7 @@ describe('enqueuePrReviewNotification', () => {
         prUrl: 'https://github.com/owner/repo/pull/42',
         deferrals: 0,
       },
-      { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+      { delay: 0 },
     );
   });
 
@@ -124,7 +123,7 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockQueueAdd).toHaveBeenCalled();
   });
 
-  it('appends the event and schedules a debounced notification job', async () => {
+  it('appends the event and schedules an immediate notification job', async () => {
     const result = await enqueuePrReviewNotification(baseInput);
 
     expect(result).toEqual({ notifiedTaskCount: 1 });
@@ -142,7 +141,7 @@ describe('enqueuePrReviewNotification', () => {
         prUrl: 'https://github.com/owner/repo/pull/42',
         deferrals: 0,
       },
-      { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+      { delay: 0 },
     );
   });
 
