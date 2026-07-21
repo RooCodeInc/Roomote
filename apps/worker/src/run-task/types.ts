@@ -35,8 +35,9 @@ export type EnvironmentSetupSettledOutcome =
 /**
  * Lets the task runtime observe background environment setup without owning
  * it. Implemented by BackgroundEnvironmentSetupController; consumed by
- * runTask to (a) tell the agent whether setup is still running and (b) push a
- * notification into the harness session when it settles mid-task.
+ * runTask so sandbox instructions can tell the agent whether setup is still
+ * running. Agents should poll `.roomote/setup-status.json` — the runtime does
+ * not inject mid-task settled notices into the harness session.
  */
 export interface BackgroundEnvironmentSetupNotifier {
   /** True while environment setup is still running in the background. */
@@ -44,7 +45,8 @@ export interface BackgroundEnvironmentSetupNotifier {
   /**
    * Register a listener invoked once background setup settles. Fires
    * immediately (synchronously) if setup already settled; never fires when
-   * there is no background setup.
+   * there is no background setup. Kept for controller/wiring callers; runTask
+   * no longer uses this to wake the agent session.
    */
   onSettled(listener: (outcome: EnvironmentSetupSettledOutcome) => void): void;
 }

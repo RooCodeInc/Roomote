@@ -338,6 +338,9 @@ describe('buildSandboxInstruction', () => {
     expect(pendingInstruction).toContain('.roomote/setup-status.json');
     expect(pendingInstruction).toContain('.roomote/setup-logs/');
     expect(pendingInstruction).not.toContain(
+      'You will receive a message when background environment setup finishes',
+    );
+    expect(pendingInstruction).not.toContain(
       'were already executed before your task started',
     );
 

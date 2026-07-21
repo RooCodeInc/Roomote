@@ -2452,6 +2452,64 @@ describe('runTask', () => {
     );
   });
 
+  it('does not inject mid-task notices when background environment setup settles', async () => {
+    const onSettled = vi.fn();
+
+    await runTask({
+      taskRun: {
+        id: 205,
+        taskId: 'task-205',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: 'do work',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      backgroundEnvironmentSetup: {
+        hasPendingBackgroundSetup: true,
+        onSettled,
+      },
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      workerEnv: {
+        buildUserFacingEnv: vi.fn(() => ({})),
+        roomoteAppUrl: 'http://localhost:3000',
+        trpcUrl: 'http://localhost:3001',
+        authToken: 'auth-token',
+        appEnv: 'test',
+        setRuntimeEnv: vi.fn(),
+      } as never,
+    });
+
+    const manager = harnessManagerInstances[0]!;
+
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(manager.sendFollowUpPrompt).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'environment-setup' }),
+    );
+    expect(
+      manager.sendFollowUpPrompt.mock.calls.some((call) => {
+        const prompt = call[0]?.prompt;
+
+        return (
+          typeof prompt === 'string' &&
+          prompt.includes('Environment setup update:')
+        );
+      }),
+    ).toBe(false);
+  });
+
   it('coerces an explicit legacy direct harness into the sandbox server', async () => {
     await runTask({
       taskRun: {
