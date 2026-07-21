@@ -150,12 +150,35 @@ type PrReviewSummaryNotification = {
   dedupKey: string;
 };
 
+function getReviewStatusFirstLine(body: string): string | null {
+  const statusContent = getMarkedSection({
+    content: body,
+    startMarker: REVIEW_STATUS_START_MARKER,
+    endMarker: REVIEW_STATUS_END_MARKER,
+  });
+
+  if (!statusContent) {
+    return null;
+  }
+
+  return statusContent.split('\n')[0] ?? '';
+}
+
 /**
  * Classifies a PR issue-comment webhook event (created or edited) into a
  * review-summary notification when the comment is a Roomote review-summary
- * comment whose status section is terminal. Roomote posts the summary comment
- * in "review in progress" form first and patches it with the results, so the
- * terminal content usually arrives via `issue_comment.edited`.
+ * comment whose status section is terminal.
+ *
+ * Roomote posts the summary comment in "review in progress" form first and
+ * patches it with the results, so real review completions usually arrive via
+ * `issue_comment.edited`. For edited events, only notify when the status
+ * transitions from an in-progress review line to a terminal result (the review
+ * workflow's signature move). Terminal → terminal rewrites — for example a PR
+ * fixer checking off checklist items or rewriting status to "all addressed" —
+ * must not enqueue another self-review notice. Edited events without a
+ * previous body (`changes.body.from`) are suppressed as unverifiable. Created
+ * events with an already-terminal body still notify so legacy/crash paths that
+ * post a terminal summary directly keep working.
  */
 export function buildPrReviewSummaryNotification(
   eventPayload: PrReviewSummaryWebhookPayload,
@@ -191,6 +214,26 @@ export function buildPrReviewSummaryNotification(
 
   if (isReviewInProgressStatusLine(firstStatusLine)) {
     return null;
+  }
+
+  // Edited events: require an in-progress → terminal status transition so
+  // bookkeeping edits of an already-finished summary do not look like a new
+  // review pass. `changes` is only present on issue_comment.edited payloads.
+  if ('changes' in eventPayload) {
+    const previousBody = eventPayload.changes.body?.from;
+
+    if (typeof previousBody !== 'string') {
+      return null;
+    }
+
+    const previousStatusLine = getReviewStatusFirstLine(previousBody);
+
+    if (
+      previousStatusLine === null ||
+      !isReviewInProgressStatusLine(previousStatusLine)
+    ) {
+      return null;
+    }
   }
 
   const summary = sanitizeReviewSummaryStatus(statusContent);
