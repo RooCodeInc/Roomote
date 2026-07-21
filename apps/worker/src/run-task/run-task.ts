@@ -224,12 +224,40 @@ function hasAutomationWorkItemId(taskRun: { payload: unknown }): boolean {
   );
 }
 
+function hasCustomAutomationId(taskRun: { payload: unknown }): boolean {
+  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
+    return false;
+  }
+
+  const payload = taskRun.payload as {
+    customAutomationId?: unknown;
+  };
+
+  return (
+    typeof payload.customAutomationId === 'string' &&
+    payload.customAutomationId.trim().length > 0
+  );
+}
+
+/**
+ * Channel-only automation launches (work-item execution tasks and custom
+ * automation runs) stay silent until they have a final result or blocker;
+ * their first chat message late-binds the report thread, so an opening ack
+ * would hijack the thread root.
+ */
+function isSilentChannelAutomationLaunch(taskRun: {
+  payload: unknown;
+}): boolean {
+  return hasAutomationWorkItemId(taskRun) || hasCustomAutomationId(taskRun);
+}
+
 function shouldRequireInitialAckOnInitialTurn(taskRun: {
   payloadKind: string;
   payload: unknown;
 }): boolean {
-  // Automation work items deliberately skip opening acknowledgements.
-  if (hasAutomationWorkItemId(taskRun)) {
+  // Channel-only automation launches deliberately skip opening
+  // acknowledgements.
+  if (isSilentChannelAutomationLaunch(taskRun)) {
     return false;
   }
 
@@ -865,10 +893,11 @@ export const runTask = async ({
                   shouldAllowEmojiReactionOnInitialTurn(taskRun),
               }
             : {}),
-          // Late-bound automation execution tasks have no inbound Slack turn,
-          // but must still end with one agent-written closeout; the Stop hook
-          // blocks silent completion when this flag is set.
-          ...(!initialTurnMessageTs && hasAutomationWorkItemId(taskRun)
+          // Late-bound automation tasks (work-item execution tasks and
+          // custom automation runs) have no inbound Slack turn, but must
+          // still end with one agent-written closeout; the Stop hook blocks
+          // silent completion when this flag is set.
+          ...(!initialTurnMessageTs && isSilentChannelAutomationLaunch(taskRun)
             ? { requiresTerminalCloseoutWithoutTurn: true }
             : {}),
         }),
