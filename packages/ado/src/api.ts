@@ -1534,6 +1534,7 @@ const adoBuildListResponseSchema = z.object({
 const adoTimelineRecordSchema = z
   .object({
     id: z.string().optional(),
+    parentId: z.string().nullable().optional(),
     name: z.string().optional(),
     type: z.string().optional(),
     result: z.string().nullable().optional(),
@@ -1566,6 +1567,87 @@ const adoTimelineSchema = z
   .passthrough();
 
 export type AdoBuild = z.infer<typeof adoBuildSchema>;
+type AdoTimelineRecord = z.infer<typeof adoTimelineRecordSchema>;
+
+function timelineRecordParentId(record: AdoTimelineRecord): string | undefined {
+  const parentId = record.parentId;
+  return typeof parentId === 'string' && parentId.trim() ? parentId : undefined;
+}
+
+/**
+ * Keep each independent innermost failed timeline record. Cascaded Stage /
+ * Phase / Job wrappers that only exist because a child task failed are
+ * dropped, while a peer job that failed without a failed task child is kept.
+ */
+export function selectInnermostFailedAdoTimelineRecords(
+  records: AdoTimelineRecord[],
+): AdoTimelineRecord[] {
+  const failed = records.filter(
+    (record) => (record.result ?? '').toLowerCase() === 'failed',
+  );
+  if (failed.length === 0) {
+    return [];
+  }
+
+  const allById = new Map(
+    records
+      .filter((record): record is AdoTimelineRecord & { id: string } =>
+        Boolean(record.id?.trim()),
+      )
+      .map((record) => [record.id, record]),
+  );
+
+  const hasParentLinks = failed.some((record) =>
+    Boolean(timelineRecordParentId(record)),
+  );
+
+  if (hasParentLinks) {
+    const hasFailedDescendant = (record: AdoTimelineRecord): boolean => {
+      if (!record.id) {
+        return false;
+      }
+      for (const other of failed) {
+        if (other === record) {
+          continue;
+        }
+        let cursor = timelineRecordParentId(other);
+        const seen = new Set<string>();
+        while (cursor && !seen.has(cursor)) {
+          if (cursor === record.id) {
+            return true;
+          }
+          seen.add(cursor);
+          cursor = timelineRecordParentId(allById.get(cursor) ?? {});
+        }
+      }
+      return false;
+    };
+
+    const leaves = failed.filter((record) => !hasFailedDescendant(record));
+    const typedLeaves = leaves.filter((record) => {
+      const type = (record.type ?? '').toLowerCase();
+      return type === 'task' || type === 'job' || Boolean(record.name?.trim());
+    });
+    return (typedLeaves.length > 0 ? typedLeaves : leaves).slice(
+      0,
+      ADO_FAILURE_EVIDENCE_MAX_TASKS,
+    );
+  }
+
+  // Timelines without parent links only support global depth preference.
+  const failedOfType = (type: string) =>
+    failed.filter((record) => (record.type ?? '').toLowerCase() === type);
+  const failedTasks = failedOfType('task');
+  const failedJobs = failedOfType('job');
+  const failedNamed = failed.filter((record) => Boolean(record.name?.trim()));
+  return (
+    failedTasks.length > 0
+      ? failedTasks
+      : failedJobs.length > 0
+        ? failedJobs
+        : failedNamed
+  ).slice(0, ADO_FAILURE_EVIDENCE_MAX_TASKS);
+}
 
 function buildAdoBranchRef(branch: string): string {
   const trimmed = branch.trim();
@@ -1798,24 +1880,12 @@ export async function getAdoBuildFailureEvidence(params: {
   }
 
   const timeline = adoTimelineSchema.parse(await timelineResponse.json());
-  const failed = (timeline.records ?? []).filter(
-    (record) => (record.result ?? '').toLowerCase() === 'failed',
+  // Cascaded Stage/Phase/Job wrappers share parent links with their failed
+  // children; keep each independent innermost failure so peer jobs are not
+  // dropped when another job already has a failed task.
+  const failedRecords = selectInnermostFailedAdoTimelineRecords(
+    timeline.records ?? [],
   );
-  // A failing task cascades failed results up through its Job/Stage/Phase
-  // wrapper records; keep only the innermost level available so wrappers do
-  // not crowd the record cap with duplicate parent logs.
-  const failedOfType = (type: string) =>
-    failed.filter((record) => (record.type ?? '').toLowerCase() === type);
-  const failedTasks = failedOfType('task');
-  const failedJobs = failedOfType('job');
-  const failedNamed = failed.filter((record) => Boolean(record.name?.trim()));
-  const failedRecords = (
-    failedTasks.length > 0
-      ? failedTasks
-      : failedJobs.length > 0
-        ? failedJobs
-        : failedNamed
-  ).slice(0, ADO_FAILURE_EVIDENCE_MAX_TASKS);
 
   if (failedRecords.length === 0) {
     return null;

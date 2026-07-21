@@ -88,6 +88,7 @@ import {
   listAdoRepositories,
   normalizeAdoLinkedAccountKey,
   resolveAdoToken,
+  selectInnermostFailedAdoTimelineRecords,
   validateAdoToken,
   type AdoRepository,
 } from '../api';
@@ -1240,6 +1241,117 @@ describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
     expect(evidence).toContain('task="Build job"');
     expect(evidence).toContain('Job aborted');
     expect(evidence).not.toContain('Build stage');
+  });
+
+  it('keeps a peer job-level failure alongside an unrelated task failure', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              { id: 'stage-1', name: 'CI', type: 'Stage', result: 'failed' },
+              {
+                id: 'job-a',
+                parentId: 'stage-1',
+                name: 'Unit tests',
+                type: 'Job',
+                result: 'failed',
+              },
+              {
+                id: 'task-a',
+                parentId: 'job-a',
+                name: 'Jest',
+                type: 'Task',
+                result: 'failed',
+                log: { id: 7 },
+              },
+              {
+                id: 'job-b',
+                parentId: 'stage-1',
+                name: 'Agent job',
+                type: 'Job',
+                result: 'failed',
+                issues: [{ message: 'Job cancelled by system' }],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes('/logs/7')) {
+        return new Response('AssertionError: boom\n', { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Jest"');
+    expect(evidence).toContain('task="Agent job"');
+    expect(evidence).toContain('Job cancelled by system');
+    expect(evidence).not.toContain('Unit tests');
+    expect(evidence).not.toContain('CI');
+  });
+});
+
+describe('selectInnermostFailedAdoTimelineRecords', () => {
+  it('drops cascade wrappers when parent links are present', () => {
+    const selected = selectInnermostFailedAdoTimelineRecords([
+      { id: 'stage', type: 'Stage', result: 'failed', name: 'Stage' },
+      {
+        id: 'job',
+        parentId: 'stage',
+        type: 'Job',
+        result: 'failed',
+        name: 'Job',
+      },
+      {
+        id: 'task',
+        parentId: 'job',
+        type: 'Task',
+        result: 'failed',
+        name: 'Task',
+      },
+    ]);
+
+    expect(selected.map((record) => record.id)).toEqual(['task']);
+  });
+
+  it('retains independent job failures when a sibling has a failed task', () => {
+    const selected = selectInnermostFailedAdoTimelineRecords([
+      { id: 'stage', type: 'Stage', result: 'failed', name: 'Stage' },
+      {
+        id: 'job-a',
+        parentId: 'stage',
+        type: 'Job',
+        result: 'failed',
+        name: 'Job A',
+      },
+      {
+        id: 'task-a',
+        parentId: 'job-a',
+        type: 'Task',
+        result: 'failed',
+        name: 'Task A',
+      },
+      {
+        id: 'job-b',
+        parentId: 'stage',
+        type: 'Job',
+        result: 'failed',
+        name: 'Job B',
+      },
+    ]);
+
+    expect(selected.map((record) => record.id).sort()).toEqual([
+      'job-b',
+      'task-a',
+    ]);
   });
 });
 
