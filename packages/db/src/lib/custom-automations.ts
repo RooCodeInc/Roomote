@@ -220,19 +220,29 @@ export async function recordCustomAutomationRunOutcome(
     error?: string | null;
     lastLaunchedTaskId?: string | null;
     lastRunAt?: Date | 'skip';
+    /**
+     * When finalizing a claimed launch (success or failure after claim), pass
+     * the fencing token so a reclaimed claim cannot be stomped by a slow
+     * first launcher. Omit for pre-claim bookkeeping updates that must not
+     * touch launchClaimedAt / lastLaunchedTaskId.
+     */
+    launchClaimedAt?: Date;
   },
-): Promise<void> {
+): Promise<boolean> {
   const at = params.at ?? new Date();
   const update: Partial<typeof customAutomations.$inferInsert> = {
     updatedAt: at,
-    launchClaimedAt: null,
   };
+
+  if (params.launchClaimedAt) {
+    update.launchClaimedAt = null;
+  }
 
   if (params.lastRunAt !== 'skip') {
     update.lastRunAt = params.lastRunAt ?? at;
   }
 
-  if (params.lastLaunchedTaskId !== undefined) {
+  if (params.launchClaimedAt && params.lastLaunchedTaskId !== undefined) {
     update.lastLaunchedTaskId = params.lastLaunchedTaskId;
   }
 
@@ -247,10 +257,20 @@ export async function recordCustomAutomationRunOutcome(
     }
   }
 
-  await client
+  const where = params.launchClaimedAt
+    ? and(
+        eq(customAutomations.id, params.id),
+        eq(customAutomations.launchClaimedAt, params.launchClaimedAt),
+      )
+    : eq(customAutomations.id, params.id);
+
+  const updated = await client
     .update(customAutomations)
     .set(update)
-    .where(eq(customAutomations.id, params.id));
+    .where(where)
+    .returning({ id: customAutomations.id });
+
+  return updated.length > 0;
 }
 
 /**

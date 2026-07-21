@@ -140,6 +140,7 @@ describe('customAutomationsJob', () => {
         id: automation.id,
         status: 'succeeded',
         lastLaunchedTaskId: 'task_abc',
+        launchClaimedAt: expect.any(Date),
       }),
     );
   });

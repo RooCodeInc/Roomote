@@ -58,6 +58,7 @@ export async function getCostAnalyticsRows(
       taskTitle: tasks.title,
       initiatorKind: tasks.initiatorKind,
       initiatorAutomation: tasks.initiatorAutomation,
+      actorDisplayName: tasks.actorDisplayName,
       eventUserName: usageUsers.name,
       eventUserEmail: usageUsers.email,
       taskUserName: taskInitiatorUsers.name,
@@ -147,6 +148,7 @@ export async function getCostAnalyticsRows(
       ? getTaskTypeDimensionValue({
           initiatorKind: row.initiatorKind,
           initiatorAutomation: row.initiatorAutomation,
+          actorDisplayName: row.actorDisplayName,
         })
       : createLabelBackedDimensionValue('Non-task inference');
     const attributedUserId = row.userId ?? row.taskUserId;

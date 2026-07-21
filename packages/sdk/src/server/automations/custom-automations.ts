@@ -245,6 +245,7 @@ async function launchCustomAutomationRow(
       id: automation.id,
       status: 'succeeded',
       lastLaunchedTaskId: launchResult.taskId,
+      launchClaimedAt,
     });
 
     result.launchedTaskId = launchResult.taskId;
