@@ -294,6 +294,7 @@ type ProviderSetupExperienceProps = {
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
   createdSlackAppSettingsUrl?: string | null;
+  createdSlackAppIconSet?: boolean | null;
   createSlackAppPending?: boolean;
   showMicrosoftAdvancedConfig?: boolean;
   surface?: 'setup' | 'settings';
@@ -333,6 +334,7 @@ function ProviderSetupTitle({
 function SlackSetupExperience(props: ProviderSetupExperienceProps) {
   const [configToken, setConfigToken] = useState('');
   const createdSlackAppSettingsUrl = props.createdSlackAppSettingsUrl ?? null;
+  const createdSlackAppIconSet = props.createdSlackAppIconSet === true;
 
   if (createdSlackAppSettingsUrl) {
     return (
@@ -340,26 +342,42 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
         <ProviderSetupTitle surface={props.surface} text="Finish Slack app" />
 
         <div className="space-y-4 max-w-xl">
-          <p>
-            Your Slack app is ready. Adding a logo is optional: open{' '}
-            <a
-              href={createdSlackAppSettingsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-foreground underline font-semibold"
-            >
-              the app
-            </a>
-            , scroll down to App icon, and upload{' '}
-            <a
-              href="/api/setup/roomote-logo"
-              download
-              className="text-foreground underline font-semibold"
-            >
-              the Roomote logo
-            </a>
-            .
-          </p>
+          {createdSlackAppIconSet ? (
+            <p>
+              Your Slack app is ready. Open{' '}
+              <a
+                href={createdSlackAppSettingsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground underline font-semibold"
+              >
+                the app
+              </a>{' '}
+              if you want to review its settings, then continue to connect it to
+              your workspace.
+            </p>
+          ) : (
+            <p>
+              Your Slack app is ready. Adding a logo is optional: open{' '}
+              <a
+                href={createdSlackAppSettingsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground underline font-semibold"
+              >
+                the app
+              </a>
+              , scroll down to App icon, and upload{' '}
+              <a
+                href="/api/setup/roomote-logo"
+                download
+                className="text-foreground underline font-semibold"
+              >
+                the Roomote logo
+              </a>
+              .
+            </p>
+          )}
         </div>
       </div>
     );

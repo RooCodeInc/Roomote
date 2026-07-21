@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { buildSlackApiUrl } from '@roomote/slack';
 import { db } from '@roomote/db/server';
 
@@ -30,8 +33,18 @@ type SlackManifestDeleteResponse = {
   error?: string;
 };
 
+type SlackAppIconSetResponse = {
+  ok?: boolean;
+  error?: string;
+};
+
 type CreateSlackAppFromManifestResult =
-  | { success: true; appId: string; appSettingsUrl: string }
+  | {
+      success: true;
+      appId: string;
+      appSettingsUrl: string;
+      iconSet: boolean;
+    }
   | { success: false; error: string };
 
 const CONFIG_TOKEN_ERRORS = new Set([
@@ -44,6 +57,8 @@ const CONFIG_TOKEN_ERRORS = new Set([
 
 const CONFIG_TOKEN_ERROR_MESSAGE =
   'Slack rejected the app configuration token. Generate a fresh token at api.slack.com/apps and try again.';
+
+const ROOMOTE_LOGO_FILENAME = 'roomote-logo.png';
 
 function formatManifestErrors(
   errors: SlackManifestCreateError[] | undefined,
@@ -101,6 +116,65 @@ async function deleteSlackAppFromManifest({
     error: data?.error
       ? `Slack returned an error while deleting the app: ${data.error}`
       : `Failed to delete the Slack app after credential persistence failed (HTTP ${response.status}).`,
+  };
+}
+
+async function setSlackAppIcon({
+  configToken,
+  appId,
+}: {
+  configToken: string;
+  appId: string;
+}): Promise<{ success: true } | { success: false; error: string }> {
+  let logoBytes: Buffer;
+
+  try {
+    logoBytes = await readFile(
+      path.join(process.cwd(), 'public', ROOMOTE_LOGO_FILENAME),
+    );
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? `Failed to read the Roomote logo: ${error.message}`
+          : 'Failed to read the Roomote logo.',
+    };
+  }
+
+  const body = new FormData();
+  body.append('app_id', appId);
+  body.append(
+    'file',
+    new Blob([new Uint8Array(logoBytes)], { type: 'image/png' }),
+    ROOMOTE_LOGO_FILENAME,
+  );
+
+  const response = await fetch(buildSlackApiUrl('apps.icon.set'), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${configToken}`,
+    },
+    body,
+  });
+
+  let data: SlackAppIconSetResponse | null = null;
+
+  try {
+    data = (await response.json()) as SlackAppIconSetResponse;
+  } catch {
+    data = null;
+  }
+
+  if (data?.ok) {
+    return { success: true };
+  }
+
+  return {
+    success: false,
+    error: data?.error
+      ? `Slack returned an error while setting the app icon: ${data.error}`
+      : `Failed to set the Slack app icon (HTTP ${response.status}).`,
   };
 }
 
@@ -257,10 +331,34 @@ export async function createSlackAppFromManifest({
       );
     }
 
+    let iconSet = false;
+
+    try {
+      const iconResult = await setSlackAppIcon({
+        configToken: normalizedConfigToken,
+        appId,
+      });
+
+      if (iconResult.success) {
+        iconSet = true;
+      } else {
+        console.error(
+          '[createSlackAppFromManifest] Failed to set Slack app icon:',
+          iconResult.error,
+        );
+      }
+    } catch (error) {
+      console.error(
+        '[createSlackAppFromManifest] Failed to set Slack app icon:',
+        error,
+      );
+    }
+
     return {
       success: true,
       appId,
       appSettingsUrl: `https://api.slack.com/apps/${encodeURIComponent(appId)}`,
+      iconSet,
     };
   } catch (error) {
     console.error('[createSlackAppFromManifest] Unhandled error:', error);
