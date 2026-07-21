@@ -402,21 +402,27 @@ describe('sleepCheckJob', () => {
     });
   });
 
-  it('uses inArray for stale-worker query so idle jobs are recovered too', async () => {
+  it('includes active and booting statuses in stale-worker recovery', async () => {
     mockJobQueries({});
 
     await sleepCheckJob();
 
-    // dueJobs query uses inArray with two statuses
+    // Due and hard-limit queries only consider active sessions.
     expect(inArrayFn).toHaveBeenCalledWith('status', [
       RunStatus.Running,
       RunStatus.Idle,
     ]);
-    // staleWorkerJobs query also uses inArray so idle jobs are recovered.
+    // Once any heartbeat has gone stale, booting runs need the same recovery
+    // as running and idle sessions.
     expect(inArrayFn).toHaveBeenCalledWith('status', [
       RunStatus.Running,
       RunStatus.Idle,
+      RunStatus.Processing,
+      RunStatus.Preparing,
+      RunStatus.Spawning,
+      RunStatus.Connecting,
     ]);
+    // The no-heartbeat query remains limited to runs that never heartbeated.
     expect(inArrayFn).toHaveBeenCalledWith('status', [
       RunStatus.Processing,
       RunStatus.Preparing,
@@ -1289,13 +1295,13 @@ describe('sleepCheckJob', () => {
     expect(recordedPaths).not.toContain('hard_limit');
   });
 
-  it('fails stale-worker jobs when the sandbox is already gone', async () => {
+  it('fails preparing jobs with a stale heartbeat when the sandbox is already gone', async () => {
     const mockJob = {
       id: 91,
       machineId: 'sb-gone',
       payloadKind: TaskPayloadKind.StandardTask,
-      status: RunStatus.Running,
-      taskPhase: 'stopped',
+      status: RunStatus.Preparing,
+      taskPhase: null,
       vendor: 'modal',
       workerHeartbeatAt: new Date(Date.now() - 5 * 60 * 1_000),
       snapshotId: null,
@@ -1342,13 +1348,13 @@ describe('sleepCheckJob', () => {
     );
   });
 
-  it('finalizes stale-worker jobs as canceled when a stop was requested and the sandbox is already gone', async () => {
+  it('cancels preparing jobs with a stale heartbeat and stop request when the sandbox is gone', async () => {
     const mockJob = {
       id: 101,
       machineId: 'sb-gone-after-stop',
       payloadKind: TaskPayloadKind.StandardTask,
-      status: RunStatus.Running,
-      taskPhase: 'stopped',
+      status: RunStatus.Preparing,
+      taskPhase: null,
       vendor: 'modal',
       workerHeartbeatAt: new Date(Date.now() - 5 * 60 * 1_000),
       snapshotId: null,
