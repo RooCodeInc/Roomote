@@ -189,7 +189,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         roles: {
           coding: { modelId: DEFAULT_TASK_MODEL_ID, reasoningEffort: 'medium' },
           helper: {
-            modelId: 'openrouter/google/gemini-3.5-flash',
+            modelId: 'openrouter/google/gemini-3.6-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -197,7 +197,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'high',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.5-flash',
+            modelId: 'openrouter/google/gemini-3.6-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -211,11 +211,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         label: 'Quick turnaround',
         roles: {
           coding: {
-            modelId: 'openrouter/google/gemini-3.5-flash',
+            modelId: 'openrouter/google/gemini-3.6-flash',
             reasoningEffort: 'low',
           },
           helper: {
-            modelId: 'openrouter/google/gemini-3.5-flash',
+            modelId: 'openrouter/google/gemini-3.6-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -223,7 +223,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.5-flash',
+            modelId: 'openrouter/google/gemini-3.6-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -249,7 +249,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
       'gemini-3-1-pro': 'vercel/google/gemini-3.1-pro-preview',
-      'gemini-3-5-flash': 'vercel/google/gemini-3.5-flash',
+      'gemini-3-6-flash': 'vercel/google/gemini-3.6-flash',
       'deepseek-v4-flash': 'vercel/deepseek/deepseek-v4-flash',
       'deepseek-v4-pro': 'vercel/deepseek/deepseek-v4-pro',
       'glm-5-2': 'vercel/zai/glm-5.2',
@@ -263,9 +263,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Vision is unset: the recommended coding model is multimodal, so image
     // work follows the coding model ("same as coding").
     recommendedRoleModels: {
-      helper: 'vercel/google/gemini-3.5-flash',
+      helper: 'vercel/google/gemini-3.6-flash',
       codeReview: 'vercel/anthropic/claude-opus-4.8',
-      explore: 'vercel/google/gemini-3.5-flash',
+      explore: 'vercel/google/gemini-3.6-flash',
       planning: 'vercel/anthropic/claude-opus-4.8',
     },
   },
@@ -420,7 +420,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-4-8': 'opencode/claude-opus-4-8',
       'claude-sonnet-5': 'opencode/claude-sonnet-5',
       'gemini-3-1-pro': 'opencode/gemini-3.1-pro',
-      'gemini-3-5-flash': 'opencode/gemini-3.5-flash',
+      'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
       'deepseek-v4-flash': 'opencode/deepseek-v4-flash',
       'deepseek-v4-pro': 'opencode/deepseek-v4-pro',
       'glm-5-2': 'opencode/glm-5.2',
@@ -433,10 +433,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // so vision gets an explicit multimodal recommendation instead of the
     // usual same-as-coding fallback.
     recommendedRoleModels: {
-      helper: 'opencode/gemini-3.5-flash',
+      helper: 'opencode/gemini-3.6-flash',
       vision: 'opencode/claude-sonnet-5',
       codeReview: 'opencode/claude-opus-4-8',
-      explore: 'opencode/gemini-3.5-flash',
+      explore: 'opencode/gemini-3.6-flash',
       planning: 'opencode/claude-opus-4-8',
     },
   },
@@ -487,13 +487,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'gemini-3-1-pro': 'google/gemini-3.1-pro-preview',
-      'gemini-3-5-flash': 'google/gemini-3.5-flash',
+      'gemini-3-6-flash': 'google/gemini-3.6-flash',
     }),
     // Pro is the coding default, and code review and planning follow it via
     // "same as coding"; Flash covers the high-volume cheap roles.
     recommendedRoleModels: {
-      helper: 'google/gemini-3.5-flash',
-      explore: 'google/gemini-3.5-flash',
+      helper: 'google/gemini-3.6-flash',
+      explore: 'google/gemini-3.6-flash',
     },
   },
   {
@@ -530,7 +530,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
       'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
       'gemini-3-1-pro': 'github-copilot/gemini-3.1-pro-preview',
-      'gemini-3-5-flash': 'github-copilot/gemini-3.5-flash',
       'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
     }),
     recommendedRoleModels: {

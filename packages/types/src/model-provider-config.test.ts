@@ -320,6 +320,28 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ]);
   });
 
+  it('recommends Gemini 3.6 Flash only from providers that support it', () => {
+    const geminiFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'Gemini 3.6 Flash',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(geminiFlashByProvider).toEqual([
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/google/gemini-3.6-flash',
+      },
+      { providerId: 'vercel', modelId: 'vercel/google/gemini-3.6-flash' },
+      { providerId: 'opencode', modelId: 'opencode/gemini-3.6-flash' },
+      { providerId: 'google', modelId: 'google/gemini-3.6-flash' },
+    ]);
+  });
+
   it('registers Kimi for Coding as an Anthropic-style API-key provider', () => {
     expect(getSetupModelProvider('kimi-for-coding')).toMatchObject({
       id: 'kimi-for-coding',
