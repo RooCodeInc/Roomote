@@ -103,6 +103,7 @@ describe('background automation registry', () => {
     expect(descriptor?.supportedSourceControlProviders).toEqual([
       'github',
       'gitlab',
+      'ado',
     ]);
   });
 

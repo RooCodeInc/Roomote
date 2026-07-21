@@ -31,6 +31,15 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
   messageId?: string;
   guildId?: string;
   preservePayloadFlags?: string[];
+  /**
+   * Discord wake-up 👀 target (thread or DM channel hosting the resume
+   * message). When set with intakeAckPinned, worker onStart clears eyes.
+   */
+  discordWakeAckReaction?: {
+    channelId: string;
+    messageId: string;
+    intakeAckPinned: boolean;
+  };
 }) {
   if (!input.completedRun.snapshotId) {
     throw new Error(
@@ -92,6 +101,16 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
   });
   if (input.provider === 'discord') {
     resumePayload.communicationSourceEventId = input.queuedMessage.ts;
+    // Match Slack SnapshotResume: pin eyes on the waking message and record
+    // the target so worker onStart can clear it once the runtime is up.
+    const wakeAck = input.discordWakeAckReaction;
+    if (wakeAck?.messageId && wakeAck.channelId) {
+      resumePayload.discordReactionChannelId = wakeAck.channelId;
+      resumePayload.discordReactionMessageId = wakeAck.messageId;
+      if (wakeAck.intakeAckPinned) {
+        resumePayload.discordIntakeAckPending = true;
+      }
+    }
   }
   for (const key of input.preservePayloadFlags ?? []) {
     if (completedPayload[key] === true) {

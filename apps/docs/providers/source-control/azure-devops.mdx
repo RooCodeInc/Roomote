@@ -90,11 +90,23 @@ run before launching an Azure DevOps-backed task. Worker tasks write
 host- and clone-path-scoped Azure DevOps credentials into the file-backed Git
 credential helper instead of exporting `ADO_TOKEN` into task shells.
 
+## Service hooks and automations
+
+When Azure DevOps repositories are mapped into environments, Roomote ensures
+service hooks for:
+
+- pull request created/updated and PR comments (Review Code and task follow-up)
+- work item commented (`@roomote` on work items)
+- build completed (CI Failure Triage on failed default-branch builds)
+
+Service hook webhook secrets are generated automatically. The deployment API
+must be reachable from Azure DevOps for those deliveries.
+
 ## Current limits
 
-Azure DevOps service hook ingestion and Review Code automation are not
-implemented yet. Azure DevOps support currently covers repository sync and
-Azure DevOps-backed manual or environment launches.
+Classic TFVC repositories and non-Git build repository types are not triaged.
+CI Failure Triage only investigates failed builds on each repository's default
+branch, one active investigation per repository.
 
 ## Verify setup
 
@@ -102,3 +114,5 @@ Azure DevOps-backed manual or environment launches.
 2. create or update an environment from a synced repository
 3. start a small task and confirm Roomote can clone the repository
 4. confirm Roomote can push a branch when the task produces changes
+5. optionally enable CI Failure Triage and push a default-branch commit that
+   fails CI to confirm a triage task starts

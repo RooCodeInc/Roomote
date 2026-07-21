@@ -1439,6 +1439,11 @@ describe('Discord Gateway event handler', () => {
         }),
       }),
     );
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
     expect(mocks.resumeTask).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'discord',
@@ -1447,6 +1452,11 @@ describe('Discord Gateway event handler', () => {
         threadId: 'thread-1',
         guildId: 'guild-1',
         preservePayloadFlags: ['discordTaskThread'],
+        discordWakeAckReaction: {
+          channelId: 'thread-1',
+          messageId: 'message-1',
+          intakeAckPinned: true,
+        },
         queuedMessage: expect.objectContaining({
           text: 'Make one more change',
           formattedPrompt: expect.stringContaining('<thread_context>'),
@@ -1455,6 +1465,45 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.reply).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('clears wake eyes when snapshot resume fails after pinning', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'Completed task',
+      type: 11,
+    });
+    mocks.findCompletedRun.mockResolvedValue({
+      id: 31,
+      payload: {},
+      port: null,
+      snapshotId: 'snapshot-1',
+    });
+    mocks.resumeTask.mockRejectedValueOnce(new Error('enqueue failed'));
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'Make one more change',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(500);
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
+    expect(mocks.removeReaction).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
   });
 
   it('links a Discord user with a one-shot /link code', async () => {
