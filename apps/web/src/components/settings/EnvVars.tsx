@@ -36,7 +36,7 @@ export function EnvVars() {
     <>
       <Section
         icon={KeyRound}
-        title="Environment Variables"
+        title="Deployment Environment Variables"
         action={
           <Button
             type="button"
@@ -49,6 +49,9 @@ export function EnvVars() {
           </Button>
         }
       >
+        <p className="text-sm text-muted-foreground">
+          Encrypted variables available to tasks in every environment.
+        </p>
         {isPending ? (
           <table className="w-full">
             <tbody>
