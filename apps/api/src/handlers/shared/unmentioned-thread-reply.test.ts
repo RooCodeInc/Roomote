@@ -36,6 +36,7 @@ function decide(input: {
   senderUserId?: string;
   isThreadTaskOwner?: boolean;
   isThreadRootAuthor?: boolean;
+  isAutomationReportThread?: boolean;
   threadMessages: UnmentionedThreadHistoryMessage[];
 }) {
   return evaluateUnmentionedThreadReplyRouting({
@@ -43,6 +44,7 @@ function decide(input: {
     senderUserId: input.senderUserId ?? 'U1',
     isThreadTaskOwner: input.isThreadTaskOwner ?? true,
     isThreadRootAuthor: input.isThreadRootAuthor ?? false,
+    isAutomationReportThread: input.isAutomationReportThread ?? false,
     threadMessages: input.threadMessages,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -105,6 +107,28 @@ describe('evaluateUnmentionedThreadReplyRouting', () => {
         ],
       }),
     ).toEqual({ shouldRoute: true, interjectionDetected: false });
+  });
+
+  it('routes a first-time sender in an automation report thread', () => {
+    expect(
+      decide({
+        isThreadTaskOwner: false,
+        isThreadRootAuthor: false,
+        isAutomationReportThread: true,
+        threadMessages: [bot('100'), bot('200')],
+      }),
+    ).toEqual({ shouldRoute: true, interjectionDetected: false });
+  });
+
+  it('still requires a mention after an interjection in an automation report thread', () => {
+    expect(
+      decide({
+        isThreadTaskOwner: false,
+        isThreadRootAuthor: false,
+        isAutomationReportThread: true,
+        threadMessages: [bot('100'), human('200', 'U2')],
+      }),
+    ).toEqual({ shouldRoute: false, interjectionDetected: true });
   });
 
   it('rejects a first-time sender who never owned/rooted/mentioned', () => {

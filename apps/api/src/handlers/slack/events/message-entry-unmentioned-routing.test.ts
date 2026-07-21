@@ -302,6 +302,24 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toEqual({ shouldRoute: false });
   });
 
+  it('routes a first-time sender replying in a custom automation report thread', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue({
+      userId: null,
+      slackUserId: null,
+      isCustomAutomationThread: true,
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      botMessage(THREAD_TS, 'Automation report root'),
+      botMessage('101.000'),
+    ]);
+
+    const decision = await routeDecision(
+      threadReplyEvent({ user: 'U222', ts: '102.000' }),
+    );
+
+    expect(decision.shouldRoute).toBe(true);
+  });
+
   it('ignores replies in threads Roomote does not own', async () => {
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
 
