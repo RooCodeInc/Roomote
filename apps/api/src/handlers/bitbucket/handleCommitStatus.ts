@@ -35,16 +35,20 @@ export function parseBitbucketPipelineIdentityFromUrl(
 
   // UUID segments can start with hex digits; match them before bare build
   // numbers so ".../results/01234567-89ab-..." is not treated as 1234567.
+  // Require a Pipelines path so external CI URLs are not treated as Pipeline ids.
   const uuidMatch = href.match(
-    /(?:results\/|pipelines\/)(\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?)/i,
+    /pipelines\/(?:results\/|home#!\/results\/)(\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?)/i,
   );
   if (uuidMatch?.[1]) {
     return { pipelineUuid: stripUuidBraces(uuidMatch[1]) };
   }
 
+  // Require a Pipelines path segment so external CI URLs that happen to
+  // contain "/results/<n>" are not treated as Pipeline identities.
   const buildMatch =
-    href.match(/[#!/]results\/(\d+)(?:\b|[/?#]|$)/i) ||
-    href.match(/\/results\/(\d+)(?:\?|#|$)/i);
+    href.match(
+      /pipelines\/(?:home#!\/*results\/|results\/)(\d+)(?:\b|[/?#]|$)/i,
+    ) || href.match(/addon\/pipelines\/[^#]*#!\/results\/(\d+)(?:\b|[/?#]|$)/i);
   if (buildMatch?.[1]) {
     return { buildNumber: Number(buildMatch[1]) };
   }
@@ -57,6 +61,8 @@ export function parseBitbucketPipelineIdentityFromUrl(
  * FailedCiRun and hand off to the shared CI failure triage launch core.
  *
  * Bitbucket Cloud surfaces Pipeline completion as repo:commit_status_* events.
+ * Those events also cover external CI (Jenkins, etc.), so only launch when the
+ * status URL identifies a Pipelines run that resolves via the Bitbucket API.
  */
 export async function handleBitbucketCommitStatus(
   payload: BitbucketCommitStatusWebhook,
@@ -67,6 +73,18 @@ export async function handleBitbucketCommitStatus(
     return {
       status: 'ok',
       message: `Ignoring non-failure Bitbucket commit status: ${status.state ?? 'unknown'}`,
+    };
+  }
+
+  const identity = parseBitbucketPipelineIdentityFromUrl(status.url);
+  if (
+    identity.pipelineUuid === undefined &&
+    identity.buildNumber === undefined
+  ) {
+    return {
+      status: 'ok',
+      message:
+        'Ignoring failed Bitbucket commit status that is not a Pipelines result URL',
     };
   }
 
@@ -83,10 +101,12 @@ export async function handleBitbucketCommitStatus(
     };
   }
 
+  // Prefer repository HTML links so external CI hosts (Jenkins, etc.) do not
+  // break host-scoped repository matching before pipeline resolution.
   const webhookHost = toHostFromUrl(
-    status.url ??
-      payload.repository.links?.html?.href ??
+    payload.repository.links?.html?.href ??
       status.links?.self?.href ??
+      status.url ??
       '',
   );
 
@@ -116,29 +136,24 @@ export async function handleBitbucketCommitStatus(
   const defaultBranch = stripGitRef(repo.defaultBranch) || 'main';
   let headBranch = stripGitRef(status.refname);
   let headSha = (status.commit?.hash ?? '').trim();
-  let pipelineUuid: string | undefined;
-  let buildNumber: number | undefined;
+  let pipelineUuid = identity.pipelineUuid;
+  let buildNumber = identity.buildNumber;
   let runUrl = (status.url ?? '').trim();
   let workflowName = (status.name ?? '').trim() || 'pipeline';
 
-  const identity = parseBitbucketPipelineIdentityFromUrl(status.url);
-  pipelineUuid = identity.pipelineUuid;
-  buildNumber = identity.buildNumber;
-
+  let pipeline = null;
   try {
-    let pipeline =
+    pipeline =
       pipelineUuid !== undefined
         ? await getBitbucketPipeline({
             repositoryFullName: repo.fullName,
             pipelineUuid,
           })
-        : buildNumber !== undefined
-          ? await getBitbucketPipelineByBuildNumber({
-              repositoryFullName: repo.fullName,
-              branch: headBranch || defaultBranch,
-              buildNumber,
-            })
-          : null;
+        : await getBitbucketPipelineByBuildNumber({
+            repositoryFullName: repo.fullName,
+            branch: headBranch || defaultBranch,
+            buildNumber: buildNumber!,
+          });
 
     // If build-number lookup used status ref and missed, retry on default branch.
     if (
@@ -152,36 +167,47 @@ export async function handleBitbucketCommitStatus(
         buildNumber,
       });
     }
-
-    if (pipeline) {
-      const result = getBitbucketPipelineResultName(pipeline);
-      if (result !== 'FAILED' && result !== 'ERROR') {
-        return {
-          status: 'ok',
-          message: `Ignoring Bitbucket pipeline that is not failed: ${result || 'unknown'}`,
-        };
-      }
-
-      headBranch =
-        stripGitRef(pipeline.target?.ref_name) || headBranch || defaultBranch;
-      headSha = (pipeline.target?.commit?.hash ?? headSha).trim();
-      pipelineUuid = stripUuidBraces(pipeline.uuid);
-      buildNumber = pipeline.build_number ?? buildNumber;
-      runUrl = getBitbucketPipelineWebUrl({
-        repositoryFullName: repo.fullName,
-        pipeline,
-      });
-      workflowName =
-        pipeline.target?.selector?.pattern?.trim() ||
-        pipeline.target?.selector?.type?.trim() ||
-        workflowName;
-    }
   } catch (error) {
     logApiError(
       `[Bitbucket] Failed to inspect pipeline for status ${status.key ?? status.name ?? 'unknown'}`,
       error,
     );
+    return {
+      status: 'ok',
+      message:
+        'Ignoring failed Bitbucket commit status that could not be resolved to a Pipeline',
+    };
   }
+
+  if (!pipeline) {
+    return {
+      status: 'ok',
+      message:
+        'Ignoring failed Bitbucket commit status that could not be resolved to a Pipeline',
+    };
+  }
+
+  const result = getBitbucketPipelineResultName(pipeline);
+  if (result !== 'FAILED' && result !== 'ERROR') {
+    return {
+      status: 'ok',
+      message: `Ignoring Bitbucket pipeline that is not failed: ${result || 'unknown'}`,
+    };
+  }
+
+  headBranch =
+    stripGitRef(pipeline.target?.ref_name) || headBranch || defaultBranch;
+  headSha = (pipeline.target?.commit?.hash ?? headSha).trim();
+  pipelineUuid = stripUuidBraces(pipeline.uuid);
+  buildNumber = pipeline.build_number ?? buildNumber;
+  runUrl = getBitbucketPipelineWebUrl({
+    repositoryFullName: repo.fullName,
+    pipeline,
+  });
+  workflowName =
+    pipeline.target?.selector?.pattern?.trim() ||
+    pipeline.target?.selector?.type?.trim() ||
+    workflowName;
 
   if (!headBranch) {
     return {
@@ -214,19 +240,16 @@ export async function handleBitbucketCommitStatus(
     });
   }
 
-  const failureEvidence =
-    pipelineUuid !== undefined
-      ? await getBitbucketPipelineFailureEvidence({
-          repositoryFullName: repo.fullName,
-          pipelineUuid,
-        }).catch((error) => {
-          logApiError(
-            `[Bitbucket] Failed to fetch pipeline evidence for ${pipelineUuid}`,
-            error,
-          );
-          return null;
-        })
-      : null;
+  const failureEvidence = await getBitbucketPipelineFailureEvidence({
+    repositoryFullName: repo.fullName,
+    pipelineUuid,
+  }).catch((error) => {
+    logApiError(
+      `[Bitbucket] Failed to fetch pipeline evidence for ${pipelineUuid}`,
+      error,
+    );
+    return null;
+  });
 
   const failedRun: FailedCiRun = {
     provider: 'bitbucket',
@@ -238,9 +261,7 @@ export async function handleBitbucketCommitStatus(
     headBranch,
     headSha,
     workflowOrPipelineName: workflowName,
-    runId:
-      pipelineUuid ??
-      (buildNumber !== undefined ? String(buildNumber) : headSha),
+    runId: pipelineUuid ?? String(buildNumber),
     runUrl,
     ...(failureEvidence ? { failureEvidence } : {}),
   };

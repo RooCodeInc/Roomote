@@ -122,6 +122,14 @@ describe('parseBitbucketPipelineIdentityFromUrl', () => {
       ),
     ).toEqual({});
   });
+
+  it('returns empty identity for external CI URLs that only look like results paths', () => {
+    expect(
+      parseBitbucketPipelineIdentityFromUrl(
+        'https://ci.example.com/job/acme-api/results/42/',
+      ),
+    ).toEqual({});
+  });
 });
 
 describe('handleBitbucketCommitStatus', () => {
@@ -237,6 +245,31 @@ describe('handleBitbucketCommitStatus', () => {
     const result = await handleBitbucketCommitStatus(buildPayload());
 
     expect(result.message).toContain('No active Bitbucket repository');
+    expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
+  });
+
+  it('ignores failed external commit statuses that are not Pipelines result URLs', async () => {
+    const result = await handleBitbucketCommitStatus(
+      buildPayload({
+        commit_status: {
+          name: 'Jenkins',
+          key: 'jenkins-build',
+          url: 'https://ci.example.com/job/acme-api/123/',
+        },
+      }),
+    );
+
+    expect(result.message).toContain('not a Pipelines result URL');
+    expect(mockGetBitbucketPipelineByBuildNumber).not.toHaveBeenCalled();
+    expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
+  });
+
+  it('ignores Pipelines URLs that do not resolve to a pipeline run', async () => {
+    mockGetBitbucketPipelineByBuildNumber.mockResolvedValue(null);
+
+    const result = await handleBitbucketCommitStatus(buildPayload());
+
+    expect(result.message).toContain('could not be resolved to a Pipeline');
     expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
   });
 });
