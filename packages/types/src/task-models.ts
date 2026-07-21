@@ -231,6 +231,25 @@ export function normalizeTaskModelId(modelId: string): string {
   return trimmedModelId;
 }
 
+/**
+ * When LiteLLM is configured, bare OpenCode model names without a provider
+ * segment are treated as LiteLLM route names and rewritten to
+ * `litellm/<name>`. Explicit `provider/model` ids (including already-prefixed
+ * `litellm/...` values) are left unchanged.
+ */
+export function applyImplicitLiteLlmModelPrefix(
+  modelId: string,
+  isLiteLlmConfigured: boolean,
+): string {
+  const trimmedModelId = modelId.trim();
+
+  if (!trimmedModelId || !isLiteLlmConfigured || trimmedModelId.includes('/')) {
+    return trimmedModelId;
+  }
+
+  return `litellm/${trimmedModelId}`;
+}
+
 export function buildTaskModelOption(input: {
   id: string;
   displayName: string;

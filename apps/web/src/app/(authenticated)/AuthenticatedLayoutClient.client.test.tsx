@@ -29,6 +29,11 @@ vi.mock('@/hooks/useSignInRedirect', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
+    onboarding: {
+      status: {
+        queryOptions: vi.fn(() => ({ queryKey: ['onboarding.status'] })),
+      },
+    },
     setup: {
       status: {
         queryOptions: vi.fn(() => ({ queryKey: ['setup.status'] })),

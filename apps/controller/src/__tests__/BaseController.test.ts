@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import { RunStatus, TaskPayloadKind, TaskRunErrorCode } from '@roomote/types';
 import type { TaskRun } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -118,6 +118,7 @@ vi.mock('../monitoring/sentry', () => ({
 // ── Import after mocks ──────────────────────────────────────────────────────
 
 import { BaseController } from '../BaseController';
+import { DockerBootError } from '../compute-providers/docker-sandbox-security';
 
 // Create a concrete subclass for testing the abstract BaseController.
 class TestController extends BaseController {
@@ -303,13 +304,37 @@ describe('BaseController.handleSpawnTaskRunError', () => {
     );
   });
 
-  it('re-throws the original error after calling finishRun', async () => {
+  it('re-throws a sanitized error after calling finishRun (no token-bearing cause)', async () => {
     const job = makeTaskRun();
-    const originalError = new Error('original');
+    const originalError = new Error(
+      'Command failed: docker exec -e AUTH_TOKEN=super-secret true',
+    );
+    Object.assign(originalError, {
+      cause: new Error('docker exec -e AUTH_TOKEN=super-secret true'),
+    });
 
-    await expect(
-      controller.testHandleSpawnTaskRunError(job, originalError),
-    ).rejects.toThrow('original');
+    let thrown: unknown;
+    try {
+      await controller.testHandleSpawnTaskRunError(job, originalError);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).not.toBe(originalError);
+    expect((thrown as Error).cause).toBeUndefined();
+    expect((thrown as Error).message).toContain('AUTH_TOKEN=<redacted>');
+    expect((thrown as Error).message).not.toContain('super-secret');
+
+    expect(mockCaptureControllerException).toHaveBeenCalledTimes(1);
+    const [capturedError, context] =
+      mockCaptureControllerException.mock.calls[0] ?? [];
+    expect(capturedError).toBeInstanceOf(Error);
+    expect((capturedError as Error).message).not.toContain('super-secret');
+    expect((capturedError as Error).cause).toBeUndefined();
+    expect(context).toEqual(
+      expect.objectContaining({ phase: 'spawn_worker', runId: 42 }),
+    );
   });
 
   it('handles non-Error objects as error messages', async () => {
@@ -317,13 +342,50 @@ describe('BaseController.handleSpawnTaskRunError', () => {
 
     await expect(
       controller.testHandleSpawnTaskRunError(job, 'string error'),
-    ).rejects.toBe('string error');
+    ).rejects.toThrow('string error');
 
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 7,
       status: RunStatus.Failed,
       error: 'string error',
     });
+  });
+
+  it('persists the machine-readable code carried by DockerBootError', async () => {
+    const job = makeTaskRun({ id: 11 });
+    const error = new DockerBootError(
+      TaskRunErrorCode.DockerImageMissing,
+      'Docker worker image roomote-worker:local is not available locally and could not be pulled.',
+    );
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(job, error),
+    ).rejects.toThrow('could not be pulled');
+
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 11,
+        status: RunStatus.Failed,
+        errorCode: TaskRunErrorCode.DockerImageMissing,
+      }),
+    );
+  });
+
+  it('classifies untyped docker failures from the formatted message', async () => {
+    const job = makeTaskRun({ id: 12 });
+    const error = new Error(
+      'Failed to run docker run.\n\nCannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n\ncommand:\ndocker run -d roomote-worker:local',
+    );
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(job, error),
+    ).rejects.toThrow();
+
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: TaskRunErrorCode.DockerDaemonUnreachable,
+      }),
+    );
   });
 
   it('resolves local release paths from the repo root even when cwd is apps/controller', () => {

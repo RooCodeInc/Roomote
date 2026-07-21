@@ -427,7 +427,7 @@ describe('StepAuthEnvVars', () => {
     ).toHaveAttribute('href', 'https://api.slack.com/apps');
   });
 
-  it('creates the Slack app from a config token, shows optional icon guidance, and continues setup', async () => {
+  it('creates the Slack app from a config token, shows finish guidance, and continues setup', async () => {
     const invalidateQueries = vi.fn();
     mockUseQueryClient.mockReturnValue({
       invalidateQueries,
@@ -472,6 +472,7 @@ describe('StepAuthEnvVars', () => {
         success: true,
         appId: 'A1',
         appSettingsUrl: 'https://api.slack.com/apps/A1',
+        iconSet: true,
       });
     });
 
@@ -481,10 +482,10 @@ describe('StepAuthEnvVars', () => {
     expect(
       await screen.findByRole('heading', { name: /finish slack app/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Your Slack app is ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/Your Slack app is ready\./i)).toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: /the Roomote logo/i }),
-    ).toHaveAttribute('href', '/api/setup/roomote-logo');
+      screen.queryByRole('link', { name: /the Roomote logo/i }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /the app/i })).toHaveAttribute(
       'href',
       'https://api.slack.com/apps/A1',
@@ -589,8 +590,18 @@ describe('StepAuthEnvVars', () => {
       />,
     );
 
-    // Saved Slack skips the "Create Slack app" intro and shows the value form.
-    expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
+    // Saved Slack skips the_config-token create intro and shows the credentials form.
+    expect(
+      screen.getByText(/Credentials for the Slack app Roomote uses/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: /Create a new Slack app with a configuration token/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('App configuration token'),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /create slack app/i }),
     ).not.toBeInTheDocument();
@@ -601,6 +612,55 @@ describe('StepAuthEnvVars', () => {
     expect(
       screen.getByRole('button', { name: /continue/i }),
     ).toBeInTheDocument();
+  });
+
+  it('lets saved Slack open the config-token create flow', () => {
+    const authSetup = buildAuthSetup('slack');
+    const savedSlackAuthSetup: SetupAuthStatus = {
+      ...authSetup,
+      providers: authSetup.providers.map((provider) =>
+        provider.id === 'slack'
+          ? {
+              ...provider,
+              savedSatisfied: true,
+              setupSatisfied: true,
+              fields: provider.fields.map((field) => ({
+                ...field,
+                savedSatisfied: true,
+                savedValue:
+                  field.envVarName === 'R_SLACK_CLIENT_ID'
+                    ? '11040692082085.11578538885334'
+                    : field.savedValue,
+              })),
+            }
+          : provider,
+      ),
+    };
+
+    render(
+      <StepAuthEnvVars
+        authSetup={savedSlackAuthSetup}
+        selectedProviderId="slack"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /Create a new Slack app with a configuration token/i,
+      }),
+    );
+
+    expect(
+      screen.getByLabelText('App configuration token'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create Slack app' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Back$/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /continue/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps Microsoft setup focused on the single app values', () => {

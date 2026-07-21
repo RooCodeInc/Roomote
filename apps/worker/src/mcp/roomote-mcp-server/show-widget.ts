@@ -7,6 +7,7 @@ const SHOW_WIDGET_MAX_HTML_CHARS = 100_000;
 const SHOW_WIDGET_MAX_CSS_CHARS = 50_000;
 const SHOW_WIDGET_MAX_TITLE_CHARS = 200;
 const SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS = 4_000;
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 export const SHOW_WIDGET_DEFAULT_HEIGHT = 320;
 export const SHOW_WIDGET_MIN_HEIGHT = 120;
 export const SHOW_WIDGET_MAX_HEIGHT = 800;
@@ -49,8 +50,11 @@ async function getPurifier(): Promise<DOMPurify> {
     ([{ default: createDOMPurify }, { JSDOM }]) => {
       const purifier = createDOMPurify(new JSDOM('').window);
 
-      purifier.addHook('uponSanitizeAttribute', (_node, data) => {
+      purifier.addHook('uponSanitizeAttribute', (node, data) => {
         const name = data.attrName.toLowerCase();
+        const value = String(data.attrValue ?? '')
+          .trim()
+          .toLowerCase();
 
         if (
           name.startsWith('on') ||
@@ -62,6 +66,22 @@ async function getPurifier(): Promise<DOMPurify> {
           return;
         }
 
+        if (node.namespaceURI === SVG_NAMESPACE) {
+          if (name === 'href' && !value.startsWith('#')) {
+            data.keepAttr = false;
+            return;
+          }
+
+          const withoutLocalReferences = value.replace(
+            /url\(\s*(['"]?)#[^'"()\s]+\1\s*\)/gi,
+            '',
+          );
+          if (/url\s*\(/i.test(withoutLocalReferences)) {
+            data.keepAttr = false;
+            return;
+          }
+        }
+
         if (
           name === 'href' ||
           name === 'src' ||
@@ -69,10 +89,6 @@ async function getPurifier(): Promise<DOMPurify> {
           name === 'action' ||
           name === 'srcset'
         ) {
-          const value = String(data.attrValue ?? '')
-            .trim()
-            .toLowerCase();
-
           if (
             value.startsWith('http:') ||
             value.startsWith('https:') ||
@@ -103,7 +119,7 @@ export async function sanitizeWidgetHtml(html: string): Promise<string> {
   const purifier = await getPurifier();
 
   return purifier.sanitize(html, {
-    USE_PROFILES: { html: true },
+    USE_PROFILES: { html: true, svg: true },
     FORBID_TAGS: [
       'script',
       'iframe',
@@ -114,8 +130,17 @@ export async function sanitizeWidgetHtml(html: string): Promise<string> {
       'meta',
       'link',
       'style',
-      'svg',
       'math',
+      'foreignobject',
+      'image',
+      'use',
+      'animate',
+      'animatecolor',
+      'animatemotion',
+      'animatetransform',
+      'filter',
+      'set',
+      'mpath',
       'noscript',
       'template',
       'video',
@@ -128,7 +153,7 @@ export async function sanitizeWidgetHtml(html: string): Promise<string> {
       'applet',
     ],
     ALLOW_DATA_ATTR: false,
-    FORBID_CONTENTS: ['script', 'style'],
+    ADD_FORBID_CONTENTS: ['script', 'style'],
   });
 }
 

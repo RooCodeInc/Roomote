@@ -21,6 +21,7 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
 import { encodeRecord } from '@/lib';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import {
   createSignedGitHubAuthState,
   decodeSignedGitHubAuthState,
@@ -194,13 +195,13 @@ const GITHUB_APP_NOT_CONFIGURED_ERROR =
   'Configure a GitHub App for this deployment before installing. Create one or enter its credentials first.';
 
 function getGitHubCallbackUrl() {
-  return new URL('/github/callback', Env.R_APP_URL).toString();
+  return new URL('/github/callback', getPublicAppUrl(Env)).toString();
 }
 
 function getGitHubWebhookUrl() {
   const trpcUrl = new URL(Env.TRPC_URL);
   const webhookBaseUrl = isLoopbackHostname(trpcUrl.hostname)
-    ? Env.R_APP_URL
+    ? getPublicAppUrl(Env)
     : Env.TRPC_URL;
 
   return new URL('/api/webhooks/github', webhookBaseUrl).toString();
@@ -211,7 +212,7 @@ function buildGitHubManifestName() {
   const GITHUB_APP_NAME_MAX_LENGTH = 34;
   const prefix = 'roomote-';
 
-  const host = new URL(Env.R_APP_URL).hostname
+  const host = new URL(getPublicAppUrl(Env)).hostname
     .replace(/[^a-zA-Z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
@@ -530,7 +531,7 @@ export async function startCreateGitHubInstallationCommand(
     };
   }
 
-  const baseUrl = Env.R_APP_URL;
+  const baseUrl = getPublicAppUrl(Env);
   const params = new URLSearchParams();
 
   if (state) {
@@ -866,7 +867,7 @@ export async function startAuthenticateGitHubAccountCommand(
       };
     }
 
-    const baseUrl = Env.R_APP_URL;
+    const baseUrl = getPublicAppUrl(Env);
     const callbackBackground = state?.bg;
     const signedState = createSignedGitHubAuthState({
       userId: auth.userId,

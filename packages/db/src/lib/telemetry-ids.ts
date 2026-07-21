@@ -117,8 +117,7 @@ export async function getUserAnalyticsId(
 
 /**
  * Persists the latest released version reported by the Ping version-check
- * endpoint. Stored for a future "update available" surface; no UI reads it
- * yet.
+ * endpoint. Read by the in-app "update available" notice for self-host admins.
  */
 export async function recordLatestKnownVersion(
   latestVersion: string,

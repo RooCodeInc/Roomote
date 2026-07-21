@@ -160,6 +160,17 @@ describe('startNewDiscordTask', () => {
           },
         ],
       }),
+      // The message this thread was started from lives in the parent channel
+      // (its id equals the thread id) and is absent from the thread listing.
+      fetchMessage: vi.fn().mockResolvedValue({
+        provider: 'discord',
+        id: '50',
+        user: 'u-sky',
+        username: 'Sky',
+        text: 'Tested the PR and the task failed while preparing the workspace.',
+        channelId: 'channel-1',
+        fileCount: 0,
+      }),
     };
     mocks.processAttachments.mockResolvedValue({
       images: ['data:image/png;base64,thread'],
@@ -183,11 +194,11 @@ describe('startNewDiscordTask', () => {
       metadata: {
         communicationProvider: 'discord',
         communicationChannelId: 'channel-1',
-        communicationThreadId: 'discussion-thread',
+        communicationThreadId: '50',
         communicationMessageId: '200',
       },
       channel: {
-        channelId: 'discussion-thread',
+        channelId: '50',
         channelName: 'General discussion',
         channelType: 11,
         guildId: 'guild-1',
@@ -200,7 +211,11 @@ describe('startNewDiscordTask', () => {
 
     expect(result.status).toBe('started');
     expect(provider.fetchChannelMessages).toHaveBeenCalledWith({
-      channelId: 'discussion-thread',
+      channelId: '50',
+    });
+    expect(provider.fetchMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: '50',
     });
     expect(mocks.processAttachments).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -213,6 +228,10 @@ describe('startNewDiscordTask', () => {
       expect.objectContaining({
         taskDescription: expect.stringContaining('log.txt contents'),
         threadMessages: [
+          {
+            user: 'Sky',
+            text: 'Tested the PR and the task failed while preparing the workspace.',
+          },
           { user: 'Alice', text: 'Deploy failed on main' },
           { user: 'Matt', text: '@Roomote investigate the flaky build' },
         ],
@@ -236,6 +255,9 @@ describe('startNewDiscordTask', () => {
     );
     const agentPrompt = mocks.launchTask.mock.calls[0]?.[0]
       .agentPromptText as string;
+    expect(agentPrompt).toContain(
+      'Sky: Tested the PR and the task failed while preparing the workspace.',
+    );
     expect(agentPrompt).toContain('Alice: Deploy failed on main');
     expect(agentPrompt).toContain('investigate the flaky build');
     expect(agentPrompt).toContain('log.txt contents');
@@ -318,6 +340,80 @@ describe('startNewDiscordTask', () => {
     expect(launchArgs.agentPromptText).toBeUndefined();
   });
 
+  it('includes the explicit replied-to channel message without dumping full channel history', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn(),
+      fetchMessage: vi.fn().mockResolvedValue({
+        provider: 'discord',
+        id: '100',
+        user: 'u-alice',
+        username: 'Alice',
+        text: 'pnpm build triggers codebase indexing with hundreds of temporary files',
+        channelId: 'channel-1',
+        fileCount: 0,
+      }),
+    };
+
+    const result = await startNewDiscordTask({
+      provider: provider as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      replyToMessageId: '100',
+      replyToChannelId: 'channel-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'can you check if this issue already exists?',
+        user: 'Toray',
+        userId: 'user-1',
+        ts: '200',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: '200',
+        communicationAnchorMessageId: '200',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(result.status).toBe('started');
+    expect(provider.fetchChannelMessages).not.toHaveBeenCalled();
+    expect(provider.fetchMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: '100',
+    });
+    expect(mocks.buildRoutingContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadMessages: [
+          {
+            user: 'Alice',
+            text: 'pnpm build triggers codebase indexing with hundreds of temporary files',
+          },
+          {
+            user: 'Toray',
+            text: 'can you check if this issue already exists?',
+          },
+        ],
+      }),
+    );
+    const agentPrompt = mocks.launchTask.mock.calls[0]?.[0]
+      .agentPromptText as string;
+    expect(agentPrompt).toContain(
+      '<thread_context>\nAlice: pnpm build triggers codebase indexing with hundreds of temporary files\n</thread_context>',
+    );
+    expect(agentPrompt).toContain(
+      'can you check if this issue already exists?',
+    );
+  });
+
   it('stores thread context on routing confirmation for later launch', async () => {
     mocks.shouldAutoConfirm.mockReturnValue(false);
     mocks.requestConfirmation.mockResolvedValue({
@@ -377,6 +473,143 @@ describe('startNewDiscordTask', () => {
         agentPromptText: expect.stringContaining('Alice: Earlier detail'),
       }),
     );
+  });
+
+  it('clears intake eyes when a platform answer is handled inline', async () => {
+    mocks.routeTask.mockResolvedValue({
+      status: 'platform_answer',
+      result: { answer: 'Use the npm scripts in package.json.' },
+    });
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    const result = await startNewDiscordTask({
+      provider: { removeReaction } as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      intakeAckPinned: true,
+      queuedMessage: {
+        provider: 'discord',
+        text: 'How do I run tests?',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(result.status).toBe('replied_inline');
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Use the npm scripts in package.json.',
+      }),
+    );
     expect(mocks.launchTask).not.toHaveBeenCalled();
+    expect(removeReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
+  });
+
+  it('clears intake eyes when auto-start skips a platform answer', async () => {
+    mocks.routeTask.mockResolvedValue({
+      status: 'platform_answer',
+      result: { answer: 'Should not post in monitored channel.' },
+    });
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    const result = await startNewDiscordTask({
+      provider: { removeReaction } as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      intakeAckPinned: true,
+      channelAutoStart: {
+        initiator: { kind: 'user', userId: 'user-1' },
+      },
+      queuedMessage: {
+        provider: 'discord',
+        text: 'what is 2+2?',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-2',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-2',
+        communicationMessageId: 'message-2',
+        communicationAnchorMessageId: 'message-2',
+      },
+      channel: {
+        channelId: 'channel-2',
+        channelName: 'bugs',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(result.status).toBe('skipped_platform_answer');
+    expect(mocks.reply).not.toHaveBeenCalled();
+    expect(removeReaction).toHaveBeenCalledWith({
+      channelId: 'channel-2',
+      messageId: 'message-2',
+      name: 'eyes',
+    });
+  });
+
+  it('does not remove eyes when intake ack was never pinned', async () => {
+    mocks.routeTask.mockResolvedValue({
+      status: 'platform_answer',
+      result: { answer: 'No eyes were pinned.' },
+    });
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    const result = await startNewDiscordTask({
+      provider: { removeReaction } as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      intakeAckPinned: false,
+      queuedMessage: {
+        provider: 'discord',
+        text: 'How do I run tests?',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-3',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-3',
+        communicationAnchorMessageId: 'message-3',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(result.status).toBe('replied_inline');
+    expect(removeReaction).not.toHaveBeenCalled();
   });
 });

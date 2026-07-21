@@ -41,6 +41,10 @@ import type {
 } from './types';
 import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { isMention } from './isMention';
+import {
+  fetchGitHubLinkedReferences,
+  formatGitHubLinkedReferencesSection,
+} from './linked-issue-pr-context';
 import { getReviewTaskRelayPayload } from './reviewTaskRelayPayload';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
 
@@ -499,6 +503,7 @@ function buildActiveTaskFollowUpMessage({
   reasoning,
   issueComments,
   reviewComments,
+  linkedReferencesSection,
 }: {
   repository: string;
   prNumber: number;
@@ -512,6 +517,7 @@ function buildActiveTaskFollowUpMessage({
   reasoning: string;
   issueComments: Array<{ author: string; body: string }>;
   reviewComments: Array<{ author: string; body: string; path?: string }>;
+  linkedReferencesSection?: string;
 }): string {
   return buildGitHubExistingTaskFollowUpMessage({
     routingReason: reasoning,
@@ -532,6 +538,9 @@ function buildActiveTaskFollowUpMessage({
       existing_review_comments:
         formatCompactGitHubReviewComments(reviewComments),
       issue_comments: formatCompactGitHubIssueComments(issueComments),
+      ...(linkedReferencesSection
+        ? { linked_issues_and_pull_requests: linkedReferencesSection }
+        : {}),
     },
   });
 }
@@ -1434,18 +1443,26 @@ export async function handlePrComment(
   });
 
   if (activePrOwner?.taskId) {
-    const routingHistory = await getGitHubRoutingHistoryContext({
-      installationId: githubInstallationId,
-      repositoryFullName: repository.full_name,
-      prNumber: pr.number,
-    });
-    const triggeringComment = await buildTriggeringCommentContext({
-      eventPayload,
-      installationId: githubInstallationId,
-      repositoryFullName: repository.full_name,
-      commenter: sender.login,
-      commentBody: mention.body ?? '',
-    });
+    const [routingHistory, linkedReferences, triggeringComment] =
+      await Promise.all([
+        getGitHubRoutingHistoryContext({
+          installationId: githubInstallationId,
+          repositoryFullName: repository.full_name,
+          prNumber: pr.number,
+        }),
+        fetchGitHubLinkedReferences({
+          installationId: githubInstallationId,
+          repositoryFullName: repository.full_name,
+          issueOrPrNumber: pr.number,
+        }),
+        buildTriggeringCommentContext({
+          eventPayload,
+          installationId: githubInstallationId,
+          repositoryFullName: repository.full_name,
+          commenter: sender.login,
+          commentBody: mention.body ?? '',
+        }),
+      ]);
     const followUpMessage = buildActiveTaskFollowUpMessage({
       repository: repository.full_name,
       prNumber: pr.number,
@@ -1459,6 +1476,8 @@ export async function handlePrComment(
       reasoning: routingReason,
       issueComments: routingHistory.issueComments,
       reviewComments: routingHistory.reviewComments,
+      linkedReferencesSection:
+        formatGitHubLinkedReferencesSection(linkedReferences),
     });
     const resumePromptFallbackTask = {
       type: TaskPayloadKind.GithubPrReviewFollowUp,

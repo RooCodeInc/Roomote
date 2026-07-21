@@ -274,7 +274,7 @@ code. "Fix the typo on the pricing page" works.
 
 ## Community
 
-- [Discord](https://discord.gg/roomote): questions, showcase, feature requests
+- [Discord](https://discord.gg/KNw7Sz75UK): questions, showcase, feature requests
 - [GitHub Issues](https://github.com/RooCodeInc/Roomote/issues): bug reports
   and feature requests
 

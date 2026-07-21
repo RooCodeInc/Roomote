@@ -4,6 +4,7 @@ import { isNativeMcpIntegration, MCP_INTEGRATIONS } from '@roomote/types';
 import type { Variables } from '../../types';
 
 import { asanaMcp } from './asana';
+import { communicationMcp } from './communication';
 import { environmentsRouter } from '../environments';
 import { tasksRouter } from '../tasks';
 import { createIntegrationMcpProxy } from './integration-mcp';
@@ -39,11 +40,14 @@ for (const integration of MCP_INTEGRATIONS.filter(
 // Task and agent routes share the mcpAuth middleware
 mcp.use('/slack/*', mcpAuthMiddleware);
 mcp.use('/slack', mcpAuthMiddleware);
+mcp.use('/communication/*', mcpAuthMiddleware);
+mcp.use('/communication', mcpAuthMiddleware);
 mcp.use('/tasks/*', mcpAuthMiddleware);
 mcp.use('/tasks', mcpAuthMiddleware);
 mcp.use('/environments/*', mcpAuthMiddleware);
 mcp.use('/environments', mcpAuthMiddleware);
 
 mcp.route('/slack', slackMcp);
+mcp.route('/communication', communicationMcp);
 mcp.route('/tasks', tasksRouter);
 mcp.route('/environments', environmentsRouter);

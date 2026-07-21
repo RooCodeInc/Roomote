@@ -1045,6 +1045,45 @@ describe('buildSetupModelStatus', () => {
       savedApiKeySatisfied: false,
     });
   });
+
+  it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is configured', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_MODEL: 'coding',
+        LITELLM_BASE_URL: 'http://localhost:4000',
+        LITELLM_API_KEY: 'litellm-key',
+      },
+    });
+
+    expect(status.runtimeRoomoteModel).toBe('litellm/coding');
+    expect(status.runtimeProviderId).toBe('litellm');
+    expect(status.preselectedProvider).toBe('litellm');
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
+    expect(status.setupSatisfied).toBe(true);
+    expect(
+      status.providers.find((provider) => provider.id === 'litellm'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: true,
+      savedApiKeySatisfied: false,
+    });
+  });
+
+  it('prefixes bare LiteLLM route names when LiteLLM is only persisted', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_MODEL: 'coding',
+      },
+      persistedEnvVarNames: ['LITELLM_BASE_URL', 'LITELLM_API_KEY'],
+      persistedEnvVarValues: {
+        LITELLM_BASE_URL: 'http://localhost:4000',
+      },
+    });
+
+    expect(status.runtimeRoomoteModel).toBe('litellm/coding');
+    expect(status.runtimeProviderId).toBe('litellm');
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+    expect(status.setupSatisfied).toBe(true);
+  });
 });
 
 describe('buildSetupModelStatus multi-credential providers', () => {

@@ -1,5 +1,10 @@
 export { announcerJob } from './announcer';
 export { ciFailureTriageJob } from './ci-failure-triage';
+export {
+  launchCiFailureTriageForFailedRun,
+  CI_FAILURE_TRIAGE_DEBOUNCE_SECONDS,
+  type CiFailureTriageLaunchResult,
+} from './ci-failure-triage-launch';
 export { codeQualityAuditorJob } from './code-quality-auditor';
 export { codeqlTriageJob } from './codeql-triage';
 export { conflictScanJob } from './conflict-scan';
@@ -21,7 +26,9 @@ export {
   loadAutomationThreadFeedbackReport,
 } from './automation-thread-feedback';
 export {
+  findEnvironmentIdForRepositoryId,
   getActiveRepositoryFullNames,
+  getActiveRepositoriesForProviders,
   hasActiveGitHubInstallation,
 } from './github-deployment-scope';
 export type {

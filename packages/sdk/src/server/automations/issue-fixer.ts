@@ -5,15 +5,15 @@ import {
 } from './types';
 
 /**
- * Triage GitHub Issues is webhook-driven only (issues.opened / issues.reopened).
- * There is no scheduled or Run now path — that avoids a second prompt beside the
- * webhook handler.
+ * Triage Issues is webhook-driven only (issue opened / reopened on GitHub,
+ * GitLab, or Gitea). There is no scheduled or Run now path — that avoids a
+ * second prompt beside the webhook handlers.
  */
 export async function issueFixerJob(
   _opts: AutomationRunOpts = {},
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   result.skippedReason =
-    'Triage GitHub Issues runs from the GitHub issues webhook only.';
+    'Triage Issues runs from source-control issue webhooks only (GitHub, GitLab, Gitea).';
   return result;
 }

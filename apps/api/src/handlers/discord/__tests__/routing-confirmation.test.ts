@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   launchTask: vi.fn(),
   reserveAnchoredThread: vi.fn(),
   forgetPendingTaskThread: vi.fn(),
+  removeReaction: vi.fn(),
   resolveWorkspace: vi.fn(),
   reply: vi.fn(),
   redisSet: vi.fn(),
@@ -106,6 +107,7 @@ describe('Discord routing confirmation', () => {
     mocks.redisSet.mockResolvedValue('OK');
     mocks.reserveAnchoredThread.mockResolvedValue(null);
     mocks.forgetPendingTaskThread.mockResolvedValue(undefined);
+    mocks.removeReaction.mockResolvedValue(undefined);
     mocks.findMappedUser.mockResolvedValue('user-1');
     mocks.findSourceRun.mockResolvedValue(null);
     mocks.getTaskUrl.mockReturnValue('https://roomote.example/task/task-1');
@@ -164,6 +166,130 @@ describe('Discord routing confirmation', () => {
         callback: { pendingRouteId: 'abcdefghijkl', selection: 0 },
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('clears the original intake eyes when a free-text routing reply cancels', async () => {
+    mocks.redisGetdel.mockResolvedValueOnce(
+      JSON.stringify({
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+          communicationAnchorMessageId: 'message-1',
+        },
+        routingContext: { taskDescription: 'Fix matchmaking' },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        options: [],
+        suggestedIndex: null,
+        intakeAckPinned: true,
+      }),
+    );
+    mocks.classifyFollowUp.mockResolvedValueOnce({
+      intent: 'cancel',
+      reasoning: 'The user canceled',
+    });
+
+    await expect(
+      handleDiscordRoutingReply({
+        provider: { removeReaction: mocks.removeReaction } as never,
+        applicationId: 'app-1',
+        pendingRouteId: 'abcdefghijkl',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'never mind',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-2',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.removeReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
+  });
+
+  it('clears the original intake eyes when the routing cancel button wins', async () => {
+    mocks.redisGetdel.mockResolvedValueOnce(
+      JSON.stringify({
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+          communicationAnchorMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        options: [],
+        suggestedIndex: null,
+        intakeAckPinned: true,
+      }),
+    );
+
+    await handleDiscordRoutingCallback({
+      provider: { removeReaction: mocks.removeReaction } as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-1',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-1',
+        channel_id: 'channel-1',
+        user: { id: 'discord-user-1', username: 'matt' },
+        data: { custom_id: 'discord:route:abcdefghijkl:cancel' },
+      },
+      interactionDeferred: true,
+      callback: { pendingRouteId: 'abcdefghijkl', selection: 'cancel' },
+    });
+
+    expect(mocks.removeReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
   });
 
   it('auto-confirms only high-confidence, unremapped routes', () => {

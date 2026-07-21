@@ -24,6 +24,7 @@ import { captureWorkerException } from '../monitoring/sentry';
 import {
   buildRequestUserInputTaskUrl,
   getRequestUserInputPromptSignature,
+  isOpenCodeQuestionPlaceholderRequest,
   supportsIntegrationRequestUserInput,
 } from './request-user-input';
 
@@ -299,6 +300,12 @@ async function handleRequestUserInput(
   const promptSignature = getRequestUserInputPromptSignature(event.request);
 
   if (postedSignatures.get(event.request.requestId) === promptSignature) {
+    return;
+  }
+
+  // OpenCode streams the question tool before options land. Skip the empty
+  // shell so Slack only shows the real structured prompt.
+  if (isOpenCodeQuestionPlaceholderRequest(event.request)) {
     return;
   }
 

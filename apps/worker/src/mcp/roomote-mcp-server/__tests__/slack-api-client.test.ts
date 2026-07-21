@@ -1,8 +1,8 @@
 import {
-  getSlackChannelMessages,
+  getChatChannelMessages,
   addReactionToSlackMessage,
   clearSlackReplyQuote,
-  getSlackThread,
+  getChatMessageContext,
   postToSlackChannel,
   replyToSlackThread,
   trackSlackReplyQuote,
@@ -357,7 +357,7 @@ describe('addReactionToSlackMessage', () => {
   });
 });
 
-describe('getSlackThread', () => {
+describe('getChatMessageContext', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -367,66 +367,80 @@ describe('getSlackThread', () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
+        provider: 'slack',
         channelId: 'C123',
-        requestedMessageTs: '111.222',
-        threadTs: '111.000',
+        requestedMessageId: '111.222',
+        threadId: '111.000',
         matchedMessageIndex: 1,
         messageCount: 2,
         messages: [
           {
-            ts: '111.000',
+            provider: 'slack',
+            id: '111.000',
             user: 'U1',
             username: 'Alice',
             text: 'root',
+            channelId: 'C123',
+            threadId: '111.000',
             fileCount: 0,
           },
           {
-            ts: '111.222',
+            provider: 'slack',
+            id: '111.222',
             user: 'U2',
             username: 'Bob',
             text: 'reply',
+            channelId: 'C123',
+            threadId: '111.000',
             fileCount: 0,
           },
         ],
       }),
     });
 
-    const result = await getSlackThread(config, {
+    const result = await getChatMessageContext(config, {
       channel: '#eng',
-      messageTs: '111.222',
+      messageId: '111.222',
     });
 
     expect(result).toEqual({
+      provider: 'slack',
       channelId: 'C123',
-      requestedMessageTs: '111.222',
-      threadTs: '111.000',
+      requestedMessageId: '111.222',
+      threadId: '111.000',
       matchedMessageIndex: 1,
       messageCount: 2,
       messages: [
         {
-          ts: '111.000',
+          provider: 'slack',
+          id: '111.000',
           user: 'U1',
           username: 'Alice',
           text: 'root',
+          channelId: 'C123',
+          threadId: '111.000',
           fileCount: 0,
         },
         {
-          ts: '111.222',
+          provider: 'slack',
+          id: '111.222',
           user: 'U2',
           username: 'Bob',
           text: 'reply',
+          channelId: 'C123',
+          threadId: '111.000',
           fileCount: 0,
         },
       ],
     });
     expect(fetch).toHaveBeenCalledWith(
-      'https://platform.example.com/api/mcp/slack/thread_lookup',
+      'https://platform.example.com/api/mcp/communication/message_context',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
           Authorization: 'Bearer test-token',
         }),
-        body: JSON.stringify({ channel: '#eng', messageTs: '111.222' }),
+        body: JSON.stringify({ channel: '#eng', messageId: '111.222' }),
       }),
     );
   });
@@ -439,14 +453,14 @@ describe('getSlackThread', () => {
     });
 
     await expect(
-      getSlackThread(config, { messageTs: '111.222' }),
+      getChatMessageContext(config, { messageId: '111.222' }),
     ).rejects.toThrow(
-      'Failed to look up Slack thread: 404 Slack message not found',
+      'Failed to look up chat message context: 404 Slack message not found',
     );
   });
 });
 
-describe('getSlackChannelMessages', () => {
+describe('getChatChannelMessages', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -456,61 +470,71 @@ describe('getSlackChannelMessages', () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
+        provider: 'slack',
         channelId: 'C123',
         requestedOldest: '2026-04-01T00:00:00Z',
         requestedLatest: '2026-04-02T00:00:00Z',
         messageCount: 2,
         messages: [
           {
-            ts: '1711929600.000000',
+            provider: 'slack',
+            id: '1711929600.000000',
             user: 'U1',
             username: 'Alice',
             text: 'root',
+            channelId: 'C123',
             fileCount: 0,
           },
           {
-            ts: '1711929900.000000',
+            provider: 'slack',
+            id: '1711929900.000000',
             user: 'U2',
             username: 'Bob',
-            threadTs: '1711929600.000000',
+            threadId: '1711929600.000000',
             text: 'reply',
+            channelId: 'C123',
             fileCount: 0,
           },
         ],
       }),
     });
 
-    const result = await getSlackChannelMessages(config, {
+    const result = await getChatChannelMessages(config, {
       channel: '#eng',
       oldest: '2026-04-01T00:00:00Z',
       latest: '2026-04-02T00:00:00Z',
     });
 
     expect(result).toEqual({
+      provider: 'slack',
       channelId: 'C123',
       requestedOldest: '2026-04-01T00:00:00Z',
       requestedLatest: '2026-04-02T00:00:00Z',
       messageCount: 2,
       messages: [
         {
-          ts: '1711929600.000000',
+          provider: 'slack',
+          id: '1711929600.000000',
           user: 'U1',
           username: 'Alice',
           text: 'root',
+          channelId: 'C123',
           fileCount: 0,
         },
         {
-          ts: '1711929900.000000',
+          provider: 'slack',
+          id: '1711929900.000000',
           user: 'U2',
           username: 'Bob',
-          threadTs: '1711929600.000000',
+          threadId: '1711929600.000000',
           text: 'reply',
+          channelId: 'C123',
           fileCount: 0,
         },
       ],
     });
     expect(fetch).toHaveBeenCalledWith(
-      'https://platform.example.com/api/mcp/slack/channel_messages',
+      'https://platform.example.com/api/mcp/communication/channel_messages',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
@@ -536,9 +560,9 @@ describe('getSlackChannelMessages', () => {
     });
 
     await expect(
-      getSlackChannelMessages(config, { channel: '#eng' }),
+      getChatChannelMessages(config, { channel: '#eng' }),
     ).rejects.toThrow(
-      'Failed to look up Slack channel messages: 403 Linked Slack user is not a member of channel #eng.',
+      'Failed to look up chat channel messages: 403 Linked Slack user is not a member of channel #eng.',
     );
   });
 });

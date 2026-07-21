@@ -9,6 +9,7 @@ vi.mock('../../encryption', () => ({
 import {
   listConfiguredComputeProviders,
   resolveComputeProviderEnvValues,
+  resolveComputeProviderSelection,
   resolveDefaultComputeProvider,
 } from '../compute-runtime-config';
 
@@ -372,5 +373,32 @@ describe('resolveDefaultComputeProvider', () => {
     });
 
     expect(provider).toBe('docker');
+  });
+});
+
+describe('resolveComputeProviderSelection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+  });
+
+  it('resolves the default and available providers from one deployment read', async () => {
+    const executor = makeExecutor([]);
+
+    const selection = await resolveComputeProviderSelection({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'docker',
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
+        MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+      },
+      executor,
+    });
+
+    expect(selection).toEqual({
+      defaultComputeProvider: 'modal',
+      availableComputeProviders: ['modal', 'docker'],
+    });
+    expect(executor.query.deploymentSettings.findFirst).toHaveBeenCalledOnce();
   });
 });

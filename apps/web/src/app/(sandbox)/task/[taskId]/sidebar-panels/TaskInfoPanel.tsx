@@ -7,6 +7,7 @@ import { Streamdown } from 'streamdown';
 import {
   type ComputeProvider,
   type CodingHarness,
+  type LinkedWorkItem,
   type SourceControlProvider,
   HARNESS_LABELS,
   PRODUCT_NAME,
@@ -125,6 +126,52 @@ const SOURCE_CONTROL_SURFACES: ReadonlySet<string> = new Set([
   'ado',
 ]);
 
+function getLinkedWorkItemReference(item: LinkedWorkItem): string {
+  if (item.provider === 'github' && item.repository) {
+    return `${item.repository}#${item.identifier}`;
+  }
+
+  return item.identifier;
+}
+
+function LinkedWorkItemDisplay({ item }: { item: LinkedWorkItem }) {
+  const title = item.title?.trim();
+  const url = item.url?.trim();
+  const reference = getLinkedWorkItemReference(item);
+  const content = (
+    <>
+      <BrandIcon
+        icon={item.provider}
+        name=""
+        className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+      />
+      <span className="min-w-0">
+        <span className="block truncate">{title || reference}</span>
+        {title ? (
+          <span className="block truncate text-xs text-muted-foreground">
+            {reference}
+          </span>
+        ) : null}
+      </span>
+    </>
+  );
+
+  if (!url) {
+    return <span className="flex min-w-0 items-start gap-1.5">{content}</span>;
+  }
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex min-w-0 items-start gap-1.5 hover:underline"
+    >
+      {content}
+    </a>
+  );
+}
+
 function getStartedFrom(
   task: SessionTask,
   taskRun: SessionTaskRun,
@@ -191,6 +238,7 @@ export function TaskInfoPanel({
 
   const taskRunError = getTaskRunDisplayError(taskRun);
   const startedFrom = getStartedFrom(task, taskRun);
+  const linkedWorkItems = taskRun.payload?.linkedWorkItems ?? [];
   const effectiveHarness = taskRun.harness ?? harness;
   const HarnessIcon = HARNESS_ICONS[effectiveHarness];
   const SandboxProviderIcon = taskRun.vendor
@@ -387,6 +435,24 @@ export function TaskInfoPanel({
                   </td>
                 </tr>
               )}
+
+              {linkedWorkItems.length > 0 ? (
+                <tr>
+                  <td className="pr-4 py-1 align-top whitespace-nowrap">
+                    Linked Work
+                  </td>
+                  <td className="py-1">
+                    <div className="flex max-w-72 flex-col gap-2">
+                      {linkedWorkItems.map((item, index) => (
+                        <LinkedWorkItemDisplay
+                          key={`${item.provider}:${item.repository ?? ''}:${item.identifier}:${item.url ?? ''}:${index}`}
+                          item={item}
+                        />
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ) : null}
 
               <tr>
                 <td className="pr-4 py-1 align-top whitespace-nowrap">

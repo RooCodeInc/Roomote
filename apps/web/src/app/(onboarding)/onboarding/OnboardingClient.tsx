@@ -5,22 +5,33 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Spinner } from '@/components/system';
 
 import { StepWelcome } from '../setup/StepWelcome';
-import { StepGitHub } from './StepGitHub';
 import { StepInvoke } from './StepInvoke';
-import { StepLinear } from './StepLinear';
-import { StepSlack } from './StepSlack';
 import { useOnboardingFlow } from './hooks';
+import { ProviderLinkStep } from './ProviderLinkStep';
+import type { OnboardingLinkableProvider } from './types';
 
 export function OnboardingClient({ githubAppSlug }: { githubAppSlug: string }) {
-  const {
-    step,
-    goToNextStep,
-    slackConnected,
-    linearConnected,
-    githubConnected,
-    status,
-    isLoading,
-  } = useOnboardingFlow();
+  const { step, currentProvider, goToNextStep, refetch, status, isLoading } =
+    useOnboardingFlow();
+  const linkableProviders = status?.linkableProviders as
+    | readonly OnboardingLinkableProvider[]
+    | undefined;
+  const configuredCommunicationProviders = (linkableProviders ?? []).filter(
+    (
+      provider,
+    ): provider is Extract<
+      OnboardingLinkableProvider,
+      { category: 'communication' }
+    > => provider.configured && provider.category === 'communication',
+  );
+  const configuredSourceControlProviders = (linkableProviders ?? []).filter(
+    (
+      provider,
+    ): provider is Extract<
+      OnboardingLinkableProvider,
+      { category: 'source-control' }
+    > => provider.configured && provider.category === 'source-control',
+  );
 
   if (isLoading) {
     return (
@@ -50,36 +61,26 @@ export function OnboardingClient({ githubAppSlug }: { githubAppSlug: string }) {
           {step === 'welcome' && (
             <StepWelcome isOnboarding onContinue={goToNextStep} />
           )}
-          {step === 'slack' && <StepSlack onContinue={goToNextStep} />}
-          {step === 'linear' && (
-            <StepLinear
-              onContinue={goToNextStep}
-              previousStepCompleted={slackConnected ? 'Slack' : undefined}
-            />
-          )}
-          {step === 'github' && (
-            <StepGitHub
+          {currentProvider && (
+            <ProviderLinkStep
+              provider={currentProvider}
               githubAppSlug={githubAppSlug}
               onContinue={goToNextStep}
-              previousStepCompleted={linearConnected ? 'Linear' : undefined}
+              onLinked={() => {
+                void refetch();
+                goToNextStep();
+              }}
             />
           )}
           {step === 'invoke' && (
             <StepInvoke
-              previousStepCompleted={githubConnected ? 'GitHub' : undefined}
-              communicationProviders={
-                status?.orgHasSlack || status?.userHasLinkedSlack
-                  ? ['slack']
-                  : []
-              }
-              sourceControlProviders={
-                status?.userHasLinkedGitHub || githubConnected ? ['github'] : []
-              }
-              includeLinear={
-                status?.orgHasLinear ||
-                status?.userHasLinkedLinear ||
-                linearConnected
-              }
+              communicationProviders={configuredCommunicationProviders.map(
+                (provider) => provider.id,
+              )}
+              sourceControlProviders={configuredSourceControlProviders.map(
+                (provider) => provider.id,
+              )}
+              includeAutomations={status?.isAdmin === true}
             />
           )}
         </motion.div>

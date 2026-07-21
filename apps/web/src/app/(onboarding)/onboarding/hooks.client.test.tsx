@@ -29,31 +29,42 @@ vi.mock('@tanstack/react-query', async () => {
 const mockUseQuery = vi.mocked(useQuery);
 
 import { useOnboardingFlow } from './hooks';
+import type { OnboardingLinkableProvider } from './types';
 
 function mockStatus(
   overrides: Partial<{
     onboardingCompletedAt: string | null;
-    orgHasSlack: boolean;
-    orgHasLinear: boolean;
-    userHasLinkedGitHub: boolean;
-    userHasLinkedSlack: boolean;
-    userHasLinkedLinear: boolean;
-    hasEnabledUserLevelMcp: boolean;
-    userHasConnectedEnabledUserLevelMcp: boolean;
-    enabledUserLevelMcpIds: string[];
+    linkableProviders: OnboardingLinkableProvider[];
+    isAdmin: boolean;
   }> = {},
 ) {
   mockUseQuery.mockReturnValue({
     data: {
       onboardingCompletedAt: null,
-      orgHasSlack: true,
-      orgHasLinear: true,
-      userHasLinkedGitHub: false,
-      userHasLinkedSlack: false,
-      userHasLinkedLinear: false,
-      hasEnabledUserLevelMcp: false,
-      userHasConnectedEnabledUserLevelMcp: false,
-      enabledUserLevelMcpIds: [],
+      linkableProviders: [
+        {
+          id: 'slack',
+          category: 'communication',
+          label: 'Slack',
+          configured: true,
+          linked: false,
+        },
+        {
+          id: 'microsoft',
+          category: 'communication',
+          label: 'Microsoft Teams',
+          configured: true,
+          linked: false,
+        },
+        {
+          id: 'github',
+          category: 'source-control',
+          label: 'GitHub',
+          configured: true,
+          linked: false,
+        },
+      ],
+      isAdmin: true,
       ...overrides,
     },
     isLoading: false,
@@ -68,24 +79,17 @@ function setLocationSearch(search: string) {
 }
 
 describe('useOnboardingFlow', () => {
-  const originalReplaceState = window.history.replaceState;
-
   beforeEach(() => {
     vi.clearAllMocks();
     setLocationSearch('');
-    window.history.replaceState = vi.fn();
   });
 
-  afterEach(() => {
-    window.history.replaceState = originalReplaceState;
-  });
-
-  it('moves through the simplified onboarding flow and ends on invoke', () => {
+  it('moves through configured providers in catalog order and ends on invoke', () => {
     mockStatus();
 
     const { result } = renderHook(() => useOnboardingFlow());
 
-    const expectedOrder = ['welcome', 'slack', 'linear', 'github', 'invoke'];
+    const expectedOrder = ['welcome', 'slack', 'microsoft', 'github', 'invoke'];
 
     expect(result.current.step).toBe('welcome');
 
@@ -98,11 +102,24 @@ describe('useOnboardingFlow', () => {
     }
   });
 
-  it('skips directly to invoke when github is the last unresolved step', () => {
+  it('skips configured providers that are already linked', () => {
     mockStatus({
-      orgHasSlack: false,
-      orgHasLinear: false,
-      hasEnabledUserLevelMcp: false,
+      linkableProviders: [
+        {
+          id: 'slack',
+          category: 'communication',
+          label: 'Slack',
+          configured: true,
+          linked: true,
+        },
+        {
+          id: 'github',
+          category: 'source-control',
+          label: 'GitHub',
+          configured: true,
+          linked: false,
+        },
+      ],
     });
     setLocationSearch('?step=github');
 
@@ -115,10 +132,21 @@ describe('useOnboardingFlow', () => {
     });
 
     expect(result.current.step).toBe('invoke');
-    expect(window.history.replaceState).toHaveBeenCalledWith(
-      {},
-      '',
-      '/onboarding',
-    );
+  });
+
+  it('starts Members at their first available personal linking step', () => {
+    mockStatus({ isAdmin: false });
+
+    const { result } = renderHook(() => useOnboardingFlow());
+
+    expect(result.current.step).toBe('slack');
+  });
+
+  it('goes directly to completion when no providers are configured', () => {
+    mockStatus({ linkableProviders: [], isAdmin: false });
+
+    const { result } = renderHook(() => useOnboardingFlow());
+
+    expect(result.current.step).toBe('invoke');
   });
 });

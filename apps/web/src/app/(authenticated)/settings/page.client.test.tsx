@@ -4,21 +4,8 @@ vi.mock('@/components/settings/pages/EnvironmentsSettingsPage', () => ({
   EnvironmentsSettingsPage: () => <div>Environments Page</div>,
 }));
 
-vi.mock('@/components/settings/pages/PersonalSettingsPage', () => ({
-  PersonalSettingsPage: () => <div>Personal Settings Page</div>,
-}));
-
-vi.mock('@/lib/server/auth-context', () => ({
-  authorizeOrThrow: vi.fn(async () => ({
-    userId: 'user-1',
-    primaryEmail: 'test@example.com',
-    name: 'Test User',
-    resource: { imageUrl: null },
-  })),
-}));
-
-vi.mock('@/lib/server', () => ({
-  userHasCredentialAccount: vi.fn(async () => true),
+vi.mock('@/components/settings/pages/PersonalSettingsRoute', () => ({
+  PersonalSettingsRoute: () => <div>Personal Settings Page</div>,
 }));
 
 import Page from './page';

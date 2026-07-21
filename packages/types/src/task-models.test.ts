@@ -1,4 +1,5 @@
 import {
+  applyImplicitLiteLlmModelPrefix,
   buildTaskModelOption,
   DEFAULT_TASK_MODEL_SETTINGS,
   getDefaultTaskModelId,
@@ -9,6 +10,32 @@ import {
   normalizeTaskModelId,
   normalizeTaskModelSettings,
 } from './task-models';
+
+describe('applyImplicitLiteLlmModelPrefix', () => {
+  it('prefixes bare model names when LiteLLM is configured', () => {
+    expect(
+      applyImplicitLiteLlmModelPrefix(
+        'qwen3.6-35b-a3b-uncensored-heretic-native-mtp-preserved-nvfp4-experts-only',
+        true,
+      ),
+    ).toBe(
+      'litellm/qwen3.6-35b-a3b-uncensored-heretic-native-mtp-preserved-nvfp4-experts-only',
+    );
+    expect(applyImplicitLiteLlmModelPrefix('  coding  ', true)).toBe(
+      'litellm/coding',
+    );
+  });
+
+  it('leaves qualified and bare ids unchanged when LiteLLM is not configured', () => {
+    expect(applyImplicitLiteLlmModelPrefix('coding', false)).toBe('coding');
+    expect(applyImplicitLiteLlmModelPrefix('litellm/coding', true)).toBe(
+      'litellm/coding',
+    );
+    expect(
+      applyImplicitLiteLlmModelPrefix('openrouter/openai/gpt-5.4', true),
+    ).toBe('openrouter/openai/gpt-5.4');
+  });
+});
 
 describe('normalizeTaskModelId', () => {
   it('prefixes bare author/model slugs with openrouter', () => {

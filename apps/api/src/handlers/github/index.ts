@@ -36,6 +36,9 @@ import {
 import { handlePushConflictCheck } from './handlePushConflictCheck';
 import { handleWorkflowRunCompleted } from './handleWorkflowRunCompleted';
 
+// Repository metadata sync:
+import { handleRepositoryEdited } from './handleRepositoryEdited';
+
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
@@ -223,9 +226,9 @@ github.post('/', async (c) => {
           mentionBody: payload.issue.body ?? '',
         });
 
-        // Always run Issue Fixer when enabled (immediate, like Review Code).
-        // Mentions and Issue Fixer are independent: a mention still starts a
-        // conversation task, while Issue Fixer may launch a hidden fix task.
+        // Always run Triage Issues when enabled (immediate, like Review Code).
+        // Mentions and Triage Issues are independent: a mention still starts a
+        // conversation task, while Triage Issues may launch a hidden plan task.
         const fixerResult = await handleGitHubIssueFixer(payload);
 
         if (fixerResult.status === 'error') {
@@ -451,6 +454,12 @@ github.post('/', async (c) => {
 
     webhooks.on('push', ({ id, name, payload }) =>
       recordWebhook(id, name, payload, () => handlePushConflictCheck(payload)),
+    );
+
+    webhooks.on('repository.edited', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+        handleRepositoryEdited(payload),
+      ),
     );
 
     webhooks.on('workflow_run.completed', ({ id, name, payload }) =>

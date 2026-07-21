@@ -622,25 +622,26 @@ describe('buildChatProviderMessageInstructions', () => {
     },
   );
 
-  it('teaches structured request_user_input rendering for Discord', () => {
-    const instructions = buildChatProviderMessageInstructions('discord');
-
-    expect(instructions).toContain(
-      'do not use `request_user_input` unless the next step is still genuinely blocked after using thread context and available tools to resolve the question',
-    );
-    expect(instructions).toContain(
-      'A Discord-rendered `request_user_input` prompt is supplemental and never satisfies ack or closeout on its own',
-    );
-    expect(instructions).toContain(
-      'use `request_user_input` in progressive blocks of up to 4 questions',
-    );
-  });
-
-  it.each(['teams', 'telegram'] as const)(
-    'does not claim native request_user_input rendering for %s yet',
+  it.each(['discord', 'teams', 'telegram'] as const)(
+    'teaches structured request_user_input rendering for %s',
     (provider) => {
+      const label =
+        provider === 'discord'
+          ? 'Discord'
+          : provider === 'telegram'
+            ? 'Telegram'
+            : 'Teams';
       const instructions = buildChatProviderMessageInstructions(provider);
-      expect(instructions).not.toContain(`_request_user_input>`);
+
+      expect(instructions).toContain(
+        'do not use `request_user_input` unless the next step is still genuinely blocked after using thread context and available tools to resolve the question',
+      );
+      expect(instructions).toContain(
+        `A ${label}-rendered \`request_user_input\` prompt is supplemental and never satisfies ack or closeout on its own`,
+      );
+      expect(instructions).toContain(
+        'use `request_user_input` in progressive blocks of up to 4 questions',
+      );
     },
   );
 

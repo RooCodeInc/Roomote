@@ -73,6 +73,10 @@ const giteaIssueSchema = z
   .object({
     number: z.number(),
     title: z.string().optional(),
+    body: z.string().nullable().optional(),
+    html_url: z.string().optional(),
+    url: z.string().optional(),
+    user: giteaUserSchema.optional(),
   })
   .passthrough();
 
@@ -91,3 +95,41 @@ export const giteaPullRequestCommentWebhookSchema = z
 export type GiteaPullRequestCommentWebhook = z.infer<
   typeof giteaPullRequestCommentWebhookSchema
 >;
+
+const giteaIssueLabelSchema = z.union([
+  z.string(),
+  z
+    .object({
+      id: z.number().optional(),
+      name: z.string().optional(),
+    })
+    .passthrough(),
+]);
+
+const giteaPlainIssueSchema = z
+  .object({
+    number: z.number(),
+    title: z.string(),
+    body: z.string().nullable().optional(),
+    html_url: z.string().optional(),
+    url: z.string().optional(),
+    state: z.string().optional(),
+    user: giteaUserSchema.optional(),
+    labels: z.array(giteaIssueLabelSchema).optional(),
+    pull_request: z.unknown().optional(),
+  })
+  .passthrough();
+
+export const giteaIssueWebhookSchema = z
+  .object({
+    action: z.string(),
+    number: z.number().optional(),
+    issue: giteaPlainIssueSchema,
+    repository: giteaRepositorySchema,
+    sender: giteaUserSchema.optional(),
+    is_pull: z.boolean().optional(),
+    pull_request: giteaPullRequestSchema.optional(),
+  })
+  .passthrough();
+
+export type GiteaIssueWebhook = z.infer<typeof giteaIssueWebhookSchema>;

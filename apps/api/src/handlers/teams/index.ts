@@ -1884,6 +1884,28 @@ teams.post('/', async (c) => {
     runId: activeRun.id,
     senderUserId: mappedUserId,
   });
+
+  if (mappedUserId && queuedMessage.text?.trim()) {
+    const { tryHandleTeamsRequestUserInputMessage } =
+      await import('./request-user-input.js');
+    const handled = await tryHandleTeamsRequestUserInputMessage({
+      activeRunId: activeRun.id,
+      userId: mappedUserId,
+      text: queuedMessage.text,
+      conversationId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      serviceUrl: metadata.communicationServiceUrl ?? null,
+    });
+    if (handled) {
+      return c.json({
+        ok: true,
+        queued: true,
+        runId: activeRun.id,
+        requestUserInput: true,
+      });
+    }
+  }
+
   let activeFollowUp: QueuedTeamsCommunicationMessage = queuedMessage;
   let outOfBandClaim: { messageIds: string[] } | null = null;
   if (activeRun.taskId) {

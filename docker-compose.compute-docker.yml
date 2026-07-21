@@ -38,5 +38,10 @@ services:
     environment:
       DOCKER_STANDBY_MAX_COUNT: ${DOCKER_STANDBY_MAX_COUNT:-10}
       DOCKER_STANDBY_MAX_AGE_HOURS: ${DOCKER_STANDBY_MAX_AGE_HOURS:-24}
+      # The settings "Validate environment" checks run in this service (it
+      # holds the Docker socket), so it needs the same image/release config
+      # as the controller.
+      DOCKER_WORKER_IMAGE: ${DOCKER_WORKER_IMAGE:-roomote-worker:local}
+      DOCKER_WORKER_RELEASE_PATH: ${DOCKER_WORKER_RELEASE_PATH:-/roomote/releases/worker-current.tar.gz}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

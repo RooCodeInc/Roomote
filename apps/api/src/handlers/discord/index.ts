@@ -411,6 +411,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
             channelId: channel.channelId,
+            ...(channel.parentChannelId
+              ? { parentChannelId: channel.parentChannelId }
+              : {}),
           });
           return history.length > 0 ? history : null;
         },
@@ -454,25 +457,43 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   }
 
   if (pendingRoutingReply) {
+    let routingReplyAckPinned = false;
     try {
       await resolved.provider.addReaction({
         channelId: channel.channelId,
         messageId: queuedMessage.ts,
         name: '👀',
       });
+      routingReplyAckPinned = true;
     } catch {
       // Routing ownership is already durable; the reaction is only an ack.
     }
 
-    const handled = await handleDiscordRoutingReply({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      pendingRouteId: pendingRoutingReply.pendingRouteId,
-      requesterDiscordUserId: sender.id,
-      launchOwnerUserId: senderUserId,
-      queuedMessage,
-      channel,
-    });
+    let handled: boolean;
+    try {
+      handled = await handleDiscordRoutingReply({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        pendingRouteId: pendingRoutingReply.pendingRouteId,
+        requesterDiscordUserId: sender.id,
+        launchOwnerUserId: senderUserId,
+        queuedMessage,
+        channel,
+      });
+    } finally {
+      // A routing reply is a transient continuation, not the task's durable
+      // intake target. Its eyes must end when routing finishes; a launched
+      // worker separately clears the original request's intake reaction.
+      if (routingReplyAckPinned && resolved.provider.removeReaction) {
+        await resolved.provider
+          .removeReaction({
+            channelId: channel.channelId,
+            messageId: queuedMessage.ts,
+            name: 'eyes',
+          })
+          .catch(() => undefined);
+      }
+    }
     if (handled) {
       return { ok: true, routingReplyHandled: true };
     }
@@ -553,8 +574,19 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       const continuation = await buildDiscordContinuationPrompt({
         provider: resolved.provider,
         channelId: channel.channelId,
+        ...(channel.parentChannelId
+          ? { parentChannelId: channel.parentChannelId }
+          : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
+        ...(message?.message_reference?.message_id
+          ? {
+              replyToMessageId: message.message_reference.message_id,
+              ...(message.message_reference.channel_id
+                ? { replyToChannelId: message.message_reference.channel_id }
+                : {}),
+            }
+          : {}),
       });
       messageForQueue = continuation.message;
       continuationClaim = {
@@ -619,8 +651,19 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       const continuation = await buildDiscordContinuationPrompt({
         provider: resolved.provider,
         channelId: channel.channelId,
+        ...(channel.parentChannelId
+          ? { parentChannelId: channel.parentChannelId }
+          : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
+        ...(message?.message_reference?.message_id
+          ? {
+              replyToMessageId: message.message_reference.message_id,
+              ...(message.message_reference.channel_id
+                ? { replyToChannelId: message.message_reference.channel_id }
+                : {}),
+            }
+          : {}),
       });
       resumeMessage = continuation.message;
       continuationClaim = {
@@ -659,6 +702,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   // Match Slack intake: ack the origin message with 👀 before launch work.
   // Only real MESSAGE_CREATE messages can receive Discord reactions; slash-
   // command interaction ids are not message targets and would 404.
+  let intakeAckPinned = false;
   if (message?.id) {
     try {
       await resolved.provider.addReaction({
@@ -666,6 +710,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         messageId: message.id,
         name: '👀',
       });
+      intakeAckPinned = true;
     } catch {
       // Soft ack only.
     }
@@ -684,6 +729,15 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
     // thread (with thread history as context). Only `/new` forces a sibling
     // task thread; known task threads were already handled above.
     forceNewThread: forceNewTask,
+    ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
+    ...(message?.message_reference?.message_id
+      ? {
+          replyToMessageId: message.message_reference.message_id,
+          ...(message.message_reference.channel_id
+            ? { replyToChannelId: message.message_reference.channel_id }
+            : {}),
+        }
+      : {}),
   });
   return { ok: true, ...started };
 }

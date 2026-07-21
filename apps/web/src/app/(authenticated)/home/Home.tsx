@@ -23,7 +23,6 @@ import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { cn } from '@/lib/utils';
 
 import { useEnvironments } from '@/hooks/environments';
-import { useGitHubInstallations } from '@/hooks/github';
 import { useShowDebugUI } from '@/hooks/useShowDebugUI';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
@@ -105,7 +104,6 @@ export function Home({
   availableComputeProviders,
 }: HomeProps) {
   const router = useRouter();
-  const githubInstallations = useGitHubInstallations();
   const environments = useEnvironments();
   const { cloudEnabled } = useAuthorizedUser();
 
@@ -596,10 +594,6 @@ export function Home({
       wiggleWorkspace,
     ],
   );
-
-  if (githubInstallations.isPending) {
-    return null;
-  }
 
   return (
     <FormProvider {...form}>

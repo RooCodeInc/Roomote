@@ -28,12 +28,38 @@ import {
   type DiscordChannelContext,
 } from './task-launch.js';
 import {
+  fetchDiscordRepliedToMessageBestEffort,
   fetchDiscordThreadHistoryBestEffort,
   formatDiscordThreadContext,
   markDiscordThreadHistoryDelivered,
+  mergeDiscordRepliedToMessage,
   toDiscordAttachmentsFromHistory,
   type DiscordThreadHistoryMessage,
 } from './thread-context.js';
+
+/**
+ * Soft-clear the MESSAGE_CREATE intake 👀 when a path ends without a worker.
+ * Platform answers and auto-start skips never hit onStart cleanup.
+ */
+async function clearDiscordIntakeAckBestEffort(input: {
+  provider: DiscordCommunicationProvider;
+  channel: DiscordChannelContext;
+  metadata: DiscordEventCommunicationMetadata;
+  intakeAckPinned?: boolean;
+}): Promise<void> {
+  const messageId = input.metadata.communicationAnchorMessageId;
+  if (!input.intakeAckPinned || !messageId || !input.provider.removeReaction) {
+    return;
+  }
+
+  await input.provider
+    .removeReaction({
+      channelId: input.channel.channelId,
+      messageId,
+      name: 'eyes',
+    })
+    .catch(() => undefined);
+}
 
 export async function startNewDiscordTask(input: {
   provider: DiscordCommunicationProvider;
@@ -60,6 +86,19 @@ export async function startNewDiscordTask(input: {
     initiator: TaskInitiator;
   };
   forceNewThread?: boolean;
+  /**
+   * True when the Discord intake path successfully pinned 👀 on the origin
+   * message before calling into launch (soft-ack failures stay false).
+   */
+  intakeAckPinned?: boolean;
+  /**
+   * Discord `message_reference.message_id` when the triggering mention is a
+   * client reply. Always folded into thread context so channel-level replies
+   * still carry the original message without dumping whole-channel history.
+   */
+  replyToMessageId?: string;
+  /** Discord `message_reference.channel_id` when present. */
+  replyToChannelId?: string;
 }) {
   const existingRun = await findCommunicationTaskRunBySourceEvent({
     provider: 'discord',
@@ -92,20 +131,40 @@ export async function startNewDiscordTask(input: {
   // launch already lives inside a Discord thread and is not /new (or another
   // forced sibling). Matching Slack: continue-in-thread gets history; a fresh
   // task must start clean. Top-level channel launches never dump unrelated
-  // channel history into the agent prompt.
+  // channel history into the agent prompt — except the single message the user
+  // explicitly replied to via Discord's reply UI.
   const includeFullThreadContext =
     input.channel.isThread && !input.forceNewThread;
-  const [history, installation] = await Promise.all([
+  const shouldFetchRepliedTo =
+    Boolean(input.replyToMessageId) && !input.forceNewThread;
+  const [historyBase, repliedToMessage, installation] = await Promise.all([
     includeFullThreadContext
       ? fetchDiscordThreadHistoryBestEffort({
           provider: input.provider,
           channelId: input.channel.channelId,
+          ...(input.channel.parentChannelId
+            ? { parentChannelId: input.channel.parentChannelId }
+            : {}),
         })
       : Promise.resolve([] as DiscordThreadHistoryMessage[]),
+    shouldFetchRepliedTo && input.replyToMessageId
+      ? fetchDiscordRepliedToMessageBestEffort({
+          provider: input.provider,
+          channelId:
+            input.replyToChannelId ??
+            input.channel.parentChannelId ??
+            input.channel.channelId,
+          messageId: input.replyToMessageId,
+        })
+      : Promise.resolve(null),
     input.channel.guildId
       ? findDiscordInstallationByGuildId(input.channel.guildId)
       : Promise.resolve(null),
   ]);
+  const history = mergeDiscordRepliedToMessage({
+    messages: historyBase,
+    repliedTo: repliedToMessage,
+  });
   const triggeringMessage: DiscordThreadHistoryMessage = {
     id: input.queuedMessage.ts,
     user: input.queuedMessage.user,
@@ -117,9 +176,12 @@ export async function startNewDiscordTask(input: {
   )
     ? history
     : [...history, triggeringMessage];
-  // Router keeps its own last-N budgetary slice; pass the reconstructed
-  // transcript only when this launch inherits the thread.
-  const routingThreadMessages = includeFullThreadContext
+  // Full thread launches get the reconstructed transcript; top-level channel
+  // reply launches only pass the explicit reply target + current turn.
+  const includeReplyContext =
+    includeFullThreadContext ||
+    (Boolean(repliedToMessage) && !input.forceNewThread);
+  const routingThreadMessages = includeReplyContext
     ? historyWithTrigger.map((message) => ({
         user: message.username ?? message.user,
         text: message.text,
@@ -130,7 +192,7 @@ export async function startNewDiscordTask(input: {
           text: triggeringMessage.text,
         },
       ];
-  const historyAttachments = includeFullThreadContext
+  const historyAttachments = includeReplyContext
     ? toDiscordAttachmentsFromHistory(history, {
         excludeMessageId: input.queuedMessage.ts,
       })
@@ -150,7 +212,7 @@ export async function startNewDiscordTask(input: {
     ...(input.queuedMessage.images ?? []),
     ...threadAttachments.images,
   ];
-  const threadContext = includeFullThreadContext
+  const threadContext = includeReplyContext
     ? formatDiscordThreadContext({
         messages: historyWithTrigger,
         currentMessageId: input.queuedMessage.ts,
@@ -180,6 +242,7 @@ export async function startNewDiscordTask(input: {
     // a question-shaped message that routes to a platform answer is skipped
     // silently (mirrors Slack's auto-routed path, which never posts answers).
     if (input.channelAutoStart) {
+      await clearDiscordIntakeAckBestEffort(input);
       return { status: 'skipped_platform_answer' as const, routingDecision };
     }
     await replyToDiscordEvent({
@@ -189,6 +252,8 @@ export async function startNewDiscordTask(input: {
       ...(input.interaction ? { interaction: input.interaction } : {}),
       text: routingDecision.result.answer,
     });
+    // No worker onStart fires for inline answers; clear intake 👀 here.
+    await clearDiscordIntakeAckBestEffort(input);
     return { status: 'replied_inline' as const, routingDecision };
   }
 
@@ -215,8 +280,9 @@ export async function startNewDiscordTask(input: {
       routingDecision,
       forceNewThread: input.forceNewThread,
       ...(agentPromptText ? { agentPromptText } : {}),
+      ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
     });
-    if (includeFullThreadContext) {
+    if (includeReplyContext) {
       await markDiscordThreadHistoryDelivered({
         channelId: input.channel.channelId,
         messageIds: historyWithTrigger.map((message) => message.id),
@@ -259,8 +325,9 @@ export async function startNewDiscordTask(input: {
     workspace,
     forceNewThread: input.forceNewThread,
     ...(kickoffMessage ? { kickoffMessage } : {}),
+    ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
   });
-  if (includeFullThreadContext) {
+  if (includeReplyContext) {
     await markDiscordThreadHistoryDelivered({
       channelId: input.channel.channelId,
       messageIds: historyWithTrigger.map((message) => message.id),

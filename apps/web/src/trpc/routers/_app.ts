@@ -134,6 +134,7 @@ import {
   getLinkedMicrosoftTeamsAccountCommand,
 } from '../commands/linked-accounts';
 import {
+  getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
   updatePersonalPreferencesCommand,
 } from '../commands/preferences';
@@ -141,6 +142,7 @@ import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
   getEnvironmentsCommand,
+  getAvailableEnvironmentsCommand,
   getEnvironmentNamesByIdsCommand,
   getEnvironmentByIdCommand,
   getEnvironmentConfigVersionCommand,
@@ -266,6 +268,7 @@ import {
   clearComputeConfigCommand,
   setDefaultComputeProviderCommand,
   setLocalDockerEnabledCommand,
+  validateDockerEnvironmentCommand,
 } from '../commands/compute';
 import {
   getTaskSuggestionFilterOptionsCommand,
@@ -324,6 +327,7 @@ import {
   startGitHubCopilotDeviceAuthCommand,
 } from '../commands/github-copilot-subscription';
 import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
+import { getProviderCreditBalancesCommand } from '../commands/provider-credits';
 import {
   getRouterDebugSettingsCommand,
   updateRouterDebugSettingsCommand,
@@ -351,9 +355,17 @@ import {
   getMiscSettingsCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
+import {
+  getReleaseNotesCommand,
+  getReleaseStatusCommand,
+} from '../commands/product-releases';
 
 const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
+
+function assertAdmin(auth: { isAdmin: boolean }) {
+  if (!auth.isAdmin) throw new Error('Unauthorized');
+}
 
 const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA = z.enum(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -508,6 +520,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
         suggesterDiscordChannel: z
@@ -597,37 +610,45 @@ export const appRouter = createRouter({
   analytics: createRouter({
     overview: protectedProcedure
       .input(analyticsOverviewInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsOverviewCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsOverviewCommand(auth, input);
+      }),
 
     pullRequestOverview: protectedProcedure
       .input(pullRequestAnalyticsOverviewInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getPullRequestAnalyticsOverviewCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getPullRequestAnalyticsOverviewCommand(auth, input);
+      }),
 
     chart: protectedProcedure
       .input(analyticsChartInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsChartCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsChartCommand(auth, input);
+      }),
 
     filters: protectedProcedure
       .input(analyticsFilterOptionsInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsFiltersCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsFiltersCommand(auth, input);
+      }),
 
     details: protectedProcedure
       .input(analyticsDetailsInputSchema)
-      .query(({ ctx: { auth }, input }) =>
-        getAnalyticsDetailsCommand(auth, input),
-      ),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return getAnalyticsDetailsCommand(auth, input);
+      }),
 
     export: protectedProcedure
       .input(analyticsExportInputSchema)
-      .query(({ ctx: { auth }, input }) => exportAnalyticsCommand(auth, input)),
+      .query(({ ctx: { auth }, input }) => {
+        assertAdmin(auth);
+        return exportAnalyticsCommand(auth, input);
+      }),
   }),
 
   tasks: createRouter({
@@ -1091,6 +1112,9 @@ export const appRouter = createRouter({
   }),
 
   preferences: createRouter({
+    accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPersonalAccountCapabilitiesCommand(auth),
+    ),
     getPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalPreferencesCommand(auth),
     ),
@@ -1121,6 +1145,12 @@ export const appRouter = createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       getEnvironmentsCommand(auth),
     ),
+
+    available: protectedProcedure
+      .input(z.object({ repository: z.string().optional() }).optional())
+      .query(({ ctx: { auth }, input }) =>
+        getAvailableEnvironmentsCommand(auth, input),
+      ),
 
     namesByIds: protectedProcedure
       .input(z.object({ ids: z.array(z.string()).max(20) }))
@@ -1558,6 +1588,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setLocalDockerEnabledCommand(auth, input),
       ),
+
+    validateDockerEnvironment: protectedProcedure.mutation(
+      ({ ctx: { auth } }) => validateDockerEnvironmentCommand(auth),
+    ),
   }),
 
   taskEnvVarRequests: createRouter({
@@ -1898,6 +1932,12 @@ export const appRouter = createRouter({
   subscriptionUsage: createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       getSubscriptionProviderUsageCommand(auth),
+    ),
+  }),
+
+  providerCredits: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      getProviderCreditBalancesCommand(auth),
     ),
   }),
 
@@ -2387,6 +2427,19 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setAnonymousAnalyticsCommand(auth, input),
       ),
+  }),
+
+  releases: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getReleaseStatusCommand(auth),
+    ),
+    notes: protectedProcedure
+      .input(
+        z.object({
+          version: z.string().min(1).max(64),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => getReleaseNotesCommand(auth, input)),
   }),
 });
 

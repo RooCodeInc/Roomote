@@ -1,3 +1,5 @@
+import { getProviderRetryNoticeFromMessageData } from '@roomote/types';
+
 import type { TaskArtifact } from '@/types';
 
 import type {
@@ -56,7 +58,29 @@ function getBlockTs(block: AcpRenderBlock): number {
   return block.kind === 'tool_group' ? block.ts : block.msg.ts;
 }
 
+function isProviderRetryNoticeMessage(msg: AcpUiMessage): boolean {
+  if (msg.kind !== 'text' || msg.role !== 'assistant') {
+    return false;
+  }
+
+  return (
+    getProviderRetryNoticeFromMessageData(
+      msg.data as Record<string, unknown>,
+    ) !== null
+  );
+}
+
+function isProviderRetryNoticeBlock(block: AcpRenderBlock): boolean {
+  return block.kind === 'message' && isProviderRetryNoticeMessage(block.msg);
+}
+
 function isTextBoundaryBlock(block: AcpRenderBlock): boolean {
+  // Provider retry notices are assistant text envelopes, but they are activity
+  // rows (status chrome), not narrative turns that should split groups.
+  if (isProviderRetryNoticeBlock(block)) {
+    return false;
+  }
+
   return block.kind === 'message' && block.msg.kind === 'text';
 }
 
@@ -138,6 +162,10 @@ export function isActivityCollapsibleBlock(
   }
 
   const { msg } = block;
+
+  if (isProviderRetryNoticeMessage(msg)) {
+    return true;
+  }
 
   if (!COLLAPSIBLE_ACP_MESSAGE_KIND_SET.has(msg.kind)) {
     return false;

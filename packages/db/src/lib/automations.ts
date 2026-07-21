@@ -790,6 +790,7 @@ export function normalizeBackgroundAgentSettings(
       issueFixer,
       isFrequencyOf(ISSUE_FIXER_FREQUENCIES),
     ),
+    issueFixerInstructions: issueFixer?.instructions ?? null,
     issueFixerLastRunAt: issueFixer?.lastRunAt ?? null,
     issueFixerScanCursor: issueFixer?.scanCursor ?? null,
 

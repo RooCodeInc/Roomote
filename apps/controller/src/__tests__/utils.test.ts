@@ -7,6 +7,7 @@ import {
 import { db } from '@roomote/db/server';
 
 import {
+  clearTaskRunMachine,
   getNamedPortsForTaskRun,
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
@@ -552,5 +553,28 @@ describe('updateTaskRunMachine', () => {
     const setArg = setCall.mock.calls[0][0];
 
     expect(setArg.sourceSnapshotId).toBeNull();
+  });
+});
+
+describe('clearTaskRunMachine', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('nulls machine routing fields after sandbox teardown', async () => {
+    await clearTaskRunMachine(42);
+
+    const setCall = mockUpdate.mock.results[0]?.value.set;
+    const setArg = setCall.mock.calls[0][0];
+
+    expect(setArg).toEqual({
+      machineId: null,
+      machineDomain: null,
+      machineDomains: null,
+      primaryPortName: null,
+      sandboxServerUrl: null,
+      sandboxCmdId: null,
+      proxyPorts: null,
+    });
   });
 });

@@ -17,6 +17,7 @@ import {
 } from './exit-certificate';
 import { isExpectedSubprocessExit } from './expected-exit';
 import { OpenCodeServerHarness } from './harness';
+import { resolveOpenCodeCommand } from './opencode-command';
 
 interface StartOpenCodeServerHarnessOptions {
   workspacePath: string;
@@ -54,27 +55,6 @@ interface StartOpenCodeServerHarnessOptions {
 interface StartOpenCodeServerHarnessResult {
   harness: OpenCodeServerHarness;
   subprocess: ResultPromise;
-}
-
-function shellEscape(value: string): string {
-  const escapedSingleQuote = `'"'"'`;
-  return `'${value.replace(/'/g, escapedSingleQuote)}'`;
-}
-
-function resolveOpenCodeCommand(args: string[]): {
-  command: string;
-  args: string[];
-} {
-  const configured = process.env.OPENCODE_COMMAND?.trim();
-
-  if (!configured) {
-    return { command: 'opencode', args };
-  }
-
-  return {
-    command: 'bash',
-    args: ['-lc', `${configured} ${args.map(shellEscape).join(' ')}`],
-  };
 }
 
 function parseTimeoutMs(value: string | undefined): number | undefined {
@@ -233,16 +213,19 @@ export async function startOpenCodeServerHarness({
     developerInstructionsContent,
     logger,
   });
-  const resolved = resolveOpenCodeCommand([
-    'serve',
-    '--hostname',
-    '127.0.0.1',
-    '--port',
-    String(port),
-    '--print-logs',
-    '--log-level',
-    'INFO',
-  ]);
+  const resolved = resolveOpenCodeCommand(
+    [
+      'serve',
+      '--hostname',
+      '127.0.0.1',
+      '--port',
+      String(port),
+      '--print-logs',
+      '--log-level',
+      'INFO',
+    ],
+    commandEnv,
+  );
 
   log.info(
     `Launching OpenCode server command=${resolved.command} args=${JSON.stringify(

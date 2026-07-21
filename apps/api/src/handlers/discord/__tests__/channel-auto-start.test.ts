@@ -250,6 +250,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       expect.objectContaining({
         skipRoutingConfirmation: true,
         launchOwnerUserId: 'roomote-user-1',
+        intakeAckPinned: true,
         channelAutoStart: {
           agentPromptPrefix: 'Treat each message as a bug report.',
           initiator: {
@@ -263,6 +264,28 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     );
     // The gate is not consulted when no launch criteria are configured.
     expect(mocks.evaluateGate).not.toHaveBeenCalled();
+  });
+
+  it('forwards message_reference into startNewDiscordTask for reply launches', async () => {
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          type: 19,
+          message_reference: {
+            message_id: 'parent-message-1',
+            channel_id: MONITORED_CHANNEL_ID,
+          },
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyToMessageId: 'parent-message-1',
+        replyToChannelId: MONITORED_CHANNEL_ID,
+      }),
+    );
   });
 
   it('DMs an unlinked human a link nudge and never launches', async () => {
@@ -397,6 +420,10 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     await flushBackgroundWork();
 
     expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
+    const startArgs = mocks.startNewTask.mock.calls[0]![0] as {
+      intakeAckPinned?: boolean;
+    };
+    expect(startArgs.intakeAckPinned).toBeUndefined();
   });
 
   it('releases the routing lock when the launch fails', async () => {

@@ -48,6 +48,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'View analytics',
     matchExact: false,
     matchPaths: ['/analytics'],
+    adminOnly: true,
   },
 ];
 

@@ -209,17 +209,9 @@ describe('CommandPalette', () => {
       .getAllByRole('button')
       .map((button) => button.textContent?.trim())
       .filter((label): label is string =>
-        ['New Task', 'Tasks', 'Analytics', 'Settings', 'Help'].includes(
-          label ?? '',
-        ),
+        ['New Task', 'Tasks', 'Settings', 'Help'].includes(label ?? ''),
       );
 
-    expect(navItems).toEqual([
-      'New Task',
-      'Tasks',
-      'Analytics',
-      'Settings',
-      'Help',
-    ]);
+    expect(navItems).toEqual(['New Task', 'Tasks', 'Settings', 'Help']);
   });
 });

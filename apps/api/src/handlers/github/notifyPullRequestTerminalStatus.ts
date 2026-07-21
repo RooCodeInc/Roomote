@@ -34,6 +34,7 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getDiscordReactionTargetFromTaskPayload,
 } from '@roomote/types';
 
 /** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
@@ -181,38 +182,13 @@ function getDiscordTarget(payload: unknown): DiscordTarget | null {
   }
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
-  const reactionChannelId = getNonEmptyPayloadString(
-    payload,
-    'discordReactionChannelId',
-  );
-  const reactionMessageId = getNonEmptyPayloadString(
-    payload,
-    'discordReactionMessageId',
-  );
+  const reactionTarget = getDiscordReactionTargetFromTaskPayload(payload);
 
   return {
     channelId,
     ...(threadId ? { threadId } : {}),
-    ...(reactionChannelId && reactionMessageId
-      ? {
-          reaction: {
-            channelId: reactionChannelId,
-            messageId: reactionMessageId,
-          },
-        }
-      : {}),
+    ...(reactionTarget ? { reaction: reactionTarget } : {}),
   };
-}
-
-function getNonEmptyPayloadString(
-  payload: unknown,
-  key: string,
-): string | null {
-  if (!payload || typeof payload !== 'object') {
-    return null;
-  }
-  const value = (payload as Record<string, unknown>)[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 async function resolveLinearClient() {
@@ -550,18 +526,32 @@ async function deliverDiscordTerminalStatus({
 
       const originReaction = target.reaction;
       if (originReaction && provider.addReaction) {
-        await Promise.all([
-          provider.addReaction({
+        // Add and remove independently. Eyes may already be gone after worker
+        // onStart cleanup; a failed remove must not skip the terminal reaction.
+        try {
+          await provider.addReaction({
             channelId: originReaction.channelId,
             messageId: originReaction.messageId,
             name: terminalReaction,
-          }),
-          provider.removeReaction?.({
-            channelId: originReaction.channelId,
-            messageId: originReaction.messageId,
-            name: ackEmoji,
-          }) ?? Promise.resolve(),
-        ]);
+          });
+        } catch (error) {
+          console.warn(
+            `[notifyPullRequestTerminalStatus] Failed to add Discord terminal reaction for conversation ${conversationKey}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+        if (provider.removeReaction) {
+          try {
+            await provider.removeReaction({
+              channelId: originReaction.channelId,
+              messageId: originReaction.messageId,
+              name: ackEmoji,
+            });
+          } catch {
+            // Soft cleanup only.
+          }
+        }
       }
 
       notifiedConversations.add(conversationKey);

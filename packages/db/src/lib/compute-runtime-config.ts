@@ -71,6 +71,100 @@ async function isComputeProviderConfigured(
   );
 }
 
+type PersistedRuntimeComputeConfig = Awaited<
+  ReturnType<typeof loadPersistedRuntimeComputeConfig>
+>;
+
+function getExcludedComputeProviders(
+  runtimeEnv: Partial<Record<string, string | undefined>>,
+  persistedComputeConfig: PersistedRuntimeComputeConfig,
+) {
+  const excludedProviders = parseExcludedComputeProviders(
+    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
+  );
+
+  for (const provider of persistedComputeConfig.excludedProviders) {
+    excludedProviders.add(provider);
+  }
+
+  return excludedProviders;
+}
+
+async function listConfiguredComputeProvidersFromState({
+  runtimeEnv,
+  executor,
+  excludedProviders,
+}: {
+  runtimeEnv: Partial<Record<string, string | undefined>>;
+  executor: DatabaseOrTransaction;
+  excludedProviders: ReadonlySet<ComputeProvider>;
+}): Promise<ComputeProvider[]> {
+  const providerChecks = await Promise.all(
+    SETUP_COMPUTE_PROVIDER_CATALOG.map(async ({ provider }) => {
+      if (excludedProviders.has(provider)) {
+        return null;
+      }
+
+      return (await isComputeProviderConfigured(provider, {
+        runtimeEnv,
+        executor,
+      }))
+        ? provider
+        : null;
+    }),
+  );
+
+  return providerChecks.filter(
+    (provider): provider is ComputeProvider => provider !== null,
+  );
+}
+
+function pickDefaultComputeProvider({
+  runtimeEnv,
+  persistedComputeConfig,
+  excludedProviders,
+  configuredProviders,
+}: {
+  runtimeEnv: Partial<Record<string, string | undefined>>;
+  persistedComputeConfig: PersistedRuntimeComputeConfig;
+  excludedProviders: ReadonlySet<ComputeProvider>;
+  configuredProviders: readonly ComputeProvider[];
+}): ComputeProvider {
+  if (
+    persistedComputeConfig.defaultProvider &&
+    !excludedProviders.has(persistedComputeConfig.defaultProvider)
+  ) {
+    return persistedComputeConfig.defaultProvider;
+  }
+
+  const runtimeDefault = runtimeEnv.DEFAULT_COMPUTE_PROVIDER?.trim();
+  if (
+    runtimeDefault &&
+    isComputeProvider(runtimeDefault) &&
+    !excludedProviders.has(runtimeDefault) &&
+    runtimeDefault !== 'docker'
+  ) {
+    return runtimeDefault;
+  }
+
+  const preferredConfigured =
+    pickPreferredConfiguredComputeProvider(configuredProviders);
+
+  if (
+    runtimeDefault === 'docker' &&
+    isComputeProvider(runtimeDefault) &&
+    !excludedProviders.has(runtimeDefault)
+  ) {
+    return preferredConfigured && preferredConfigured !== 'docker'
+      ? preferredConfigured
+      : 'docker';
+  }
+
+  return (
+    preferredConfigured ?? getDefaultAvailableComputeProvider(excludedProviders)
+  );
+}
+
 /**
  * Lists sandbox providers that are both not excluded and fully configured for
  * task launch. Used by surfaces that let users pick a compute backend.
@@ -86,33 +180,57 @@ export async function listConfiguredComputeProviders(
   const persistedComputeConfig = executor.query?.deploymentSettings
     ? await loadPersistedRuntimeComputeConfig(executor)
     : { defaultProvider: null, excludedProviders: [] };
-  const excludedProviders = parseExcludedComputeProviders(
-    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
+  const excludedProviders = getExcludedComputeProviders(
+    runtimeEnv,
+    persistedComputeConfig,
   );
-  for (const provider of persistedComputeConfig.excludedProviders) {
-    excludedProviders.add(provider);
-  }
 
-  // Preserve setup-catalog display order so callers that fall back to the first
-  // entry match the home dropdown ordering (modal, e2b, daytona, docker).
-  const providers: ComputeProvider[] = [];
+  // Promise.all keeps independent provider checks to one latency window while
+  // map/filter preserve setup-catalog display order.
+  return listConfiguredComputeProvidersFromState({
+    runtimeEnv,
+    executor,
+    excludedProviders,
+  });
+}
 
-  for (const { provider } of SETUP_COMPUTE_PROVIDER_CATALOG) {
-    if (excludedProviders.has(provider)) {
-      continue;
-    }
+/**
+ * Resolves both values needed by provider pickers with one deployment-settings
+ * read and one parallel readiness scan.
+ */
+export async function resolveComputeProviderSelection(
+  options: {
+    runtimeEnv?: Partial<Record<string, string | undefined>>;
+    executor?: DatabaseOrTransaction;
+  } = {},
+): Promise<{
+  defaultComputeProvider: ComputeProvider;
+  availableComputeProviders: ComputeProvider[];
+}> {
+  const runtimeEnv = options.runtimeEnv ?? process.env;
+  const executor = options.executor ?? db;
+  const persistedComputeConfig =
+    await loadPersistedRuntimeComputeConfig(executor);
+  const excludedProviders = getExcludedComputeProviders(
+    runtimeEnv,
+    persistedComputeConfig,
+  );
+  const availableComputeProviders =
+    await listConfiguredComputeProvidersFromState({
+      runtimeEnv,
+      executor,
+      excludedProviders,
+    });
 
-    if (
-      await isComputeProviderConfigured(provider, {
-        runtimeEnv,
-        executor,
-      })
-    ) {
-      providers.push(provider);
-    }
-  }
-
-  return providers;
+  return {
+    defaultComputeProvider: pickDefaultComputeProvider({
+      runtimeEnv,
+      persistedComputeConfig,
+      excludedProviders,
+      configuredProviders: availableComputeProviders,
+    }),
+    availableComputeProviders,
+  };
 }
 
 /**
@@ -136,12 +254,10 @@ export async function resolveDefaultComputeProvider(
   const executor = options.executor ?? db;
   const persistedComputeConfig =
     await loadPersistedRuntimeComputeConfig(executor);
-  const excludedProviders = parseExcludedComputeProviders(
-    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
+  const excludedProviders = getExcludedComputeProviders(
+    runtimeEnv,
+    persistedComputeConfig,
   );
-  for (const provider of persistedComputeConfig.excludedProviders) {
-    excludedProviders.add(provider);
-  }
 
   if (
     persistedComputeConfig.defaultProvider &&
@@ -163,29 +279,18 @@ export async function resolveDefaultComputeProvider(
   }
 
   // Docker env default or unset: resolve cloud-vs-Local Docker from readiness.
-  const configuredProviders = await listConfiguredComputeProviders({
+  const configuredProviders = await listConfiguredComputeProvidersFromState({
     runtimeEnv,
     executor,
+    excludedProviders,
   });
-  const preferredConfigured =
-    pickPreferredConfiguredComputeProvider(configuredProviders);
 
-  if (
-    runtimeDefault === 'docker' &&
-    isComputeProvider(runtimeDefault) &&
-    !excludedProviders.has(runtimeDefault)
-  ) {
-    if (preferredConfigured && preferredConfigured !== 'docker') {
-      return preferredConfigured;
-    }
-    return 'docker';
-  }
-
-  if (preferredConfigured) {
-    return preferredConfigured;
-  }
-
-  return getDefaultAvailableComputeProvider(excludedProviders);
+  return pickDefaultComputeProvider({
+    runtimeEnv,
+    persistedComputeConfig,
+    excludedProviders,
+    configuredProviders,
+  });
 }
 
 /**

@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import { APIError } from 'better-auth/api';
 
 import { db, deploymentSettings, eq, invites, users } from '@roomote/db/server';
 import type { UserRole } from '@roomote/types';
@@ -42,6 +43,23 @@ type SignedInAuthContextOptions = {
   treatPendingAsSignedOut?: boolean;
 };
 
+async function loadDeploymentIdentityState(userId: string) {
+  const [existingDeploymentSettings, existingUser] = await Promise.all([
+    db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    }),
+    db.query.users.findFirst({
+      where: eq(users.id, userId),
+    }),
+  ]);
+
+  return { existingDeploymentSettings, existingUser };
+}
+
+type DeploymentIdentityState = Awaited<
+  ReturnType<typeof loadDeploymentIdentityState>
+>;
+
 function createUserResource({
   userId,
   name,
@@ -82,6 +100,7 @@ async function ensureDeploymentIdentity({
   imageUrl,
   invitedByInviteId,
   admittedViaBootstrap,
+  identityState,
 }: {
   userId: string;
   name: string;
@@ -89,14 +108,11 @@ async function ensureDeploymentIdentity({
   imageUrl?: string | null;
   invitedByInviteId?: string | null;
   admittedViaBootstrap?: boolean;
+  identityState: DeploymentIdentityState;
 }) {
   const now = new Date();
   let deploymentMetadata: Record<string, unknown>;
-
-  const existingDeploymentSettings =
-    await db.query.deploymentSettings.findFirst({
-      where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-    });
+  const { existingDeploymentSettings, existingUser } = identityState;
 
   if (existingDeploymentSettings) {
     deploymentMetadata = normalizeMetadataRecord(
@@ -111,10 +127,6 @@ async function ensureDeploymentIdentity({
       setupCompletedAt: null,
     });
   }
-
-  const existingUser = await db.query.users.findFirst({
-    where: eq(users.id, userId),
-  });
 
   const userEntity = {
     id: userId,
@@ -165,7 +177,8 @@ async function ensureDeploymentIdentity({
           entity: userEntity,
           metadata: {},
           role: insertRole,
-          onboardingCompletedAt: now,
+          // New Members link their personal accounts before using Roomote.
+          onboardingCompletedAt: insertRole === 'member' ? null : now,
           invitedByInviteId: invitedByInviteId ?? null,
         })
         .onConflictDoNothing({ target: users.id })
@@ -207,12 +220,15 @@ async function ensureDeploymentIdentity({
         ? 'member'
         : existingUser.role;
 
+    const desiredImageUrl = imageUrl ?? existingUser.imageUrl;
     const profileUpdate = {
       name,
       email,
-      imageUrl: imageUrl ?? existingUser.imageUrl,
+      imageUrl: desiredImageUrl,
       entity: userEntity,
-      onboardingCompletedAt: existingUser.onboardingCompletedAt ?? now,
+      // A null timestamp is intentional for an incomplete Member. Do not turn
+      // later authentication checks into an implicit onboarding completion.
+      onboardingCompletedAt: existingUser.onboardingCompletedAt,
       updatedAt: now,
       ...(admittedViaBootstrap && existingUser.role !== 'admin'
         ? { role }
@@ -232,7 +248,13 @@ async function ensureDeploymentIdentity({
           .set({ ...profileUpdate, deletedAt: null, role })
           .where(eq(users.id, userId));
       });
-    } else {
+    } else if (
+      existingUser.name !== name ||
+      existingUser.email !== email ||
+      existingUser.imageUrl !== desiredImageUrl ||
+      (admittedViaBootstrap && existingUser.role !== 'admin') ||
+      !isMatchingUserEntity(existingUser.entity, userEntity)
+    ) {
       await db.update(users).set(profileUpdate).where(eq(users.id, userId));
     }
   }
@@ -250,12 +272,41 @@ async function ensureDeploymentIdentity({
   };
 }
 
+function isMatchingUserEntity(
+  value: unknown,
+  expected: { id: string; name: string; email: string; imageUrl: string },
+): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const entity = value as Record<string, unknown>;
+
+  return (
+    Object.keys(entity).length === 4 &&
+    entity.id === expected.id &&
+    entity.name === expected.name &&
+    entity.email === expected.email &&
+    entity.imageUrl === expected.imageUrl
+  );
+}
+
 async function getBetterAuthSession() {
   const auth = await getAuth();
 
-  return auth.api.getSession({
-    headers: await headers(),
-  });
+  try {
+    return await auth.api.getSession({
+      headers: await headers(),
+    });
+  } catch (error) {
+    // Invalid or expired auth cookies should behave like a signed-out
+    // visitor on server renders instead of crashing the whole page.
+    if (error instanceof APIError && error.statusCode === 401) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 export async function getSignedInAuthContext(
@@ -275,10 +326,13 @@ export async function getSignedInAuthContext(
   const primaryEmail = sessionUser.email;
   const imageUrl = sessionUser.image ?? '';
 
-  const accessDecision = await evaluateSignInAccess({
-    userId,
-    email: primaryEmail,
-  });
+  const [accessDecision, identityState] = await Promise.all([
+    evaluateSignInAccess({
+      userId,
+      email: primaryEmail,
+    }),
+    loadDeploymentIdentityState(userId),
+  ]);
 
   if (!accessDecision.allowed) {
     return { success: false, error: 'Unauthorized: Not a member' };
@@ -297,6 +351,7 @@ export async function getSignedInAuthContext(
       imageUrl,
       invitedByInviteId,
       admittedViaBootstrap: accessDecision.via === 'bootstrap',
+      identityState,
     });
   } catch (error) {
     if (error instanceof InviteRedemptionFailedError) {

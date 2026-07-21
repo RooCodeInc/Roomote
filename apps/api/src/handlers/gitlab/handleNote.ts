@@ -1,18 +1,12 @@
 import {
   buildMentionRequestBlock,
   buildUntrustedContentPolicy,
-  buildUntrustedExternalContentBlock,
   enqueueTask,
   escapeTaskContextText,
   getTaskUrl,
 } from '@roomote/cloud-agents/server';
 import {
-  db,
-  environmentRepositoryMappings,
-  eq,
-  asc,
   findActiveGitHubPrReviewTask,
-  findReusableGitHubIssueTaskOwner,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
 import {
@@ -28,6 +22,8 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import { orchestrateIssueMention } from '../shared/issue-mention-orchestration';
 import {
   sendMessageToTask,
   steerMessageToTask,
@@ -36,10 +32,6 @@ import {
   getGitLabAutomationTargets,
   isRoomoteGitLabUsername,
 } from './getGitLabAutomationTargets';
-import {
-  buildSourceControlAccountLinkRequiredMessage,
-  buildSourceControlEnvironmentRequiredMessage,
-} from '../source-control-account-linking';
 import { toHostFromUrl } from '../utils';
 import type { GitLabNoteWebhook } from './types';
 
@@ -263,95 +255,6 @@ function buildExistingMrTaskFollowUpMessage({
   return lines.join('\n');
 }
 
-function buildIssueMentionPrompt({
-  repositoryFullName,
-  issueIid,
-  issueTitle,
-  issueBody,
-  issueUrl,
-  commentBody,
-  commenterLogin,
-}: {
-  repositoryFullName: string;
-  issueIid: number;
-  issueTitle: string;
-  issueBody?: string | null;
-  issueUrl: string;
-  commentBody: string;
-  commenterLogin: string;
-}): string {
-  const trimmedIssueBody = issueBody?.trim() ?? '';
-  const trimmedCommentBody = commentBody.trim();
-  const issueBodySection =
-    trimmedIssueBody && trimmedIssueBody !== trimmedCommentBody
-      ? [
-          '',
-          'Issue description (context only):',
-          buildUntrustedExternalContentBlock({
-            source: 'gitlab_issue_description',
-            text: trimmedIssueBody,
-          }),
-        ]
-      : [];
-
-  return [
-    `${commenterLogin} mentioned Roomote on GitLab issue #${issueIid} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
-    `Issue URL: ${issueUrl}`,
-    '',
-    'Mention comment (the request to act on):',
-    buildMentionRequestBlock(trimmedCommentBody),
-    ...issueBodySection,
-    '',
-    buildUntrustedContentPolicy(),
-  ].join('\n');
-}
-
-function buildIssueFollowUpMessage({
-  repositoryFullName,
-  issueIid,
-  issueTitle,
-  issueUrl,
-  commentBody,
-  commenterLogin,
-}: {
-  repositoryFullName: string;
-  issueIid: number;
-  issueTitle: string;
-  issueUrl: string;
-  commentBody: string;
-  commenterLogin: string;
-}): string {
-  return [
-    `${commenterLogin} mentioned Roomote again on GitLab issue #${issueIid} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
-    `Issue URL: ${issueUrl}`,
-    '',
-    'This is a follow-up on the existing Roomote task for this issue. Continue that work instead of starting a separate task.',
-    '',
-    'Mention comment (the request to act on):',
-    buildMentionRequestBlock(commentBody),
-    '',
-    buildUntrustedContentPolicy(),
-  ].join('\n');
-}
-
-async function resolveMappedEnvironmentId(
-  repositoryId: string,
-): Promise<string | null> {
-  const mappings = await db
-    .select({
-      environmentId: environmentRepositoryMappings.environmentId,
-    })
-    .from(environmentRepositoryMappings)
-    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId))
-    .orderBy(asc(environmentRepositoryMappings.environmentId));
-
-  if (mappings.length === 0) {
-    return null;
-  }
-
-  return mappings[0]?.environmentId ?? null;
-}
-
 async function handleGitLabIssueNote({
   payload,
   note,
@@ -404,17 +307,6 @@ async function handleGitLabIssueNote({
     };
   }
 
-  const environmentId = await resolveMappedEnvironmentId(target.repo.id);
-
-  if (!environmentId) {
-    await postIssueMentionResponseNote({
-      ...mentionResponseTarget,
-      body: buildSourceControlEnvironmentRequiredMessage('gitlab'),
-    });
-
-    return { status: 'ok', message: 'environment_required' };
-  }
-
   const issueUrl =
     issue.url ??
     (payload.project.web_url
@@ -423,130 +315,32 @@ async function handleGitLabIssueNote({
   const issueTitle = issue.title ?? `Issue #${issue.iid}`;
   const issueBody = issue.description ?? null;
 
-  const existingIssueOwner = await findReusableGitHubIssueTaskOwner({
-    repoFullName,
-    issueNumber: issue.iid,
-    sourceControlProvider: 'gitlab',
-    host: target.repo.host ?? null,
-  });
-
-  if (existingIssueOwner?.taskId) {
-    const followUpMessage = buildIssueFollowUpMessage({
-      repositoryFullName: repoFullName,
-      issueIid: issue.iid,
-      issueTitle,
-      issueUrl,
-      commentBody: note.note,
-      commenterLogin: commenter,
-    });
-
-    const delivery = isActivelyRunningTask(
-      existingIssueOwner.status,
-      existingIssueOwner.taskPhase,
-    )
-      ? await steerMessageToTask({
-          taskId: existingIssueOwner.taskId,
-          userId: target.userId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-        })
-      : await sendMessageToTask({
-          taskId: existingIssueOwner.taskId,
-          userId: target.userId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-        });
-
-    if (delivery.success) {
-      await postIssueMentionResponseNote({
-        ...mentionResponseTarget,
-        body: formatGitLabIssueMentionReply(
-          'active_follow_up',
-          tryBuildTaskLink({
-            taskId: existingIssueOwner.taskId,
-            campaign: 'gitlab.issue.mention.active-owner',
-          }),
-        ),
-      });
-
-      return { status: 'ok', message: 'active_issue_owner_routed' };
-    }
-
-    console.warn(
-      `[handleGitLabNote] failed to deliver issue mention to reusable task ${existingIssueOwner.taskId}: ${delivery.error}`,
-    );
-  }
-
-  const prompt = buildIssueMentionPrompt({
+  return orchestrateIssueMention({
+    provider: 'gitlab',
+    logPrefix: '[handleGitLabNote]',
+    repositoryId: target.repo.id,
     repositoryFullName: repoFullName,
-    issueIid: issue.iid,
+    issueNumber: issue.iid,
     issueTitle,
     issueBody,
     issueUrl,
     commentBody: note.note,
     commenterLogin: commenter,
+    commenterUserId: target.userId,
+    sourceControlHost: target.repo.host ?? null,
+    includeSourceControlOnPayload: true,
+    providerDisplayName: 'GitLab',
+    issueBodySource: 'gitlab_issue_description',
+    issueBodyContextLabel: 'Issue description (context only):',
+    postComment: (body) =>
+      postIssueMentionResponseNote({ ...mentionResponseTarget, body }),
+    formatFollowUpReply: (taskLink) =>
+      formatGitLabIssueMentionReply('active_follow_up', taskLink),
+    formatStartedReply: (taskLink) =>
+      formatGitLabIssueMentionReply('task_started', taskLink),
+    formatStartFailed: () => buildTaskStartFailedNote('issue'),
+    tryBuildTaskLink,
   });
-
-  const taskPayload = {
-    repo: repoFullName,
-    sourceControlProvider: 'gitlab',
-    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
-    environmentId,
-    selectedRepositories: [repoFullName],
-    description: prompt,
-    linkedWorkItems: [
-      {
-        provider: 'gitlab',
-        identifier: String(issue.iid),
-        url: issueUrl,
-        title: issueTitle,
-        repository: repoFullName,
-      },
-    ],
-  } satisfies TaskPayload<typeof TaskPayloadKind.StandardTask>;
-
-  try {
-    const launch = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.StandardTask,
-        payload: taskPayload,
-      },
-      initiator: { kind: 'user', userId: target.userId },
-      workflow: 'standard',
-      surface: 'gitlab',
-      trigger: 'message',
-    });
-
-    await postIssueMentionResponseNote({
-      ...mentionResponseTarget,
-      body: formatGitLabIssueMentionReply(
-        'task_started',
-        tryBuildTaskLink({
-          taskId: launch.taskId,
-          campaign: 'gitlab.issue.mention',
-        }),
-      ),
-    });
-
-    return {
-      status: 'ok',
-      metadata: { ids: [launch.id] },
-    };
-  } catch (error) {
-    console.warn(
-      `[handleGitLabNote] failed to start issue task for ${repoFullName}#${issue.iid}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    await postIssueMentionResponseNote({
-      ...mentionResponseTarget,
-      body: buildTaskStartFailedNote('issue'),
-    });
-
-    return {
-      status: 'error',
-      message: `issue_task_start_failed:${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
 }
 
 async function handleGitLabMergeRequestNote({

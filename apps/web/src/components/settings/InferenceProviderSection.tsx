@@ -9,12 +9,13 @@ import {
   getModelProviderLabel,
 } from '@roomote/types';
 import type {
+  ProviderCreditBalance,
+  ProviderCreditBalanceProviderId,
   SetupModelProviderId,
   SetupModelProviderStatus,
   SetupModelStatus,
   SubscriptionProviderUsage,
   SubscriptionUsageProviderId,
-  SubscriptionUsageWindow,
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
@@ -45,6 +46,8 @@ import {
 import { Section } from '@/components/settings/Section';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
+import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
+import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
@@ -116,79 +119,10 @@ function getSubmitAdditionalEnvValues(
   );
 }
 
-function formatUsageReset(resetsAt: string): string | null {
-  const reset = new Date(resetsAt).getTime();
-
-  if (Number.isNaN(reset)) {
-    return null;
-  }
-
-  const deltaMinutes = Math.round((reset - Date.now()) / 60_000);
-
-  if (deltaMinutes <= 0) {
-    return null;
-  }
-  if (deltaMinutes < 60) {
-    return `resets in ${deltaMinutes}m`;
-  }
-  if (deltaMinutes < 48 * 60) {
-    return `resets in ${Math.round(deltaMinutes / 60)}h`;
-  }
-
-  return `resets ${new Date(reset).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })}`;
-}
-
-function formatUsageWindow(window: SubscriptionUsageWindow): string | null {
-  let value: string;
-
-  if (window.unlimited) {
-    value = 'unlimited';
-  } else if (window.remaining !== undefined && window.limit !== undefined) {
-    value = `${window.remaining.toLocaleString()} of ${window.limit.toLocaleString()} left`;
-  } else if (window.usedPercent !== undefined) {
-    value = `${Math.round(window.usedPercent)}% used`;
-  } else {
-    return null;
-  }
-
-  const reset =
-    !window.unlimited && window.resetsAt
-      ? formatUsageReset(window.resetsAt)
-      : null;
-
-  return `${window.label}: ${value}${reset ? ` (${reset})` : ''}`;
-}
-
-function SubscriptionUsageLine({
-  usage,
-  className,
-}: {
-  usage: SubscriptionProviderUsage | undefined;
-  className?: string;
-}) {
-  const parts = (usage?.windows ?? [])
-    .map(formatUsageWindow)
-    .filter((part): part is string => part !== null);
-
-  if (parts.length === 0) {
-    return null;
-  }
-
-  return (
-    <p
-      className={`min-w-0 truncate text-xs text-muted-foreground ${className ?? ''}`}
-    >
-      {parts.join(' · ')}
-    </p>
-  );
-}
-
 function ConnectedProviderRow({
   provider,
   usage,
+  creditBalance,
   isSaving,
   canDelete,
   onEdit,
@@ -196,6 +130,7 @@ function ConnectedProviderRow({
 }: {
   provider: SetupModelProviderStatus;
   usage?: SubscriptionProviderUsage;
+  creditBalance?: ProviderCreditBalance;
   isSaving: boolean;
   canDelete: boolean;
   onEdit: () => void;
@@ -234,6 +169,7 @@ function ConnectedProviderRow({
             data-1p-ignore
           />
           <SubscriptionUsageLine usage={usage} className="mt-1" />
+          <ProviderCreditBalanceLine balance={creditBalance} className="mt-1" />
         </div>
 
         {hasRuntimeKey ? (
@@ -659,7 +595,9 @@ function ChatGptSubscriptionRow({
                 : 'Connected to a ChatGPT account.'}
             </p>
           )}
-          {!errored ? <SubscriptionUsageLine usage={usage} /> : null}
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
         </div>
 
         {errored ? (
@@ -715,7 +653,9 @@ function GitHubCopilotSubscriptionRow({
               ? (errorMessage ?? 'GitHub Copilot needs to be reconnected.')
               : 'Connected to a GitHub Copilot account.'}
           </p>
-          {!errored ? <SubscriptionUsageLine usage={usage} /> : null}
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
         </div>
         {errored ? (
           <Button size="sm" variant="outline" onClick={onReconnect}>
@@ -829,6 +769,23 @@ export function InferenceProviderSection({
     [subscriptionUsageQuery.data],
   );
 
+  // Credit-balance endpoints soft-fail the same way: missing means no line.
+  const providerCreditsQuery = useQuery(
+    trpc.providerCredits.list.queryOptions(undefined, {
+      staleTime: 60_000,
+    }),
+  );
+  const creditBalanceByProvider = useMemo(
+    () =>
+      new Map<ProviderCreditBalanceProviderId, ProviderCreditBalance>(
+        (providerCreditsQuery.data ?? []).map((balance) => [
+          balance.providerId,
+          balance,
+        ]),
+      ),
+    [providerCreditsQuery.data],
+  );
+
   const saveProvider = useMutation(
     trpc.taskModels.saveProvider.mutationOptions({
       onSuccess: async (result, variables) => {
@@ -853,6 +810,9 @@ export function InferenceProviderSection({
           }),
           queryClient.invalidateQueries({
             queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.providerCredits.list.queryKey(),
           }),
           ...(addedModelCount > 0 || addedDiscoveredModelCount > 0
             ? [
@@ -945,6 +905,9 @@ export function InferenceProviderSection({
           }),
           queryClient.invalidateQueries({
             queryKey: trpc.subscriptionUsage.list.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.providerCredits.list.queryKey(),
           }),
         ]);
       },
@@ -1196,6 +1159,11 @@ export function InferenceProviderSection({
                 usage={
                   provider.id === 'kimi-for-coding'
                     ? usageByProvider.get('kimi-for-coding')
+                    : undefined
+                }
+                creditBalance={
+                  provider.id === 'openrouter'
+                    ? creditBalanceByProvider.get('openrouter')
                     : undefined
                 }
                 isSaving={savingProviderId === provider.id}

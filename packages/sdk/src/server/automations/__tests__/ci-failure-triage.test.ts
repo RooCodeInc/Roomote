@@ -6,10 +6,12 @@ const {
   mockListConnectedCommunicationProviders,
   mockResolveAutomationRuntimeDestination,
   mockBuildDestinationTaskPayloadFields,
-  mockHasActiveGitHubInstallation,
-  mockGetActiveRepositoryFullNames,
-  mockBuildRepositoryCoverage,
-  mockGetEnvironmentBackedCoverage,
+  mockGetActiveRepositoriesForProviders,
+  mockFindEnvironmentIdForRepositoryId,
+  mockFindEnvironmentForRepo,
+  mockGetLatestGitLabPipeline,
+  mockGetGitLabPipelineFailureEvidence,
+  mockResolveGitLabInstanceHost,
   mockTryClaimCiFailureTriageInvestigation,
   mockReleaseCiFailureTriageInvestigation,
   mockBuildCiFailureTriageFingerprint,
@@ -21,10 +23,12 @@ const {
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
   mockBuildDestinationTaskPayloadFields: vi.fn(),
-  mockHasActiveGitHubInstallation: vi.fn(),
-  mockGetActiveRepositoryFullNames: vi.fn(),
-  mockBuildRepositoryCoverage: vi.fn(),
-  mockGetEnvironmentBackedCoverage: vi.fn(),
+  mockGetActiveRepositoriesForProviders: vi.fn(),
+  mockFindEnvironmentIdForRepositoryId: vi.fn(),
+  mockFindEnvironmentForRepo: vi.fn(),
+  mockGetLatestGitLabPipeline: vi.fn(),
+  mockGetGitLabPipelineFailureEvidence: vi.fn(),
+  mockResolveGitLabInstanceHost: vi.fn(),
   mockTryClaimCiFailureTriageInvestigation: vi.fn(),
   mockReleaseCiFailureTriageInvestigation: vi.fn(),
   mockBuildCiFailureTriageFingerprint: vi.fn(),
@@ -41,9 +45,8 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildCiFailureTriageFingerprint: mockBuildCiFailureTriageFingerprint,
   buildCiFailureTriagePrompt: mockBuildCiFailureTriagePrompt,
-  buildRepositoryCoverage: mockBuildRepositoryCoverage,
   enqueueTask: mockEnqueueTask,
-  getEnvironmentBackedCoverage: mockGetEnvironmentBackedCoverage,
+  findEnvironmentForRepo: mockFindEnvironmentForRepo,
   releaseCiFailureTriageInvestigation: mockReleaseCiFailureTriageInvestigation,
   tryClaimCiFailureTriageInvestigation:
     mockTryClaimCiFailureTriageInvestigation,
@@ -56,8 +59,23 @@ vi.mock('../destination', () => ({
 }));
 
 vi.mock('../github-deployment-scope', () => ({
-  getActiveRepositoryFullNames: mockGetActiveRepositoryFullNames,
-  hasActiveGitHubInstallation: mockHasActiveGitHubInstallation,
+  getActiveRepositoriesForProviders: mockGetActiveRepositoriesForProviders,
+  findEnvironmentIdForRepositoryId: mockFindEnvironmentIdForRepositoryId,
+}));
+
+vi.mock('@roomote/gitlab', () => ({
+  getLatestGitLabPipeline: mockGetLatestGitLabPipeline,
+  getGitLabPipelineFailureEvidence: mockGetGitLabPipelineFailureEvidence,
+  resolveGitLabInstanceHost: mockResolveGitLabInstanceHost,
+  isNestedGitLabPipelineSource: (source: string | null | undefined) => {
+    const normalized = source?.trim().toLowerCase();
+    return (
+      normalized === 'parent_pipeline' ||
+      normalized === 'pipeline' ||
+      normalized === 'ondemand_dast_scan' ||
+      normalized === 'ondemand_dast_validation'
+    );
+  },
 }));
 
 import { ciFailureTriageJob } from '../ci-failure-triage';
@@ -72,20 +90,39 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       destination: null,
     });
     mockListConnectedCommunicationProviders.mockResolvedValue(['teams']);
-    mockHasActiveGitHubInstallation.mockResolvedValue(true);
-    mockGetActiveRepositoryFullNames.mockResolvedValue(['acme/api']);
-    mockBuildRepositoryCoverage.mockResolvedValue([
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
       {
-        repositoryFullName: 'acme/api',
-        targetEnvironmentId: 'env-api',
+        id: 'repo-gh-1',
+        fullName: 'acme/api',
+        sourceControlProvider: 'github',
+        externalRepoId: null,
+        host: 'github.com',
+        defaultBranch: 'main',
       },
     ]);
-    mockGetEnvironmentBackedCoverage.mockReturnValue([
-      {
-        repositoryFullName: 'acme/api',
-        targetEnvironmentId: 'env-api',
+    mockFindEnvironmentIdForRepositoryId.mockImplementation(
+      async (repositoryId: string) => {
+        if (repositoryId === 'repo-gh-1') return 'env-api';
+        if (repositoryId === 'repo-gl-cloud') return 'env-gl-cloud';
+        if (repositoryId === 'repo-gl-self') return 'env-gl-self';
+        if (repositoryId === 'repo-gl-1') return 'env-gl';
+        return undefined;
       },
-    ]);
+    );
+    mockFindEnvironmentForRepo.mockResolvedValue(undefined);
+    mockGetLatestGitLabPipeline.mockResolvedValue({
+      id: 77,
+      name: 'default',
+      ref: 'main',
+      sha: 'abc123',
+      status: 'failed',
+      source: 'push',
+      web_url: 'https://gitlab.com/acme/gitlab-api/-/pipelines/77',
+    });
+    mockGetGitLabPipelineFailureEvidence.mockResolvedValue(
+      'job="test" id=21\nAssertionError',
+    );
+    mockResolveGitLabInstanceHost.mockResolvedValue('gitlab.com');
     mockBuildCiFailureTriageFingerprint.mockReturnValue('fp-manual');
     mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(true);
     mockBuildCiFailureTriagePrompt.mockReturnValue('$ci-failure-triage prompt');
@@ -111,34 +148,15 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     expect(result.skippedReason).toBeNull();
     expect(result.launchedTaskId).toBe('task-1');
     expect(result.errors).toEqual([]);
-
-    expect(mockListConnectedCommunicationProviders).toHaveBeenCalled();
-    expect(mockResolveAutomationRuntimeDestination).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({ enabled: true }),
-      slackConnected: false,
-    });
-    expect(mockBuildDestinationTaskPayloadFields).toHaveBeenCalledWith({
-      provider: 'teams',
-      channelId: '19:teams-channel@thread.tacv2',
-      serviceUrl: 'https://smba.trafficmanager.net/amer/',
-      source: 'manager_channel',
-    });
+    expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
+      'repo-gh-1',
+    );
     expect(mockTryClaimCiFailureTriageInvestigation).toHaveBeenCalledWith({
+      provider: 'github',
       repositoryFullName: 'acme/api',
+      repositoryHost: 'github.com',
       fingerprint: 'fp-manual',
       marker: 'manual:acme/api',
-    });
-    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith({
-      channelId: '19:teams-channel@thread.tacv2',
-      repositoryFullNames: ['acme/api'],
-      repositoryCoverage: [
-        {
-          repositoryFullName: 'acme/api',
-          targetEnvironmentId: 'env-api',
-        },
-      ],
-      trigger: 'manual',
-      destinationProvider: 'teams',
     });
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       {
@@ -163,7 +181,198 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       },
       { launchClass: 'automation' },
     );
-    expect(mockEnqueueTask.mock.calls[0]?.[0]).not.toHaveProperty('channels');
+  });
+
+  it('stamps GitLab provider on the payload for GitLab repos', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-1',
+        fullName: 'acme/gitlab-api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '9001',
+        host: 'gitlab.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
+      'repo-gl-1',
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/gitlab-api',
+            environmentId: 'env-gl',
+            sourceControlProvider: 'gitlab',
+            sourceControlHost: 'gitlab.com',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('only inspects GitLab repos on the deployment instance host', async () => {
+    // Same-path projects on two instances: the deployment credential belongs
+    // to gitlab.example.com, so the gitlab.com row must never be queried with
+    // it (project ids are only unique per instance).
+    mockResolveGitLabInstanceHost.mockResolvedValue('gitlab.example.com');
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-cloud',
+        fullName: 'acme/api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '11',
+        host: 'gitlab.com',
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-gl-self',
+        fullName: 'acme/api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '22',
+        host: 'gitlab.example.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockGetLatestGitLabPipeline.mockResolvedValueOnce({
+      id: 2,
+      name: 'default',
+      ref: 'main',
+      sha: 'self-sha',
+      status: 'failed',
+      source: 'push',
+      web_url: 'https://gitlab.example.com/acme/api/-/pipelines/2',
+    });
+    mockGetGitLabPipelineFailureEvidence.mockResolvedValue('fail-self');
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockGetLatestGitLabPipeline).toHaveBeenCalledTimes(1);
+    expect(mockGetLatestGitLabPipeline).toHaveBeenCalledWith({
+      projectId: '22',
+      ref: 'main',
+    });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/api',
+            environmentId: 'env-gl-self',
+            sourceControlProvider: 'gitlab',
+            sourceControlHost: 'gitlab.example.com',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('skips hostless legacy GitLab rows instead of querying the deployment instance', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-legacy',
+        fullName: 'acme/legacy-api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '33',
+        host: null,
+        defaultBranch: 'main',
+      },
+    ]);
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-gl-legacy');
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockGetLatestGitLabPipeline).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('skips GitLab manual Run now when the latest pipeline is green', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-1',
+        fullName: 'acme/gitlab-api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '9001',
+        host: 'gitlab.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockGetLatestGitLabPipeline.mockResolvedValue({
+      id: 77,
+      name: 'default',
+      ref: 'main',
+      sha: 'abc123',
+      status: 'success',
+      source: 'push',
+      web_url: 'https://gitlab.com/acme/gitlab-api/-/pipelines/77',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('skips GitLab manual Run now when the latest failed pipeline is nested/child', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-1',
+        fullName: 'acme/gitlab-api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '9001',
+        host: 'gitlab.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockGetLatestGitLabPipeline.mockResolvedValue({
+      id: 88,
+      name: 'child',
+      ref: 'main',
+      sha: 'def456',
+      status: 'failed',
+      source: 'parent_pipeline',
+      web_url: 'https://gitlab.com/acme/gitlab-api/-/pipelines/88',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockGetGitLabPipelineFailureEvidence).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('still stamps channels.slackChannelId for Slack destinations', async () => {
@@ -178,10 +387,6 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     const result = await ciFailureTriageJob({ manualTrigger: true });
 
     expect(result.launchedTaskId).toBe('task-1');
-    expect(mockResolveAutomationRuntimeDestination).toHaveBeenCalledWith({
-      runtime: expect.objectContaining({ enabled: true }),
-      slackConnected: true,
-    });
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         channels: { slackChannelId: 'C123MANAGER' },
@@ -190,23 +395,65 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     );
   });
 
-  it('keeps the Slack-only skip path removed (does not use the old reason string)', async () => {
+  it('falls back to fullName environment lookup for GitHub when mapping rows are missing', async () => {
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-from-config');
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
-      provider: 'telegram',
-      channelId: '-100123',
-      source: 'primary_conversation',
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
     });
-    mockBuildDestinationTaskPayloadFields.mockReturnValue({
-      communicationProvider: 'telegram',
-      communicationChannelId: '-100123',
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
+      'repo-gh-1',
+    );
+    expect(mockFindEnvironmentForRepo).toHaveBeenCalledWith(
+      'acme/api',
+      undefined,
+      'github',
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/api',
+            environmentId: 'env-from-config',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('does not path-fallback for GitLab when repository mapping is missing', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gl-1',
+        fullName: 'acme/api',
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '9001',
+        host: 'gitlab.example.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
+    mockFindEnvironmentForRepo.mockResolvedValue('env-wrong-host');
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
     });
 
     const result = await ciFailureTriageJob({ manualTrigger: true });
 
-    expect(result.skippedReason).not.toBe(
-      'CI failure triage reports to Slack only for now.',
-    );
-    expect(result.launchedTaskId).toBe('task-1');
-    expect(mockEnqueueTask).toHaveBeenCalled();
+    expect(result.launchedTaskId).toBeNull();
+    expect(result.skippedReason).toContain('no repositories are covered');
+    expect(mockFindEnvironmentForRepo).not.toHaveBeenCalled();
+    expect(mockGetLatestGitLabPipeline).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 });

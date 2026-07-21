@@ -1419,6 +1419,60 @@ describe('findReusableGitHubIssueTaskOwner', () => {
     });
   });
 
+  it('reuses a standard task linked to the same Gitea issue', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'acme/backend-issue-gitea';
+    const issueNumber = 93;
+
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+    });
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: repoFullName,
+        sourceControlProvider: 'gitea',
+        description: `work on gitea #${issueNumber}`,
+        linkedWorkItems: [
+          {
+            provider: 'gitea',
+            identifier: String(issueNumber),
+            repository: repoFullName,
+            url: `https://git.example.com/${repoFullName}/issues/${issueNumber}`,
+            title: `Issue #${issueNumber}`,
+          },
+        ],
+      },
+    });
+
+    await createIssueLinkedStandardTaskRun({
+      repoFullName,
+      issueNumber,
+      userId: user.id,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+    });
+
+    const result = await findReusableGitHubIssueTaskOwner({
+      repoFullName,
+      issueNumber,
+      sourceControlProvider: 'gitea',
+    });
+
+    expect(result).toEqual({
+      runId: run.id,
+      taskId: run.taskId,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      delivery: 'attach',
+    });
+  });
+
   it('host-scopes GitLab issue reuse and tolerates unstamped legacy payloads', async () => {
     const { user } = await createActor();
     const repoFullName = 'acme/backend-issue-host';

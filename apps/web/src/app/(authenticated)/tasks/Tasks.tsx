@@ -236,7 +236,9 @@ export const Tasks = () => {
   };
 
   const handleClearAllFilters = () =>
-    router.replace(window.location.pathname, { scroll: false });
+    router.replace(`${window.location.pathname}?userId=all`, {
+      scroll: false,
+    });
 
   // Build filters array based on state.
   const effectiveFilters = useMemo(() => {
@@ -457,6 +459,10 @@ export const Tasks = () => {
 
   const isFiltering =
     taskFilterState.hasNonDefaultFilters || timePeriod !== 'all';
+  const hasAppliedFilters =
+    effectiveFilters.some(
+      (filter) => filter.type !== 'userId' || filter.value !== 'all',
+    ) || timePeriod !== 'all';
 
   const canSelect = tasks.length > 0 && !isSelectionMode && !isLoading;
 
@@ -568,18 +574,23 @@ export const Tasks = () => {
         <div className="flex min-h-0 flex-1 bg-background">
           <Empty>
             <EmptyHeader>
-              <EmptyDescription className="text-sm">
-                {isFiltering ? (
-                  <>
-                    <span>Try changing your criteria or </span>
+              {hasAppliedFilters ? (
+                <>
+                  <EmptyDescription className="text-sm">
+                    No tasks match your criteria.
+                  </EmptyDescription>
+                  <EmptyDescription className="text-sm">
                     <Link
-                      href="/tasks"
+                      href="/tasks?userId=all"
                       className="font-semibold hover:underline"
                     >
-                      removing all filters.
-                    </Link>
-                  </>
-                ) : (
+                      Remove the filters
+                    </Link>{' '}
+                    to show all tasks.
+                  </EmptyDescription>
+                </>
+              ) : (
+                <EmptyDescription className="text-sm">
                   <>
                     No tasks yet!{' '}
                     <Link href="/" className="font-bold hover:underline">
@@ -587,8 +598,8 @@ export const Tasks = () => {
                     </Link>
                     {' and it will appear here.'}
                   </>
-                )}
-              </EmptyDescription>
+                </EmptyDescription>
+              )}
             </EmptyHeader>
           </Empty>
         </div>

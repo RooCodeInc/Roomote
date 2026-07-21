@@ -32,6 +32,8 @@ export interface StartupStep {
 interface StartupMessageProps {
   step: StartupStep;
   isActive: boolean;
+  /** Elapsed seconds for the overall boot sequence, when known. */
+  elapsedSeconds?: number;
 }
 
 const getStepIcon = (step: StartupStep): LucideIcon => {
@@ -97,9 +99,29 @@ const getStepMessage = (step: StartupStep) => {
   })();
 };
 
-const StartupMessage = ({ step, isActive }: StartupMessageProps) => {
+function formatBootElapsed(elapsedSeconds: number): string {
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`;
+  }
+
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+const StartupMessage = ({
+  step,
+  isActive,
+  elapsedSeconds,
+}: StartupMessageProps) => {
   const Icon = getStepIcon(step);
   const message = getStepMessage(step);
+  const showElapsed =
+    isActive &&
+    typeof elapsedSeconds === 'number' &&
+    elapsedSeconds >= 10 &&
+    step.status !== RunStatus.Failed &&
+    step.status !== RunStatus.Canceled;
 
   return (
     <Message from="assistant">
@@ -112,6 +134,11 @@ const StartupMessage = ({ step, isActive }: StartupMessageProps) => {
             </Shimmer>
           ) : (
             <span className="text-muted-foreground">{message}</span>
+          )}
+          {showElapsed && (
+            <span className="text-xs text-muted-foreground tabular-nums">
+              Still booting… ({formatBootElapsed(elapsedSeconds)})
+            </span>
           )}
         </div>
       </MessageContent>
@@ -133,6 +160,8 @@ export type StartupPromptPreview = {
 interface StartupErrorMessageProps {
   status: RunStatus;
   error?: string;
+  /** Machine-readable failure category persisted with the run. */
+  errorCode?: string | null;
   prompt?: StartupPromptPreview | null;
   retryAction?: StartupRetryAction;
 }
@@ -140,12 +169,13 @@ interface StartupErrorMessageProps {
 export const StartupFailureMessage = ({
   status,
   error,
+  errorCode,
   prompt,
   retryAction,
 }: StartupErrorMessageProps) => {
   const isFailed = status === RunStatus.Failed;
   const isCanceled = status === RunStatus.Canceled;
-  const displayError = getTaskRunErrorDisplayMessage(error);
+  const displayError = getTaskRunErrorDisplayMessage(error, errorCode);
   const promptText = prompt?.text?.trim() || undefined;
   const promptImages = prompt?.images?.filter(Boolean) ?? [];
   const hasPrompt = Boolean(promptText) || promptImages.length > 0;
@@ -273,21 +303,27 @@ export const StartupFailureMessage = ({
 interface StartupSequenceProps {
   steps: StartupStep[];
   error?: string;
+  /** Machine-readable failure category persisted with the run. */
+  errorCode?: string | null;
   logs?: SandboxLogEntry[];
   logsConnected?: boolean;
   logsError?: string | null;
   prompt?: StartupPromptPreview | null;
   retryAction?: StartupRetryAction;
+  /** Elapsed seconds since boot began (dequeue/create). */
+  elapsedSeconds?: number;
 }
 
 export const StartupSequence = ({
   steps,
   error,
+  errorCode,
   logs,
   logsConnected = true,
   logsError = null,
   prompt,
   retryAction,
+  elapsedSeconds,
 }: StartupSequenceProps) => {
   const lastStep = steps[steps.length - 1];
   const status = lastStep?.status ?? RunStatus.Pending;
@@ -325,6 +361,11 @@ export const StartupSequence = ({
             <StartupMessage
               step={step}
               isActive={index === steps.length - 1 && !step.completed}
+              elapsedSeconds={
+                index === steps.length - 1 && !step.completed
+                  ? elapsedSeconds
+                  : undefined
+              }
             />
             {index === logInsertIndex && (
               <SandboxLogsTerminal
@@ -339,6 +380,7 @@ export const StartupSequence = ({
         <StartupFailureMessage
           status={status}
           error={error}
+          errorCode={errorCode}
           prompt={prompt}
           retryAction={retryAction}
         />

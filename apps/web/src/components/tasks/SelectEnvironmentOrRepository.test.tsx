@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { FormProvider, useForm, useFormContext } from 'react-hook-form';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -9,6 +9,7 @@ import { SelectEnvironmentOrRepository } from './SelectEnvironmentOrRepository';
 
 vi.mock('@/hooks/environments', () => ({
   useEnvironments: vi.fn(),
+  useAvailableEnvironments: vi.fn(),
 }));
 
 vi.mock('@/hooks/source-control', () => ({
@@ -68,7 +69,10 @@ vi.mock('@/components/system', async () => {
   };
 });
 
-import { useEnvironments } from '@/hooks/environments';
+import {
+  useAvailableEnvironments,
+  useEnvironments,
+} from '@/hooks/environments';
 import { useRepositories } from '@/hooks/source-control';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useWorkspaceStorage } from '@/hooks/useWorkspaceStorage';
@@ -140,6 +144,7 @@ const SelectEnvironmentOrRepositoryHarness = ({
 
 describe('SelectEnvironmentOrRepository', () => {
   const mockedUseEnvironments = vi.mocked(useEnvironments);
+  const mockedUseAvailableEnvironments = vi.mocked(useAvailableEnvironments);
   const mockedUseRepositories = vi.mocked(useRepositories);
   const mockedUseAuthorizedUser = vi.mocked(useAuthorizedUser);
   const mockedUseWorkspaceStorage = vi.mocked(useWorkspaceStorage);
@@ -149,7 +154,7 @@ describe('SelectEnvironmentOrRepository', () => {
     vi.clearAllMocks();
 
     mockedUseAuthorizedUser.mockReturnValue({
-      isAdmin: false,
+      isAdmin: true,
     } as ReturnType<typeof useAuthorizedUser>);
 
     mockedUseWorkspaceStorage.mockReturnValue({
@@ -176,6 +181,11 @@ describe('SelectEnvironmentOrRepository', () => {
       isPending: false,
       isSuccess: true,
     } as ReturnType<typeof useEnvironments>);
+    mockedUseAvailableEnvironments.mockReturnValue({
+      data: [{ id: 'env_123', name: 'Roomote' }],
+      isPending: false,
+      isSuccess: true,
+    } as ReturnType<typeof useAvailableEnvironments>);
   });
 
   it('auto-selects the matching environment for repository-filtered flows when repository is prefilled', async () => {
@@ -203,6 +213,27 @@ describe('SelectEnvironmentOrRepository', () => {
     expect(setWorkspace).toHaveBeenCalledWith({
       workspace: { type: 'environment', id: 'env_123' },
     });
+  });
+
+  it('uses the Member-safe environment result without configuration data', async () => {
+    mockedUseAuthorizedUser.mockReturnValue({
+      isAdmin: false,
+    } as ReturnType<typeof useAuthorizedUser>);
+    mockedUseAvailableEnvironments.mockReturnValue({
+      data: [{ id: 'env_member', name: 'Member environment' }],
+      isPending: false,
+      isSuccess: true,
+    } as ReturnType<typeof useAvailableEnvironments>);
+
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        defaultValues={{}}
+        onValuesChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText('Member environment')).toHaveLength(2);
+    expect(screen.getByText(/Environments.*recommended/)).toBeInTheDocument();
   });
 
   it('preserves prefilled repository in auto mode instead of force-selecting an environment', async () => {

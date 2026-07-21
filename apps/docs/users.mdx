@@ -18,7 +18,7 @@ Roomote has two user roles:
 | Role   | What it can do                                                                                                                                     |
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Admin  | Configure the deployment, manage users, connect providers, edit environments, configure automations, and use Roomote.                              |
-| Member | Use Roomote without changing deployment-wide settings. Members can launch and review tasks, manage their own profile, and link their own accounts. |
+| Member | Use Roomote without changing deployment-wide settings. Members can launch and review tasks with Admin-configured environments, manage their own profile, and link their own accounts. Only Admins can create, inspect, edit, or delete environment configuration. |
 
 The first user in a deployment becomes the founding admin. After that, admins
 can invite people as either **Admin** or **Member**, and can change another
@@ -49,6 +49,12 @@ An invite link can be used with email/password or with any configured sign-in
 provider. This is useful when you want to invite someone who is outside your
 Slack workspace or Microsoft tenant, or when you want to grant a specific role
 at join time.
+
+When someone opens a valid invite, Roomote identifies the invited role before
+they sign in and lets them continue with a configured provider or create an
+email/password account. New Members then link any eligible personal accounts
+and see the ways they can invoke Roomote. Existing users can still sign in when
+an invite has expired, been revoked, or been used up.
 
 Operators can also configure an email allowlist for a self-hosted deployment.
 When that allowlist is active, a user still needs to pass the normal sign-in

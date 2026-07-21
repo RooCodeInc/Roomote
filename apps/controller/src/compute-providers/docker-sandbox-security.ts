@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { TaskRunErrorCode } from '@roomote/types';
+
 import { resolveFromWorkspaceRoot } from '../repo-paths';
 
 const execFileAsync = promisify(execFile);
@@ -49,7 +51,7 @@ type DockerContainerInspect = {
 
 export type DockerCommand = (
   args: string[],
-  options?: { allowFailure?: boolean },
+  options?: { allowFailure?: boolean; signal?: AbortSignal },
 ) => Promise<string>;
 
 export type DockerWorkerEgressPolicy = 'internet' | 'none';
@@ -75,24 +77,249 @@ const BLOCKED_PRIVATE_ROUTES = [
   '192.168.0.0/16',
 ] as const;
 
+type DockerExecFailure = {
+  code?: string | number | null;
+  cmd?: string;
+  stdout?: string | Buffer;
+  stderr?: string | Buffer;
+  message?: string;
+  killed?: boolean;
+  signal?: NodeJS.Signals | null;
+};
+
+function bufferToString(value: string | Buffer | undefined): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return value.toString('utf8');
+  }
+
+  return '';
+}
+
+/** Hide env values from docker CLI diagnostics so auth tokens never reach the UI. */
+export function sanitizeDockerCommandForDisplay(
+  command: string | string[],
+): string {
+  if (Array.isArray(command)) {
+    const sanitized: string[] = [];
+
+    for (let index = 0; index < command.length; index += 1) {
+      const arg = command[index] ?? '';
+
+      if ((arg === '-e' || arg === '--env') && index + 1 < command.length) {
+        sanitized.push(arg);
+        const next = command[index + 1] ?? '';
+        const eq = next.indexOf('=');
+        sanitized.push(
+          eq > 0 ? `${next.slice(0, eq)}=<redacted>` : '<redacted>',
+        );
+        index += 1;
+        continue;
+      }
+
+      sanitized.push(arg);
+    }
+
+    return `docker ${sanitized.join(' ')}`.trim();
+  }
+
+  // Unquoted values are redacted to the next whitespace only: worker env
+  // values must stay space-free or the remainder would survive redaction.
+  return command
+    .replace(
+      /(^|\s)(-e|--env)\s+([A-Za-z_][\w]*)=(?:"[^"]*"|'[^']*'|\S+)/g,
+      '$1$2 $3=<redacted>',
+    )
+    .replace(
+      /(^|\s)(-e|--env)=([A-Za-z_][\w]*)=(?:"[^"]*"|'[^']*'|\S+)/g,
+      '$1$2=$3=<redacted>',
+    )
+    .trim();
+}
+
+/**
+ * Prefer Docker's diagnostic output (stderr/stdout) over the full argv list
+ * so spawn failures surface *why* the command failed in the product UI.
+ */
+export function formatDockerCommandError(
+  args: string[],
+  error: unknown,
+): string {
+  const failure = (error ?? {}) as DockerExecFailure;
+  const stderr = sanitizeDockerCommandForDisplay(
+    bufferToString(failure.stderr).trim(),
+  );
+  const stdout = sanitizeDockerCommandForDisplay(
+    bufferToString(failure.stdout).trim(),
+  );
+  const command =
+    typeof failure.cmd === 'string' && failure.cmd.trim()
+      ? sanitizeDockerCommandForDisplay(failure.cmd)
+      : sanitizeDockerCommandForDisplay(args);
+  const operation = args[0] ? `docker ${args[0]}` : 'docker';
+  // Node's execFile error.message embeds the full argv (including -e secrets)
+  // when stderr/stdout are empty — always redact before surfacing.
+  const reason = sanitizeDockerCommandForDisplay(
+    stderr ||
+      stdout ||
+      (typeof failure.message === 'string' ? failure.message.trim() : '') ||
+      `${operation} failed`,
+  );
+
+  const details: string[] = [`Failed to run ${operation}.`, reason];
+
+  if (stdout && stdout !== reason) {
+    details.push(`stdout:\n${stdout}`);
+  }
+
+  if (failure.code !== undefined && failure.code !== null) {
+    details.push(`exit code: ${String(failure.code)}`);
+  }
+
+  details.push(`command:\n${command}`);
+
+  return details.filter(Boolean).join('\n\n');
+}
+
+/**
+ * Boot/spawn failure with a machine-readable category. Thrown at the sites
+ * that know exactly what went wrong (preflight, worker start assertions) so
+ * the category survives to finishRun without re-parsing error prose.
+ */
+export class DockerBootError extends Error {
+  readonly errorCode: TaskRunErrorCode;
+
+  constructor(errorCode: TaskRunErrorCode, message: string) {
+    super(message);
+    this.name = 'DockerBootError';
+    this.errorCode = errorCode;
+  }
+}
+
+export function getTaskRunErrorCode(
+  error: unknown,
+): TaskRunErrorCode | undefined {
+  return error instanceof DockerBootError ? error.errorCode : undefined;
+}
+
+const SPAWN_ERROR_CLASSIFIERS: ReadonlyArray<{
+  code: TaskRunErrorCode;
+  pattern: RegExp;
+}> = [
+  {
+    code: TaskRunErrorCode.DockerDaemonUnreachable,
+    pattern:
+      /Cannot connect to the Docker daemon|failed to connect to the [Dd]ocker API|Is the docker daemon running|docker\.sock.*connect: no such file or directory/i,
+  },
+  {
+    code: TaskRunErrorCode.DockerImageMissing,
+    pattern:
+      /pull access denied|repository does not exist or may require ['"]?docker login['"]?|manifest for .+ not found|Unable to find image ['"].+['"] locally/i,
+  },
+  {
+    code: TaskRunErrorCode.DockerPortInUse,
+    pattern:
+      /port is already allocated|bind: address already in use|failed to bind host port/i,
+  },
+  {
+    code: TaskRunErrorCode.DockerReleaseArchiveMissing,
+    pattern:
+      /Docker worker release archive does not exist|Docker provider requires a local worker release archive/i,
+  },
+];
+
+/**
+ * Fallback categorization for spawn failures that were not raised as
+ * DockerBootError (e.g. a docker run failure surfacing daemon stderr).
+ * Single source of truth for these patterns — the web app matches on the
+ * persisted code, not on error prose.
+ */
+export function classifyDockerSpawnError(
+  message: string,
+): TaskRunErrorCode | undefined {
+  return SPAWN_ERROR_CLASSIFIERS.find(({ pattern }) => pattern.test(message))
+    ?.code;
+}
+
+/** Normalize spawn failures so finishRun stores a useful diagnostic message. */
+export function formatSpawnWorkerError(error: unknown): string {
+  if (error instanceof Error) {
+    const failure = error as Error & DockerExecFailure;
+    const stderr = sanitizeDockerCommandForDisplay(
+      bufferToString(failure.stderr).trim(),
+    );
+    const stdout = sanitizeDockerCommandForDisplay(
+      bufferToString(failure.stdout).trim(),
+    );
+    const message = error.message.trim();
+
+    // Already formatted by formatDockerCommandError / spawn-docker-worker.
+    if (message.startsWith('Failed to run docker')) {
+      return sanitizeDockerCommandForDisplay(message);
+    }
+
+    if (stderr || stdout) {
+      return formatDockerCommandError(
+        typeof failure.cmd === 'string'
+          ? failure.cmd.replace(/^docker\s+/, '').split(/\s+/)
+          : [],
+        error,
+      );
+    }
+
+    return sanitizeDockerCommandForDisplay(message) || 'Worker spawn failed';
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return sanitizeDockerCommandForDisplay(error.trim());
+  }
+
+  return String(error);
+}
+
 export async function docker(
   args: string[],
-  options: { allowFailure?: boolean } = {},
+  options: { allowFailure?: boolean; signal?: AbortSignal } = {},
 ): Promise<string> {
   try {
     const { stdout } = await execFileAsync('docker', args, {
       cwd: resolveFromWorkspaceRoot('.'),
       maxBuffer: 10 * 1024 * 1024,
+      signal: options.signal,
     });
 
     return stdout;
   } catch (error) {
+    // Cancellation must not be treated as a soft failure; allowFailure only
+    // covers Docker CLI / object-state errors, not AbortSignal abort.
+    if (options.signal?.aborted || isAbortError(error)) {
+      throw error;
+    }
+
     if (options.allowFailure) {
       return '';
     }
 
-    throw error;
+    // Do not attach the raw execFile error as `cause`: Sentry LinkedErrors
+    // would serialize the unredacted argv (including AUTH_TOKEN) from it.
+    throw new Error(formatDockerCommandError(args, error));
   }
+}
+
+export function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === 'AbortError' ||
+    error.name === 'TimeoutError' ||
+    // Node's aborted execFile errors use this code.
+    ('code' in error && error.code === 'ABORT_ERR')
+  );
 }
 
 export function getDockerTaskNetworkName(taskRunId: number): string {
@@ -273,7 +500,8 @@ export async function prepareDockerTaskNetwork(
       );
     }
   } catch (error) {
-    await removeDockerTaskNetwork(taskNetwork, runDocker);
+    // Network teardown must not share a possibly-aborted spawn signal.
+    await removeDockerTaskNetwork(taskNetwork, docker);
     throw error;
   }
 
