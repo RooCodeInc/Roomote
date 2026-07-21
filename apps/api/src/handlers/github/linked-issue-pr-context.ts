@@ -1,9 +1,9 @@
 import { getInstallationOctokit } from '@roomote/github';
 
 const TIMELINE_PAGE_SIZE = 100;
-/** Bound webhook latency; most timelines finish within one page. */
+/** Bound webhook latency; same three-page cap for GraphQL and REST. */
 const TIMELINE_MAX_PAGES = 3;
-const GRAPHQL_LINKED_ITEM_LIMIT = 100;
+const GRAPHQL_PAGE_SIZE = 100;
 
 type GitHubLinkedReference = {
   kind: 'issue' | 'pull_request';
@@ -53,13 +53,19 @@ type GraphQlTimelineNode = {
   subject?: GraphQlLinkedNode | null;
 };
 
+type GraphQlTimelinePage = {
+  pageInfo?: {
+    hasNextPage?: boolean | null;
+    endCursor?: string | null;
+  } | null;
+  nodes?: Array<GraphQlTimelineNode | null> | null;
+};
+
 type GraphQlLinkedReferencesResult = {
   repository?: {
     issueOrPullRequest?: {
       __typename?: string | null;
-      timelineItems?: {
-        nodes?: Array<GraphQlTimelineNode | null> | null;
-      } | null;
+      timelineItems?: GraphQlTimelinePage | null;
       closingIssuesReferences?: {
         nodes?: Array<GraphQlLinkedNode | null> | null;
       } | null;
@@ -67,12 +73,61 @@ type GraphQlLinkedReferencesResult = {
   } | null;
 };
 
+const LINKED_ITEM_FIELDS = `
+  __typename
+  number
+  title
+  url
+  state
+  repository {
+    nameWithOwner
+  }
+`;
+
+const TIMELINE_NODE_FIELDS = `
+  __typename
+  ... on CrossReferencedEvent {
+    source {
+      ... on Issue {
+        ${LINKED_ITEM_FIELDS}
+      }
+      ... on PullRequest {
+        ${LINKED_ITEM_FIELDS}
+      }
+    }
+  }
+  ... on ConnectedEvent {
+    subject {
+      ... on Issue {
+        ${LINKED_ITEM_FIELDS}
+      }
+      ... on PullRequest {
+        ${LINKED_ITEM_FIELDS}
+      }
+    }
+  }
+  ... on DisconnectedEvent {
+    subject {
+      ... on Issue {
+        ${LINKED_ITEM_FIELDS}
+      }
+      ... on PullRequest {
+        ${LINKED_ITEM_FIELDS}
+      }
+    }
+  }
+`;
+
+// Development connections only stay linked while not followed by a matching
+// disconnect. Cross-references are independent and not removed by disconnects.
 const LINKED_REFERENCES_GRAPHQL = `
   query RoomoteLinkedReferences(
     $owner: String!
     $name: String!
     $number: Int!
     $limit: Int!
+    $cursor: String
+    $includeClosingIssues: Boolean!
   ) {
     repository(owner: $owner, name: $name) {
       issueOrPullRequest(number: $number) {
@@ -80,128 +135,44 @@ const LINKED_REFERENCES_GRAPHQL = `
         ... on Issue {
           timelineItems(
             first: $limit
-            itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT]
+            after: $cursor
+            itemTypes: [
+              CROSS_REFERENCED_EVENT
+              CONNECTED_EVENT
+              DISCONNECTED_EVENT
+            ]
           ) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
             nodes {
-              __typename
-              ... on CrossReferencedEvent {
-                source {
-                  ... on Issue {
-                    __typename
-                    number
-                    title
-                    url
-                    state
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                  ... on PullRequest {
-                    __typename
-                    number
-                    title
-                    url
-                    state
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                }
-              }
-              ... on ConnectedEvent {
-                subject {
-                  ... on Issue {
-                    __typename
-                    number
-                    title
-                    url
-                    state
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                  ... on PullRequest {
-                    __typename
-                    number
-                    title
-                    url
-                    state
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                }
-              }
+              ${TIMELINE_NODE_FIELDS}
             }
           }
         }
         ... on PullRequest {
-          closingIssuesReferences(first: $limit) {
+          closingIssuesReferences(first: $limit)
+            @include(if: $includeClosingIssues) {
             nodes {
-              __typename
-              number
-              title
-              url
-              state
-              repository {
-                nameWithOwner
-              }
+              ${LINKED_ITEM_FIELDS}
             }
           }
           timelineItems(
             first: $limit
-            itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT]
+            after: $cursor
+            itemTypes: [
+              CROSS_REFERENCED_EVENT
+              CONNECTED_EVENT
+              DISCONNECTED_EVENT
+            ]
           ) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
             nodes {
-              __typename
-              ... on CrossReferencedEvent {
-                source {
-                  ... on Issue {
-                    __typename
-                    number
-                    title
-                    url
-                    state
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                  ... on PullRequest {
-                    __typename
-                    number
-                    title
-                    url
-                    state
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                }
-              }
-              ... on ConnectedEvent {
-                subject {
-                  ... on Issue {
-                    __typename
-                    number
-                    title
-                    url
-                    state
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                  ... on PullRequest {
-                    __typename
-                    number
-                    title
-                    url
-                    state
-                    repository {
-                      nameWithOwner
-                    }
-                  }
-                }
-              }
+              ${TIMELINE_NODE_FIELDS}
             }
           }
         }
@@ -340,18 +311,25 @@ function sortLinkedReferences(
   });
 }
 
-function collectGraphQlLinkedNodes(
-  result: GraphQlLinkedReferencesResult,
-  fallbackRepository: string,
-  excludeNumber: number,
-  byKey: Map<string, GitHubLinkedReference>,
-): void {
-  const target = result.repository?.issueOrPullRequest;
-  if (!target) {
-    return;
-  }
-
-  for (const node of target.timelineItems?.nodes ?? []) {
+/**
+ * Timeline GraphQL nodes arrive oldest-first. Apply development connect and
+ * disconnect events in order so a later disconnect drops an earlier connect.
+ * Cross-references are kept independently and are not affected by disconnects.
+ */
+function applyGraphQlTimelineNodes({
+  nodes,
+  fallbackRepository,
+  excludeNumber,
+  crossReferences,
+  developmentConnections,
+}: {
+  nodes: Array<GraphQlTimelineNode | null | undefined>;
+  fallbackRepository: string;
+  excludeNumber: number;
+  crossReferences: Map<string, GitHubLinkedReference>;
+  developmentConnections: Map<string, GitHubLinkedReference>;
+}): void {
+  for (const node of nodes) {
     if (!node) {
       continue;
     }
@@ -362,31 +340,46 @@ function collectGraphQlLinkedNodes(
         fallbackRepository,
         excludeNumber,
         fallbackRepository,
-        byKey,
+        crossReferences,
       );
+      continue;
     }
 
-    if (node.__typename === 'ConnectedEvent') {
-      // Development sidebar links are only available via GraphQL; REST
-      // timeline `connected` events do not expose the linked subject.
-      collectFromIssue(
-        graphQlNodeToIssueLike(node.subject),
-        fallbackRepository,
-        excludeNumber,
-        fallbackRepository,
-        byKey,
-      );
+    if (
+      node.__typename !== 'ConnectedEvent' &&
+      node.__typename !== 'DisconnectedEvent'
+    ) {
+      continue;
     }
-  }
 
-  for (const node of target.closingIssuesReferences?.nodes ?? []) {
-    collectFromIssue(
-      graphQlNodeToIssueLike(node),
+    const reference = toLinkedReference(
+      graphQlNodeToIssueLike(node.subject),
       fallbackRepository,
-      excludeNumber,
-      fallbackRepository,
-      byKey,
     );
+    if (!reference) {
+      continue;
+    }
+
+    if (
+      reference.number === excludeNumber &&
+      reference.repository === fallbackRepository
+    ) {
+      continue;
+    }
+
+    const key = referenceKey(reference);
+    if (node.__typename === 'ConnectedEvent') {
+      const existing = developmentConnections.get(key);
+      developmentConnections.set(key, {
+        ...reference,
+        title: existing?.title ?? reference.title,
+        url: existing?.url ?? reference.url,
+        state: existing?.state ?? reference.state,
+      });
+      continue;
+    }
+
+    developmentConnections.delete(key);
   }
 }
 
@@ -412,25 +405,65 @@ async function fetchLinkedReferencesViaGraphQl({
   }
 
   try {
-    const result = (await octokit.graphql(LINKED_REFERENCES_GRAPHQL, {
-      owner,
-      name: repo,
-      number: issueOrPrNumber,
-      limit: GRAPHQL_LINKED_ITEM_LIMIT,
-    })) as GraphQlLinkedReferencesResult;
+    const crossReferences = new Map<string, GitHubLinkedReference>();
+    const developmentConnections = new Map<string, GitHubLinkedReference>();
+    let cursor: string | null = null;
+    let sawTarget = false;
 
-    if (!result.repository?.issueOrPullRequest) {
-      return null;
+    for (let page = 0; page < TIMELINE_MAX_PAGES; page += 1) {
+      const result = (await octokit.graphql(LINKED_REFERENCES_GRAPHQL, {
+        owner,
+        name: repo,
+        number: issueOrPrNumber,
+        limit: GRAPHQL_PAGE_SIZE,
+        cursor,
+        includeClosingIssues: page === 0,
+      })) as GraphQlLinkedReferencesResult;
+
+      const target = result.repository?.issueOrPullRequest;
+      if (!target) {
+        return sawTarget
+          ? sortLinkedReferences([...crossReferences.values()])
+          : null;
+      }
+
+      sawTarget = true;
+
+      if (page === 0) {
+        for (const node of target.closingIssuesReferences?.nodes ?? []) {
+          collectFromIssue(
+            graphQlNodeToIssueLike(node),
+            repositoryFullName,
+            issueOrPrNumber,
+            repositoryFullName,
+            crossReferences,
+          );
+        }
+      }
+
+      applyGraphQlTimelineNodes({
+        nodes: target.timelineItems?.nodes ?? [],
+        fallbackRepository: repositoryFullName,
+        excludeNumber: issueOrPrNumber,
+        crossReferences,
+        developmentConnections,
+      });
+
+      const pageInfo = target.timelineItems?.pageInfo;
+      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) {
+        break;
+      }
+
+      cursor = pageInfo.endCursor;
     }
 
-    const byKey = new Map<string, GitHubLinkedReference>();
-    collectGraphQlLinkedNodes(
-      result,
-      repositoryFullName,
-      issueOrPrNumber,
-      byKey,
-    );
-    return sortLinkedReferences([...byKey.values()]);
+    for (const [key, reference] of developmentConnections) {
+      if (!crossReferences.has(key)) {
+        crossReferences.set(key, reference);
+      }
+    }
+
+    return sortLinkedReferences([...crossReferences.values()]);
   } catch (error) {
     console.warn(
       `[fetchGitHubLinkedReferences] GraphQL failed for ${repositoryFullName}#${issueOrPrNumber}: ${

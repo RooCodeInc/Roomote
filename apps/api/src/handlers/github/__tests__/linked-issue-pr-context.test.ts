@@ -11,6 +11,24 @@ import {
   formatGitHubLinkedReferencesSection,
 } from '../linked-issue-pr-context';
 
+function issueNode(overrides: {
+  number: number;
+  title: string;
+  url: string;
+  state?: string;
+  typename?: 'Issue' | 'PullRequest';
+  repository?: string;
+}) {
+  return {
+    __typename: overrides.typename ?? 'Issue',
+    number: overrides.number,
+    title: overrides.title,
+    url: overrides.url,
+    state: overrides.state ?? 'OPEN',
+    repository: { nameWithOwner: overrides.repository ?? 'acme/api' },
+  };
+}
+
 describe('linked-issue-pr-context', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -44,57 +62,48 @@ describe('linked-issue-pr-context', () => {
     expect(formatGitHubLinkedReferencesSection([])).toBeUndefined();
   });
 
-  it('collects GraphQL cross-references and development connections', async () => {
+  it('collects GraphQL cross-references and active development connections', async () => {
     const graphql = vi.fn().mockResolvedValue({
       repository: {
         issueOrPullRequest: {
           __typename: 'Issue',
           timelineItems: {
+            pageInfo: { hasNextPage: false, endCursor: null },
             nodes: [
               {
                 __typename: 'CrossReferencedEvent',
-                source: {
-                  __typename: 'PullRequest',
+                source: issueNode({
                   number: 963,
                   title: 'feat: enable image support',
                   url: 'https://github.com/acme/api/pull/963',
-                  state: 'OPEN',
-                  repository: { nameWithOwner: 'acme/api' },
-                },
+                  typename: 'PullRequest',
+                }),
               },
               {
                 __typename: 'CrossReferencedEvent',
-                source: {
-                  __typename: 'PullRequest',
+                source: issueNode({
                   number: 963,
                   title: 'feat: enable image support',
                   url: 'https://github.com/acme/api/pull/963',
-                  state: 'OPEN',
-                  repository: { nameWithOwner: 'acme/api' },
-                },
+                  typename: 'PullRequest',
+                }),
               },
               {
                 __typename: 'ConnectedEvent',
-                subject: {
-                  __typename: 'Issue',
+                subject: issueNode({
                   number: 12,
                   title: 'Sibling issue',
                   url: 'https://github.com/acme/api/issues/12',
-                  state: 'OPEN',
-                  repository: { nameWithOwner: 'acme/api' },
-                },
+                }),
               },
               {
                 // Same repository/number as the mention target must be skipped.
                 __typename: 'CrossReferencedEvent',
-                source: {
-                  __typename: 'Issue',
+                source: issueNode({
                   number: 42,
                   title: 'Self',
                   url: 'https://github.com/acme/api/issues/42',
-                  state: 'OPEN',
-                  repository: { nameWithOwner: 'acme/api' },
-                },
+                }),
               },
             ],
           },
@@ -111,7 +120,16 @@ describe('linked-issue-pr-context', () => {
       issueOrPrNumber: 42,
     });
 
-    expect(graphql).toHaveBeenCalled();
+    expect(graphql).toHaveBeenCalledWith(
+      expect.stringContaining('RoomoteLinkedReferences'),
+      expect.objectContaining({
+        owner: 'acme',
+        name: 'api',
+        number: 42,
+        cursor: null,
+        includeClosingIssues: true,
+      }),
+    );
     expect(request).not.toHaveBeenCalled();
     expect(refs).toEqual([
       {
@@ -131,6 +149,150 @@ describe('linked-issue-pr-context', () => {
         repository: 'acme/api',
       },
     ]);
+  });
+
+  it('drops development links after a matching disconnect without removing cross-references', async () => {
+    const graphql = vi.fn().mockResolvedValue({
+      repository: {
+        issueOrPullRequest: {
+          __typename: 'Issue',
+          timelineItems: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [
+              {
+                __typename: 'ConnectedEvent',
+                subject: issueNode({
+                  number: 12,
+                  title: 'Linked then unlinked',
+                  url: 'https://github.com/acme/api/issues/12',
+                }),
+              },
+              {
+                __typename: 'DisconnectedEvent',
+                subject: issueNode({
+                  number: 12,
+                  title: 'Linked then unlinked',
+                  url: 'https://github.com/acme/api/issues/12',
+                }),
+              },
+              {
+                __typename: 'CrossReferencedEvent',
+                source: issueNode({
+                  number: 12,
+                  title: 'Still mentioned in a comment',
+                  url: 'https://github.com/acme/api/issues/12',
+                }),
+              },
+              {
+                __typename: 'ConnectedEvent',
+                subject: issueNode({
+                  number: 99,
+                  title: 'Still linked',
+                  url: 'https://github.com/acme/api/issues/99',
+                }),
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    mockGetInstallationOctokit.mockResolvedValue({ graphql, request: vi.fn() });
+
+    const refs = await fetchGitHubLinkedReferences({
+      installationId: 1,
+      repositoryFullName: 'acme/api',
+      issueOrPrNumber: 42,
+    });
+
+    expect(refs).toEqual([
+      {
+        kind: 'issue',
+        number: 12,
+        title: 'Still mentioned in a comment',
+        url: 'https://github.com/acme/api/issues/12',
+        state: 'OPEN',
+        repository: 'acme/api',
+      },
+      {
+        kind: 'issue',
+        number: 99,
+        title: 'Still linked',
+        url: 'https://github.com/acme/api/issues/99',
+        state: 'OPEN',
+        repository: 'acme/api',
+      },
+    ]);
+  });
+
+  it('paginates GraphQL timeline items across two pages', async () => {
+    const graphql = vi
+      .fn()
+      .mockResolvedValueOnce({
+        repository: {
+          issueOrPullRequest: {
+            __typename: 'Issue',
+            timelineItems: {
+              pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+              nodes: [
+                {
+                  __typename: 'ConnectedEvent',
+                  subject: issueNode({
+                    number: 1,
+                    title: 'Page one',
+                    url: 'https://github.com/acme/api/issues/1',
+                  }),
+                },
+              ],
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        repository: {
+          issueOrPullRequest: {
+            __typename: 'Issue',
+            timelineItems: {
+              pageInfo: { hasNextPage: false, endCursor: 'cursor-2' },
+              nodes: [
+                {
+                  __typename: 'CrossReferencedEvent',
+                  source: issueNode({
+                    number: 2,
+                    title: 'Page two',
+                    url: 'https://github.com/acme/api/pull/2',
+                    typename: 'PullRequest',
+                  }),
+                },
+              ],
+            },
+          },
+        },
+      });
+
+    mockGetInstallationOctokit.mockResolvedValue({ graphql, request: vi.fn() });
+
+    const refs = await fetchGitHubLinkedReferences({
+      installationId: 1,
+      repositoryFullName: 'acme/api',
+      issueOrPrNumber: 42,
+    });
+
+    expect(graphql).toHaveBeenCalledTimes(2);
+    expect(graphql).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({ cursor: null, includeClosingIssues: true }),
+    );
+    expect(graphql).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        cursor: 'cursor-1',
+        includeClosingIssues: false,
+      }),
+    );
+    expect(refs.map((ref) => ref.number)).toEqual([1, 2]);
   });
 
   it('falls back to REST cross-references when GraphQL is unavailable', async () => {
