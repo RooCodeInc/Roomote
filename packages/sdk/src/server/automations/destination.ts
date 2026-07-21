@@ -83,7 +83,7 @@ export async function findTeamsConversationDisplayName(
   return row?.channelName ?? row?.teamName ?? null;
 }
 
-async function findTeamsConversationServiceUrl(
+export async function findTeamsConversationServiceUrl(
   conversationId: string,
 ): Promise<string | null> {
   const [row] = await db

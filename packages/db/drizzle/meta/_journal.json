@@ -127,6 +127,20 @@
       "when": 1784566126487,
       "tag": "0017_pink_living_mummy",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784643000000,
+      "tag": "0018_custom_automations",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784644900000,
+      "tag": "0019_custom_automation_launch_claim",
+      "breakpoints": true
     }
   ]
 }

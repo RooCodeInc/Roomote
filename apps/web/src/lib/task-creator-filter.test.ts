@@ -129,4 +129,15 @@ describe('formatAutomationAttributionLabel', () => {
       'Conflict Resolver Automation',
     );
   });
+
+  it('uses the user-entered custom automation name when provided', () => {
+    expect(
+      formatAutomationAttributionLabel('custom_automation', {
+        actorDisplayName: 'Weekly flaky-test scan',
+      }),
+    ).toBe('Weekly flaky-test scan Automation');
+    expect(formatAutomationAttributionLabel('custom_automation')).toBe(
+      'Custom Automation',
+    );
+  });
 });

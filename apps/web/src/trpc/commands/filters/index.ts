@@ -105,7 +105,9 @@ export async function getUsersOnlyForFilterCommand(
       optionsByValue.set(value, {
         value,
         label: row.initiatorAutomation
-          ? formatAutomationLabel(row.initiatorAutomation)
+          ? formatAutomationLabel(row.initiatorAutomation, {
+              actorDisplayName: row.actorDisplayName,
+            })
           : '',
         subLabel: 'Automation',
       });
