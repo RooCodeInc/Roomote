@@ -7,6 +7,10 @@ import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-
 import { orchestrateIssueMention } from '../shared/issue-mention-orchestration';
 import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { isMention } from './isMention';
+import {
+  fetchGitHubLinkedReferences,
+  formatGitHubLinkedReferencesSection,
+} from './linked-issue-pr-context';
 import type {
   WebhookIssueCommentCreated,
   WebhookRepository,
@@ -207,6 +211,13 @@ export async function handleGitHubIssueComment(
   const issueBody = issue.body ?? null;
   const commenterUserId = target.properties.userId;
   const issueAuthorLogin = issue.user?.login ?? null;
+  const linkedReferences = await fetchGitHubLinkedReferences({
+    installationId: githubInstallationId,
+    repositoryFullName,
+    issueOrPrNumber: issueNumber,
+  });
+  const linkedReferencesSection =
+    formatGitHubLinkedReferencesSection(linkedReferences);
 
   return orchestrateIssueMention({
     provider: 'github',
@@ -229,6 +240,7 @@ export async function handleGitHubIssueComment(
     issueBodyContextLabel: `Issue body (context only, authored by ${
       issueAuthorLogin ? `@${issueAuthorLogin}` : 'an unknown user'
     }):`,
+    linkedReferencesSection,
     postComment: (body) => postIssueComment({ ...replyTarget, body }),
     formatFollowUpReply,
     formatStartedReply,

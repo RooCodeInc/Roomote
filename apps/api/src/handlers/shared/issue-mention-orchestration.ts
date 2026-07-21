@@ -73,6 +73,12 @@ type IssueMentionOrchestrationInput = {
    * context to include, a default is used from `issueBodyContextLabel`.
    */
   issueBodyContextLabel: string;
+  /**
+   * Optional preformatted section listing issues/PRs linked to the mention
+   * target (for example GitHub timeline cross-references). Included in both
+   * fresh-task and follow-up mention prompts when present.
+   */
+  linkedReferencesSection?: string | null;
   postComment: (body: string) => Promise<void>;
   formatFollowUpReply: (taskLink: string | null) => string;
   formatStartedReply: (taskLink: string | null) => string;
@@ -94,6 +100,8 @@ function buildIssueMentionPrompt({
   commenterLogin,
   issueBodySource,
   issueBodyContextLabel,
+  linkedReferencesSection,
+  linkedReferencesSource,
 }: {
   providerDisplayName: string;
   repositoryFullName: string;
@@ -105,6 +113,8 @@ function buildIssueMentionPrompt({
   commenterLogin: string;
   issueBodySource: string;
   issueBodyContextLabel: string;
+  linkedReferencesSection?: string | null;
+  linkedReferencesSource: string;
 }): string {
   const trimmedIssueBody = issueBody?.trim() ?? '';
   const trimmedCommentBody = commentBody.trim();
@@ -121,6 +131,16 @@ function buildIssueMentionPrompt({
           }),
         ]
       : [];
+  const linkedSection = linkedReferencesSection?.trim()
+    ? [
+        '',
+        'Linked issues and pull requests (context only):',
+        buildUntrustedExternalContentBlock({
+          source: linkedReferencesSource,
+          text: linkedReferencesSection.trim(),
+        }),
+      ]
+    : [];
 
   return [
     `${commenterLogin} mentioned Roomote on ${providerDisplayName} issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
@@ -129,6 +149,7 @@ function buildIssueMentionPrompt({
     'Mention comment (the request to act on):',
     buildMentionRequestBlock(trimmedCommentBody),
     ...issueBodySection,
+    ...linkedSection,
     '',
     buildUntrustedContentPolicy(),
   ].join('\n');
@@ -142,6 +163,8 @@ function buildIssueFollowUpMessage({
   issueUrl,
   commentBody,
   commenterLogin,
+  linkedReferencesSection,
+  linkedReferencesSource,
 }: {
   providerDisplayName: string;
   repositoryFullName: string;
@@ -150,7 +173,21 @@ function buildIssueFollowUpMessage({
   issueUrl: string;
   commentBody: string;
   commenterLogin: string;
+  linkedReferencesSection?: string | null;
+  linkedReferencesSource: string;
 }): string {
+  const linkedSection = linkedReferencesSection?.trim()
+    ? [
+        '',
+        'Linked issues and pull requests (context only):',
+        buildUntrustedExternalContentBlock({
+          source: linkedReferencesSource,
+          text: linkedReferencesSection.trim(),
+        }),
+        '',
+      ]
+    : [''];
+
   return [
     `${commenterLogin} mentioned Roomote again on ${providerDisplayName} issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
     `Issue URL: ${issueUrl}`,
@@ -159,7 +196,7 @@ function buildIssueFollowUpMessage({
     '',
     'Mention comment (the request to act on):',
     buildMentionRequestBlock(commentBody),
-    '',
+    ...linkedSection,
     buildUntrustedContentPolicy(),
   ].join('\n');
 }
@@ -323,12 +360,15 @@ export async function orchestrateIssueMention(
     providerDisplayName,
     issueBodySource,
     issueBodyContextLabel,
+    linkedReferencesSection,
     postComment,
     formatFollowUpReply,
     formatStartedReply,
     formatStartFailed,
     tryBuildTaskLink,
   } = input;
+
+  const linkedReferencesSource = `${provider}_linked_references`;
 
   const environmentId = await resolveMappedEnvironmentId(repositoryId);
 
@@ -358,6 +398,8 @@ export async function orchestrateIssueMention(
       issueUrl,
       commentBody,
       commenterLogin,
+      linkedReferencesSection,
+      linkedReferencesSource,
     });
 
     const delivery = await deliverIssueFollowUpToExistingTask({
@@ -399,6 +441,8 @@ export async function orchestrateIssueMention(
     commenterLogin,
     issueBodySource,
     issueBodyContextLabel,
+    linkedReferencesSection,
+    linkedReferencesSource,
   });
 
   const taskPayload = {

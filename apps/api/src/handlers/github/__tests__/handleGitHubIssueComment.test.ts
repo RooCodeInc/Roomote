@@ -124,17 +124,20 @@ function makePayload(
 
 describe('handleGitHubIssueComment', () => {
   const createComment = vi.fn().mockResolvedValue({});
+  const timelineRequest = vi.fn().mockResolvedValue({ data: [] });
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
 
+    timelineRequest.mockResolvedValue({ data: [] });
     mockGetInstallationOctokit.mockResolvedValue({
       rest: {
         issues: {
           createComment,
         },
       },
+      request: timelineRequest,
     });
     mockGetTaskUrl.mockReturnValue('https://app.roomote.dev/task/task-1');
     mockEnqueueTask.mockResolvedValue({ id: 11, taskId: 'task-1' });
@@ -226,6 +229,47 @@ describe('handleGitHubIssueComment', () => {
     expect(description).toContain('<untrusted_content_policy/>');
   });
 
+  it('includes linked pull requests and issues from the timeline in mention context', async () => {
+    timelineRequest.mockResolvedValue({
+      data: [
+        {
+          event: 'cross-referenced',
+          source: {
+            issue: {
+              number: 963,
+              title: 'feat: enable image support for DeepSeek V4 models',
+              html_url: 'https://github.com/acme/api/pull/963',
+              state: 'open',
+              pull_request: {},
+              repository: { full_name: 'acme/api' },
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await handleGitHubIssueComment(makePayload());
+
+    expect(result.status).toBe('ok');
+    expect(timelineRequest).toHaveBeenCalledWith(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/timeline',
+      expect.objectContaining({
+        owner: 'acme',
+        repo: 'api',
+        issue_number: 42,
+      }),
+    );
+    const description = mockEnqueueTask.mock.calls[0]?.[0].task.payload
+      .description as string;
+    expect(description).toContain(
+      'Linked issues and pull requests (context only):',
+    );
+    expect(description).toContain('source="github_linked_references"');
+    expect(description).toContain(
+      'Pull request acme/api#963 — feat: enable image support for DeepSeek V4 models',
+    );
+  });
+
   it('does not duplicate the issue body when the mention is the issue body itself', async () => {
     const issueBody = 'Take a look at this crash please, @roomote';
     const base = makePayload();
@@ -300,6 +344,48 @@ describe('handleGitHubIssueComment', () => {
     expect(createComment).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining('existing task for this issue'),
+      }),
+    );
+  });
+
+  it('includes linked references on follow-up issue mentions', async () => {
+    mockFindReusableGitHubIssueTaskOwner.mockResolvedValue({
+      runId: 9,
+      taskId: 'task-existing',
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      delivery: 'attach',
+    });
+    timelineRequest.mockResolvedValue({
+      data: [
+        {
+          event: 'cross-referenced',
+          source: {
+            issue: {
+              number: 963,
+              title: 'Linked PR',
+              html_url: 'https://github.com/acme/api/pull/963',
+              state: 'open',
+              pull_request: {},
+              repository: { full_name: 'acme/api' },
+            },
+          },
+        },
+      ],
+    });
+
+    const result = await handleGitHubIssueComment(makePayload());
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'active_issue_owner_routed',
+    });
+    expect(mockSteerMessageToTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'Pull request acme/api#963 — Linked PR',
+        ),
       }),
     );
   });
