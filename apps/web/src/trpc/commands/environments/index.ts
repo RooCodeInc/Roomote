@@ -908,12 +908,14 @@ export async function getActiveEnvironmentAgentTask(
 ): Promise<{
   taskId: string;
   status: RunStatus;
+  taskPhase: string | null;
   isPreviewSetupTask: boolean;
 } | null> {
   const [job] = await dbOrTx
     .select({
       taskId: taskRuns.taskId,
       status: taskRuns.status,
+      taskPhase: taskRuns.taskPhase,
       isPreviewSetupTask: sql<boolean>`(
         ${tasks.workflow} = 'setup_onboarding'
         AND ${taskRuns.payload} ->> 'environmentDefinitionId' = ${environmentId}

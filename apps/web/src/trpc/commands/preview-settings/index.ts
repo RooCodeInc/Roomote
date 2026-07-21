@@ -23,10 +23,11 @@ import {
   isLocalPreviewDomain,
   PREVIEW_DOMAIN_ENV_VAR,
   PREVIEW_PROXY_BASE_URL_ENV_VAR,
-  RunStatus,
+  isTaskExecutingTurn,
   TaskPayloadKind,
   type EnvironmentConfig,
   type PreviewRuntimeConfigFields,
+  type RunStatus,
 } from '@roomote/types';
 
 import {
@@ -458,9 +459,9 @@ function getEnvironmentIdFromPayload(payload: unknown): string | null {
 
 /**
  * Preview pane + launch de-dupe only care about an in-environment preview
- * setup/repair agent that is still actively working. Idle leftover sessions
- * (common after the agent finishes) must not keep the empty-state spinner or
- * block a new repair launch.
+ * setup/repair agent that is still mid-turn. After the first turn, sandbox
+ * runs stay Idle while `taskPhase` toggles between `running` and
+ * `waiting_for_prompt`, so status alone is not enough.
  */
 function getInFlightPreviewSetupAgent(
   activeAgentTask: Awaited<ReturnType<typeof getActiveEnvironmentAgentTask>>,
@@ -469,7 +470,7 @@ function getInFlightPreviewSetupAgent(
 > | null {
   if (
     !activeAgentTask?.isPreviewSetupTask ||
-    activeAgentTask.status === RunStatus.Idle
+    !isTaskExecutingTurn(activeAgentTask.status, activeAgentTask.taskPhase)
   ) {
     return null;
   }
@@ -579,8 +580,8 @@ type PreviewSetupTaskMode = 'configure' | 'repair';
  * for the task's environment. Admin-only, matching the rest of environment
  * management. The environment id is derived server-side from the task run, so
  * callers cannot target arbitrary environments. If a preview setup/repair
- * agent is already actively running in this environment, returns that task
- * instead of launching a duplicate. Idle leftover sessions and initial
+ * agent is already mid-turn in this environment, returns that task instead of
+ * launching a duplicate. Idle leftover sessions (between turns) and initial
  * environment creation/verification tasks are not de-duped here.
  *
  * Mode 'configure' (default) adds preview ports to an environment without

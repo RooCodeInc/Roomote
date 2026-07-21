@@ -57,6 +57,7 @@ async function createActiveSetupTask(
   options: {
     runsInEnvironment?: boolean;
     status?: RunStatus;
+    taskPhase?: string | null;
   } = {},
 ) {
   const task = await taskFactory.create({ workflow: 'setup_onboarding' });
@@ -71,7 +72,12 @@ async function createActiveSetupTask(
   });
   await db
     .update(taskRuns)
-    .set({ status: options.status ?? RunStatus.Running })
+    .set({
+      status: options.status ?? RunStatus.Running,
+      ...(options.taskPhase !== undefined
+        ? { taskPhase: options.taskPhase }
+        : {}),
+    })
     .where(eq(taskRuns.id, run.id));
   return task;
 }
@@ -227,7 +233,7 @@ describe('getTaskPreviewStatusCommand', () => {
     });
   });
 
-  it('ignores an idle preview setup agent that has finished its turn', async () => {
+  it('ignores an idle preview setup agent waiting between turns', async () => {
     const environment = await environmentFactory.create({
       createdByUserId: null,
     });
@@ -237,6 +243,7 @@ describe('getTaskPreviewStatusCommand', () => {
     await createActiveSetupTask(environment.id, {
       runsInEnvironment: true,
       status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
     });
 
     const status = await getTaskPreviewStatusCommand(adminAuth, {
@@ -244,6 +251,30 @@ describe('getTaskPreviewStatusCommand', () => {
     });
 
     expect(status.setupTask).toBeNull();
+  });
+
+  it('reports an idle preview setup agent that is executing a follow-up turn', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    const setupTask = await createActiveSetupTask(environment.id, {
+      runsInEnvironment: true,
+      status: RunStatus.Idle,
+      taskPhase: 'running',
+    });
+
+    const status = await getTaskPreviewStatusCommand(adminAuth, {
+      taskId: task.id,
+    });
+
+    expect(status.setupTask).toEqual({
+      taskId: setupTask.id,
+      status: RunStatus.Idle,
+      kind: 'preview',
+    });
   });
 });
 
@@ -327,6 +358,7 @@ describe('startPreviewSetupTaskCommand', () => {
     await createActiveSetupTask(environment.id, {
       runsInEnvironment: true,
       status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
     });
     vi.mocked(enqueueTask).mockResolvedValueOnce({
       taskId: 'launched-after-idle-preview',
@@ -341,6 +373,27 @@ describe('startPreviewSetupTaskCommand', () => {
     });
 
     expect(vi.mocked(enqueueTask)).toHaveBeenCalled();
+  });
+
+  it('returns an idle preview setup task that is mid follow-up turn', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    const setupTask = await createActiveSetupTask(environment.id, {
+      runsInEnvironment: true,
+      status: RunStatus.Idle,
+      taskPhase: 'running',
+    });
+
+    await expect(
+      startPreviewSetupTaskCommand(adminAuth, { taskId: task.id }),
+    ).resolves.toEqual({
+      taskId: setupTask.id,
+      alreadyRunning: true,
+    });
   });
 
   it('launches with the repair change request in repair mode', async () => {
