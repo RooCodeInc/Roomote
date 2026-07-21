@@ -1,9 +1,10 @@
 import { and, asc, count, eq, isNull, lt, or, sql } from 'drizzle-orm';
 
 import {
+  isConfiguredAutomationTarget,
   isScheduleOnlyBackgroundAutomationFrequency,
-  type AutomationTarget,
   type CustomAutomationScheduleMode,
+  type OptionalAutomationTarget,
   type ScheduleOnlyBackgroundAutomationFrequency,
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
@@ -30,7 +31,8 @@ export type CustomAutomationWriteInput = {
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string;
-  target: AutomationTarget;
+  /** Full destination target, or {} when the automation has no report channel. */
+  target: OptionalAutomationTarget;
   createdByUserId?: string | null;
 };
 
@@ -73,12 +75,15 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     throw new Error('Environment is required.');
   }
 
-  if (
-    !input.target?.provider ||
-    !input.target?.targetKind ||
-    !input.target?.externalRef
-  ) {
-    throw new Error('A report destination channel is required.');
+  const hasAnyTargetField = Boolean(
+    input.target?.provider ||
+    input.target?.targetKind ||
+    input.target?.externalRef,
+  );
+  if (hasAnyTargetField && !isConfiguredAutomationTarget(input.target)) {
+    throw new Error(
+      'Report destination must include a provider, target kind, and channel.',
+    );
   }
 
   return { name, prompt };

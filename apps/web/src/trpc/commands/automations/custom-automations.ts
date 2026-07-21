@@ -17,6 +17,7 @@ import {
   type BackgroundAutomationProvider,
   type BackgroundAutomationTargetKind,
   type CustomAutomationScheduleMode,
+  type OptionalAutomationTarget,
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -30,7 +31,7 @@ export type CustomAutomationListItem = {
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string | null;
-  target: AutomationTarget;
+  target: OptionalAutomationTarget;
   lastRunAt: Date | null;
   lastSucceededAt: Date | null;
   lastFailedAt: Date | null;
@@ -46,8 +47,9 @@ export type CustomAutomationWriteInput = {
   enabled: boolean;
   scheduleMode: string;
   environmentId: string;
-  targetProvider: 'slack' | 'discord' | 'teams' | 'telegram';
-  targetChannelId: string;
+  /** Omitted when the automation has no report destination channel. */
+  targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram';
+  targetChannelId?: string;
   targetServiceUrl?: string | null;
 };
 
@@ -76,14 +78,22 @@ function toListItem(row: CustomAutomation): CustomAutomationListItem {
   };
 }
 
-function buildTarget(input: CustomAutomationWriteInput): AutomationTarget {
-  const externalRef = input.targetChannelId.trim();
+function buildTarget(
+  input: CustomAutomationWriteInput,
+): OptionalAutomationTarget {
+  if (!input.targetProvider) {
+    return {};
+  }
+
+  const externalRef = input.targetChannelId?.trim() ?? '';
   if (!externalRef) {
-    throw new Error('A report destination channel is required.');
+    throw new Error(
+      'Choose a destination channel for the selected provider, or set the destination to None.',
+    );
   }
 
   const targetKindByProvider: Record<
-    CustomAutomationWriteInput['targetProvider'],
+    NonNullable<CustomAutomationWriteInput['targetProvider']>,
     BackgroundAutomationTargetKind
   > = {
     slack: 'slack_channel',
@@ -116,7 +126,7 @@ function assertScheduleMode(
 }
 
 async function assertDestinationConnected(
-  provider: CustomAutomationWriteInput['targetProvider'],
+  provider: NonNullable<CustomAutomationWriteInput['targetProvider']>,
 ): Promise<void> {
   const connected = await listConnectedCommunicationProviders();
   if (!connected.includes(provider)) {
@@ -140,7 +150,9 @@ export async function createCustomAutomationCommand(
 ): Promise<CustomAutomationListItem> {
   assertAdmin(auth);
   assertScheduleMode(input.scheduleMode);
-  await assertDestinationConnected(input.targetProvider);
+  if (input.targetProvider) {
+    await assertDestinationConnected(input.targetProvider);
+  }
 
   const created = await createCustomAutomation({
     name: input.name,
@@ -161,7 +173,9 @@ export async function updateCustomAutomationCommand(
 ): Promise<CustomAutomationListItem> {
   assertAdmin(auth);
   assertScheduleMode(input.scheduleMode);
-  await assertDestinationConnected(input.targetProvider);
+  if (input.targetProvider) {
+    await assertDestinationConnected(input.targetProvider);
+  }
 
   const updated = await updateCustomAutomation(input.id, {
     name: input.name,

@@ -638,8 +638,10 @@ const automationsRouter = createRouter({
           'weekly',
         ]),
         environmentId: z.string().uuid(),
-        targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']),
-        targetChannelId: z.string().trim().min(1).max(160),
+        targetProvider: z
+          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .optional(),
+        targetChannelId: z.string().trim().min(1).max(160).optional(),
         targetServiceUrl: z
           .string()
           .trim()
@@ -668,8 +670,10 @@ const automationsRouter = createRouter({
           'weekly',
         ]),
         environmentId: z.string().uuid(),
-        targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']),
-        targetChannelId: z.string().trim().min(1).max(160),
+        targetProvider: z
+          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .optional(),
+        targetChannelId: z.string().trim().min(1).max(160).optional(),
         targetServiceUrl: z
           .string()
           .trim()

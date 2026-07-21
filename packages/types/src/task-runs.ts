@@ -983,6 +983,14 @@ const sharedTaskPayloadSchema = z.object({
    * survive schema parsing rather than being stripped as an unknown key.
    */
   automationWorkItemId: z.string().optional(),
+
+  /**
+   * Optional custom automation marker for channel-anchored custom automation
+   * runs. Like automationWorkItemId, its presence authorizes the Slack
+   * thread-reply late-bind flow and marks the run as a silent channel
+   * automation launch in the worker, so it must survive schema parsing.
+   */
+  customAutomationId: z.string().optional(),
 });
 
 const queuedSnapshotResumeSlackMessageSchema = z.object({

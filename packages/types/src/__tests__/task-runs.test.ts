@@ -269,6 +269,30 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.sourceControlProvider).toBe('gitlab');
   });
 
+  it('preserves customAutomationId and Slack channel context on StandardTask payloads', () => {
+    const parsed = taskSpecSchema.parse({
+      userId: 'user-1',
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: '',
+        description: 'Scan for flaky tests.',
+        customAutomationId: 'custom-automation-1',
+        channel: 'C123',
+        slackChannel: 'C123',
+      },
+    });
+
+    expect(parsed.type).toBe(TaskPayloadKind.StandardTask);
+
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.customAutomationId).toBe('custom-automation-1');
+    expect(parsed.payload.channel).toBe('C123');
+    expect(parsed.payload.slackChannel).toBe('C123');
+  });
+
   it('allows GitLab target branch metadata on PR review payloads', () => {
     const parsed = taskSpecSchema.parse({
       type: TaskPayloadKind.GithubPrReview,
