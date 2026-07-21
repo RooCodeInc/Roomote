@@ -579,8 +579,12 @@ using Docker sandboxes. That overlay:
   the API, and the optional preview proxy when enabled, never sibling tasks,
   Postgres, Redis, or MinIO;
 - enforces CPU, memory, PID, supported writable-layer quotas, and log limits
-  and blocks private and cloud metadata ranges under the default `internet`
-  egress policy;
+  and, under the default `internet` egress policy, blackholes private and
+  cloud metadata ranges plus drops packets destined to the Docker bridge
+  gateway (host hairpin) while still allowing public egress via that gateway
+  as next-hop. The gateway drop is installed with `iptables`, so the worker
+  image must ship an iptables binary the host kernel supports (the stock
+  image does); sandbox provisioning fails closed when it is unavailable;
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 
