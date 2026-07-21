@@ -40,10 +40,6 @@ repositories:
         run: mise install && pnpm install
         timeout: 600
         continue_on_error: false
-      - name: Install Mintlify CLI for docs
-        run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint
-        timeout: 600
-        continue_on_error: true
       - name: Write local env overrides
         run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nR_APP_ENV=development\nWEB_DEV_LOGIN_ENABLED=true\n' > .env.local
         timeout: 600
@@ -72,6 +68,10 @@ repositories:
         run: pnpm --filter @roomote/db db:push:test
         timeout: 600
         continue_on_error: false
+      - name: Install Mintlify CLI for docs
+        run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint
+        timeout: 600
+        continue_on_error: true
       - name: Start Redis
         run: mkdir -p /tmp/redis-data && redis-server --port 16379 --dir /tmp/redis-data --appendonly no
         timeout: 600
