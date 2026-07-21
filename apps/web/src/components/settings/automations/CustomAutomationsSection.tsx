@@ -142,10 +142,16 @@ export function CustomAutomationsSection() {
   const discordChannelsQuery = useQuery(
     trpc.automations.listDiscordChannels.queryOptions(),
   );
+  const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
+
+  // New Slack destinations default to the shared manager channel, matching
+  // where the other automations report by default.
+  const managerSlackChannelId =
+    settingsQuery.data?.settings.managerSlackChannelId ?? '';
 
   const environmentOptions = useMemo(
     () =>
@@ -288,8 +294,8 @@ export function CustomAutomationsSection() {
   };
 
   const renderEditor = () => (
-    <Card className="border-dashed">
-      <CardHeader className="pb-3">
+    <Card variant="snug" className="border-dashed">
+      <CardHeader>
         <CardTitle className="text-sm font-medium">
           {editingId ? 'Edit custom automation' : 'New custom automation'}
         </CardTitle>
@@ -390,7 +396,8 @@ export function CustomAutomationsSection() {
                   ...current,
                   targetProvider:
                     value as CustomAutomationFormState['targetProvider'],
-                  targetChannelId: '',
+                  targetChannelId:
+                    value === 'slack' ? managerSlackChannelId : '',
                   targetServiceUrl: '',
                 }))
               }
@@ -547,7 +554,10 @@ export function CustomAutomationsSection() {
             onClick={() => {
               setIsCreating(true);
               setEditingId(null);
-              setForm(EMPTY_FORM);
+              setForm({
+                ...EMPTY_FORM,
+                targetChannelId: managerSlackChannelId,
+              });
             }}
           >
             <Plus className="size-4" />
@@ -563,8 +573,8 @@ export function CustomAutomationsSection() {
           Loading custom automations…
         </p>
       ) : rows.length === 0 && !isCreating ? (
-        <Card>
-          <CardContent className="py-6 text-sm text-muted-foreground">
+        <Card variant="snug">
+          <CardContent className="text-muted-foreground">
             No custom automations yet. Example: every Monday, summarize flaky
             tests and post to #eng-quality.
           </CardContent>
@@ -593,7 +603,7 @@ export function CustomAutomationsSection() {
                     : target.channelId;
 
             return (
-              <Card key={row.id}>
+              <Card key={row.id} variant="snug">
                 <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2">
                   <div className="space-y-1">
                     <CardTitle className="text-sm font-medium">
