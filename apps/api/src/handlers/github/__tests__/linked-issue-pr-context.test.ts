@@ -44,7 +44,96 @@ describe('linked-issue-pr-context', () => {
     expect(formatGitHubLinkedReferencesSection([])).toBeUndefined();
   });
 
-  it('collects unique cross-referenced and connected timeline items', async () => {
+  it('collects GraphQL cross-references and development connections', async () => {
+    const graphql = vi.fn().mockResolvedValue({
+      repository: {
+        issueOrPullRequest: {
+          __typename: 'Issue',
+          timelineItems: {
+            nodes: [
+              {
+                __typename: 'CrossReferencedEvent',
+                source: {
+                  __typename: 'PullRequest',
+                  number: 963,
+                  title: 'feat: enable image support',
+                  url: 'https://github.com/acme/api/pull/963',
+                  state: 'OPEN',
+                  repository: { nameWithOwner: 'acme/api' },
+                },
+              },
+              {
+                __typename: 'CrossReferencedEvent',
+                source: {
+                  __typename: 'PullRequest',
+                  number: 963,
+                  title: 'feat: enable image support',
+                  url: 'https://github.com/acme/api/pull/963',
+                  state: 'OPEN',
+                  repository: { nameWithOwner: 'acme/api' },
+                },
+              },
+              {
+                __typename: 'ConnectedEvent',
+                subject: {
+                  __typename: 'Issue',
+                  number: 12,
+                  title: 'Sibling issue',
+                  url: 'https://github.com/acme/api/issues/12',
+                  state: 'OPEN',
+                  repository: { nameWithOwner: 'acme/api' },
+                },
+              },
+              {
+                // Same repository/number as the mention target must be skipped.
+                __typename: 'CrossReferencedEvent',
+                source: {
+                  __typename: 'Issue',
+                  number: 42,
+                  title: 'Self',
+                  url: 'https://github.com/acme/api/issues/42',
+                  state: 'OPEN',
+                  repository: { nameWithOwner: 'acme/api' },
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+    const request = vi.fn();
+
+    mockGetInstallationOctokit.mockResolvedValue({ graphql, request });
+
+    const refs = await fetchGitHubLinkedReferences({
+      installationId: 1,
+      repositoryFullName: 'acme/api',
+      issueOrPrNumber: 42,
+    });
+
+    expect(graphql).toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(refs).toEqual([
+      {
+        kind: 'issue',
+        number: 12,
+        title: 'Sibling issue',
+        url: 'https://github.com/acme/api/issues/12',
+        state: 'OPEN',
+        repository: 'acme/api',
+      },
+      {
+        kind: 'pull_request',
+        number: 963,
+        title: 'feat: enable image support',
+        url: 'https://github.com/acme/api/pull/963',
+        state: 'OPEN',
+        repository: 'acme/api',
+      },
+    ]);
+  });
+
+  it('falls back to REST cross-references when GraphQL is unavailable', async () => {
     const request = vi.fn().mockResolvedValue({
       data: [
         {
@@ -62,48 +151,8 @@ describe('linked-issue-pr-context', () => {
           },
         },
         {
-          event: 'cross-referenced',
-          source: {
-            type: 'issue',
-            issue: {
-              number: 963,
-              title: 'feat: enable image support',
-              html_url: 'https://github.com/acme/api/pull/963',
-              state: 'open',
-              pull_request: {},
-              repository: { full_name: 'acme/api' },
-            },
-          },
-        },
-        {
+          // REST connected events have no subject; ignore them.
           event: 'connected',
-          subject: {
-            number: 12,
-            title: 'Sibling issue',
-            html_url: 'https://github.com/acme/api/issues/12',
-            state: 'open',
-            repository: { full_name: 'acme/api' },
-          },
-        },
-        {
-          // Same repository/number as the mention target must be skipped.
-          event: 'cross-referenced',
-          source: {
-            issue: {
-              number: 42,
-              title: 'Self',
-              html_url: 'https://github.com/acme/api/issues/42',
-              repository: { full_name: 'acme/api' },
-            },
-          },
-        },
-        {
-          event: 'disconnected',
-          subject: {
-            number: 99,
-            title: 'Should be ignored',
-            repository: { full_name: 'acme/api' },
-          },
         },
       ],
     });
@@ -126,14 +175,6 @@ describe('linked-issue-pr-context', () => {
     );
     expect(refs).toEqual([
       {
-        kind: 'issue',
-        number: 12,
-        title: 'Sibling issue',
-        url: 'https://github.com/acme/api/issues/12',
-        state: 'open',
-        repository: 'acme/api',
-      },
-      {
         kind: 'pull_request',
         number: 963,
         title: 'feat: enable image support',
@@ -144,9 +185,49 @@ describe('linked-issue-pr-context', () => {
     ]);
   });
 
-  it('returns an empty list when the timeline API fails', async () => {
+  it('falls back to REST when GraphQL fails', async () => {
+    const graphql = vi.fn().mockRejectedValue(new Error('graphql unavailable'));
+    const request = vi.fn().mockResolvedValue({
+      data: [
+        {
+          event: 'cross-referenced',
+          source: {
+            issue: {
+              number: 7,
+              title: 'From REST',
+              html_url: 'https://github.com/acme/api/issues/7',
+              state: 'open',
+              repository: { full_name: 'acme/api' },
+            },
+          },
+        },
+      ],
+    });
+
+    mockGetInstallationOctokit.mockResolvedValue({ graphql, request });
+
+    await expect(
+      fetchGitHubLinkedReferences({
+        installationId: 1,
+        repositoryFullName: 'acme/api',
+        issueOrPrNumber: 42,
+      }),
+    ).resolves.toEqual([
+      {
+        kind: 'issue',
+        number: 7,
+        title: 'From REST',
+        url: 'https://github.com/acme/api/issues/7',
+        state: 'open',
+        repository: 'acme/api',
+      },
+    ]);
+  });
+
+  it('returns an empty list when GraphQL and REST both fail', async () => {
     mockGetInstallationOctokit.mockResolvedValue({
-      request: vi.fn().mockRejectedValue(new Error('boom')),
+      graphql: vi.fn().mockRejectedValue(new Error('graphql boom')),
+      request: vi.fn().mockRejectedValue(new Error('rest boom')),
     });
 
     await expect(

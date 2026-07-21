@@ -3,6 +3,7 @@ import { getInstallationOctokit } from '@roomote/github';
 const TIMELINE_PAGE_SIZE = 100;
 /** Bound webhook latency; most timelines finish within one page. */
 const TIMELINE_MAX_PAGES = 3;
+const GRAPHQL_LINKED_ITEM_LIMIT = 100;
 
 type GitHubLinkedReference = {
   kind: 'issue' | 'pull_request';
@@ -21,6 +22,7 @@ type TimelineIssueLike = {
   pull_request?: unknown;
   repository?: {
     full_name?: string | null;
+    nameWithOwner?: string | null;
     owner?: { login?: string | null } | null;
     name?: string | null;
   } | null;
@@ -32,13 +34,190 @@ type TimelineEventLike = {
     type?: string;
     issue?: TimelineIssueLike;
   };
-  subject?: TimelineIssueLike;
 };
+
+type GraphQlLinkedNode = {
+  number?: number | null;
+  title?: string | null;
+  url?: string | null;
+  state?: string | null;
+  __typename?: string | null;
+  repository?: {
+    nameWithOwner?: string | null;
+  } | null;
+};
+
+type GraphQlTimelineNode = {
+  __typename?: string | null;
+  source?: GraphQlLinkedNode | null;
+  subject?: GraphQlLinkedNode | null;
+};
+
+type GraphQlLinkedReferencesResult = {
+  repository?: {
+    issueOrPullRequest?: {
+      __typename?: string | null;
+      timelineItems?: {
+        nodes?: Array<GraphQlTimelineNode | null> | null;
+      } | null;
+      closingIssuesReferences?: {
+        nodes?: Array<GraphQlLinkedNode | null> | null;
+      } | null;
+    } | null;
+  } | null;
+};
+
+const LINKED_REFERENCES_GRAPHQL = `
+  query RoomoteLinkedReferences(
+    $owner: String!
+    $name: String!
+    $number: Int!
+    $limit: Int!
+  ) {
+    repository(owner: $owner, name: $name) {
+      issueOrPullRequest(number: $number) {
+        __typename
+        ... on Issue {
+          timelineItems(
+            first: $limit
+            itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT]
+          ) {
+            nodes {
+              __typename
+              ... on CrossReferencedEvent {
+                source {
+                  ... on Issue {
+                    __typename
+                    number
+                    title
+                    url
+                    state
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                  ... on PullRequest {
+                    __typename
+                    number
+                    title
+                    url
+                    state
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                }
+              }
+              ... on ConnectedEvent {
+                subject {
+                  ... on Issue {
+                    __typename
+                    number
+                    title
+                    url
+                    state
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                  ... on PullRequest {
+                    __typename
+                    number
+                    title
+                    url
+                    state
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        ... on PullRequest {
+          closingIssuesReferences(first: $limit) {
+            nodes {
+              __typename
+              number
+              title
+              url
+              state
+              repository {
+                nameWithOwner
+              }
+            }
+          }
+          timelineItems(
+            first: $limit
+            itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT]
+          ) {
+            nodes {
+              __typename
+              ... on CrossReferencedEvent {
+                source {
+                  ... on Issue {
+                    __typename
+                    number
+                    title
+                    url
+                    state
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                  ... on PullRequest {
+                    __typename
+                    number
+                    title
+                    url
+                    state
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                }
+              }
+              ... on ConnectedEvent {
+                subject {
+                  ... on Issue {
+                    __typename
+                    number
+                    title
+                    url
+                    state
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                  ... on PullRequest {
+                    __typename
+                    number
+                    title
+                    url
+                    state
+                    repository {
+                      nameWithOwner
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
 
 function repositoryFromIssue(
   issue: TimelineIssueLike,
   fallbackRepository: string,
 ): string {
+  if (issue.repository?.nameWithOwner) {
+    return issue.repository.nameWithOwner;
+  }
+
   if (issue.repository?.full_name) {
     return issue.repository.full_name;
   }
@@ -72,13 +251,39 @@ function toLinkedReference(
     return null;
   }
 
+  const isPullRequest =
+    Boolean(issue.pull_request) ||
+    (typeof issue.html_url === 'string' &&
+      /\/pull\/\d+(?:$|[?#/])/.test(issue.html_url));
+
   return {
-    kind: issue.pull_request ? 'pull_request' : 'issue',
+    kind: isPullRequest ? 'pull_request' : 'issue',
     number: issue.number,
     title: typeof issue.title === 'string' ? issue.title : undefined,
     url: typeof issue.html_url === 'string' ? issue.html_url : undefined,
     state: typeof issue.state === 'string' ? issue.state : undefined,
     repository: repositoryFromIssue(issue, fallbackRepository),
+  };
+}
+
+function graphQlNodeToIssueLike(
+  node: GraphQlLinkedNode | null | undefined,
+): TimelineIssueLike | undefined {
+  if (typeof node?.number !== 'number') {
+    return undefined;
+  }
+
+  const isPullRequest = node.__typename === 'PullRequest';
+
+  return {
+    number: node.number,
+    title: node.title,
+    html_url: node.url,
+    state: node.state,
+    pull_request: isPullRequest ? {} : undefined,
+    repository: node.repository?.nameWithOwner
+      ? { nameWithOwner: node.repository.nameWithOwner }
+      : null,
   };
 }
 
@@ -121,10 +326,183 @@ function collectFromIssue(
   });
 }
 
+function sortLinkedReferences(
+  references: GitHubLinkedReference[],
+): GitHubLinkedReference[] {
+  return [...references].sort((a, b) => {
+    if (a.repository !== b.repository) {
+      return a.repository.localeCompare(b.repository);
+    }
+    if (a.kind !== b.kind) {
+      return a.kind.localeCompare(b.kind);
+    }
+    return a.number - b.number;
+  });
+}
+
+function collectGraphQlLinkedNodes(
+  result: GraphQlLinkedReferencesResult,
+  fallbackRepository: string,
+  excludeNumber: number,
+  byKey: Map<string, GitHubLinkedReference>,
+): void {
+  const target = result.repository?.issueOrPullRequest;
+  if (!target) {
+    return;
+  }
+
+  for (const node of target.timelineItems?.nodes ?? []) {
+    if (!node) {
+      continue;
+    }
+
+    if (node.__typename === 'CrossReferencedEvent') {
+      collectFromIssue(
+        graphQlNodeToIssueLike(node.source),
+        fallbackRepository,
+        excludeNumber,
+        fallbackRepository,
+        byKey,
+      );
+    }
+
+    if (node.__typename === 'ConnectedEvent') {
+      // Development sidebar links are only available via GraphQL; REST
+      // timeline `connected` events do not expose the linked subject.
+      collectFromIssue(
+        graphQlNodeToIssueLike(node.subject),
+        fallbackRepository,
+        excludeNumber,
+        fallbackRepository,
+        byKey,
+      );
+    }
+  }
+
+  for (const node of target.closingIssuesReferences?.nodes ?? []) {
+    collectFromIssue(
+      graphQlNodeToIssueLike(node),
+      fallbackRepository,
+      excludeNumber,
+      fallbackRepository,
+      byKey,
+    );
+  }
+}
+
 /**
- * Collect issues and pull requests linked to a GitHub issue or PR via the
- * timeline (cross-references and development connections). Failures return an
- * empty list so mention handling is not blocked.
+ * Prefer GraphQL so development connections (ConnectedEvent.subject) are
+ * available. REST timeline only carries enough data for cross-references.
+ */
+async function fetchLinkedReferencesViaGraphQl({
+  octokit,
+  owner,
+  repo,
+  issueOrPrNumber,
+  repositoryFullName,
+}: {
+  octokit: Awaited<ReturnType<typeof getInstallationOctokit>>;
+  owner: string;
+  repo: string;
+  issueOrPrNumber: number;
+  repositoryFullName: string;
+}): Promise<GitHubLinkedReference[] | null> {
+  if (typeof octokit.graphql !== 'function') {
+    return null;
+  }
+
+  try {
+    const result = (await octokit.graphql(LINKED_REFERENCES_GRAPHQL, {
+      owner,
+      name: repo,
+      number: issueOrPrNumber,
+      limit: GRAPHQL_LINKED_ITEM_LIMIT,
+    })) as GraphQlLinkedReferencesResult;
+
+    if (!result.repository?.issueOrPullRequest) {
+      return null;
+    }
+
+    const byKey = new Map<string, GitHubLinkedReference>();
+    collectGraphQlLinkedNodes(
+      result,
+      repositoryFullName,
+      issueOrPrNumber,
+      byKey,
+    );
+    return sortLinkedReferences([...byKey.values()]);
+  } catch (error) {
+    console.warn(
+      `[fetchGitHubLinkedReferences] GraphQL failed for ${repositoryFullName}#${issueOrPrNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
+ * REST timeline fallback for cross-references only. Do not use REST
+ * `connected` events: they omit the linked subject/issue payload.
+ */
+async function fetchCrossReferencesViaRestTimeline({
+  octokit,
+  owner,
+  repo,
+  issueOrPrNumber,
+  repositoryFullName,
+}: {
+  octokit: Awaited<ReturnType<typeof getInstallationOctokit>>;
+  owner: string;
+  repo: string;
+  issueOrPrNumber: number;
+  repositoryFullName: string;
+}): Promise<GitHubLinkedReference[]> {
+  const byKey = new Map<string, GitHubLinkedReference>();
+
+  for (let page = 1; page <= TIMELINE_MAX_PAGES; page += 1) {
+    const response = await octokit.request(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/timeline',
+      {
+        owner,
+        repo,
+        issue_number: issueOrPrNumber,
+        per_page: TIMELINE_PAGE_SIZE,
+        page,
+        headers: {
+          accept: 'application/vnd.github+json',
+        },
+      },
+    );
+
+    const events = Array.isArray(response.data)
+      ? (response.data as TimelineEventLike[])
+      : [];
+
+    for (const event of events) {
+      if (event.event === 'cross-referenced') {
+        collectFromIssue(
+          event.source?.issue,
+          repositoryFullName,
+          issueOrPrNumber,
+          repositoryFullName,
+          byKey,
+        );
+      }
+    }
+
+    if (events.length < TIMELINE_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return sortLinkedReferences([...byKey.values()]);
+}
+
+/**
+ * Collect issues and pull requests linked to a GitHub issue or PR via
+ * cross-references and development connections. Failures return an empty list
+ * so mention handling is not blocked.
  */
 export async function fetchGitHubLinkedReferences({
   installationId,
@@ -142,66 +520,24 @@ export async function fetchGitHubLinkedReferences({
 
   try {
     const octokit = await getInstallationOctokit({ installationId });
-    const byKey = new Map<string, GitHubLinkedReference>();
+    const graphQlRefs = await fetchLinkedReferencesViaGraphQl({
+      octokit,
+      owner,
+      repo,
+      issueOrPrNumber,
+      repositoryFullName,
+    });
 
-    for (let page = 1; page <= TIMELINE_MAX_PAGES; page += 1) {
-      const response = await octokit.request(
-        'GET /repos/{owner}/{repo}/issues/{issue_number}/timeline',
-        {
-          owner,
-          repo,
-          issue_number: issueOrPrNumber,
-          per_page: TIMELINE_PAGE_SIZE,
-          page,
-          headers: {
-            accept: 'application/vnd.github+json',
-          },
-        },
-      );
-
-      const events = Array.isArray(response.data)
-        ? (response.data as TimelineEventLike[])
-        : [];
-
-      for (const event of events) {
-        if (event.event === 'cross-referenced') {
-          collectFromIssue(
-            event.source?.issue,
-            repositoryFullName,
-            issueOrPrNumber,
-            repositoryFullName,
-            byKey,
-          );
-        }
-
-        if (event.event === 'connected' || event.event === 'disconnected') {
-          // Connected events point at the other work item; ignore disconnects
-          // for inclusion — later code only stores unique refs by number.
-          if (event.event === 'connected') {
-            collectFromIssue(
-              event.subject,
-              repositoryFullName,
-              issueOrPrNumber,
-              repositoryFullName,
-              byKey,
-            );
-          }
-        }
-      }
-
-      if (events.length < TIMELINE_PAGE_SIZE) {
-        break;
-      }
+    if (graphQlRefs) {
+      return graphQlRefs;
     }
 
-    return [...byKey.values()].sort((a, b) => {
-      if (a.repository !== b.repository) {
-        return a.repository.localeCompare(b.repository);
-      }
-      if (a.kind !== b.kind) {
-        return a.kind.localeCompare(b.kind);
-      }
-      return a.number - b.number;
+    return await fetchCrossReferencesViaRestTimeline({
+      octokit,
+      owner,
+      repo,
+      issueOrPrNumber,
+      repositoryFullName,
     });
   } catch (error) {
     console.warn(
