@@ -13,6 +13,13 @@ import {
   recordAutomationRunOutcome,
 } from '@roomote/db/server';
 import {
+  getAdoBuildFailureEvidence,
+  getAdoBuildWebUrl,
+  getLatestAdoBuild,
+  resolveAdoInstanceHost,
+  stripAdoGitRef,
+} from '@roomote/ado';
+import {
   getGitLabPipelineFailureEvidence,
   getLatestGitLabPipeline,
   isNestedGitLabPipelineSource,
@@ -95,10 +102,11 @@ export async function ciFailureTriageJob(
     const channelId = destination.channelId;
     let launched = 0;
     let consideredWithEnvironment = 0;
-    // Resolved once on first GitLab repository; the deployment holds a single
-    // GitLab credential/base URL, so only repositories on that host can be
-    // inspected with it.
+    // Resolved once on first GitLab / Azure DevOps repository; each
+    // deployment holds a single credential/base URL, so only repositories on
+    // that host can be inspected with it.
     let deploymentGitLabHost: string | undefined;
+    let deploymentAdoHost: string | undefined;
 
     // Walk every provider+host+fullName identity and resolve coverage through
     // the repository-id environment mapping (not fullName).
@@ -205,6 +213,84 @@ export async function ciFailureTriageJob(
             error instanceof Error ? error.message : String(error);
           result.errors.push(
             `${selectedRepository.fullName}: failed to inspect GitLab pipeline (${message})`,
+          );
+          continue;
+        }
+      }
+
+      if (sourceControlProvider === 'ado') {
+        try {
+          deploymentAdoHost ??= await resolveAdoInstanceHost();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to resolve the Azure DevOps instance host (${message})`,
+          );
+          continue;
+        }
+
+        const repositoryHost = selectedRepository.host?.trim().toLowerCase();
+        if (repositoryHost !== deploymentAdoHost) {
+          console.log(
+            `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: repository host ${repositoryHost ?? 'unknown'} does not match the deployment Azure DevOps instance ${deploymentAdoHost}`,
+          );
+          continue;
+        }
+
+        const repositoryId = selectedRepository.externalRepoId?.trim();
+        if (!repositoryId) {
+          result.errors.push(
+            `${selectedRepository.fullName}: Azure DevOps repository id is unavailable`,
+          );
+          continue;
+        }
+
+        try {
+          const latestBuild = await getLatestAdoBuild({
+            repositoryFullName: selectedRepository.fullName,
+            repositoryId,
+            branch: selectedRepository.defaultBranch,
+          });
+
+          if (
+            !latestBuild ||
+            (latestBuild.result ?? '').toLowerCase() !== 'failed'
+          ) {
+            console.log(
+              `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: latest Azure DevOps default-branch build is not failed`,
+            );
+            continue;
+          }
+
+          const failureEvidence = await getAdoBuildFailureEvidence({
+            repositoryFullName: selectedRepository.fullName,
+            buildId: latestBuild.id,
+          });
+          workflowName =
+            latestBuild.definition?.name?.trim() ||
+            (latestBuild.buildNumber
+              ? `build ${latestBuild.buildNumber}`
+              : 'build');
+          headBranch =
+            stripAdoGitRef(latestBuild.sourceBranch) ||
+            stripAdoGitRef(selectedRepository.defaultBranch) ||
+            'main';
+          claimMarker = getAdoBuildWebUrl(latestBuild);
+          triggeringRun = {
+            repositoryFullName: selectedRepository.fullName,
+            workflowName,
+            runUrl: getAdoBuildWebUrl(latestBuild),
+            headBranch,
+            headSha: (latestBuild.sourceVersion ?? '').trim() || 'unknown',
+            provider: 'ado',
+            failureEvidence,
+          };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to inspect Azure DevOps build (${message})`,
           );
           continue;
         }

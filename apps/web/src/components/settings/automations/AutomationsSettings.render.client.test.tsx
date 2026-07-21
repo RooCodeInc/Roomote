@@ -618,19 +618,19 @@ describe('AutomationsSettings', () => {
   it('shows exception-only capability badges from the shared descriptors', async () => {
     render(<AutomationsSettings />);
 
-    // Dependabot and CodeQL stay GitHub-only; CI failure triage supports
-    // GitHub/GitLab, Issue Fixer supports GitHub/GitLab/Gitea, and manager
-    // stats is provider-neutral now and shows no source-control badge.
+    // Dependabot and CodeQL stay GitHub-only; Issue Fixer supports
+    // GitHub/GitLab/Gitea, and manager stats is provider-neutral now and
+    // shows no source-control badge.
     expect((await screen.findAllByText('GitHub only')).length).toBe(2);
     // The suggester supports Slack and Discord destinations; the other
     // manager automations post to all configured communication providers.
     expect(screen.queryByText('Slack only')).toBeNull();
     expect(screen.getAllByText('Slack · Discord only').length).toBe(1);
-    // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no
-    // Gitea/Bitbucket conflict signal).
+    // conflict_resolver and ci_failure_triage support GitHub, GitLab, and
+    // Azure DevOps (no Gitea/Bitbucket signal).
     expect(
       screen.getAllByText('GitHub · GitLab · Azure DevOps only').length,
-    ).toBe(1);
+    ).toBe(2);
     // Full coverage shows nothing — absence of a warning is the signal.
     expect(screen.queryByText('All chat channels')).toBeNull();
     expect(screen.queryByText('All source control')).toBeNull();

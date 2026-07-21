@@ -10,10 +10,12 @@ import {
   type AdoUpdatedNotificationType,
   handleAdoPullRequest,
 } from './handlePullRequest';
+import { handleAdoBuild } from './handleBuild';
 import { handleAdoComment } from './handleComment';
 import { handleAdoWorkItemComment } from './handleWorkItemComment';
 import { normalizeAdoCommentWebhookPayload } from './normalizeCommentWebhook';
 import {
+  adoBuildCompleteWebhookSchema,
   adoPullRequestCommentWebhookSchema,
   adoPullRequestWebhookSchema,
   adoWorkItemCommentedWebhookSchema,
@@ -29,6 +31,7 @@ const ADO_PULL_REQUEST_EVENTS = new Set([
 const ADO_PULL_REQUEST_COMMENT_EVENT =
   'ms.vss-code.git-pullrequest-comment-event';
 const ADO_WORK_ITEM_COMMENTED_EVENT = 'workitem.commented';
+const ADO_BUILD_COMPLETE_EVENT = 'build.complete';
 
 function getAdoUpdatedNotificationType(
   value: string | undefined,
@@ -123,6 +126,20 @@ ado.post('/', async (c) => {
         eventName,
         payload,
         () => handleAdoWorkItemComment(payload),
+        { provider: 'ado' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === ADO_BUILD_COMPLETE_EVENT) {
+      const payload = adoBuildCompleteWebhookSchema.parse(parsedJson);
+
+      await recordWebhook(
+        deliveryId,
+        eventName,
+        payload,
+        () => handleAdoBuild(payload),
         { provider: 'ado' },
       );
 

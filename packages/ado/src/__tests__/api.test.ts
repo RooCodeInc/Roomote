@@ -82,10 +82,13 @@ import {
   createTaskRunAdoCredentials,
   ensureAdoServiceHooksForRepositories,
   removeAdoServiceHooksForRepositories,
+  getAdoBuildFailureEvidence,
   getAdoDeploymentUser,
+  getLatestAdoBuild,
   listAdoRepositories,
   normalizeAdoLinkedAccountKey,
   resolveAdoToken,
+  selectInnermostFailedAdoTimelineRecords,
   validateAdoToken,
   type AdoRepository,
 } from '../api';
@@ -840,6 +843,19 @@ describe('Azure DevOps API helpers', () => {
                   url: 'https://roomote.example.com/api/webhooks/ado',
                 },
               },
+              {
+                id: 'subscription-build',
+                publisherId: 'tfs',
+                eventType: 'build.complete',
+                consumerId: 'webHooks',
+                consumerActionId: 'httpRequest',
+                publisherInputs: {
+                  projectId: 'project-1',
+                },
+                consumerInputs: {
+                  url: 'https://roomote.example.com/api/webhooks/ado',
+                },
+              },
             ],
           }),
           { status: 200 },
@@ -873,6 +889,7 @@ describe('Azure DevOps API helpers', () => {
     expect(deleteCalls.map(([url]) => url)).toEqual([
       'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-repo?api-version=7.1',
       'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-work-item?api-version=7.1',
+      'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-build?api-version=7.1',
     ]);
   });
 
@@ -967,7 +984,9 @@ describe('Azure DevOps API helpers', () => {
           'https://dev.azure.com/acme/_apis/hooks/subscriptions?api-version=7.1' &&
         init?.method === 'POST',
     );
-    expect(createCalls).toHaveLength(4);
+    // 1 existing PR created hook is refreshed via PUT; remaining 3 PR hooks
+    // plus workitem.commented and build.complete are created via POST.
+    expect(createCalls).toHaveLength(5);
     const createBodies = createCalls.map(([, init]) =>
       JSON.parse(String(init?.body)),
     ) as Array<{
@@ -1013,6 +1032,326 @@ describe('Azure DevOps API helpers', () => {
           !body.publisherInputs.repository,
       ),
     ).toBe(true);
+    expect(
+      createBodies.some(
+        (body) =>
+          body.eventType === 'build.complete' &&
+          body.publisherInputs.projectId === 'project-1' &&
+          !body.publisherInputs.repository,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
+  beforeEach(() => {
+    process.env.ADO_TOKEN = 'ado_test';
+    process.env.ADO_ORGANIZATION = 'acme';
+    process.env.ADO_BASE_URL = 'https://dev.azure.com';
+  });
+
+  afterEach(() => {
+    delete process.env.ADO_TOKEN;
+    delete process.env.ADO_ORGANIZATION;
+    delete process.env.ADO_BASE_URL;
+  });
+
+  it('reads the newest completed default-branch build without filtering by result', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          value: [
+            {
+              id: 88,
+              result: 'succeeded',
+              sourceBranch: 'refs/heads/main',
+              sourceVersion: 'abc123',
+              definition: { name: 'CI' },
+              _links: {
+                web: {
+                  href: 'https://dev.azure.com/acme/Platform/_build/results?buildId=88',
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const build = await getLatestAdoBuild({
+      repositoryFullName: 'acme/Platform/backend',
+      repositoryId: 'repo-guid-1',
+      branch: 'main',
+      fetchImpl: fetchMock,
+    });
+
+    expect(build?.id).toBe(88);
+    expect(build?.result).toBe('succeeded');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/Platform/_apis/build/builds',
+    );
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      'repositoryId=repo-guid-1',
+    );
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      'statusFilter=completed',
+    );
+    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('resultFilter=');
+  });
+
+  it('throws on rejected credentials instead of reading them as no failed build', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('<html>sign in</html>', { status: 203 }));
+
+    await expect(
+      getLatestAdoBuild({
+        repositoryFullName: 'acme/Platform/backend',
+        repositoryId: 'repo-guid-1',
+        branch: 'main',
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toThrow('rejected the access token');
+  });
+
+  it('returns null for unknown projects or repositories', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('{}', { status: 404 }));
+
+    const build = await getLatestAdoBuild({
+      repositoryFullName: 'acme/Platform/backend',
+      repositoryId: 'repo-guid-1',
+      branch: 'main',
+      fetchImpl: fetchMock,
+    });
+
+    expect(build).toBeNull();
+  });
+
+  it('formats failed timeline tasks and log tails', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              {
+                name: 'Test',
+                type: 'Task',
+                result: 'failed',
+                log: { id: 7 },
+                issues: [{ message: 'Assertion failed' }],
+              },
+              {
+                name: 'ok',
+                type: 'Task',
+                result: 'succeeded',
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes('/logs/7')) {
+        return new Response('line1\nAssertionError: boom\n', { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Test"');
+    expect(evidence).toContain('Assertion failed');
+    expect(evidence).toContain('AssertionError: boom');
+  });
+
+  it('keeps failed task records over cascaded job/stage/phase wrappers', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              { name: 'Build stage', type: 'Stage', result: 'failed' },
+              { name: 'Build phase', type: 'Phase', result: 'failed' },
+              { name: 'Build job', type: 'Job', result: 'failed' },
+              {
+                name: 'Test',
+                type: 'Task',
+                result: 'failed',
+                log: { id: 7 },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes('/logs/7')) {
+        return new Response('AssertionError: boom\n', { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Test"');
+    expect(evidence).not.toContain('Build stage');
+    expect(evidence).not.toContain('Build phase');
+    expect(evidence).not.toContain('Build job');
+  });
+
+  it('falls back to failed job wrappers when no failed task record exists', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              { name: 'Build stage', type: 'Stage', result: 'failed' },
+              {
+                name: 'Build job',
+                type: 'Job',
+                result: 'failed',
+                issues: [{ message: 'Job aborted' }],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Build job"');
+    expect(evidence).toContain('Job aborted');
+    expect(evidence).not.toContain('Build stage');
+  });
+
+  it('keeps a peer job-level failure alongside an unrelated task failure', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              { id: 'stage-1', name: 'CI', type: 'Stage', result: 'failed' },
+              {
+                id: 'job-a',
+                parentId: 'stage-1',
+                name: 'Unit tests',
+                type: 'Job',
+                result: 'failed',
+              },
+              {
+                id: 'task-a',
+                parentId: 'job-a',
+                name: 'Jest',
+                type: 'Task',
+                result: 'failed',
+                log: { id: 7 },
+              },
+              {
+                id: 'job-b',
+                parentId: 'stage-1',
+                name: 'Agent job',
+                type: 'Job',
+                result: 'failed',
+                issues: [{ message: 'Job cancelled by system' }],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes('/logs/7')) {
+        return new Response('AssertionError: boom\n', { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Jest"');
+    expect(evidence).toContain('task="Agent job"');
+    expect(evidence).toContain('Job cancelled by system');
+    expect(evidence).not.toContain('Unit tests');
+    expect(evidence).not.toContain('CI');
+  });
+});
+
+describe('selectInnermostFailedAdoTimelineRecords', () => {
+  it('drops cascade wrappers when parent links are present', () => {
+    const selected = selectInnermostFailedAdoTimelineRecords([
+      { id: 'stage', type: 'Stage', result: 'failed', name: 'Stage' },
+      {
+        id: 'job',
+        parentId: 'stage',
+        type: 'Job',
+        result: 'failed',
+        name: 'Job',
+      },
+      {
+        id: 'task',
+        parentId: 'job',
+        type: 'Task',
+        result: 'failed',
+        name: 'Task',
+      },
+    ]);
+
+    expect(selected.map((record) => record.id)).toEqual(['task']);
+  });
+
+  it('retains independent job failures when a sibling has a failed task', () => {
+    const selected = selectInnermostFailedAdoTimelineRecords([
+      { id: 'stage', type: 'Stage', result: 'failed', name: 'Stage' },
+      {
+        id: 'job-a',
+        parentId: 'stage',
+        type: 'Job',
+        result: 'failed',
+        name: 'Job A',
+      },
+      {
+        id: 'task-a',
+        parentId: 'job-a',
+        type: 'Task',
+        result: 'failed',
+        name: 'Task A',
+      },
+      {
+        id: 'job-b',
+        parentId: 'stage',
+        type: 'Job',
+        result: 'failed',
+        name: 'Job B',
+      },
+    ]);
+
+    expect(selected.map((record) => record.id).sort()).toEqual([
+      'job-b',
+      'task-a',
+    ]);
   });
 });
 

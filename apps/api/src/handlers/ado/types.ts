@@ -203,3 +203,51 @@ export type AdoWorkItemCommentedWebhook = z.infer<
   typeof adoWorkItemCommentedWebhookSchema
 >;
 export type AdoWorkItemResource = z.infer<typeof adoWorkItemResourceSchema>;
+
+const adoBuildDefinitionSchema = z
+  .object({
+    id: z.number().optional(),
+    name: z.string().optional(),
+  })
+  .passthrough();
+
+const adoBuildRepositorySchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().optional(),
+    type: z.string().optional(),
+    url: z.string().optional(),
+  })
+  .passthrough();
+
+const adoBuildResourceSchema = z
+  .object({
+    id: z.number(),
+    buildNumber: z.string().optional(),
+    status: z.string().optional(),
+    result: z.string().nullable().optional(),
+    sourceBranch: z.string().optional(),
+    sourceVersion: z.string().optional(),
+    reason: z.string().optional(),
+    url: z.string().optional(),
+    definition: adoBuildDefinitionSchema.optional(),
+    project: adoProjectSchema.optional(),
+    repository: adoBuildRepositorySchema.optional(),
+    _links: z
+      .object({
+        web: adoLinkSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const adoBuildCompleteWebhookSchema = z
+  .object({
+    resource: adoBuildResourceSchema,
+  })
+  .merge(adoWebhookBaseSchema);
+
+export type AdoBuildCompleteWebhook = z.infer<
+  typeof adoBuildCompleteWebhookSchema
+>;
