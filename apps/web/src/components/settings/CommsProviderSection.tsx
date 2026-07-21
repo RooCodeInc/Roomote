@@ -514,6 +514,7 @@ export function CommsProviderSection({
 
         setCreatedSlackAppSettingsUrl(result.appSettingsUrl);
         setCreatedSlackAppIconSet(result.iconSet);
+        setSlackCreateWithConfigToken(false);
         toast.success(
           result.iconSet
             ? 'Slack app created and credentials saved. Connect it to your workspace next.'
@@ -570,6 +571,8 @@ export function CommsProviderSection({
   const [createdSlackAppIconSet, setCreatedSlackAppIconSet] = useState<
     boolean | null
   >(null);
+  const [slackCreateWithConfigToken, setSlackCreateWithConfigToken] =
+    useState(false);
   const previousConfiguredValues = useRef<{
     providerId: CommsProviderId;
     hasConfiguredValues: boolean;
@@ -657,6 +660,14 @@ export function CommsProviderSection({
         !hasConfiguredValues)
     ) {
       setCreatedSlackAppSettingsUrl(null);
+      setCreatedSlackAppIconSet(null);
+    }
+
+    if (
+      previous?.providerId !== provider.id ||
+      (provider.id === 'slack' && !hasConfiguredValues)
+    ) {
+      setSlackCreateWithConfigToken(false);
     }
 
     previousConfiguredValues.current = {
@@ -668,7 +679,11 @@ export function CommsProviderSection({
   const hasEditableFields = visibleFields.some(
     (field) => !field.runtimeSatisfied,
   );
-  const providerOwnsActions = provider.id === 'slack' && !hasConfiguredValues;
+  const providerOwnsActions =
+    provider.id === 'slack' &&
+    (!hasConfiguredValues ||
+      slackCreateWithConfigToken ||
+      Boolean(createdSlackAppSettingsUrl));
 
   const teamsBotAppIdField = provider.fields.find(
     (field) => field.envVarName === 'R_TEAMS_BOT_APP_ID',
@@ -765,6 +780,7 @@ export function CommsProviderSection({
               createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
               createdSlackAppIconSet={createdSlackAppIconSet}
               createSlackAppPending={createSlackApp.isPending}
+              slackCreateWithConfigToken={slackCreateWithConfigToken}
               surface="settings"
               envVarsInfoNote={
                 !provider.runtimeSatisfied && provider.id === 'telegram'
@@ -776,6 +792,7 @@ export function CommsProviderSection({
               onCreateSlackApp={(configToken) =>
                 createSlackApp.mutate({ configToken })
               }
+              onSlackCreateWithConfigTokenChange={setSlackCreateWithConfigToken}
               onValueChange={(envVarName, value) =>
                 setValues((current) => ({ ...current, [envVarName]: value }))
               }
