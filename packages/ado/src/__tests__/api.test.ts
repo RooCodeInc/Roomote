@@ -1099,6 +1099,36 @@ describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('resultFilter=');
   });
 
+  it('throws on rejected credentials instead of reading them as no failed build', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('<html>sign in</html>', { status: 203 }));
+
+    await expect(
+      getLatestAdoBuild({
+        repositoryFullName: 'acme/Platform/backend',
+        repositoryId: 'repo-guid-1',
+        branch: 'main',
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toThrow('rejected the access token');
+  });
+
+  it('returns null for unknown projects or repositories', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('{}', { status: 404 }));
+
+    const build = await getLatestAdoBuild({
+      repositoryFullName: 'acme/Platform/backend',
+      repositoryId: 'repo-guid-1',
+      branch: 'main',
+      fetchImpl: fetchMock,
+    });
+
+    expect(build).toBeNull();
+  });
+
   it('formats failed timeline tasks and log tails', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
       const href = String(url);

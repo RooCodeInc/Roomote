@@ -24,7 +24,7 @@ const ADO_API_VERSION = '7.1';
 const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
 const ADO_FAILURE_EVIDENCE_MAX_TASKS = 5;
 const ADO_FAILURE_EVIDENCE_TRACE_CHARS = 6_000;
-const ADO_FAILURE_EVIDENCE_TIMEOUT_MS = 5_000;
+const ADO_BUILD_INSPECTION_TIMEOUT_MS = 5_000;
 const ADO_ENTRA_TOKEN_SCOPE = 'https://app.vssps.visualstudio.com/.default';
 const ADO_ENTRA_RESOURCE_SCOPE =
   '499b84ac-1321-427f-aa17-267ca6975798/.default';
@@ -1464,13 +1464,7 @@ function buildAdoRepositoryFullName(
 }
 
 function normalizeAdoDefaultBranch(branch: string | null | undefined): string {
-  const trimmed = branch?.trim();
-
-  if (!trimmed) {
-    return 'main';
-  }
-
-  return trimmed.replace(/^refs\/heads\//, '');
+  return stripAdoGitRef(branch) || 'main';
 }
 
 export function stripAdoGitRef(refName: string | null | undefined): string {
@@ -1647,11 +1641,20 @@ export async function getLatestAdoBuild(params: {
         Accept: 'application/json',
         Authorization: buildAdoAuthorizationHeader(adoToken),
       },
-      signal: AbortSignal.timeout(ADO_FAILURE_EVIDENCE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(ADO_BUILD_INSPECTION_TIMEOUT_MS),
     },
   );
 
-  if ([203, 401, 403, 404].includes(response.status)) {
+  // Azure DevOps answers rejected PATs with a 203 sign-in page instead of a
+  // 401. Throw so callers surface a credential problem instead of reading it
+  // as "no failed build"; only an unknown project/repository maps to null.
+  if ([203, 401, 403].includes(response.status)) {
+    throw new Error(
+      `Azure DevOps rejected the access token when listing builds (status ${response.status}). Confirm it is active, belongs to the organization, and has Build read access.`,
+    );
+  }
+
+  if (response.status === 404) {
     return null;
   }
 
@@ -1780,7 +1783,7 @@ export async function getAdoBuildFailureEvidence(params: {
         Accept: 'application/json',
         Authorization: buildAdoAuthorizationHeader(adoToken),
       },
-      signal: AbortSignal.timeout(ADO_FAILURE_EVIDENCE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(ADO_BUILD_INSPECTION_TIMEOUT_MS),
     },
   );
 
@@ -1842,7 +1845,7 @@ export async function getAdoBuildFailureEvidence(params: {
               Accept: 'text/plain',
               Authorization: buildAdoAuthorizationHeader(adoToken),
             },
-            signal: AbortSignal.timeout(ADO_FAILURE_EVIDENCE_TIMEOUT_MS),
+            signal: AbortSignal.timeout(ADO_BUILD_INSPECTION_TIMEOUT_MS),
           },
         );
 
