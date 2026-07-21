@@ -516,7 +516,7 @@ export function CommsProviderSection({
         setCreatedSlackAppIconSet(result.iconSet);
         toast.success(
           result.iconSet
-            ? 'Slack app created with the Roomote icon. Connect it to your workspace next.'
+            ? 'Slack app created and credentials saved. Connect it to your workspace next.'
             : 'Slack app created and credentials saved. Add the Roomote icon, then connect it to your workspace.',
         );
         await queryClient.invalidateQueries({

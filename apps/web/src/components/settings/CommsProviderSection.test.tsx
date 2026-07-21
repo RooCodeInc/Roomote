@@ -612,7 +612,7 @@ describe('CommsProviderSection', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('shows icon-applied status after creating a Slack app from a config token', async () => {
+    it('shows finish status after creating a Slack app from a config token', async () => {
       const { rerender } = render(
         <CommsProviderSection
           provider={buildSlackProvider()}
@@ -630,9 +630,7 @@ describe('CommsProviderSection', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create Slack app' }));
 
       expect(
-        await screen.findByText(
-          /Your Slack app is ready with the Roomote icon applied/i,
-        ),
+        await screen.findByText(/Your Slack app is ready\./i),
       ).toBeInTheDocument();
       expect(
         screen.queryByRole('link', { name: /the Roomote logo/i }),

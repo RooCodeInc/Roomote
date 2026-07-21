@@ -344,7 +344,7 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
         <div className="space-y-4 max-w-xl">
           {createdSlackAppIconSet ? (
             <p>
-              Your Slack app is ready with the Roomote icon applied. Open{' '}
+              Your Slack app is ready. Open{' '}
               <a
                 href={createdSlackAppSettingsUrl}
                 target="_blank"

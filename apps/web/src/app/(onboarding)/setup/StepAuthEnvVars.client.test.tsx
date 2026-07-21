@@ -427,7 +427,7 @@ describe('StepAuthEnvVars', () => {
     ).toHaveAttribute('href', 'https://api.slack.com/apps');
   });
 
-  it('creates the Slack app from a config token, shows icon applied guidance, and continues setup', async () => {
+  it('creates the Slack app from a config token, shows finish guidance, and continues setup', async () => {
     const invalidateQueries = vi.fn();
     mockUseQueryClient.mockReturnValue({
       invalidateQueries,
@@ -482,11 +482,7 @@ describe('StepAuthEnvVars', () => {
     expect(
       await screen.findByRole('heading', { name: /finish slack app/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Your Slack app is ready with the Roomote icon applied/i,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Your Slack app is ready\./i)).toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /the Roomote logo/i }),
     ).not.toBeInTheDocument();
