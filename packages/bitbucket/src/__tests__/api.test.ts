@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   buildBitbucketApiBaseUrl,
   buildBitbucketRepositoryValues,
+  encodeBitbucketUuid,
+  getBitbucketPipelineFailureEvidence,
+  getBitbucketPipelineResultName,
+  getBitbucketPipelineWebUrl,
+  getLatestBitbucketPipeline,
   listBitbucketRepositories,
   normalizeBitbucketLinkedAccountKey,
+  stripUuidBraces,
 } from '../api';
 
 describe('listBitbucketRepositories', () => {
@@ -110,8 +116,96 @@ describe('normalizeBitbucketLinkedAccountKey', () => {
   });
 });
 
-describe('request path smoke', () => {
-  it('documents that unit helpers stay pure without network', () => {
-    expect(vi.isFakeTimers()).toBe(false);
+describe('pipeline helpers', () => {
+  it('strips and encodes Bitbucket UUID path segments', () => {
+    expect(stripUuidBraces('{abc-123}')).toBe('abc-123');
+    expect(encodeBitbucketUuid('abc-123')).toBe('%7Babc-123%7D');
+    expect(encodeBitbucketUuid('{abc-123}')).toBe('%7Babc-123%7D');
+  });
+
+  it('reads pipeline result names and builds web URLs', () => {
+    expect(
+      getBitbucketPipelineResultName({
+        uuid: '{p1}',
+        state: { result: { name: 'FAILED' } },
+      }),
+    ).toBe('FAILED');
+
+    expect(
+      getBitbucketPipelineWebUrl({
+        repositoryFullName: 'acme/roomote',
+        pipeline: { uuid: '{p1}', build_number: 9 },
+      }),
+    ).toBe(
+      'https://bitbucket.org/acme/roomote/addon/pipelines/home#!/results/9',
+    );
+  });
+
+  it('loads the latest branch pipeline and failure evidence', async () => {
+    const jsonResponse = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200 });
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.includes('/pipelines/') && url.includes('pagelen=1')) {
+        return jsonResponse({
+          values: [
+            {
+              uuid: '{pipe-1}',
+              build_number: 3,
+              target: {
+                ref_name: 'main',
+                commit: { hash: 'deadbeef' },
+                selector: { type: 'branches', pattern: 'main' },
+              },
+              state: { result: { name: 'FAILED' } },
+            },
+          ],
+        });
+      }
+
+      if (url.includes('/pipelines/%7Bpipe-1%7D/steps/%7Bstep-1%7D/log')) {
+        return new Response('Assertion failed at line 12', {
+          status: 200,
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      }
+
+      if (url.includes('/pipelines/%7Bpipe-1%7D/steps/')) {
+        return jsonResponse({
+          values: [
+            {
+              uuid: '{step-1}',
+              name: 'test',
+              state: { result: { name: 'FAILED' } },
+            },
+          ],
+        });
+      }
+
+      throw new Error(`unexpected Bitbucket API url: ${url}`);
+    }) as typeof fetch;
+
+    const latest = await getLatestBitbucketPipeline({
+      repositoryFullName: 'acme/roomote',
+      branch: 'main',
+      token: 'token',
+      username: 'bot',
+      baseUrl: 'https://bitbucket.org',
+      fetchImpl,
+    });
+    expect(latest?.build_number).toBe(3);
+    expect(getBitbucketPipelineResultName(latest!)).toBe('FAILED');
+
+    const evidence = await getBitbucketPipelineFailureEvidence({
+      repositoryFullName: 'acme/roomote',
+      pipelineUuid: 'pipe-1',
+      token: 'token',
+      username: 'bot',
+      baseUrl: 'https://bitbucket.org',
+      fetchImpl,
+    });
+    expect(evidence).toContain('step="test"');
+    expect(evidence).toContain('Assertion failed at line 12');
   });
 });

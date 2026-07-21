@@ -257,13 +257,13 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'CI Failure Triage',
     availability: 'stable',
     scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
-    // GitHub workflow_run, GitLab Pipeline, and Azure DevOps build.complete
-    // hooks are wired; open-ended SCM requirement so non-GitHub-only
-    // deployments can still Run now.
+    // GitHub workflow_run, GitLab Pipeline, Azure DevOps build.complete, and
+    // Bitbucket Pipelines commit-status hooks are wired; open-ended SCM
+    // requirement so non-GitHub-only deployments can still Run now.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
-    supportedSourceControlProviders: ['github', 'gitlab', 'ado'],
+    supportedSourceControlProviders: ['github', 'gitlab', 'ado', 'bitbucket'],
     scheduledSuggestionSource: 'ci_failure_triage',
   },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];

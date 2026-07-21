@@ -119,6 +119,43 @@ export type BitbucketPullRequestCommentWebhook = z.infer<
 
 export type BitbucketWebhookUser = z.infer<typeof bitbucketUserSchema>;
 
+const bitbucketCommitStatusSchema = z
+  .object({
+    name: z.string().optional(),
+    description: z.string().nullable().optional(),
+    state: z.string().optional(),
+    key: z.string().optional(),
+    url: z.string().optional(),
+    type: z.string().optional(),
+    refname: z.string().optional(),
+    commit: z
+      .object({
+        hash: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    links: z
+      .object({
+        commit: bitbucketHtmlLinkSchema.optional(),
+        self: bitbucketHtmlLinkSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const bitbucketCommitStatusWebhookSchema = z
+  .object({
+    commit_status: bitbucketCommitStatusSchema,
+    repository: bitbucketRepositorySchema,
+    actor: bitbucketUserSchema.optional(),
+  })
+  .passthrough();
+
+export type BitbucketCommitStatusWebhook = z.infer<
+  typeof bitbucketCommitStatusWebhookSchema
+>;
+
 export function getBitbucketPullRequestNumber(
   pullRequest: BitbucketPullRequestWebhook['pullrequest'],
 ): number {
