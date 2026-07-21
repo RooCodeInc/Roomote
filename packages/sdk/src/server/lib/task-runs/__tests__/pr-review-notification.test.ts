@@ -148,10 +148,14 @@ describe('enqueuePrReviewNotification', () => {
     );
   });
 
-  it('schedules Roomote-authored self-review activity immediately', async () => {
+  it('schedules terminal Roomote self-review summaries immediately', async () => {
     const result = await enqueuePrReviewNotification({
       ...baseInput,
-      event: { ...baseInput.event, roomoteAuthored: true },
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+      },
     });
 
     expect(result).toEqual({ notifiedTaskCount: 1 });
@@ -162,11 +166,29 @@ describe('enqueuePrReviewNotification', () => {
     );
   });
 
+  it('debounces Roomote-authored inline review activity', async () => {
+    const result = await enqueuePrReviewNotification({
+      ...baseInput,
+      event: { ...baseInput.event, roomoteAuthored: true },
+    });
+
+    expect(result).toEqual({ notifiedTaskCount: 1 });
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'notify-pr-review-activity',
+      expect.objectContaining({ immediate: false }),
+      { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+    );
+  });
+
   it('keeps immediate self-review activity separate from ordinary activity', async () => {
     await enqueuePrReviewNotification(baseInput);
     await enqueuePrReviewNotification({
       ...baseInput,
-      event: { ...baseInput.event, roomoteAuthored: true },
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+      },
     });
 
     const pendingKeys = multiCalls

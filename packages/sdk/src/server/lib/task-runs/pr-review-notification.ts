@@ -369,9 +369,9 @@ export async function requeuePendingPrReviewActivity({
 /**
  * Records PR review activity (submitted reviews and review comments) for the
  * tasks that own the pull request, and schedules a notification job per task.
- * Roomote-authored self-review activity uses an independent immediate queue so
- * ordinary review activity cannot hold it behind the debounce window. Chat
- * delivery still needs an originating conversation route, but
+ * Terminal Roomote self-review summaries use an independent immediate queue so
+ * ordinary review activity cannot hold the completed result behind the debounce
+ * window. Chat delivery still needs an originating conversation route, but
  * web-only tasks are enqueued too so the summary can land in task history.
  * The notification is informational only: it tells the user about the review
  * feedback once the task is idle. No agent turn is started.
@@ -402,7 +402,9 @@ export async function enqueuePrReviewNotification(
   let notifiedTaskCount = 0;
 
   for (const taskId of taskIds) {
-    const immediate = parsedInput.event.roomoteAuthored === true;
+    const immediate =
+      parsedInput.event.kind === 'review_summary' &&
+      parsedInput.event.roomoteAuthored === true;
     const target = {
       taskId,
       repository: parsedInput.repository,
