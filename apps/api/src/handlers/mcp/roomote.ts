@@ -10,13 +10,14 @@ import {
   mcpConnections,
   deploymentMcpEnablements,
   resolveInvocationIdentityMap,
-  taskRuns,
 } from '@roomote/db/server';
 import {
   findLinearDeploymentMcpConnection,
   getLinearDeploymentMetadata,
 } from '@roomote/sdk/server';
 import {
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
   environmentConfigSchema,
   MCP_INTEGRATIONS,
   isUserToken,
@@ -36,10 +37,11 @@ import {
   toMcpToolResult,
 } from './proxy-utils';
 import {
-  lookupSlackChannelMessages,
-  lookupSlackThread,
-} from './slack-thread-lookup';
-import { getTaskChannelBindings } from '../tasks/helpers';
+  lookupCommunicationChannelMessages,
+  lookupCommunicationMessageContext,
+  type CommunicationLookupTaskRun,
+} from './communication-message-lookup';
+import { requireCommunicationLookupTaskRun } from './communication-lookup-run-context';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -260,52 +262,14 @@ async function buildAboutMePayload(options: {
   };
 }
 
-type SlackLookupRunContext = {
-  actingUserId: string | null;
-  slackChannelId: string | null;
-  slackThreadTs: string | null;
-  payload: unknown;
-};
-
-/**
- * Load the Slack routing context for a run-token request: the run's acting
- * user and payload plus the owning task's Slack channel bindings (channel
- * bindings moved from runs to tasks in the Stage 2 data-model
- * simplification).
- */
-async function loadSlackLookupRunContext(
-  runId: number,
-): Promise<SlackLookupRunContext> {
-  const run = await db.query.taskRuns.findFirst({
-    columns: {
-      actingUserId: true,
-      taskId: true,
-      payload: true,
-    },
-    where: eq(taskRuns.id, runId),
-  });
-
-  if (!run) {
-    throw new McpProxyError(404, 'Task run not found for this MCP token');
-  }
-
-  const bindings = await getTaskChannelBindings(run.taskId);
-
-  return {
-    actingUserId: run.actingUserId,
-    slackChannelId: bindings?.slackChannelId ?? null,
-    slackThreadTs: bindings?.slackThreadTs ?? null,
-    payload: run.payload,
-  };
-}
-
-async function buildSlackThreadPayload(options: {
+async function buildCommunicationMessageContextPayload(options: {
   auth: McpAuthContext;
   actingUserId: string | null;
   channel?: string;
-  messageTs: string;
+  messageId?: string;
+  messageLink?: string;
 }) {
-  let taskRun: SlackLookupRunContext | undefined;
+  let taskRun: CommunicationLookupTaskRun | undefined;
 
   if (options.auth.tokenType === 'run') {
     if (!options.auth.runId) {
@@ -315,29 +279,35 @@ async function buildSlackThreadPayload(options: {
       );
     }
 
-    taskRun = await loadSlackLookupRunContext(options.auth.runId);
+    taskRun = await requireCommunicationLookupTaskRun(options.auth.runId);
   }
 
-  return lookupSlackThread({
-    messageTs: options.messageTs,
+  return lookupCommunicationMessageContext({
     ...(typeof options.channel === 'string' && options.channel.length > 0
       ? { channel: options.channel }
       : {}),
+    ...(typeof options.messageId === 'string' && options.messageId.length > 0
+      ? { messageId: options.messageId }
+      : {}),
+    ...(typeof options.messageLink === 'string' &&
+    options.messageLink.length > 0
+      ? { messageLink: options.messageLink }
+      : {}),
     ...(taskRun ? { taskRun } : {}),
     ...(options.auth.tokenType === 'auth'
-      ? { actingSlackMembershipUserId: options.actingUserId }
+      ? { actingUserId: options.actingUserId }
       : {}),
   });
 }
 
-async function buildSlackChannelMessagesPayload(options: {
+async function buildCommunicationChannelMessagesPayload(options: {
   auth: McpAuthContext;
   actingUserId: string | null;
   channel?: string;
   oldest?: string;
   latest?: string;
 }) {
-  let taskRun: SlackLookupRunContext | undefined;
+  let taskRun: CommunicationLookupTaskRun | undefined;
 
   if (options.auth.tokenType === 'run') {
     if (!options.auth.runId) {
@@ -347,10 +317,10 @@ async function buildSlackChannelMessagesPayload(options: {
       );
     }
 
-    taskRun = await loadSlackLookupRunContext(options.auth.runId);
+    taskRun = await requireCommunicationLookupTaskRun(options.auth.runId);
   }
 
-  return lookupSlackChannelMessages({
+  return lookupCommunicationChannelMessages({
     ...(typeof options.channel === 'string' && options.channel.length > 0
       ? { channel: options.channel }
       : {}),
@@ -362,7 +332,7 @@ async function buildSlackChannelMessagesPayload(options: {
       : {}),
     ...(taskRun ? { taskRun } : {}),
     ...(options.auth.tokenType === 'auth'
-      ? { actingSlackMembershipUserId: options.actingUserId }
+      ? { actingUserId: options.actingUserId }
       : {}),
   });
 }
@@ -378,8 +348,7 @@ function createRoomoteMcpServer(
   actingUserId: string | null,
 ) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
-    instructions:
-      'Use get_about_me for Roomote platform, integration, and getting-started context. Use get_slack_thread when you need the surrounding Slack thread for a referenced Slack message. Use get_slack_channel_messages when you need history from a public Slack channel the app has already joined.',
+    instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel.`,
   });
 
   server.registerTool(
@@ -414,30 +383,23 @@ function createRoomoteMcpServer(
   );
 
   server.registerTool(
-    'get_slack_channel_messages',
+    CHAT_CHANNEL_MESSAGES_TOOL.name,
     {
-      title: 'Get Public Slack Channel Messages',
-      description:
-        'Fetch history from the originating Slack channel or an explicitly provided Slack channel, but only when that channel is public and the Slack app has already joined it. Optional oldest/latest bounds accept Slack timestamps or ISO 8601 date strings. Explicit channel lookups still require a linked acting Slack user when the current context has one.',
+      title: CHAT_CHANNEL_MESSAGES_TOOL.title,
+      description: CHAT_CHANNEL_MESSAGES_TOOL.description,
       inputSchema: {
         channel: z
           .string()
           .optional()
-          .describe(
-            'Optional Slack channel ID, channel name, or channel mention. Required when the current context did not start from Slack. Only public channels the Slack app has already joined are supported.',
-          ),
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
         oldest: z
           .string()
           .optional()
-          .describe(
-            'Optional inclusive lower bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
-          ),
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
         latest: z
           .string()
           .optional()
-          .describe(
-            'Optional inclusive upper bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
-          ),
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -448,7 +410,7 @@ function createRoomoteMcpServer(
       },
     },
     async ({ channel, oldest, latest }) => {
-      const payload = await buildSlackChannelMessagesPayload({
+      const payload = await buildCommunicationChannelMessagesPayload({
         auth,
         actingUserId,
         ...(typeof channel === 'string' && channel.trim().length > 0
@@ -467,24 +429,23 @@ function createRoomoteMcpServer(
   );
 
   server.registerTool(
-    'get_slack_thread',
+    CHAT_MESSAGE_CONTEXT_TOOL.name,
     {
-      title: 'Get Slack Thread',
-      description:
-        'Look up a Slack message by timestamp in the originating Slack channel and return the full thread that contains it. When the current context did not start from Slack, provide the Slack channel ID, name, or channel mention.',
+      title: CHAT_MESSAGE_CONTEXT_TOOL.title,
+      description: CHAT_MESSAGE_CONTEXT_TOOL.description,
       inputSchema: {
         channel: z
           .string()
           .optional()
-          .describe(
-            'Optional Slack channel ID, channel name, or channel mention. Required when the current context did not start from Slack.',
-          ),
-        messageTs: z
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.channel),
+        messageId: z
           .string()
-          .min(1)
-          .describe(
-            'Slack message timestamp to look up in the originating or provided Slack channel.',
-          ),
+          .optional()
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageId),
+        messageLink: z
+          .string()
+          .optional()
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -494,14 +455,19 @@ function createRoomoteMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ channel, messageTs }) => {
-      const payload = await buildSlackThreadPayload({
+    async ({ channel, messageId, messageLink }) => {
+      const payload = await buildCommunicationMessageContextPayload({
         auth,
         actingUserId,
         ...(typeof channel === 'string' && channel.trim().length > 0
           ? { channel: channel.trim() }
           : {}),
-        messageTs: messageTs.trim(),
+        ...(typeof messageId === 'string' && messageId.trim().length > 0
+          ? { messageId: messageId.trim() }
+          : {}),
+        ...(typeof messageLink === 'string' && messageLink.trim().length > 0
+          ? { messageLink: messageLink.trim() }
+          : {}),
       });
 
       return toMcpToolResult(payload);

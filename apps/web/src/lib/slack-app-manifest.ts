@@ -38,7 +38,7 @@ export const SLACK_MANIFEST_BOT_EVENTS = [
 ] as const;
 
 export const SLACK_MANIFEST_DESCRIPTION = 'Cloud coding agents for all';
-export const SLACK_MANIFEST_BACKGROUND_COLOR = '#D6EE26';
+export const SLACK_MANIFEST_BACKGROUND_COLOR = '#000000';
 
 type SlackAppManifestInput = {
   publicOrigin: string;

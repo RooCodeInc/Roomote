@@ -17,10 +17,6 @@ let currentFeatureFlags: Record<string, boolean> = {};
 let currentCloudEnabled = false;
 let currentShowDebugUI = false;
 let currentShowDebugUILoading = false;
-let currentGitHubInstallations = [{ id: 'installation-1' }];
-let currentGitHubInstallationsPending = false;
-let currentGitHubInstallationsFetching = false;
-let currentGitHubInstallationsSuccess = true;
 let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-1', name: 'Primary Env' },
   { id: 'env-2', name: 'Secondary Env' },
@@ -81,15 +77,6 @@ vi.mock('@/hooks/useUser', () => ({
       imageUrl: '',
       createdAt: null,
     },
-  }),
-}));
-
-vi.mock('@/hooks/github', () => ({
-  useGitHubInstallations: () => ({
-    data: currentGitHubInstallations,
-    isPending: currentGitHubInstallationsPending,
-    isFetching: currentGitHubInstallationsFetching,
-    isSuccess: currentGitHubInstallationsSuccess,
   }),
 }));
 
@@ -339,10 +326,6 @@ describe('Home', () => {
     currentCloudEnabled = false;
     currentShowDebugUI = false;
     currentShowDebugUILoading = false;
-    currentGitHubInstallations = [{ id: 'installation-1' }];
-    currentGitHubInstallationsPending = false;
-    currentGitHubInstallationsFetching = false;
-    currentGitHubInstallationsSuccess = true;
     currentEnvironments = [
       { id: 'env-1', name: 'Primary Env' },
       { id: 'env-2', name: 'Secondary Env' },
@@ -461,17 +444,6 @@ describe('Home', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it('keeps the home page available when GitHub installations are empty', () => {
-    currentGitHubInstallations = [];
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    expect(
-      screen.getByRole('heading', { name: /let's get started/i }),
-    ).toBeInTheDocument();
-    expect(mockPush).not.toHaveBeenCalledWith('/tasks');
   });
 
   it('launches a standard task run without an agent identity for routed workspaces', async () => {

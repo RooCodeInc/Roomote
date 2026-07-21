@@ -29,6 +29,7 @@ import type { UserAuthSuccess } from '@/types';
 
 import { getRepositories } from '@/lib/server';
 import { Env } from '@/lib/server/env';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 
 import {
   assertAdmin,
@@ -215,12 +216,12 @@ async function configureScopedProviderWebhooks<
 function getSourceControlWebhookUrl(
   provider: 'gitlab' | 'gitea' | 'bitbucket' | 'ado',
 ): string | null {
-  // Match the GitHub App manifest behavior: prefer TRPC_URL, but fall back
-  // to R_APP_URL when TRPC_URL is a loopback address that token-backed
-  // source-control providers cannot reach.
+  // Match GitHub webhook URL selection: prefer TRPC_URL, but fall back to
+  // getPublicAppUrl (R_PUBLIC_URL ?? R_APP_URL) when TRPC_URL is loopback so
+  // self-hosted fleets with a public edge still register reachable webhooks.
   const trpcUrl = new URL(Env.TRPC_URL);
   const webhookBaseUrl = isLoopbackHostname(trpcUrl.hostname)
-    ? Env.R_APP_URL
+    ? getPublicAppUrl(Env)
     : Env.TRPC_URL;
 
   if (isLoopbackHostname(new URL(webhookBaseUrl).hostname)) {
@@ -482,11 +483,23 @@ async function configureAdoWebhooks(
           ]
         : [];
     },
-    removeWebhooks: ({ targets, webhookUrl }) =>
-      Ado.removeAdoServiceHooksForRepositories({
+    removeWebhooks: async ({ targets, webhookUrl }) => {
+      // Keep project-scoped work-item hooks when any repository in that project
+      // is still environment-mapped; partial unmaps must not drop @roomote WI intake.
+      const mappedRepositoryIds = await getEnvironmentMappedRepositoryIds();
+      const retainProjectIds = new Set(
+        repositories
+          .filter((repository) => mappedRepositoryIds.has(repository.id))
+          .map((repository) => getAdoProjectId(repository.permissions))
+          .filter((projectId): projectId is string => Boolean(projectId)),
+      );
+
+      return Ado.removeAdoServiceHooksForRepositories({
         repositories: targets,
         webhookUrl,
-      }),
+        retainProjectIds,
+      });
+    },
     ensureWebhooks: ({ targets, webhookUrl, secretToken }) =>
       Ado.ensureAdoServiceHooksForRepositories({
         repositories: targets,

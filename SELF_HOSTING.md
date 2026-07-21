@@ -378,11 +378,12 @@ docker compose exec postgres \
 
 Slack sign-in can reuse `R_SLACK_CLIENT_ID` and `R_SLACK_CLIENT_SECRET` from the
 Slack integration app if you use one Slack app for both sign-in and bot events.
-The `/setup` Slack step is the preferred path: paste a Slack app configuration
-token and click **Create Slack app**. Roomote creates the app through Slack's
-manifest API and saves the Client ID, Client Secret, and Signing Secret
-automatically. For an existing Slack app, or when production secret management
-owns the values, set those env vars directly instead.
+The `/setup` Slack step and **Settings → Communications** are the preferred
+paths: paste a Slack app configuration token and click **Create Slack app**.
+Roomote creates the app through Slack's manifest API and saves the Client ID,
+Client Secret, and Signing Secret automatically. For an existing Slack app, or
+when production secret management owns the values, set those env vars directly
+instead.
 
 ## GitHub App
 
@@ -422,11 +423,12 @@ The detailed GitHub manifest and manual permission checklist is in
 ## Slack Integration
 
 Slack integration is optional unless Slack is your sign-in provider or task
-entry surface. For local development and local self-hosting, open `/setup`,
-paste a Slack app configuration token, and click **Create Slack app**. Roomote
-creates the app with redirect, webhook, interactivity, scope, and event
-settings prefilled for your public URL and saves the credentials automatically.
-Workspace installation still happens later in the Slack connection step.
+entry surface. For local development and local self-hosting, open `/setup` or
+**Settings → Communications**, paste a Slack app configuration token, and click
+**Create Slack app**. Roomote creates the app with redirect, webhook,
+interactivity, scope, and event settings prefilled for your public URL and
+saves the credentials automatically. Workspace installation still happens later
+in the Slack connection step.
 
 For production self-hosting or manual review, use the same public URL for every
 Slack URL:
@@ -577,8 +579,12 @@ using Docker sandboxes. That overlay:
   the API, and the optional preview proxy when enabled, never sibling tasks,
   Postgres, Redis, or MinIO;
 - enforces CPU, memory, PID, supported writable-layer quotas, and log limits
-  and blocks private and cloud metadata ranges under the default `internet`
-  egress policy;
+  and, under the default `internet` egress policy, blackholes private and
+  cloud metadata ranges plus drops packets destined to the Docker bridge
+  gateway (host hairpin) while still allowing public egress via that gateway
+  as next-hop. The gateway drop is installed with `iptables`, so the worker
+  image must ship an iptables binary the host kernel supports (the stock
+  image does); sandbox provisioning fails closed when it is unavailable;
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 

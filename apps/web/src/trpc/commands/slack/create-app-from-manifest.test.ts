@@ -5,10 +5,12 @@ import type { UserAuthSuccess } from '@/types';
 const {
   mockDbTransaction,
   mockFetch,
+  mockReadFile,
   mockUpsertDeploymentEnvironmentVariables,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
   mockFetch: vi.fn(),
+  mockReadFile: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
 }));
 
@@ -24,13 +26,18 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@/lib/server', () => ({
   Env: {
-    R_APP_URL: 'https://roomote.example.com/',
+    R_APP_URL: 'http://localhost:3000/',
+    R_PUBLIC_URL: 'https://roomote.example.com/',
   },
 }));
 
 vi.mock('../environment-variables', () => ({
   upsertDeploymentEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
+}));
+
+vi.mock('node:fs/promises', () => ({
+  readFile: mockReadFile,
 }));
 
 vi.stubGlobal('fetch', mockFetch);
@@ -70,12 +77,27 @@ function mockSlackResponse(body: unknown, status = 200) {
   });
 }
 
+function mockSuccessfulCreateResponse() {
+  return {
+    ok: true,
+    app_id: 'A0NEWAPP',
+    credentials: {
+      client_id: 'new-client-id',
+      client_secret: 'new-client-secret',
+      verification_token: 'new-verification-token',
+      signing_secret: 'new-signing-secret',
+    },
+    oauth_authorize_url: 'https://slack.com/oauth/v2/authorize?client_id=x',
+  };
+}
+
 describe('createSlackAppFromManifestCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbTransaction.mockImplementation(async (callback) =>
       callback({ kind: 'tx' }),
     );
+    mockReadFile.mockResolvedValue(Buffer.from('fake-png-bytes'));
   });
 
   it('rejects non-admin users without calling Slack', async () => {
@@ -88,18 +110,18 @@ describe('createSlackAppFromManifestCommand', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('creates the app and persists the three Slack env vars in one transaction', async () => {
-    mockSlackResponse({
-      ok: true,
-      app_id: 'A0NEWAPP',
-      credentials: {
-        client_id: 'new-client-id',
-        client_secret: 'new-client-secret',
-        verification_token: 'new-verification-token',
-        signing_secret: 'new-signing-secret',
-      },
-      oauth_authorize_url: 'https://slack.com/oauth/v2/authorize?client_id=x',
-    });
+  it('creates the app, sets the icon, and persists the three Slack env vars', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCreateResponse(),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      });
 
     const result = await createSlackAppFromManifestCommand(buildMockAuth(), {
       configToken: '  xoxe.xoxp-token  ',
@@ -109,17 +131,23 @@ describe('createSlackAppFromManifestCommand', () => {
       success: true,
       appId: 'A0NEWAPP',
       appSettingsUrl: 'https://api.slack.com/apps/A0NEWAPP',
+      iconSet: true,
     });
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://slack.example.test/api/apps.manifest.create');
-    expect(init.method).toBe('POST');
-    expect((init.headers as Record<string, string>).Authorization).toBe(
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const [createUrl, createInit] = mockFetch.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(createUrl).toBe(
+      'https://slack.example.test/api/apps.manifest.create',
+    );
+    expect(createInit.method).toBe('POST');
+    expect((createInit.headers as Record<string, string>).Authorization).toBe(
       'Bearer xoxe.xoxp-token',
     );
 
-    const body = JSON.parse(String(init.body)) as { manifest: string };
+    const body = JSON.parse(String(createInit.body)) as { manifest: string };
     const manifest = JSON.parse(body.manifest);
     expect(manifest).toMatchObject({
       display_information: { name: 'Roomote' },
@@ -128,7 +156,28 @@ describe('createSlackAppFromManifestCommand', () => {
           request_url: 'https://roomote.example.com/api/webhooks/slack',
         },
       },
+      oauth_config: {
+        redirect_urls: [
+          'https://roomote.example.com/api/auth/oauth2/callback/slack',
+          'https://roomote.example.com/api/slack/callback',
+        ],
+      },
     });
+    expect(JSON.stringify(manifest)).not.toContain('localhost');
+
+    const [iconUrl, iconInit] = mockFetch.mock.calls[1] as [
+      string,
+      RequestInit,
+    ];
+    expect(iconUrl).toBe('https://slack.example.test/api/apps.icon.set');
+    expect(iconInit.method).toBe('POST');
+    expect((iconInit.headers as Record<string, string>).Authorization).toBe(
+      'Bearer xoxe.xoxp-token',
+    );
+    expect(iconInit.body).toBeInstanceOf(FormData);
+    const iconBody = iconInit.body as FormData;
+    expect(iconBody.get('app_id')).toBe('A0NEWAPP');
+    expect(iconBody.get('file')).toBeInstanceOf(Blob);
 
     expect(mockDbTransaction).toHaveBeenCalledTimes(1);
     expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
@@ -144,21 +193,38 @@ describe('createSlackAppFromManifestCommand', () => {
     );
   });
 
+  it('still succeeds when the app icon cannot be set', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCreateResponse(),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: false, error: 'invalid_icon_size' }),
+      });
+
+    const result = await createSlackAppFromManifestCommand(buildMockAuth(), {
+      configToken: 'xoxe.xoxp-token',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      appId: 'A0NEWAPP',
+      appSettingsUrl: 'https://api.slack.com/apps/A0NEWAPP',
+      iconSet: false,
+    });
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalled();
+  });
+
   it('deletes the created Slack app when persisting credentials fails', async () => {
     mockFetch
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({
-          ok: true,
-          app_id: 'A0NEWAPP',
-          credentials: {
-            client_id: 'new-client-id',
-            client_secret: 'new-client-secret',
-            verification_token: 'new-verification-token',
-            signing_secret: 'new-signing-secret',
-          },
-        }),
+        json: async () => mockSuccessfulCreateResponse(),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -197,16 +263,7 @@ describe('createSlackAppFromManifestCommand', () => {
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({
-          ok: true,
-          app_id: 'A0NEWAPP',
-          credentials: {
-            client_id: 'new-client-id',
-            client_secret: 'new-client-secret',
-            verification_token: 'new-verification-token',
-            signing_secret: 'new-signing-secret',
-          },
-        }),
+        json: async () => mockSuccessfulCreateResponse(),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -231,16 +288,7 @@ describe('createSlackAppFromManifestCommand', () => {
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({
-          ok: true,
-          app_id: 'A0NEWAPP',
-          credentials: {
-            client_id: 'new-client-id',
-            client_secret: 'new-client-secret',
-            verification_token: 'new-verification-token',
-            signing_secret: 'new-signing-secret',
-          },
-        }),
+        json: async () => mockSuccessfulCreateResponse(),
       })
       .mockRejectedValueOnce(new Error('network down'));
     mockDbTransaction.mockRejectedValue(new Error('database is unavailable'));
@@ -294,13 +342,23 @@ describe('createSlackAppFromManifestCommand', () => {
   });
 
   it('fails when Slack omits credentials from a successful response', async () => {
-    mockSlackResponse({
-      ok: true,
-      app_id: 'A0NEWAPP',
-      credentials: {
-        client_id: 'new-client-id',
-      },
-    });
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          app_id: 'A0NEWAPP',
+          credentials: {
+            client_id: 'new-client-id',
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      });
 
     const result = await createSlackAppFromManifestCommand(buildMockAuth(), {
       configToken: 'xoxe.xoxp-token',

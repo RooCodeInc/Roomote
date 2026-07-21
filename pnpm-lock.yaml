@@ -34,7 +34,7 @@ overrides:
   router>path-to-regexp: 8.4.0
   socket.io>socket.io-adapter: 2.5.8
   socket.io-adapter>ws: 8.21.0
-  tar: 7.5.16
+  tar: 7.5.20
   zod: ^3.25.76
   astro>zod: ^4.3.6
   knip>zod: ^4.1.11
@@ -226,7 +226,7 @@ importers:
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(tsx@4.20.4)(typescript@5.9.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.1
-        version: 4.1.1(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.5(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0))
+        version: 4.1.1(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.0)(@types/node@24.12.4)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.5(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0))
 
   apps/bullmq:
     dependencies:
@@ -988,7 +988,7 @@ importers:
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(tsx@4.20.4)(typescript@5.9.3)(yaml@2.9.0)
       vitest:
         specifier: ^4.1.1
-        version: 4.1.1(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.0)(@types/node@24.12.4)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.5(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0))
+        version: 4.1.1(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.5(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0))
 
   packages/ado:
     dependencies:
@@ -10733,8 +10733,8 @@ packages:
   tar-stream@3.2.0:
     resolution: {integrity: sha512-ojzvCvVaNp6aOTFmG7jaRD0meowIAuPc3cMMhSgKiVWws1GyHbGd/xvnyuRKcKlMpt3qvxx6r0hreCNITP9hIg==}
 
-  tar@7.5.16:
-    resolution: {integrity: sha512-56adEpPMouktRlBLXiaYFFzZ/3+JXa8P9n7WbR+ibIjtviN55mEaOkiysCnPnWm+7kkui1Dn8J9l+g6zV8731w==}
+  tar@7.5.20:
+    resolution: {integrity: sha512-9FcyK4PA6+WbzlTM9WhQm6vB5W7cP7dUiPsv1g7YDwEQnQ1CGpK3MGlKk/ITVWMk05kHZuBhmVhiv8LZoy/PFQ==}
     engines: {node: '>=18'}
 
   teex@1.0.1:
@@ -12710,7 +12710,7 @@ snapshots:
       isomorphic-ws: 5.0.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
       pathe: 2.0.3
       shell-quote: 1.9.0
-      tar: 7.5.16
+      tar: 7.5.20
     transitivePeerDependencies:
       - debug
       - supports-color
@@ -17796,7 +17796,7 @@ snapshots:
       glob: 13.0.6
       openapi-fetch: 0.14.1
       platform: 1.3.6
-      tar: 7.5.16
+      tar: 7.5.20
       undici: 7.28.0
 
   ecdsa-sig-formatter@1.0.11:
@@ -21842,7 +21842,7 @@ snapshots:
       - bare-buffer
       - react-native-b4a
 
-  tar@7.5.16:
+  tar@7.5.20:
     dependencies:
       '@isaacs/fs-minipass': 4.0.1
       chownr: 3.0.0

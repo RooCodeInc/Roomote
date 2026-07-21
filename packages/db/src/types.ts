@@ -53,6 +53,7 @@ import type {
   environmentConfigVersions,
   environmentRepositoryMappings,
   automations,
+  customAutomations,
   trackedMessages,
 } from './schema';
 
@@ -496,6 +497,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   codeqlTriageDiscordChannelId: string | null;
   codeqlTriageLastRunAt: Date | null;
   issueFixerFrequency: IssueFixerFrequency;
+  issueFixerInstructions: string | null;
   issueFixerLastRunAt: Date | null;
   issueFixerScanCursor?: CiFailureTriageScanCursor | null;
   securityAuditorFrequency: SecurityAuditorFrequency;
@@ -528,3 +530,14 @@ export type CiFailureTriageScanCursor = SecurityAuditorScanCursor;
 export type Automation = typeof automations.$inferSelect;
 
 export type CreateAutomation = Omit<typeof automations.$inferInsert, Timestamp>;
+
+/**
+ * custom_automations
+ */
+
+export type CustomAutomation = typeof customAutomations.$inferSelect;
+
+export type CreateCustomAutomation = Omit<
+  typeof customAutomations.$inferInsert,
+  Timestamp
+>;

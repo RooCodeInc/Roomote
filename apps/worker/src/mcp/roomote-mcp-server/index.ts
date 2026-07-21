@@ -7,6 +7,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  CHAT_CHANNEL_MESSAGES_TOOL,
+  CHAT_MESSAGE_CONTEXT_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
@@ -51,8 +53,8 @@ import {
   handlePostToChannel,
   handlePostToSlackChannel,
 } from './post-to-slack-channel.js';
-import { handleGetSlackChannelMessages } from './get-slack-channel-messages.js';
-import { handleGetSlackThread } from './get-slack-thread.js';
+import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
+import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleSubmitTaskSuggestions } from './submit-task-suggestions.js';
@@ -669,7 +671,8 @@ roomoteMcpServer.registerTool(
   {
     title: 'Manage Source Control',
     description:
-      'Provider-neutral pull request/merge request operations for the current task. ' +
+      'Provider-neutral issue and pull request/merge request operations for the current task. ' +
+      'Use "get_issue", "list_issue_comments", and "create_issue_comment" for plain issues. ' +
       'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
       'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
@@ -692,9 +695,12 @@ roomoteMcpServer.registerTool(
           'resolve_pull_request_thread',
           'submit_pull_request_review',
           'update_pull_request_comment',
+          'get_issue',
+          'list_issue_comments',
+          'create_issue_comment',
         ])
         .describe(
-          'create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level comment; resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -707,7 +713,15 @@ roomoteMcpServer.registerTool(
         .positive()
         .optional()
         .describe(
-          'Required for every action except create_or_update_pull_request and list_pull_requests: the PR/MR number (GitLab iid).',
+          'Required for single-PR/MR actions; unused by issue actions, create_or_update_pull_request, and list_pull_requests.',
+        ),
+      issueNumber: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Required for get_issue, list_issue_comments, and create_issue_comment.',
         ),
       state: z
         .literal('open')
@@ -770,7 +784,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'The text content: the PR/MR description for create_or_update_pull_request (required there), the comment text for reply/create comment actions (required there), or the optional review body for submit_pull_request_review.',
+          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, or the optional review body for submit_pull_request_review.',
         ),
       labels: z
         .array(z.string())
@@ -811,6 +825,7 @@ roomoteMcpServer.registerTool(
         action: params.action,
         repositoryFullName: params.repositoryFullName,
         prNumber: params.prNumber,
+        issueNumber: params.issueNumber,
         state: params.state,
         limit: params.limit,
         threadId: params.threadId,
@@ -1117,32 +1132,23 @@ if (shouldRegisterTaskSuggestionsTool()) {
 }
 
 roomoteMcpServer.registerTool(
-  'get_slack_channel_messages',
+  CHAT_CHANNEL_MESSAGES_TOOL.name,
   {
-    title: 'Get Public Slack Channel Messages',
-    description:
-      'Fetch history from the originating Slack channel or an explicitly provided Slack channel, but only when that channel is public and the Slack app has already joined it. ' +
-      'Optional oldest/latest bounds accept Slack timestamps or ISO 8601 date strings. ' +
-      'Explicit channel lookups still require a linked acting Slack user when the current task has one.',
+    title: CHAT_CHANNEL_MESSAGES_TOOL.title,
+    description: CHAT_CHANNEL_MESSAGES_TOOL.description,
     inputSchema: {
       channel: z
         .string()
         .optional()
-        .describe(
-          'Optional Slack channel ID, channel name, or channel mention. Required when the current task did not start from Slack. Only public channels the Slack app has already joined are supported.',
-        ),
+        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
       oldest: z
         .string()
         .optional()
-        .describe(
-          'Optional inclusive lower bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
-        ),
+        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
       latest: z
         .string()
         .optional()
-        .describe(
-          'Optional inclusive upper bound for returned messages, as a Slack timestamp or ISO 8601 date string.',
-        ),
+        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
     },
     annotations: {
       readOnlyHint: true,
@@ -1157,7 +1163,7 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
 
-    return handleGetSlackChannelMessages(
+    return handleGetChatChannelMessages(
       {
         channel: params.channel,
         oldest: params.oldest,
@@ -1169,27 +1175,23 @@ roomoteMcpServer.registerTool(
 );
 
 roomoteMcpServer.registerTool(
-  'get_slack_thread',
+  CHAT_MESSAGE_CONTEXT_TOOL.name,
   {
-    title: 'Get Slack Thread',
-    description:
-      'Look up a Slack message by timestamp in the originating Slack channel and return the full thread that contains it. ' +
-      'Use this when a Slack thread references another Slack message timestamp and you need the surrounding thread context. ' +
-      'When the current task did not start from Slack, provide the Slack channel ID, name, or channel mention. ' +
-      'Explicit channel lookups require a linked acting Slack user, except bot-started Slack jobs are limited to public channels the app has joined.',
+    title: CHAT_MESSAGE_CONTEXT_TOOL.title,
+    description: CHAT_MESSAGE_CONTEXT_TOOL.description,
     inputSchema: {
       channel: z
         .string()
         .optional()
-        .describe(
-          'Optional Slack channel ID, channel name, or channel mention. Required when the current task did not start from Slack. Explicit channels require a linked acting Slack user unless the job only has bot Slack context, in which case only public channels are allowed.',
-        ),
-      messageTs: z
+        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.channel),
+      messageId: z
         .string()
-        .min(1)
-        .describe(
-          'Slack message timestamp to look up in the originating or provided Slack channel.',
-        ),
+        .optional()
+        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageId),
+      messageLink: z
+        .string()
+        .optional()
+        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
     },
     annotations: {
       readOnlyHint: true,
@@ -1204,10 +1206,11 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
 
-    return handleGetSlackThread(
+    return handleGetChatMessageContext(
       {
         channel: params.channel,
-        messageTs: params.messageTs,
+        messageId: params.messageId,
+        messageLink: params.messageLink,
       },
       roomoteConfig,
     );

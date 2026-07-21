@@ -7,8 +7,10 @@ import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import { apiLogger, logApiError } from '../../logging';
 import { recordWebhook } from '../github/recordWebhook';
 import { handleGiteaComment } from './handleComment';
+import { handleGiteaIssue } from './handleIssue';
 import { handleGiteaPullRequest } from './handlePullRequest';
 import {
+  giteaIssueWebhookSchema,
   giteaPullRequestCommentWebhookSchema,
   giteaPullRequestWebhookSchema,
 } from './types';
@@ -81,6 +83,20 @@ gitea.post('/', async (c) => {
           );
           return result;
         },
+        { provider: 'gitea' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === 'issues') {
+      const payload = giteaIssueWebhookSchema.parse(parsedJson);
+
+      await recordWebhook(
+        deliveryId,
+        `issues.${payload.action}`,
+        payload,
+        () => handleGiteaIssue(payload),
         { provider: 'gitea' },
       );
 

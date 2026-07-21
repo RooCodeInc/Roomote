@@ -195,7 +195,7 @@ export function buildSandboxInstruction(
       if (options?.backgroundEnvironmentSetupPending) {
         lines.push(
           '',
-          'Repository setup commands from this environment configuration run in the background and may still be executing while you work. Do not assume dependencies are installed or services are ready: check `.roomote/setup-status.json` in the workspace root for live per-command status, and read the logs under `.roomote/setup-logs/` if something you need appears to be missing. You will receive a message when background environment setup finishes. Never re-run a setup command that is still marked as running.',
+          'Repository setup commands from this environment configuration run in the background and may still be executing while you work. Do not assume dependencies are installed or services are ready: check `.roomote/setup-status.json` in the workspace root for live per-command status, and read the logs under `.roomote/setup-logs/` if something you need appears to be missing. Never re-run a setup command that is still marked as running.',
         );
       } else {
         lines.push(

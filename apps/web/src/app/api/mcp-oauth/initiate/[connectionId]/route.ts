@@ -30,6 +30,7 @@ import {
 } from '@roomote/types';
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { resolveStaticOauthClientInformation } from '@/lib/server/mcp-static-oauth';
 
 export const runtime = 'nodejs';
@@ -130,7 +131,7 @@ export async function GET(
 ) {
   const { connectionId } = await params;
   const webEnv = await bootstrapWebRuntimeEnv();
-  const webUrl = webEnv.R_APP_URL;
+  const webUrl = getPublicAppUrl(webEnv);
   const requestUrl = new URL(request.url);
   const redirectPath =
     sanitizeRedirectPath(requestUrl.searchParams.get('redirectTo')) ??
@@ -188,7 +189,7 @@ export async function GET(
       discoverOAuthEndpoints(integration.url),
       discoverOAuthProtectedResourceMetadata(integration.url),
     ]);
-    const redirectUri = `${webEnv.R_APP_URL}/api/mcp-oauth/callback`;
+    const redirectUri = new URL('/api/mcp-oauth/callback', webUrl).toString();
     const requestedScope = getRequestedScope(
       protectedResourceMetadata?.scopes_supported ??
         serverMetadata.scopes_supported,
@@ -197,7 +198,9 @@ export async function GET(
     );
 
     let clientInfo: OAuthClientInformation | undefined =
-      await getClientInformation(connectionId);
+      await getClientInformation(connectionId, {
+        expectedRedirectUri: redirectUri,
+      });
 
     if (!clientInfo) {
       const staticClientInfo = getStaticClientInformation(webEnv, integration);

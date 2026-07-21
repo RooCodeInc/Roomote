@@ -68,6 +68,7 @@ import {
   ScheduleOnlyAutomationContent,
   SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS,
 } from './ScheduleOnlyAutomationContent';
+import { CustomAutomationsSection } from './CustomAutomationsSection';
 import { SlackChannelSelect } from './SlackChannelSelect';
 
 import {
@@ -156,7 +157,8 @@ type FieldErrors = Partial<
     | 'sentryTriageProjectSlugs'
     | 'suggesterInstructions'
     | 'suggesterRoutingInstructions'
-    | 'announcerInstructions',
+    | 'announcerInstructions'
+    | 'issueFixerInstructions',
     string
   >
 >;
@@ -743,7 +745,9 @@ function mapSettingsToFormState(
     ciFailureTriageSlackChannelId: string | null;
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
-  } & ScheduleOnlyAutomationFrequencyState,
+  } & ScheduleOnlyAutomationFrequencyState & {
+      issueFixerInstructions: string | null;
+    },
 ): FormState {
   return {
     reviewerEnabled: settings.reviewer.enabled,
@@ -767,6 +771,7 @@ function mapSettingsToFormState(
       DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
     conflictResolverLabel: settings.conflictResolverLabel,
     conflictResolverInstructions: settings.conflictResolverInstructions ?? '',
+    issueFixerInstructions: settings.issueFixerInstructions ?? '',
     channelAutoStartChannels: [
       ...settings.channelAutoStartSlackChannels.map(
         ({ channelId, instructions, launchMode, launchCriteria }) => ({
@@ -2880,7 +2885,34 @@ export function AutomationsSettings() {
                       )
                     }
                   >
-                    {null}
+                    {automation.id === 'issueFixer' ? (
+                      <div className="space-y-2">
+                        <Label htmlFor="issue-fixer-instructions">
+                          Additional instructions
+                        </Label>
+                        <Textarea
+                          id="issue-fixer-instructions"
+                          value={formState.issueFixerInstructions}
+                          onChange={(event) =>
+                            setFormState((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    issueFixerInstructions: event.target.value,
+                                  }
+                                : prev,
+                            )
+                          }
+                          rows={4}
+                          placeholder="Optional guidance for how to triage issues and write plans"
+                        />
+                        {fieldErrors.issueFixerInstructions ? (
+                          <p className="text-xs text-destructive">
+                            {fieldErrors.issueFixerInstructions}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </ScheduleOnlyAutomationContent>
                 </AutomationCard>
               );
@@ -3480,6 +3512,8 @@ export function AutomationsSettings() {
                 </AutomationCard>
               );
             })}
+
+            <CustomAutomationsSection />
 
             <h2 className="pt-2 text-base font-semibold text-foreground">
               Channel automations

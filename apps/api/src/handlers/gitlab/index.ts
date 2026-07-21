@@ -6,11 +6,15 @@ import { resolveDeploymentEnvVar } from '@roomote/db/server';
 
 import { apiLogger, logApiError } from '../../logging';
 import { recordWebhook } from '../github/recordWebhook';
+import { handleGitLabIssue } from './handleIssue';
 import { handleGitLabMergeRequest } from './handleMergeRequest';
 import { handleGitLabNote } from './handleNote';
+import { handleGitLabPipeline } from './handlePipeline';
 import {
+  gitLabIssueWebhookSchema,
   gitLabMergeRequestWebhookSchema,
   gitLabNoteWebhookSchema,
+  gitLabPipelineWebhookSchema,
 } from './types';
 import { verifyGitLabWebhook } from './verifyWebhook';
 
@@ -67,6 +71,36 @@ gitlab.post('/', async (c) => {
         `note.${payload.object_attributes.noteable_type ?? 'unknown'}`,
         payload,
         () => handleGitLabNote(payload),
+        { provider: 'gitlab' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === 'Issue Hook') {
+      const payload = gitLabIssueWebhookSchema.parse(parsedJson);
+      const action = payload.object_attributes.action ?? 'unknown';
+
+      await recordWebhook(
+        deliveryId,
+        `issue.${action}`,
+        payload,
+        () => handleGitLabIssue(payload),
+        { provider: 'gitlab' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === 'Pipeline Hook') {
+      const payload = gitLabPipelineWebhookSchema.parse(parsedJson);
+      const status = payload.object_attributes.status ?? 'unknown';
+
+      await recordWebhook(
+        deliveryId,
+        `pipeline.${status}`,
+        payload,
+        () => handleGitLabPipeline(payload),
         { provider: 'gitlab' },
       );
 

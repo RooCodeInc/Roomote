@@ -100,6 +100,21 @@ describe('background automation registry', () => {
       'telegram',
       'discord',
     ]);
-    expect(descriptor?.supportedSourceControlProviders).toEqual(['github']);
+    expect(descriptor?.supportedSourceControlProviders).toEqual([
+      'github',
+      'gitlab',
+    ]);
+  });
+
+  it('supports GitHub, GitLab, and Gitea for issue triage', () => {
+    const descriptor =
+      getTriggerableBackgroundAutomationDescriptorByKey('issue_fixer');
+
+    expect(descriptor?.label).toBe('Triage Issues');
+    expect(descriptor?.supportedSourceControlProviders).toEqual([
+      'github',
+      'gitlab',
+      'gitea',
+    ]);
   });
 });

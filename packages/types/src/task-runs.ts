@@ -762,6 +762,7 @@ export const linkedWorkItemProviderSchema = z.enum([
   'github',
   'gitlab',
   'gitea',
+  'ado',
   'linear',
   'jira',
   'asana',
@@ -937,6 +938,12 @@ const sharedTaskPayloadSchema = z.object({
    * Must be a real message id, never an interaction id.
    */
   discordReactionMessageId: z.string().optional(),
+  /**
+   * True when intake pinned 👀 on the origin reaction target before launch.
+   * Worker onStart clears that eyes reaction only when this flag is set so
+   * resume runs and interaction launches without intake eyes do not DELETE 404s.
+   */
+  discordIntakeAckPending: z.boolean().optional(),
   /** True when the Telegram topic was created specifically for this task. */
   telegramTaskTopic: z.boolean().optional(),
   /** True when the Discord thread/forum post was created for this task. */
@@ -1597,6 +1604,78 @@ export function getCommunicationMessageIdFromTaskPayload(
   );
 }
 
+/**
+ * Discord channel + message that intake (👀) and terminal platform reactions
+ * target. Prefer the dedicated reaction fields (always real message ids) over
+ * communication message metadata, which can lag for interaction launches.
+ */
+export function getDiscordReactionTargetFromTaskPayload(payload: unknown): {
+  channelId: string;
+  messageId: string;
+} | null {
+  const reactionChannelId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionChannelId',
+  );
+  const reactionMessageId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionMessageId',
+  );
+
+  // Dedicated reaction coordinates are one atomic target. Mixing one of them
+  // with communication metadata can pair a parent channel with a thread-only
+  // message and produce a Discord 404.
+  if (reactionChannelId && reactionMessageId) {
+    return { channelId: reactionChannelId, messageId: reactionMessageId };
+  }
+
+  const channelId =
+    getCommunicationThreadIdFromTaskPayload(payload) ??
+    getCommunicationChannelFromTaskPayload(payload);
+  const messageId = getCommunicationMessageIdFromTaskPayload(payload);
+
+  if (!channelId || !messageId) {
+    return null;
+  }
+
+  return { channelId, messageId };
+}
+
+/**
+ * Origin of a real Discord intake 👀 reaction to clear on worker start.
+ * Requires the dedicated reaction target plus the intake-pending flag set at
+ * enqueue when eyes were actually pinned (not resume / interaction-only targets).
+ */
+export function getDiscordIntakeAckReactionTargetFromTaskPayload(
+  payload: unknown,
+): { channelId: string; messageId: string } | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  if (
+    (payload as { discordIntakeAckPending?: unknown })
+      .discordIntakeAckPending !== true
+  ) {
+    return null;
+  }
+
+  const channelId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionChannelId',
+  );
+  const messageId = getNonEmptyTaskPayloadString(
+    payload,
+    'discordReactionMessageId',
+  );
+
+  if (!channelId || !messageId) {
+    return null;
+  }
+
+  return { channelId, messageId };
+}
+
 export function getSlackChannelFromTaskPayload(
   payload: unknown,
 ): string | null {
@@ -1935,6 +2014,25 @@ export const bootingRunStatuses = [
   RunStatus.Spawning,
   RunStatus.Connecting,
 ] as const;
+
+/**
+ * Machine-readable category for a failed run's boot/spawn error, persisted on
+ * task_runs.error_code alongside the full diagnostic text in `error`. The web
+ * app maps codes to actionable copy instead of pattern-matching error prose.
+ * Values are stored in the database — treat them as stable identifiers.
+ */
+export const TaskRunErrorCode = {
+  DockerDaemonUnreachable: 'docker_daemon_unreachable',
+  DockerImageMissing: 'docker_image_missing',
+  DockerPortInUse: 'docker_port_in_use',
+  DockerReleaseArchiveMissing: 'docker_release_archive_missing',
+  DockerWorkerStartTimeout: 'docker_worker_start_timeout',
+  DockerWorkerExitedEarly: 'docker_worker_exited_early',
+  DockerWorkerFetchFailed: 'docker_worker_fetch_failed',
+} as const;
+
+export type TaskRunErrorCode =
+  (typeof TaskRunErrorCode)[keyof typeof TaskRunErrorCode];
 
 export const activeRunStatuses = [
   ...bootingRunStatuses,

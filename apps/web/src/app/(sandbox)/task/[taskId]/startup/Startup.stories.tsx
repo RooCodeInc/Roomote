@@ -303,6 +303,29 @@ export const FailedWithLogs: Story = {
   ),
 };
 
+/** Missing worker image surfaces friendly guidance instead of a raw docker run. */
+export const FailedMissingWorkerImage: Story = {
+  name: 'Failed boot – missing worker image',
+  render: () => (
+    <StartupSequence
+      steps={[
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Dequeued, true),
+        mockStep(RunStatus.Processing, true),
+        mockStep(RunStatus.Spawning, true),
+        mockStep(RunStatus.Failed, true),
+      ]}
+      error={`Failed to run docker run.
+
+Unable to find image 'roomote-worker:local' locally
+docker: Error response from daemon: pull access denied for roomote-worker, repository does not exist or may require 'docker login'
+
+command:
+docker run -d --name roomote-worker-12 roomote-worker:local sleep infinity`}
+    />
+  ),
+};
+
 /** Failed boot without a specific error message — shows fallback copy. */
 export const FailedWithoutError: Story = {
   name: 'Failed boot without error message',

@@ -35,6 +35,7 @@ const {
   mockValidateGiteaToken: vi.fn(),
   mockEnv: {
     R_APP_URL: 'https://roomote.example.com',
+    R_PUBLIC_URL: undefined as string | undefined,
     TRPC_URL: 'http://localhost:3000/trpc',
   },
 }));
@@ -130,6 +131,7 @@ describe('source-control commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnv.R_APP_URL = 'https://roomote.example.com';
+    mockEnv.R_PUBLIC_URL = undefined;
     mockEnv.TRPC_URL = 'http://localhost:3000/trpc';
     mockResolveDeploymentEnvVar.mockResolvedValue(null);
     mockEnvironmentMappingRows.rows = [
@@ -212,6 +214,119 @@ describe('source-control commands', () => {
         status: 'configured',
         created: 1,
         skippedUnmapped: 0,
+      },
+    });
+  });
+
+  it('prefers R_PUBLIC_URL for GitLab webhooks when R_APP_URL is loopback', async () => {
+    mockEnv.R_APP_URL = 'http://127.0.0.1:13000';
+    mockEnv.R_PUBLIC_URL = 'https://customer.example';
+    mockEnv.TRPC_URL = 'http://127.0.0.1:13001';
+    mockSyncGitLabRepositories.mockResolvedValue({
+      success: true,
+      repositories: [
+        {
+          id: 'gitlab-repo-row-1',
+          externalRepoId: '42',
+          fullName: 'acme/gitlab-app',
+        },
+      ],
+    });
+
+    const result = await syncRepositoriesCommand(buildMockAuth(), {
+      provider: 'gitlab',
+    });
+
+    expect(mockEnsureGitLabWebhooksForProjects).toHaveBeenCalledWith({
+      projects: [{ projectId: '42', repositoryFullName: 'acme/gitlab-app' }],
+      webhookUrl: 'https://customer.example/api/webhooks/gitlab',
+      secretToken: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(result).toMatchObject({
+      success: true,
+      webhooks: {
+        status: 'configured',
+        created: 1,
+      },
+    });
+  });
+
+  it('prefers R_PUBLIC_URL over an internal non-loopback R_APP_URL when TRPC is loopback', async () => {
+    mockEnv.R_APP_URL = 'http://roomote.internal:3000';
+    mockEnv.R_PUBLIC_URL = 'https://customer.example';
+    mockEnv.TRPC_URL = 'http://127.0.0.1:13001';
+    mockSyncGitLabRepositories.mockResolvedValue({
+      success: true,
+      repositories: [
+        {
+          id: 'gitlab-repo-row-1',
+          externalRepoId: '42',
+          fullName: 'acme/gitlab-app',
+        },
+      ],
+    });
+
+    await syncRepositoriesCommand(buildMockAuth(), {
+      provider: 'gitlab',
+    });
+
+    expect(mockEnsureGitLabWebhooksForProjects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhookUrl: 'https://customer.example/api/webhooks/gitlab',
+      }),
+    );
+  });
+
+  it('keeps a non-loopback TRPC_URL as the GitLab webhook host when set', async () => {
+    mockEnv.R_APP_URL = 'http://127.0.0.1:13000';
+    mockEnv.R_PUBLIC_URL = 'https://customer.example';
+    mockEnv.TRPC_URL = 'https://api.customer.example';
+    mockSyncGitLabRepositories.mockResolvedValue({
+      success: true,
+      repositories: [
+        {
+          id: 'gitlab-repo-row-1',
+          externalRepoId: '42',
+          fullName: 'acme/gitlab-app',
+        },
+      ],
+    });
+
+    await syncRepositoriesCommand(buildMockAuth(), {
+      provider: 'gitlab',
+    });
+
+    expect(mockEnsureGitLabWebhooksForProjects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhookUrl: 'https://api.customer.example/api/webhooks/gitlab',
+      }),
+    );
+  });
+
+  it('skips GitLab webhook setup when no publicly reachable Roomote URL is configured', async () => {
+    mockEnv.R_APP_URL = 'http://127.0.0.1:13000';
+    mockEnv.R_PUBLIC_URL = undefined;
+    mockEnv.TRPC_URL = 'http://127.0.0.1:13001';
+    mockSyncGitLabRepositories.mockResolvedValue({
+      success: true,
+      repositories: [
+        {
+          id: 'gitlab-repo-row-1',
+          externalRepoId: '42',
+          fullName: 'acme/gitlab-app',
+        },
+      ],
+    });
+
+    const result = await syncRepositoriesCommand(buildMockAuth(), {
+      provider: 'gitlab',
+    });
+
+    expect(mockEnsureGitLabWebhooksForProjects).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: true,
+      webhooks: {
+        status: 'skipped',
       },
     });
   });

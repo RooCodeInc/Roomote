@@ -7,6 +7,7 @@ import {
   getPrimaryPortFromConfig,
   portNameToSlug,
   SANDBOX_SERVER_NAMED_PORT,
+  TaskRunErrorCode,
   type NamedPort,
 } from '@roomote/types';
 import { Env, resolveAppEnv } from '@roomote/env';
@@ -37,6 +38,7 @@ import {
   buildDockerWorkerLabels,
   buildDockerWorkerResourceArgs,
   docker,
+  DockerBootError,
   getDockerTaskNetworkName,
   getDockerTaskDaemonContainerName,
   getDockerTaskWorkspaceVolumeName,
@@ -57,11 +59,63 @@ const DOCKER_CONTAINER_READY_ARGS = ['infinity'];
 const DOCKER_WORKER_ARCHIVE_PATH = '/sandbox/worker.tar.gz';
 const DOCKER_WORKER_ROOT = '/sandbox';
 const DOCKER_INSTALL_WORKER_SCRIPT = `${DOCKER_WORKER_ROOT}/install-worker.sh`;
-const DOCKER_WORKER_START_TIMEOUT_MS = 15_000;
+// Image pulls and cold worker installs can exceed 15s on first boot (self-host).
+const DOCKER_WORKER_START_TIMEOUT_MS = 60_000;
 const DOCKER_WORKER_START_POLL_MS = 500;
 const DOCKER_TASK_DAEMON_IMAGE = 'docker:28-dind';
 /** Upper bound for fresh Docker provisioning so a stuck daemon cannot hang forever. */
 export const DOCKER_SPAWN_TIMEOUT_MS = 15 * 60 * 1_000;
+
+/**
+ * Fail fast, with precise categories, on environment problems that otherwise
+ * surface as opaque docker run failures or worker start timeouts. Runs before
+ * any sandbox resources are created so nothing needs cleanup on failure.
+ */
+export async function preflightDockerSpawn(
+  runDocker: DockerCommand,
+  image: string,
+): Promise<void> {
+  try {
+    await runDocker(['version', '--format', '{{.Server.Version}}']);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerDaemonUnreachable,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  // The daemon is reachable (checked above), so an empty inspect result means
+  // the image is absent locally. Pull explicitly so registry-hosted images
+  // still work and pull time is attributed to preflight, not the start wait.
+  const imageId = await runDocker(
+    ['image', 'inspect', '--format', '{{.Id}}', image],
+    { allowFailure: true },
+  );
+
+  if (imageId.trim()) {
+    return;
+  }
+
+  try {
+    await runDocker(['pull', image]);
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
+
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerImageMissing,
+      [
+        `Docker worker image ${image} is not available locally and could not be pulled.`,
+        error instanceof Error ? error.message : String(error),
+      ].join('\n\n'),
+    );
+  }
+}
 
 export async function spawnDockerWorker(
   taskRun: TaskRun,
@@ -100,7 +154,8 @@ export async function spawnDockerWorker(
   }
 
   if (!isStandbyResume && !config.localWorkerReleasePath) {
-    throw new Error(
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerReleaseArchiveMissing,
       'Docker provider requires a local worker release archive. TaskRun pnpm dev without --use-release.',
     );
   }
@@ -110,7 +165,8 @@ export async function spawnDockerWorker(
     config.localWorkerReleasePath &&
     !existsSync(config.localWorkerReleasePath)
   ) {
-    throw new Error(
+    throw new DockerBootError(
+      TaskRunErrorCode.DockerReleaseArchiveMissing,
       `Docker worker release archive does not exist: ${config.localWorkerReleasePath}`,
     );
   }
@@ -170,6 +226,12 @@ export async function spawnDockerWorker(
   };
 
   throwIfSpawnAborted();
+
+  // Resume restarts a retained container, so daemon/image preflight only
+  // applies to fresh spawns.
+  if (!isStandbyResume) {
+    await preflightDockerSpawn(runDocker, config.image);
+  }
 
   // Network name is deterministic so outer cleanup can tear it down even if
   // prepare is interrupted before returning.
@@ -406,6 +468,10 @@ export async function spawnDockerWorker(
 
     throwIfSpawnAborted();
 
+    const workerTrpcUrl = resolveDockerWorkerTrpcUrl({
+      trpcUrl: process.env.TRPC_URL ?? Env.TRPC_URL,
+      controlNetwork,
+    });
     const workerEnv = buildDockerWorkerEnv({
       authToken,
       sandboxExpiresAtMs: Date.now() + config.dockerTimeoutMs,
@@ -414,7 +480,7 @@ export async function spawnDockerWorker(
       image: config.image,
       extraEnv: {
         SANDBOX_TIMEOUT_MS: String(config.dockerTimeoutMs),
-        TRPC_URL: toContainerReachableUrl(process.env.TRPC_URL ?? Env.TRPC_URL),
+        TRPC_URL: workerTrpcUrl,
         // Mock-Slack parity: worker-side SlackNotifier calls (question blocks,
         // reactions) must reach the same mock harness the API uses.
         ...(process.env.SLACK_API_BASE_URL && {
@@ -449,14 +515,17 @@ export async function spawnDockerWorker(
       },
     });
 
+    assertDockerWorkerLaunchEnv(workerEnv);
+
     const workerCommand = getDockerWorkerCommand(taskRun.payloadKind);
+    // Inject via `docker exec -e` so the worker process gets AUTH_TOKEN /
+    // TRPC_URL without baking secrets into `docker inspect` Config.Env.
+    // Operators checking a later plain `docker exec` shell will not see these
+    // keys — that is expected and does not mean spawn skipped injection.
     await runDocker([
       'exec',
       '-d',
-      ...Object.entries(workerEnv).flatMap(([key, value]) => [
-        '-e',
-        `${key}=${value}`,
-      ]),
+      ...buildDockerWorkerExecEnvArgs(workerEnv),
       containerName,
       'bash',
       '-lc',
@@ -467,7 +536,12 @@ export async function spawnDockerWorker(
 
     console.log(
       `[spawnDockerWorker] Docker worker launched for task run #${taskRun.id} ${JSON.stringify(
-        { containerName, containerId },
+        {
+          containerName,
+          containerId,
+          trpcUrl: sanitizeDockerWorkerTrpcUrlForLog(workerTrpcUrl),
+          envKeys: Object.keys(workerEnv).sort(),
+        },
       )}`,
     );
 
@@ -607,9 +681,11 @@ async function assertDetachedWorkerStarted(
         allowFailure: true,
       });
 
-      throw new Error(
+      throw new DockerBootError(
+        classifyWorkerBootLogs(logs, TaskRunErrorCode.DockerWorkerExitedEarly),
         [
           `Docker worker container exited before task run #${runId} started.`,
+          'The sandbox container stopped during boot. Common causes include a missing worker image, a failed entrypoint, or the worker crashing on startup.',
           logs.trim() ? `Recent Docker logs:\n${logs.trim()}` : undefined,
         ]
           .filter(Boolean)
@@ -641,9 +717,13 @@ async function assertDetachedWorkerStarted(
     allowFailure: true,
   });
 
-  throw new Error(
+  const timeoutSeconds = Math.round(DOCKER_WORKER_START_TIMEOUT_MS / 1000);
+
+  throw new DockerBootError(
+    classifyWorkerBootLogs(logs, TaskRunErrorCode.DockerWorkerStartTimeout),
     [
-      `Docker worker command for task run #${runId} was not observed during startup.`,
+      `Docker worker for task run #${runId} did not start within ${timeoutSeconds}s.`,
+      'The container stayed running, but the Roomote worker process never appeared. Check that the local worker image and release archive are available, and inspect container logs for fetch/start failures.',
       processList.trim()
         ? `Docker process list:\n${processList.trim()}`
         : 'Docker process list was empty.',
@@ -652,6 +732,20 @@ async function assertDetachedWorkerStarted(
       .filter(Boolean)
       .join('\n\n'),
   );
+}
+
+/**
+ * A worker that dies (or never appears) because it cannot reach the Roomote
+ * API logs a `fetch failed` job error — a distinct, actionable category
+ * (networking from inside Docker) rather than a generic start failure.
+ */
+function classifyWorkerBootLogs(
+  logs: string,
+  fallback: TaskRunErrorCode,
+): TaskRunErrorCode {
+  return /failed:\s*fetch failed/i.test(logs)
+    ? TaskRunErrorCode.DockerWorkerFetchFailed
+    : fallback;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -877,6 +971,77 @@ export function getDockerWorkerCommand(
   payloadKind: TaskPayloadKind,
 ): 'resume' | 'run' {
   return payloadKind === TaskPayloadKind.SnapshotResume ? 'resume' : 'run';
+}
+
+/**
+ * Docker Compose self-host/prod attaches the `api` service to each task
+ * network. When a control network is configured, egress policy blackholes the
+ * docker bridge gateway so sandboxes cannot hairpin through the public edge.
+ * Workers must call the in-network API alias directly (no `/_roomote-api`
+ * prefix — that path only exists on the public reverse proxy).
+ */
+export const DOCKER_CONTROL_PLANE_TRPC_URL = 'http://api:3001';
+
+export function resolveDockerWorkerTrpcUrl(params: {
+  trpcUrl: string | undefined;
+  controlNetwork?: string;
+}): string {
+  // Control-plane isolation only trusts the `api` service on the task
+  // network at the app origin/root. Public reverse-proxy path prefixes such
+  // as `/_roomote-api` must not be preserved even when hostname is already
+  // `api`.
+  if (params.controlNetwork?.trim()) {
+    return DOCKER_CONTROL_PLANE_TRPC_URL;
+  }
+
+  return toContainerReachableUrl(params.trpcUrl);
+}
+
+/**
+ * Log-safe view of the worker TRPC URL: drops userinfo credentials and
+ * query/hash so operator logs never capture embedded secrets while still
+ * showing host + path for spawn diagnosis.
+ */
+export function sanitizeDockerWorkerTrpcUrlForLog(trpcUrl: string): string {
+  try {
+    const url = new URL(trpcUrl);
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return trimTrailingSlash(url.toString());
+  } catch {
+    return '[invalid-trpc-url]';
+  }
+}
+
+const REQUIRED_DOCKER_WORKER_LAUNCH_ENV_KEYS = [
+  'AUTH_TOKEN',
+  'TRPC_URL',
+  'R_APP_URL',
+] as const;
+
+export function assertDockerWorkerLaunchEnv(
+  workerEnv: Record<string, string>,
+): void {
+  const missing = REQUIRED_DOCKER_WORKER_LAUNCH_ENV_KEYS.filter(
+    (key) => !workerEnv[key]?.trim(),
+  );
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Docker worker launch env missing required value(s): ${missing.join(', ')}`,
+    );
+  }
+}
+
+export function buildDockerWorkerExecEnvArgs(
+  workerEnv: Record<string, string>,
+): string[] {
+  return Object.entries(workerEnv).flatMap(([key, value]) => [
+    '-e',
+    `${key}=${value}`,
+  ]);
 }
 
 export function toContainerReachableUrl(value: string | undefined): string {

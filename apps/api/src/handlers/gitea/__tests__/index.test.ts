@@ -5,11 +5,13 @@ import { Hono } from 'hono';
 const {
   mockHandleGiteaPullRequest,
   mockHandleGiteaComment,
+  mockHandleGiteaIssue,
   mockRecordWebhook,
   mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
   mockHandleGiteaPullRequest: vi.fn(),
   mockHandleGiteaComment: vi.fn(),
+  mockHandleGiteaIssue: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
 }));
@@ -38,6 +40,10 @@ vi.mock('../handleComment', () => ({
   handleGiteaComment: mockHandleGiteaComment,
 }));
 
+vi.mock('../handleIssue', () => ({
+  handleGiteaIssue: mockHandleGiteaIssue,
+}));
+
 function sign(body: string): string {
   return createHmac('sha256', 'gitea-secret').update(body).digest('hex');
 }
@@ -49,6 +55,7 @@ describe('gitea webhook router', () => {
     vi.resetModules();
     mockHandleGiteaPullRequest.mockReset();
     mockHandleGiteaComment.mockReset();
+    mockHandleGiteaIssue.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
@@ -56,6 +63,7 @@ describe('gitea webhook router', () => {
     );
     mockHandleGiteaPullRequest.mockResolvedValue({ status: 'ok' });
     mockHandleGiteaComment.mockResolvedValue({ status: 'ok' });
+    mockHandleGiteaIssue.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -274,6 +282,51 @@ describe('gitea webhook router', () => {
         }),
       }),
       { forcePullRequestComment: false },
+    );
+  });
+
+  it('records and routes plain issues webhooks', async () => {
+    const payload = {
+      action: 'opened',
+      sender: { id: 7, login: 'alice' },
+      repository: {
+        id: 123,
+        full_name: 'acme/backend',
+        html_url: 'https://git.example.com/acme/backend',
+      },
+      issue: {
+        number: 77,
+        title: 'Broken feature',
+        body: 'Something is broken.',
+        html_url: 'https://git.example.com/acme/backend/issues/77',
+        state: 'open',
+        labels: [{ name: 'bug' }],
+      },
+    };
+    const body = JSON.stringify(payload);
+
+    const response = await app.request('http://localhost/api/webhooks/gitea', {
+      method: 'POST',
+      headers: {
+        'x-gitea-signature': sign(body),
+        'x-gitea-event': 'issues',
+        'x-gitea-delivery': 'delivery-issue-1',
+      },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-issue-1',
+      'issues.opened',
+      expect.objectContaining({ action: 'opened' }),
+      expect.any(Function),
+      { provider: 'gitea' },
+    );
+    expect(mockHandleGiteaIssue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue: expect.objectContaining({ number: 77 }),
+      }),
     );
   });
 

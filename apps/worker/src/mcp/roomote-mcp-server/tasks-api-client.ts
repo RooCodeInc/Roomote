@@ -30,6 +30,7 @@ import type {
   SubmitTaskSuggestionsResponse,
   SourceControlPullRequestReadResponse,
   SourceControlPullRequestResponse,
+  SourceControlIssueResponse,
 } from './types.js';
 
 /**
@@ -332,6 +333,33 @@ export async function writeSourceControl(
       body: JSON.stringify(params),
     },
     'Failed to write source control state',
+  );
+}
+
+/**
+ * Read or comment on a plain issue through the platform API. Provider tokens
+ * remain server-side; the task supplies only its scoped issue coordinates.
+ */
+export async function manageSourceControlIssue(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    action: 'get_issue' | 'list_issue_comments' | 'create_issue_comment';
+    repositoryFullName: string;
+    issueNumber: number;
+    body?: string;
+    sourceControlProvider?: SourceControlProvider;
+  },
+): Promise<SourceControlIssueResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/source_control`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to manage source control issue',
   );
 }
 

@@ -111,7 +111,7 @@ describe('formatAutomationLabel', () => {
     );
     expect(formatAutomationLabel('ci-fixer')).toBe('CI Fixer');
     expect(formatAutomationLabel('codeql_triage')).toBe('CodeQL Triage');
-    expect(formatAutomationLabel('issue_fixer')).toBe('Issue Fixer');
+    expect(formatAutomationLabel('issue_fixer')).toBe('Triage Issues');
   });
 
   it('does not treat Object.prototype keys as token overrides', () => {
@@ -127,6 +127,17 @@ describe('formatAutomationAttributionLabel', () => {
     );
     expect(formatAutomationAttributionLabel('conflict_resolver')).toBe(
       'Conflict Resolver Automation',
+    );
+  });
+
+  it('uses the user-entered custom automation name when provided', () => {
+    expect(
+      formatAutomationAttributionLabel('custom_automation', {
+        actorDisplayName: 'Weekly flaky-test scan',
+      }),
+    ).toBe('Weekly flaky-test scan Automation');
+    expect(formatAutomationAttributionLabel('custom_automation')).toBe(
+      'Custom Automation',
     );
   });
 });

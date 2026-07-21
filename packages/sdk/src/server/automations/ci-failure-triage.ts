@@ -1,18 +1,28 @@
 import {
   buildCiFailureTriageFingerprint,
   buildCiFailureTriagePrompt,
-  buildRepositoryCoverage,
   enqueueTask,
-  getEnvironmentBackedCoverage,
+  findEnvironmentForRepo,
   releaseCiFailureTriageInvestigation,
   tryClaimCiFailureTriageInvestigation,
+  type CiFailureTriageTriggeringRun,
 } from '@roomote/cloud-agents/server';
 import {
   db,
   getAutomationRuntime,
   recordAutomationRunOutcome,
 } from '@roomote/db/server';
-import { TaskPayloadKind } from '@roomote/types';
+import {
+  getGitLabPipelineFailureEvidence,
+  getLatestGitLabPipeline,
+  isNestedGitLabPipelineSource,
+  resolveGitLabInstanceHost,
+} from '@roomote/gitlab';
+import {
+  getTriggerableBackgroundAutomationDescriptorByKey,
+  TaskPayloadKind,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 import {
   buildDestinationTaskPayloadFields,
@@ -20,8 +30,8 @@ import {
   resolveAutomationRuntimeDestination,
 } from './destination';
 import {
-  getActiveRepositoryFullNames,
-  hasActiveGitHubInstallation,
+  findEnvironmentIdForRepositoryId,
+  getActiveRepositoriesForProviders,
 } from './github-deployment-scope';
 import {
   emptyJobResult,
@@ -67,53 +77,165 @@ export async function ciFailureTriageJob(
       return result;
     }
 
-    if (!(await hasActiveGitHubInstallation())) {
-      result.skippedReason = 'GitHub is not configured';
-      return result;
-    }
+    const supportedProviders =
+      (getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage')
+        ?.supportedSourceControlProviders ?? [
+        'github',
+      ]) as SourceControlProvider[];
 
-    const selectedRepositories = await getActiveRepositoryFullNames();
-    const repositoryCoverage =
-      await buildRepositoryCoverage(selectedRepositories);
-    const environmentBacked = getEnvironmentBackedCoverage(repositoryCoverage);
+    const selectedRepositories =
+      await getActiveRepositoriesForProviders(supportedProviders);
 
-    if (environmentBacked.length === 0) {
+    if (selectedRepositories.length === 0) {
       result.skippedReason =
-        'no repositories are covered by a configured environment';
+        'No active repositories for supported source-control providers.';
       return result;
     }
 
     const channelId = destination.channelId;
     let launched = 0;
+    let consideredWithEnvironment = 0;
+    // Resolved once on first GitLab repository; the deployment holds a single
+    // GitLab credential/base URL, so only repositories on that host can be
+    // inspected with it.
+    let deploymentGitLabHost: string | undefined;
 
-    for (const coverage of environmentBacked) {
-      const environmentId = coverage.targetEnvironmentId;
+    // Walk every provider+host+fullName identity and resolve coverage through
+    // the repository-id environment mapping (not fullName).
+    for (const selectedRepository of selectedRepositories) {
+      // Prefer the provider+host-scoped mapping row. Path-only fullName fallback
+      // is GitHub-only so GitLab same-path hosts cannot mis-resolve workspaces.
+      const mappedEnvironmentId = await findEnvironmentIdForRepositoryId(
+        selectedRepository.id,
+      );
+      const environmentId =
+        mappedEnvironmentId ??
+        (selectedRepository.sourceControlProvider === 'github'
+          ? await findEnvironmentForRepo(
+              selectedRepository.fullName,
+              undefined,
+              'github',
+            )
+          : undefined);
       if (!environmentId) {
         continue;
+      }
+      consideredWithEnvironment += 1;
+
+      const sourceControlProvider = selectedRepository.sourceControlProvider;
+      let triggeringRun: CiFailureTriageTriggeringRun | undefined;
+      let workflowName = 'manual-run-now';
+      let headBranch = 'default';
+      let claimMarker = `manual:${selectedRepository.fullName}`;
+
+      if (sourceControlProvider === 'gitlab') {
+        try {
+          deploymentGitLabHost ??= await resolveGitLabInstanceHost();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to resolve the GitLab instance host (${message})`,
+          );
+          continue;
+        }
+
+        // Project ids are only unique per instance; querying another host's
+        // repository with the deployment credential would read (and possibly
+        // triage) an unrelated project. A hostless legacy row is an unknown
+        // instance, so it gets the same treatment; re-syncing GitLab
+        // repositories backfills `host`.
+        const repositoryHost = selectedRepository.host?.trim().toLowerCase();
+        if (repositoryHost !== deploymentGitLabHost) {
+          console.log(
+            `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: repository host ${repositoryHost ?? 'unknown'} does not match the deployment GitLab instance ${deploymentGitLabHost}`,
+          );
+          continue;
+        }
+
+        const projectId = selectedRepository.externalRepoId?.trim();
+        if (!projectId) {
+          result.errors.push(
+            `${selectedRepository.fullName}: GitLab project id is unavailable`,
+          );
+          continue;
+        }
+
+        try {
+          const latestPipeline = await getLatestGitLabPipeline({
+            projectId,
+            ref: selectedRepository.defaultBranch,
+          });
+
+          if (
+            !latestPipeline ||
+            latestPipeline.status.toLowerCase() !== 'failed'
+          ) {
+            console.log(
+              `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: latest GitLab default-branch pipeline is not failed`,
+            );
+            continue;
+          }
+
+          if (isNestedGitLabPipelineSource(latestPipeline.source)) {
+            console.log(
+              `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: latest GitLab pipeline source is nested/child (${latestPipeline.source})`,
+            );
+            continue;
+          }
+
+          const failureEvidence = await getGitLabPipelineFailureEvidence({
+            projectId,
+            pipelineId: latestPipeline.id,
+          });
+          workflowName = latestPipeline.name?.trim() || 'pipeline';
+          headBranch = latestPipeline.ref;
+          claimMarker = latestPipeline.web_url;
+          triggeringRun = {
+            repositoryFullName: selectedRepository.fullName,
+            workflowName,
+            runUrl: latestPipeline.web_url,
+            headBranch,
+            headSha: latestPipeline.sha,
+            provider: 'gitlab',
+            failureEvidence,
+          };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to inspect GitLab pipeline (${message})`,
+          );
+          continue;
+        }
       }
 
       // Repo claim blocks double-start against an active webhook investigation.
       const fingerprint = buildCiFailureTriageFingerprint({
-        repositoryFullName: coverage.repositoryFullName,
-        workflowName: 'manual-run-now',
-        headBranch: 'default',
+        repositoryFullName: selectedRepository.fullName,
+        workflowName,
+        headBranch,
+        repositoryHost: selectedRepository.host,
+        provider: sourceControlProvider,
       });
       const claimed = await tryClaimCiFailureTriageInvestigation({
-        repositoryFullName: coverage.repositoryFullName,
+        provider: sourceControlProvider,
+        repositoryFullName: selectedRepository.fullName,
+        repositoryHost: selectedRepository.host,
         fingerprint,
-        marker: `manual:${coverage.repositoryFullName}`,
+        marker: claimMarker,
       });
 
       if (!claimed) {
         console.log(
-          `${LOG_PREFIX} Skipping ${coverage.repositoryFullName}: active investigation claim`,
+          `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: active investigation claim`,
         );
         continue;
       }
 
       const coverageSlice = [
         {
-          repositoryFullName: coverage.repositoryFullName,
+          repositoryFullName: selectedRepository.fullName,
           targetEnvironmentId: environmentId,
         },
       ];
@@ -124,15 +246,24 @@ export async function ciFailureTriageJob(
             task: {
               type: TaskPayloadKind.StandardTask,
               payload: {
-                repo: coverage.repositoryFullName,
+                repo: selectedRepository.fullName,
                 environmentId,
-                selectedRepositories: [coverage.repositoryFullName],
+                selectedRepositories: [selectedRepository.fullName],
+                ...(sourceControlProvider !== 'github'
+                  ? { sourceControlProvider }
+                  : {}),
+                ...(sourceControlProvider !== 'github' &&
+                selectedRepository.host
+                  ? { sourceControlHost: selectedRepository.host }
+                  : {}),
                 description: buildCiFailureTriagePrompt({
                   channelId,
-                  repositoryFullNames: [coverage.repositoryFullName],
+                  repositoryFullNames: [selectedRepository.fullName],
                   repositoryCoverage: coverageSlice,
                   trigger: 'manual',
                   destinationProvider: destination.provider,
+                  sourceControlProvider,
+                  triggeringRun,
                 }),
                 ...buildDestinationTaskPayloadFields(destination),
                 visibleInTranscript: false,
@@ -156,7 +287,9 @@ export async function ciFailureTriageJob(
         break;
       } catch (enqueueError) {
         await releaseCiFailureTriageInvestigation({
-          repositoryFullName: coverage.repositoryFullName,
+          provider: sourceControlProvider,
+          repositoryFullName: selectedRepository.fullName,
+          repositoryHost: selectedRepository.host,
           fingerprint,
         }).catch(() => undefined);
         const message =
@@ -164,12 +297,17 @@ export async function ciFailureTriageJob(
             ? enqueueError.message
             : String(enqueueError);
         result.errors.push(
-          `${coverage.repositoryFullName}: failed to launch (${message})`,
+          `${selectedRepository.fullName}: failed to launch (${message})`,
         );
         console.error(
-          `${LOG_PREFIX} Failed to launch for ${coverage.repositoryFullName}: ${message}`,
+          `${LOG_PREFIX} Failed to launch for ${selectedRepository.fullName}: ${message}`,
         );
       }
+    }
+
+    if (consideredWithEnvironment === 0 && launched === 0) {
+      result.skippedReason =
+        'no repositories are covered by a configured environment';
     }
 
     await recordAutomationRunOutcome(db, {
@@ -178,7 +316,7 @@ export async function ciFailureTriageJob(
       at: new Date(),
     });
 
-    if (launched === 0) {
+    if (launched === 0 && !result.skippedReason) {
       result.skippedReason =
         result.errors.length > 0
           ? 'Failed to launch the CI failure fix task.'

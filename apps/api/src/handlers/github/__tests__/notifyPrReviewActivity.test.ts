@@ -290,16 +290,39 @@ const IN_PROGRESS_SUMMARY_BODY = [
   '<!-- roomote-review-status:end -->',
 ].join('\n');
 
+const ALL_ADDRESSED_SUMMARY_BODY = [
+  '<!-- roomote-review-summary sha=abcdef01 mode=initial -->',
+  '<!-- roomote-review-status:start -->',
+  '**All 1 issue addressed.** [See task](https://roomote.dev/task/x)',
+  '<!-- roomote-review-status:end -->',
+  '<!-- roomote-review-checklist:start -->',
+  '- [x] Update the doc comment',
+  '<!-- roomote-review-checklist:end -->',
+].join('\n');
+
+const CHECKLIST_ONLY_EDIT_BODY = [
+  '<!-- roomote-review-summary sha=f0c89ce4 mode=initial -->',
+  '<!-- roomote-review-status:start -->',
+  '1 minor doc note; no blocking issues. [See task](https://roomote.dev/task/x)',
+  '<!-- roomote-review-status:end -->',
+  '<!-- roomote-review-checklist:start -->',
+  '- [x] Update the doc comment',
+  '<!-- roomote-review-checklist:end -->',
+].join('\n');
+
 function summaryPayload({
   body = TERMINAL_SUMMARY_BODY,
   login = 'roomote[bot]',
   commentId = 99,
   isPr = true,
+  previousBody,
 }: {
   body?: string;
   login?: string | null;
   commentId?: number;
   isPr?: boolean;
+  /** When set, models an issue_comment.edited payload with changes.body.from. */
+  previousBody?: string | null;
 } = {}): any {
   return {
     repository,
@@ -316,11 +339,23 @@ function summaryPayload({
       html_url: `https://github.com/owner/repo/pull/42#issuecomment-${commentId}`,
       user: login === null ? null : { login },
     },
+    ...(previousBody !== undefined
+      ? {
+          changes: {
+            body:
+              previousBody === null
+                ? {}
+                : {
+                    from: previousBody,
+                  },
+          },
+        }
+      : {}),
   };
 }
 
 describe('buildPrReviewSummaryNotification', () => {
-  it('builds a review_summary event from a terminal Roomote summary comment', () => {
+  it('builds a review_summary event from a terminal Roomote summary comment on create', () => {
     const notification = buildPrReviewSummaryNotification(summaryPayload());
 
     expect(notification?.input).toEqual({
@@ -338,6 +373,54 @@ describe('buildPrReviewSummaryNotification', () => {
     });
     expect(notification?.dedupKey).toContain('99');
     expect(notification?.dedupKey).toContain('f0c89ce4');
+  });
+
+  it('notifies when an edit flips in-progress status to a terminal review result', () => {
+    const notification = buildPrReviewSummaryNotification(
+      summaryPayload({
+        body: TERMINAL_SUMMARY_BODY,
+        previousBody: IN_PROGRESS_SUMMARY_BODY,
+      }),
+    );
+
+    expect(notification?.input.event).toMatchObject({
+      kind: 'review_summary',
+      summary: '1 minor doc note; no blocking issues.',
+      roomoteAuthored: true,
+    });
+  });
+
+  it('skips fixer terminal-to-terminal rewrites of the pinned summary', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({
+          body: ALL_ADDRESSED_SUMMARY_BODY,
+          previousBody: TERMINAL_SUMMARY_BODY,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('skips edited summaries that only change the checklist', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({
+          body: CHECKLIST_ONLY_EDIT_BODY,
+          previousBody: TERMINAL_SUMMARY_BODY,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('skips edited events without a previous body', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({
+          body: TERMINAL_SUMMARY_BODY,
+          previousBody: null,
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('skips in-progress summary comments', () => {

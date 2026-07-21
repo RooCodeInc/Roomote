@@ -6,6 +6,11 @@ import type {
 
 import { ComputeProviderSection } from './ComputeProviderSection';
 
+// Requires a TRPCProvider; its behavior is not under test here.
+vi.mock('./DockerEnvironmentValidation', () => ({
+  DockerEnvironmentValidation: () => null,
+}));
+
 type ComputeProviderStatus = SetupComputeStatus['providers'][number];
 
 const apiKeyField: ComputeProviderStatus['fields'][number] = {

@@ -134,6 +134,7 @@ import {
   getLinkedMicrosoftTeamsAccountCommand,
 } from '../commands/linked-accounts';
 import {
+  getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
   updatePersonalPreferencesCommand,
 } from '../commands/preferences';
@@ -267,6 +268,7 @@ import {
   clearComputeConfigCommand,
   setDefaultComputeProviderCommand,
   setLocalDockerEnabledCommand,
+  validateDockerEnvironmentCommand,
 } from '../commands/compute';
 import {
   getTaskSuggestionFilterOptionsCommand,
@@ -277,11 +279,16 @@ import {
   triggerTaskSuggestionsCommand,
 } from '../commands/task-suggestions';
 import {
+  createCustomAutomationCommand,
+  deleteCustomAutomationCommand,
   getBackgroundAgentSettingsCommand,
   listAutomationDiscordChannelsCommand,
+  listCustomAutomationsCommand,
   listSlackChannelsCommand,
+  triggerCustomAutomationCommand,
   updateBackgroundAgentSettingsCommand,
   triggerAutomationCommand,
+  updateCustomAutomationCommand,
 } from '../commands/automations';
 import {
   getAgentBehaviorSettingsCommand,
@@ -518,6 +525,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
+        issueFixerInstructions: z.string().max(8_000).nullable().optional(),
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
         suggesterDiscordChannel: z
@@ -610,6 +618,81 @@ const automationsRouter = createRouter({
     )
     .mutation(({ ctx: { auth }, input }) =>
       triggerAutomationCommand(auth, input),
+    ),
+
+  listCustomAutomations: protectedProcedure.query(({ ctx: { auth } }) =>
+    listCustomAutomationsCommand(auth),
+  ),
+
+  createCustomAutomation: protectedProcedure
+    .input(
+      z.object({
+        name: z.string().trim().min(1).max(100),
+        prompt: z.string().trim().min(1).max(8_000),
+        enabled: z.boolean(),
+        scheduleMode: z.enum([
+          'off',
+          'every_hour',
+          'every_6_hours',
+          'daily',
+          'weekly',
+        ]),
+        environmentId: z.string().uuid(),
+        targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']),
+        targetChannelId: z.string().trim().min(1).max(160),
+        targetServiceUrl: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .nullable()
+          .optional(),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) =>
+      createCustomAutomationCommand(auth, input),
+    ),
+
+  updateCustomAutomation: protectedProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        name: z.string().trim().min(1).max(100),
+        prompt: z.string().trim().min(1).max(8_000),
+        enabled: z.boolean(),
+        scheduleMode: z.enum([
+          'off',
+          'every_hour',
+          'every_6_hours',
+          'daily',
+          'weekly',
+        ]),
+        environmentId: z.string().uuid(),
+        targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']),
+        targetChannelId: z.string().trim().min(1).max(160),
+        targetServiceUrl: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .nullable()
+          .optional(),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) =>
+      updateCustomAutomationCommand(auth, input),
+    ),
+
+  deleteCustomAutomation: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      deleteCustomAutomationCommand(auth, input),
+    ),
+
+  triggerCustomAutomation: protectedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      triggerCustomAutomationCommand(auth, input),
     ),
 });
 
@@ -1119,6 +1202,9 @@ export const appRouter = createRouter({
   }),
 
   preferences: createRouter({
+    accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
+      getPersonalAccountCapabilitiesCommand(auth),
+    ),
     getPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalPreferencesCommand(auth),
     ),
@@ -1592,6 +1678,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setLocalDockerEnabledCommand(auth, input),
       ),
+
+    validateDockerEnvironment: protectedProcedure.mutation(
+      ({ ctx: { auth } }) => validateDockerEnvironmentCommand(auth),
+    ),
   }),
 
   taskEnvVarRequests: createRouter({

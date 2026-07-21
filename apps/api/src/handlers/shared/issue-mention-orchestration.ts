@@ -5,13 +5,7 @@ import {
   enqueueTask,
   escapeTaskContextText,
 } from '@roomote/cloud-agents/server';
-import {
-  db,
-  environmentRepositoryMappings,
-  eq,
-  asc,
-  findReusableGitHubIssueTaskOwner,
-} from '@roomote/db/server';
+import { findReusableGitHubIssueTaskOwner } from '@roomote/db/server';
 import {
   type RunStatus,
   type SourceControlProvider,
@@ -28,13 +22,14 @@ import {
   sendMessageToTask,
   steerMessageToTask,
 } from '../tasks/sendMessageToTask';
+import { resolveMappedEnvironmentId } from './repository-environment';
 
 const EXISTING_TASK_WAIT_TIMEOUT_MS = 15_000;
 const EXISTING_TASK_WAIT_POLL_MS = 500;
 
 type IssueMentionProvider = Extract<
   SourceControlProvider,
-  'github' | 'gitlab' | 'gitea'
+  'github' | 'gitlab' | 'gitea' | 'ado'
 >;
 
 type IssueMentionOrchestrationInput = {
@@ -68,6 +63,11 @@ type IssueMentionOrchestrationInput = {
   /** Human provider name in task prompts (“GitHub”, “GitLab”, “Gitea”). */
   providerDisplayName: string;
   /**
+   * Noun for the work unit in prompts (“issue”, “work item”). Defaults to
+   * “issue”.
+   */
+  resourceLabel?: string;
+  /**
    * Untrusted block source id for the issue body/description context section.
    * e.g. `github_issue_body`, `gitlab_issue_description`.
    */
@@ -78,6 +78,12 @@ type IssueMentionOrchestrationInput = {
    * context to include, a default is used from `issueBodyContextLabel`.
    */
   issueBodyContextLabel: string;
+  /**
+   * Optional preformatted section listing issues/PRs linked to the mention
+   * target (for example GitHub timeline cross-references). Included in both
+   * fresh-task and follow-up mention prompts when present.
+   */
+  linkedReferencesSection?: string | null;
   postComment: (body: string) => Promise<void>;
   formatFollowUpReply: (taskLink: string | null) => string;
   formatStartedReply: (taskLink: string | null) => string;
@@ -88,29 +94,9 @@ type IssueMentionOrchestrationInput = {
   }) => string | null;
 };
 
-async function resolveMappedEnvironmentId(
-  repositoryId: string,
-): Promise<string | null> {
-  const mappings = await db
-    .select({
-      environmentId: environmentRepositoryMappings.environmentId,
-    })
-    .from(environmentRepositoryMappings)
-    .where(eq(environmentRepositoryMappings.repositoryId, repositoryId))
-    .orderBy(asc(environmentRepositoryMappings.environmentId));
-
-  if (mappings.length === 0) {
-    return null;
-  }
-
-  // When multiple environments map to the same repository, pick a stable
-  // ordered environment id and still pin the selected repository so the worker
-  // has a concrete checkout target.
-  return mappings[0]?.environmentId ?? null;
-}
-
 function buildIssueMentionPrompt({
   providerDisplayName,
+  resourceLabel,
   repositoryFullName,
   issueNumber,
   issueTitle,
@@ -120,8 +106,11 @@ function buildIssueMentionPrompt({
   commenterLogin,
   issueBodySource,
   issueBodyContextLabel,
+  linkedReferencesSection,
+  linkedReferencesSource,
 }: {
   providerDisplayName: string;
+  resourceLabel: string;
   repositoryFullName: string;
   issueNumber: number;
   issueTitle: string;
@@ -131,6 +120,8 @@ function buildIssueMentionPrompt({
   commenterLogin: string;
   issueBodySource: string;
   issueBodyContextLabel: string;
+  linkedReferencesSection?: string | null;
+  linkedReferencesSource: string;
 }): string {
   const trimmedIssueBody = issueBody?.trim() ?? '';
   const trimmedCommentBody = commentBody.trim();
@@ -147,14 +138,25 @@ function buildIssueMentionPrompt({
           }),
         ]
       : [];
+  const linkedSection = linkedReferencesSection?.trim()
+    ? [
+        '',
+        'Linked issues and pull requests (context only):',
+        buildUntrustedExternalContentBlock({
+          source: linkedReferencesSource,
+          text: linkedReferencesSection.trim(),
+        }),
+      ]
+    : [];
 
   return [
-    `${commenterLogin} mentioned Roomote on ${providerDisplayName} issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
-    `Issue URL: ${issueUrl}`,
+    `${commenterLogin} mentioned Roomote on ${providerDisplayName} ${resourceLabel} #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
+    `${resourceLabel.charAt(0).toUpperCase()}${resourceLabel.slice(1)} URL: ${issueUrl}`,
     '',
     'Mention comment (the request to act on):',
     buildMentionRequestBlock(trimmedCommentBody),
     ...issueBodySection,
+    ...linkedSection,
     '',
     buildUntrustedContentPolicy(),
   ].join('\n');
@@ -162,30 +164,48 @@ function buildIssueMentionPrompt({
 
 function buildIssueFollowUpMessage({
   providerDisplayName,
+  resourceLabel,
   repositoryFullName,
   issueNumber,
   issueTitle,
   issueUrl,
   commentBody,
   commenterLogin,
+  linkedReferencesSection,
+  linkedReferencesSource,
 }: {
   providerDisplayName: string;
+  resourceLabel: string;
   repositoryFullName: string;
   issueNumber: number;
   issueTitle: string;
   issueUrl: string;
   commentBody: string;
   commenterLogin: string;
+  linkedReferencesSection?: string | null;
+  linkedReferencesSource: string;
 }): string {
+  const linkedSection = linkedReferencesSection?.trim()
+    ? [
+        '',
+        'Linked issues and pull requests (context only):',
+        buildUntrustedExternalContentBlock({
+          source: linkedReferencesSource,
+          text: linkedReferencesSection.trim(),
+        }),
+        '',
+      ]
+    : [''];
+
   return [
-    `${commenterLogin} mentioned Roomote again on ${providerDisplayName} issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
-    `Issue URL: ${issueUrl}`,
+    `${commenterLogin} mentioned Roomote again on ${providerDisplayName} ${resourceLabel} #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
+    `${resourceLabel.charAt(0).toUpperCase()}${resourceLabel.slice(1)} URL: ${issueUrl}`,
     '',
-    'This is a follow-up on the existing Roomote task for this issue. Continue that work instead of starting a separate task.',
+    `This is a follow-up on the existing Roomote task for this ${resourceLabel}. Continue that work instead of starting a separate task.`,
     '',
     'Mention comment (the request to act on):',
     buildMentionRequestBlock(commentBody),
-    '',
+    ...linkedSection,
     buildUntrustedContentPolicy(),
   ].join('\n');
 }
@@ -347,14 +367,18 @@ export async function orchestrateIssueMention(
     followUpCommenterDisplayName,
     retrySandboxBoot = false,
     providerDisplayName,
+    resourceLabel = 'issue',
     issueBodySource,
     issueBodyContextLabel,
+    linkedReferencesSection,
     postComment,
     formatFollowUpReply,
     formatStartedReply,
     formatStartFailed,
     tryBuildTaskLink,
   } = input;
+
+  const linkedReferencesSource = `${provider}_linked_references`;
 
   const environmentId = await resolveMappedEnvironmentId(repositoryId);
 
@@ -378,12 +402,15 @@ export async function orchestrateIssueMention(
   if (existingIssueOwner?.taskId) {
     const followUpMessage = buildIssueFollowUpMessage({
       providerDisplayName,
+      resourceLabel,
       repositoryFullName,
       issueNumber,
       issueTitle,
       issueUrl,
       commentBody,
       commenterLogin,
+      linkedReferencesSection,
+      linkedReferencesSource,
     });
 
     const delivery = await deliverIssueFollowUpToExistingTask({
@@ -416,6 +443,7 @@ export async function orchestrateIssueMention(
 
   const prompt = buildIssueMentionPrompt({
     providerDisplayName,
+    resourceLabel,
     repositoryFullName,
     issueNumber,
     issueTitle,
@@ -425,6 +453,8 @@ export async function orchestrateIssueMention(
     commenterLogin,
     issueBodySource,
     issueBodyContextLabel,
+    linkedReferencesSection,
+    linkedReferencesSource,
   });
 
   const taskPayload = {

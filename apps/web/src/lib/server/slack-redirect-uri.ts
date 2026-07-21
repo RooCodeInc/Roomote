@@ -1,5 +1,7 @@
-import { Env } from '@/lib/server';
 import { SLACK_APP_INSTALL_CALLBACK_PATH } from '@/lib/slack-callback-paths';
+
+import { Env } from './env';
+import { getPublicAppUrl } from './get-public-app-url';
 
 export function getSlackRedirectUri(): string {
   const configuredUri = Env.SLACK_REDIRECT_URI.trim();
@@ -8,5 +10,8 @@ export function getSlackRedirectUri(): string {
     return configuredUri;
   }
 
-  return new URL(SLACK_APP_INSTALL_CALLBACK_PATH, Env.R_APP_URL).toString();
+  return new URL(
+    SLACK_APP_INSTALL_CALLBACK_PATH,
+    getPublicAppUrl(Env),
+  ).toString();
 }

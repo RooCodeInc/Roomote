@@ -303,12 +303,14 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         }
       }
 
+      let intakeAckPinned = false;
       try {
         await provider.addReaction({
           channelId: channel.channelId,
           messageId: message.id,
           name: '👀',
         });
+        intakeAckPinned = true;
       } catch {
         // The launch matters more than the acknowledgement.
       }
@@ -328,6 +330,17 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
             : {}),
           initiator,
         },
+        ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
+        // Match normal gateway launches: explicit Discord reply targets belong
+        // in agent thread context, including monitored auto-start channels.
+        ...(message.message_reference?.message_id
+          ? {
+              replyToMessageId: message.message_reference.message_id,
+              ...(message.message_reference.channel_id
+                ? { replyToChannelId: message.message_reference.channel_id }
+                : {}),
+            }
+          : {}),
       });
 
       if (started.status !== 'started') {

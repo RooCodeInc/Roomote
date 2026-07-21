@@ -112,10 +112,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     }
 
     const threadId = parsePositiveInteger(input.threadId);
-    // Telegram's chronological chat already provides enough context. Quoting
-    // every inbound message duplicates the transcript and overwhelms both
-    // topic and non-topic conversations.
-    const replyToMessageId = undefined;
+    // Honor an explicit reply target when callers supply one (task closeouts,
+    // launch-failure recovery, onboarding threads). Callers that prefer a
+    // free-floating chronological send simply omit replyToMessageId.
+    const replyToMessageId = parsePositiveInteger(input.replyToMessageId);
     const useMarkdown = input.textFormat === 'markdown';
     const chunks: Array<{ markdown: string; html: string | null }> = text
       ? useMarkdown

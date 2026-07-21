@@ -1772,6 +1772,32 @@ describe('finishRun', () => {
       });
     });
 
+    it('attaches Discord startup failures to a root opener when no thread id exists', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          payload: {
+            repo: 'owner/repo',
+            communicationProvider: 'discord',
+            communicationChannelId: 'channel-1',
+            communicationMessageId: 'opener-1',
+          } as unknown as TaskRun['payload'],
+        }),
+      );
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockDiscordPostMessage).toHaveBeenCalledWith({
+        channelId: 'channel-1',
+        replyToMessageId: 'opener-1',
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        textFormat: 'markdown',
+      });
+    });
+
     it('uses runtime-failure copy after Discord work has started', async () => {
       mockFindFirstRun.mockResolvedValue(
         makeRun({

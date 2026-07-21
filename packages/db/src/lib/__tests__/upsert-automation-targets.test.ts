@@ -8,16 +8,23 @@ function buildFakeTx(existingTargets: AutomationTarget[] | null) {
   const onConflictDoUpdate = vi.fn(async () => undefined);
   const values = vi.fn(() => ({ onConflictDoUpdate }));
   const insert = vi.fn(() => ({ values }));
+  const execute = vi.fn(async () => undefined);
   const findFirst = vi.fn(async () =>
     existingTargets === null ? undefined : { targets: existingTargets },
   );
 
   const tx = {
+    execute,
     insert,
     query: { automations: { findFirst } },
   } as unknown as DatabaseOrTransaction;
+  const transaction = vi.fn(
+    async (callback: (nestedTx: DatabaseOrTransaction) => Promise<unknown>) =>
+      callback(tx),
+  );
+  Object.assign(tx, { transaction });
 
-  return { tx, values, findFirst };
+  return { tx, values, findFirst, execute, transaction };
 }
 
 const teamsTarget: AutomationTarget = {
@@ -34,7 +41,7 @@ const slackTarget: AutomationTarget = {
 
 describe('upsertAutomation target preservation', () => {
   it('preserves targets of unmanaged kinds when managedTargetKinds is set', async () => {
-    const { tx, values } = buildFakeTx([
+    const { tx, values, execute, transaction } = buildFakeTx([
       { ...slackTarget, externalRef: 'C_OLD' },
       teamsTarget,
     ]);
@@ -51,10 +58,14 @@ describe('upsertAutomation target preservation', () => {
         targets: [teamsTarget, slackTarget],
       }),
     );
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it('replaces targets wholesale when managedTargetKinds is omitted', async () => {
-    const { tx, values, findFirst } = buildFakeTx([teamsTarget]);
+    const { tx, values, findFirst, execute, transaction } = buildFakeTx([
+      teamsTarget,
+    ]);
 
     await upsertAutomation(tx, {
       key: 'announcer',
@@ -66,6 +77,8 @@ describe('upsertAutomation target preservation', () => {
     expect(values).toHaveBeenCalledWith(
       expect.objectContaining({ targets: [slackTarget] }),
     );
+    expect(transaction).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('clears managed kinds while preserving others when the new list is empty', async () => {

@@ -47,9 +47,12 @@ type TaskInitiatorRow = {
 function getInitiatorLabel(row: TaskInitiatorRow): string {
   if (row.initiatorKind === 'automation') {
     // Match the web dashboard/analytics label formatting so an automation is
-    // named consistently (e.g. `pr_review` -> "PR Review") across surfaces.
+    // named consistently across surfaces. Custom automations prefer the
+    // user-entered name stamped as actorDisplayName.
     return row.initiatorAutomation
-      ? formatAutomationLabel(row.initiatorAutomation)
+      ? formatAutomationLabel(row.initiatorAutomation, {
+          actorDisplayName: row.actorDisplayName,
+        })
       : 'automation';
   }
 

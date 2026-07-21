@@ -1,5 +1,14 @@
 export { announcerJob } from './announcer';
+export {
+  customAutomationsJob,
+  runCustomAutomationNow,
+} from './custom-automations';
 export { ciFailureTriageJob } from './ci-failure-triage';
+export {
+  launchCiFailureTriageForFailedRun,
+  CI_FAILURE_TRIAGE_DEBOUNCE_SECONDS,
+  type CiFailureTriageLaunchResult,
+} from './ci-failure-triage-launch';
 export { codeQualityAuditorJob } from './code-quality-auditor';
 export { codeqlTriageJob } from './codeql-triage';
 export { conflictScanJob } from './conflict-scan';
@@ -11,7 +20,9 @@ export { sentryTriageJob } from './sentry-triage';
 export { suggesterJob } from './suggester';
 export { getAutomationRunner, runAutomationNow } from './run-now';
 export {
+  buildDestinationTaskPayloadFields,
   findTeamsConversationDisplayName,
+  findTeamsConversationServiceUrl,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
@@ -21,7 +32,9 @@ export {
   loadAutomationThreadFeedbackReport,
 } from './automation-thread-feedback';
 export {
+  findEnvironmentIdForRepositoryId,
   getActiveRepositoryFullNames,
+  getActiveRepositoriesForProviders,
   hasActiveGitHubInstallation,
 } from './github-deployment-scope';
 export type {

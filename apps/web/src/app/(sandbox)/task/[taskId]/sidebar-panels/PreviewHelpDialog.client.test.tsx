@@ -18,7 +18,7 @@ const { authState, statusState, startSetupMock } = vi.hoisted(() => ({
       setupTask: null as {
         taskId: string | null;
         status: string;
-        kind: 'preview' | 'environment';
+        kind: 'preview';
       } | null,
     },
   },
@@ -164,29 +164,6 @@ describe('PreviewHelpDialog', () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /view agent task/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('explains ongoing environment setup instead of claiming a preview agent', async () => {
-    authState.isAdmin = true;
-    statusState.data = {
-      ...statusState.data,
-      setupTask: {
-        taskId: 'env-setup-9',
-        status: 'running',
-        kind: 'environment',
-      },
-    };
-
-    renderDialog();
-
-    expect(
-      await screen.findByText(
-        'Web App is still being set up. Previews may not work until setup completes.',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /fix previews with an agent/i }),
     ).not.toBeInTheDocument();
   });
 });

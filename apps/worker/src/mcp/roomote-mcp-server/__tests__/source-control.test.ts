@@ -210,3 +210,79 @@ describe('handleManageSourceControl create_or_update_pull_request', () => {
     expect(parsed.error).toContain('Retry with targetBranch set');
   });
 });
+
+describe('handleManageSourceControl issue actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('forwards provider-neutral issue reads to the platform', async () => {
+    vi.mocked(tasksApiClient.manageSourceControlIssue).mockResolvedValueOnce({
+      success: true,
+      action: 'get_issue',
+      provider: 'gitlab',
+      repositoryFullName: 'acme/web',
+      number: 14,
+      warnings: [],
+      title: 'Broken checkout',
+      state: 'open',
+    });
+
+    const result = await handleManageSourceControl(
+      {
+        action: 'get_issue',
+        repositoryFullName: 'acme/web',
+        issueNumber: 14,
+        sourceControlProvider: 'gitlab',
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      action: 'get_issue',
+      title: 'Broken checkout',
+    });
+    expect(tasksApiClient.manageSourceControlIssue).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      {
+        action: 'get_issue',
+        repositoryFullName: 'acme/web',
+        issueNumber: 14,
+        body: undefined,
+        sourceControlProvider: 'gitlab',
+      },
+    );
+  });
+
+  it('requires issueNumber and a body for issue comments', async () => {
+    const missingNumber = await handleManageSourceControl(
+      {
+        action: 'get_issue',
+        repositoryFullName: 'acme/web',
+      },
+      config,
+      'task-1',
+    );
+    const missingBody = await handleManageSourceControl(
+      {
+        action: 'create_issue_comment',
+        repositoryFullName: 'acme/web',
+        issueNumber: 14,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(missingNumber.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: 'issueNumber is required for get_issue',
+    });
+    expect(JSON.parse(missingBody.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: 'body is required for create_issue_comment',
+    });
+    expect(tasksApiClient.manageSourceControlIssue).not.toHaveBeenCalled();
+  });
+});

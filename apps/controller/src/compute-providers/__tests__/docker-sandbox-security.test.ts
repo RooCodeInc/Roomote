@@ -1,17 +1,29 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   attachDockerEgressPolicy,
   buildDockerTaskDaemonResourceArgs,
   buildDockerWorkerResourceArgs,
+  classifyDockerSpawnError,
   cleanupStaleDockerSandboxes,
+  DockerBootError,
+  formatDockerCommandError,
+  formatSpawnWorkerError,
   getDockerTaskNetworkName,
+  getTaskRunErrorCode,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
   removeDockerSandboxResources,
   restoreDockerStandbyNetworking,
+  sanitizeDockerCommandForDisplay,
   type DockerCommand,
 } from '../docker-sandbox-security';
+import { TaskRunErrorCode } from '@roomote/types';
+
+const execFileAsync = promisify(execFile);
 
 describe('buildDockerWorkerResourceArgs', () => {
   it('enforces CPU, memory, swap, PID, configured disk, log, and capability bounds', () => {
@@ -256,6 +268,7 @@ describe('attachDockerEgressPolicy', () => {
         'ALL',
         '--cap-add',
         'NET_ADMIN',
+        'NET_RAW',
         'roomote-worker:test',
       ]),
     );
@@ -263,7 +276,48 @@ describe('attachDockerEgressPolicy', () => {
     expect(routeScript).toContain('ip route replace blackhole 169.254.0.0/16');
     expect(routeScript).toContain('ip route replace blackhole 10.0.0.0/8');
     expect(routeScript).toContain('ip route show default');
-    expect(routeScript).toContain('ip route replace blackhole "$gateway/32"');
+    expect(routeScript).not.toContain(
+      'ip route replace blackhole "$gateway/32"',
+    );
+    expect(routeScript).toContain(
+      'iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
+    );
+    expect(routeScript).toContain(
+      'iptables -C FORWARD -d "$gateway" -j DROP 2>/dev/null || iptables -A FORWARD -d "$gateway" -j DROP',
+    );
+    // Upgrades must heal netns state left by controllers that blackholed the
+    // gateway route in retained standby workers.
+    expect(routeScript).toContain(
+      'ip route del blackhole "$gateway/32" 2>/dev/null || true',
+    );
+  });
+
+  it('generates a syntactically valid shell script for the egress helper', async () => {
+    for (const blockDockerGateway of [true, false]) {
+      const runDocker = vi.fn<DockerCommand>().mockResolvedValue('');
+
+      await attachDockerEgressPolicy(
+        {
+          containerName: 'roomote-worker-92',
+          egressPolicy: 'internet',
+          image: 'roomote-worker:test',
+          platform: 'linux/amd64',
+          blockDockerGateway,
+        },
+        runDocker,
+      );
+
+      const helperRun = runDocker.mock.calls
+        .map(([args]) => args)
+        .find((args) => args[0] === 'run');
+      const routeScript = helperRun?.at(-1);
+      expect(routeScript).toBeTruthy();
+      // `sh -n` parses without executing; a syntax error here would make every
+      // sandbox spawn fail inside the egress helper container.
+      await expect(
+        execFileAsync('sh', ['-n', '-c', routeScript!]),
+      ).resolves.toBeTruthy();
+    }
   });
 
   it('keeps private host routes reachable for host-based local development', async () => {
@@ -642,5 +696,173 @@ describe('cleanupStaleDockerSandboxes', () => {
         runDocker,
       ),
     ).resolves.toBe(taskNetwork);
+  });
+});
+
+describe('formatDockerCommandError', () => {
+  it('leads with Docker stderr instead of the raw argv list', () => {
+    const message = formatDockerCommandError(
+      ['run', '-d', 'roomote-worker:local'],
+      {
+        message: 'Command failed: docker run -d roomote-worker:local',
+        cmd: 'docker run -d roomote-worker:local',
+        code: 125,
+        stderr:
+          "Unable to find image 'roomote-worker:local' locally\ndocker: Error response from daemon: pull access denied for roomote-worker, repository does not exist or may require 'docker login'\n",
+        stdout: '',
+      },
+    );
+
+    expect(message.startsWith('Failed to run docker run.')).toBe(true);
+    expect(message).toContain('pull access denied for roomote-worker');
+    expect(message.indexOf('pull access denied')).toBeLessThan(
+      message.indexOf('command:'),
+    );
+  });
+
+  it('redacts docker -e environment values from command diagnostics', () => {
+    const message = formatDockerCommandError(
+      ['exec', '-e', 'AUTH_TOKEN=super-secret', 'roomote-worker-1', 'true'],
+      {
+        message: 'Command failed',
+        cmd: 'docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+        code: 1,
+        stderr: 'container not running',
+        stdout: '',
+      },
+    );
+
+    expect(message).toContain('AUTH_TOKEN=<redacted>');
+    expect(message).not.toContain('super-secret');
+    expect(
+      sanitizeDockerCommandForDisplay([
+        'exec',
+        '-e',
+        'AUTH_TOKEN=super-secret',
+        'roomote-worker-1',
+      ]),
+    ).toBe('docker exec -e AUTH_TOKEN=<redacted> roomote-worker-1');
+  });
+
+  it('redacts auth tokens when reason falls back to raw error.message', () => {
+    const message = formatDockerCommandError(
+      ['exec', '-e', 'AUTH_TOKEN=super-secret', 'roomote-worker-1', 'true'],
+      {
+        message:
+          'Command failed: docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+        cmd: 'docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+        code: 1,
+        stderr: '',
+        stdout: '',
+      },
+    );
+
+    expect(message).toContain('AUTH_TOKEN=<redacted>');
+    expect(message).not.toContain('super-secret');
+    expect(formatSpawnWorkerError(new Error(message))).not.toContain(
+      'super-secret',
+    );
+  });
+
+  it('redacts auth tokens embedded in stderr/stdout diagnostics', () => {
+    const message = formatDockerCommandError(
+      ['run', '-d', 'roomote-worker:local'],
+      {
+        message: 'Command failed',
+        cmd: 'docker run -d roomote-worker:local',
+        code: 1,
+        stderr:
+          'failed: docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+        stdout:
+          'retry: docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+      },
+    );
+
+    expect(message).toContain('AUTH_TOKEN=<redacted>');
+    expect(message).not.toContain('super-secret');
+  });
+
+  it('formats plain Error messages for finishRun storage', () => {
+    expect(formatSpawnWorkerError(new Error('Machine unavailable'))).toBe(
+      'Machine unavailable',
+    );
+    expect(
+      formatSpawnWorkerError(
+        new Error(
+          'Failed to run docker run.\n\npull access denied\n\ncommand:\ndocker run -d x',
+        ),
+      ),
+    ).toContain('Failed to run docker run');
+  });
+});
+
+describe('docker spawn error wrapping', () => {
+  it('exposes a pure helper that never attaches a raw execFile cause', () => {
+    const raw = Object.assign(
+      new Error(
+        'Command failed: docker exec -e AUTH_TOKEN=super-secret c true',
+      ),
+      {
+        cmd: 'docker exec -e AUTH_TOKEN=super-secret c true',
+        stderr: '',
+        stdout: '',
+        code: 1,
+      },
+    );
+
+    const message = formatDockerCommandError(
+      ['exec', '-e', 'AUTH_TOKEN=super-secret', 'c', 'true'],
+      raw,
+    );
+    // Mirrors apps/controller docker() throw site: sanitized message, no cause.
+    const thrown = new Error(message);
+
+    expect(thrown.message).toContain('AUTH_TOKEN=<redacted>');
+    expect(thrown.message).not.toContain('super-secret');
+    expect(thrown.cause).toBeUndefined();
+  });
+});
+
+describe('classifyDockerSpawnError', () => {
+  it('categorizes daemon, image, port, and archive failures', () => {
+    expect(
+      classifyDockerSpawnError(
+        'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?',
+      ),
+    ).toBe(TaskRunErrorCode.DockerDaemonUnreachable);
+    expect(
+      classifyDockerSpawnError(
+        "pull access denied for roomote-worker, repository does not exist or may require 'docker login'",
+      ),
+    ).toBe(TaskRunErrorCode.DockerImageMissing);
+    expect(
+      classifyDockerSpawnError(
+        'driver failed programming external connectivity: Bind for 127.0.0.1:13000 failed: port is already allocated',
+      ),
+    ).toBe(TaskRunErrorCode.DockerPortInUse);
+    expect(
+      classifyDockerSpawnError(
+        'Docker worker release archive does not exist: /releases/worker.tar.gz',
+      ),
+    ).toBe(TaskRunErrorCode.DockerReleaseArchiveMissing);
+  });
+
+  it('returns undefined for failures with no mapped category', () => {
+    expect(classifyDockerSpawnError('Machine unavailable')).toBeUndefined();
+  });
+});
+
+describe('DockerBootError', () => {
+  it('carries a code readable via getTaskRunErrorCode', () => {
+    const error = new DockerBootError(
+      TaskRunErrorCode.DockerImageMissing,
+      'Docker worker image roomote-worker:local is not available locally and could not be pulled.',
+    );
+
+    expect(getTaskRunErrorCode(error)).toBe(
+      TaskRunErrorCode.DockerImageMissing,
+    );
+    expect(getTaskRunErrorCode(new Error('plain'))).toBeUndefined();
+    expect(getTaskRunErrorCode('string error')).toBeUndefined();
   });
 });

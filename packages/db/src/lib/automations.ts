@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import {
   type AnnouncerFrequency,
@@ -42,6 +42,19 @@ import type {
   CodeQualityAuditorScanCursor,
   SecurityAuditorScanCursor,
 } from '../types';
+
+function automationTargetsLockKey(key: BackgroundAutomationKey): string {
+  return `automation-targets:${key}`;
+}
+
+async function lockAutomationTargets(
+  tx: DatabaseOrTransaction,
+  key: BackgroundAutomationKey,
+): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${automationTargetsLockKey(key)}))`,
+  );
+}
 
 function getScheduleModes<TMode extends string>(
   automationKey: TriggerableBackgroundAutomationKey,
@@ -266,38 +279,42 @@ export async function persistAutomationTelegramTopicThread(params: {
     return;
   }
 
-  const existing = await db.query.automations.findFirst({
-    columns: { targets: true },
-    where: eq(automations.key, params.automationKey),
+  await db.transaction(async (tx) => {
+    await lockAutomationTargets(tx, params.automationKey);
+
+    const existing = await tx.query.automations.findFirst({
+      columns: { targets: true },
+      where: eq(automations.key, params.automationKey),
+    });
+    const targets = [...(existing?.targets ?? [])];
+    const index = targets.findIndex(
+      (target) =>
+        target.provider === 'telegram' && target.targetKind === 'telegram_chat',
+    );
+    const topicName = params.topicName?.trim();
+    const nextMetadata = {
+      ...(index >= 0 ? asObject(targets[index]?.metadata) : {}),
+      threadId,
+      ...(topicName ? { topicName } : {}),
+    };
+    const nextTarget: AutomationTarget = {
+      provider: 'telegram',
+      targetKind: 'telegram_chat',
+      externalRef: chatId,
+      metadata: nextMetadata,
+    };
+
+    if (index >= 0) {
+      targets[index] = nextTarget;
+    } else {
+      targets.push(nextTarget);
+    }
+
+    await tx
+      .update(automations)
+      .set({ targets, updatedAt: new Date() })
+      .where(eq(automations.key, params.automationKey));
   });
-  const targets = [...(existing?.targets ?? [])];
-  const index = targets.findIndex(
-    (target) =>
-      target.provider === 'telegram' && target.targetKind === 'telegram_chat',
-  );
-  const topicName = params.topicName?.trim();
-  const nextMetadata = {
-    ...(index >= 0 ? asObject(targets[index]?.metadata) : {}),
-    threadId,
-    ...(topicName ? { topicName } : {}),
-  };
-  const nextTarget: AutomationTarget = {
-    provider: 'telegram',
-    targetKind: 'telegram_chat',
-    externalRef: chatId,
-    metadata: nextMetadata,
-  };
-
-  if (index >= 0) {
-    targets[index] = nextTarget;
-  } else {
-    targets.push(nextTarget);
-  }
-
-  await db
-    .update(automations)
-    .set({ targets, updatedAt: new Date() })
-    .where(eq(automations.key, params.automationKey));
 }
 
 /**
@@ -504,6 +521,21 @@ export type UpsertAutomationInput = {
 };
 
 export async function upsertAutomation(
+  tx: DatabaseOrTransaction,
+  input: UpsertAutomationInput,
+): Promise<void> {
+  if (input.targets !== undefined && input.managedTargetKinds !== undefined) {
+    await tx.transaction(async (lockedTx) => {
+      await lockAutomationTargets(lockedTx, input.key);
+      await upsertAutomationValues(lockedTx, input);
+    });
+    return;
+  }
+
+  await upsertAutomationValues(tx, input);
+}
+
+async function upsertAutomationValues(
   tx: DatabaseOrTransaction,
   input: UpsertAutomationInput,
 ): Promise<void> {
@@ -911,6 +943,7 @@ export function normalizeBackgroundAgentSettings(
       issueFixer,
       isFrequencyOf(ISSUE_FIXER_FREQUENCIES),
     ),
+    issueFixerInstructions: issueFixer?.instructions ?? null,
     issueFixerLastRunAt: issueFixer?.lastRunAt ?? null,
     issueFixerScanCursor: issueFixer?.scanCursor ?? null,
 

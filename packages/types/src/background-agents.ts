@@ -61,13 +61,23 @@ export function isScheduleOnlyBackgroundAutomationFrequency(
     SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES as readonly string[]
   ).includes(value);
 }
+
+/** Cadence presets supported by user-defined custom automations. */
+export type CustomAutomationScheduleMode =
+  ScheduleOnlyBackgroundAutomationFrequency;
+
+export const MAX_CUSTOM_AUTOMATIONS = 25;
+
+export const CUSTOM_AUTOMATION_NAME_MAX_LENGTH = 100;
+
+export const CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH = 8_000;
 export type SecurityAuditorFrequency =
   ScheduleOnlyBackgroundAutomationFrequency;
 
 export type CodeQualityAuditorFrequency =
   ScheduleOnlyBackgroundAutomationFrequency;
 
-// CI failure triage and Issue Fixer are webhook-driven and have no schedule;
+// CI failure triage and Triage Issues are webhook-driven and have no schedule;
 // 'daily' is only the stored enabled sentinel so they reuse the generic
 // schedule-only settings machinery.
 export type CiFailureTriageFrequency = 'off' | 'daily';
@@ -108,6 +118,9 @@ export const INTERNAL_AUTOMATION_KEYS = [
   'snapshot_refresh',
   'mcp_recommendations',
   'slack_workflow',
+  // Seeds automations.key so custom-automation task launches can FK-stamp
+  // initiator_automation. User-defined definitions live in custom_automations.
+  'custom_automation',
 ] as const;
 
 export const BACKGROUND_AUTOMATION_KEYS = [
@@ -237,12 +250,14 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
   },
   issueFixer: {
     id: 'issueFixer',
-    label: 'Triage GitHub Issues',
+    label: 'Triage Issues',
     hashAliases: [
       'issue-fixer',
       'issuefixer',
       'fix-issues',
       'fixissues',
+      'triage-issues',
+      'triageissues',
       'triage-github-issues',
       'triagegithubissues',
     ],

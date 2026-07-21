@@ -620,6 +620,30 @@ describe('Env', () => {
     }
   });
 
+  it('derives SLACK_AUTH_URI from R_PUBLIC_URL when set ahead of loopback R_APP_URL', () => {
+    const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...productionCoreEnv,
+      R_APP_URL: 'http://localhost:3000/',
+      R_PUBLIC_URL: 'https://customer.roomote.ai/',
+    };
+
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    delete runtimeEnv.SLACK_AUTH_URI;
+
+    try {
+      expect(createRoomoteEnv(runtimeEnv).SLACK_AUTH_URI).toBe(
+        'https://customer.roomote.ai/api/slack/auth',
+      );
+    } finally {
+      if (previousSkipEnvValidation === undefined) {
+        delete process.env.SKIP_ENV_VALIDATION;
+      } else {
+        process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
+      }
+    }
+  });
+
   it('prefers an explicit SLACK_AUTH_URI over the derived value', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: NodeJS.ProcessEnv = {

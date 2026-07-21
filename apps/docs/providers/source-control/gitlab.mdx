@@ -1,7 +1,7 @@
 ---
 title: GitLab
 icon: 'https://api.iconify.design/simple-icons:gitlab.svg?color=currentColor'
-description: Configure GitLab repository sync and merge request webhooks for Roomote.
+description: Configure GitLab repository sync, merge request webhooks, and pipeline failure triage for Roomote.
 ---
 
 GitLab does not have a GitHub-style App installation flow. Configure a GitLab
@@ -43,7 +43,9 @@ before launching a GitLab-backed task.
 
 ## Configure webhooks
 
-Create a GitLab project or group webhook for merge request events.
+Create a GitLab project or group webhook for merge request, issue, comment,
+and pipeline events. Repository sync configures these project webhook events
+automatically when the authorized identity has permission to manage hooks.
 
 Webhook URL:
 
@@ -54,6 +56,9 @@ Webhook URL:
 Enable:
 
 - **Merge request events**
+- **Issues events**
+- **Comments**
+- **Pipeline events**
 
 Preferred verification uses GitLab signed webhook headers. Set a GitLab
 signing token on the webhook and save the same value in Roomote:
@@ -84,9 +89,19 @@ Open or reopened merge request events enqueue initial review tasks. Update
 events enqueue sync reviews when GitLab includes `oldrev`, which indicates a
 code-related update.
 
+## Enable CI failure triage
+
+Associate the GitLab repository with an environment, configure the Manager
+Channel destination, and enable **CI Failure Triage** under Automations.
+Failed default-branch Pipeline Hooks start an environment-backed Roomote task.
+Roomote reads a bounded tail of the failed job logs with the deployment GitLab
+credential, reproduces the relevant commands locally, and opens a merge
+request when it can fix the failure.
+
 ## Verify setup
 
 1. sync GitLab repositories from Settings
 2. create or update an environment from a synced repository
 3. start a small task and confirm Roomote can clone the repository
 4. open or update a merge request and confirm configured review automation runs
+5. trigger a failing default-branch pipeline and confirm CI Failure Triage starts

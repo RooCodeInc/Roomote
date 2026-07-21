@@ -75,9 +75,13 @@ import {
   createGitLabMergeRequestNote,
   createGitLabIssueNote,
   ensureGitLabWebhooksForProjects,
+  getGitLabPipelineFailureEvidence,
+  getLatestGitLabPipeline,
+  isNestedGitLabPipelineSource,
   removeGitLabWebhooksForProjects,
   getGitLabDeploymentUser,
   resolveGitLabBaseUrl,
+  resolveGitLabInstanceHost,
   revokeGitLabScopedProjectToken,
   type GitLabProject,
   listGitLabProjects,
@@ -135,6 +139,17 @@ describe('resolveGitLabBaseUrl', () => {
     expect(normalizeGitLabBaseUrl('gitlab.example.com////////')).toBe(
       'https://gitlab.example.com',
     );
+  });
+
+  it('resolves the deployment instance host, keeping any explicit port', async () => {
+    process.env.GITLAB_BASE_URL = 'https://gitlab.example.com:8443/api/v4/';
+
+    await expect(resolveGitLabInstanceHost()).resolves.toBe(
+      'gitlab.example.com:8443',
+    );
+
+    delete process.env.GITLAB_BASE_URL;
+    await expect(resolveGitLabInstanceHost()).resolves.toBe('gitlab.com');
   });
 });
 
@@ -238,6 +253,142 @@ describe('listGitLabProjects', () => {
       'https://gitlab.example.com/api/v4/projects?membership=true&simple=true&archived=false&order_by=path&sort=asc&per_page=100&page=1',
       expect.objectContaining({ method: 'GET' }),
     );
+  });
+});
+
+describe('GitLab pipeline inspection', () => {
+  it('reads the latest pipeline for a branch with the deployment credential', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 77,
+          name: 'default',
+          ref: 'main',
+          sha: 'abc123',
+          status: 'failed',
+          source: 'push',
+          web_url: 'https://gitlab.com/acme/api/-/pipelines/77',
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      getLatestGitLabPipeline({
+        projectId: '9001',
+        ref: 'main',
+        token: 'glpat_test',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toMatchObject({ id: 77, status: 'failed', ref: 'main' });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://gitlab.com/api/v4/projects/9001/pipelines/latest?ref=main',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'PRIVATE-TOKEN': 'glpat_test',
+        }),
+      }),
+    );
+  });
+
+  it('returns null when the branch has no latest pipeline', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 403 }));
+
+    await expect(
+      getLatestGitLabPipeline({
+        projectId: '9001',
+        ref: 'main',
+        token: 'glpat_test',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it('identifies nested/child GitLab pipeline sources', () => {
+    expect(isNestedGitLabPipelineSource('parent_pipeline')).toBe(true);
+    expect(isNestedGitLabPipelineSource('pipeline')).toBe(true);
+    expect(isNestedGitLabPipelineSource('ondemand_dast_scan')).toBe(true);
+    expect(isNestedGitLabPipelineSource('push')).toBe(false);
+    expect(isNestedGitLabPipelineSource(undefined)).toBe(false);
+  });
+
+  it('fetches bounded log tails for failed pipeline jobs', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(`old output\n${'x'.repeat(6_100)}\nboom`),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+
+    const evidence = await getGitLabPipelineFailureEvidence({
+      projectId: '9001',
+      pipelineId: 77,
+      jobs: [
+        {
+          id: 11,
+          name: 'lint',
+          stage: 'test',
+          status: 'failed',
+          failure_reason: 'script_failure',
+          allow_failure: false,
+        },
+        {
+          id: 12,
+          name: 'optional scan',
+          stage: 'test',
+          status: 'failed',
+          allow_failure: true,
+        },
+      ],
+      token: 'glpat_test',
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('job="lint" id=11 stage="test"');
+    expect(evidence).toContain(
+      '[Earlier log output omitted; showing the tail.]',
+    );
+    expect(evidence).toContain('boom');
+    expect(evidence).toContain('job="optional scan" id=12');
+    expect(evidence).toContain('Log trace unavailable.');
+  });
+
+  it('lists failed jobs when the webhook did not provide them', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              id: 21,
+              name: 'test',
+              stage: 'test',
+              status: 'failed',
+              failure_reason: 'script_failure',
+              allow_failure: false,
+            },
+          ]),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response('AssertionError: expected true'));
+
+    const evidence = await getGitLabPipelineFailureEvidence({
+      projectId: '9001',
+      pipelineId: 77,
+      token: 'glpat_test',
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('AssertionError: expected true');
+    expect(fetchMock.mock.calls[0]?.[0]).toContain(
+      '/projects/9001/pipelines/77/jobs?',
+    );
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('scope=failed');
   });
 });
 
@@ -946,6 +1097,8 @@ describe('ensureGitLabWebhooksForProjects', () => {
         init?.method === 'POST',
     );
     expect(createCall?.[1]?.body).toContain('"merge_requests_events":true');
+    expect(createCall?.[1]?.body).toContain('"issues_events":true');
+    expect(createCall?.[1]?.body).toContain('"pipeline_events":true');
     expect(createCall?.[1]?.body).toContain('"token":"webhook-secret"');
 
     const updateCall = fetchMock.mock.calls.find(

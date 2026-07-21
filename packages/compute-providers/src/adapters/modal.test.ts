@@ -1049,6 +1049,12 @@ describe('ModalClient', () => {
       'test "$(/sandbox/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}"',
     );
     expect(dockerfile).toContain(
+      'npm install --prefix /opt/roomote/opencode-plugin-seed',
+    );
+    expect(dockerfile).toContain(
+      'ENV ROOMOTE_OPENCODE_PLUGIN_SEED_DIR=/opt/roomote/opencode-plugin-seed',
+    );
+    expect(dockerfile).toContain(
       'exec /sandbox/node_modules/.bin/opencode "$@"',
     );
   });

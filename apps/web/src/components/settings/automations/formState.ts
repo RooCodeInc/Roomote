@@ -80,6 +80,7 @@ export type FormState = {
   conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
   conflictResolverLabel: string;
   conflictResolverInstructions: string;
+  issueFixerInstructions: string;
   /** Merged, provider-tagged auto-respond rows (Slack and Discord). */
   channelAutoStartChannels: ChannelAutoStartFormRow[];
   managerSlackChannel: string;
@@ -196,6 +197,9 @@ const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
       ...(DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID[
         automation.id as keyof typeof DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID
       ] ?? []),
+      ...(automation.id === 'issueFixer'
+        ? (['issueFixerInstructions'] as const)
+        : []),
     ],
   ]),
 ) as Record<ScheduleOnlyBackgroundAutomationId, Array<keyof FormState>>;
@@ -344,6 +348,7 @@ export function buildAutomationSettingsSaveInput(
     dependabotTriageFrequency: stateToSave.dependabotTriageFrequency,
     codeqlTriageFrequency: stateToSave.codeqlTriageFrequency,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
+    issueFixerInstructions: stateToSave.issueFixerInstructions.trim() || null,
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
     suggesterUseTelegram: stateToSave.suggesterUseTelegram,
