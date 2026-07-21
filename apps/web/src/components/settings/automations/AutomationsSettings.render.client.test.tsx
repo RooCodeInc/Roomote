@@ -510,6 +510,16 @@ describe('AutomationsSettings', () => {
     ).toBeGreaterThan(1);
   });
 
+  it('defaults new custom automations to the manager channel', async () => {
+    render(<AutomationsSettings />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New' }));
+
+    expect(screen.getByLabelText('Destination channel')).toHaveTextContent(
+      '#roomote-managers',
+    );
+  });
+
   it('shows a saved Discord destination and a provider-neutral placeholder when Discord is connected', async () => {
     state.settingsQuery.data.capabilities.discordConnected = true;
     state.discordChannelsQuery.data.channels = [

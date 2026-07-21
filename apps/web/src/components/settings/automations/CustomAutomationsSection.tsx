@@ -131,6 +131,7 @@ export function CustomAutomationsSection() {
   const listQuery = useQuery(
     trpc.automations.listCustomAutomations.queryOptions(),
   );
+  const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
   const environmentsQuery = useQuery(trpc.environments.list.queryOptions());
   const slackChannelsQuery = useQuery(
     trpc.automations.listSlackChannels.queryOptions(),
@@ -398,9 +399,12 @@ export function CustomAutomationsSection() {
           </div>
 
           <div className="space-y-2">
-            <Label>Destination channel</Label>
+            <Label htmlFor="custom-automation-destination-channel">
+              Destination channel
+            </Label>
             {form.targetProvider === 'slack' ? (
               <SlackChannelSelect
+                id="custom-automation-destination-channel"
                 value={form.targetChannelId || null}
                 options={slackOptions}
                 disabled={busy}
@@ -422,7 +426,7 @@ export function CustomAutomationsSection() {
                   }))
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger id="custom-automation-destination-channel">
                   <SelectValue placeholder="Select Discord channel" />
                 </SelectTrigger>
                 <SelectContent>
@@ -435,6 +439,7 @@ export function CustomAutomationsSection() {
               </Select>
             ) : (
               <Input
+                id="custom-automation-destination-channel"
                 value={form.targetChannelId}
                 disabled={busy}
                 onChange={(event) =>
@@ -527,7 +532,11 @@ export function CustomAutomationsSection() {
             onClick={() => {
               setIsCreating(true);
               setEditingId(null);
-              setForm(EMPTY_FORM);
+              setForm({
+                ...EMPTY_FORM,
+                targetChannelId:
+                  settingsQuery.data?.settings.managerSlackChannelId ?? '',
+              });
             }}
           >
             <Plus className="size-4" />
