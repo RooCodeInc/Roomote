@@ -408,13 +408,13 @@ describe('sleepCheckJob', () => {
     await sleepCheckJob();
 
     // Due and hard-limit queries only consider active sessions.
-    expect(inArrayFn).toHaveBeenCalledWith('status', [
+    expect(inArrayFn).toHaveBeenNthCalledWith(1, 'status', [
       RunStatus.Running,
       RunStatus.Idle,
     ]);
     // Once any heartbeat has gone stale, booting runs need the same recovery
     // as running and idle sessions.
-    expect(inArrayFn).toHaveBeenCalledWith('status', [
+    expect(inArrayFn).toHaveBeenNthCalledWith(3, 'status', [
       RunStatus.Running,
       RunStatus.Idle,
       RunStatus.Processing,
@@ -423,11 +423,15 @@ describe('sleepCheckJob', () => {
       RunStatus.Connecting,
     ]);
     // The no-heartbeat query remains limited to runs that never heartbeated.
-    expect(inArrayFn).toHaveBeenCalledWith('status', [
+    expect(inArrayFn).toHaveBeenNthCalledWith(5, 'status', [
       RunStatus.Processing,
       RunStatus.Preparing,
       RunStatus.Spawning,
       RunStatus.Connecting,
+    ]);
+    expect(inArrayFn).toHaveBeenNthCalledWith(7, 'status', [
+      RunStatus.Running,
+      RunStatus.Idle,
     ]);
   });
 
