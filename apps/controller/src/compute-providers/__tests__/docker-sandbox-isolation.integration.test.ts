@@ -184,17 +184,31 @@ describe.runIf(runIntegrationTests)('Docker task network isolation', () => {
     await expect(
       docker(['exec', sourceContainer, 'ip', 'route', 'get', '1.1.1.1']),
     ).resolves.toContain('via');
+    // The worker container drops NET_ADMIN/NET_RAW and the test image has no
+    // iptables binary, so the rule check needs a helper container sharing the
+    // worker's network namespace, mirroring how the policy is applied.
     await expect(
       docker([
-        'exec',
-        sourceContainer,
-        'iptables',
-        '-C',
-        'OUTPUT',
-        '-d',
-        defaultGateway!,
-        '-j',
-        'DROP',
+        'run',
+        '--rm',
+        '--network',
+        `container:${sourceContainer}`,
+        '--user',
+        'root',
+        '--cap-drop',
+        'ALL',
+        '--cap-add',
+        'NET_ADMIN',
+        '--cap-add',
+        'NET_RAW',
+        '--entrypoint',
+        '/bin/sh',
+        dockerImage,
+        '-c',
+        [
+          'command -v iptables >/dev/null 2>&1 || apk add --no-cache iptables >/dev/null 2>&1',
+          `iptables -C OUTPUT -d ${defaultGateway} -j DROP`,
+        ].join(' && '),
       ]),
     ).resolves.toBe('');
     // Public next-hop still works; destination traffic to the bridge gateway

@@ -541,6 +541,11 @@ export async function attachDockerEgressPolicy(
     'ALL',
     '--cap-add',
     'NET_ADMIN',
+    // iptables-legacy (forced in the worker image) opens a raw socket, which
+    // needs CAP_NET_RAW on top of CAP_NET_ADMIN; both are in Docker's default
+    // capability set.
+    '--cap-add',
+    'NET_RAW',
     '--entrypoint',
     '/bin/sh',
     params.image,
@@ -576,9 +581,7 @@ export async function attachDockerEgressPolicy(
               '    exit 1',
               '  fi',
               'fi',
-            ]
-              .map((line) => line.trim())
-              .join(' '),
+            ].join('\n'),
           ]
         : []),
     ].join(' && '),

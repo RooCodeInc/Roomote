@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -19,6 +22,8 @@ import {
   type DockerCommand,
 } from '../docker-sandbox-security';
 import { TaskRunErrorCode } from '@roomote/types';
+
+const execFileAsync = promisify(execFile);
 
 describe('buildDockerWorkerResourceArgs', () => {
   it('enforces CPU, memory, swap, PID, configured disk, log, and capability bounds', () => {
@@ -263,6 +268,7 @@ describe('attachDockerEgressPolicy', () => {
         'ALL',
         '--cap-add',
         'NET_ADMIN',
+        'NET_RAW',
         'roomote-worker:test',
       ]),
     );
@@ -276,6 +282,34 @@ describe('attachDockerEgressPolicy', () => {
     expect(routeScript).toContain(
       'iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
     );
+  });
+
+  it('generates a syntactically valid shell script for the egress helper', async () => {
+    for (const blockDockerGateway of [true, false]) {
+      const runDocker = vi.fn<DockerCommand>().mockResolvedValue('');
+
+      await attachDockerEgressPolicy(
+        {
+          containerName: 'roomote-worker-92',
+          egressPolicy: 'internet',
+          image: 'roomote-worker:test',
+          platform: 'linux/amd64',
+          blockDockerGateway,
+        },
+        runDocker,
+      );
+
+      const helperRun = runDocker.mock.calls
+        .map(([args]) => args)
+        .find((args) => args[0] === 'run');
+      const routeScript = helperRun?.at(-1);
+      expect(routeScript).toBeTruthy();
+      // `sh -n` parses without executing; a syntax error here would make every
+      // sandbox spawn fail inside the egress helper container.
+      await expect(
+        execFileAsync('sh', ['-n', '-c', routeScript!]),
+      ).resolves.toBeTruthy();
+    }
   });
 
   it('keeps private host routes reachable for host-based local development', async () => {
