@@ -579,6 +579,14 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
           : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
+        ...(message?.message_reference?.message_id
+          ? {
+              replyToMessageId: message.message_reference.message_id,
+              ...(message.message_reference.channel_id
+                ? { replyToChannelId: message.message_reference.channel_id }
+                : {}),
+            }
+          : {}),
       });
       messageForQueue = continuation.message;
       continuationClaim = {
@@ -648,6 +656,14 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
           : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
+        ...(message?.message_reference?.message_id
+          ? {
+              replyToMessageId: message.message_reference.message_id,
+              ...(message.message_reference.channel_id
+                ? { replyToChannelId: message.message_reference.channel_id }
+                : {}),
+            }
+          : {}),
       });
       resumeMessage = continuation.message;
       continuationClaim = {
@@ -714,6 +730,14 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
     // task thread; known task threads were already handled above.
     forceNewThread: forceNewTask,
     ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
+    ...(message?.message_reference?.message_id
+      ? {
+          replyToMessageId: message.message_reference.message_id,
+          ...(message.message_reference.channel_id
+            ? { replyToChannelId: message.message_reference.channel_id }
+            : {}),
+        }
+      : {}),
   });
   return { ok: true, ...started };
 }

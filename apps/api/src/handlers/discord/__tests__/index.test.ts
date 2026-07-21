@@ -482,6 +482,41 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
+  it('forwards message_reference into startNewDiscordTask for channel reply mentions', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+    const response = await postEvent(
+      envelope(
+        message({
+          id: 'message-2',
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> can you check if this issue already exists?',
+          mentions: [{ id: 'bot-1', username: 'roomote' }],
+          message_reference: {
+            message_id: 'message-parent',
+            channel_id: 'channel-1',
+          },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyToMessageId: 'message-parent',
+        replyToChannelId: 'channel-1',
+        queuedMessage: expect.objectContaining({
+          ts: 'message-2',
+        }),
+      }),
+    );
+  });
+
   it('still launches when the initial eyes reaction fails', async () => {
     mocks.addReaction.mockRejectedValueOnce(new Error('rate limited'));
 
@@ -603,6 +638,47 @@ describe('Discord Gateway event handler', () => {
     // Slack only platform-acks the first intake message; follow-ups stay silent.
     expect(mocks.addReaction).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('forwards message_reference into continuation prompts for active follow-ups', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'Fix tests',
+      type: 11,
+    });
+    mocks.findActiveRun.mockResolvedValue({
+      id: 23,
+      taskId: 'task-23',
+      actingUserId: 'roomote-user-1',
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'what about that earlier note?',
+          message_reference: {
+            message_id: 'earlier-1',
+            channel_id: 'thread-1',
+          },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.buildContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'thread-1',
+        replyToMessageId: 'earlier-1',
+        replyToChannelId: 'thread-1',
+        queuedMessage: expect.objectContaining({
+          text: 'what about that earlier note?',
+        }),
+      }),
+    );
   });
 
   it('releases claimed out-of-band context when the queue duplicates', async () => {

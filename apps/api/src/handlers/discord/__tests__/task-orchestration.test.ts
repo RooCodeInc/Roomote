@@ -340,6 +340,80 @@ describe('startNewDiscordTask', () => {
     expect(launchArgs.agentPromptText).toBeUndefined();
   });
 
+  it('includes the explicit replied-to channel message without dumping full channel history', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn(),
+      fetchMessage: vi.fn().mockResolvedValue({
+        provider: 'discord',
+        id: '100',
+        user: 'u-alice',
+        username: 'Alice',
+        text: 'pnpm build triggers codebase indexing with hundreds of temporary files',
+        channelId: 'channel-1',
+        fileCount: 0,
+      }),
+    };
+
+    const result = await startNewDiscordTask({
+      provider: provider as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      replyToMessageId: '100',
+      replyToChannelId: 'channel-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'can you check if this issue already exists?',
+        user: 'Toray',
+        userId: 'user-1',
+        ts: '200',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: '200',
+        communicationAnchorMessageId: '200',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(result.status).toBe('started');
+    expect(provider.fetchChannelMessages).not.toHaveBeenCalled();
+    expect(provider.fetchMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: '100',
+    });
+    expect(mocks.buildRoutingContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadMessages: [
+          {
+            user: 'Alice',
+            text: 'pnpm build triggers codebase indexing with hundreds of temporary files',
+          },
+          {
+            user: 'Toray',
+            text: 'can you check if this issue already exists?',
+          },
+        ],
+      }),
+    );
+    const agentPrompt = mocks.launchTask.mock.calls[0]?.[0]
+      .agentPromptText as string;
+    expect(agentPrompt).toContain(
+      '<thread_context>\nAlice: pnpm build triggers codebase indexing with hundreds of temporary files\n</thread_context>',
+    );
+    expect(agentPrompt).toContain(
+      'can you check if this issue already exists?',
+    );
+  });
+
   it('stores thread context on routing confirmation for later launch', async () => {
     mocks.shouldAutoConfirm.mockReturnValue(false);
     mocks.requestConfirmation.mockResolvedValue({
