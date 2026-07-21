@@ -55,8 +55,8 @@ type GraphQlTimelineNode = {
 
 type GraphQlTimelinePage = {
   pageInfo?: {
-    hasNextPage?: boolean | null;
-    endCursor?: string | null;
+    hasPreviousPage?: boolean | null;
+    startCursor?: string | null;
   } | null;
   nodes?: Array<GraphQlTimelineNode | null> | null;
 };
@@ -118,8 +118,10 @@ const TIMELINE_NODE_FIELDS = `
   }
 `;
 
-// Development connections only stay linked while not followed by a matching
-// disconnect. Cross-references are independent and not removed by disconnects.
+// Page from the recent end (`last`/`before`) so a connect inside the retained
+// window is paired with a later disconnect when one exists. Pages are applied
+// in chronological order after collection. Cross-references stay independent of
+// disconnects; development connections only stay while not followed by a match.
 const LINKED_REFERENCES_GRAPHQL = `
   query RoomoteLinkedReferences(
     $owner: String!
@@ -134,8 +136,8 @@ const LINKED_REFERENCES_GRAPHQL = `
         __typename
         ... on Issue {
           timelineItems(
-            first: $limit
-            after: $cursor
+            last: $limit
+            before: $cursor
             itemTypes: [
               CROSS_REFERENCED_EVENT
               CONNECTED_EVENT
@@ -143,8 +145,8 @@ const LINKED_REFERENCES_GRAPHQL = `
             ]
           ) {
             pageInfo {
-              hasNextPage
-              endCursor
+              hasPreviousPage
+              startCursor
             }
             nodes {
               ${TIMELINE_NODE_FIELDS}
@@ -159,8 +161,8 @@ const LINKED_REFERENCES_GRAPHQL = `
             }
           }
           timelineItems(
-            first: $limit
-            after: $cursor
+            last: $limit
+            before: $cursor
             itemTypes: [
               CROSS_REFERENCED_EVENT
               CONNECTED_EVENT
@@ -168,8 +170,8 @@ const LINKED_REFERENCES_GRAPHQL = `
             ]
           ) {
             pageInfo {
-              hasNextPage
-              endCursor
+              hasPreviousPage
+              startCursor
             }
             nodes {
               ${TIMELINE_NODE_FIELDS}
@@ -409,6 +411,10 @@ async function fetchLinkedReferencesViaGraphQl({
     const developmentConnections = new Map<string, GitHubLinkedReference>();
     let cursor: string | null = null;
     let sawTarget = false;
+    // Newest-page-first collection; reverse before chronological apply.
+    const recentPagesOldestFirst: Array<
+      Array<GraphQlTimelineNode | null | undefined>
+    > = [];
 
     for (let page = 0; page < TIMELINE_MAX_PAGES; page += 1) {
       const result = (await octokit.graphql(LINKED_REFERENCES_GRAPHQL, {
@@ -441,20 +447,25 @@ async function fetchLinkedReferencesViaGraphQl({
         }
       }
 
+      // GraphQL `last` pages still return nodes oldest→newest within the page.
+      recentPagesOldestFirst.unshift(target.timelineItems?.nodes ?? []);
+
+      const pageInfo = target.timelineItems?.pageInfo;
+      if (!pageInfo?.hasPreviousPage || !pageInfo.startCursor) {
+        break;
+      }
+
+      cursor = pageInfo.startCursor;
+    }
+
+    for (const nodes of recentPagesOldestFirst) {
       applyGraphQlTimelineNodes({
-        nodes: target.timelineItems?.nodes ?? [],
+        nodes,
         fallbackRepository: repositoryFullName,
         excludeNumber: issueOrPrNumber,
         crossReferences,
         developmentConnections,
       });
-
-      const pageInfo = target.timelineItems?.pageInfo;
-      if (!pageInfo?.hasNextPage || !pageInfo.endCursor) {
-        break;
-      }
-
-      cursor = pageInfo.endCursor;
     }
 
     for (const [key, reference] of developmentConnections) {

@@ -68,7 +68,7 @@ describe('linked-issue-pr-context', () => {
         issueOrPullRequest: {
           __typename: 'Issue',
           timelineItems: {
-            pageInfo: { hasNextPage: false, endCursor: null },
+            pageInfo: { hasPreviousPage: false, startCursor: null },
             nodes: [
               {
                 __typename: 'CrossReferencedEvent',
@@ -130,6 +130,8 @@ describe('linked-issue-pr-context', () => {
         includeClosingIssues: true,
       }),
     );
+    expect(graphql.mock.calls[0]?.[0]).toContain('last: $limit');
+    expect(graphql.mock.calls[0]?.[0]).toContain('before: $cursor');
     expect(request).not.toHaveBeenCalled();
     expect(refs).toEqual([
       {
@@ -157,7 +159,7 @@ describe('linked-issue-pr-context', () => {
         issueOrPullRequest: {
           __typename: 'Issue',
           timelineItems: {
-            pageInfo: { hasNextPage: false, endCursor: null },
+            pageInfo: { hasPreviousPage: false, startCursor: null },
             nodes: [
               {
                 __typename: 'ConnectedEvent',
@@ -225,22 +227,32 @@ describe('linked-issue-pr-context', () => {
     ]);
   });
 
-  it('paginates GraphQL timeline items across two pages', async () => {
+  it('paginates GraphQL timeline items from the recent end and applies them chronologically', async () => {
     const graphql = vi
       .fn()
+      // First call: newest page (later events).
       .mockResolvedValueOnce({
         repository: {
           issueOrPullRequest: {
             __typename: 'Issue',
             timelineItems: {
-              pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+              pageInfo: { hasPreviousPage: true, startCursor: 'cursor-new' },
               nodes: [
                 {
-                  __typename: 'ConnectedEvent',
+                  __typename: 'DisconnectedEvent',
                   subject: issueNode({
                     number: 1,
-                    title: 'Page one',
+                    title: 'Unlinked on newer page',
                     url: 'https://github.com/acme/api/issues/1',
+                  }),
+                },
+                {
+                  __typename: 'CrossReferencedEvent',
+                  source: issueNode({
+                    number: 2,
+                    title: 'Cross-ref on newer page',
+                    url: 'https://github.com/acme/api/pull/2',
+                    typename: 'PullRequest',
                   }),
                 },
               ],
@@ -248,20 +260,20 @@ describe('linked-issue-pr-context', () => {
           },
         },
       })
+      // Second call: older page inside the retained window.
       .mockResolvedValueOnce({
         repository: {
           issueOrPullRequest: {
             __typename: 'Issue',
             timelineItems: {
-              pageInfo: { hasNextPage: false, endCursor: 'cursor-2' },
+              pageInfo: { hasPreviousPage: false, startCursor: 'cursor-old' },
               nodes: [
                 {
-                  __typename: 'CrossReferencedEvent',
-                  source: issueNode({
-                    number: 2,
-                    title: 'Page two',
-                    url: 'https://github.com/acme/api/pull/2',
-                    typename: 'PullRequest',
+                  __typename: 'ConnectedEvent',
+                  subject: issueNode({
+                    number: 1,
+                    title: 'Connected earlier',
+                    url: 'https://github.com/acme/api/issues/1',
                   }),
                 },
               ],
@@ -288,11 +300,21 @@ describe('linked-issue-pr-context', () => {
       2,
       expect.any(String),
       expect.objectContaining({
-        cursor: 'cursor-1',
+        cursor: 'cursor-new',
         includeClosingIssues: false,
       }),
     );
-    expect(refs.map((ref) => ref.number)).toEqual([1, 2]);
+    // Issue #1 must be dropped by the newer disconnect; #2 remains via x-ref.
+    expect(refs).toEqual([
+      {
+        kind: 'pull_request',
+        number: 2,
+        title: 'Cross-ref on newer page',
+        url: 'https://github.com/acme/api/pull/2',
+        state: 'OPEN',
+        repository: 'acme/api',
+      },
+    ]);
   });
 
   it('falls back to REST cross-references when GraphQL is unavailable', async () => {
