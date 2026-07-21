@@ -2,6 +2,53 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.15.0 (2026-07-21)
+
+Multi-SCM triage and mentions, richer chat and release UX, and more reliable self-hosted Docker boots and agent context.
+
+### Highlights
+
+- Expand Triage Issues across GitHub, GitLab, and Gitea, with optional custom instructions and GitLab pipeline CI failure triage.
+- Start Gitea issue tasks from @mentions and pull richer Slack/Discord context with generic chat lookup tools and structured questions on more chat surfaces.
+- Show in-app release notices and OpenRouter credit balance, plus safer member first-run access and faster home/settings navigation.
+- Fix stuck Docker boots on self-host (including TRPC reachability and cancel), Discord reply/thread context, and default-branch self-healing from workers and GitHub webhooks.
+
+### Minor changes
+
+- Add generic chat message and channel lookup tools so agents can pull Slack or Discord communication context without choosing a platform-specific tool.
+- Start Gitea issue tasks when teammates @mention Roomote, matching GitHub and GitLab issue-mention routing.
+- Add GitLab Pipeline Hook support for CI Failure Triage so failed GitLab pipelines can launch the same triage workflow as other providers.
+- Show sidenav release notices for available updates (self-host admins) and what's new after upgrades, sourced from GitHub release notes with changelog summary and highlights.
+- Allow safe inline SVG in transcript widgets so agents can render charts and diagrams without active or externally loaded markup.
+- Expand Triage Issues (formerly Triage GitHub Issues) to GitHub, GitLab, and Gitea so open/reopen issue webhooks post plan comments across those providers.
+- Show OpenRouter credit balance on model settings so operators can see remaining credits next to their provider configuration.
+- Expand structured `request_user_input` prompts across Slack, Linear, Teams, and Telegram so agents can collect choices on those surfaces the way they already can on Discord and the web UI.
+- Add optional custom instructions to Triage Issues so teams can guide how opened issues are planned.
+
+### Patch changes
+
+- Include the message a Discord user replied to and the thread-starter message in agent context so Discord tasks no longer miss the problem statement the requester pointed at.
+- Clear stuck Discord start-eye reactions that blocked later merge checkmarks, and update Discord task thread titles after launch instead of keeping provisional first-message titles.
+- Stop Docker task provisioning when a task is canceled so cancelled self-hosted runs do not keep creating sandbox resources.
+- Fix self-hosted Docker tasks stuck at Booting environment when workers cannot reach a public TRPC_URL from the task network.
+- Make authenticated navigation respond immediately and avoid redundant user profile writes during routine authorization checks.
+- Make home and personal settings navigation render without waiting on unrelated provider, GitHub, or repeated authentication lookups.
+- Forward `issueNumber` correctly in the manage_source_control tool so agents can read and comment on plain issues instead of those actions rejecting a provided issue number.
+- Stop GitHub App setup from emitting unreachable callback URLs when `R_APP_URL` is a loopback address on self-hosted installs.
+- Include linked issues and pull requests in agent context when Roomote is mentioned on GitHub issues or PRs.
+- Treat invalid or expired authentication cookies as signed-out sessions instead of failing the page render.
+- Start tasks correctly when `R_MODEL` is a bare LiteLLM route name instead of failing provider resolution.
+- Surface structured Docker boot failures instead of leaving workspaces stuck on Booting environment, preflight the daemon and worker image before spawn, and add a Validate environment button on Local Docker settings.
+- Show a minimal usage bar on model settings subscription lines so plan usage is visible at a glance.
+- Report the default branch the worker resolves from `origin/HEAD` back to the control plane so stale stored repository metadata self-heals instead of persisting until a manual installation resync.
+- Handle the GitHub `repository.edited` webhook so stored repository metadata follows default-branch changes instead of going stale until a manual installation resync.
+- Resolve implicit repository branches from the fetched `origin/HEAD` before using stored metadata, and fail clearly when no valid default branch exists.
+- Guide Members through secure first-run access: invites show the invited role without exposing tokens and walk email invitees through the correct sign-in path.
+- Stop self-hosted task sessions from hanging on the first OpenCode create when the worker cannot complete session bootstrap.
+- Show linked issues and work items in the Task Info panel.
+- Set the Roomote app icon automatically when creating a Slack app from a config token, and use a Slack-safe near-black manifest background so app saves no longer fail contrast checks.
+- Use the configuration-token Slack app setup flow on Settings → Communications so installing Slack matches the guided setup path end to end.
+
 ## 0.14.1 (2026-07-19)
 
 ### Patch changes
