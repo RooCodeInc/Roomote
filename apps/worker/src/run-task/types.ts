@@ -156,9 +156,9 @@ export type RunTaskOptions = {
   repoLocalSkills?: RepoLocalSkill[];
   workspaceReadinessWarnings?: string[];
   /**
-   * Observer for environment setup still finishing in the background. Used to
-   * pick accurate readiness wording for the agent and to notify it in-session
-   * when setup settles.
+   * Observer for environment setup still finishing in the background. Used only
+   * to pick accurate initial readiness wording for sandbox instructions
+   * (`.roomote/setup-status.json`); does not inject mid-task settled notices.
    */
   backgroundEnvironmentSetup?: BackgroundEnvironmentSetupNotifier;
   /**
