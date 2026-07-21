@@ -22,6 +22,9 @@ const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 const ADO_API_VERSION = '7.1';
 const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
+const ADO_FAILURE_EVIDENCE_MAX_TASKS = 5;
+const ADO_FAILURE_EVIDENCE_TRACE_CHARS = 6_000;
+const ADO_FAILURE_EVIDENCE_TIMEOUT_MS = 5_000;
 const ADO_ENTRA_TOKEN_SCOPE = 'https://app.vssps.visualstudio.com/.default';
 const ADO_ENTRA_RESOURCE_SCOPE =
   '499b84ac-1321-427f-aa17-267ca6975798/.default';
@@ -53,10 +56,14 @@ const ADO_PULL_REQUEST_SERVICE_HOOK_EVENTS: readonly {
 ] as const;
 
 /** Project-scoped events (no repository publisher input). */
-const ADO_WORK_ITEM_SERVICE_HOOK_EVENTS: readonly {
+const ADO_PROJECT_SERVICE_HOOK_EVENTS: readonly {
   eventType: string;
   publisherInputs?: Record<string, string>;
-}[] = [{ eventType: 'workitem.commented' }] as const;
+}[] = [
+  { eventType: 'workitem.commented' },
+  // CI Failure Triage: completed builds (result filtered in the handler).
+  { eventType: 'build.complete' },
+] as const;
 
 const adoWorkItemCommentSchema = z
   .object({
@@ -1271,7 +1278,7 @@ async function ensureAdoRepositoryServiceHooks({
   return statuses.includes('created') ? 'created' : 'updated';
 }
 
-async function ensureAdoProjectWorkItemServiceHooks({
+async function ensureAdoProjectServiceHooks({
   projectId,
   subscriptions,
   webhookUrl,
@@ -1290,7 +1297,7 @@ async function ensureAdoProjectWorkItemServiceHooks({
 }): Promise<'created' | 'updated'> {
   const statuses: ('created' | 'updated')[] = [];
 
-  for (const descriptor of ADO_WORK_ITEM_SERVICE_HOOK_EVENTS) {
+  for (const descriptor of ADO_PROJECT_SERVICE_HOOK_EVENTS) {
     statuses.push(
       await upsertAdoServiceHookSubscription({
         projectId,
@@ -1398,11 +1405,12 @@ export async function ensureAdoServiceHooksForRepositories({
     );
   }
 
-  // Work-item @mentions are project-scoped. Ensure once per project after the
-  // per-repository PR hooks so multi-repo projects only create a single hook.
-  // Re-list subscriptions so IDs removed by a preceding unmapped-repo cleanup
-  // (or concurrent DELETE) are not PUT-updated as if they still exist.
-  const workItemSubscriptions = await listAdoServiceHookSubscriptions({
+  // Project-scoped hooks (work-item @mentions, build completion) are ensured
+  // once per project after the per-repository PR hooks so multi-repo projects
+  // only create a single subscription per event. Re-list subscriptions so IDs
+  // removed by a preceding unmapped-repo cleanup (or concurrent DELETE) are
+  // not PUT-updated as if they still exist.
+  const projectSubscriptions = await listAdoServiceHookSubscriptions({
     organizationApiBaseUrl,
     token: adoToken,
     fetchImpl,
@@ -1412,9 +1420,9 @@ export async function ensureAdoServiceHooksForRepositories({
   ];
   for (const projectId of projectIds) {
     try {
-      await ensureAdoProjectWorkItemServiceHooks({
+      await ensureAdoProjectServiceHooks({
         projectId,
-        subscriptions: workItemSubscriptions,
+        subscriptions: projectSubscriptions,
         webhookUrl,
         secretToken,
         token: adoToken,
@@ -1465,6 +1473,398 @@ function normalizeAdoDefaultBranch(branch: string | null | undefined): string {
   return trimmed.replace(/^refs\/heads\//, '');
 }
 
+export function stripAdoGitRef(refName: string | null | undefined): string {
+  return (refName ?? '').trim().replace(/^refs\/heads\//, '');
+}
+
+/**
+ * Host of the deployment-configured Azure DevOps base URL (e.g. dev.azure.com).
+ * Manual Run matches repository `host` against this so the deployment
+ * credential is not pointed at an unrelated collection host.
+ */
+export async function resolveAdoInstanceHost(): Promise<string> {
+  return hostFromBaseUrl(await resolveAdoBaseUrl()).toLowerCase();
+}
+
+const adoBuildSchema = z
+  .object({
+    id: z.number(),
+    buildNumber: z.string().optional(),
+    status: z.string().optional(),
+    result: z.string().nullable().optional(),
+    sourceBranch: z.string().optional(),
+    sourceVersion: z.string().optional(),
+    reason: z.string().optional(),
+    url: z.string().optional(),
+    definition: z
+      .object({
+        id: z.number().optional(),
+        name: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    project: z
+      .object({
+        id: z.string().optional(),
+        name: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    repository: z
+      .object({
+        id: z.string().optional(),
+        name: z.string().optional(),
+        type: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    _links: z
+      .object({
+        web: z
+          .object({
+            href: z.string().optional(),
+          })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const adoBuildListResponseSchema = z.object({
+  count: z.number().optional(),
+  value: z.array(adoBuildSchema),
+});
+
+const adoTimelineRecordSchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().optional(),
+    type: z.string().optional(),
+    result: z.string().nullable().optional(),
+    state: z.string().optional(),
+    log: z
+      .object({
+        id: z.number().optional(),
+        url: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    issues: z
+      .array(
+        z
+          .object({
+            type: z.string().optional(),
+            category: z.string().optional(),
+            message: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
+
+const adoTimelineSchema = z
+  .object({
+    records: z.array(adoTimelineRecordSchema).optional(),
+  })
+  .passthrough();
+
+export type AdoBuild = z.infer<typeof adoBuildSchema>;
+
+function buildAdoBranchRef(branch: string): string {
+  const trimmed = branch.trim();
+  if (!trimmed) {
+    return 'refs/heads/main';
+  }
+  return trimmed.startsWith('refs/') ? trimmed : `refs/heads/${trimmed}`;
+}
+
+export function getAdoBuildWebUrl(build: AdoBuild): string {
+  const web = build._links?.web?.href?.trim();
+  if (web) {
+    return web;
+  }
+  if (build.url?.trim()) {
+    return build.url.trim();
+  }
+  return `build/${build.id}`;
+}
+
+/**
+ * Newest completed failed build for a Git repository on the given branch.
+ * Uses the deployment Azure DevOps credential. Null when none match.
+ */
+export async function getLatestAdoBuild(params: {
+  repositoryFullName: string;
+  repositoryId: string;
+  branch: string;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<AdoBuild | null> {
+  const adoToken = params.token ?? (await resolveAdoToken());
+  if (!adoToken?.trim()) {
+    throw new Error('ADO_TOKEN is required to inspect Azure DevOps builds.');
+  }
+
+  const parsed = parseAdoRepositoryFullName(params.repositoryFullName);
+  const organizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl({
+    organization: params.organization ?? parsed.organization,
+    baseUrl: params.baseUrl,
+    organizationApiBaseUrl: params.organizationApiBaseUrl,
+  });
+
+  if (!organizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to inspect Azure DevOps builds.',
+    );
+  }
+
+  const projectPath = encodeURIComponent(parsed.project);
+  const response = await (params.fetchImpl ?? fetch)(
+    buildAdoApiUrl(
+      organizationApiBaseUrl,
+      `/${projectPath}/_apis/build/builds`,
+      {
+        'api-version': ADO_API_VERSION,
+        repositoryId: params.repositoryId,
+        repositoryType: 'TfsGit',
+        branchName: buildAdoBranchRef(params.branch),
+        statusFilter: 'completed',
+        resultFilter: 'failed',
+        queryOrder: 'finishTimeDescending',
+        $top: 1,
+      },
+    ),
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: buildAdoAuthorizationHeader(adoToken),
+      },
+      signal: AbortSignal.timeout(ADO_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+  );
+
+  if ([203, 401, 403, 404].includes(response.status)) {
+    return null;
+  }
+
+  if (response.status !== 200) {
+    throw new Error(
+      `Azure DevOps API request failed: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const { value } = adoBuildListResponseSchema.parse(await response.json());
+  return value[0] ?? null;
+}
+
+async function readResponseTextTail(
+  response: Response,
+  maxChars: number,
+): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) {
+    const text = await response.text();
+    return {
+      text: text.slice(-maxChars),
+      truncated: text.length > maxChars,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let tail = '';
+  let totalChars = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    const chunk = decoder.decode(value, { stream: true });
+    totalChars += chunk.length;
+    tail = `${tail}${chunk}`.slice(-maxChars);
+  }
+
+  const finalChunk = decoder.decode();
+  totalChars += finalChunk.length;
+  tail = `${tail}${finalChunk}`.slice(-maxChars);
+
+  return { text: tail, truncated: totalChars > maxChars };
+}
+
+function formatAdoTimelineRecordEvidence(params: {
+  record: z.infer<typeof adoTimelineRecordSchema>;
+  logText: string | null;
+  logTruncated: boolean;
+}): string {
+  const issues = (params.record.issues ?? [])
+    .map((issue) => issue.message?.trim())
+    .filter((message): message is string => Boolean(message));
+  const metadata = [
+    `task=${JSON.stringify(params.record.name ?? 'unknown')}`,
+    ...(params.record.type
+      ? [`type=${JSON.stringify(params.record.type)}`]
+      : []),
+    ...(params.record.result
+      ? [`result=${JSON.stringify(params.record.result)}`]
+      : []),
+  ].join(' ');
+
+  const issueBlock =
+    issues.length > 0
+      ? `\nIssues:\n${issues.map((message) => `- ${message}`).join('\n')}`
+      : '';
+
+  if (!params.logText) {
+    return `${metadata}${issueBlock}${issueBlock ? '' : '\nLog trace unavailable.'}`;
+  }
+
+  return `${metadata}${issueBlock}\n${
+    params.logTruncated
+      ? '[Earlier log output omitted; showing the tail.]\n'
+      : ''
+  }${params.logText}`;
+}
+
+/**
+ * Bounded, prompt-ready snapshot of failed build timeline tasks and log tails.
+ */
+export async function getAdoBuildFailureEvidence(params: {
+  repositoryFullName: string;
+  buildId: number;
+  token?: string;
+  organization?: string;
+  baseUrl?: string;
+  organizationApiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<string | null> {
+  const adoToken = params.token ?? (await resolveAdoToken());
+  if (!adoToken?.trim()) {
+    throw new Error(
+      'ADO_TOKEN is required to inspect Azure DevOps build logs.',
+    );
+  }
+
+  const parsed = parseAdoRepositoryFullName(params.repositoryFullName);
+  const organizationApiBaseUrl = await resolveAdoOrganizationApiBaseUrl({
+    organization: params.organization ?? parsed.organization,
+    baseUrl: params.baseUrl,
+    organizationApiBaseUrl: params.organizationApiBaseUrl,
+  });
+
+  if (!organizationApiBaseUrl) {
+    throw new Error(
+      'ADO_ORGANIZATION is required to inspect Azure DevOps build logs.',
+    );
+  }
+
+  const fetchImpl = params.fetchImpl ?? fetch;
+  const projectPath = encodeURIComponent(parsed.project);
+  const timelineResponse = await fetchImpl(
+    buildAdoApiUrl(
+      organizationApiBaseUrl,
+      `/${projectPath}/_apis/build/builds/${params.buildId}/timeline`,
+      { 'api-version': ADO_API_VERSION },
+    ),
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: buildAdoAuthorizationHeader(adoToken),
+      },
+      signal: AbortSignal.timeout(ADO_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+  );
+
+  if ([203, 401, 403, 404].includes(timelineResponse.status)) {
+    return null;
+  }
+
+  if (timelineResponse.status !== 200) {
+    throw new Error(
+      `Azure DevOps API request failed: ${timelineResponse.status} ${timelineResponse.statusText}`,
+    );
+  }
+
+  const timeline = adoTimelineSchema.parse(await timelineResponse.json());
+  const failedRecords = (timeline.records ?? [])
+    .filter((record) => (record.result ?? '').toLowerCase() === 'failed')
+    .filter((record) => {
+      const type = (record.type ?? '').toLowerCase();
+      // Prefer task/job rows; skip phase wrappers without useful names.
+      return type === 'task' || type === 'job' || Boolean(record.name?.trim());
+    })
+    .slice(0, ADO_FAILURE_EVIDENCE_MAX_TASKS);
+
+  if (failedRecords.length === 0) {
+    return null;
+  }
+
+  const evidence = await Promise.all(
+    failedRecords.map(async (record) => {
+      const logId = record.log?.id;
+      if (logId === undefined) {
+        return formatAdoTimelineRecordEvidence({
+          record,
+          logText: null,
+          logTruncated: false,
+        });
+      }
+
+      try {
+        const logResponse = await fetchImpl(
+          buildAdoApiUrl(
+            organizationApiBaseUrl,
+            `/${projectPath}/_apis/build/builds/${params.buildId}/logs/${logId}`,
+            { 'api-version': ADO_API_VERSION },
+          ),
+          {
+            method: 'GET',
+            headers: {
+              Accept: 'text/plain',
+              Authorization: buildAdoAuthorizationHeader(adoToken),
+            },
+            signal: AbortSignal.timeout(ADO_FAILURE_EVIDENCE_TIMEOUT_MS),
+          },
+        );
+
+        if (logResponse.status !== 200) {
+          return formatAdoTimelineRecordEvidence({
+            record,
+            logText: null,
+            logTruncated: false,
+          });
+        }
+
+        const tail = await readResponseTextTail(
+          logResponse,
+          ADO_FAILURE_EVIDENCE_TRACE_CHARS,
+        );
+        return formatAdoTimelineRecordEvidence({
+          record,
+          logText: tail.text.trim() || null,
+          logTruncated: tail.truncated,
+        });
+      } catch {
+        return formatAdoTimelineRecordEvidence({
+          record,
+          logText: null,
+          logTruncated: false,
+        });
+      }
+    }),
+  );
+
+  return evidence.join('\n\n');
+}
+
 export type AdoServiceHookRemoveResult = {
   repositoryFullName: string;
   status: 'removed' | 'not_found' | 'failed';
@@ -1494,10 +1894,10 @@ function isRoomoteAdoSubscriptionUrl(
  * refreshed. Failures are collected per repository instead of failing the
  * whole batch.
  *
- * Project-scoped `workitem.commented` hooks are removed only when the project
- * is not in `retainProjectIds` (projects that still have mapped repositories).
- * Deleting them while a mapped repo remains leaves ensure unable to update the
- * deleted subscription id from a stale list and can drop the work-item hook.
+ * Project-scoped hooks (`workitem.commented`, `build.complete`) are removed
+ * only when the project is not in `retainProjectIds` (projects that still have
+ * mapped repositories). Deleting them while a mapped repo remains leaves
+ * ensure unable to update the deleted subscription id from a stale list.
  */
 export async function removeAdoServiceHooksForRepositories({
   repositories,
@@ -1515,9 +1915,9 @@ export async function removeAdoServiceHooksForRepositories({
   }[];
   webhookUrl: string;
   /**
-   * Project IDs that still have environment-mapped repositories. Work-item
-   * hooks for these projects are left in place so a partial unmap does not
-   * tear down @roomote intake for the whole project.
+   * Project IDs that still have environment-mapped repositories. Project-
+   * scoped hooks (work-item comments, build completion) for these projects
+   * are left in place so a partial unmap does not tear down intake.
    */
   retainProjectIds?: Iterable<string>;
   token?: string;
@@ -1556,15 +1956,15 @@ export async function removeAdoServiceHooksForRepositories({
 
   const results: AdoServiceHookRemoveResult[] = [];
 
-  const workItemEventTypes = new Set(
-    ADO_WORK_ITEM_SERVICE_HOOK_EVENTS.map((event) => event.eventType),
+  const projectEventTypes = new Set(
+    ADO_PROJECT_SERVICE_HOOK_EVENTS.map((event) => event.eventType),
   );
   const retainedProjects = new Set(
     [...(retainProjectIds ?? [])].filter((id) => Boolean(id?.trim())),
   );
-  // Track project-level WI hooks deleted once so multi-repo same-project
+  // Track project-level hooks deleted once so multi-repo same-project
   // removals don't 404 on a second delete of the same subscription.
-  const deletedWorkItemSubscriptionIds = new Set<string>();
+  const deletedProjectSubscriptionIds = new Set<string>();
 
   for (const repository of repositories) {
     const matching = subscriptions.filter(
@@ -1582,9 +1982,9 @@ export async function removeAdoServiceHooksForRepositories({
         ),
     );
 
-    // Only tear down project-scoped work-item hooks when no mapped repository
-    // remains for this project (caller omits projectId from retainProjectIds).
-    const workItemMatching = retainedProjects.has(repository.projectId)
+    // Only tear down project-scoped hooks when no mapped repository remains
+    // for this project (caller omits projectId from retainProjectIds).
+    const projectMatching = retainedProjects.has(repository.projectId)
       ? []
       : subscriptions.filter(
           (subscription) =>
@@ -1592,7 +1992,7 @@ export async function removeAdoServiceHooksForRepositories({
             subscription.consumerId === ADO_SERVICE_HOOK_CONSUMER_ID &&
             subscription.consumerActionId ===
               ADO_SERVICE_HOOK_CONSUMER_ACTION_ID &&
-            workItemEventTypes.has(subscription.eventType) &&
+            projectEventTypes.has(subscription.eventType) &&
             !(subscription.publisherInputs?.repository ?? '') &&
             (subscription.publisherInputs?.projectId ?? '') ===
               repository.projectId &&
@@ -1600,10 +2000,10 @@ export async function removeAdoServiceHooksForRepositories({
               subscription.consumerInputs?.url,
               webhookUrl,
             ) &&
-            !deletedWorkItemSubscriptionIds.has(subscription.id),
+            !deletedProjectSubscriptionIds.has(subscription.id),
         );
 
-    if (matching.length === 0 && workItemMatching.length === 0) {
+    if (matching.length === 0 && projectMatching.length === 0) {
       results.push({
         repositoryFullName: repository.repositoryFullName,
         status: 'not_found',
@@ -1612,7 +2012,7 @@ export async function removeAdoServiceHooksForRepositories({
     }
 
     try {
-      for (const subscription of [...matching, ...workItemMatching]) {
+      for (const subscription of [...matching, ...projectMatching]) {
         const response = await fetchImpl(
           buildAdoApiUrl(
             organizationApiBaseUrl,
@@ -1634,8 +2034,8 @@ export async function removeAdoServiceHooksForRepositories({
           );
         }
 
-        if (workItemEventTypes.has(subscription.eventType)) {
-          deletedWorkItemSubscriptionIds.add(subscription.id);
+        if (projectEventTypes.has(subscription.eventType)) {
+          deletedProjectSubscriptionIds.add(subscription.id);
         }
       }
 

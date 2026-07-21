@@ -82,7 +82,9 @@ import {
   createTaskRunAdoCredentials,
   ensureAdoServiceHooksForRepositories,
   removeAdoServiceHooksForRepositories,
+  getAdoBuildFailureEvidence,
   getAdoDeploymentUser,
+  getLatestAdoBuild,
   listAdoRepositories,
   normalizeAdoLinkedAccountKey,
   resolveAdoToken,
@@ -840,6 +842,19 @@ describe('Azure DevOps API helpers', () => {
                   url: 'https://roomote.example.com/api/webhooks/ado',
                 },
               },
+              {
+                id: 'subscription-build',
+                publisherId: 'tfs',
+                eventType: 'build.complete',
+                consumerId: 'webHooks',
+                consumerActionId: 'httpRequest',
+                publisherInputs: {
+                  projectId: 'project-1',
+                },
+                consumerInputs: {
+                  url: 'https://roomote.example.com/api/webhooks/ado',
+                },
+              },
             ],
           }),
           { status: 200 },
@@ -873,6 +888,7 @@ describe('Azure DevOps API helpers', () => {
     expect(deleteCalls.map(([url]) => url)).toEqual([
       'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-repo?api-version=7.1',
       'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-work-item?api-version=7.1',
+      'https://dev.azure.com/acme/_apis/hooks/subscriptions/subscription-build?api-version=7.1',
     ]);
   });
 
@@ -967,7 +983,9 @@ describe('Azure DevOps API helpers', () => {
           'https://dev.azure.com/acme/_apis/hooks/subscriptions?api-version=7.1' &&
         init?.method === 'POST',
     );
-    expect(createCalls).toHaveLength(4);
+    // 1 existing PR created hook is refreshed via PUT; remaining 3 PR hooks
+    // plus workitem.commented and build.complete are created via POST.
+    expect(createCalls).toHaveLength(5);
     const createBodies = createCalls.map(([, init]) =>
       JSON.parse(String(init?.body)),
     ) as Array<{
@@ -1013,6 +1031,111 @@ describe('Azure DevOps API helpers', () => {
           !body.publisherInputs.repository,
       ),
     ).toBe(true);
+    expect(
+      createBodies.some(
+        (body) =>
+          body.eventType === 'build.complete' &&
+          body.publisherInputs.projectId === 'project-1' &&
+          !body.publisherInputs.repository,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('getLatestAdoBuild and getAdoBuildFailureEvidence', () => {
+  beforeEach(() => {
+    process.env.ADO_TOKEN = 'ado_test';
+    process.env.ADO_ORGANIZATION = 'acme';
+    process.env.ADO_BASE_URL = 'https://dev.azure.com';
+  });
+
+  afterEach(() => {
+    delete process.env.ADO_TOKEN;
+    delete process.env.ADO_ORGANIZATION;
+    delete process.env.ADO_BASE_URL;
+  });
+
+  it('reads the newest failed default-branch build for a repository', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          value: [
+            {
+              id: 88,
+              result: 'failed',
+              sourceBranch: 'refs/heads/main',
+              sourceVersion: 'abc123',
+              definition: { name: 'CI' },
+              _links: {
+                web: {
+                  href: 'https://dev.azure.com/acme/Platform/_build/results?buildId=88',
+                },
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const build = await getLatestAdoBuild({
+      repositoryFullName: 'acme/Platform/backend',
+      repositoryId: 'repo-guid-1',
+      branch: 'main',
+      fetchImpl: fetchMock,
+    });
+
+    expect(build?.id).toBe(88);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/Platform/_apis/build/builds',
+    );
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      'repositoryId=repo-guid-1',
+    );
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      'resultFilter=failed',
+    );
+  });
+
+  it('formats failed timeline tasks and log tails', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (url) => {
+      const href = String(url);
+      if (href.includes('/timeline')) {
+        return new Response(
+          JSON.stringify({
+            records: [
+              {
+                name: 'Test',
+                type: 'Task',
+                result: 'failed',
+                log: { id: 7 },
+                issues: [{ message: 'Assertion failed' }],
+              },
+              {
+                name: 'ok',
+                type: 'Task',
+                result: 'succeeded',
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (href.includes('/logs/7')) {
+        return new Response('line1\nAssertionError: boom\n', { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const evidence = await getAdoBuildFailureEvidence({
+      repositoryFullName: 'acme/Platform/backend',
+      buildId: 88,
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('task="Test"');
+    expect(evidence).toContain('Assertion failed');
+    expect(evidence).toContain('AssertionError: boom');
   });
 });
 

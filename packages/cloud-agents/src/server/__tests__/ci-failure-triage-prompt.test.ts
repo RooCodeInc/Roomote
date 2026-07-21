@@ -133,4 +133,27 @@ describe('buildCiFailureTriagePrompt', () => {
     expect(prompt).not.toContain('gh run view');
     expect(prompt).toContain('Do not re-run remote CI workflows/pipelines');
   });
+
+  it('uses Azure DevOps-focused inspection guidance for ADO triggering runs', () => {
+    const prompt = buildCiFailureTriagePrompt({
+      ...baseParams,
+      trigger: 'webhook',
+      triggeringRun: {
+        repositoryFullName: 'acme/Platform/backend',
+        workflowName: 'CI',
+        runUrl: 'https://dev.azure.com/acme/Platform/_build/results?buildId=88',
+        headBranch: 'main',
+        headSha: 'abc123',
+        provider: 'ado',
+        failureEvidence: 'task="Test"\nAssertionError',
+      },
+    });
+
+    expect(prompt).toContain(
+      '<source_control_provider>ado</source_control_provider>',
+    );
+    expect(prompt).toContain('Azure Pipelines');
+    expect(prompt).not.toContain('gh run view');
+    expect(prompt).toContain('Do not dig through unrelated older builds');
+  });
 });
