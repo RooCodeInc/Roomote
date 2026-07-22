@@ -272,9 +272,9 @@ describe('chat message copy builders', () => {
     expect(
       buildThreadReplyFooterText({
         taskUrl: 'https://roomote.dev/task/123',
-        formatEmphasis: (text) => `*${text}*`,
+        formatFooterText: (text) => `-# ${text}`,
       }),
-    ).toBe('*Reply or use the [web app](https://roomote.dev/task/123).*');
+    ).toBe('-# Reply or use the [web app](https://roomote.dev/task/123).');
   });
 
   it('escapes Markdown link labels', () => {

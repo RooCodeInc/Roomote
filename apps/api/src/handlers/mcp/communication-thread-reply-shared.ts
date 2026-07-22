@@ -85,7 +85,7 @@ export async function buildCommunicationThreadReplyFooterText(params: {
     ...context,
     formatLink: formatMarkdownLink,
     ...(params.provider === 'discord'
-      ? { formatEmphasis: (text: string) => `*${text}*` }
+      ? { formatFooterText: (text: string) => `-# ${text}` }
       : {}),
   });
 }

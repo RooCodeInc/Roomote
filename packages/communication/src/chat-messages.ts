@@ -295,14 +295,14 @@ export function buildThreadReplyFooterText({
   livePreviewUrl,
   explicitMentionRequired = false,
   formatLink = formatMarkdownLink,
-  formatEmphasis = (text) => `_${text}_`,
+  formatFooterText = (text) => `_${text}_`,
 }: {
   taskUrl: string;
   linkedPr?: ThreadReplyLinkedPr | null;
   livePreviewUrl?: string | null;
   explicitMentionRequired?: boolean;
   formatLink?: LinkFormatter;
-  formatEmphasis?: (text: string) => string;
+  formatFooterText?: (text: string) => string;
 }): string {
   const replyInstruction = explicitMentionRequired
     ? 'reply with @-mention or use'
@@ -318,18 +318,18 @@ export function buildThreadReplyFooterText({
       ? `${prLink}, ${livePreviewLink}`
       : prLink;
 
-    return formatEmphasis(
+    return formatFooterText(
       `Working on ${workingOn}, ${replyInstruction} the ${webAppLink}.`,
     );
   }
 
   if (livePreviewLink) {
-    return formatEmphasis(
+    return formatFooterText(
       `Working on a ${livePreviewLink}, ${replyInstruction} the ${webAppLink}.`,
     );
   }
 
-  return formatEmphasis(
+  return formatFooterText(
     explicitMentionRequired
       ? `Reply with @-mention or use the ${webAppLink}.`
       : `Reply or use the ${webAppLink}.`,

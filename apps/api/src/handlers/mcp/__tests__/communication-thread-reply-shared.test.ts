@@ -175,9 +175,9 @@ describe('deliverManagedThreadReplyFooter', () => {
 });
 
 describe('buildCommunicationThreadReplyFooterText', () => {
-  it('uses asterisks for Discord footer emphasis', async () => {
-    buildThreadReplyFooterTextMock.mockImplementation(({ formatEmphasis }) =>
-      formatEmphasis('Footer'),
+  it('uses subtext for Discord footers', async () => {
+    buildThreadReplyFooterTextMock.mockImplementation(({ formatFooterText }) =>
+      formatFooterText('Footer'),
     );
 
     await expect(
@@ -189,6 +189,6 @@ describe('buildCommunicationThreadReplyFooterText', () => {
           payload: {},
         },
       }),
-    ).resolves.toBe('*Footer*');
+    ).resolves.toBe('-# Footer');
   });
 });
