@@ -17,6 +17,7 @@ import {
   TASK_STARTUP_FAILURE_TEXT,
 } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
 import {
@@ -640,7 +641,14 @@ function formatChannelProviderError(error?: string): string | undefined {
     return undefined;
   }
 
-  return message;
+  return redactSecrets(message);
+}
+
+function escapeSlackMrkdwnText(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 /**
@@ -827,6 +835,7 @@ async function sendSlackFailureNotification(
   error?: string,
 ): Promise<void> {
   const task = run.task;
+  const escapedError = error ? escapeSlackMrkdwnText(error) : undefined;
   const runtimeAlreadyStarted = hasReachedTaskRuntime(run);
   const slackInstallation = await db.query.slackInstallations.findFirst({
     where: and(eq(slackInstallations.isActive, true)),
@@ -875,7 +884,9 @@ async function sendSlackFailureNotification(
       : SLACK_STARTUP_FAILURE_TEXT;
     const restartFailureText =
       "I ran into a hiccup and couldn't get started. Please send a fresh Slack message and I'll give it another shot.";
-    const failureDetails = error ? `\n\n*Error details:* ${error}` : '';
+    const failureDetails = escapedError
+      ? `\n\n*Error details:* ${escapedError}`
+      : '';
 
     const failureMessage =
       run.payloadKind === TaskPayloadKind.SlackAppMention
@@ -917,7 +928,7 @@ async function sendSlackFailureNotification(
     thread_ts: threadTs ?? task.slackThreadTs!,
     text: [
       'I ran into an issue when setting things up.',
-      error ? `*Error details:* ${error}` : null,
+      escapedError ? `*Error details:* ${escapedError}` : null,
       `<${taskUrl}|Continue on the web app> to fix it.`,
     ]
       .filter((part): part is string => part !== null)

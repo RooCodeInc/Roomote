@@ -10,6 +10,9 @@ import type {
   TaskEvent,
 } from '@roomote/types';
 
+/** Internal task-message signal for an unrecoverable provider failure. */
+export const TERMINAL_PROVIDER_ERROR_SAY = 'terminal_provider_error';
+
 /**
  * Command names supported by the sandbox harness layer.
  * This is the local subset currently used by the OpenCode runtime.

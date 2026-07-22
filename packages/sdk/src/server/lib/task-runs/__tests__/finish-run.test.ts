@@ -1271,6 +1271,50 @@ describe('finishRun', () => {
       });
     });
 
+    it('redacts provider credentials and escapes Slack mentions at delivery', async () => {
+      const job = makeRun(
+        {
+          payloadKind: TaskPayloadKind.SlackAppMention,
+          payload: {
+            repo: 'owner/repo',
+            channel: 'C123',
+            user: 'U456',
+            text: 'test',
+            ts: '111.222',
+          },
+        },
+        { slackChannelId: 'C123', slackThreadTs: '111.222' },
+      );
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+      mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
+      mockFindFirstSlackInstallation.mockResolvedValue({
+        id: 'slack-inst-1',
+        botAccessToken: 'xoxb-test',
+        isActive: true,
+      });
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error:
+          'The provider returned an error: Invalid credential xoxb-1234567890-abcdefghijklmnop; <!channel> authentication unavailable.',
+      });
+
+      const messageText = String(
+        (
+          mockBuildTaskFailedMessage.mock.calls.at(-1)?.[0] as
+            | { messageText?: string }
+            | undefined
+        )?.messageText,
+      );
+      expect(messageText).toContain(
+        'The provider returned an error: Invalid credential [redacted]; &lt;!channel&gt; authentication unavailable.',
+      );
+      expect(messageText).not.toContain('xoxb-1234567890');
+      expect(messageText).not.toContain('<!channel>');
+    });
+
     it('suppresses the failure notification when a stop was requested before the failure', async () => {
       const job = makeRun(
         {
@@ -1632,7 +1676,7 @@ describe('finishRun', () => {
       await finishRun({
         id: 1,
         status: RunStatus.Failed,
-        error: 'spawn timeout',
+        error: 'The provider returned an error: Model is not available.',
       });
 
       expect(mockTeamsPostMessage).toHaveBeenCalledWith({
@@ -1640,7 +1684,7 @@ describe('finishRun', () => {
         serviceUrl: 'https://smba.trafficmanager.net/amer/',
         threadId: 'activity-root',
         replyToMessageId: 'activity-root',
-        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: Model is not available.\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
     });
@@ -1769,13 +1813,13 @@ describe('finishRun', () => {
       await finishRun({
         id: 1,
         status: RunStatus.Failed,
-        error: 'spawn timeout',
+        error: 'The provider returned an error: Model is not available.',
       });
 
       expect(mockDiscordPostMessage).toHaveBeenCalledWith({
         channelId: 'channel-1',
         threadId: 'thread-1',
-        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: Model is not available.\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
     });

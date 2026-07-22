@@ -2824,7 +2824,7 @@ describe('OpenCodeServerHarness', () => {
           expect.objectContaining({
             taskId: 'ses_1',
             message: expect.objectContaining({
-              say: 'error',
+              say: 'terminal_provider_error',
               text: 'The provider returned an error: [xAI] The model grok-4.5 is not available in your region.',
             }),
           }),

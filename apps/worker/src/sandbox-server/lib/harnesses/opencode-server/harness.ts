@@ -17,6 +17,7 @@ import {
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
   TaskEventName,
 } from '@roomote/types';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import type {
   AcpMessage,
   AcpPersistedEnvelope,
@@ -44,6 +45,7 @@ import type {
   TaskCommand,
 } from '../../harness';
 import {
+  TERMINAL_PROVIDER_ERROR_SAY,
   TaskCommandName,
   extractQueuedMessageId,
   extractQueuedMessageMove,
@@ -99,7 +101,6 @@ import {
   type OpenCodeModelSelection,
   resolveOpenCodeModelSelection,
 } from '../../../../run-task/opencode-model';
-import { redactSecrets } from '../../../../run-task/redact-secrets';
 
 interface OpenCodeServerHarnessOptions {
   client: OpenCodeServerClient;
@@ -3742,7 +3743,7 @@ export class OpenCodeServerHarness
             message: {
               ts: Date.now(),
               type: 'say',
-              say: 'error',
+              say: TERMINAL_PROVIDER_ERROR_SAY,
               text: errorText,
             },
           },

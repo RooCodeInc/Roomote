@@ -2824,7 +2824,7 @@ describe('HarnessManager error status', () => {
             message: {
               ts: Date.now(),
               type: 'say',
-              say: 'error',
+              say: 'terminal_provider_error',
               text: 'The provider returned an error: API key is invalid.',
             },
           },
@@ -2838,6 +2838,47 @@ describe('HarnessManager error status', () => {
       await expect(manager.waitForShutdown()).resolves.toMatchObject({
         lastErrorMessage: 'The provider returned an error: API key is invalid.',
         taskAbortedAt: undefined,
+      });
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('keeps nonterminal provider-error aborts resumable', () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-retry-error'],
+      } as TaskEvent);
+      harness.emitTaskEvent({
+        eventName: TaskEventName.Message,
+        payload: [
+          {
+            taskId: 'task-retry-error',
+            action: 'created',
+            message: {
+              ts: Date.now(),
+              type: 'say',
+              say: 'api_req_retry_delayed',
+              text: 'The provider is temporarily unavailable.',
+            },
+          },
+        ],
+      } as TaskEvent);
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskAborted,
+        payload: ['task-retry-error'],
+      } as TaskEvent);
+
+      expect(manager.getStatus()).toMatchObject({
+        phase: 'waiting_for_prompt',
+        taskStateEvent: TaskEventName.TaskAborted,
+        lastErrorMessage: 'The provider is temporarily unavailable.',
       });
     } finally {
       manager.dispose();

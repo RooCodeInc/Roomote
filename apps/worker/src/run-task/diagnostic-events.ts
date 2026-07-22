@@ -1,7 +1,7 @@
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { sdk } from '@roomote/sdk/client';
 
 import type { HarnessLogger } from '../logging';
-import { redactSecrets } from './redact-secrets';
 
 // Sandbox logs do not survive the sandbox (and Modal exposes none at all), so
 // runtime facts worth a post-mortem are recorded as durable `diagnostic` task
@@ -12,7 +12,7 @@ const MAX_MESSAGE_CHARS = 2_000;
 const MAX_DETAIL_STRING_CHARS = 4_000;
 const MAX_DETAIL_DEPTH = 4;
 
-export { redactSecrets } from './redact-secrets';
+export { redactSecrets } from '@roomote/communication/redact-secrets';
 
 function sanitizeString(value: string, maxChars: number): string {
   const capped =
