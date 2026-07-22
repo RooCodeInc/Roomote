@@ -256,6 +256,24 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     );
   });
 
+  it('posts the canonical read-only message when the suggestion launch is policy-blocked', async () => {
+    startNewTelegramTaskMock.mockRejectedValue({
+      code: 'deployment_read_only',
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
+      id: WORK_ITEM_ID,
+      claimedAt: CLAIMED_AT,
+    });
+    expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'This deployment is read-only. New task launches are paused.',
+      }),
+    );
+  });
+
   it('does not launch or touch the claim helpers when the claim CAS loses', async () => {
     claimTelegramSuggestionLaunchMock.mockResolvedValue(null);
 

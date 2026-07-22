@@ -9,6 +9,7 @@ export * from './worker-env';
 export * from './modal';
 
 export * from './adapters/modal';
+export * from './adapters/roomote-broker';
 export * from './adapters/docker';
 export * from './adapters/daytona';
 export * from './daytona';

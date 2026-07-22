@@ -1,5 +1,7 @@
 import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   activeRunStatuses,
+  isDeploymentReadOnlyError,
   type QueuedCommunicationMessage,
 } from '@roomote/types';
 import {
@@ -349,6 +351,7 @@ async function handleSuggestionCallback(input: {
         : {}),
     });
   } catch (error) {
+    const blockedByReadOnly = isDeploymentReadOnlyError(error);
     await releaseWorkItemClaim(db, {
       id: suggestion.id,
       claimedAt,
@@ -361,7 +364,9 @@ async function handleSuggestionCallback(input: {
       ...(input.channel.parentChannelId
         ? { threadId: input.channel.channelId }
         : {}),
-      text: `Could not start “${suggestion.title}” — try describing the task in a message instead.`,
+      text: blockedByReadOnly
+        ? MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE
+        : `Could not start “${suggestion.title}” — try describing the task in a message instead.`,
     });
   }
 }

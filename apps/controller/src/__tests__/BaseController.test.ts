@@ -16,6 +16,7 @@ const {
   mockDequeueTaskRun,
   mockFindPersistedWorkerBootstrapRestarts,
   mockGetOrphanedTaskRun,
+  mockReadManagedDeploymentAccess,
   mockRecordTaskRunLifecycleEvent,
   mockRedisSet,
   mockUpdateWhere,
@@ -30,6 +31,14 @@ const {
   mockDequeueTaskRun: vi.fn().mockResolvedValue(null),
   mockFindPersistedWorkerBootstrapRestarts: vi.fn().mockResolvedValue([]),
   mockGetOrphanedTaskRun: vi.fn().mockResolvedValue(null),
+  mockReadManagedDeploymentAccess: vi.fn().mockResolvedValue({
+    state: 'active',
+    reason: null,
+    revision: 0,
+    effectiveAt: '1970-01-01T00:00:00.000Z',
+    restrictionStartsAt: null,
+    remediationUrl: null,
+  }),
   mockRecordTaskRunLifecycleEvent: vi.fn().mockResolvedValue(undefined),
   mockRedisSet: vi.fn().mockResolvedValue('OK'),
   mockUpdateWhere: vi.fn().mockReturnValue({
@@ -76,6 +85,8 @@ vi.mock('@roomote/db/server', async () => {
     },
     recordTaskRunLifecycleEvent: (...args: unknown[]) =>
       mockRecordTaskRunLifecycleEvent(...args),
+    readManagedDeploymentAccess: (...args: unknown[]) =>
+      mockReadManagedDeploymentAccess(...args),
     resolveDefaultComputeProvider: vi.fn().mockResolvedValue('docker'),
     syncTaskStateFromRuns: (...args: unknown[]) =>
       mockSyncTaskStateFromRuns(...args),
@@ -206,6 +217,14 @@ function resetControllerMocks() {
   mockDequeueTaskRun.mockResolvedValue(null);
   mockFindPersistedWorkerBootstrapRestarts.mockResolvedValue([]);
   mockGetOrphanedTaskRun.mockResolvedValue(null);
+  mockReadManagedDeploymentAccess.mockResolvedValue({
+    state: 'active',
+    reason: null,
+    revision: 0,
+    effectiveAt: '1970-01-01T00:00:00.000Z',
+    restrictionStartsAt: null,
+    remediationUrl: null,
+  });
   mockRecordTaskRunLifecycleEvent.mockResolvedValue(undefined);
   mockRedisSet.mockResolvedValue('OK');
   mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
@@ -515,6 +534,32 @@ describe('BaseController.dequeueTaskRun', () => {
         }),
       }),
     );
+  });
+
+  it('fails pending jobs before token minting when deployment is read-only', async () => {
+    const job = makeTaskRun({
+      id: 81,
+      status: RunStatus.Pending,
+    });
+    mockReadManagedDeploymentAccess.mockResolvedValueOnce({
+      state: 'read_only',
+      reason: 'billing_required',
+      revision: 7,
+      effectiveAt: '2026-07-24T12:00:00.000Z',
+      restrictionStartsAt: null,
+      remediationUrl: 'https://cloud.roomote.test/#billing',
+    });
+
+    const result = await controller.testDequeueTaskRun(job);
+
+    expect(result).toBeNull();
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 81,
+      status: RunStatus.Failed,
+      error: 'This deployment is read-only. New task launches are paused.',
+      errorCode: TaskRunErrorCode.DeploymentReadOnly,
+    });
+    expect(mockDbTransaction).not.toHaveBeenCalled();
   });
 
   it('does not revive a job canceled during the dequeue window', async () => {

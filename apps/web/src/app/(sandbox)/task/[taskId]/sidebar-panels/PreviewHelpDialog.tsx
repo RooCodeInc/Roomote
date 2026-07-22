@@ -4,7 +4,10 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { DEFAULT_MANAGED_DEPLOYMENT_ACCESS } from '@roomote/types';
+
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { useTRPC } from '@/trpc/client';
 import {
   ArrowRight,
@@ -35,7 +38,8 @@ export function PreviewHelpDialog({
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const { isAdmin } = useAuthorizedUser();
+  const { isAdmin, managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
   const statusQuery = useQuery(
     trpc.previewSettings.taskStatus.queryOptions(
       { taskId: taskId ?? '' },
@@ -65,6 +69,15 @@ export function PreviewHelpDialog({
 
   const setupTask = statusQuery.data?.setupTask ?? null;
   const environmentName = statusQuery.data?.environment?.name;
+  const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
+
+  const handleStartRepair = () => {
+    if (!taskId || taskLaunchDisabledReason) {
+      return;
+    }
+
+    startRepairMutation.mutate({ taskId, mode: 'repair' });
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -94,11 +107,18 @@ export function PreviewHelpDialog({
             ) : null}
           </div>
         ) : isAdmin ? (
-          <p className="text-sm text-muted-foreground">
-            An agent can reproduce the problem in this environment and fix its
-            configuration. If the app itself needs changes, it reports exactly
-            what is needed.
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              An agent can reproduce the problem in this environment and fix its
+              configuration. If the app itself needs changes, it reports exactly
+              what is needed.
+            </p>
+            {taskLaunchDisabledReason ? (
+              <p className="text-sm text-muted-foreground">
+                {taskLaunchDisabledReason}
+              </p>
+            ) : null}
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground">
             Ask an administrator to fix live previews for this environment.
@@ -111,10 +131,13 @@ export function PreviewHelpDialog({
           </Button>
           {isAdmin && !setupTask ? (
             <Button
-              onClick={() =>
-                taskId && startRepairMutation.mutate({ taskId, mode: 'repair' })
+              onClick={handleStartRepair}
+              disabled={
+                !taskId ||
+                startRepairMutation.isPending ||
+                Boolean(taskLaunchDisabledReason)
               }
-              disabled={!taskId || startRepairMutation.isPending}
+              title={taskLaunchDisabledReason}
             >
               {startRepairMutation.isPending ? <Spinner /> : <Sparkles />}
               Fix previews with an agent

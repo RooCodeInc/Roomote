@@ -59,6 +59,7 @@ describe('Discord component callbacks', () => {
     vi.clearAllMocks();
     mocks.reply.mockResolvedValue({ messageId: 'response-1' });
     mocks.findMappedUser.mockResolvedValue('user-1');
+    mocks.releaseWorkItem.mockResolvedValue(true);
   });
 
   it('cancels an active run only when it belongs to the interaction channel', async () => {
@@ -358,6 +359,50 @@ describe('Discord component callbacks', () => {
     );
     expect(postMessage).toHaveBeenCalledWith(
       expect.not.objectContaining({ threadId: expect.anything() }),
+    );
+  });
+
+  it('posts the canonical read-only message when a suggestion launch is policy-blocked', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+    const provider = { postMessage } as never;
+    mocks.claimSuggestion.mockResolvedValue({
+      id: 'suggestion-1',
+      title: 'Fix the flaky login test',
+      brief: null,
+      targetRepositoryFullName: null,
+      investigationContext: null,
+      launchClaimedAt: new Date(),
+    });
+    mocks.startNewTask.mockRejectedValue({ code: 'deployment_read_only' });
+
+    const result = await handleDiscordComponentInteraction({
+      provider,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-2',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-2',
+        channel_id: 'dm-1',
+        user: { id: 'discord-user-1', username: 'matt' },
+        data: { custom_id: 'idea:suggestion-1', component_type: 2 },
+      },
+      interactionDeferred: true,
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'DM',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+    });
+
+    expect(result).toBe('handled');
+    expect(mocks.releaseWorkItem).toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'This deployment is read-only. New task launches are paused.',
+      }),
     );
   });
 });

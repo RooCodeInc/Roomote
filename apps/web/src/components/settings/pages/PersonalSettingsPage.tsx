@@ -5,6 +5,7 @@ import {
   type UserProfileSectionProfile,
   UserProfileSection,
 } from '@/components/settings/UserProfileSection';
+import { ChangePasswordSection } from '@/components/settings/ChangePasswordSection';
 import { LinkedAccounts } from '@/components/settings/LinkedAccounts';
 import {
   ShowDebugUISection,
@@ -24,6 +25,7 @@ export function PersonalSettingsPage({
         canChangePassword={canChangePassword}
         profile={profile}
       />
+      {canChangePassword ? <ChangePasswordSection /> : null}
       <UserPreferencesSection />
       <LinkedAccounts />
       <ShowDebugUISection />

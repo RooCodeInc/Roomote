@@ -48,26 +48,12 @@ export function UserProfileSection({
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(profile.name);
   const [email, setEmail] = useState(profile.email);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const trimmedName = name.trim();
   const trimmedEmail = email.trim();
   const hasNameChange = trimmedName !== profile.name;
   const hasEmailChange = trimmedEmail !== profile.email;
-  const hasPasswordChange =
-    currentPassword.length > 0 ||
-    newPassword.length > 0 ||
-    confirmPassword.length > 0;
-
-  const resetPasswordFields = () => {
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-  };
-
   // Only show the Remove control for avatars uploaded through this app's
   // /api/avatars/ endpoint. OAuth-provider avatar URLs are not removable here
   // — the user would lose their provider-supplied picture with no way back.
@@ -139,7 +125,7 @@ export function UserProfileSection({
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!hasNameChange && !hasEmailChange && !hasPasswordChange) {
+    if (!hasNameChange && !hasEmailChange) {
       setIsEditing(false);
       return;
     }
@@ -147,23 +133,6 @@ export function UserProfileSection({
     if (!trimmedName) {
       toast.error('Enter your name.');
       return;
-    }
-
-    if (hasPasswordChange) {
-      if (!currentPassword || !newPassword || !confirmPassword) {
-        toast.error('Enter your current password and a new password.');
-        return;
-      }
-
-      if (newPassword.length < 8) {
-        toast.error('Password must be at least 8 characters.');
-        return;
-      }
-
-      if (newPassword !== confirmPassword) {
-        toast.error('Passwords do not match.');
-        return;
-      }
     }
 
     setIsSubmitting(true);
@@ -196,26 +165,6 @@ export function UserProfileSection({
         }
       }
 
-      if (hasPasswordChange) {
-        const result = await authClient.changePassword({
-          currentPassword,
-          newPassword,
-          revokeOtherSessions: true,
-        });
-
-        if (result.error) {
-          toast.error(
-            getAuthErrorMessage(
-              result.error,
-              'Unable to change your password.',
-            ),
-          );
-          return;
-        }
-
-        resetPasswordFields();
-      }
-
       toast.success('Profile updated.');
       setIsEditing(false);
     } catch (error) {
@@ -235,7 +184,7 @@ export function UserProfileSection({
       icon={IdCard}
       title="Profile"
       action={
-        canChangePassword && !isEditing ? (
+        !isEditing ? (
           <Button
             type="button"
             size="sm"
@@ -336,8 +285,8 @@ export function UserProfileSection({
         ) : (
           <form className="space-y-4 max-w-md" onSubmit={handleSubmit}>
             <p className="text-muted-foreground">
-              Update your name, email, or password. Your profile picture can be
-              changed from the profile view.
+              Update your name or email. Your profile picture can be changed
+              from the profile view.
             </p>
             <div className="space-y-1">
               <Label htmlFor="personal-name">Name</Label>
@@ -362,45 +311,6 @@ export function UserProfileSection({
                 disabled={isSubmitting}
               />
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="current-password">Current password</Label>
-              <Input
-                id="current-password"
-                secret={true}
-                autoComplete="current-password"
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                disabled={isSubmitting}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="personal-new-password">New password</Label>
-              <Input
-                id="personal-new-password"
-                secret={true}
-                passwordStrength
-                autoComplete="new-password"
-                minLength={8}
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                disabled={isSubmitting}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="personal-confirm-password">
-                Confirm password
-              </Label>
-              <Input
-                id="personal-confirm-password"
-                secret={true}
-                match={newPassword}
-                autoComplete="new-password"
-                minLength={8}
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                disabled={isSubmitting}
-              />
-            </div>
             <div className="flex flex-wrap gap-2">
               <Button type="submit" size="sm" disabled={isSubmitting}>
                 {isSubmitting ? <Spinner /> : <Check />}
@@ -414,7 +324,6 @@ export function UserProfileSection({
                 onClick={() => {
                   setName(profile.name);
                   setEmail(profile.email);
-                  resetPasswordFields();
                   setIsEditing(false);
                 }}
               >

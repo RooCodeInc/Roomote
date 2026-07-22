@@ -1,4 +1,5 @@
 import {
+  DeploymentReadOnlyError,
   enqueueTaskRelaunch,
   isRelaunchableFailedStartPayloadKind,
 } from '@roomote/cloud-agents/server';
@@ -92,6 +93,10 @@ export async function retryFailedTaskStartCommand(
     };
   } catch (error) {
     console.error('retryFailedTaskStart error:', error);
+
+    if (error instanceof DeploymentReadOnlyError) {
+      return { success: false, error: error.code };
+    }
 
     return {
       success: false,

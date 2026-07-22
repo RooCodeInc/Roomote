@@ -124,6 +124,10 @@ const serverSchema = {
   ROOMOTE_FORCE_TELEMETRY: z.string().optional(),
   // Release tag baked into published app images by the publish workflow.
   RELEASE_VERSION: z.string().min(1).optional(),
+  // Product (changelog) version baked into published app images alongside
+  // RELEASE_VERSION, so channel builds (develop-<sha>/main-<sha>) still know
+  // which product release they contain. Read by the in-app release notices.
+  RELEASE_PRODUCT_VERSION: z.string().min(1).optional(),
   TRPC_URL: z.string().min(1),
   R_MODEL: z.string().min(1).optional(),
   R_SMALL_MODEL: z.string().min(1).optional(),
@@ -219,9 +223,14 @@ const serverSchema = {
   // the hosting operator's provisioning rather than the setup flow).
   ROOMOTE_CLOUD_TOKEN_ID: z.string().optional(),
   ROOMOTE_CLOUD_TOKEN_SECRET: z.string().optional(),
+  ROOMOTE_CLOUD_ACCESS_VERIFICATION_SECRET: z.string().optional(),
   ROOMOTE_CLOUD_BACKEND: z.enum(ROOMOTE_CLOUD_BACKENDS).optional(),
   ROOMOTE_CLOUD_SLUG: z.string().optional(),
   ROOMOTE_CLOUD_APP_NAME: z.string().optional(),
+  // Compute broker base URL for the `broker` backend; with it, the token
+  // pair above carries a derived per-tenant broker credential instead of
+  // Modal workspace tokens.
+  ROOMOTE_CLOUD_BROKER_URL: z.string().url().optional(),
   MODAL_ENDPOINT: z.string().optional(),
   MODAL_ENVIRONMENT: z.string().optional(),
   MODAL_APP_NAME: z.string().optional(),
@@ -400,6 +409,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WORKER_RELEASE_CHANNEL',
   'WORKER_RELEASE_VERSION',
   'RELEASE_VERSION',
+  'RELEASE_PRODUCT_VERSION',
   'R_PING_BASE_URL',
   'R_INSTANCE_ID',
   'R_INTERCOM_APP_ID',
@@ -444,6 +454,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'MODAL_TOKEN_SECRET',
   'ROOMOTE_CLOUD_TOKEN_ID',
   'ROOMOTE_CLOUD_TOKEN_SECRET',
+  'ROOMOTE_CLOUD_ACCESS_VERIFICATION_SECRET',
   'ROOMOTE_CLOUD_BACKEND',
   'ROOMOTE_CLOUD_SLUG',
   'ROOMOTE_CLOUD_APP_NAME',

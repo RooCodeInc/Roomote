@@ -43,6 +43,16 @@ vi.mock('sonner', () => ({
 
 vi.mock('@roomote/types', () => ({
   ALL_REPOSITORIES: [],
+  DEFAULT_MANAGED_DEPLOYMENT_ACCESS: {
+    state: 'active',
+    reason: null,
+    revision: 1,
+    effectiveAt: '2026-01-01T00:00:00.000Z',
+    restrictionStartsAt: null,
+    remediationUrl: null,
+  },
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE:
+    'This deployment is read-only. New task launches are paused.',
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -66,6 +76,19 @@ vi.mock('@/lib/utils', () => ({
 
 vi.mock('@/hooks/tasks', () => ({
   useTask: () => ({ data: null }),
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({
+    managedAccess: {
+      state: 'active',
+      reason: null,
+      revision: 1,
+      effectiveAt: '2026-01-01T00:00:00.000Z',
+      restrictionStartsAt: null,
+      remediationUrl: null,
+    },
+  }),
 }));
 
 vi.mock('@/hooks/task-runs', () => ({

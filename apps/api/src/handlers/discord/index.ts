@@ -21,6 +21,10 @@ import {
 } from '@roomote/communication/messages';
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  isDeploymentReadOnlyError,
+} from '@roomote/types';
+import {
   consumeDiscordLinkCode,
   findDiscordInstallationByGuildId,
   findDiscordMappedUserId,
@@ -728,6 +732,19 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
           })
           .catch(() => undefined);
       }
+      if (isDeploymentReadOnlyError(error)) {
+        await replyToDiscordEvent({
+          provider: resolved.provider,
+          applicationId: resolved.applicationId,
+          channel,
+          ...(interaction
+            ? { interaction: interactionReplyContext(event) }
+            : {}),
+          text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+        }).catch(() => undefined);
+
+        return { ok: true, repliedInline: true };
+      }
       throw error;
     }
   }
@@ -749,29 +766,46 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
     }
   }
 
-  const started = await startNewDiscordTask({
-    provider: resolved.provider,
-    applicationId: resolved.applicationId,
-    requesterDiscordUserId: sender.id,
-    launchOwnerUserId: senderUserId,
-    queuedMessage,
-    metadata,
-    channel,
-    ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-    // Match Slack: a mention inside an existing thread continues in that same
-    // thread (with thread history as context). Only `/new` forces a sibling
-    // task thread; known task threads were already handled above.
-    forceNewThread: forceNewTask,
-    ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
-    ...(message?.message_reference?.message_id
-      ? {
-          replyToMessageId: message.message_reference.message_id,
-          ...(message.message_reference.channel_id
-            ? { replyToChannelId: message.message_reference.channel_id }
-            : {}),
-        }
-      : {}),
-  });
+  let started: Awaited<ReturnType<typeof startNewDiscordTask>>;
+  try {
+    started = await startNewDiscordTask({
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      requesterDiscordUserId: sender.id,
+      launchOwnerUserId: senderUserId,
+      queuedMessage,
+      metadata,
+      channel,
+      ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
+      // Match Slack: a mention inside an existing thread continues in that same
+      // thread (with thread history as context). Only `/new` forces a sibling
+      // task thread; known task threads were already handled above.
+      forceNewThread: forceNewTask,
+      ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
+      ...(message?.message_reference?.message_id
+        ? {
+            replyToMessageId: message.message_reference.message_id,
+            ...(message.message_reference.channel_id
+              ? { replyToChannelId: message.message_reference.channel_id }
+              : {}),
+          }
+        : {}),
+    });
+  } catch (error) {
+    if (isDeploymentReadOnlyError(error)) {
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
+        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+      }).catch(() => undefined);
+
+      return { ok: true, repliedInline: true };
+    }
+
+    throw error;
+  }
   return { ok: true, ...started };
 }
 

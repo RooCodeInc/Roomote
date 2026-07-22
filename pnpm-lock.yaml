@@ -120,10 +120,10 @@ importers:
         version: 3.1000.0
       '@hono/node-server':
         specifier: 1.19.13
-        version: 1.19.13(hono@4.12.25)
+        version: 1.19.13(hono@4.12.27)
       '@hono/trpc-server':
         specifier: ^0.4.2
-        version: 0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.12.25)
+        version: 0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.12.27)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
@@ -194,8 +194,8 @@ importers:
         specifier: ^11.15.0
         version: 11.15.0(typescript@5.9.3)
       hono:
-        specifier: 4.12.25
-        version: 4.12.25
+        specifier: 4.12.27
+        version: 4.12.27
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -235,13 +235,13 @@ importers:
         version: 6.16.4(@bull-board/ui@6.16.4)
       '@bull-board/hono':
         specifier: ^6.16.4
-        version: 6.16.4(hono@4.12.25)
+        version: 6.16.4(hono@4.12.27)
       '@bull-board/ui':
         specifier: ^6.16.4
         version: 6.16.4
       '@hono/node-server':
         specifier: 1.19.13
-        version: 1.19.13(hono@4.12.25)
+        version: 1.19.13(hono@4.12.27)
       '@roomote/cloud-agents':
         specifier: workspace:^
         version: link:../../packages/cloud-agents
@@ -282,8 +282,8 @@ importers:
         specifier: ^5.78.0
         version: 5.78.0
       hono:
-        specifier: 4.12.25
-        version: 4.12.25
+        specifier: 4.12.27
+        version: 4.12.27
       ioredis:
         specifier: 5.10.1
         version: 5.10.1
@@ -867,7 +867,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: 1.19.13
-        version: 1.19.13(hono@4.12.25)
+        version: 1.19.13(hono@4.12.27)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
@@ -917,8 +917,8 @@ importers:
         specifier: 9.6.1
         version: 9.6.1
       hono:
-        specifier: 4.12.25
-        version: 4.12.25
+        specifier: 4.12.27
+        version: 4.12.27
       http-proxy:
         specifier: ^1.18.1
         version: 1.18.1
@@ -8179,8 +8179,8 @@ packages:
     resolution: {integrity: sha512-eSmmWE5bZTK2Nou4g0AI3zZ9rswp7GRKoKXS1BLUkvPviOqs4YTN1djQIqrXy9k5gEtdLPy86JjRwsNM9tnDcA==}
     engines: {node: '>=0.10.0'}
 
-  hono@4.12.25:
-    resolution: {integrity: sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ==}
+  hono@4.12.27:
+    resolution: {integrity: sha512-1yrb/+w6HWQJrUCLkJ2IF5jNIPvvFkblV5RNOYl6bV+OA6p9GLcMpHFFGTosSvHvcAUibuUukRqhlYI4z32C7Q==}
     engines: {node: '>=16.9.0'}
 
   hotkeys-js@4.0.2:
@@ -12458,12 +12458,12 @@ snapshots:
       '@bull-board/ui': 6.16.4
       redis-info: 3.1.0
 
-  '@bull-board/hono@6.16.4(hono@4.12.25)':
+  '@bull-board/hono@6.16.4(hono@4.12.27)':
     dependencies:
       '@bull-board/api': 6.16.4(@bull-board/ui@6.16.4)
       '@bull-board/ui': 6.16.4
       ejs: 3.1.10
-      hono: 4.12.25
+      hono: 4.12.27
 
   '@bull-board/ui@6.16.4':
     dependencies:
@@ -13058,14 +13058,14 @@ snapshots:
 
   '@hey-api/types@0.1.4': {}
 
-  '@hono/node-server@1.19.13(hono@4.12.25)':
+  '@hono/node-server@1.19.13(hono@4.12.27)':
     dependencies:
-      hono: 4.12.25
+      hono: 4.12.27
 
-  '@hono/trpc-server@0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.12.25)':
+  '@hono/trpc-server@0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.12.27)':
     dependencies:
       '@trpc/server': 11.15.0(typescript@5.9.3)
-      hono: 4.12.25
+      hono: 4.12.27
 
   '@hookform/resolvers@5.2.2(react-hook-form@7.60.0(react@19.2.4))':
     dependencies:
@@ -13310,7 +13310,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)':
     dependencies:
-      '@hono/node-server': 1.19.13(hono@4.12.25)
+      '@hono/node-server': 1.19.13(hono@4.12.27)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -13320,7 +13320,7 @@ snapshots:
       eventsource-parser: 3.0.6
       express: 5.2.1
       express-rate-limit: 8.5.2(express@5.2.1)
-      hono: 4.12.25
+      hono: 4.12.27
       jose: 6.2.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -18740,7 +18740,7 @@ snapshots:
     dependencies:
       parse-passwd: 1.0.0
 
-  hono@4.12.25: {}
+  hono@4.12.27: {}
 
   hotkeys-js@4.0.2: {}
 

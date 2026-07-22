@@ -53,6 +53,19 @@ vi.mock('@/hooks/snapshots', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({
+    managedAccess: {
+      state: 'active',
+      reason: null,
+      revision: 1,
+      effectiveAt: '2026-01-01T00:00:00.000Z',
+      restrictionStartsAt: null,
+      remediationUrl: null,
+    },
+  }),
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     tasks: {
@@ -87,6 +100,7 @@ vi.mock('@/components/tasks', () => ({
     submitWithMetaKey,
     submitIcon,
     surface,
+    submitDisabledReason,
   }: {
     isBusy: boolean;
     promptText: string;
@@ -104,6 +118,7 @@ vi.mock('@/components/tasks', () => ({
     submitWithMetaKey?: boolean;
     submitIcon?: unknown;
     surface?: string;
+    submitDisabledReason?: string;
   }) => {
     capturedPlaceholder = placeholder;
     capturedSuggestion = suggestion;
@@ -120,6 +135,7 @@ vi.mock('@/components/tasks', () => ({
         />
         <button
           disabled={isBusy}
+          title={submitDisabledReason}
           onClick={() =>
             void onSubmit({
               text: promptText,

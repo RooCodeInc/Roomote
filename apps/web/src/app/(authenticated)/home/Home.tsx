@@ -11,6 +11,7 @@ import {
   type ComputeProvider,
   ALL_REPOSITORIES,
   DEFAULT_LAUNCH_CODING_HARNESS,
+  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
   pickPreferredConfiguredComputeProvider,
   SETUP_COMPUTE_PROVIDER_CATALOG,
 } from '@roomote/types';
@@ -21,6 +22,7 @@ import { type CreateTaskFormValues, createTaskFormSchema } from '@/types';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { cn } from '@/lib/utils';
+import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 
 import { useEnvironments } from '@/hooks/environments';
 import { useShowDebugUI } from '@/hooks/useShowDebugUI';
@@ -105,7 +107,8 @@ export function Home({
 }: HomeProps) {
   const router = useRouter();
   const environments = useEnvironments();
-  const { cloudEnabled } = useAuthorizedUser();
+  const { cloudEnabled, managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
 
   const { isDebugUIVisible } = useShowDebugUI();
   const canSelectBranch = isDebugUIVisible;
@@ -446,9 +449,10 @@ export function Home({
   const showNoEnvironmentsWarning =
     !environments.isPending && !hasAnyEnvironments;
   const submitDisabledReason =
-    !hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
+    getTaskLaunchDisabledReason(managedAccess) ??
+    (!hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
       ? 'Auto routing needs an environment. Create one, or select All Repositories to work without one.'
-      : undefined;
+      : undefined);
 
   const handleAutoSubmit = useCallback(
     async (submission: SubmissionSnapshot) => {

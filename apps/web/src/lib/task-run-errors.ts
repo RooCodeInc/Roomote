@@ -107,6 +107,8 @@ const DOCKER_ERROR_CODE_MESSAGES: Record<TaskRunErrorCode, string> = {
     'The sandbox container exited during boot before the worker started. Review the recent Docker logs below for the underlying crash or missing dependency.',
   [TaskRunErrorCode.DockerReleaseArchiveMissing]:
     'Roomote is missing the local worker release archive required to boot Docker sandboxes. Build the worker release (for example via the local development worker-release step) and retry.',
+  [TaskRunErrorCode.DeploymentReadOnly]:
+    'This deployment is read-only. New task launches are paused until access is restored.',
 };
 
 /** The persisted code may come from a newer or older release — trust it only

@@ -32,6 +32,7 @@ import {
   taskMessages,
   taskPullRequests,
   taskRunEvents,
+  deploymentSettings,
   users,
   environments,
   environmentRepositoryMappings,
@@ -45,6 +46,7 @@ import {
   TaskRunQueue,
   enqueueTask,
   enqueueTaskRelaunch,
+  DeploymentReadOnlyError,
   persistEarlyGeneratedTaskTitle,
   resolveFreshTaskComputeProvider,
   resolveQueueScope,
@@ -140,6 +142,69 @@ afterAll(async () => {
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('blocks fresh launches when managed access is read-only', async () => {
+    const priorSettings = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+      columns: { metadata: true },
+    });
+    const userId = await createUser();
+
+    await db
+      .insert(deploymentSettings)
+      .values({
+        id: 'default',
+        metadata: {
+          feature_flags: { keep_me: true },
+          deployment_disabled: false,
+          managed_access: {
+            state: 'read_only',
+            reason: 'billing_required',
+            revision: 7,
+            effectiveAt: '2026-07-24T12:00:00.000Z',
+            restrictionStartsAt: null,
+            remediationUrl: 'https://cloud.roomote.test/#billing',
+          },
+        },
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          metadata: {
+            feature_flags: { keep_me: true },
+            deployment_disabled: false,
+            managed_access: {
+              state: 'read_only',
+              reason: 'billing_required',
+              revision: 7,
+              effectiveAt: '2026-07-24T12:00:00.000Z',
+              restrictionStartsAt: null,
+              remediationUrl: 'https://cloud.roomote.test/#billing',
+            },
+          },
+        },
+      });
+
+    try {
+      await expect(
+        enqueueTask(
+          {
+            task: standardTaskInput(),
+            initiator: { kind: 'user', userId },
+            workflow: 'standard',
+            surface: 'web',
+            trigger: 'manual',
+          },
+          { enqueue: false },
+        ),
+      ).rejects.toBeInstanceOf(DeploymentReadOnlyError);
+    } finally {
+      await db
+        .update(deploymentSettings)
+        .set({ metadata: priorSettings?.metadata ?? {} })
+        .where(eq(deploymentSettings.id, 'default'));
+    }
+  });
+
   it('rejects an early generated title after a user edit wins the database race', async () => {
     const userId = await createUser();
     const run = await launchFresh({

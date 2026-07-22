@@ -42,6 +42,33 @@ export const SLACK_PR_CLOSED_REACTION_EMOJI = '-1';
 
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 
+/**
+ * Discord renders backslash escapes literally inside masked-link labels, so
+ * instead of escaping we drop the characters that let untrusted title text
+ * break out of the label (`[`, `]`, `\`) and split the scheme of any embedded
+ * URL with a zero-width space so Discord does not auto-link it.
+ */
+function sanitizeDiscordLinkLabel(text: string): string {
+  return text
+    .replace(/[[\]\\]/g, '')
+    .replace(/(https?):\/\//gi, '$1:\u200b//')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatDiscordPullRequestLink(label: string, url: string): string {
+  const [, matchedTag, matchedTitle] =
+    label.match(/^(\[[^\]]+\])\s+(.+)$/) ?? [];
+  const tag = matchedTag ? `${matchedTag} ` : '';
+  const title = sanitizeDiscordLinkLabel(matchedTitle ?? label);
+
+  if (!title) {
+    return `${tag}${url}`;
+  }
+
+  return `${tag}[${title}](${url})`;
+}
+
 interface NotifyPullRequestTerminalStatusParams {
   /**
    * Source control provider that owns the terminal PR/MR. Used to scope the
@@ -499,7 +526,7 @@ async function deliverDiscordTerminalStatus({
     prUrl,
     status,
     actorLogin: resolvedActorLogin,
-    formatLink: formatMarkdownLink,
+    formatLink: formatDiscordPullRequestLink,
     formatStatus: (value) => `**${value}**`,
   });
   // Match Slack terminal reactions: check on merge, thumbsdown on closed.

@@ -84,8 +84,10 @@ COPY apps/worker ./apps/worker/
 
 ARG R_APP_ENV
 ARG RELEASE_VERSION
+ARG RELEASE_PRODUCT_VERSION
 ENV R_APP_ENV=${R_APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
+ENV RELEASE_PRODUCT_VERSION=${RELEASE_PRODUCT_VERSION}
 
 # ---------------------------------------------------------------------------
 # web: Next.js standalone build. The placeholder env values only satisfy
@@ -271,8 +273,10 @@ RUN chmod +x /roomote/.docker/app/entrypoint.sh
 
 ARG R_APP_ENV
 ARG RELEASE_VERSION
+ARG RELEASE_PRODUCT_VERSION
 ENV R_APP_ENV=${R_APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
+ENV RELEASE_PRODUCT_VERSION=${RELEASE_PRODUCT_VERSION}
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOME=/tmp

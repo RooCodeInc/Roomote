@@ -12,6 +12,10 @@ import {
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
+import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  isDeploymentReadOnlyError,
+} from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
@@ -288,6 +292,24 @@ export async function launchClaimedTeamsSuggestion(params: {
 
     return { result: 'replied_inline' };
   } catch (error) {
+    if (isDeploymentReadOnlyError(error)) {
+      await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt }).catch(
+        (releaseError) => {
+          apiLogger.warn(
+            `[teams] Failed to release claim for work item ${suggestion.id} after read-only launch block: ${
+              releaseError instanceof Error
+                ? releaseError.message
+                : String(releaseError)
+            }`,
+          );
+        },
+      );
+
+      await params.postMessage(MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE);
+
+      return { result: 'launch_failed' };
+    }
+
     apiLogger.warn(
       `[teams] Failed to launch suggestion ${suggestion.id} from "start idea" reply: ${
         error instanceof Error ? error.message : String(error)

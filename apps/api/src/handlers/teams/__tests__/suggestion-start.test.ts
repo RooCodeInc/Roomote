@@ -249,4 +249,26 @@ describe('launchClaimedTeamsSuggestion', () => {
       expect.stringContaining('Could not start'),
     );
   });
+
+  it('posts the canonical read-only message when the launch is policy-blocked', async () => {
+    const launchTask = vi.fn().mockRejectedValue({
+      code: 'deployment_read_only',
+    });
+    const postMessage = vi.fn();
+
+    const outcome = await launchClaimedTeamsSuggestion({
+      suggestion: buildClaimedSuggestion(),
+      launchTask,
+      postMessage,
+    });
+
+    expect(outcome).toEqual({ result: 'launch_failed' });
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
+      id: 'work-item-1',
+      claimedAt: CLAIMED_AT,
+    });
+    expect(postMessage).toHaveBeenCalledWith(
+      'This deployment is read-only. New task launches are paused.',
+    );
+  });
 });

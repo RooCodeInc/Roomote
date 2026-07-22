@@ -125,7 +125,11 @@ async function createArtifactRecord(
     },
   );
 
-  const viewUrl = `${Env.R_APP_URL}/task/${taskId}/artifacts/${path}?v=${artifact.version}`;
+  const artifactUrlBase = (Env.R_PUBLIC_URL ?? Env.R_APP_URL).replace(
+    /\/+$/,
+    '',
+  );
+  const viewUrl = `${artifactUrlBase}/task/${taskId}/artifacts/${path}?v=${artifact.version}`;
   const response: {
     id: string;
     version: number;
@@ -145,7 +149,7 @@ async function createArtifactRecord(
     response.rawUrl = buildSignedArtifactRawUrl({
       artifactId: artifact.id,
       ts: currentEpochSeconds(),
-      apiBaseUrl: Env.R_APP_URL,
+      apiBaseUrl: artifactUrlBase,
       signingKey: getArtifactSigningKey(),
     });
   }

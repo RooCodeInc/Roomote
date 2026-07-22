@@ -60,6 +60,10 @@ export async function listTaskArtifacts(
   });
 
   const rawUrlTs = currentEpochSeconds();
+  const artifactUrlBase = (Env.R_PUBLIC_URL ?? Env.R_APP_URL).replace(
+    /\/+$/,
+    '',
+  );
 
   return c.json({
     taskId,
@@ -82,14 +86,14 @@ export async function listTaskArtifacts(
         contentType: artifact.contentType,
         size: artifact.size,
         createdAt: artifact.createdAt,
-        viewUrl: `${Env.R_APP_URL}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`,
+        viewUrl: `${artifactUrlBase}/task/${taskId}/artifacts/${artifact.path}?v=${artifact.version}`,
       };
 
       if (artifact.contentType.startsWith('image/')) {
         entry.rawUrl = buildSignedArtifactRawUrl({
           artifactId: artifact.id,
           ts: rawUrlTs,
-          apiBaseUrl: Env.R_APP_URL,
+          apiBaseUrl: artifactUrlBase,
           signingKey: getArtifactSigningKey(),
         });
       }

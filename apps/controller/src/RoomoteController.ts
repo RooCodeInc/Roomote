@@ -90,10 +90,19 @@ export class RoomoteController extends BaseController {
       // own spawn function here after the backend resolution.
       case 'modal':
       case 'roomote': {
-        if (provider === 'roomote') {
-          // Throws on an unsupported backend; the resolved value is 'modal'
-          // until more ROOMOTE_CLOUD_BACKENDS exist.
-          resolveRoomoteCloudBackend(resolvedEnv);
+        // Throws on an unsupported backend. `broker` routes all sandbox
+        // operations through the hosting operator's compute broker; the
+        // token pair then carries the tenant id + derived broker credential.
+        const backend =
+          provider === 'roomote'
+            ? resolveRoomoteCloudBackend(resolvedEnv)
+            : ('modal' as const);
+        const brokerUrl = resolvedEnv.ROOMOTE_CLOUD_BROKER_URL;
+
+        if (backend === 'broker' && !brokerUrl) {
+          throw new Error(
+            'ROOMOTE_CLOUD_BROKER_URL is required to spawn broker-backed Roomote Cloud workers',
+          );
         }
 
         const modalTokenId =
@@ -122,6 +131,8 @@ export class RoomoteController extends BaseController {
 
         await spawnModalWorker(taskRun, authToken, {
           vendor: provider,
+          backend,
+          ...(brokerUrl ? { brokerUrl } : {}),
           deploymentSlug: deploymentSlug,
           modalTags: this.buildSandboxTags(),
           modalTokenId,

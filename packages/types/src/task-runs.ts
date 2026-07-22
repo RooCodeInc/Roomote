@@ -2037,6 +2037,7 @@ export const TaskRunErrorCode = {
   DockerWorkerStartTimeout: 'docker_worker_start_timeout',
   DockerWorkerExitedEarly: 'docker_worker_exited_early',
   DockerWorkerFetchFailed: 'docker_worker_fetch_failed',
+  DeploymentReadOnly: 'deployment_read_only',
 } as const;
 
 export type TaskRunErrorCode =

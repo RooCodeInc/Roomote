@@ -1397,4 +1397,38 @@ describe('startAutoRoutedSlackTask', () => {
       taskUrl: 'https://app.example.com/task/task_77',
     });
   });
+
+  it('returns a clear not-started result when the deployment is read-only', async () => {
+    startSlackAppMentionTaskMock.mockRejectedValue({
+      code: 'deployment_read_only',
+    });
+    const slack = {
+      hasMessageInThread: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi
+        .fn()
+        .mockImplementation(async (text: string) => text),
+      fetchThreadMessages: vi.fn().mockResolvedValue([]),
+    };
+
+    const result = await startAutoRoutedSlackTask({
+      slackInstallation: { orgId: 'org_1' } as never,
+      slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
+      launchUserId: 'user_installer',
+      slackUserId: 'UINSTALLER',
+      channel: 'C123',
+      prompt: 'Investigate this',
+      threadTs: '120.000',
+    });
+
+    expect(result).toEqual({
+      status: 'not_started',
+      code: 'deployment_read_only',
+      threadId: '120.000',
+      message: 'This deployment is read-only. New task launches are paused.',
+      routingResult: expect.any(Object),
+    });
+    expect(finishRoutedStartMock).not.toHaveBeenCalled();
+  });
 });

@@ -12,7 +12,11 @@ import {
   syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
 import { findDiscordMappedUserId } from '@roomote/sdk/server';
-import type { TaskInitiator } from '@roomote/types';
+import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  isDeploymentReadOnlyError,
+  type TaskInitiator,
+} from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import { checkAutoStartChannelCache } from '../shared/auto-start-cache.js';
@@ -350,6 +354,18 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         await releaseRoutingLock();
       }
     } catch (error) {
+      if (isDeploymentReadOnlyError(error)) {
+        await provider
+          .postMessage({
+            channelId: channel.parentChannelId ?? channel.channelId,
+            ...(channel.parentChannelId ? { threadId: channel.channelId } : {}),
+            text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+          })
+          .catch(() => undefined);
+        await releaseRoutingLock();
+        return;
+      }
+
       apiLogger.error(
         `[DiscordChannelAutoStart] Failed to launch for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
       );

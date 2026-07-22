@@ -89,6 +89,7 @@ x-roomote-production-env: &roomote-production-env
 x-roomote-production-build-args: &roomote-production-build-args
   R_APP_ENV: production
   RELEASE_VERSION: ${RELEASE_VERSION:-self-host-production}
+  RELEASE_PRODUCT_VERSION: ${RELEASE_PRODUCT_VERSION:-}
 
 services:
   postgres:
