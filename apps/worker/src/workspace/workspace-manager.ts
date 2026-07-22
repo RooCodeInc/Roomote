@@ -24,6 +24,7 @@ import { createWorkspaceRepositoryPreparationError } from '../commands/setup/wor
 import {
   SOURCE_CONTROL_GIT_CONFIG_PATH,
   ensureGitCredentialHelper,
+  getGitHubTokenFileStatus,
 } from '../lib/github-token';
 
 interface PrepareRepositoryOptions {
@@ -510,6 +511,35 @@ export class WorkspaceManager {
     });
   }
 
+  /**
+   * GitHub task runs always receive a GitHub App installation token at
+   * dequeue, which the worker writes to the file-backed git credential
+   * helper before repository setup. If no credential signal is present
+   * here, git would fall back to slow anonymous clone retries and fail
+   * checkout with a cryptic error — fail fast with an operator-actionable
+   * message instead. Logs presence signals only, never token material.
+   */
+  private assertGitHubCredentialsAvailable(repoFullName: string): void {
+    const tokenFile = getGitHubTokenFileStatus();
+    const envTokenPresent = Boolean(
+      this.env.GH_TOKEN?.trim() || this.env.GITHUB_TOKEN?.trim(),
+    );
+
+    console.log(
+      `GitHub credential check for ${repoFullName}: tokenFilePresent=${tokenFile.present} tokenFileNonEmpty=${tokenFile.nonEmpty} envTokenPresent=${envTokenPresent}`,
+    );
+
+    if (tokenFile.nonEmpty || envTokenPresent) {
+      return;
+    }
+
+    throw new Error(
+      `No GitHub credentials are available for ${repoFullName}: the worker's token file (~/.roomote/gh-token) is missing or empty and no GH_TOKEN/GITHUB_TOKEN env var is set. ` +
+        'The control plane creates a GitHub App installation token when the run is dequeued; verify the GitHub App is installed for the repository owner, the installation covers this repository, and repositories are synced. ' +
+        'Anonymous git access is rate limited and fails for private repositories, so repository setup was stopped before cloning.',
+    );
+  }
+
   public async prepareRepository(
     repoFullName: string,
     branch: string | undefined,
@@ -561,14 +591,37 @@ export class WorkspaceManager {
       this.workspaceRoot,
       fullName.split('/').pop() ?? fullName,
     );
-    const resolvedRepoPath =
+    let resolvedRepoPath =
       preserveGitState &&
       repoPath !== legacyRepoPath &&
       !existsSync(repoPath) &&
       existsSync(legacyRepoPath)
         ? legacyRepoPath
         : repoPath;
+
+    // An interrupted earlier run can leave a directory behind that is not a
+    // git repository (e.g. a clone killed before .git was written). Treating
+    // it as an existing clone would skip cloning here and fail much later at
+    // checkout with a cryptic "'origin/<branch>' is not a commit" error.
+    if (
+      existsSync(resolvedRepoPath) &&
+      !existsSync(join(resolvedRepoPath, '.git'))
+    ) {
+      console.warn(
+        `Repository path ${resolvedRepoPath} exists but is not a git repository; removing it and cloning again.`,
+      );
+      await rm(resolvedRepoPath, { recursive: true, force: true });
+      resolvedRepoPath = repoPath;
+    }
+
     const needsClone = !existsSync(resolvedRepoPath);
+
+    if (
+      sourceControlProvider === 'github' &&
+      (needsClone || !preserveGitState)
+    ) {
+      this.assertGitHubCredentialsAvailable(fullName);
+    }
 
     if (!needsClone) {
       console.log(`Repository ${fullName} already exists, skipping clone`);
@@ -589,7 +642,12 @@ export class WorkspaceManager {
           // file-backed credential helper and avoids gh's extra API lookup.
           // Escape both args: cloneUrl is provider-synced and may include
           // shell metacharacters from a hostile self-hosted origin.
-          run: `git clone '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
+          // Retries re-run this same line, and a clone killed mid-transfer
+          // (e.g. by the timeout) leaves a partial target directory that
+          // would make every retry fail with "destination path already
+          // exists" — remove it first. Safe: needsClone guarantees the path
+          // did not exist before the first attempt.
+          run: `rm -rf -- '${shellEscape(fullName)}' && git clone '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
           // Allow brief auth and repository visibility propagation delays.
           retries: 4,
           timeout: 300,
