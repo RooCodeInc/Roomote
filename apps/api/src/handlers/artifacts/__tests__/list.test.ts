@@ -8,6 +8,7 @@ const {
   mockListArtifactsByTask,
   mockResolveArtifactRouteAuth,
   mockVerifyArtifactRouteTaskReadAccess,
+  mockEnv,
 } = vi.hoisted(() => ({
   mockBuildSignedArtifactRawUrl: vi.fn(
     ({ artifactId }: { artifactId: string }) =>
@@ -16,6 +17,11 @@ const {
   mockListArtifactsByTask: vi.fn(),
   mockResolveArtifactRouteAuth: vi.fn(),
   mockVerifyArtifactRouteTaskReadAccess: vi.fn(),
+  mockEnv: {
+    R_APP_URL: 'https://app.example.com',
+    R_PUBLIC_URL: undefined as string | undefined,
+    ARTIFACT_SIGNING_KEY: 'signing-key',
+  },
 }));
 
 vi.mock('../auth', () => ({
@@ -33,10 +39,7 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/env', () => ({
-  Env: {
-    R_APP_URL: 'https://app.example.com',
-    ARTIFACT_SIGNING_KEY: 'signing-key',
-  },
+  Env: mockEnv,
   getArtifactSigningKey: () => 'signing-key',
 }));
 
@@ -73,6 +76,7 @@ function artifactRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockEnv.R_PUBLIC_URL = undefined;
   mockResolveArtifactRouteAuth.mockReturnValue({ ok: true, auth });
   mockVerifyArtifactRouteTaskReadAccess.mockResolvedValue({ ok: true });
   mockListArtifactsByTask.mockResolvedValue([]);
@@ -135,6 +139,31 @@ describe('listTaskArtifacts', () => {
       taskId: 'task-1',
       artifactType: undefined,
       auth: {},
+    });
+  });
+
+  it('prefers the public URL for artifact links', async () => {
+    mockEnv.R_PUBLIC_URL = 'https://public.example.com';
+    mockListArtifactsByTask.mockResolvedValue([
+      artifactRow({ contentType: 'image/png' }),
+    ]);
+
+    const response = await createApp().request(
+      'http://localhost/tasks/task-1/artifacts',
+    );
+    const body = (await response.json()) as {
+      artifacts: Array<Record<string, unknown>>;
+    };
+
+    expect(body.artifacts[0]).toMatchObject({
+      viewUrl:
+        'https://public.example.com/task/task-1/artifacts/notes/summary.md?v=1',
+    });
+    expect(mockBuildSignedArtifactRawUrl).toHaveBeenCalledWith({
+      artifactId: 'art-1',
+      ts: 1234,
+      apiBaseUrl: 'https://public.example.com',
+      signingKey: 'signing-key',
     });
   });
 
