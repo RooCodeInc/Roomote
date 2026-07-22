@@ -4,6 +4,10 @@ import {
   queueCommunicationMessage,
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
+import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  isDeploymentReadOnlyError,
+} from '@roomote/types';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
 import {
   getTelegramUpdateCallbackQuery,
@@ -545,6 +549,21 @@ telegram.post('/', async (c) => {
         runId: resumeLaunch.id,
       });
     } catch (error) {
+      if (isDeploymentReadOnlyError(error)) {
+        await postTelegramMessageBestEffort({
+          chatId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          replyToMessageId: metadata.communicationMessageId,
+          text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+        });
+
+        return c.json({
+          ok: true,
+          queued: false,
+          repliedInline: true,
+        });
+      }
+
       apiLogger.warn(
         `[telegram] Failed to resume Telegram task from snapshot for chat ${metadata.communicationChannelId}: ${
           error instanceof Error ? error.message : String(error)
@@ -553,13 +572,33 @@ telegram.post('/', async (c) => {
     }
   }
 
-  const launch = await startNewTelegramTask({
-    message,
-    launchOwnerUserId: senderUserId,
-    queuedMessage,
-    metadata,
-    forceNewTopic: Boolean(newTaskCommand),
-  });
+  let launch: Awaited<ReturnType<typeof startNewTelegramTask>>;
+  try {
+    launch = await startNewTelegramTask({
+      message,
+      launchOwnerUserId: senderUserId,
+      queuedMessage,
+      metadata,
+      forceNewTopic: Boolean(newTaskCommand),
+    });
+  } catch (error) {
+    if (isDeploymentReadOnlyError(error)) {
+      await postTelegramMessageBestEffort({
+        chatId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+        replyToMessageId: metadata.communicationMessageId,
+        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+      });
+
+      return c.json({
+        ok: true,
+        queued: false,
+        repliedInline: true,
+      });
+    }
+
+    throw error;
+  }
 
   if (launch.status === 'replied_inline') {
     return c.json({

@@ -34,9 +34,11 @@ import {
   type SlackUserMapping,
 } from '@roomote/db/server';
 import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   type TaskInitiator,
+  isDeploymentReadOnlyError,
 } from '@roomote/types';
 import {
   stripLeadingRawSlackMention,
@@ -1278,6 +1280,21 @@ async function processAutomatedAppMentionTask(params: {
           `[SlackWebhook] Automated app_mention resume not handled for thread ${threadId} - falling back to new task`,
         );
       } catch (error) {
+        if (isDeploymentReadOnlyError(error)) {
+          await slack.postMessage({
+            channel: event.channel,
+            thread_ts: threadId,
+            text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+            blocks: [
+              {
+                type: 'markdown',
+                text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+              },
+            ],
+          });
+          return { handled: true, value: true };
+        }
+
         console.error(
           `[SlackWebhook] Automated app_mention snapshot resume failed for thread ${threadId}:`,
           error instanceof Error ? error.message : String(error),
@@ -1356,7 +1373,8 @@ async function processAutomatedAppMentionTask(params: {
 
         if (
           result.status === 'not_started' &&
-          result.code === 'source_message_inaccessible'
+          (result.code === 'source_message_inaccessible' ||
+            result.code === 'deployment_read_only')
         ) {
           await slack.postMessage({
             channel: event.channel,
@@ -1755,6 +1773,21 @@ async function handleSlackEntryEvent(params: {
           );
         })
         .catch(async (error) => {
+          if (isDeploymentReadOnlyError(error)) {
+            await slack.postMessage({
+              channel: event.channel,
+              thread_ts: threadId,
+              text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+              blocks: [
+                {
+                  type: 'markdown',
+                  text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+                },
+              ],
+            });
+            return;
+          }
+
           console.error(
             `❌ Background snapshot resume failed for thread ${threadId}:`,
             error instanceof Error ? error.message : String(error),

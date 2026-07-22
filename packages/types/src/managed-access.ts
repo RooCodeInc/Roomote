@@ -105,6 +105,22 @@ export type ManagedDeploymentAccess = Pick<
   | 'remediationUrl'
 >;
 
+export const MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE =
+  'This deployment is read-only. New task launches are paused.';
+
+export function isDeploymentReadOnlyError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const candidate = error as { code?: unknown; name?: unknown };
+
+  return (
+    candidate.code === 'deployment_read_only' ||
+    candidate.name === 'DeploymentReadOnlyError'
+  );
+}
+
 export const managedDeploymentAccessSchema = managedAccessDecisionBaseSchema
   .pick({
     state: true,

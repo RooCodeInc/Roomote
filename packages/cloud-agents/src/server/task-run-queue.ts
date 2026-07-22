@@ -28,6 +28,7 @@ import {
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
   isReasoningEffort,
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   normalizeDeploymentModelConfig,
   resolveTaskRuntimePolicy,
   resolveTaskWorkspace,
@@ -272,7 +273,7 @@ export class DeploymentReadOnlyError extends Error {
   readonly code = 'deployment_read_only';
 
   constructor() {
-    super('This deployment is read-only. New task launches are paused.');
+    super(MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE);
     this.name = 'DeploymentReadOnlyError';
   }
 }
