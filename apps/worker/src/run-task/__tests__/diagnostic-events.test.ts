@@ -30,6 +30,7 @@ describe('redactSecrets', () => {
       'github ghp_ABCdef123456789012345678901234567890',
       'slack xoxb-1234567890-abcdefghijklmnop',
       'Authorization: Bearer abcDEF123456789.token-value',
+      'Authorization: Basic dXNlcjpwYXNz',
       'jwt eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c',
     ].join('\n');
 
@@ -39,6 +40,7 @@ describe('redactSecrets', () => {
     expect(output).not.toContain('ghp_ABCdef');
     expect(output).not.toContain('xoxb-1234567890');
     expect(output).not.toContain('abcDEF123456789.token-value');
+    expect(output).not.toContain('dXNlcjpwYXNz');
     expect(output).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
     expect(output).toContain('[redacted]');
   });
