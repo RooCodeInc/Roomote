@@ -84,6 +84,11 @@ import { buildManagerSlackSettingsUrl } from '../manager-slack';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 const DEFAULT_DEPLOYMENT_ID = 'default';
+const CHANNEL_PROVIDER_ERROR_MAX_CHARS = 300;
+const CHANNEL_PROVIDER_ERROR_PATTERN =
+  /^The provider returned an error(?: \([A-Za-z][A-Za-z0-9_-]*\))?: .+$/;
+const UNSAFE_CHANNEL_ERROR_PATTERN =
+  /\r|\n|https?:\/\/|\b(?:api[_ -]?key|token|authorization|password|secret)\s*(?:=|:)\s*\S+|\bBearer\s+\S+|\b(?:stack|traceback)\b/i;
 
 /**
  * TaskRun + its owning task, as loaded by the terminal path. Side-effect helpers
@@ -146,6 +151,7 @@ export const finishRun = async ({
 
   const { payloadKind } = run;
   const sanitizedError = stripRunErrorMarkers(error);
+  const channelProviderError = formatChannelProviderError(sanitizedError);
 
   const now = new Date();
   const existingResult =
@@ -321,7 +327,7 @@ export const finishRun = async ({
   // was triggered from Slack (the task carries a Slack thread binding).
   if (status === RunStatus.Failed && task.slackThreadTs) {
     try {
-      await sendSlackFailureNotification(run, sanitizedError);
+      await sendSlackFailureNotification(run, channelProviderError);
     } catch (err) {
       console.error(
         `[finishRun] Failed to send Slack failure notification for run ${id}: ${
@@ -339,7 +345,7 @@ export const finishRun = async ({
     getCommunicationProviderFromTaskPayload(run.payload) === 'teams'
   ) {
     try {
-      await sendTeamsFailureNotification(run, sanitizedError);
+      await sendTeamsFailureNotification(run, channelProviderError);
     } catch (err) {
       console.error(
         `[finishRun] Failed to send Teams failure notification for run ${id}: ${
@@ -357,7 +363,7 @@ export const finishRun = async ({
     getCommunicationProviderFromTaskPayload(run.payload) === 'discord'
   ) {
     try {
-      await sendDiscordFailureNotification(run, sanitizedError);
+      await sendDiscordFailureNotification(run, channelProviderError);
     } catch (err) {
       console.error(
         `[finishRun] Failed to send Discord failure notification for run ${id}: ${
@@ -373,7 +379,7 @@ export const finishRun = async ({
     getCommunicationProviderFromTaskPayload(run.payload) === 'telegram'
   ) {
     try {
-      await sendTelegramFailureNotification(run, sanitizedError);
+      await sendTelegramFailureNotification(run, channelProviderError);
     } catch (err) {
       console.error(
         `[finishRun] Failed to send Telegram failure notification for run ${id}: ${
@@ -620,6 +626,21 @@ function hasReachedTaskRuntime(run: TaskRun): boolean {
     run.runtimeTaskStartedAt != null ||
     run.firstAssistantOutputAt != null
   );
+}
+
+function formatChannelProviderError(error?: string): string | undefined {
+  const message = error?.trim();
+
+  if (
+    !message ||
+    message.length > CHANNEL_PROVIDER_ERROR_MAX_CHARS ||
+    !CHANNEL_PROVIDER_ERROR_PATTERN.test(message) ||
+    UNSAFE_CHANNEL_ERROR_PATTERN.test(message)
+  ) {
+    return undefined;
+  }
+
+  return message;
 }
 
 /**
