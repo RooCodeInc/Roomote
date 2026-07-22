@@ -796,4 +796,22 @@ describe('Gitea API helpers', () => {
       }),
     ).resolves.toBeNull();
   });
+
+  it('returns null evidence when jobs listing fails with a server error', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('server error', { status: 500, statusText: 'Error' }),
+      );
+
+    await expect(
+      getGiteaActionRunFailureEvidence({
+        repositoryFullName: 'acme/backend',
+        runId: 99,
+        token: 'gitea_test',
+        baseUrl: 'https://git.example.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toBeNull();
+  });
 });

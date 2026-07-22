@@ -540,67 +540,68 @@ async function listGiteaActionRunJobs(params: {
   runId: number;
   fetchImpl: typeof fetch;
 }): Promise<GiteaActionWorkflowJob[] | null> {
-  const authHeaders = {
-    Accept: 'application/json',
-    Authorization: `Bearer ${params.token}`,
-  } as const;
+  try {
+    const authHeaders = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${params.token}`,
+    } as const;
 
-  const nestedResponse = await params.fetchImpl(
-    buildGiteaApiUrl(
-      params.apiBaseUrl,
-      `${params.repoPath}/actions/runs/${params.runId}/jobs`,
+    const nestedResponse = await params.fetchImpl(
+      buildGiteaApiUrl(
+        params.apiBaseUrl,
+        `${params.repoPath}/actions/runs/${params.runId}/jobs`,
+        {
+          limit: GITEA_ACTION_JOBS_PAGE_LIMIT,
+          page: 1,
+        },
+      ),
       {
+        method: 'GET',
+        headers: authHeaders,
+        signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
+      },
+    );
+
+    if ([401, 403].includes(nestedResponse.status)) {
+      return null;
+    }
+
+    if (nestedResponse.status === 200) {
+      const { jobs } = giteaActionWorkflowJobListSchema.parse(
+        await nestedResponse.json(),
+      );
+      return jobs;
+    }
+
+    if (nestedResponse.status !== 404) {
+      // Evidence is best-effort; do not block Manual Run / webhook launch.
+      return null;
+    }
+
+    // Nested runs/{id}/jobs is missing on older Gitea; try flat jobs list.
+    const flatResponse = await params.fetchImpl(
+      buildGiteaApiUrl(params.apiBaseUrl, `${params.repoPath}/actions/jobs`, {
         limit: GITEA_ACTION_JOBS_PAGE_LIMIT,
         page: 1,
+      }),
+      {
+        method: 'GET',
+        headers: authHeaders,
+        signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
       },
-    ),
-    {
-      method: 'GET',
-      headers: authHeaders,
-      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
-    },
-  );
-
-  if ([401, 403].includes(nestedResponse.status)) {
-    return null;
-  }
-
-  if (nestedResponse.status === 200) {
-    const { jobs } = giteaActionWorkflowJobListSchema.parse(
-      await nestedResponse.json(),
     );
-    return jobs;
-  }
 
-  if (nestedResponse.status !== 404) {
-    throw new GiteaApiError(nestedResponse.status, nestedResponse.statusText);
-  }
+    if (flatResponse.status !== 200) {
+      return null;
+    }
 
-  // Nested runs/{id}/jobs is missing on older Gitea; try flat jobs list.
-  const flatResponse = await params.fetchImpl(
-    buildGiteaApiUrl(params.apiBaseUrl, `${params.repoPath}/actions/jobs`, {
-      limit: GITEA_ACTION_JOBS_PAGE_LIMIT,
-      page: 1,
-    }),
-    {
-      method: 'GET',
-      headers: authHeaders,
-      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
-    },
-  );
-
-  if ([401, 403, 404].includes(flatResponse.status)) {
+    const { jobs } = giteaActionWorkflowJobListSchema.parse(
+      await flatResponse.json(),
+    );
+    return jobs.filter((job) => job.run_id === params.runId);
+  } catch {
     return null;
   }
-
-  if (flatResponse.status !== 200) {
-    throw new GiteaApiError(flatResponse.status, flatResponse.statusText);
-  }
-
-  const { jobs } = giteaActionWorkflowJobListSchema.parse(
-    await flatResponse.json(),
-  );
-  return jobs.filter((job) => job.run_id === params.runId);
 }
 
 /**
