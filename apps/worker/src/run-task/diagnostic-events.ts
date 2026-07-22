@@ -1,6 +1,7 @@
 import { sdk } from '@roomote/sdk/client';
 
 import type { HarnessLogger } from '../logging';
+import { redactSecrets } from './redact-secrets';
 
 // Sandbox logs do not survive the sandbox (and Modal exposes none at all), so
 // runtime facts worth a post-mortem are recorded as durable `diagnostic` task
@@ -34,7 +35,7 @@ const HASH_SHAPED_PATTERNS: RegExp[] = [
   /\b[A-Za-z0-9+/]{48,}={0,2}\b/g,
 ];
 
-export function redactSecrets(text: string): string {
+function redactSecretsLegacy(text: string): string {
   let redacted = text;
 
   for (const pattern of SECRET_PATTERNS) {
@@ -57,6 +58,8 @@ export function redactSecrets(text: string): string {
 
   return redacted;
 }
+
+export { redactSecrets } from './redact-secrets';
 
 function sanitizeString(value: string, maxChars: number): string {
   const capped =

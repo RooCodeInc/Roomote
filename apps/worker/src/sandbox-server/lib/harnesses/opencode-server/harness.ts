@@ -99,6 +99,7 @@ import {
   type OpenCodeModelSelection,
   resolveOpenCodeModelSelection,
 } from '../../../../run-task/opencode-model';
+import { redactSecrets } from '../../../../run-task/redact-secrets';
 
 interface OpenCodeServerHarnessOptions {
   client: OpenCodeServerClient;
@@ -1046,17 +1047,6 @@ function isOpenCodeMessageAbortedError(error: unknown): boolean {
 }
 
 const MAX_RESOLVED_USER_INPUT_REQUEST_IDS = 256;
-const PROVIDER_ERROR_CREDENTIAL_VALUE_PATTERN =
-  /\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|(?:AKIA|ASIA)[A-Z0-9]{12,})\b/g;
-const PROVIDER_ERROR_LABELED_SECRET_PATTERN =
-  /\bauthorization\s*:\s*Bearer\s+\S+|\bBearer\s+\S+|\b(?:api[_ -]?key|token|authorization|password|secret)(?:\s+(?:is|was|provided))?\s*[:=]\s*\S+/gi;
-
-function redactOpenCodeProviderErrorMessage(message: string): string {
-  return message
-    .replace(PROVIDER_ERROR_CREDENTIAL_VALUE_PATTERN, '[REDACTED]')
-    .replace(PROVIDER_ERROR_LABELED_SECRET_PATTERN, '[REDACTED]');
-}
-
 /**
  * Session errors used to be dumped into the transcript as the raw
  * `JSON.stringify(error)` blob (status codes, response headers, provider
@@ -1070,7 +1060,7 @@ function formatOpenCodeSessionErrorText(error: unknown): string {
     asString(asRecord(record?.data)?.message) ?? asString(record?.message);
 
   if (message) {
-    const redactedMessage = redactOpenCodeProviderErrorMessage(message);
+    const redactedMessage = redactSecrets(message);
 
     return name && name !== 'APIError'
       ? `The provider returned an error (${name}): ${redactedMessage}`
