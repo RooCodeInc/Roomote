@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Job } from 'bullmq';
 
 import type { CommunicationPostMessageInput } from '@roomote/communication';
@@ -24,7 +26,9 @@ import {
   schedulePrReviewNotificationJob,
 } from '@roomote/sdk/server';
 import {
+  buildSlackPrReviewActionBlocks,
   postSlackThreadMessageWithStickyFooter,
+  setPendingSlackPrReviewAction,
   SlackNotifier,
 } from '@roomote/slack';
 import { isTaskExecutingTurn } from '@roomote/types';
@@ -68,14 +72,27 @@ function buildPrReviewNotificationPostInput(
   }
 }
 
+type SlackPrReviewAction = {
+  /** Summary text already in Slack mrkdwn link syntax, without the question. */
+  summaryText: string;
+  question: string;
+  followUpPrompt: string;
+  repository: string;
+  prNumber: number;
+  prUrl: string;
+};
+
 async function postPrReviewNotification({
   taskId,
   route,
   text,
+  slackAction,
 }: {
   taskId: string;
   route: PrReviewNotificationRoute;
   text: string;
+  /** When set (Slack routes only), post Yes/Dismiss action buttons. */
+  slackAction?: SlackPrReviewAction;
 }): Promise<string | null> {
   if (route.provider === 'slack') {
     const slackInstallation = await db.query.slackInstallations.findFirst({
@@ -89,6 +106,38 @@ async function postPrReviewNotification({
     }
 
     const slack = new SlackNotifier(slackInstallation.botAccessToken);
+
+    if (slackAction) {
+      // Stored before posting: an orphaned record just expires, while a
+      // posted message without a record would leave dead buttons.
+      const nonce = randomUUID();
+
+      await setPendingSlackPrReviewAction({
+        nonce,
+        taskId,
+        repository: slackAction.repository,
+        prNumber: slackAction.prNumber,
+        prUrl: slackAction.prUrl,
+        channelId: route.channelId,
+        threadTs: route.threadId,
+        followUpPrompt: slackAction.followUpPrompt,
+      });
+
+      return postSlackThreadMessageWithStickyFooter({
+        slack,
+        channel: route.channelId,
+        threadTs: route.threadId,
+        taskId,
+        text,
+        blocks: buildSlackPrReviewActionBlocks({
+          text: slackAction.summaryText,
+          question: slackAction.question,
+          nonce,
+        }),
+        utmCampaign: 'slack.pr_review',
+      });
+    }
+
     return postSlackThreadMessageWithStickyFooter({
       slack,
       channel: route.channelId,
@@ -218,6 +267,19 @@ export const prReviewNotificationJob = async (
       return;
     }
 
+    const followUp =
+      delivery.followUpQuestion && delivery.followUpPrompt
+        ? {
+            question: delivery.followUpQuestion,
+            prompt: delivery.followUpPrompt,
+          }
+        : null;
+    // Surfaces without buttons (and the task-history record) carry the offer
+    // as a trailing question, preserving the pre-elicitation message shape.
+    const textWithQuestion = followUp
+      ? `${delivery.text}\n${followUp.question}`
+      : delivery.text;
+
     // Chat delivery is optional (web-only tasks have no route). Task history is
     // always recorded so the web task view shows the self-review summary.
     let messageTs: string | null = null;
@@ -225,7 +287,19 @@ export const prReviewNotificationJob = async (
       messageTs = await postPrReviewNotification({
         taskId: data.taskId,
         route: delivery.route,
-        text: delivery.text,
+        text: textWithQuestion,
+        ...(followUp && delivery.route.provider === 'slack'
+          ? {
+              slackAction: {
+                summaryText: delivery.text,
+                question: followUp.question,
+                followUpPrompt: followUp.prompt,
+                repository: data.repository,
+                prNumber: data.prNumber,
+                prUrl: data.prUrl,
+              },
+            }
+          : {}),
       });
     } else {
       console.log(
@@ -237,7 +311,7 @@ export const prReviewNotificationJob = async (
       runId: latestJob.id,
       taskId: data.taskId,
       route: delivery.route,
-      text: delivery.text,
+      text: textWithQuestion,
       ...(messageTs ? { messageTs } : {}),
     });
 

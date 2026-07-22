@@ -14,6 +14,7 @@ const {
   mockTelegramPostMessage,
   mockDiscordPostMessage,
   mockStickyFooterPost,
+  mockSetPendingPrReviewAction,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockTelegramPostMessage: vi.fn(),
   mockDiscordPostMessage: vi.fn(),
   mockStickyFooterPost: vi.fn(),
+  mockSetPendingPrReviewAction: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -58,12 +60,18 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: { isActive: 'isActive' },
 }));
 
-vi.mock('@roomote/slack', () => ({
-  postSlackThreadMessageWithStickyFooter: mockStickyFooterPost,
-  SlackNotifier: vi.fn().mockImplementation(function () {
-    return {};
-  }),
-}));
+vi.mock('@roomote/slack', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/slack')>();
+
+  return {
+    buildSlackPrReviewActionBlocks: actual.buildSlackPrReviewActionBlocks,
+    postSlackThreadMessageWithStickyFooter: mockStickyFooterPost,
+    setPendingSlackPrReviewAction: mockSetPendingPrReviewAction,
+    SlackNotifier: vi.fn().mockImplementation(function () {
+      return {};
+    }),
+  };
+});
 
 vi.mock('@roomote/sdk/server', () => ({
   PR_REVIEW_NOTIFICATION_DEFER_MS: 5000,
@@ -195,6 +203,104 @@ describe('prReviewNotificationJob', () => {
       messageTs: '999.888',
     });
     expect(mockSchedule).not.toHaveBeenCalled();
+  });
+
+  it('posts Yes/Dismiss action buttons and stores the pending offer when the triage produced a follow-up', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSetPendingPrReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        channelId: 'C123',
+        threadTs: '111.222',
+        followUpPrompt: 'Address the review feedback on owner/repo#42.',
+        nonce: expect.any(String),
+      }),
+    );
+
+    const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
+    expect(postedCall.text).toBe('formatted-message\nWant me to take a look?');
+    const blocks = postedCall.blocks as Array<Record<string, unknown>>;
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        type: 'section',
+        text: expect.objectContaining({ text: 'formatted-message' }),
+      }),
+      expect.objectContaining({
+        block_id: 'pr_review_action_question',
+        text: expect.objectContaining({ text: 'Want me to take a look?' }),
+      }),
+      expect.objectContaining({
+        type: 'actions',
+        block_id: 'pr_review_action',
+      }),
+    ]);
+    // Both buttons carry the stored nonce so the click handler can claim it.
+    const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    const actionsBlock = blocks[2] as {
+      elements: Array<{ action_id: string; value: string }>;
+    };
+    expect(actionsBlock.elements.map((element) => element.action_id)).toEqual([
+      'pr_review_action_yes',
+      'pr_review_action_dismiss',
+    ]);
+    for (const element of actionsBlock.elements) {
+      expect(JSON.parse(element.value)).toEqual({ nonce: storedNonce });
+    }
+
+    // The task-history record carries the question as trailing text.
+    expect(mockRecordDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'formatted-message\nWant me to take a look?',
+      }),
+    );
+  });
+
+  it('appends the follow-up question as text for providers without buttons', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'telegram',
+        channelId: '12345',
+        threadId: 'thread-9',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockTelegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'formatted-message\nWant me to take a look?',
+      }),
+    );
+  });
+
+  it('posts plain text without buttons when the triage produced no follow-up', async () => {
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
+    expect(postedCall.text).toBe('formatted-message');
+    expect(postedCall.blocks).toBeUndefined();
   });
 
   it('consumes immediate self-review activity from its independent queue', async () => {
