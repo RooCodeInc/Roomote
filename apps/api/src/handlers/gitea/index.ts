@@ -9,10 +9,12 @@ import { recordWebhook } from '../github/recordWebhook';
 import { handleGiteaComment } from './handleComment';
 import { handleGiteaIssue } from './handleIssue';
 import { handleGiteaPullRequest } from './handlePullRequest';
+import { handleGiteaWorkflowRun } from './handleWorkflowRun';
 import {
   giteaIssueWebhookSchema,
   giteaPullRequestCommentWebhookSchema,
   giteaPullRequestWebhookSchema,
+  giteaWorkflowRunWebhookSchema,
 } from './types';
 import { verifyGiteaWebhook } from './verifyWebhook';
 
@@ -97,6 +99,20 @@ gitea.post('/', async (c) => {
         `issues.${payload.action}`,
         payload,
         () => handleGiteaIssue(payload),
+        { provider: 'gitea' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === 'workflow_run') {
+      const payload = giteaWorkflowRunWebhookSchema.parse(parsedJson);
+
+      await recordWebhook(
+        deliveryId,
+        `workflow_run.${payload.action ?? 'unknown'}`,
+        payload,
+        () => handleGiteaWorkflowRun(payload),
         { provider: 'gitea' },
       );
 

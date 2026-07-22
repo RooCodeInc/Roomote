@@ -124,6 +124,9 @@ export function buildCiFailureTriagePrompt({
       if (triggeringRun.provider === 'bitbucket') {
         return `Work only the failing run in triggering_run. Start from failure_evidence when present, then inspect bitbucket-pipelines.yml and pipeline steps and reproduce the relevant commands locally. Use the Bitbucket Pipelines UI/API only when authenticated access is already available. Do not dig through unrelated older pipelines.`;
       }
+      if (triggeringRun.provider === 'gitea') {
+        return `Work only the failing run in triggering_run. Start from failure_evidence when present, then inspect .gitea/workflows (or .github/workflows) Actions definitions and reproduce the relevant commands locally. Use the Gitea Actions UI/API only when authenticated access is already available. Do not dig through unrelated older runs.`;
+      }
       if (triggeringRun.provider && triggeringRun.provider !== 'github') {
         return `Work only the failing run in triggering_run. Prefer injected failure evidence when available, then the provider-native CI UI/API. Do not dig through unrelated older runs.`;
       }
@@ -140,6 +143,10 @@ export function buildCiFailureTriagePrompt({
 
     if (providerHint === 'bitbucket') {
       return `In ${repository}, work only the latest failed default-branch Bitbucket Pipeline identified in task context. Start from injected failure evidence, inspect bitbucket-pipelines.yml, and reproduce the relevant commands locally. Skip older failures.`;
+    }
+
+    if (providerHint === 'gitea') {
+      return `In ${repository}, work only the latest failed default-branch Gitea Actions run identified in task context. Start from injected failure evidence, inspect .gitea/workflows (or .github/workflows) definitions, and reproduce the relevant commands locally. Skip older failures.`;
     }
 
     return `In ${repository}, use \`gh run list\` against the default branch to find failing runs, then take only the single most recent failure and inspect it with \`gh run view\` / \`gh run view --log-failed\`. Skip older failures.`;

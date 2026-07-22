@@ -133,3 +133,46 @@ export const giteaIssueWebhookSchema = z
   .passthrough();
 
 export type GiteaIssueWebhook = z.infer<typeof giteaIssueWebhookSchema>;
+
+const giteaActionWorkflowSchema = z
+  .object({
+    id: z.union([z.string(), z.number()]).optional(),
+    name: z.string().optional(),
+    path: z.string().optional(),
+    html_url: z.string().optional(),
+    url: z.string().optional(),
+  })
+  .passthrough();
+
+const giteaActionWorkflowRunSchema = z
+  .object({
+    id: z.number(),
+    name: z.string().optional(),
+    display_title: z.string().optional(),
+    path: z.string().optional(),
+    event: z.string().optional(),
+    status: z.string().optional(),
+    conclusion: z.string().nullable().optional(),
+    html_url: z.string().optional(),
+    url: z.string().optional(),
+    head_branch: z.string().optional(),
+    head_sha: z.string().optional(),
+    run_number: z.number().optional(),
+  })
+  .passthrough();
+
+export const giteaWorkflowRunWebhookSchema = z
+  .object({
+    action: z.string().optional(),
+    workflow: giteaActionWorkflowSchema.optional(),
+    workflow_run: giteaActionWorkflowRunSchema.optional(),
+    repository: giteaRepositorySchema.extend({
+      default_branch: z.string().optional(),
+    }),
+    sender: giteaUserSchema.optional(),
+  })
+  .passthrough();
+
+export type GiteaWorkflowRunWebhook = z.infer<
+  typeof giteaWorkflowRunWebhookSchema
+>;
