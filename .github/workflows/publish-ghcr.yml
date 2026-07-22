@@ -34,6 +34,7 @@ jobs:
       docs_only: ${{ steps.changed-paths.outputs.docs_only }}
       owner: ${{ steps.vars.outputs.owner }}
       version: ${{ steps.vars.outputs.version }}
+      product_version: ${{ steps.vars.outputs.product_version }}
       app_env: ${{ steps.vars.outputs.app_env }}
       extra_tag: ${{ steps.vars.outputs.extra_tag }}
     steps:
