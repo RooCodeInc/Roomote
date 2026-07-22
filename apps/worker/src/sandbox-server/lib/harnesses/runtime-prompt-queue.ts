@@ -79,6 +79,10 @@ export class RuntimePromptQueue {
     return this.queuedMessages.length > 0;
   }
 
+  has(id: string): boolean {
+    return this.queuedMessages.some((message) => message.id === id);
+  }
+
   clear(): void {
     if (this.queuedMessages.length === 0) {
       return;

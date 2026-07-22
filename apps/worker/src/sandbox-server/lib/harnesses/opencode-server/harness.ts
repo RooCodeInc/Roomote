@@ -1574,7 +1574,12 @@ export class OpenCodeServerHarness
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
   private finalizedAssistantTurn: FinalizedAssistantTurn | null = null;
   private suppressNextReplayAbortError = false;
-  private skipStopHookForQueuedUserInputReplay = false;
+  // Queue id of an answered user-input replay awaiting delivery. While that
+  // exact prompt is still queued, an idle transition must drain it instead of
+  // running Slack closeout enforcement. Keyed by id (ids are never reused) so
+  // the suppression expires the moment the replay is dequeued and can never
+  // leak onto a later, unrelated queued prompt.
+  private queuedUserInputReplayPromptId: string | null = null;
   private ignoreNextUserInputReplaySessionIdle = false;
   private replayAbortErrorSuppressionTimeout:
     | ReturnType<typeof setTimeout>
@@ -2070,6 +2075,7 @@ export class OpenCodeServerHarness
     this.clearProviderErrorRecoveryState();
     this.clearAllExecuteToolProgress();
     this.stopHookReminderCount = 0;
+    this.queuedUserInputReplayPromptId = null;
     this.ignoreNextUserInputReplaySessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
@@ -3030,13 +3036,13 @@ export class OpenCodeServerHarness
         userId: command.data.userId,
       });
       this.prompts.prioritize(queuedId);
+      this.queuedUserInputReplayPromptId = queuedId;
 
       if (this.providerErrorRecoveryQueuedPromptId !== null) {
         this.frontloadProviderErrorRecoveryIfQueued();
         return;
       }
 
-      this.skipStopHookForQueuedUserInputReplay = true;
       await this.interruptForQueuedReplay();
       return;
     }
@@ -4409,12 +4415,13 @@ export class OpenCodeServerHarness
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
 
     // A blocked question answer queues an abort-and-replay prompt. Its abort
-    // can emit session.idle before the answer is submitted, so defer closeout
-    // enforcement for only that transient idle.
+    // can emit session.status(idle)/session.idle before the answer is
+    // submitted, so defer closeout enforcement while that exact prompt is
+    // still queued. The suppression self-expires once the replay is dequeued;
+    // it never carries over to later, unrelated queued prompts.
     const skipStopHookForQueuedReplay =
-      this.skipStopHookForQueuedUserInputReplay &&
-      this.prompts.hasQueuedMessages();
-    this.skipStopHookForQueuedUserInputReplay = false;
+      this.queuedUserInputReplayPromptId !== null &&
+      this.prompts.has(this.queuedUserInputReplayPromptId);
     this.ignoreNextUserInputReplaySessionIdle =
       skipStopHookForQueuedReplay && source === 'session_status';
 

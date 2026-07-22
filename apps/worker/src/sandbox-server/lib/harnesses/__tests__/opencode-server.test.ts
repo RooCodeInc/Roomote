@@ -602,11 +602,8 @@ describe('OpenCodeServerHarness', () => {
         },
       });
       await client.emit({
-        type: 'session.status',
-        properties: {
-          sessionID: 'ses_1',
-          status: { type: 'idle' },
-        },
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
       });
 
       await vi.waitFor(() => {
@@ -727,11 +724,8 @@ describe('OpenCodeServerHarness', () => {
         },
       });
       await client.emit({
-        type: 'session.status',
-        properties: {
-          sessionID: 'ses_1',
-          status: { type: 'idle' },
-        },
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
       });
 
       await vi.waitFor(() => {
@@ -1646,6 +1640,135 @@ describe('OpenCodeServerHarness', () => {
         expect(client.promptAsync).toHaveBeenCalledTimes(2);
       });
       expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining(
+                'Before finalizing, post a terminal Slack-visible reply',
+              ),
+            },
+          ],
+        },
+      });
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not leak replay suppression onto later queued prompts once the replay is delivered', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-replay-leak-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+        tool: 'request_user_input',
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Ask for input.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: {
+              status: 'running',
+              input: {
+                questions: [
+                  {
+                    id: 'color',
+                    header: 'Color',
+                    question: 'Which color should I use?',
+                    options: [{ label: 'Blue', description: 'Use blue.' }],
+                  },
+                ],
+              },
+              title: 'Ask user',
+            },
+          },
+        },
+      });
+
+      const pendingRequest = harness.getPendingUserInputRequests()[0];
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.AnswerUserInputRequest,
+          data: {
+            requestId: pendingRequest!.requestId,
+            answers: { color: { answers: ['Blue'] } },
+          },
+        }),
+      ).toBe(true);
+
+      // The abort resolves immediately, so the interrupt path submits the
+      // replay itself without any idle transition in between. The suppression
+      // window must close with that delivery.
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [{ type: 'text', text: expect.stringContaining('Blue') }],
+        },
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'An ordinary queued follow-up.',
+            queueOnly: true,
+            visibleInTranscript: false,
+          },
+        }),
+      ).toBe(true);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+      expect(client.promptAsync.mock.calls[2]?.[0]).toMatchObject({
         sessionId: 'ses_1',
         request: {
           parts: [
