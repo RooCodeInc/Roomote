@@ -28,7 +28,7 @@ export type ParsedThreadReplyBody = {
   images: Array<{ artifactId: string }>;
 };
 
-type CommunicationThreadReplyProvider = 'telegram' | 'teams';
+type CommunicationThreadReplyProvider = 'discord' | 'telegram' | 'teams';
 
 type PostedFooterRecord<T extends { messageId: string }> = T & {
   textWithoutFooter: string;

@@ -1,6 +1,7 @@
 import {
   UnsupportedCommunicationOperationError,
   clearLatestUserMessageForReplyQuoteIfId,
+  chunkDiscordMessage,
   getLatestInboundMessageId,
   getLatestUserMessageForReplyQuote,
   type DiscordCommunicationProvider,
@@ -30,6 +31,8 @@ import {
 
 const LOG_CONTEXT = 'communicationThreadReplies';
 const TEAMS_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'teams:thread_reply_footer_lock:';
+const DISCORD_THREAD_REPLY_FOOTER_LOCK_PREFIX =
+  'discord:thread_reply_footer_lock:';
 const DISCORD_THREAD_REPLY_QUOTE_MAX_LENGTH = 280;
 
 // Telegram clears a chat action after ~5s; re-send inside that window so the
@@ -77,6 +80,22 @@ function buildDiscordThreadReplyQuote(params: {
 
   // Discord markdown blockquote — matches Slack's ">*name:* text" shape.
   return `> **${username}:** ${text}`;
+}
+
+function getDiscordFooterlessFinalChunk(params: {
+  textWithFooter: string;
+  footerText: string;
+}): string {
+  const finalChunk = chunkDiscordMessage(params.textWithFooter).at(-1) ?? '';
+
+  if (finalChunk === params.footerText) {
+    return '';
+  }
+
+  const footerSuffix = `\n\n${params.footerText}`;
+  return finalChunk.endsWith(footerSuffix)
+    ? finalChunk.slice(0, -footerSuffix.length)
+    : finalChunk;
 }
 
 async function peekDiscordThreadReplyQuote(params: { runId: number }): Promise<{
@@ -470,6 +489,15 @@ async function sendDiscordThreadReply(params: {
     : null;
   const textWithQuote =
     text && pendingQuote ? `${pendingQuote.quote}\n\n${text}` : text;
+  const footerText = await buildCommunicationThreadReplyFooterTextBestEffort({
+    provider: 'discord',
+    providerLabel: 'Discord',
+    taskRun: params.taskRun,
+    logContext: LOG_CONTEXT,
+  });
+  const textWithFooter = footerText
+    ? [textWithQuote, footerText].filter(Boolean).join('\n\n')
+    : textWithQuote;
 
   // The reply text is already composed by the worker; the only window the API
   // owns is this delivery. Show "typing…" across it so the message(s) don't
@@ -481,18 +509,56 @@ async function sendDiscordThreadReply(params: {
 
   let reply;
   try {
-    reply = await provider.postMessage({
-      channelId,
-      // Discord thread channels are real destinations (threadId). When the
-      // task only has a root message id (e.g. a channel investigating opener),
-      // attach via replyToMessageId so closeouts stay on that message instead
-      // of posting a free-floating channel message.
-      ...(threadId ? { threadId } : {}),
-      ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
-      ...(textWithQuote ? { text: textWithQuote } : {}),
-      textFormat: 'markdown',
-      images,
-    });
+    const postDiscordReply = () =>
+      provider.postMessage({
+        channelId,
+        // Discord thread channels are real destinations (threadId). When the
+        // task only has a root message id (e.g. a channel investigating opener),
+        // attach via replyToMessageId so closeouts stay on that message instead
+        // of posting a free-floating channel message.
+        ...(threadId ? { threadId } : {}),
+        ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
+        ...(textWithFooter ? { text: textWithFooter } : {}),
+        textFormat: 'markdown',
+        images,
+      });
+
+    if (!footerText) {
+      reply = await postDiscordReply();
+    } else {
+      const footerStateThreadId = threadId ?? messageId ?? 'root';
+      const footerMessageChannelId = threadId ?? channelId;
+      const footerlessFinalChunk = getDiscordFooterlessFinalChunk({
+        textWithFooter: textWithFooter ?? footerText,
+        footerText,
+      });
+
+      reply = await deliverManagedThreadReplyFooter({
+        provider: 'discord',
+        providerLabel: 'Discord',
+        channelId,
+        footerStateThreadId,
+        lockKey: `${DISCORD_THREAD_REPLY_FOOTER_LOCK_PREFIX}${channelId}:${footerStateThreadId}`,
+        runId: params.taskRun.id,
+        logContext: LOG_CONTEXT,
+        postReplyWithFooter: async () => {
+          const posted = await postDiscordReply();
+
+          return {
+            ...posted,
+            messageId: posted.lastMessageId ?? posted.messageId,
+            textWithoutFooter: footerlessFinalChunk,
+          };
+        },
+        clearPreviousFooter: async (previousFooterRecord) => {
+          await provider.editMessage({
+            channelId: footerMessageChannelId,
+            messageId: previousFooterRecord.messageId,
+            text: previousFooterRecord.textWithoutFooter,
+          });
+        },
+      });
+    }
 
     if (pendingQuote) {
       try {

@@ -5,6 +5,7 @@ const {
   buildThreadReplyImagesMock,
   clearLatestUserMessageForReplyQuoteIfIdMock,
   discordAddReactionMock,
+  discordEditMessageMock,
   discordPostMessageMock,
   envMock,
   getLatestInboundMessageIdMock,
@@ -18,6 +19,7 @@ const {
   buildThreadReplyImagesMock: vi.fn(),
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   discordAddReactionMock: vi.fn(),
+  discordEditMessageMock: vi.fn(),
   discordPostMessageMock: vi.fn(),
   envMock: { R_APP_URL: 'https://app.example.com' },
   getLatestInboundMessageIdMock: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock('@roomote/communication', () => ({
     return {
       postMessage: discordPostMessageMock,
       addReaction: discordAddReactionMock,
+      editMessage: discordEditMessageMock,
     };
   }),
   UnsupportedCommunicationOperationError: class UnsupportedCommunicationOperationError extends Error {},
@@ -55,6 +58,8 @@ vi.mock('@roomote/communication', () => ({
   getLatestUserMessageForReplyQuote: getLatestUserMessageForReplyQuoteMock,
   clearLatestUserMessageForReplyQuoteIfId:
     clearLatestUserMessageForReplyQuoteIfIdMock,
+  chunkDiscordMessage: (text: string) =>
+    text.length <= 2_000 ? [text] : text.split('\n\n'),
   resolveThreadReplyFooterContext: vi.fn().mockResolvedValue({
     linkedPr: null,
     livePreviewUrl: null,
@@ -88,6 +93,7 @@ vi.mock('@roomote/sdk/server', () => ({
       ? {
           postMessage: discordPostMessageMock,
           addReaction: discordAddReactionMock,
+          editMessage: discordEditMessageMock,
           triggerTyping: vi.fn(async () => undefined),
         }
       : null;
@@ -167,6 +173,12 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     getLatestUserMessageForReplyQuoteMock.mockResolvedValue(null);
     clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
     discordPostMessageMock.mockResolvedValue({ messageId: 'reply-1' });
+    discordEditMessageMock.mockResolvedValue(undefined);
+    vi.mocked(buildThreadReplyFooterText).mockReturnValue(null as never);
+    vi.mocked(getThreadReplyFooterRecord).mockResolvedValue(null);
+    withThreadReplyFooterLockMock.mockImplementation(
+      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    );
     discordAddReactionMock.mockResolvedValue({
       channelId: 'thread-1',
       messageId: 'message-2',
@@ -248,6 +260,67 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       'discord',
       44,
       'quote-abc',
+    );
+  });
+
+  it('moves the footer to the latest Discord reply', async () => {
+    vi.mocked(buildThreadReplyFooterText).mockReturnValue(
+      '[Open task](https://app.example.com/task/task-3)',
+    );
+    vi.mocked(getThreadReplyFooterRecord).mockResolvedValue({
+      messageId: 'previous-reply',
+      textWithoutFooter: 'Earlier update',
+    });
+    discordPostMessageMock.mockResolvedValue({ messageId: 'latest-reply' });
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: discordTaskRun,
+      parsedBody: { text: 'Latest update', images: [] },
+    });
+
+    expect(discordPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      text: 'Latest update\n\n[Open task](https://app.example.com/task/task-3)',
+      textFormat: 'markdown',
+      images: [],
+    });
+    expect(discordEditMessageMock).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'previous-reply',
+      text: 'Earlier update',
+    });
+    expect(setThreadReplyFooterRecord).toHaveBeenCalledWith(
+      'discord',
+      'channel-1',
+      'thread-1',
+      {
+        messageId: 'latest-reply',
+        textWithoutFooter: 'Latest update',
+      },
+    );
+  });
+
+  it('tracks the final Discord chunk when a footer-bearing reply is split', async () => {
+    vi.mocked(buildThreadReplyFooterText).mockReturnValue('Task footer');
+    discordPostMessageMock.mockResolvedValue({
+      messageId: 'first-chunk',
+      lastMessageId: 'footer-chunk',
+    });
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: discordTaskRun,
+      parsedBody: { text: 'a'.repeat(1_990), images: [] },
+    });
+
+    expect(setThreadReplyFooterRecord).toHaveBeenCalledWith(
+      'discord',
+      'channel-1',
+      'thread-1',
+      {
+        messageId: 'footer-chunk',
+        textWithoutFooter: '',
+      },
     );
   });
 

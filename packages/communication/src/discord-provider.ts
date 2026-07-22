@@ -501,6 +501,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     const batchCount = Math.max(textChunks.length, imageGroups.length, 1);
     const destinationId = input.threadId ?? input.channelId;
     let firstMessage: DiscordApiMessage | null = null;
+    let lastMessage: DiscordApiMessage | null = null;
 
     for (let index = 0; index < batchCount; index += 1) {
       const nonce = this.nonceFactory();
@@ -543,6 +544,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         { retryNetworkErrors: true, retryServerErrors: true },
       );
       firstMessage ??= message;
+      lastMessage = message;
     }
 
     if (!firstMessage)
@@ -551,6 +553,9 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       provider: 'discord',
       channelId: input.channelId,
       messageId: firstMessage.id,
+      ...(lastMessage && lastMessage.id !== firstMessage.id
+        ? { lastMessageId: lastMessage.id }
+        : {}),
       ...(input.threadId ? { threadId: input.threadId } : {}),
     };
   }
