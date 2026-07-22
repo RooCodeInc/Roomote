@@ -5,7 +5,7 @@ const SECRET_PATTERNS: RegExp[] = [
   /\bxox[a-z]-[A-Za-z0-9-]{8,}/g,
   /\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi,
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g,
-  /(authorization)(\s*:\s*)(?:(?:Bearer|Basic)\s+\S+|\S+)/gi,
+  /(authorization)(\s*:\s*)[^\r\n]*/gi,
   /([\w-]*(?:token|secret|password|passwd|api[_-]?key))(\s*[:=]\s*)\S+/gi,
 ];
 
