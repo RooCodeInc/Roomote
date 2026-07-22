@@ -35,7 +35,7 @@
     "commander": "^14.0.2",
     "dompurify": "3.4.11",
     "execa": "9.6.1",
-    "hono": "4.12.25",
+    "hono": "4.12.27",
     "http-proxy": "^1.18.1",
     "ignore": "^7.0.5",
     "jsdom": "26.1.0",
