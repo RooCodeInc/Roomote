@@ -125,7 +125,10 @@ async function createArtifactRecord(
     },
   );
 
-  const artifactUrlBase = Env.R_PUBLIC_URL ?? Env.R_APP_URL;
+  const artifactUrlBase = (Env.R_PUBLIC_URL ?? Env.R_APP_URL).replace(
+    /\/+$/,
+    '',
+  );
   const viewUrl = `${artifactUrlBase}/task/${taskId}/artifacts/${path}?v=${artifact.version}`;
   const response: {
     id: string;

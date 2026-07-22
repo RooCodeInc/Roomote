@@ -82,8 +82,8 @@ beforeEach(() => {
 });
 
 describe('createArtifact', () => {
-  it('prefers the public URL for view and image raw URLs', async () => {
-    mockEnv.R_PUBLIC_URL = 'https://public.example.com';
+  it('normalizes the public URL for view and image raw URLs', async () => {
+    mockEnv.R_PUBLIC_URL = 'https://public.example.com/';
 
     const response = await createApp().request('http://localhost/artifacts', {
       method: 'POST',

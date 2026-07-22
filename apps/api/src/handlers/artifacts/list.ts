@@ -60,7 +60,10 @@ export async function listTaskArtifacts(
   });
 
   const rawUrlTs = currentEpochSeconds();
-  const artifactUrlBase = Env.R_PUBLIC_URL ?? Env.R_APP_URL;
+  const artifactUrlBase = (Env.R_PUBLIC_URL ?? Env.R_APP_URL).replace(
+    /\/+$/,
+    '',
+  );
 
   return c.json({
     taskId,

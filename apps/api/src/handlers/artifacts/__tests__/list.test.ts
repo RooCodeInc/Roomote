@@ -142,8 +142,8 @@ describe('listTaskArtifacts', () => {
     });
   });
 
-  it('prefers the public URL for artifact links', async () => {
-    mockEnv.R_PUBLIC_URL = 'https://public.example.com';
+  it('normalizes the public URL for artifact links', async () => {
+    mockEnv.R_PUBLIC_URL = 'https://public.example.com/';
     mockListArtifactsByTask.mockResolvedValue([
       artifactRow({ contentType: 'image/png' }),
     ]);
