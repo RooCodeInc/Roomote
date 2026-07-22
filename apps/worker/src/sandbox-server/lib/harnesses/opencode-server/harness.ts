@@ -1049,7 +1049,7 @@ const MAX_RESOLVED_USER_INPUT_REQUEST_IDS = 256;
 const PROVIDER_ERROR_CREDENTIAL_VALUE_PATTERN =
   /\b(?:sk-[A-Za-z0-9_-]{8,}|AIza[A-Za-z0-9_-]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|(?:AKIA|ASIA)[A-Z0-9]{12,})\b/g;
 const PROVIDER_ERROR_LABELED_SECRET_PATTERN =
-  /\b(?:api[_ -]?key|token|authorization|password|secret)(?:\s+(?:is|was|provided))?\s*[:=]\s*\S+/gi;
+  /\bauthorization\s*:\s*Bearer\s+\S+|\bBearer\s+\S+|\b(?:api[_ -]?key|token|authorization|password|secret)(?:\s+(?:is|was|provided))?\s*[:=]\s*\S+/gi;
 
 function redactOpenCodeProviderErrorMessage(message: string): string {
   return message

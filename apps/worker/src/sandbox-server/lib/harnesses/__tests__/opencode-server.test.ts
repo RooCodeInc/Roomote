@@ -2862,7 +2862,7 @@ describe('OpenCodeServerHarness', () => {
           error: {
             name: 'APIError',
             data: {
-              message: 'Incorrect API key provided: sk-secret-token',
+              message: 'Authorization: Bearer eyJ-secret-token',
               isRetryable: false,
             },
           },
@@ -2878,9 +2878,9 @@ describe('OpenCodeServerHarness', () => {
       );
 
       expect(String(errorMessage?.payload.text)).toBe(
-        'The provider returned an error: Incorrect [REDACTED]',
+        'The provider returned an error: [REDACTED]',
       );
-      expect(String(errorMessage?.payload.text)).not.toContain('sk-secret');
+      expect(String(errorMessage?.payload.text)).not.toContain('eyJ-secret');
     } finally {
       harness.dispose();
     }
