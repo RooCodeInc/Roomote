@@ -226,6 +226,10 @@ const serverSchema = {
   ROOMOTE_CLOUD_BACKEND: z.enum(ROOMOTE_CLOUD_BACKENDS).optional(),
   ROOMOTE_CLOUD_SLUG: z.string().optional(),
   ROOMOTE_CLOUD_APP_NAME: z.string().optional(),
+  // Compute broker base URL for the `broker` backend; with it, the token
+  // pair above carries a derived per-tenant broker credential instead of
+  // Modal workspace tokens.
+  ROOMOTE_CLOUD_BROKER_URL: z.string().url().optional(),
   MODAL_ENDPOINT: z.string().optional(),
   MODAL_ENVIRONMENT: z.string().optional(),
   MODAL_APP_NAME: z.string().optional(),

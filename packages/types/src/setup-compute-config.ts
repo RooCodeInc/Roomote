@@ -331,6 +331,14 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'infrastructure',
       },
       {
+        // Compute broker base URL for the `broker` backend. Seeded by the
+        // hosting operator's provisioning alongside the token pair.
+        envVarName: 'ROOMOTE_CLOUD_BROKER_URL',
+        label: 'Roomote Cloud Broker URL',
+        required: false,
+        category: 'infrastructure',
+      },
+      {
         // Shared with the Modal provider: the default backend runs on Modal,
         // and the base image derives from the deployment's worker image.
         envVarName: 'MODAL_BASE_IMAGE_REF',
@@ -593,6 +601,7 @@ const DEPLOYMENT_MANAGED_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'ROOMOTE_CLOUD_BACKEND',
   'ROOMOTE_CLOUD_SLUG',
   'ROOMOTE_CLOUD_APP_NAME',
+  'ROOMOTE_CLOUD_BROKER_URL',
 ]);
 
 /**

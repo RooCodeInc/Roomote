@@ -260,6 +260,33 @@ export interface ModalConfig {
   vmRuntime?: boolean;
 }
 
+export interface RoomoteBrokerConfig {
+  /** Base URL of the hosting operator's compute broker. */
+  brokerUrl: string;
+  /** Deployment id; the broker's tenant identity (`ROOMOTE_CLOUD_TOKEN_ID`). */
+  tenantId: string;
+  /** Derived per-tenant broker credential (`ROOMOTE_CLOUD_TOKEN_SECRET`). */
+  brokerKey: string;
+  /** Baked worker image reference for fresh sandboxes. */
+  baseImageRef: string;
+  /** Optional Modal placement region(s), enforced server-side. */
+  regions?: string[];
+  /** Maximum sandbox lifetime in milliseconds, clamped server-side. */
+  timeoutMs?: number;
+  /** CPU core reservation (can be fractional). */
+  cpu?: number;
+  /** Hard CPU cap in physical cores. */
+  cpuLimit?: number;
+  /** Memory reservation in MiB. */
+  memoryMiB?: number;
+  /** Hard memory cap in MiB. */
+  memoryLimitMiB?: number;
+  /** Use the VM sandbox runtime for nested Docker workloads. */
+  vmRuntime?: boolean;
+  /** Test seam; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
 export interface DockerConfig {
   /** Local Docker image used for worker containers. */
   image?: string;
