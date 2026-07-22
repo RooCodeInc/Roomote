@@ -22,6 +22,7 @@ import { type CreateTaskFormValues, createTaskFormSchema } from '@/types';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { cn } from '@/lib/utils';
+import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 
 import { useEnvironments } from '@/hooks/environments';
 import { useShowDebugUI } from '@/hooks/useShowDebugUI';
@@ -448,11 +449,10 @@ export function Home({
   const showNoEnvironmentsWarning =
     !environments.isPending && !hasAnyEnvironments;
   const submitDisabledReason =
-    managedAccess.state === 'read_only'
-      ? 'This deployment is read-only. New task launches are paused.'
-      : !hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
-        ? 'Auto routing needs an environment. Create one, or select All Repositories to work without one.'
-        : undefined;
+    getTaskLaunchDisabledReason(managedAccess) ??
+    (!hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
+      ? 'Auto routing needs an environment. Create one, or select All Repositories to work without one.'
+      : undefined);
 
   const handleAutoSubmit = useCallback(
     async (submission: SubmissionSnapshot) => {

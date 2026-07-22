@@ -106,6 +106,19 @@ vi.mock('@/hooks/snapshots', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({
+    managedAccess: {
+      state: 'active',
+      reason: null,
+      revision: 1,
+      effectiveAt: '2026-01-01T00:00:00.000Z',
+      restrictionStartsAt: null,
+      remediationUrl: null,
+    },
+  }),
+}));
+
 vi.mock('@/components/layout/side-nav/SideNavItem', () => ({
   SideNavItem: ({
     href,

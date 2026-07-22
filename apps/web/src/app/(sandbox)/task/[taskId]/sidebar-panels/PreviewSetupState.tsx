@@ -4,9 +4,14 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import {
+  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+} from '@roomote/types';
 import type { TaskRun } from '@roomote/db';
 
 import { SETTINGS_PATHS } from '@/lib/settings';
+import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useTRPC } from '@/trpc/client';
 import type { TaskPreviewStatus } from '@/trpc/commands/preview-settings';
@@ -38,7 +43,8 @@ function CenteredMessage({ children }: { children: React.ReactNode }) {
 export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const { isAdmin } = useAuthorizedUser();
+  const { isAdmin, managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
   const taskId = taskRun?.taskId;
   const statusQuery = useQuery(
     trpc.previewSettings.taskStatus.queryOptions(
@@ -94,6 +100,7 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
   }
 
   const status: TaskPreviewStatus = statusQuery.data;
+  const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
   // Repo-only tasks have no environment to preview. The Live Preview button
   // is hidden for these tasks, so this state is only reachable via a direct
@@ -192,11 +199,19 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
             <Button
               size="sm"
               onClick={() => startSetupMutation.mutate({ taskId })}
-              disabled={startSetupMutation.isPending}
+              disabled={
+                startSetupMutation.isPending ||
+                Boolean(taskLaunchDisabledReason)
+              }
             >
               {startSetupMutation.isPending ? <Spinner /> : <Sparkles />}
               Set up previews with an agent
             </Button>
+            {taskLaunchDisabledReason ? (
+              <p className="text-sm text-muted-foreground">
+                {MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE}
+              </p>
+            ) : null}
             <p className="text-sm text-muted-foreground">
               Or{' '}
               <Link

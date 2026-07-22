@@ -2,8 +2,12 @@
 
 import { memo, useState, type MouseEventHandler } from 'react';
 
+import { DEFAULT_MANAGED_DEPLOYMENT_ACCESS } from '@roomote/types';
+
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
+import { useAuthorizedUser } from '@/hooks/useUser';
+import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import {
   AppWindow,
   Button,
@@ -32,6 +36,8 @@ function LivePreviewButtonBase({
   disabled: disabledUntilReady = false,
 }: SidebarActionBaseProps & { disabled?: boolean }) {
   const [showWakeDialog, setShowWakeDialog] = useState(false);
+  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
   const { initialPaths, previewUrl, previewUrls, primaryPortName } =
     usePreviewUrls(taskRun ?? {});
   const {
@@ -66,22 +72,30 @@ function LivePreviewButtonBase({
   const asleep = isTaskRunAsleep(taskRun);
   const canWakeForPreview =
     asleep && !!taskRun?.snapshotId && !!resolvedPreviewUrl;
+  const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
+  const wakeDisabled = canWakeForPreview && Boolean(taskLaunchDisabledReason);
   const openUrl =
     resolvedPreviewUrl && taskRun
       ? buildPreviewIframeUrl(resolvedPreviewUrl, taskRun.id)
       : null;
   const hasPreviewUrl = Boolean(resolvedPreviewUrl);
-  const disabled = disabledUntilReady || !taskRun;
+  const disabled = disabledUntilReady || !taskRun || wakeDisabled;
   const tooltip = disabledUntilReady
     ? undefined
-    : canWakeForPreview
-      ? 'Wake up Roomote to use Live Preview'
-      : !hasPreviewUrl
-        ? 'Set up Live Preview'
-        : 'Live Preview';
+    : wakeDisabled
+      ? taskLaunchDisabledReason
+      : canWakeForPreview
+        ? 'Wake up Roomote to use Live Preview'
+        : !hasPreviewUrl
+          ? 'Set up Live Preview'
+          : 'Live Preview';
 
   const handleWakeConfirm = async () => {
-    if (!taskRun?.snapshotId || restoreSnapshot.isPending) {
+    if (
+      !taskRun?.snapshotId ||
+      restoreSnapshot.isPending ||
+      taskLaunchDisabledReason
+    ) {
       return;
     }
 
@@ -125,13 +139,15 @@ function LivePreviewButtonBase({
         label="Live Preview"
         tooltip={tooltip}
         description={
-          canWakeForPreview
-            ? 'Wake this task so live preview becomes available'
-            : disabled
-              ? undefined
-              : hasPreviewUrl
-                ? "Preview this task's app"
-                : 'Set up live previews for this task'
+          wakeDisabled
+            ? taskLaunchDisabledReason
+            : canWakeForPreview
+              ? 'Wake this task so live preview becomes available'
+              : disabled
+                ? undefined
+                : hasPreviewUrl
+                  ? "Preview this task's app"
+                  : 'Set up live previews for this task'
         }
         active={!disabled && !canWakeForPreview && isViewActive('preview')}
         disabled={disabled}
@@ -143,7 +159,9 @@ function LivePreviewButtonBase({
         useNativeLink={true}
         onClick={
           canWakeForPreview
-            ? () => setShowWakeDialog(true)
+            ? wakeDisabled
+              ? undefined
+              : () => setShowWakeDialog(true)
             : !hasPreviewUrl
               ? openPreviewSetupView
               : undefined
@@ -180,7 +198,9 @@ function LivePreviewButtonBase({
             <Button
               type="button"
               onClick={() => void handleWakeConfirm()}
-              disabled={restoreSnapshot.isPending}
+              disabled={
+                restoreSnapshot.isPending || Boolean(taskLaunchDisabledReason)
+              }
             >
               {restoreSnapshot.isPending ? 'Waking up...' : 'Wake up'}
             </Button>

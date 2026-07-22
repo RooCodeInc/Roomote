@@ -3,10 +3,14 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
+import { DEFAULT_MANAGED_DEPLOYMENT_ACCESS } from '@roomote/types';
+
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { TaskPromptInput } from '@/components/tasks';
 import { Sun } from '@/components/system';
 import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
+import { useAuthorizedUser } from '@/hooks/useUser';
+import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import type { TaskRunDetail } from '@/lib/server';
 import { cn } from '@/lib/utils';
@@ -30,6 +34,9 @@ export function WakeTaskInput({
   } = useOptimisticPromptSubmission();
   const [promptText, setPromptText] = useState(initialPrompt);
   const [sending, setSending] = useState(false);
+  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
+  const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
   const restore = useRestoreTaskRunSnapshot({
     onSuccess: () => setPromptText(''),
@@ -41,7 +48,7 @@ export function WakeTaskInput({
   }, [taskRun.id, initialPrompt]);
 
   const handleSubmit = async (message: PromptInputMessage) => {
-    if (!taskRun.snapshotId || isBusy) {
+    if (!taskRun.snapshotId || isBusy || taskLaunchDisabledReason) {
       return;
     }
 
@@ -136,6 +143,7 @@ export function WakeTaskInput({
         submitWithMetaKey={false}
         submitIcon={promptText.trim().length === 0 ? <Sun /> : undefined}
         surface={embedded ? 'embedded' : 'default'}
+        submitDisabledReason={taskLaunchDisabledReason}
       />
     </div>
   );
