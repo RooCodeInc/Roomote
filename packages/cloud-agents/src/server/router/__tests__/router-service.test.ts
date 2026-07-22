@@ -7,6 +7,10 @@ const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
   mockGenerateTrackedNonTaskObject: vi.fn(),
 }));
 
+const { mockCallRouterMcpTool } = vi.hoisted(() => ({
+  mockCallRouterMcpTool: vi.fn(),
+}));
+
 vi.mock('../../non-task-provider-usage', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../non-task-provider-usage')>();
@@ -16,6 +20,10 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
     generateTrackedNonTaskObject: mockGenerateTrackedNonTaskObject,
   };
 });
+
+vi.mock('../mcp-tool-call', () => ({
+  callRouterMcpTool: mockCallRouterMcpTool,
+}));
 
 describe('routeTask', () => {
   const environments: RoutableEnvironment[] = [
@@ -94,6 +102,58 @@ describe('routeTask', () => {
         needsExternalLookup: false,
         confidence: 0.92,
         workspaceRemapped: false,
+      },
+    });
+  });
+
+  it('uses pasted GitHub issue context when choosing a workspace', async () => {
+    mockCallRouterMcpTool.mockResolvedValue({
+      title: 'Fix the dashboard refresh failure',
+      body: 'The dashboard API request belongs to the web application.',
+    });
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'The linked issue describes the web application.',
+        confidence: 0.92,
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        taskDescription:
+          'Please investigate https://github.com/acme/web/issues/42',
+      }),
+    );
+
+    expect(mockCallRouterMcpTool).toHaveBeenCalledWith({
+      context: expect.objectContaining({
+        taskDescription:
+          'Please investigate https://github.com/acme/web/issues/42',
+      }),
+      serverId: 'github',
+      toolName: 'issue_read',
+      args: {
+        method: 'get',
+        owner: 'acme',
+        repo: 'web',
+        issue_number: 42,
+      },
+    });
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('Fix the dashboard refresh failure'),
+      }),
+    );
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        debug: {
+          phase: 'mcp',
+          toolsUsed: ['github.issue_read'],
+        },
       },
     });
   });
