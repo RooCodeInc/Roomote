@@ -30,7 +30,7 @@ function parseExternalIssueReferences(text: string): ExternalIssueReference[] {
       break;
     }
 
-    const url = rawUrl.replace(/[.,;:!?]+$/, '');
+    const url = rawUrl.replace(/[.,;:!?]$/, '');
 
     try {
       const parsedUrl = new URL(url);
@@ -93,14 +93,20 @@ function serializeExternalContext(value: unknown): string {
 
 async function withExternalLookupTimeout<T>(
   operation: Promise<T>,
+  deadline: number,
 ): Promise<T | null> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) {
+    return null;
+  }
+
   let timeout: ReturnType<typeof setTimeout> | undefined;
 
   try {
     return await Promise.race([
       operation,
       new Promise<null>((resolve) => {
-        timeout = setTimeout(resolve, EXTERNAL_LOOKUP_TIMEOUT_MS, null);
+        timeout = setTimeout(resolve, remainingMs, null);
       }),
     ]);
   } finally {
@@ -115,6 +121,8 @@ async function fetchExternalIssueContext(
   reference: ExternalIssueReference,
 ): Promise<{ toolName: string; result: unknown } | null> {
   try {
+    const deadline = Date.now() + EXTERNAL_LOOKUP_TIMEOUT_MS;
+
     if (reference.serverId === 'linear') {
       const result = await withExternalLookupTimeout(
         callRouterMcpTool({
@@ -123,6 +131,7 @@ async function fetchExternalIssueContext(
           toolName: 'get_issue',
           args: { id: reference.identifier },
         }),
+        deadline,
       );
 
       return result === null ? null : { toolName: 'linear.get_issue', result };
@@ -140,6 +149,7 @@ async function fetchExternalIssueContext(
           issue_number: reference.issueNumber,
         },
       }),
+      deadline,
     );
 
     if (issueReadResult !== null) {
@@ -157,6 +167,7 @@ async function fetchExternalIssueContext(
           issue_number: reference.issueNumber,
         },
       }),
+      deadline,
     );
 
     return getIssueResult === null
