@@ -230,6 +230,14 @@ vi.mock('@roomote/communication/teams-provider', () => ({
     mockCreateTeamsCommunicationProviderFromEnv(...args),
 }));
 
+const mockCreateTelegramCommunicationProvider = vi.fn();
+const mockTelegramPostMessage = vi.fn();
+vi.mock('../../telegram-communication', () => ({
+  createTelegramCommunicationProviderFromRuntimeCredentials: (
+    ...args: unknown[]
+  ) => mockCreateTelegramCommunicationProvider(...args),
+}));
+
 vi.mock('@roomote/communication/discord-provider', () => ({
   DiscordCommunicationProvider: class MockDiscordCommunicationProvider {
     postMessage = mockDiscordPostMessage;
@@ -1245,13 +1253,13 @@ describe('finishRun', () => {
       expect(mockBuildTaskFailedMessage).toHaveBeenCalledWith({
         runId: 1,
         messageText:
-          "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
+          "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n*Error details:* spawn timeout",
       });
       expect(mockUpdateMessage).toHaveBeenCalledWith({
         channel: 'C123',
         ts: '111.333',
         message: {
-          text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
+          text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n*Error details:* spawn timeout",
           blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
         },
       });
@@ -1388,7 +1396,7 @@ describe('finishRun', () => {
         channel: 'C123',
         ts: '111.333',
         message: {
-          text: "I ran into a hiccup and couldn't get started. Please send a fresh Slack message and I'll give it another shot.",
+          text: "I ran into a hiccup and couldn't get started. Please send a fresh Slack message and I'll give it another shot.\n\n*Error details:* resume bootstrap timeout",
         },
       });
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -1432,7 +1440,7 @@ describe('finishRun', () => {
       expect(mockPostMessage).toHaveBeenCalledWith({
         channel: 'C123',
         thread_ts: '111.222',
-        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n*Error details:* spawn timeout",
         blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
       });
       expect(mockRemoveCancelButton).not.toHaveBeenCalled();
@@ -1475,13 +1483,13 @@ describe('finishRun', () => {
       expect(mockBuildTaskFailedMessage).toHaveBeenCalledWith({
         runId: 1,
         messageText:
-          "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
+          "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.\n\n*Error details:* worker heartbeat stale",
       });
       expect(mockUpdateMessage).not.toHaveBeenCalled();
       expect(mockPostMessage).toHaveBeenCalledWith({
         channel: 'C123',
         thread_ts: '111.222',
-        text: "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
+        text: "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.\n\n*Error details:* worker heartbeat stale",
         blocks: mockBuildTaskFailedBlocks.mock.results[0]?.value,
       });
       expect(mockRemoveCancelButton).toHaveBeenCalledWith({
@@ -1526,7 +1534,7 @@ describe('finishRun', () => {
       expect(mockPostMessage).toHaveBeenCalledWith({
         channel: 'C123',
         thread_ts: '111.222',
-        text: `I ran into an issue when setting things up. <${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.failed|Continue on the web app> to fix it.`,
+        text: `I ran into an issue when setting things up.\n\n*Error details:* spawn timeout\n\n<${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.failed|Continue on the web app> to fix it.`,
         unfurl_links: false,
         unfurl_media: false,
       });
@@ -1632,7 +1640,7 @@ describe('finishRun', () => {
         serviceUrl: 'https://smba.trafficmanager.net/amer/',
         threadId: 'activity-root',
         replyToMessageId: 'activity-root',
-        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** spawn timeout\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
     });
@@ -1767,7 +1775,7 @@ describe('finishRun', () => {
       expect(mockDiscordPostMessage).toHaveBeenCalledWith({
         channelId: 'channel-1',
         threadId: 'thread-1',
-        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** spawn timeout\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
     });
@@ -1793,7 +1801,7 @@ describe('finishRun', () => {
       expect(mockDiscordPostMessage).toHaveBeenCalledWith({
         channelId: 'channel-1',
         replyToMessageId: 'opener-1',
-        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** spawn timeout\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
     });
@@ -1847,6 +1855,39 @@ describe('finishRun', () => {
       await expect(
         finishRun({ id: 1, status: RunStatus.Failed, error: 'task failed' }),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('Telegram task notifications', () => {
+    const telegramPayload = {
+      repo: 'owner/repo',
+      communicationProvider: 'telegram',
+      communicationChannelId: 'chat-1',
+      communicationThreadId: 'topic-1',
+      communicationMessageId: 'message-1',
+    } as unknown as TaskRun['payload'];
+
+    beforeEach(() => {
+      mockCreateTelegramCommunicationProvider.mockResolvedValue({
+        postMessage: mockTelegramPostMessage,
+      });
+    });
+
+    it('posts failure details into the originating Telegram topic', async () => {
+      mockFindFirstRun.mockResolvedValue(makeRun({ payload: telegramPayload }));
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'The provider returned an error: API key is invalid.',
+      });
+
+      expect(mockTelegramPostMessage).toHaveBeenCalledWith({
+        channelId: 'chat-1',
+        threadId: 'topic-1',
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: API key is invalid.\n\n[Open the task](https://example.com/task)",
+        textFormat: 'markdown',
+      });
     });
   });
 

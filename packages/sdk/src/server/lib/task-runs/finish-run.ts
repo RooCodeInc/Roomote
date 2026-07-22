@@ -18,6 +18,7 @@ import {
 } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
+import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
 import {
   type TaskRun,
   type Task,
@@ -338,7 +339,7 @@ export const finishRun = async ({
     getCommunicationProviderFromTaskPayload(run.payload) === 'teams'
   ) {
     try {
-      await sendTeamsFailureNotification(run);
+      await sendTeamsFailureNotification(run, sanitizedError);
     } catch (err) {
       console.error(
         `[finishRun] Failed to send Teams failure notification for run ${id}: ${
@@ -356,10 +357,26 @@ export const finishRun = async ({
     getCommunicationProviderFromTaskPayload(run.payload) === 'discord'
   ) {
     try {
-      await sendDiscordFailureNotification(run);
+      await sendDiscordFailureNotification(run, sanitizedError);
     } catch (err) {
       console.error(
         `[finishRun] Failed to send Discord failure notification for run ${id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (
+    status === RunStatus.Failed &&
+    !task.slackThreadTs &&
+    getCommunicationProviderFromTaskPayload(run.payload) === 'telegram'
+  ) {
+    try {
+      await sendTelegramFailureNotification(run, sanitizedError);
+    } catch (err) {
+      console.error(
+        `[finishRun] Failed to send Telegram failure notification for run ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -610,7 +627,10 @@ function hasReachedTaskRuntime(run: TaskRun): boolean {
  * Teams-launched run fails. Mirrors the Slack failure notification path using
  * the provider-neutral communication metadata on the task payload.
  */
-async function sendTeamsFailureNotification(run: FinishedRun): Promise<void> {
+async function sendTeamsFailureNotification(
+  run: FinishedRun,
+  error?: string,
+): Promise<void> {
   const provider =
     await createTeamsCommunicationProviderFromRuntimeCredentials();
 
@@ -641,9 +661,13 @@ async function sendTeamsFailureNotification(run: FinishedRun): Promise<void> {
     taskId: run.taskId,
     utm: { campaign: run.payloadKind, source: 'teams' },
   });
-  const text = taskUrl
-    ? `${failureText}\n\n${formatMarkdownLink('Open the task', taskUrl)}`
-    : failureText;
+  const text = [
+    failureText,
+    error ? `**Error details:** ${error}` : null,
+    taskUrl ? formatMarkdownLink('Open the task', taskUrl) : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n');
 
   await provider.postMessage({
     channelId,
@@ -668,7 +692,61 @@ async function createDiscordCommunicationProviderFromRuntimeCredentials(): Promi
   });
 }
 
-async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
+async function sendTelegramFailureNotification(
+  run: FinishedRun,
+  error?: string,
+): Promise<void> {
+  const provider =
+    await createTelegramCommunicationProviderFromRuntimeCredentials();
+  if (!provider) {
+    console.warn(
+      `[finishRun] Telegram bot credentials are not configured, skipping Telegram failure notification for run ${run.id}`,
+    );
+    return;
+  }
+
+  const channelId = getCommunicationChannelFromTaskPayload(run.payload);
+  if (!channelId) {
+    console.warn(
+      `[finishRun] Missing Telegram channel metadata for run ${run.id}, skipping Telegram failure notification`,
+    );
+    return;
+  }
+
+  const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
+  const messageId = getCommunicationMessageIdFromTaskPayload(run.payload);
+  const failureText = hasReachedTaskRuntime(run)
+    ? TASK_RUNTIME_FAILURE_TEXT
+    : TASK_STARTUP_FAILURE_TEXT;
+  const taskUrl = getTaskUrl({
+    taskId: run.taskId,
+    utm: { campaign: run.payloadKind, source: 'telegram' },
+  });
+  const text = [
+    failureText,
+    error ? `**Error details:** ${error}` : null,
+    taskUrl ? formatMarkdownLink('Open the task', taskUrl) : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n');
+
+  await provider.postMessage({
+    channelId,
+    ...(threadId ? { threadId } : {}),
+    ...(!threadId && messageId ? { replyToMessageId: messageId } : {}),
+    text,
+    textFormat: 'markdown',
+  });
+
+  console.log(
+    `[finishRun] Sent Telegram failure notification for run ${run.id}`,
+  );
+}
+
+async function sendDiscordFailureNotification(
+  run: FinishedRun,
+  error?: string,
+): Promise<void> {
   const provider =
     await createDiscordCommunicationProviderFromRuntimeCredentials();
   if (!provider) {
@@ -695,9 +773,13 @@ async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
     taskId: run.taskId,
     utm: { campaign: run.payloadKind, source: 'discord' },
   });
-  const text = taskUrl
-    ? `${failureText}\n\n${formatMarkdownLink('Open the task', taskUrl)}`
-    : failureText;
+  const text = [
+    failureText,
+    error ? `**Error details:** ${error}` : null,
+    taskUrl ? formatMarkdownLink('Open the task', taskUrl) : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n');
 
   await provider.postMessage({
     channelId,
@@ -721,7 +803,7 @@ async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
  */
 async function sendSlackFailureNotification(
   run: FinishedRun,
-  _error?: string,
+  error?: string,
 ): Promise<void> {
   const task = run.task;
   const runtimeAlreadyStarted = hasReachedTaskRuntime(run);
@@ -772,15 +854,16 @@ async function sendSlackFailureNotification(
       : SLACK_STARTUP_FAILURE_TEXT;
     const restartFailureText =
       "I ran into a hiccup and couldn't get started. Please send a fresh Slack message and I'll give it another shot.";
+    const failureDetails = error ? `\n\n*Error details:* ${error}` : '';
 
     const failureMessage =
       run.payloadKind === TaskPayloadKind.SlackAppMention
         ? buildTaskFailedMessage({
             runId: run.id,
-            messageText: retryableFailureText,
+            messageText: `${retryableFailureText}${failureDetails}`,
           })
         : {
-            text: restartFailureText,
+            text: `${restartFailureText}${failureDetails}`,
           };
 
     const shouldUpdateStartedMessage =
@@ -811,7 +894,13 @@ async function sendSlackFailureNotification(
   const messageTs = await slack.postMessage({
     channel,
     thread_ts: threadTs ?? task.slackThreadTs!,
-    text: `I ran into an issue when setting things up. <${taskUrl}|Continue on the web app> to fix it.`,
+    text: [
+      'I ran into an issue when setting things up.',
+      error ? `*Error details:* ${error}` : null,
+      `<${taskUrl}|Continue on the web app> to fix it.`,
+    ]
+      .filter((part): part is string => part !== null)
+      .join('\n\n'),
     unfurl_links: false,
     unfurl_media: false,
   });

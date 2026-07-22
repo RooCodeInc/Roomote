@@ -2761,10 +2761,12 @@ describe('OpenCodeServerHarness', () => {
   it('surfaces a readable provider message instead of the raw session error JSON', async () => {
     const { client, harness } = createHarness();
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
 
     harness.subscribeRuntimePersistedEnvelope((envelope) =>
       persistedEnvelopes.push(envelope),
     );
+    harness.subscribe((event) => taskEvents.push(event));
 
     try {
       await connectHarness(harness, client);
@@ -2816,6 +2818,18 @@ describe('OpenCodeServerHarness', () => {
         'responseHeaders',
       );
       expect(String(errorMessage?.payload.text)).not.toContain('cf-ray');
+      expect(taskEvents).toContainEqual({
+        eventName: TaskEventName.Message,
+        payload: [
+          expect.objectContaining({
+            taskId: 'ses_1',
+            message: expect.objectContaining({
+              say: 'error',
+              text: 'The provider returned an error: [xAI] The model grok-4.5 is not available in your region.',
+            }),
+          }),
+        ],
+      });
     } finally {
       harness.dispose();
     }

@@ -1045,8 +1045,6 @@ function isOpenCodeMessageAbortedError(error: unknown): boolean {
   return name === 'MessageAbortedError' || message === 'Aborted';
 }
 
-const SESSION_ERROR_FALLBACK_MAX_CHARS = 600;
-
 const MAX_RESOLVED_USER_INPUT_REQUEST_IDS = 256;
 
 /**
@@ -1071,13 +1069,7 @@ function formatOpenCodeSessionErrorText(error: unknown): string {
     return `The session ended with an error: ${name}`;
   }
 
-  const serialized = JSON.stringify(error ?? {});
-
-  return `The session ended with an error: ${
-    serialized.length > SESSION_ERROR_FALLBACK_MAX_CHARS
-      ? `${serialized.slice(0, SESSION_ERROR_FALLBACK_MAX_CHARS)}…`
-      : serialized
-  }`;
+  return 'The session ended with an unknown provider error.';
 }
 
 function formatOpenCodeUserInputResponsePrompt(options: {
@@ -3728,12 +3720,31 @@ export class OpenCodeServerHarness
     }
 
     if (sessionId) {
+      const errorText = formatOpenCodeSessionErrorText(error);
+
       this.logger.error(
         `OpenCode session error sessionId=${sessionId}: ${JSON.stringify(error ?? {})}`,
       );
       this.runtimeEvents.assistantMessage({
         sessionId,
-        text: formatOpenCodeSessionErrorText(error),
+        text: errorText,
+      });
+      // Pair the transcript message with a semantic error event so the harness
+      // manager persists the provider detail when it finalizes the failed run.
+      this.emit('taskEvent', {
+        eventName: TaskEventName.Message,
+        payload: [
+          {
+            taskId: sessionId,
+            action: 'created',
+            message: {
+              ts: Date.now(),
+              type: 'say',
+              say: 'error',
+              text: errorText,
+            },
+          },
+        ],
       });
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();

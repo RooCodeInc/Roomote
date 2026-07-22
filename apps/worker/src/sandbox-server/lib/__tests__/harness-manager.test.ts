@@ -2805,6 +2805,46 @@ describe('HarnessManager error status', () => {
     }
   });
 
+  it('treats a provider-error abort as a failed shutdown', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-provider-error'],
+      } as TaskEvent);
+      harness.emitTaskEvent({
+        eventName: TaskEventName.Message,
+        payload: [
+          {
+            taskId: 'task-provider-error',
+            action: 'created',
+            message: {
+              ts: Date.now(),
+              type: 'say',
+              say: 'error',
+              text: 'The provider returned an error: API key is invalid.',
+            },
+          },
+        ],
+      } as TaskEvent);
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskAborted,
+        payload: ['task-provider-error'],
+      } as TaskEvent);
+
+      await expect(manager.waitForShutdown()).resolves.toMatchObject({
+        lastErrorMessage: 'The provider returned an error: API key is invalid.',
+        taskAbortedAt: undefined,
+      });
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('clears lastErrorMessage when a follow-up prompt is sent successfully', () => {
     const { harness, manager } = createManager();
 

@@ -1339,6 +1339,14 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     if (payload[0] === this.state.sessionId) {
       this.logger.info(`[HarnessManager] Task aborted: ${payload[0]}`);
 
+      // A provider error is terminal, unlike a user-initiated abort. Preserve
+      // the error and shut down without setting the cancellation stamp so the
+      // worker resolves this run as Failed rather than Canceled.
+      if (this.state.lastErrorMessage && !this.state.cancelTriggeredAt) {
+        this.triggerShutdown();
+        return;
+      }
+
       this.state.taskAbortedAt = Date.now();
 
       if (this.runtimeQueuedMessagesCount > 0) {
