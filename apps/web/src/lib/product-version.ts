@@ -130,6 +130,21 @@ export function compareProductVersions(
   return comparePrereleaseSets(pa.prereleaseIds, pb.prereleaseIds);
 }
 
+/**
+ * Whether a value carries an orderable product version (numeric segments,
+ * optional prerelease suffix). Channel build tags like `main-<sha>` and
+ * placeholders like `self-host-production` are not parsable.
+ */
+export function isParsableProductVersion(
+  version: string | null | undefined,
+): boolean {
+  const normalized = normalizeProductVersion(version);
+  if (!normalized) {
+    return false;
+  }
+  return parseProductVersion(normalized).segments !== null;
+}
+
 export function isProductVersionNewer(
   candidate: string | null | undefined,
   baseline: string | null | undefined,

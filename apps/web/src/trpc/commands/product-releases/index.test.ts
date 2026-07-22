@@ -42,7 +42,13 @@ vi.mock('@/lib/server/env', () => ({
 }));
 
 import type { UserAuthSuccess } from '@/types';
+import { Env } from '@/lib/server/env';
 import { getReleaseNotesCommand, getReleaseStatusCommand } from './index';
+
+const mockEnv = Env as {
+  RELEASE_VERSION?: string;
+  RELEASE_PRODUCT_VERSION?: string;
+};
 
 const adminAuth = {
   success: true,
@@ -75,6 +81,8 @@ const memberAuth = {
 describe('releases commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnv.RELEASE_VERSION = 'v0.14.0';
+    delete mockEnv.RELEASE_PRODUCT_VERSION;
     mockIsRoomoteCloudEnabled.mockReturnValue(false);
     mockFindFirst.mockResolvedValue({
       latestKnownVersion: '0.15.0',
@@ -103,6 +111,25 @@ describe('releases commands', () => {
     mockIsRoomoteCloudEnabled.mockReturnValue(true);
     await expect(getReleaseStatusCommand(adminAuth)).resolves.toMatchObject({
       latestKnownVersion: null,
+      updateAvailable: false,
+    });
+  });
+
+  it('prefers the baked product version over a channel build tag', async () => {
+    mockEnv.RELEASE_VERSION = 'main-037146ca';
+    mockEnv.RELEASE_PRODUCT_VERSION = '0.14.0';
+
+    await expect(getReleaseStatusCommand(adminAuth)).resolves.toMatchObject({
+      runningVersion: '0.14.0',
+      updateAvailable: true,
+    });
+  });
+
+  it('reports no update for channel build tags without a product version', async () => {
+    mockEnv.RELEASE_VERSION = 'main-037146ca';
+
+    await expect(getReleaseStatusCommand(adminAuth)).resolves.toMatchObject({
+      runningVersion: 'main-037146ca',
       updateAvailable: false,
     });
   });

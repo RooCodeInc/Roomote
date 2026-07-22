@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { Astroid, Sparkles } from '@/components/system';
-import { isProductVersionNewer, toReleaseTag } from '@/lib/product-version';
+import {
+  isParsableProductVersion,
+  isProductVersionNewer,
+  toReleaseTag,
+} from '@/lib/product-version';
 import { useTRPC } from '@/trpc/client';
 
 import { SideNavItem } from '../side-nav/SideNavItem';
@@ -39,7 +43,11 @@ export function ReleaseNoticeSideNavItem({
   );
 
   useEffect(() => {
-    setSeenVersion(readWhatsNewSeenVersion());
+    // Browsers that stored an unorderable baseline (for example a channel
+    // build tag before the product version was baked into images) would
+    // otherwise never see a notice again; discard it so it gets re-seeded.
+    const stored = readWhatsNewSeenVersion();
+    setSeenVersion(stored && isParsableProductVersion(stored) ? stored : null);
     setHasHydratedStorage(true);
   }, []);
 

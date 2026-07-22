@@ -41,7 +41,13 @@ type ReleaseNotes = {
 };
 
 function getRunningVersion(): string | null {
-  return normalizeProductVersion(Env.RELEASE_VERSION);
+  // Channel builds bake RELEASE_VERSION as develop-<sha>/main-<sha>, which the
+  // product-version comparator cannot order. Prefer the product (changelog)
+  // version baked alongside it so release notices work on those deployments.
+  return (
+    normalizeProductVersion(Env.RELEASE_PRODUCT_VERSION) ??
+    normalizeProductVersion(Env.RELEASE_VERSION)
+  );
 }
 
 function canSeeUpdateStatus(auth: UserAuthSuccess): boolean {
