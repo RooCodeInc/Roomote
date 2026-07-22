@@ -3,7 +3,7 @@
  */
 
 const ROUTER_EVAL_PROVIDER =
-  process.env.ROUTER_EVAL_PROVIDER ?? 'openrouter:anthropic/claude-haiku-4.5';
+  process.env.ROUTER_EVAL_PROVIDER ?? 'openrouter:google/gemini-3.6-flash';
 
 const config = {
   description: 'LLM Routing Evaluation Suite',

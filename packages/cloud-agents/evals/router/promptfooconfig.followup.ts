@@ -11,7 +11,7 @@
 const ROUTER_FOLLOWUP_EVAL_PROVIDER =
   process.env.ROUTER_FOLLOWUP_EVAL_PROVIDER ??
   process.env.ROUTER_EVAL_PROVIDER ??
-  'openrouter:anthropic/claude-haiku-4.5';
+  'openrouter:google/gemini-3.6-flash';
 
 const config = {
   description: 'Follow-Up Classification Evaluation Suite (CLO-900)',

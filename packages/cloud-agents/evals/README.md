@@ -17,7 +17,7 @@ Ensure your promptfoo provider credentials are available in the environment
 loaded by dotenvx. Runtime routing uses `R_SMALL_MODEL`, falling back
 to `R_MODEL`; these evals are standalone promptfoo suites.
 
-Provider ids default to `openrouter:anthropic/claude-haiku-4.5`. Override them
+Provider ids default to `openrouter:google/gemini-3.6-flash`. Override them
 with `ROUTER_EVAL_PROVIDER` or `ROUTER_FOLLOWUP_EVAL_PROVIDER` when testing a
 different promptfoo provider.
 
