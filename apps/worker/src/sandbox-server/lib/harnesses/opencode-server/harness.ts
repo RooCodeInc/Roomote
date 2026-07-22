@@ -1574,6 +1574,7 @@ export class OpenCodeServerHarness
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
   private finalizedAssistantTurn: FinalizedAssistantTurn | null = null;
   private suppressNextReplayAbortError = false;
+  private skipStopHookForQueuedUserInputReplay = false;
   private replayAbortErrorSuppressionTimeout:
     | ReturnType<typeof setTimeout>
     | undefined;
@@ -3033,6 +3034,7 @@ export class OpenCodeServerHarness
         return;
       }
 
+      this.skipStopHookForQueuedUserInputReplay = true;
       await this.interruptForQueuedReplay();
       return;
     }
@@ -4395,7 +4397,15 @@ export class OpenCodeServerHarness
     this.lastOpenCodeRetryStatusMessage = null;
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
 
-    if (sessionId) {
+    // A blocked question answer queues an abort-and-replay prompt. Its abort
+    // can emit session.idle before the answer is submitted, so defer closeout
+    // enforcement for only that transient idle.
+    const skipStopHookForQueuedReplay =
+      this.skipStopHookForQueuedUserInputReplay &&
+      this.prompts.hasQueuedMessages();
+    this.skipStopHookForQueuedUserInputReplay = false;
+
+    if (sessionId && !skipStopHookForQueuedReplay) {
       const stopDecision = this.evaluateSlackStopHook(sessionId);
 
       if (stopDecision.blocked) {
