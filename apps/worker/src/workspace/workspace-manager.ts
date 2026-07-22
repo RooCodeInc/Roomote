@@ -25,6 +25,7 @@ import {
   SOURCE_CONTROL_GIT_CONFIG_PATH,
   ensureGitCredentialHelper,
   getGitHubTokenFileStatus,
+  writeGitHubTokenFile,
 } from '../lib/github-token';
 
 interface PrepareRepositoryOptions {
@@ -512,6 +513,30 @@ export class WorkspaceManager {
   }
 
   /**
+   * Resolve a repository-relative path and reject any value that escapes
+   * the workspace root. Repository full names are provider-synced and reach
+   * both shell commands and recursive deletes, so traversal segments (`..`)
+   * from a hostile or misconfigured source-control origin must never
+   * resolve outside the workspace.
+   */
+  private resolveContainedWorkspacePath(relativePath: string): string {
+    const targetPath = join(this.workspaceRoot, relativePath);
+    const relativeToRoot = relative(this.workspaceRoot, targetPath);
+
+    if (
+      relativeToRoot === '' ||
+      relativeToRoot.startsWith('..') ||
+      isAbsolute(relativeToRoot)
+    ) {
+      throw new Error(
+        `Repository path '${relativePath}' resolves outside the workspace root and was rejected.`,
+      );
+    }
+
+    return targetPath;
+  }
+
+  /**
    * GitHub task runs always receive a GitHub App installation token at
    * dequeue, which the worker writes to the file-backed git credential
    * helper before repository setup. If no credential signal is present
@@ -519,17 +544,26 @@ export class WorkspaceManager {
    * checkout with a cryptic error — fail fast with an operator-actionable
    * message instead. Logs presence signals only, never token material.
    */
-  private assertGitHubCredentialsAvailable(repoFullName: string): void {
+  private ensureGitHubCredentialsAvailable(repoFullName: string): void {
     const tokenFile = getGitHubTokenFileStatus();
-    const envTokenPresent = Boolean(
-      this.env.GH_TOKEN?.trim() || this.env.GITHUB_TOKEN?.trim(),
-    );
+    const envToken = this.env.GH_TOKEN?.trim() || this.env.GITHUB_TOKEN?.trim();
 
     console.log(
-      `GitHub credential check for ${repoFullName}: tokenFilePresent=${tokenFile.present} tokenFileNonEmpty=${tokenFile.nonEmpty} envTokenPresent=${envTokenPresent}`,
+      `GitHub credential check for ${repoFullName}: tokenFilePresent=${tokenFile.present} tokenFileNonEmpty=${tokenFile.nonEmpty} envTokenPresent=${Boolean(envToken)}`,
     );
 
-    if (tokenFile.nonEmpty || envTokenPresent) {
+    if (tokenFile.nonEmpty) {
+      return;
+    }
+
+    if (envToken) {
+      // The git credential helper and gh wrapper only read the token file;
+      // a token that exists solely as an env var would never reach git and
+      // the clone would still run anonymously.
+      console.log(
+        'GitHub token file is empty; writing the GH_TOKEN/GITHUB_TOKEN env var to the token file for git authentication.',
+      );
+      writeGitHubTokenFile(envToken);
       return;
     }
 
@@ -586,9 +620,8 @@ export class WorkspaceManager {
 
     console.log(`Preparing ${fullName}#${targetBranch}`);
 
-    const repoPath = join(this.workspaceRoot, fullName);
-    const legacyRepoPath = join(
-      this.workspaceRoot,
+    const repoPath = this.resolveContainedWorkspacePath(fullName);
+    const legacyRepoPath = this.resolveContainedWorkspacePath(
       fullName.split('/').pop() ?? fullName,
     );
     let resolvedRepoPath =
@@ -620,7 +653,7 @@ export class WorkspaceManager {
       sourceControlProvider === 'github' &&
       (needsClone || !preserveGitState)
     ) {
-      this.assertGitHubCredentialsAvailable(fullName);
+      this.ensureGitHubCredentialsAvailable(fullName);
     }
 
     if (!needsClone) {

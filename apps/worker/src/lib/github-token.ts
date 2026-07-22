@@ -326,6 +326,16 @@ function writeGhToken(token: string): void {
   writeFileSync(GH_TOKEN_FILE_PATH, `${token}\n`, { mode: 0o600 });
 }
 
+/**
+ * Write an environment-provided GitHub token to the file-backed store. The
+ * git credential helper, gh wrapper, and token env scripts only read
+ * ~/.roomote/gh-token, so a token that exists solely as an env var would
+ * never reach git operations unless it is materialized here.
+ */
+export function writeGitHubTokenFile(token: string): void {
+  writeGhToken(token);
+}
+
 function clearGhToken(): void {
   rmSync(GH_TOKEN_FILE_PATH, { force: true });
 }
