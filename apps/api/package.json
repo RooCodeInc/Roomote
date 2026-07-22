@@ -43,7 +43,7 @@
     "@sentry/node": "10.45.0",
     "@trpc/client": "^11.15.0",
     "@trpc/server": "^11.15.0",
-    "hono": "4.12.25",
+    "hono": "4.12.27",
     "jose": "^6.2.3",
     "p-map": "^7.0.4",
     "snowflake-sdk": "^2.4.3",
