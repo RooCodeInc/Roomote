@@ -12,53 +12,6 @@ const MAX_MESSAGE_CHARS = 2_000;
 const MAX_DETAIL_STRING_CHARS = 4_000;
 const MAX_DETAIL_DEPTH = 4;
 
-const SECRET_PATTERNS: RegExp[] = [
-  // Provider/API key prefixes and bearer headers.
-  /\b(?:sk|rk)-[A-Za-z0-9_-]{8,}/g,
-  /\bgh[pousr]_[A-Za-z0-9]{8,}/g,
-  /\bgithub_pat_[A-Za-z0-9_]{8,}/g,
-  /\bxox[a-z]-[A-Za-z0-9-]{8,}/g,
-  /\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi,
-  // JWTs.
-  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g,
-  // key=value / key: value assignments for credential-ish names, including
-  // prefixed forms like DATABASE_PASSWORD or GITHUB_TOKEN.
-  /([\w-]*(?:token|secret|password|passwd|api[_-]?key|authorization))(\s*[:=]\s*)\S+/gi,
-];
-
-// Long opaque hex/base64 runs are token-shaped, but they are also what git
-// SHAs and content digests look like — post-mortem evidence this rail exists
-// to preserve. These keep an 8-character prefix: enough to identify a commit
-// or digest, far too little to reconstruct a credential.
-const HASH_SHAPED_PATTERNS: RegExp[] = [
-  /\b[A-Fa-f0-9]{40,}\b/g,
-  /\b[A-Za-z0-9+/]{48,}={0,2}\b/g,
-];
-
-function redactSecretsLegacy(text: string): string {
-  let redacted = text;
-
-  for (const pattern of SECRET_PATTERNS) {
-    redacted = redacted.replace(pattern, (_match, ...groups) => {
-      // Assignment pattern keeps the key name for readability.
-      if (typeof groups[0] === 'string' && typeof groups[1] === 'string') {
-        return `${groups[0]}${groups[1]}[redacted]`;
-      }
-
-      return '[redacted]';
-    });
-  }
-
-  for (const pattern of HASH_SHAPED_PATTERNS) {
-    redacted = redacted.replace(
-      pattern,
-      (match) => `${match.slice(0, 8)}…[redacted]`,
-    );
-  }
-
-  return redacted;
-}
-
 export { redactSecrets } from './redact-secrets';
 
 function sanitizeString(value: string, maxChars: number): string {
