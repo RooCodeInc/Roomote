@@ -17,6 +17,10 @@ vi.mock('@roomote/gitea', () => ({
     conclusion?: string | null;
     status?: string | null;
   }) => (run.conclusion ?? run.status ?? '').trim().toLowerCase(),
+  isGiteaActionRunFailed: (conclusionOrStatus: string | null | undefined) => {
+    const value = (conclusionOrStatus ?? '').trim().toLowerCase();
+    return value === 'failure' || value === 'failed' || value === 'error';
+  },
   getGiteaActionRunFailureEvidence: (...args: unknown[]) =>
     mockGetGiteaActionRunFailureEvidence(...args),
   getGiteaActionRunWebUrl: (...args: unknown[]) =>
@@ -147,6 +151,21 @@ describe('handleGiteaWorkflowRun', () => {
 
     expect(result.message).toContain('non-failure');
     expect(mockLaunchCiFailureTriageForFailedRun).not.toHaveBeenCalled();
+  });
+
+  it('launches for error conclusions the same as failure', async () => {
+    const result = await handleGiteaWorkflowRun(
+      buildPayload({ workflow_run: { conclusion: 'error' } }),
+    );
+
+    expect(result.status).toBe('ok');
+    expect(mockLaunchCiFailureTriageForFailedRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'gitea',
+        runId: '99',
+        headSha: 'abc123def',
+      }),
+    );
   });
 
   it('ignores failures outside the default branch', async () => {

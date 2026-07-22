@@ -4,6 +4,7 @@ import {
   getGiteaActionRunFailureEvidence,
   getGiteaActionRunWebUrl,
   getGiteaWorkflowName,
+  isGiteaActionRunFailed,
 } from '@roomote/gitea';
 import { and, db, eq, or, repositories } from '@roomote/db/server';
 import { launchCiFailureTriageForFailedRun } from '@roomote/sdk/server';
@@ -45,7 +46,7 @@ export async function handleGiteaWorkflowRun(
   }
 
   const conclusion = getGiteaActionRunConclusion(run);
-  if (conclusion !== 'failure' && conclusion !== 'failed') {
+  if (!isGiteaActionRunFailed(conclusion)) {
     return {
       status: 'ok',
       message: `Ignoring non-failure Gitea Actions run: ${run.conclusion ?? run.status ?? 'unknown'}`,

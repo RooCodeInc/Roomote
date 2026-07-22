@@ -92,6 +92,7 @@ import {
   getGiteaActionRunFailureEvidence,
   getGiteaWorkflowName,
   getLatestGiteaActionRun,
+  isGiteaActionRunFailed,
   listGiteaRepositories,
   resolveGiteaInstanceHost,
   type GiteaRepository,
@@ -600,11 +601,86 @@ describe('Gitea API helpers', () => {
 
     expect(latest).toMatchObject({ id: 99, conclusion: 'failure' });
     expect(getGiteaActionRunConclusion(latest!)).toBe('failure');
+    expect(isGiteaActionRunFailed(getGiteaActionRunConclusion(latest!))).toBe(
+      true,
+    );
     expect(getGiteaWorkflowName(latest!)).toBe('ci.yml');
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
       '/repos/acme/backend/actions/runs?',
     );
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('branch=main');
+  });
+
+  it('falls back to /actions/tasks when /actions/runs is missing (Gitea ≤1.24)', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            total_count: 2,
+            workflow_runs: [
+              {
+                id: 10,
+                name: 'other.yml',
+                status: 'success',
+                head_branch: 'develop',
+                head_sha: 'sha-other',
+                run_number: 1,
+                url: 'https://git.example.com/acme/backend/actions/runs/10',
+              },
+              {
+                id: 11,
+                name: 'ci.yml',
+                status: 'failure',
+                head_branch: 'refs/heads/main',
+                head_sha: 'sha-main',
+                run_number: 2,
+                display_title: 'CI',
+                url: 'https://git.example.com/acme/backend/actions/runs/11',
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const latest = await getLatestGiteaActionRun({
+      repositoryFullName: 'acme/backend',
+      branch: 'main',
+      token: 'gitea_test',
+      baseUrl: 'https://git.example.com',
+      fetchImpl: fetchMock,
+    });
+
+    expect(latest).toMatchObject({
+      id: 11,
+      head_sha: 'sha-main',
+      conclusion: 'failure',
+      html_url: 'https://git.example.com/acme/backend/actions/runs/11',
+      path: 'ci.yml',
+    });
+    expect(getGiteaActionRunConclusion(latest!)).toBe('failure');
+    expect(getGiteaWorkflowName(latest!)).toBe('ci.yml');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/actions/runs?');
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/actions/tasks?');
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('limit=50');
+  });
+
+  it('treats error conclusion/status as a failed Actions outcome', () => {
+    expect(isGiteaActionRunFailed('error')).toBe(true);
+    expect(isGiteaActionRunFailed('failure')).toBe(true);
+    expect(isGiteaActionRunFailed('failed')).toBe(true);
+    expect(isGiteaActionRunFailed('success')).toBe(false);
+    expect(
+      isGiteaActionRunFailed(
+        getGiteaActionRunConclusion({
+          id: 1,
+          status: 'error',
+          conclusion: null,
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('builds Actions failure evidence from failed jobs and log tails', async () => {
@@ -649,5 +725,75 @@ describe('Gitea API helpers', () => {
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
       '/repos/acme/backend/actions/jobs/7/logs',
     );
+  });
+
+  it('falls back to flat /actions/jobs and treats error conclusions as failed', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            total_count: 2,
+            jobs: [
+              {
+                id: 21,
+                name: 'unit',
+                status: 'completed',
+                conclusion: 'error',
+                run_id: 99,
+              },
+              {
+                id: 22,
+                name: 'other-run',
+                status: 'completed',
+                conclusion: 'failure',
+                run_id: 100,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response('Error: step failed\n', { status: 200 }),
+      );
+
+    const evidence = await getGiteaActionRunFailureEvidence({
+      repositoryFullName: 'acme/backend',
+      runId: 99,
+      token: 'gitea_test',
+      baseUrl: 'https://git.example.com',
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('job="unit"');
+    expect(evidence).toContain('conclusion="error"');
+    expect(evidence).toContain('Error: step failed');
+    expect(evidence).not.toContain('other-run');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/actions/runs/99/jobs',
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/actions/jobs?');
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain(
+      '/actions/jobs/21/logs',
+    );
+  });
+
+  it('returns null evidence when jobs cannot be listed', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }));
+
+    await expect(
+      getGiteaActionRunFailureEvidence({
+        repositoryFullName: 'acme/backend',
+        runId: 99,
+        token: 'gitea_test',
+        baseUrl: 'https://git.example.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toBeNull();
   });
 });

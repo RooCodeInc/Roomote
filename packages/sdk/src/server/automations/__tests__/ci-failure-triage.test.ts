@@ -111,6 +111,10 @@ vi.mock('@roomote/gitea', () => ({
     conclusion?: string | null;
     status?: string | null;
   }) => (run.conclusion ?? run.status ?? '').trim().toLowerCase(),
+  isGiteaActionRunFailed: (conclusionOrStatus: string | null | undefined) => {
+    const value = (conclusionOrStatus ?? '').trim().toLowerCase();
+    return value === 'failure' || value === 'failed' || value === 'error';
+  },
   getGiteaActionRunWebUrl: (params: {
     run: { id: number; html_url?: string };
   }) =>
@@ -739,6 +743,48 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     expect(result.launchedTaskId).toBeNull();
     expect(mockGetGiteaActionRunFailureEvidence).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('launches Gitea manual Run now when the latest Actions conclusion is error', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gitea-1',
+        fullName: 'acme/gitea-api',
+        sourceControlProvider: 'gitea',
+        externalRepoId: '55',
+        host: 'git.example.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockGetLatestGiteaActionRun.mockResolvedValue({
+      id: 99,
+      status: 'completed',
+      conclusion: 'error',
+      head_branch: 'main',
+      head_sha: 'gitea-sha-error',
+      path: 'ci.yml@refs/heads/main',
+      html_url: 'https://git.example.com/acme/gitea-api/actions/runs/99',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockEnqueueTask).toHaveBeenCalled();
+    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceControlProvider: 'gitea',
+        triggeringRun: expect.objectContaining({
+          provider: 'gitea',
+          headSha: 'gitea-sha-error',
+        }),
+      }),
+    );
   });
 
   it('still launches Gitea manual Run now when failure evidence fetch fails', async () => {

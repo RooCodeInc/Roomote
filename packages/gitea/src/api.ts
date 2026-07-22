@@ -175,6 +175,7 @@ const giteaActionWorkflowRunSchema = z
     url: z.string().optional(),
     html_url: z.string().optional(),
     display_title: z.string().optional(),
+    name: z.string().optional(),
     path: z.string().optional(),
     event: z.string().optional(),
     run_number: z.number().optional(),
@@ -189,6 +190,10 @@ const giteaActionWorkflowRunListSchema = z.object({
   workflow_runs: z.array(giteaActionWorkflowRunSchema),
   total_count: z.number().optional(),
 });
+
+// Gitea ≤1.24 lists runs as ActionTask via GET .../actions/tasks (same
+// ActionTaskResponse shape: { total_count, workflow_runs: ActionTask[] }).
+const giteaActionTaskListSchema = giteaActionWorkflowRunListSchema;
 
 const giteaActionWorkflowJobSchema = z
   .object({
@@ -212,6 +217,13 @@ export type GiteaActionWorkflowJob = z.infer<
   typeof giteaActionWorkflowJobSchema
 >;
 
+const GITEA_ACTION_TASKS_PAGE_LIMIT = 50;
+const GITEA_ACTION_JOBS_PAGE_LIMIT = 50;
+
+function stripGiteaGitRef(refName: string | null | undefined): string {
+  return (refName ?? '').trim().replace(/^refs\/heads\//, '');
+}
+
 function getGiteaWorkflowName(run: GiteaActionWorkflowRun): string {
   const path = (run.path ?? '').trim();
   if (path) {
@@ -221,7 +233,36 @@ function getGiteaWorkflowName(run: GiteaActionWorkflowRun): string {
       return filePart;
     }
   }
-  return (run.display_title ?? '').trim() || 'workflow';
+  return (
+    (run.display_title ?? '').trim() || (run.name ?? '').trim() || 'workflow'
+  );
+}
+
+/**
+ * Map a Gitea ActionTask (from /actions/tasks) onto the workflow-run shape
+ * used by callers. On tasks, conclusion is often absent and status carries
+ * terminal outcomes like failure / failed / error / success.
+ */
+function mapGiteaActionTaskToWorkflowRun(
+  task: GiteaActionWorkflowRun,
+): GiteaActionWorkflowRun {
+  const status = (task.status ?? '').trim() || undefined;
+  const conclusion = (task.conclusion ?? '').trim() || status || undefined;
+  const htmlUrl = (task.html_url ?? task.url ?? '').trim() || undefined;
+  const path =
+    (task.path ?? '').trim() || (task.name ?? '').trim() || undefined;
+  const displayTitle =
+    (task.display_title ?? '').trim() || (task.name ?? '').trim() || undefined;
+
+  return {
+    ...task,
+    status,
+    conclusion: conclusion ?? null,
+    html_url: htmlUrl,
+    url: (task.url ?? htmlUrl ?? '').trim() || undefined,
+    path,
+    display_title: displayTitle,
+  };
 }
 
 export function getGiteaActionRunWebUrl(params: {
@@ -246,6 +287,14 @@ export function getGiteaActionRunConclusion(
   run: GiteaActionWorkflowRun,
 ): string {
   return (run.conclusion ?? run.status ?? '').trim().toLowerCase();
+}
+
+/** True when an Actions conclusion/status means the run or job failed. */
+export function isGiteaActionRunFailed(
+  conclusionOrStatus: string | null | undefined,
+): boolean {
+  const value = (conclusionOrStatus ?? '').trim().toLowerCase();
+  return value === 'failure' || value === 'failed' || value === 'error';
 }
 
 async function resolveGiteaAuthContext(params: {
@@ -339,6 +388,10 @@ function formatGiteaActionJobEvidence(params: {
 /**
  * Newest Actions run for a branch tip. Does not filter by conclusion so
  * callers can detect already-green tips before launching triage.
+ *
+ * Prefers GitHub-compat GET .../actions/runs (Gitea 1.25+). On 404 falls
+ * back to GET .../actions/tasks (Gitea ≤1.24 ActionTaskResponse) and
+ * client-filters by head_branch.
  */
 export async function getLatestGiteaActionRun(params: {
   repositoryFullName: string;
@@ -353,45 +406,79 @@ export async function getLatestGiteaActionRun(params: {
     params.repositoryFullName,
   );
   const fetchImpl = params.fetchImpl ?? fetch;
+  const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const wantedBranch = stripGiteaGitRef(params.branch);
+  const authHeaders = {
+    Accept: 'application/json',
+    Authorization: `Bearer ${auth.token}`,
+  } as const;
 
-  const response = await fetchImpl(
-    buildGiteaApiUrl(
-      auth.apiBaseUrl,
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs`,
-      {
-        branch: params.branch,
-        limit: 1,
-        page: 1,
-      },
-    ),
+  const runsResponse = await fetchImpl(
+    buildGiteaApiUrl(auth.apiBaseUrl, `${repoPath}/actions/runs`, {
+      branch: params.branch,
+      limit: 1,
+      page: 1,
+    }),
     {
       method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${auth.token}`,
-      },
+      headers: authHeaders,
       signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
     },
   );
 
-  if ([401, 403].includes(response.status)) {
+  if ([401, 403].includes(runsResponse.status)) {
     throw new Error(
-      `Gitea rejected the Actions API request (status ${response.status}). Confirm the OAuth grant can read Actions runs and the connection has been re-authorized.`,
+      `Gitea rejected the Actions API request (status ${runsResponse.status}). Confirm the OAuth grant can read Actions runs and the connection has been re-authorized.`,
     );
   }
 
-  if (response.status === 404) {
+  if (runsResponse.status === 200) {
+    const { workflow_runs: runs } = giteaActionWorkflowRunListSchema.parse(
+      await runsResponse.json(),
+    );
+    return runs[0] ?? null;
+  }
+
+  // Gitea ≤1.24 does not expose /actions/runs listing — fall back to tasks.
+  if (runsResponse.status !== 404) {
+    throw new GiteaApiError(runsResponse.status, runsResponse.statusText);
+  }
+
+  const tasksResponse = await fetchImpl(
+    buildGiteaApiUrl(auth.apiBaseUrl, `${repoPath}/actions/tasks`, {
+      limit: GITEA_ACTION_TASKS_PAGE_LIMIT,
+      page: 1,
+    }),
+    {
+      method: 'GET',
+      headers: authHeaders,
+      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+  );
+
+  if ([401, 403].includes(tasksResponse.status)) {
+    throw new Error(
+      `Gitea rejected the Actions API request (status ${tasksResponse.status}). Confirm the OAuth grant can read Actions runs and the connection has been re-authorized.`,
+    );
+  }
+
+  if (tasksResponse.status === 404) {
     return null;
   }
 
-  if (response.status !== 200) {
-    throw new GiteaApiError(response.status, response.statusText);
+  if (tasksResponse.status !== 200) {
+    throw new GiteaApiError(tasksResponse.status, tasksResponse.statusText);
   }
 
-  const { workflow_runs: runs } = giteaActionWorkflowRunListSchema.parse(
-    await response.json(),
+  const { workflow_runs: tasks } = giteaActionTaskListSchema.parse(
+    await tasksResponse.json(),
   );
-  return runs[0] ?? null;
+
+  // Tasks are typically newest-first; pick the first matching branch tip.
+  const match = tasks.find(
+    (task) => stripGiteaGitRef(task.head_branch) === wantedBranch,
+  );
+  return match ? mapGiteaActionTaskToWorkflowRun(match) : null;
 }
 
 export async function getGiteaActionRun(params: {
@@ -442,7 +529,84 @@ export async function getGiteaActionRun(params: {
 }
 
 /**
+ * List jobs for an Actions run. Prefers Gitea 1.25+ nested jobs path; on 404
+ * tries flat GET .../actions/jobs filtered by run_id (when exposed). Returns
+ * null when jobs cannot be listed so triage can still launch without evidence.
+ */
+async function listGiteaActionRunJobs(params: {
+  apiBaseUrl: string;
+  token: string;
+  repoPath: string;
+  runId: number;
+  fetchImpl: typeof fetch;
+}): Promise<GiteaActionWorkflowJob[] | null> {
+  const authHeaders = {
+    Accept: 'application/json',
+    Authorization: `Bearer ${params.token}`,
+  } as const;
+
+  const nestedResponse = await params.fetchImpl(
+    buildGiteaApiUrl(
+      params.apiBaseUrl,
+      `${params.repoPath}/actions/runs/${params.runId}/jobs`,
+      {
+        limit: GITEA_ACTION_JOBS_PAGE_LIMIT,
+        page: 1,
+      },
+    ),
+    {
+      method: 'GET',
+      headers: authHeaders,
+      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+  );
+
+  if ([401, 403].includes(nestedResponse.status)) {
+    return null;
+  }
+
+  if (nestedResponse.status === 200) {
+    const { jobs } = giteaActionWorkflowJobListSchema.parse(
+      await nestedResponse.json(),
+    );
+    return jobs;
+  }
+
+  if (nestedResponse.status !== 404) {
+    throw new GiteaApiError(nestedResponse.status, nestedResponse.statusText);
+  }
+
+  // Nested runs/{id}/jobs is missing on older Gitea; try flat jobs list.
+  const flatResponse = await params.fetchImpl(
+    buildGiteaApiUrl(params.apiBaseUrl, `${params.repoPath}/actions/jobs`, {
+      limit: GITEA_ACTION_JOBS_PAGE_LIMIT,
+      page: 1,
+    }),
+    {
+      method: 'GET',
+      headers: authHeaders,
+      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+  );
+
+  if ([401, 403, 404].includes(flatResponse.status)) {
+    return null;
+  }
+
+  if (flatResponse.status !== 200) {
+    throw new GiteaApiError(flatResponse.status, flatResponse.statusText);
+  }
+
+  const { jobs } = giteaActionWorkflowJobListSchema.parse(
+    await flatResponse.json(),
+  );
+  return jobs.filter((job) => job.run_id === params.runId);
+}
+
+/**
  * Bounded, prompt-ready snapshot of failed Actions jobs and log tails.
+ * Logs use GET .../actions/jobs/{job_id}/logs (available on Gitea 1.24+).
+ * Returns null when jobs cannot be listed so Manual Run / webhooks still launch.
  */
 export async function getGiteaActionRunFailureEvidence(params: {
   repositoryFullName: string;
@@ -459,43 +623,20 @@ export async function getGiteaActionRunFailureEvidence(params: {
   const fetchImpl = params.fetchImpl ?? fetch;
   const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 
-  const jobsResponse = await fetchImpl(
-    buildGiteaApiUrl(
-      auth.apiBaseUrl,
-      `${repoPath}/actions/runs/${params.runId}/jobs`,
-      {
-        limit: 50,
-        page: 1,
-      },
-    ),
-    {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${auth.token}`,
-      },
-      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
-    },
-  );
+  const jobs = await listGiteaActionRunJobs({
+    apiBaseUrl: auth.apiBaseUrl,
+    token: auth.token,
+    repoPath,
+    runId: params.runId,
+    fetchImpl,
+  });
 
-  if ([401, 403, 404].includes(jobsResponse.status)) {
+  if (!jobs) {
     return null;
   }
 
-  if (jobsResponse.status !== 200) {
-    throw new GiteaApiError(jobsResponse.status, jobsResponse.statusText);
-  }
-
-  const { jobs } = giteaActionWorkflowJobListSchema.parse(
-    await jobsResponse.json(),
-  );
   const failedJobs = jobs
-    .filter((job) => {
-      const conclusion = (job.conclusion ?? job.status ?? '')
-        .trim()
-        .toLowerCase();
-      return conclusion === 'failure' || conclusion === 'failed';
-    })
+    .filter((job) => isGiteaActionRunFailed(job.conclusion ?? job.status ?? ''))
     .slice(0, GITEA_FAILURE_EVIDENCE_MAX_JOBS);
 
   if (failedJobs.length === 0) {

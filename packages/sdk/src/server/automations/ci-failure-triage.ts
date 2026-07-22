@@ -31,6 +31,7 @@ import {
   getGiteaActionRunConclusion,
   getGiteaActionRunFailureEvidence,
   getGiteaActionRunWebUrl,
+  isGiteaActionRunFailed,
   getGiteaWorkflowName,
   getLatestGiteaActionRun,
   resolveGiteaInstanceHost,
@@ -425,10 +426,7 @@ export async function ciFailureTriageJob(
             ? getGiteaActionRunConclusion(latestRun)
             : '';
 
-          if (
-            !latestRun ||
-            (conclusion !== 'failure' && conclusion !== 'failed')
-          ) {
+          if (!latestRun || !isGiteaActionRunFailed(conclusion)) {
             console.log(
               `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: latest Gitea default-branch Actions run is not failed`,
             );
