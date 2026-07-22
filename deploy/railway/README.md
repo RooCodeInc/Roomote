@@ -4,8 +4,8 @@ Two official templates are published, one per image channel:
 
 | Channel                     | Tracks     | Deploy                                                                                    |
 | --------------------------- | ---------- | ----------------------------------------------------------------------------------------- |
-| **main** (stable)           | `:main`    | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo) |
-| **develop** (latest builds) | `:develop` | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/bP3Lsu) |
+| **main** (stable)           | `:main`    | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo?referralCode=roomote) |
+| **develop** (latest builds) | `:develop` | [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/bP3Lsu?referralCode=roomote) |
 
 This guide covers deploying Roomote on [Railway](https://railway.com) — either
 through an official Roomote template or by composing the services manually.
