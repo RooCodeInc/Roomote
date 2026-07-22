@@ -214,6 +214,12 @@ describe('roomote MCP tool descriptions', () => {
       'to demonstrate how something would look',
     );
     expect(tool.config.description).toContain(
+      'Use it proactively when the user asks to show, mock up, preview, or visualize',
+    );
+    expect(tool.config.description).toContain(
+      'prefer it over an ASCII or text-only example when a compact visual would answer the request better',
+    );
+    expect(tool.config.description).toContain(
       'Do not use it for ordinary prose',
     );
     expect(tool.config.description).toContain('rw-card');
