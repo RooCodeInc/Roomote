@@ -36,6 +36,7 @@ vi.mock('../../command-executor', async (importOriginal) => {
 });
 
 const getGitHubTokenFileStatusMock = vi.fn();
+const writeGitHubTokenFileMock = vi.fn();
 
 vi.mock('../../lib/github-token', async (importOriginal) => {
   const actual =
@@ -45,6 +46,7 @@ vi.mock('../../lib/github-token', async (importOriginal) => {
     ...actual,
     ensureGitCredentialHelper: vi.fn(() => '/tmp/credential-helper.sh'),
     getGitHubTokenFileStatus: () => getGitHubTokenFileStatusMock(),
+    writeGitHubTokenFile: (token: string) => writeGitHubTokenFileMock(token),
   };
 });
 
@@ -148,14 +150,63 @@ describe('WorkspaceManager repository clone preparation', () => {
     );
   });
 
-  it('accepts a GH_TOKEN env var as a credential signal', async () => {
+  it('materializes an env GH_TOKEN into the token file before cloning', async () => {
     stubTokenFile({ nonEmpty: false });
     mockCloneCreatesRepo();
     const manager = createManager({ PATH: '/usr/bin', GH_TOKEN: 'env-token' });
 
     await manager.prepareRepository(REPO_FULL_NAME, 'main', undefined);
 
+    expect(writeGitHubTokenFileMock).toHaveBeenCalledWith('env-token');
     expect(getCloneCommand()).toBeDefined();
+  });
+
+  it('does not touch the token file when it already has a token', async () => {
+    stubTokenFile({ nonEmpty: true });
+    mockCloneCreatesRepo();
+    const manager = createManager({ PATH: '/usr/bin', GH_TOKEN: 'env-token' });
+
+    await manager.prepareRepository(REPO_FULL_NAME, 'main', undefined);
+
+    expect(writeGitHubTokenFileMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects repository names that resolve outside the workspace root', async () => {
+    stubTokenFile({ nonEmpty: true });
+    vi.mocked(sdk.repositories.findRepository).mockResolvedValue(undefined);
+    const manager = createManager();
+
+    await expect(
+      manager.prepareRepository(
+        '../../victim',
+        'main',
+        undefined,
+        false,
+        false,
+        {
+          sourceControlProvider: 'gitlab',
+        },
+      ),
+    ).rejects.toThrow(/resolves outside the workspace root/);
+
+    expect(getCloneCommand()).toBeUndefined();
+  });
+
+  it('rejects synced repository rows whose full name escapes the workspace', async () => {
+    stubTokenFile({ nonEmpty: true });
+    vi.mocked(sdk.repositories.findRepository).mockResolvedValue({
+      id: 'repo-1',
+      fullName: '../evil',
+      defaultBranch: 'main',
+      cloneUrl: 'https://github.com/acme/backend.git',
+    } as Awaited<ReturnType<typeof sdk.repositories.findRepository>>);
+    const manager = createManager();
+
+    await expect(
+      manager.prepareRepository(REPO_FULL_NAME, 'main', undefined),
+    ).rejects.toThrow(/resolves outside the workspace root/);
+
+    expect(getCloneCommand()).toBeUndefined();
   });
 
   it('removes an existing directory without .git and clones again', async () => {
