@@ -602,8 +602,11 @@ describe('OpenCodeServerHarness', () => {
         },
       });
       await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
+        type: 'session.status',
+        properties: {
+          sessionID: 'ses_1',
+          status: { type: 'idle' },
+        },
       });
 
       await vi.waitFor(() => {
@@ -724,8 +727,11 @@ describe('OpenCodeServerHarness', () => {
         },
       });
       await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
+        type: 'session.status',
+        properties: {
+          sessionID: 'ses_1',
+          status: { type: 'idle' },
+        },
       });
 
       await vi.waitFor(() => {
@@ -1552,8 +1558,11 @@ describe('OpenCodeServerHarness', () => {
       });
 
       await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
+        type: 'session.status',
+        properties: {
+          sessionID: 'ses_1',
+          status: { type: 'idle' },
+        },
       });
 
       await vi.waitFor(() => {
@@ -1565,6 +1574,12 @@ describe('OpenCodeServerHarness', () => {
           parts: [{ type: 'text', text: expect.stringContaining('Blue') }],
         },
       });
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
 
       resolveAbort(true);
     } finally {

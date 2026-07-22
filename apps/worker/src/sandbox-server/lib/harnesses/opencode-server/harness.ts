@@ -1575,6 +1575,7 @@ export class OpenCodeServerHarness
   private finalizedAssistantTurn: FinalizedAssistantTurn | null = null;
   private suppressNextReplayAbortError = false;
   private skipStopHookForQueuedUserInputReplay = false;
+  private ignoreNextUserInputReplaySessionIdle = false;
   private replayAbortErrorSuppressionTimeout:
     | ReturnType<typeof setTimeout>
     | undefined;
@@ -2069,6 +2070,7 @@ export class OpenCodeServerHarness
     this.clearProviderErrorRecoveryState();
     this.clearAllExecuteToolProgress();
     this.stopHookReminderCount = 0;
+    this.ignoreNextUserInputReplaySessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
     this.cancelRequestedBeforeSession = false;
@@ -3589,6 +3591,7 @@ export class OpenCodeServerHarness
       // Retry transitions prove the session is alive, but not that the turn's
       // loop advanced. Keep the stall watchdog armed during transient backoff.
       this.ignoreNextProviderRecoverySessionIdle = false;
+      this.ignoreNextUserInputReplaySessionIdle = false;
       this.inFlight = true;
       this.stallWatchdogs.noteActivity();
       this.stallWatchdogs.ensureTurnStallArmed();
@@ -3599,6 +3602,7 @@ export class OpenCodeServerHarness
       // If OpenCode omitted the paired session.idle event, do not let a stale
       // guard consume the retry's eventual idle transition.
       this.ignoreNextProviderRecoverySessionIdle = false;
+      this.ignoreNextUserInputReplaySessionIdle = false;
       this.inFlight = true;
       // Status transitions prove the session is alive (e.g. a provider retry
       // loop), but not that the turn's loop advanced — a steer awaiting
@@ -3613,7 +3617,7 @@ export class OpenCodeServerHarness
         return;
       }
 
-      await this.finishCurrentTurn();
+      await this.finishCurrentTurn('session_status');
     }
   }
 
@@ -3681,11 +3685,16 @@ export class OpenCodeServerHarness
       return;
     }
 
+    if (this.ignoreNextUserInputReplaySessionIdle) {
+      this.ignoreNextUserInputReplaySessionIdle = false;
+      return;
+    }
+
     if (await this.drainProviderErrorRecoveryAfterIdle('session_idle')) {
       return;
     }
 
-    await this.finishCurrentTurn();
+    await this.finishCurrentTurn('session_idle');
   }
 
   private async handleSessionError(
@@ -4368,7 +4377,9 @@ export class OpenCodeServerHarness
     await this.finalizeAssistantMessage(info.id);
   }
 
-  private async finishCurrentTurn(): Promise<void> {
+  private async finishCurrentTurn(
+    source: 'session_status' | 'session_idle' = 'session_idle',
+  ): Promise<void> {
     if (!this.inFlight && !this.prompts.hasQueuedMessages()) {
       return;
     }
@@ -4404,6 +4415,8 @@ export class OpenCodeServerHarness
       this.skipStopHookForQueuedUserInputReplay &&
       this.prompts.hasQueuedMessages();
     this.skipStopHookForQueuedUserInputReplay = false;
+    this.ignoreNextUserInputReplaySessionIdle =
+      skipStopHookForQueuedReplay && source === 'session_status';
 
     if (sessionId && !skipStopHookForQueuedReplay) {
       const stopDecision = this.evaluateSlackStopHook(sessionId);
