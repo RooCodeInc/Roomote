@@ -305,7 +305,7 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     vi.mocked(buildThreadReplyFooterText).mockReturnValue('Task footer');
     discordPostMessageMock.mockResolvedValue({
       messageId: 'first-chunk',
-      lastMessageId: 'footer-chunk',
+      lastTextMessageId: 'footer-chunk',
     });
 
     await maybeSendCommunicationThreadReply({

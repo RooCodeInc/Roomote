@@ -51,7 +51,7 @@ describe('DiscordCommunicationProvider', () => {
     expect(result).toMatchObject({
       provider: 'discord',
       channelId,
-      lastMessageId: expect.any(String),
+      lastTextMessageId: expect.any(String),
     });
     const requests = server.state.requests.filter(
       (request) =>
@@ -99,6 +99,28 @@ describe('DiscordCommunicationProvider', () => {
         request.method === 'POST' && request.path.endsWith('/messages'),
     );
     expect(posted?.body).toMatchObject({ flags: 4 });
+  });
+
+  it('reports the text-bearing message when trailing image groups are posted', async () => {
+    const { server, provider } = createHarness({
+      nonceFactory: vi
+        .fn()
+        .mockReturnValueOnce('123456789012345678')
+        .mockReturnValueOnce('123456789012345679'),
+    });
+    const channelId = '400000000000000001';
+
+    const result = await provider.postMessage({
+      channelId,
+      text: 'Footer-bearing reply',
+      images: Array.from({ length: 11 }, (_, index) => ({
+        url: `https://images.example/${index}.png`,
+        altText: `Screenshot ${index}`,
+      })),
+    });
+
+    expect(result.lastTextMessageId).toBe(result.messageId);
+    expect(server.state.messages[channelId]).toHaveLength(2);
   });
 
   it('never rewrites flags while editing a message', async () => {

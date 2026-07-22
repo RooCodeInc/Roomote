@@ -546,7 +546,7 @@ async function sendDiscordThreadReply(params: {
 
           return {
             ...posted,
-            messageId: posted.lastMessageId ?? posted.messageId,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
             textWithoutFooter: footerlessFinalChunk,
           };
         },
