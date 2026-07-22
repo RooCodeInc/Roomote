@@ -2,6 +2,29 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.17.0 (2026-07-22)
+
+Managed deployments gain stronger access and credential protections, while users get safer account controls and more reliable links, notices, and Discord updates.
+
+### Highlights
+
+- Keep managed deployments readable while pausing new tasks when access becomes read-only.
+- Run managed sandboxes through a broker without storing shared Modal credentials in tenant deployments.
+- Change email-and-password credentials from a dedicated Personal Settings flow.
+- Get browser-reachable artifact links, reliable release notices, and clearer Discord task updates.
+
+### Minor changes
+
+- Add a brokered compute backend so managed deployments can run sandboxes without storing shared Modal credentials.
+- Add managed deployment access controls that keep existing data readable while pausing new tasks when a deployment becomes read-only.
+- Let email-and-password users change their password from a dedicated Personal Settings flow.
+
+### Patch changes
+
+- Use the public Roomote URL for cloud task artifact links so shared links open outside the deployment network.
+- Keep Discord task footers on the latest reply and display pull-request titles cleanly.
+- Show in-app release notices on deployments running channel builds by baking the product version into published images and reading it for the what's-new and update-available notices.
+
 ## 0.16.0 (2026-07-21)
 
 Custom automations and wider CI triage coverage help teams automate more recurring work, with reliability improvements across task startup and integrations.
