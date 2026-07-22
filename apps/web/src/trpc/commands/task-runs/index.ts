@@ -13,6 +13,7 @@ import {
 import {
   type RoutingDecision,
   buildSlackRoutingContext,
+  DeploymentReadOnlyError,
   enqueueTask,
   getTaskUrl,
   routeTask,
@@ -419,6 +420,10 @@ export async function createStandardTaskRunCommand(
     };
   } catch (error) {
     console.error(error);
+
+    if (error instanceof DeploymentReadOnlyError) {
+      return { success: false, error: error.code };
+    }
 
     return error instanceof Error
       ? { success: false, error: error.message }

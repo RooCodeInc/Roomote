@@ -14,6 +14,7 @@ export { linear } from './linear';
 export { teams } from './teams';
 export { telegram } from './telegram';
 export { discord } from './discord';
+export { cloudDeploymentAccess } from './cloud-deployment-access';
 
 // trpc
 export { trpc } from './trpc';

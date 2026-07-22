@@ -1,4 +1,5 @@
 import { FeatureFlag } from '@roomote/feature-flags';
+import type { ManagedDeploymentAccess } from '@roomote/types';
 
 /**
  * Authentication
@@ -29,6 +30,7 @@ export type AuthorizedUser = {
   anonymousAnalyticsEnabled: boolean;
   /** Whether this deployment uses Roomote Cloud-only behavior. */
   cloudEnabled: boolean;
+  managedAccess?: ManagedDeploymentAccess;
   resource: UserResource;
 };
 

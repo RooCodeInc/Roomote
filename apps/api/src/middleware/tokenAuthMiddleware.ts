@@ -3,17 +3,9 @@ import { createMiddleware } from 'hono/factory';
 
 import { validateRunToken, validateAuthToken } from '@roomote/auth';
 import { db, deploymentSettings, eq, users } from '@roomote/db/server';
+import { isRoomoteDeploymentDisabled } from '@roomote/types';
 
 import type { Variables } from '../types';
-
-function isRoomoteDeploymentDisabled(metadata: unknown): boolean {
-  return (
-    typeof metadata === 'object' &&
-    metadata !== null &&
-    'deployment_disabled' in metadata &&
-    metadata.deployment_disabled === true
-  );
-}
 
 async function deploymentAllowsTokenAuth(): Promise<boolean> {
   const deployment = await db.query.deploymentSettings.findFirst({

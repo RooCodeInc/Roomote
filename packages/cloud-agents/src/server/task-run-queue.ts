@@ -33,6 +33,8 @@ import {
   resolveTaskWorkspace,
   resolveComputeProviderTarget,
   TASK_TIMEOUT_MS,
+  isManagedDeploymentReadOnly,
+  isRoomoteDeploymentDisabled,
 } from '@roomote/types';
 import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
@@ -249,15 +251,6 @@ async function resolveMatchedHumanActor(
   };
 }
 
-function isRoomoteDeploymentDisabled(metadata: unknown): boolean {
-  return (
-    typeof metadata === 'object' &&
-    metadata !== null &&
-    'deployment_disabled' in metadata &&
-    metadata.deployment_disabled === true
-  );
-}
-
 type ResolvedHarnessSelection = {
   harness: CodingHarness;
   deploymentMetadata?: MetadataRecord | null;
@@ -275,6 +268,15 @@ type ResolvedHarnessSelection = {
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
+export class DeploymentReadOnlyError extends Error {
+  readonly code = 'deployment_read_only';
+
+  constructor() {
+    super('This deployment is read-only. New task launches are paused.');
+    this.name = 'DeploymentReadOnlyError';
+  }
+}
+
 async function assertDeploymentIsActive(): Promise<void> {
   const deployment = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
@@ -285,6 +287,10 @@ async function assertDeploymentIsActive(): Promise<void> {
 
   if (isRoomoteDeploymentDisabled(deployment?.metadata)) {
     throw new Error('Cannot create task run for disabled deployment.');
+  }
+
+  if (isManagedDeploymentReadOnly(deployment?.metadata)) {
+    throw new DeploymentReadOnlyError();
   }
 }
 
@@ -1238,6 +1244,8 @@ async function pushRunOntoQueue(params: {
  * provisioning) releases a run that was created with `enqueue: false`.
  */
 export async function queuePersistedTaskRun(taskRun: TaskRun): Promise<void> {
+  await assertDeploymentIsActive();
+
   await pushRunOntoQueue({
     taskRun,
     scope: taskRun.queueScope ?? randomUUID(),

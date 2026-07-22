@@ -13,6 +13,7 @@ import { useTRPC } from '@/trpc/client';
 import { NavbarHeader, SideNav, FramedSurface } from '@/components/layout';
 import { CommandPaletteProvider } from '@/components/layout/CommandPaletteContext';
 import { CommandPalette } from '@/components/layout/CommandPalette';
+import { ManagedAccessBanner } from './ManagedAccessBanner';
 
 export default function AuthenticatedLayoutClient({
   children,
@@ -92,6 +93,9 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
   return (
     <CommandPaletteProvider>
       <div className="flex h-viewport min-h-0 flex-col bg-card">
+        <div className="mx-2 rounded-b-2xl overflow-clip">
+          <ManagedAccessBanner />
+        </div>
         <div
           className={`md:hidden sticky top-0 ${zIndex('NAV_HEADER')} w-full bg-card`}
         >

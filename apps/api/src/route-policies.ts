@@ -213,6 +213,11 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'webhook',
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
+  {
+    name: 'internal-cloud-deployment-access',
+    match: { type: 'exact', path: '/api/internal/cloud/deployment-access' },
+    policy: 'webhook',
+  },
 
   // Inference gateway: task sandboxes call model providers through this
   // proxy with their run-scoped token; the provider key is injected

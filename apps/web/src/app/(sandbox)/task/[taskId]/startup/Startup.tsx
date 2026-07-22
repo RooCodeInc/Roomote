@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import { SSEProvider } from 'react-hooks-sse';
 
 import {
+  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
   RunStatus,
   TaskPayloadKind,
   type RunStatus as RunStatusValue,
@@ -12,6 +13,7 @@ import type { TaskRun } from '@roomote/db';
 
 import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
 import { useRetryFailedTaskStart } from '@/hooks/task-runs';
+import { useAuthorizedUser } from '@/hooks/useUser';
 import { getTaskRunError } from '@/lib/task-run-errors';
 
 import {
@@ -56,10 +58,12 @@ function buildRetryAction(params: {
     | TaskRun;
   restoreSnapshot: ReturnType<typeof useRestoreTaskRunSnapshot>;
   retryFailedStart: ReturnType<typeof useRetryFailedTaskStart>;
+  readOnly: boolean;
 }): StartupRetryAction | undefined {
-  const { taskId, taskRun, restoreSnapshot, retryFailedStart } = params;
+  const { taskId, taskRun, restoreSnapshot, retryFailedStart, readOnly } =
+    params;
 
-  if (!taskRun) {
+  if (!taskRun || readOnly) {
     return undefined;
   }
 
@@ -151,6 +155,8 @@ const StartupInner = ({
 }: StartupInnerProps) => {
   const restoreSnapshot = useRestoreTaskRunSnapshot();
   const retryFailedStart = useRetryFailedTaskStart();
+  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
 
   const {
     steps,
@@ -176,6 +182,7 @@ const StartupInner = ({
         taskRun: initialTaskRun,
         restoreSnapshot,
         retryFailedStart,
+        readOnly: managedAccess.state === 'read_only',
       })}
     />
   );
@@ -203,6 +210,8 @@ export const SnapshotResumeFailureFooter = ({
 }: SnapshotResumeFailureFooterProps) => {
   const restoreSnapshot = useRestoreTaskRunSnapshot();
   const retryFailedStart = useRetryFailedTaskStart();
+  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
 
   return (
     <StartupFailureMessage
@@ -214,6 +223,7 @@ export const SnapshotResumeFailureFooter = ({
         taskRun,
         restoreSnapshot,
         retryFailedStart,
+        readOnly: managedAccess.state === 'read_only',
       })}
     />
   );

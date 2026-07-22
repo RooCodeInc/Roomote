@@ -45,6 +45,7 @@ import {
   teams,
   telegram,
   discord,
+  cloudDeploymentAccess,
   inference,
   mcp,
   mcpRouting,
@@ -72,6 +73,7 @@ const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/webhooks/teams',
   '/api/webhooks/telegram',
   '/api/internal/discord/events',
+  '/api/internal/cloud/deployment-access',
 ]);
 
 type ListenOptions = {
@@ -193,6 +195,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/teams', teams);
   app.route('/api/webhooks/telegram', telegram);
   app.route('/api/internal/discord', discord);
+  app.route('/api/internal/cloud', cloudDeploymentAccess);
   app.route('/api/inference', inference);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);

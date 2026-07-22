@@ -22,6 +22,9 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
+  DeploymentReadOnlyError: class DeploymentReadOnlyError extends Error {
+    code = 'deployment_read_only';
+  },
   resolveRequestedWorkKindDecision: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -110,6 +113,26 @@ describe('launchTask', () => {
     // Guard against the regression: the raw row fields must not leak through.
     expect(json.id).toBeUndefined();
     expect(json.error).toBeUndefined();
+  });
+
+  it('maps read-only launch rejection to a stable 409 error', async () => {
+    const { DeploymentReadOnlyError } =
+      await import('@roomote/cloud-agents/server');
+    mockEnqueueTask.mockRejectedValue(new DeploymentReadOnlyError());
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Investigate this' }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'deployment_read_only',
+    });
   });
 
   it('stamps the source-control provider resolved from environment repositories into the payload', async () => {

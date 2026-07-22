@@ -6,7 +6,8 @@ import {
   type ComputeProvider,
   RunStatus,
   TaskPayloadKind,
-  type TaskRunErrorCode,
+  TaskRunErrorCode,
+  type TaskRunErrorCode as TaskRunErrorCodeValue,
   resolveComputeProviderTarget,
   SANDBOX_ORPHAN_SCAN_INTERVAL_MS,
   SANDBOX_TIMEOUT_MS,
@@ -20,6 +21,7 @@ import {
   db,
   taskRuns,
   buildPendingEnvironmentSnapshotMatchForTaskRun,
+  readManagedDeploymentAccess,
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   syncTaskStateFromRuns,
@@ -467,6 +469,22 @@ export abstract class BaseController {
   ): Promise<{ taskRun: TaskRun; authToken: string } | null> {
     const sandboxTimeoutMs = SANDBOX_TIMEOUT_MS;
 
+    if (
+      taskRun.status === RunStatus.Pending ||
+      taskRun.status === RunStatus.Dequeued
+    ) {
+      const access = await readManagedDeploymentAccess();
+
+      if (access.state === 'read_only') {
+        await this.finishFailedTaskRun(
+          taskRun,
+          'This deployment is read-only. New task launches are paused.',
+          TaskRunErrorCode.DeploymentReadOnly,
+        );
+        return null;
+      }
+    }
+
     // Task runs without a human driver use the deployment service principal;
     // the token carries no user claim rather than borrowing an arbitrary
     // user's identity.
@@ -893,7 +911,7 @@ export abstract class BaseController {
   private async finishFailedTaskRun(
     taskRun: TaskRun,
     errorMessage: string,
-    errorCode?: TaskRunErrorCode,
+    errorCode?: TaskRunErrorCodeValue,
   ): Promise<void> {
     // Use the centralized termination path so all side-effects (email, Slack,
     // Linear notifications, lock release, etc.) are applied consistently.
