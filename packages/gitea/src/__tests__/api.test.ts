@@ -667,6 +667,50 @@ describe('Gitea API helpers', () => {
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('limit=50');
   });
 
+  it('prefers workflow_id over job name on Gitea ≤1.24 tasks payloads', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            total_count: 1,
+            workflow_runs: [
+              {
+                id: 1,
+                name: 'build',
+                workflow_id: 'ci.yml',
+                status: 'failure',
+                head_branch: 'main',
+                head_sha: 'sha-main',
+                run_number: 1,
+                display_title: 'CI failed',
+                url: 'https://git.example.com/acme/backend/actions/runs/1',
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const latest = await getLatestGiteaActionRun({
+      repositoryFullName: 'acme/backend',
+      branch: 'main',
+      token: 'gitea_test',
+      baseUrl: 'https://git.example.com',
+      fetchImpl: fetchMock,
+    });
+
+    expect(latest).toMatchObject({
+      id: 1,
+      path: 'ci.yml',
+      workflow_id: 'ci.yml',
+      name: 'build',
+      conclusion: 'failure',
+    });
+    expect(getGiteaWorkflowName(latest!)).toBe('ci.yml');
+  });
+
   it('treats error conclusion/status as a failed Actions outcome', () => {
     expect(isGiteaActionRunFailed('error')).toBe(true);
     expect(isGiteaActionRunFailed('failure')).toBe(true);

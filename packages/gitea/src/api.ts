@@ -177,6 +177,9 @@ const giteaActionWorkflowRunSchema = z
     display_title: z.string().optional(),
     name: z.string().optional(),
     path: z.string().optional(),
+    // Gitea ≤1.24 /actions/tasks rows expose workflow file as workflow_id
+    // and often put the job name in `name` instead of the workflow path.
+    workflow_id: z.string().optional(),
     event: z.string().optional(),
     run_number: z.number().optional(),
     head_sha: z.string().optional(),
@@ -243,6 +246,10 @@ function getGiteaWorkflowName(run: GiteaActionWorkflowRun): string {
       return filePart;
     }
   }
+  const workflowId = (run.workflow_id ?? '').trim();
+  if (workflowId) {
+    return workflowId;
+  }
   return (
     (run.display_title ?? '').trim() || (run.name ?? '').trim() || 'workflow'
   );
@@ -259,8 +266,12 @@ function mapGiteaActionTaskToWorkflowRun(
   const status = (task.status ?? '').trim() || undefined;
   const conclusion = (task.conclusion ?? '').trim() || status || undefined;
   const htmlUrl = (task.html_url ?? task.url ?? '').trim() || undefined;
+  // Prefer workflow path/id over job name — 1.24 tasks set name=job.
   const path =
-    (task.path ?? '').trim() || (task.name ?? '').trim() || undefined;
+    (task.path ?? '').trim() ||
+    (task.workflow_id ?? '').trim() ||
+    (task.name ?? '').trim() ||
+    undefined;
   const displayTitle =
     (task.display_title ?? '').trim() || (task.name ?? '').trim() || undefined;
 
