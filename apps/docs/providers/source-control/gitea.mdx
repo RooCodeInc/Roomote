@@ -1,7 +1,7 @@
 ---
 title: Gitea
 icon: 'https://api.iconify.design/simple-icons:gitea.svg?color=currentColor'
-description: Configure Gitea repository sync and pull request webhooks for Roomote.
+description: Configure Gitea repository sync, pull request webhooks, and Actions failure triage for Roomote.
 ---
 
 Gitea support uses a deployment-owned token and instance URL. There is no
@@ -80,6 +80,21 @@ Open or reopened PR events enqueue initial review tasks. PR sync events enqueue
 delta reviews. `@roomote` comments on Gitea pull requests route into the
 existing PR owner task when possible, or enqueue a new review task.
 
+## CI Failure Triage
+
+Associate the Gitea repository with an environment, configure the Manager
+Channel destination, and enable **CI Failure Triage** under Automations.
+
+When a Gitea Actions run fails on the repository's default branch, Roomote
+launches one investigate-and-fix task for that repository. Failures outside
+the default branch are ignored. Manual **Run now** inspects the latest
+default-branch Actions run on the configured Gitea host only (self-managed
+deployments match repository `host` against `GITEA_BASE_URL`).
+
+Roomote reads a bounded tail of failed job logs with the deployment Gitea
+credential when the Actions API exposes them. Re-sync repositories after
+upgrading so webhooks include the `workflow_run` event.
+
 ## Current limits
 
 Gitea OAuth applications accept one redirect URL. The setup flow configures the
@@ -94,3 +109,5 @@ the commenter.
 2. create or update an environment from a synced repository
 3. start a small task and confirm Roomote can clone the repository
 4. open or update a pull request and confirm configured review automation runs
+5. optionally enable CI Failure Triage and push a failing default-branch Actions
+   run to confirm triage starts

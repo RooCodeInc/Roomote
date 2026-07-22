@@ -6,12 +6,14 @@ const {
   mockHandleGiteaPullRequest,
   mockHandleGiteaComment,
   mockHandleGiteaIssue,
+  mockHandleGiteaWorkflowRun,
   mockRecordWebhook,
   mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
   mockHandleGiteaPullRequest: vi.fn(),
   mockHandleGiteaComment: vi.fn(),
   mockHandleGiteaIssue: vi.fn(),
+  mockHandleGiteaWorkflowRun: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
 }));
@@ -44,6 +46,10 @@ vi.mock('../handleIssue', () => ({
   handleGiteaIssue: mockHandleGiteaIssue,
 }));
 
+vi.mock('../handleWorkflowRun', () => ({
+  handleGiteaWorkflowRun: mockHandleGiteaWorkflowRun,
+}));
+
 function sign(body: string): string {
   return createHmac('sha256', 'gitea-secret').update(body).digest('hex');
 }
@@ -56,6 +62,7 @@ describe('gitea webhook router', () => {
     mockHandleGiteaPullRequest.mockReset();
     mockHandleGiteaComment.mockReset();
     mockHandleGiteaIssue.mockReset();
+    mockHandleGiteaWorkflowRun.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
@@ -64,6 +71,7 @@ describe('gitea webhook router', () => {
     mockHandleGiteaPullRequest.mockResolvedValue({ status: 'ok' });
     mockHandleGiteaComment.mockResolvedValue({ status: 'ok' });
     mockHandleGiteaIssue.mockResolvedValue({ status: 'ok' });
+    mockHandleGiteaWorkflowRun.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -409,6 +417,58 @@ describe('gitea webhook router', () => {
         }),
       }),
       { forcePullRequestComment: true },
+    );
+  });
+
+  it('records and routes workflow_run webhooks', async () => {
+    const payload = {
+      action: 'completed',
+      workflow: {
+        id: 'ci.yml',
+        name: 'CI',
+        path: '.gitea/workflows/ci.yml',
+      },
+      workflow_run: {
+        id: 99,
+        status: 'completed',
+        conclusion: 'failure',
+        head_branch: 'main',
+        head_sha: 'abc123',
+        html_url: 'https://git.example.com/acme/backend/actions/runs/99',
+      },
+      repository: {
+        id: 123,
+        full_name: 'acme/backend',
+        html_url: 'https://git.example.com/acme/backend',
+        default_branch: 'main',
+      },
+    };
+    const body = JSON.stringify(payload);
+
+    const response = await app.request('http://localhost/api/webhooks/gitea', {
+      method: 'POST',
+      headers: {
+        'x-gitea-signature': sign(body),
+        'x-gitea-event': 'workflow_run',
+        'x-gitea-delivery': 'delivery-workflow-1',
+      },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-workflow-1',
+      'workflow_run.completed',
+      expect.objectContaining({
+        action: 'completed',
+      }),
+      expect.any(Function),
+      { provider: 'gitea' },
+    );
+    expect(mockHandleGiteaWorkflowRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow_run: expect.objectContaining({ id: 99 }),
+      }),
     );
   });
 

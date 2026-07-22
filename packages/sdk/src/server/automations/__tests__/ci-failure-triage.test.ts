@@ -15,6 +15,9 @@ const {
   mockGetLatestAdoBuild,
   mockGetAdoBuildFailureEvidence,
   mockResolveAdoInstanceHost,
+  mockGetLatestGiteaActionRun,
+  mockGetGiteaActionRunFailureEvidence,
+  mockResolveGiteaInstanceHost,
   mockTryClaimCiFailureTriageInvestigation,
   mockReleaseCiFailureTriageInvestigation,
   mockBuildCiFailureTriageFingerprint,
@@ -35,6 +38,9 @@ const {
   mockGetLatestAdoBuild: vi.fn(),
   mockGetAdoBuildFailureEvidence: vi.fn(),
   mockResolveAdoInstanceHost: vi.fn(),
+  mockGetLatestGiteaActionRun: vi.fn(),
+  mockGetGiteaActionRunFailureEvidence: vi.fn(),
+  mockResolveGiteaInstanceHost: vi.fn(),
   mockTryClaimCiFailureTriageInvestigation: vi.fn(),
   mockReleaseCiFailureTriageInvestigation: vi.fn(),
   mockBuildCiFailureTriageFingerprint: vi.fn(),
@@ -97,6 +103,29 @@ vi.mock('@roomote/ado', () => ({
     (ref ?? '').replace(/^refs\/heads\//, '').trim() || '',
 }));
 
+vi.mock('@roomote/gitea', () => ({
+  getLatestGiteaActionRun: mockGetLatestGiteaActionRun,
+  getGiteaActionRunFailureEvidence: mockGetGiteaActionRunFailureEvidence,
+  resolveGiteaInstanceHost: mockResolveGiteaInstanceHost,
+  getGiteaActionRunConclusion: (run: {
+    conclusion?: string | null;
+    status?: string | null;
+  }) => (run.conclusion ?? run.status ?? '').trim().toLowerCase(),
+  getGiteaActionRunWebUrl: (params: {
+    run: { id: number; html_url?: string };
+  }) =>
+    params.run.html_url?.trim() ||
+    `https://git.example.com/actions/runs/${params.run.id}`,
+  getGiteaWorkflowName: (run: { path?: string; display_title?: string }) => {
+    const path = (run.path ?? '').trim();
+    if (path) {
+      const filePart = path.split('@')[0]?.trim();
+      if (filePart) return filePart;
+    }
+    return (run.display_title ?? '').trim() || 'workflow';
+  },
+}));
+
 import { ciFailureTriageJob } from '../ci-failure-triage';
 
 describe('ciFailureTriageJob multi-comms destinations', () => {
@@ -126,6 +155,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
         if (repositoryId === 'repo-gl-self') return 'env-gl-self';
         if (repositoryId === 'repo-gl-1') return 'env-gl';
         if (repositoryId === 'repo-ado-1') return 'env-ado';
+        if (repositoryId === 'repo-gitea-1') return 'env-gitea';
         return undefined;
       },
     );
@@ -159,6 +189,19 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       'task="Test"\nAssertionError',
     );
     mockResolveAdoInstanceHost.mockResolvedValue('dev.azure.com');
+    mockGetLatestGiteaActionRun.mockResolvedValue({
+      id: 99,
+      status: 'completed',
+      conclusion: 'failure',
+      head_branch: 'main',
+      head_sha: 'gitea-sha',
+      path: 'ci.yml@refs/heads/main',
+      html_url: 'https://git.example.com/acme/gitea-api/actions/runs/99',
+    });
+    mockGetGiteaActionRunFailureEvidence.mockResolvedValue(
+      'job="test" id=7\nAssertionError',
+    );
+    mockResolveGiteaInstanceHost.mockResolvedValue('git.example.com');
     mockBuildCiFailureTriageFingerprint.mockReturnValue('fp-manual');
     mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(true);
     mockBuildCiFailureTriagePrompt.mockReturnValue('$ci-failure-triage prompt');
@@ -613,6 +656,162 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
 
     expect(result.launchedTaskId).toBeNull();
     expect(mockGetLatestAdoBuild).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('stamps Gitea provider on the payload for Gitea repos with failed Actions runs', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gitea-1',
+        fullName: 'acme/gitea-api',
+        sourceControlProvider: 'gitea',
+        externalRepoId: '55',
+        host: 'git.example.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockGetLatestGiteaActionRun).toHaveBeenCalledWith({
+      repositoryFullName: 'acme/gitea-api',
+      branch: 'main',
+    });
+    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceControlProvider: 'gitea',
+        triggeringRun: expect.objectContaining({
+          provider: 'gitea',
+          workflowName: 'ci.yml',
+          headSha: 'gitea-sha',
+          failureEvidence: 'job="test" id=7\nAssertionError',
+        }),
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/gitea-api',
+            environmentId: 'env-gitea',
+            sourceControlProvider: 'gitea',
+            sourceControlHost: 'git.example.com',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('skips Gitea manual Run now when the latest Actions run is green', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gitea-1',
+        fullName: 'acme/gitea-api',
+        sourceControlProvider: 'gitea',
+        externalRepoId: '55',
+        host: 'git.example.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockGetLatestGiteaActionRun.mockResolvedValue({
+      id: 99,
+      status: 'completed',
+      conclusion: 'success',
+      head_branch: 'main',
+      head_sha: 'gitea-sha',
+    });
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockGetGiteaActionRunFailureEvidence).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('still launches Gitea manual Run now when failure evidence fetch fails', async () => {
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gitea-1',
+        fullName: 'acme/gitea-api',
+        sourceControlProvider: 'gitea',
+        externalRepoId: '55',
+        host: 'git.example.com',
+        defaultBranch: 'main',
+      },
+    ]);
+    mockGetGiteaActionRunFailureEvidence.mockRejectedValue(
+      new Error('logs unavailable'),
+    );
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+    mockBuildDestinationTaskPayloadFields.mockReturnValue({});
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBe('task-1');
+    expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        triggeringRun: expect.objectContaining({
+          provider: 'gitea',
+          failureEvidence: null,
+        }),
+      }),
+    );
+  });
+
+  it('skips Gitea repos whose host does not match the deployment instance', async () => {
+    mockResolveGiteaInstanceHost.mockResolvedValue('git.example.com');
+    mockGetActiveRepositoriesForProviders.mockResolvedValue([
+      {
+        id: 'repo-gitea-1',
+        fullName: 'acme/gitea-api',
+        sourceControlProvider: 'gitea',
+        externalRepoId: '55',
+        host: 'other-gitea.example.com',
+        defaultBranch: 'main',
+      },
+      {
+        id: 'repo-gitea-legacy',
+        fullName: 'acme/legacy',
+        sourceControlProvider: 'gitea',
+        externalRepoId: '56',
+        host: null,
+        defaultBranch: 'main',
+      },
+    ]);
+    mockFindEnvironmentIdForRepositoryId.mockImplementation(
+      async (repositoryId: string) => {
+        if (repositoryId === 'repo-gitea-1') return 'env-gitea';
+        if (repositoryId === 'repo-gitea-legacy') return 'env-gitea-legacy';
+        return undefined;
+      },
+    );
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123MANAGER',
+      source: 'manager_channel',
+    });
+
+    const result = await ciFailureTriageJob({ manualTrigger: true });
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(mockGetLatestGiteaActionRun).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 });

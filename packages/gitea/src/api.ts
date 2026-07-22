@@ -20,6 +20,9 @@ import { getGiteaOAuthConnection, resolveGiteaOAuthAccessToken } from './oauth';
 const GITEA_PROVIDER = 'gitea' satisfies SourceControlProvider;
 const GITEA_REPOSITORIES_PER_PAGE = 50;
 const GITEA_WEBHOOK_ENSURE_CONCURRENCY = 5;
+const GITEA_FAILURE_EVIDENCE_TIMEOUT_MS = 15_000;
+const GITEA_FAILURE_EVIDENCE_MAX_JOBS = 5;
+const GITEA_FAILURE_EVIDENCE_TRACE_CHARS = 12_000;
 
 const GITEA_WEBHOOK_EVENTS = [
   'pull_request',
@@ -27,6 +30,8 @@ const GITEA_WEBHOOK_EVENTS = [
   'pull_request_comment',
   'issue_comment',
   'issues',
+  // Gitea Actions completion payloads (GitHub-compatible workflow_run event).
+  'workflow_run',
 ] as const;
 
 const giteaRepositorySchema = z.object({
@@ -151,6 +156,402 @@ export async function resolveGiteaBaseUrl(): Promise<string | null> {
   const fromConnection = (await getGiteaOAuthConnection())?.baseUrl;
   return fromConnection ? normalizeGiteaBaseUrl(fromConnection) : null;
 }
+
+/**
+ * Host of the deployment-configured Gitea base URL.
+ * Manual Run matches repository `host` against this (self-managed multi-host).
+ */
+export async function resolveGiteaInstanceHost(): Promise<string> {
+  const baseUrl = await resolveGiteaBaseUrl();
+  if (!baseUrl?.trim()) {
+    throw new Error('Gitea base URL is not configured.');
+  }
+  return hostFromBaseUrl(baseUrl).toLowerCase();
+}
+
+const giteaActionWorkflowRunSchema = z
+  .object({
+    id: z.number(),
+    url: z.string().optional(),
+    html_url: z.string().optional(),
+    display_title: z.string().optional(),
+    path: z.string().optional(),
+    event: z.string().optional(),
+    run_number: z.number().optional(),
+    head_sha: z.string().optional(),
+    head_branch: z.string().optional(),
+    status: z.string().optional(),
+    conclusion: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+const giteaActionWorkflowRunListSchema = z.object({
+  workflow_runs: z.array(giteaActionWorkflowRunSchema),
+  total_count: z.number().optional(),
+});
+
+const giteaActionWorkflowJobSchema = z
+  .object({
+    id: z.number(),
+    name: z.string().optional(),
+    status: z.string().optional(),
+    conclusion: z.string().optional(),
+    run_id: z.number().optional(),
+  })
+  .passthrough();
+
+const giteaActionWorkflowJobListSchema = z.object({
+  jobs: z.array(giteaActionWorkflowJobSchema),
+  total_count: z.number().optional(),
+});
+
+export type GiteaActionWorkflowRun = z.infer<
+  typeof giteaActionWorkflowRunSchema
+>;
+export type GiteaActionWorkflowJob = z.infer<
+  typeof giteaActionWorkflowJobSchema
+>;
+
+function getGiteaWorkflowName(run: GiteaActionWorkflowRun): string {
+  const path = (run.path ?? '').trim();
+  if (path) {
+    // path is often "ci.yml@refs/heads/main" — keep workflow file only.
+    const filePart = path.split('@')[0]?.trim();
+    if (filePart) {
+      return filePart;
+    }
+  }
+  return (run.display_title ?? '').trim() || 'workflow';
+}
+
+export function getGiteaActionRunWebUrl(params: {
+  repositoryFullName: string;
+  run: GiteaActionWorkflowRun;
+  baseUrl?: string;
+}): string {
+  const explicit = (params.run.html_url ?? '').trim();
+  if (explicit) {
+    return explicit;
+  }
+  const origin = params.baseUrl
+    ? normalizeGiteaBaseUrl(params.baseUrl)
+    : undefined;
+  if (origin) {
+    return `${origin}/${params.repositoryFullName}/actions/runs/${params.run.id}`;
+  }
+  return `actions/runs/${params.run.id}`;
+}
+
+export function getGiteaActionRunConclusion(
+  run: GiteaActionWorkflowRun,
+): string {
+  return (run.conclusion ?? run.status ?? '').trim().toLowerCase();
+}
+
+async function resolveGiteaAuthContext(params: {
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+}): Promise<{ token: string; apiBaseUrl: string; baseUrl: string | null }> {
+  const giteaToken = params.token ?? (await resolveGiteaToken());
+  if (!giteaToken?.trim()) {
+    throw new Error(
+      'Gitea OAuth connection is required to inspect Actions runs.',
+    );
+  }
+
+  const resolvedBaseUrl = params.baseUrl ?? (await resolveGiteaBaseUrl());
+  if (!resolvedBaseUrl?.trim() && !params.apiBaseUrl?.trim()) {
+    throw new Error(
+      'GITEA_BASE_URL is required to inspect Gitea Actions runs.',
+    );
+  }
+
+  return {
+    token: giteaToken,
+    baseUrl: resolvedBaseUrl,
+    apiBaseUrl:
+      params.apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl ?? ''),
+  };
+}
+
+async function readResponseTextTail(
+  response: Response,
+  maxChars: number,
+): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) {
+    const text = await response.text();
+    return {
+      text: text.slice(-maxChars),
+      truncated: text.length > maxChars,
+    };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let tail = '';
+  let totalChars = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    const chunk = decoder.decode(value, { stream: true });
+    totalChars += chunk.length;
+    tail = `${tail}${chunk}`.slice(-maxChars);
+  }
+
+  const finalChunk = decoder.decode();
+  totalChars += finalChunk.length;
+  tail = `${tail}${finalChunk}`.slice(-maxChars);
+
+  return { text: tail, truncated: totalChars > maxChars };
+}
+
+function formatGiteaActionJobEvidence(params: {
+  job: GiteaActionWorkflowJob;
+  logText: string | null;
+  logTruncated: boolean;
+}): string {
+  const conclusion = (
+    params.job.conclusion ??
+    params.job.status ??
+    'unknown'
+  ).trim();
+  const metadata = [
+    `job=${JSON.stringify(params.job.name ?? 'unknown')}`,
+    `id=${params.job.id}`,
+    `conclusion=${JSON.stringify(conclusion)}`,
+  ].join(' ');
+
+  if (!params.logText) {
+    return `${metadata}\nLog trace unavailable.`;
+  }
+
+  return `${metadata}\n${
+    params.logTruncated
+      ? '[Earlier log output omitted; showing the tail.]\n'
+      : ''
+  }${params.logText}`;
+}
+
+/**
+ * Newest Actions run for a branch tip. Does not filter by conclusion so
+ * callers can detect already-green tips before launching triage.
+ */
+export async function getLatestGiteaActionRun(params: {
+  repositoryFullName: string;
+  branch: string;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<GiteaActionWorkflowRun | null> {
+  const auth = await resolveGiteaAuthContext(params);
+  const { owner, repo } = splitGiteaRepositoryFullName(
+    params.repositoryFullName,
+  );
+  const fetchImpl = params.fetchImpl ?? fetch;
+
+  const response = await fetchImpl(
+    buildGiteaApiUrl(
+      auth.apiBaseUrl,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs`,
+      {
+        branch: params.branch,
+        limit: 1,
+        page: 1,
+      },
+    ),
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${auth.token}`,
+      },
+      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+  );
+
+  if ([401, 403].includes(response.status)) {
+    throw new Error(
+      `Gitea rejected the Actions API request (status ${response.status}). Confirm the OAuth grant can read Actions runs and the connection has been re-authorized.`,
+    );
+  }
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (response.status !== 200) {
+    throw new GiteaApiError(response.status, response.statusText);
+  }
+
+  const { workflow_runs: runs } = giteaActionWorkflowRunListSchema.parse(
+    await response.json(),
+  );
+  return runs[0] ?? null;
+}
+
+export async function getGiteaActionRun(params: {
+  repositoryFullName: string;
+  runId: number;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<GiteaActionWorkflowRun | null> {
+  const auth = await resolveGiteaAuthContext(params);
+  const { owner, repo } = splitGiteaRepositoryFullName(
+    params.repositoryFullName,
+  );
+  const fetchImpl = params.fetchImpl ?? fetch;
+
+  const response = await fetchImpl(
+    buildGiteaApiUrl(
+      auth.apiBaseUrl,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${params.runId}`,
+      {},
+    ),
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${auth.token}`,
+      },
+      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+  );
+
+  if ([401, 403].includes(response.status)) {
+    throw new Error(
+      `Gitea rejected the Actions API request (status ${response.status}). Confirm the OAuth grant can read Actions runs and the connection has been re-authorized.`,
+    );
+  }
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (response.status !== 200) {
+    throw new GiteaApiError(response.status, response.statusText);
+  }
+
+  return giteaActionWorkflowRunSchema.parse(await response.json());
+}
+
+/**
+ * Bounded, prompt-ready snapshot of failed Actions jobs and log tails.
+ */
+export async function getGiteaActionRunFailureEvidence(params: {
+  repositoryFullName: string;
+  runId: number;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<string | null> {
+  const auth = await resolveGiteaAuthContext(params);
+  const { owner, repo } = splitGiteaRepositoryFullName(
+    params.repositoryFullName,
+  );
+  const fetchImpl = params.fetchImpl ?? fetch;
+  const repoPath = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+
+  const jobsResponse = await fetchImpl(
+    buildGiteaApiUrl(
+      auth.apiBaseUrl,
+      `${repoPath}/actions/runs/${params.runId}/jobs`,
+      {
+        limit: 50,
+        page: 1,
+      },
+    ),
+    {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${auth.token}`,
+      },
+      signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
+    },
+  );
+
+  if ([401, 403, 404].includes(jobsResponse.status)) {
+    return null;
+  }
+
+  if (jobsResponse.status !== 200) {
+    throw new GiteaApiError(jobsResponse.status, jobsResponse.statusText);
+  }
+
+  const { jobs } = giteaActionWorkflowJobListSchema.parse(
+    await jobsResponse.json(),
+  );
+  const failedJobs = jobs
+    .filter((job) => {
+      const conclusion = (job.conclusion ?? job.status ?? '')
+        .trim()
+        .toLowerCase();
+      return conclusion === 'failure' || conclusion === 'failed';
+    })
+    .slice(0, GITEA_FAILURE_EVIDENCE_MAX_JOBS);
+
+  if (failedJobs.length === 0) {
+    return null;
+  }
+
+  const evidence = await Promise.all(
+    failedJobs.map(async (job) => {
+      try {
+        const logResponse = await fetchImpl(
+          buildGiteaApiUrl(
+            auth.apiBaseUrl,
+            `${repoPath}/actions/jobs/${job.id}/logs`,
+            {},
+          ),
+          {
+            method: 'GET',
+            headers: {
+              Accept: 'text/plain, application/octet-stream, */*',
+              Authorization: `Bearer ${auth.token}`,
+            },
+            signal: AbortSignal.timeout(GITEA_FAILURE_EVIDENCE_TIMEOUT_MS),
+          },
+        );
+
+        if (logResponse.status !== 200) {
+          return formatGiteaActionJobEvidence({
+            job,
+            logText: null,
+            logTruncated: false,
+          });
+        }
+
+        const tail = await readResponseTextTail(
+          logResponse,
+          GITEA_FAILURE_EVIDENCE_TRACE_CHARS,
+        );
+        return formatGiteaActionJobEvidence({
+          job,
+          logText: tail.text.trim() || null,
+          logTruncated: tail.truncated,
+        });
+      } catch {
+        return formatGiteaActionJobEvidence({
+          job,
+          logText: null,
+          logTruncated: false,
+        });
+      }
+    }),
+  );
+
+  return evidence.join('\n\n');
+}
+
+export { getGiteaWorkflowName };
 
 export async function resolveGiteaUsername(): Promise<string | null> {
   return (await getGiteaOAuthConnection())?.username || null;

@@ -88,7 +88,12 @@ import {
   getGiteaAuthenticatedUser,
   getGiteaDeploymentUser,
   clearGiteaDeploymentUserCache,
+  getGiteaActionRunConclusion,
+  getGiteaActionRunFailureEvidence,
+  getGiteaWorkflowName,
+  getLatestGiteaActionRun,
   listGiteaRepositories,
+  resolveGiteaInstanceHost,
   type GiteaRepository,
 } from '../api';
 
@@ -480,6 +485,7 @@ describe('Gitea API helpers', () => {
       }),
     );
     expect(fetchMock.mock.calls[1]?.[1]?.body).toContain('"issues"');
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toContain('"workflow_run"');
   });
 
   it('posts a Gitea pull request comment through the issue comments API', async () => {
@@ -557,10 +563,91 @@ describe('Gitea API helpers', () => {
         },
       ],
     });
-    expect(mockRepositoriesFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        columns: { fullName: true },
-      }),
+  });
+
+  it('resolves the deployment Gitea instance host from GITEA_BASE_URL', async () => {
+    await expect(resolveGiteaInstanceHost()).resolves.toBe('git.example.com');
+  });
+
+  it('reads the latest Gitea Actions run for a branch tip', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          total_count: 1,
+          workflow_runs: [
+            {
+              id: 99,
+              status: 'completed',
+              conclusion: 'failure',
+              head_branch: 'main',
+              head_sha: 'abc123',
+              path: 'ci.yml@refs/heads/main',
+              html_url: 'https://git.example.com/acme/backend/actions/runs/99',
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const latest = await getLatestGiteaActionRun({
+      repositoryFullName: 'acme/backend',
+      branch: 'main',
+      token: 'gitea_test',
+      baseUrl: 'https://git.example.com',
+      fetchImpl: fetchMock,
+    });
+
+    expect(latest).toMatchObject({ id: 99, conclusion: 'failure' });
+    expect(getGiteaActionRunConclusion(latest!)).toBe('failure');
+    expect(getGiteaWorkflowName(latest!)).toBe('ci.yml');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/repos/acme/backend/actions/runs?',
+    );
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('branch=main');
+  });
+
+  it('builds Actions failure evidence from failed jobs and log tails', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            total_count: 2,
+            jobs: [
+              {
+                id: 7,
+                name: 'test',
+                status: 'completed',
+                conclusion: 'failure',
+              },
+              {
+                id: 8,
+                name: 'lint',
+                status: 'completed',
+                conclusion: 'success',
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response('line1\nAssertionError: boom\n', { status: 200 }),
+      );
+
+    const evidence = await getGiteaActionRunFailureEvidence({
+      repositoryFullName: 'acme/backend',
+      runId: 99,
+      token: 'gitea_test',
+      baseUrl: 'https://git.example.com',
+      fetchImpl: fetchMock,
+    });
+
+    expect(evidence).toContain('job="test"');
+    expect(evidence).toContain('AssertionError: boom');
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      '/repos/acme/backend/actions/jobs/7/logs',
     );
   });
 });
