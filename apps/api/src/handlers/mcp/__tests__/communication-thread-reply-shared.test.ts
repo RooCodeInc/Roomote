@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
+  buildThreadReplyFooterTextMock,
   getThreadReplyFooterRecordMock,
+  resolveThreadReplyFooterContextMock,
   setThreadReplyFooterRecordMock,
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
+  buildThreadReplyFooterTextMock: vi.fn(),
   getThreadReplyFooterRecordMock: vi.fn(),
+  resolveThreadReplyFooterContextMock: vi.fn(),
   setThreadReplyFooterRecordMock: vi.fn(),
   withThreadReplyFooterLockMock: vi.fn(),
 }));
@@ -17,7 +21,9 @@ vi.mock('@roomote/communication', async () => {
 
   return {
     ...actual,
+    buildThreadReplyFooterText: buildThreadReplyFooterTextMock,
     getThreadReplyFooterRecord: getThreadReplyFooterRecordMock,
+    resolveThreadReplyFooterContext: resolveThreadReplyFooterContextMock,
     setThreadReplyFooterRecord: setThreadReplyFooterRecordMock,
   };
 });
@@ -28,13 +34,24 @@ vi.mock('../chat-reply-helpers', () => ({
   withThreadReplyFooterLock: withThreadReplyFooterLockMock,
 }));
 
-import { deliverManagedThreadReplyFooter } from '../communication-thread-reply-shared';
+vi.mock('@roomote/env', () => ({
+  Env: { R_APP_URL: 'https://app.example.com' },
+}));
+
+import {
+  buildCommunicationThreadReplyFooterText,
+  deliverManagedThreadReplyFooter,
+} from '../communication-thread-reply-shared';
 
 describe('deliverManagedThreadReplyFooter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     withThreadReplyFooterLockMock.mockImplementation(async ({ fn }) => fn());
     setThreadReplyFooterRecordMock.mockResolvedValue(undefined);
+    resolveThreadReplyFooterContextMock.mockResolvedValue({
+      linkedPr: null,
+      livePreviewUrl: null,
+    });
   });
 
   it('clears the prior footer message and persists the latest footer record', async () => {
@@ -154,5 +171,24 @@ describe('deliverManagedThreadReplyFooter', () => {
         textWithoutFooter: '',
       },
     );
+  });
+});
+
+describe('buildCommunicationThreadReplyFooterText', () => {
+  it('uses asterisks for Discord footer emphasis', async () => {
+    buildThreadReplyFooterTextMock.mockImplementation(({ formatEmphasis }) =>
+      formatEmphasis('Footer'),
+    );
+
+    await expect(
+      buildCommunicationThreadReplyFooterText({
+        provider: 'discord',
+        taskRun: {
+          id: 42,
+          taskId: 'task-1',
+          payload: {},
+        },
+      }),
+    ).resolves.toBe('*Footer*');
   });
 });

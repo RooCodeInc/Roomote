@@ -66,7 +66,7 @@ function buildThreadReplyTaskUrl(
   return url.toString();
 }
 
-async function buildCommunicationThreadReplyFooterText(params: {
+export async function buildCommunicationThreadReplyFooterText(params: {
   provider: CommunicationThreadReplyProvider;
   taskRun: CommunicationReplyTaskRun;
 }): Promise<string | null> {
@@ -84,6 +84,9 @@ async function buildCommunicationThreadReplyFooterText(params: {
     taskUrl: buildThreadReplyTaskUrl(params.provider, params.taskRun.taskId),
     ...context,
     formatLink: formatMarkdownLink,
+    ...(params.provider === 'discord'
+      ? { formatEmphasis: (text: string) => `*${text}*` }
+      : {}),
   });
 }
 
