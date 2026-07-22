@@ -304,3 +304,8 @@ export {
   getLinearDeploymentMetadata,
   getLinearUserMetadata,
 } from './lib/mcp/linear-connections';
+
+export {
+  requestInstancePing,
+  resetInstancePingQueueForTests,
+} from './lib/request-instance-ping';

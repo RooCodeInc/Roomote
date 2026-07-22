@@ -11,6 +11,7 @@ import {
   telegramUserMappings,
   users,
 } from '@roomote/db/server';
+import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
 import type { UserRole } from '@roomote/types';
 
 import {
@@ -149,7 +150,7 @@ export async function removeUser({
     return { removed: false, reason: 'own_account' };
   }
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     await lockDeploymentMembership(tx);
 
     const target = await tx.query.users.findFirst({
@@ -186,6 +187,14 @@ export async function removeUser({
 
     return { removed: true } as const;
   });
+
+  if (result.removed) {
+    // A removal changes the instance's user counts; refresh the anonymous
+    // report instead of waiting for the daily tick.
+    void requestInstancePing('user-removed');
+  }
+
+  return result;
 }
 
 function getPasswordResetRedirectUrl(): string {

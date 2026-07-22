@@ -31,6 +31,10 @@ const {
   },
 }));
 
+vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
+  requestInstancePing: vi.fn(async () => undefined),
+}));
+
 vi.mock('next/headers', () => ({
   headers: vi.fn(async () => new Headers()),
 }));

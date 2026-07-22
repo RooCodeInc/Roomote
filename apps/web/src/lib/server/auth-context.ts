@@ -9,6 +9,7 @@ import {
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
 import { getManagedDeploymentAccessFromMetadata } from '@roomote/types';
+import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
 
 import {
@@ -209,6 +210,10 @@ async function ensureDeploymentIdentity({
     });
 
     await seedDeploymentAccessPolicyIfNeeded({ userId });
+
+    // A new admission changes the instance's user counts; refresh the
+    // anonymous report instead of waiting for the daily tick.
+    void requestInstancePing('user-admitted');
   } else {
     // Removal deletes the Better Auth user, so a removed user normally can
     // never reach this branch again. If a soft-deleted row's auth user still
