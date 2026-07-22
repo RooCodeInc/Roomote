@@ -22,6 +22,10 @@ const { state } = vi.hoisted(() => ({
   },
 }));
 
+vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
+  requestInstancePing: vi.fn(async () => undefined),
+}));
+
 vi.mock('../auth', () => ({
   PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS: 3600,
   capturePasswordResetLink: async (callback: () => Promise<void>) => {

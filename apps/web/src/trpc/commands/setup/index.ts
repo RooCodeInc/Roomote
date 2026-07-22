@@ -17,6 +17,7 @@ import {
   normalizeSetupNewState,
 } from '@roomote/types';
 import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@roomote/feature-flags';
+import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
 import { captureEvent } from '@roomote/telemetry/server';
 import {
   AVAILABLE_SETUP_MCP_INTEGRATIONS,
@@ -460,6 +461,11 @@ export async function completeSetupCommand(
   });
 
   void captureEvent('setup_completed', { userId });
+
+  // Refresh the anonymous instance report now that setup is complete, so the
+  // Ping service sees the founding admin within minutes instead of at the
+  // next daily tick.
+  void requestInstancePing('setup-completed');
 
   return { success: true as const };
 }
