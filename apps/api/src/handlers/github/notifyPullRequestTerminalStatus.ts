@@ -42,14 +42,31 @@ export const SLACK_PR_CLOSED_REACTION_EMOJI = '-1';
 
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 
-function formatDiscordPullRequestLink(label: string, url: string): string {
-  const match = label.match(/^(\[[^\]]+\])\s+(.+)$/);
+/**
+ * Discord renders backslash escapes literally inside masked-link labels, so
+ * instead of escaping we drop the characters that let untrusted title text
+ * break out of the label (`[`, `]`, `\`) and split the scheme of any embedded
+ * URL with a zero-width space so Discord does not auto-link it.
+ */
+function sanitizeDiscordLinkLabel(text: string): string {
+  return text
+    .replace(/[[\]\\]/g, '')
+    .replace(/(https?):\/\//gi, '$1:\u200b//')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  if (match) {
-    return `${match[1]} [${match[2]}](${url})`;
+function formatDiscordPullRequestLink(label: string, url: string): string {
+  const [, matchedTag, matchedTitle] =
+    label.match(/^(\[[^\]]+\])\s+(.+)$/) ?? [];
+  const tag = matchedTag ? `${matchedTag} ` : '';
+  const title = sanitizeDiscordLinkLabel(matchedTitle ?? label);
+
+  if (!title) {
+    return `${tag}${url}`;
   }
 
-  return `[${label}](${url})`;
+  return `${tag}[${title}](${url})`;
 }
 
 interface NotifyPullRequestTerminalStatusParams {

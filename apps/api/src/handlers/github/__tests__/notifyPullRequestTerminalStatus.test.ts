@@ -323,6 +323,42 @@ describe('notifyPullRequestTerminalStatus', () => {
     });
   });
 
+  it('neutralizes Markdown link injection in Discord PR titles', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: discordPayload }] as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      prTitle: '[Fix] pwn](https://evil.example) injected',
+    });
+
+    expect(mockPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'discord-thread-1',
+      text: '[Fix] [pwn(https:\u200b//evil.example) injected](https://github.com/owner/repo/pull/42) was **merged** by merger',
+      textFormat: 'markdown',
+    });
+  });
+
+  it('breaks auto-linking of bare URLs inside Discord PR titles', async () => {
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: discordPayload }] as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      prTitle: 'Update docs for https://evil.example onboarding',
+    });
+
+    expect(mockPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'discord-thread-1',
+      text: '[Update docs for https:\u200b//evil.example onboarding](https://github.com/owner/repo/pull/42) was **merged** by merger',
+      textFormat: 'markdown',
+    });
+  });
+
   it('still places Discord merge checkmark when eyes cleanup fails', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
