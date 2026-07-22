@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 
 import {
+  DeploymentReadOnlyError,
   enqueueTask,
   resolveRequestedWorkKindDecision,
 } from '@roomote/cloud-agents/server';
@@ -382,6 +383,10 @@ export async function launchTask(
   } catch (error) {
     if (error instanceof TaskTypePromptAndWorkspacePayloadError) {
       return c.json({ error: error.message }, 400);
+    }
+
+    if (error instanceof DeploymentReadOnlyError) {
+      return c.json({ error: error.code }, 409);
     }
 
     logHandlerError('launchTask', error);

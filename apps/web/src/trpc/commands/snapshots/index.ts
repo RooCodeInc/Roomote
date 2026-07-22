@@ -12,7 +12,10 @@ import {
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import type { ModalClient as _ModalSdkClient } from 'modal';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  DeploymentReadOnlyError,
+  enqueueTask,
+} from '@roomote/cloud-agents/server';
 import { enqueueTaskSleep } from '@roomote/sdk/server';
 import {
   db,
@@ -255,6 +258,10 @@ export async function createEnvironmentSnapshotCommand(
     }
   } catch (error) {
     console.error('createEnvironmentSnapshot error:', error);
+
+    if (error instanceof DeploymentReadOnlyError) {
+      return { success: false, error: error.code };
+    }
 
     return error instanceof Error
       ? { success: false, error: error.message }
@@ -536,6 +543,10 @@ export async function restoreTaskRunSnapshotCommand(
     console.error('restoreTaskRunSnapshot error:', error);
 
     await releaseOutOfBandContext(outOfBandContext);
+
+    if (error instanceof DeploymentReadOnlyError) {
+      return { success: false, error: error.code };
+    }
 
     return error instanceof Error
       ? { success: false, error: error.message }

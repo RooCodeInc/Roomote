@@ -1,5 +1,9 @@
 import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
-import { activeRunStatuses } from '@roomote/types';
+import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  activeRunStatuses,
+  isDeploymentReadOnlyError,
+} from '@roomote/types';
 import {
   and,
   db,
@@ -276,6 +280,7 @@ async function handleSuggestionLaunchCallback(params: {
       await releaseWorkItemClaim(db, { id: params.suggestionId, claimedAt });
     }
   } catch (error) {
+    const blockedByReadOnly = isDeploymentReadOnlyError(error);
     apiLogger.warn(
       `[telegram] Failed to launch suggestion ${params.suggestionId} from callback: ${
         error instanceof Error ? error.message : String(error)
@@ -300,7 +305,9 @@ async function handleSuggestionLaunchCallback(params: {
     await postTelegramMessageBestEffort({
       chatId,
       replyToMessageId: messageId,
-      text: `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
+      text: blockedByReadOnly
+        ? MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE
+        : `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
     });
   }
 }

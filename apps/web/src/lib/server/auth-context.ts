@@ -8,6 +8,7 @@ import {
   isAnonymousAnalyticsEnabledFromMetadata,
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
+import { getManagedDeploymentAccessFromMetadata } from '@roomote/types';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
 
 import {
@@ -418,6 +419,9 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     featureFlags,
     anonymousAnalyticsEnabled,
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    managedAccess: getManagedDeploymentAccessFromMetadata(
+      authContext.deploymentMetadata,
+    ),
     resource: authContext.resource,
   };
 }

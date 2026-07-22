@@ -11,6 +11,8 @@ import {
   getHarnessModelOverride,
   getSlackConversationUrlFromTaskPayload,
   getSlackTeamDomainFromTaskPayload,
+  isDeploymentReadOnlyError,
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   getTaskModelDisplayName,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
@@ -3179,7 +3181,9 @@ export async function handleRetryFailedTask(
 
     await postSlackInteractiveResponse(payload.response_url, {
       replace_original: false,
-      text: 'I hit another issue while trying that again. Please retry from a fresh Slack mention.',
+      text: isDeploymentReadOnlyError(error)
+        ? MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE
+        : 'I hit another issue while trying that again. Please retry from a fresh Slack mention.',
     });
   }
 }

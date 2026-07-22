@@ -7,15 +7,21 @@ import remarkBreaks from 'remark-breaks';
 import type { BundledLanguage } from 'shiki';
 import { toast } from 'sonner';
 
-import { ALL_REPOSITORIES, type TaskPayload } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
+  type TaskPayload,
+} from '@roomote/types';
 
 import type { ArtifactWithContent } from '@/types';
 
 import { useTRPC } from '@/trpc/client';
 
 import { humanizeFilename } from '@/lib';
+import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { cn } from '@/lib/utils';
 
+import { useAuthorizedUser } from '@/hooks/useUser';
 import { useTask } from '@/hooks/tasks';
 import { useCreateStandardTaskRun } from '@/hooks/task-runs';
 
@@ -155,6 +161,8 @@ export function ArtifactViewerContent({
 }: ArtifactViewerContentProps) {
   const trpc = useTRPC();
   const { data: task } = useTask(taskId, false);
+  const { managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
+    useAuthorizedUser();
   const [isRaw, setIsRaw] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isUrlCopied, setIsUrlCopied] = useState(false);
@@ -226,6 +234,7 @@ export function ArtifactViewerContent({
   // preview byte cap (see getArtifactByPathCommand), so a plan larger than
   // that cap has no content to embed and must not be buildable from here.
   const canCreateTaskFromArtifact = isMarkdown && Boolean(artifact.content);
+  const taskLaunchDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
   const handleCreateBuildTask = (values: {
     repo: string;
@@ -233,6 +242,11 @@ export function ArtifactViewerContent({
     environmentId?: string;
     modelId: string;
   }) => {
+    if (taskLaunchDisabledReason) {
+      toast.error(taskLaunchDisabledReason);
+      return;
+    }
+
     const description = buildArtifactPlanDescription({
       artifactPath: artifact.path,
       artifactVersion: artifact.version,
@@ -293,12 +307,17 @@ export function ArtifactViewerContent({
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
               {canCreateTaskFromArtifact && (
-                <BasicTooltip content="Build this artifact">
+                <BasicTooltip
+                  content={taskLaunchDisabledReason ?? 'Build this artifact'}
+                >
                   <Button
                     variant="ghost"
                     className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground"
                     onClick={() => setIsBuildDialogOpen(true)}
-                    disabled={createTaskRun.isPending}
+                    disabled={
+                      createTaskRun.isPending ||
+                      Boolean(taskLaunchDisabledReason)
+                    }
                   >
                     <Hammer className="size-3.5" />
                     <span className="text-xs">Build this</span>
@@ -482,6 +501,7 @@ export function ArtifactViewerContent({
         taskEnvironmentId={taskPayload?.environmentId}
         onConfirm={handleCreateBuildTask}
         isPending={createTaskRun.isPending}
+        taskLaunchDisabledReason={taskLaunchDisabledReason}
       />
     </>
   );

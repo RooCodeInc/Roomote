@@ -20,6 +20,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: useUserMock,
   useUser: useUserMock,
 }));
 

@@ -46,11 +46,13 @@ import {
 import { getRedis, withContention } from '@roomote/redis';
 import {
   ALL_REPOSITORIES,
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   type TaskSpec,
   type TaskPayload,
   TaskPayloadKind,
   PRODUCT_NAME,
   type QueuedCommunicationMessage,
+  isDeploymentReadOnlyError,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
@@ -1519,6 +1521,20 @@ async function resumePendingTeamsAuthToken(
         };
       }
     } catch (error) {
+      if (isDeploymentReadOnlyError(error)) {
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+        });
+
+        return {
+          success: true,
+          status: 'replied_inline',
+        };
+      }
+
       apiLogger.warn(
         `[teams] Failed to resume pending Teams auth task from snapshot for conversation ${metadata.communicationChannelId}: ${
           error instanceof Error ? error.message : String(error)
@@ -1527,12 +1543,31 @@ async function resumePendingTeamsAuthToken(
     }
   }
 
-  const launch = await startNewTeamsTask({
-    activity: claimedPending.activity,
-    mappedUserId,
-    queuedMessage: queuedMessageWithImages,
-    metadata,
-  });
+  let launch: Awaited<ReturnType<typeof startNewTeamsTask>>;
+  try {
+    launch = await startNewTeamsTask({
+      activity: claimedPending.activity,
+      mappedUserId,
+      queuedMessage: queuedMessageWithImages,
+      metadata,
+    });
+  } catch (error) {
+    if (isDeploymentReadOnlyError(error)) {
+      await postTeamsMessageBestEffort({
+        conversationId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+        serviceUrl: metadata.communicationServiceUrl,
+        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+      });
+
+      return {
+        success: true,
+        status: 'replied_inline',
+      };
+    }
+
+    throw error;
+  }
 
   if (launch.status === 'replied_inline') {
     return {
@@ -1841,6 +1876,21 @@ teams.post('/', async (c) => {
           });
         }
       } catch (error) {
+        if (isDeploymentReadOnlyError(error)) {
+          await postTeamsMessageBestEffort({
+            conversationId: metadata.communicationChannelId,
+            threadId: metadata.communicationThreadId,
+            serviceUrl: metadata.communicationServiceUrl,
+            text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+          });
+
+          return c.json({
+            ok: true,
+            queued: false,
+            repliedInline: true,
+          });
+        }
+
         apiLogger.warn(
           `[teams] Failed to resume Teams task from snapshot for conversation ${metadata.communicationChannelId}: ${
             error instanceof Error ? error.message : String(error)
@@ -1849,12 +1899,32 @@ teams.post('/', async (c) => {
       }
     }
 
-    const launch = await startNewTeamsTask({
-      activity,
-      mappedUserId,
-      queuedMessage,
-      metadata,
-    });
+    let launch: Awaited<ReturnType<typeof startNewTeamsTask>>;
+    try {
+      launch = await startNewTeamsTask({
+        activity,
+        mappedUserId,
+        queuedMessage,
+        metadata,
+      });
+    } catch (error) {
+      if (isDeploymentReadOnlyError(error)) {
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+        });
+
+        return c.json({
+          ok: true,
+          queued: false,
+          repliedInline: true,
+        });
+      }
+
+      throw error;
+    }
 
     if (launch.status === 'replied_inline') {
       return c.json({

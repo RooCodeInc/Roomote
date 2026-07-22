@@ -223,6 +223,7 @@ const serverSchema = {
   // the hosting operator's provisioning rather than the setup flow).
   ROOMOTE_CLOUD_TOKEN_ID: z.string().optional(),
   ROOMOTE_CLOUD_TOKEN_SECRET: z.string().optional(),
+  ROOMOTE_CLOUD_ACCESS_VERIFICATION_SECRET: z.string().optional(),
   ROOMOTE_CLOUD_BACKEND: z.enum(ROOMOTE_CLOUD_BACKENDS).optional(),
   ROOMOTE_CLOUD_SLUG: z.string().optional(),
   ROOMOTE_CLOUD_APP_NAME: z.string().optional(),
@@ -453,6 +454,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'MODAL_TOKEN_SECRET',
   'ROOMOTE_CLOUD_TOKEN_ID',
   'ROOMOTE_CLOUD_TOKEN_SECRET',
+  'ROOMOTE_CLOUD_ACCESS_VERIFICATION_SECRET',
   'ROOMOTE_CLOUD_BACKEND',
   'ROOMOTE_CLOUD_SLUG',
   'ROOMOTE_CLOUD_APP_NAME',

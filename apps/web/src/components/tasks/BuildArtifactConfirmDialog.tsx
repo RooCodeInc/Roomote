@@ -56,6 +56,7 @@ interface BuildArtifactConfirmDialogProps {
     modelId: string;
   }) => void;
   isPending?: boolean;
+  taskLaunchDisabledReason?: string;
 }
 
 /**
@@ -72,6 +73,7 @@ export function BuildArtifactConfirmDialog({
   taskEnvironmentId,
   onConfirm,
   isPending = false,
+  taskLaunchDisabledReason,
 }: BuildArtifactConfirmDialogProps) {
   const { user } = useUser();
 
@@ -90,6 +92,7 @@ export function BuildArtifactConfirmDialog({
       taskEnvironmentId={taskEnvironmentId}
       onConfirm={onConfirm}
       isPending={isPending}
+      taskLaunchDisabledReason={taskLaunchDisabledReason}
     />
   );
 }
@@ -104,6 +107,7 @@ function BuildArtifactConfirmDialogForm({
   taskEnvironmentId,
   onConfirm,
   isPending = false,
+  taskLaunchDisabledReason,
 }: BuildArtifactConfirmDialogProps) {
   const { workspace } = useWorkspaceStorage();
   const launchTaskModels = useLaunchTaskModels();
@@ -138,6 +142,8 @@ function BuildArtifactConfirmDialogForm({
   }, [form, launchTaskModels.data?.defaultModelId]);
   const selectedEnvironmentId = form.watch('environmentId');
   const environmentRequired = !selectedEnvironmentId;
+  const isSubmitDisabled =
+    isPending || environmentRequired || Boolean(taskLaunchDisabledReason);
 
   const handleSubmit = (values: BuildArtifactFormValues) => {
     onConfirm({
@@ -187,6 +193,11 @@ function BuildArtifactConfirmDialogForm({
                 or select one above before starting this task.
               </p>
             ) : null}
+            {taskLaunchDisabledReason ? (
+              <p className="text-sm text-muted-foreground">
+                {taskLaunchDisabledReason}
+              </p>
+            ) : null}
 
             <DialogFooter>
               <Button
@@ -197,7 +208,7 @@ function BuildArtifactConfirmDialogForm({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending || environmentRequired}>
+              <Button type="submit" disabled={isSubmitDisabled}>
                 {isPending ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />

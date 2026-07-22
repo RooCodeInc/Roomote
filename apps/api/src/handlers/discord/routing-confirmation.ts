@@ -17,7 +17,11 @@ import type {
 } from '@roomote/communication/discord-provider';
 import { getRedis } from '@roomote/redis';
 import { findDiscordMappedUserId } from '@roomote/sdk/server';
-import type { QueuedCommunicationMessage } from '@roomote/types';
+import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  isDeploymentReadOnlyError,
+  type QueuedCommunicationMessage,
+} from '@roomote/types';
 
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { apiLogger } from '../../logging.js';
@@ -1054,6 +1058,24 @@ export async function handleDiscordRoutingCallback(input: {
     await restorePendingRoute(input.callback.pendingRouteId, pending).catch(
       () => undefined,
     );
+    if (isDeploymentReadOnlyError(error)) {
+      await replyToDiscordEvent({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        channel: replyChannel,
+        interaction: {
+          interaction: input.interaction,
+          interactionDeferred: input.interactionDeferred,
+        },
+        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+      }).catch(() => undefined);
+      await clearPendingDiscordIntakeAck({
+        provider: input.provider,
+        pending,
+      });
+      return;
+    }
+
     throw error;
   }
   if (result.status === 'already_started') {

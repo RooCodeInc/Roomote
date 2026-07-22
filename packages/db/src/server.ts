@@ -82,6 +82,7 @@ export * from './lib/telemetry-ids';
 export * from './lib/instance-report';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
+export * from './lib/managed-access';
 
 export {
   users,

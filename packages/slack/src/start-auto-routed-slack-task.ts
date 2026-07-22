@@ -5,6 +5,8 @@ import {
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   getTaskInitiatorLinkedUserId,
+  isDeploymentReadOnlyError,
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   type ReasoningEffort,
   type TaskInitiator,
   type TaskTrigger,
@@ -49,7 +51,8 @@ type SlackTaskStartFailureCode =
   | 'source_message_inaccessible'
   | 'launch_message_failed'
   | 'routing_fallback'
-  | 'workspace_unavailable';
+  | 'workspace_unavailable'
+  | 'deployment_read_only';
 
 export type StartAutoRoutedSlackTaskResult =
   | {
@@ -449,52 +452,67 @@ export async function startAutoRoutedSlackTask({
     const userRequestedModelDisplayName = getUserRequestedModelDisplayName(
       decision.result.model,
     );
-    const taskRun = await startSlackAppMentionTask({
-      initiator,
-      trigger,
-      workflow,
-      visibility,
-      channel,
-      teamId: slackInstallation.teamId,
-      teamDomain: slackInstallation.teamDomain ?? undefined,
-      slackUserId,
-      persistedSlackUserId,
-      text: taskText,
-      agentPromptText,
-      ts: sourceMessageTs,
-      threadTs: threadId,
-      repo: workspace.repoForPayload,
-      branch,
-      sha,
-      harness,
-      model: model ?? decision.result.model?.id,
-      environmentId: workspace.environmentId,
-      reasoningEffort,
-      images: allProcessedImages.length ? allProcessedImages : undefined,
-      threadMessages,
-      latestOwnBotReplyText: latestOwnBotReply?.text,
-      latestOwnBotReplyTs: latestOwnBotReply?.ts,
-      webPath,
-      slackConversationUrl: slackConversationUrl ?? undefined,
-      skipInitialActingUser: !initiatorLinkedUserId,
-      ...(existingMessageTs
-        ? {
-            queuedStartedMessage: {
-              ts: existingMessageTs,
-              agentName: AGENT_DISPLAY_NAME,
-              initiatingSlackUserId,
-              workspaceDisplayName: workspace.workspaceDisplayName,
-              ...(userRequestedModelDisplayName
-                ? { modelDisplayName: userRequestedModelDisplayName }
-                : {}),
-              ...(decision.result.kickoffMessage
-                ? { kickoffMessage: decision.result.kickoffMessage }
-                : {}),
-              workspaceOnly: decision.result.workspaceOnly,
-            },
-          }
-        : {}),
-    });
+    let taskRun: Awaited<ReturnType<typeof startSlackAppMentionTask>>;
+    try {
+      taskRun = await startSlackAppMentionTask({
+        initiator,
+        trigger,
+        workflow,
+        visibility,
+        channel,
+        teamId: slackInstallation.teamId,
+        teamDomain: slackInstallation.teamDomain ?? undefined,
+        slackUserId,
+        persistedSlackUserId,
+        text: taskText,
+        agentPromptText,
+        ts: sourceMessageTs,
+        threadTs: threadId,
+        repo: workspace.repoForPayload,
+        branch,
+        sha,
+        harness,
+        model: model ?? decision.result.model?.id,
+        environmentId: workspace.environmentId,
+        reasoningEffort,
+        images: allProcessedImages.length ? allProcessedImages : undefined,
+        threadMessages,
+        latestOwnBotReplyText: latestOwnBotReply?.text,
+        latestOwnBotReplyTs: latestOwnBotReply?.ts,
+        webPath,
+        slackConversationUrl: slackConversationUrl ?? undefined,
+        skipInitialActingUser: !initiatorLinkedUserId,
+        ...(existingMessageTs
+          ? {
+              queuedStartedMessage: {
+                ts: existingMessageTs,
+                agentName: AGENT_DISPLAY_NAME,
+                initiatingSlackUserId,
+                workspaceDisplayName: workspace.workspaceDisplayName,
+                ...(userRequestedModelDisplayName
+                  ? { modelDisplayName: userRequestedModelDisplayName }
+                  : {}),
+                ...(decision.result.kickoffMessage
+                  ? { kickoffMessage: decision.result.kickoffMessage }
+                  : {}),
+                workspaceOnly: decision.result.workspaceOnly,
+              },
+            }
+          : {}),
+      });
+    } catch (error) {
+      if (isDeploymentReadOnlyError(error)) {
+        return {
+          status: 'not_started',
+          code: 'deployment_read_only',
+          threadId,
+          message: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+          routingResult: decision.result,
+        };
+      }
+
+      throw error;
+    }
 
     if (existingMessageTs) {
       deliveryTracker.track(existingMessageTs);

@@ -3,32 +3,56 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { PreviewHelpDialog } from './PreviewHelpDialog';
 
-const { authState, statusState, startSetupMock } = vi.hoisted(() => ({
-  authState: { isAdmin: false },
-  statusState: {
-    data: {
-      runtimeReady: true,
-      environment: {
-        id: 'env-1',
-        name: 'Web App',
-        hasConfiguredPorts: true,
-        portNames: ['WEB'],
+const { authState, statusState, startSetupMock } = vi.hoisted(() => {
+  type ManagedAccessFixture = {
+    state: 'active' | 'read_only';
+    reason: 'billing_required' | 'payment_past_due' | null;
+    revision: number;
+    effectiveAt: string;
+    restrictionStartsAt: string | null;
+    remediationUrl: string | null;
+  };
+
+  return {
+    authState: {
+      isAdmin: false,
+      managedAccess: {
+        state: 'active',
+        reason: null,
+        revision: 1,
+        effectiveAt: '2026-01-01T00:00:00.000Z',
+        restrictionStartsAt: null,
+        remediationUrl: null,
       },
-      runHasPreviewDomains: true,
-      setupTask: null as {
-        taskId: string | null;
-        status: string;
-        kind: 'preview';
-      } | null,
+    } as {
+      isAdmin: boolean;
+      managedAccess: ManagedAccessFixture;
     },
-  },
-  startSetupMock: vi.fn(
-    async (_variables: { taskId: string; mode?: string }) => ({
-      taskId: 'fix-task-1',
-      alreadyRunning: false,
-    }),
-  ),
-}));
+    statusState: {
+      data: {
+        runtimeReady: true,
+        environment: {
+          id: 'env-1',
+          name: 'Web App',
+          hasConfiguredPorts: true,
+          portNames: ['WEB'],
+        },
+        runHasPreviewDomains: true,
+        setupTask: null as {
+          taskId: string | null;
+          status: string;
+          kind: 'preview';
+        } | null,
+      },
+    },
+    startSetupMock: vi.fn(
+      async (_variables: { taskId: string; mode?: string }) => ({
+        taskId: 'fix-task-1',
+        alreadyRunning: false,
+      }),
+    ),
+  };
+});
 
 vi.mock('sonner', () => ({
   toast: {
@@ -41,6 +65,7 @@ vi.mock('sonner', () => ({
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({
     isAdmin: authState.isAdmin,
+    managedAccess: authState.managedAccess,
   }),
 }));
 
@@ -87,6 +112,14 @@ describe('PreviewHelpDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authState.isAdmin = false;
+    authState.managedAccess = {
+      state: 'active',
+      reason: null,
+      revision: 1,
+      effectiveAt: '2026-01-01T00:00:00.000Z',
+      restrictionStartsAt: null,
+      remediationUrl: null,
+    };
     statusState.data = {
       runtimeReady: true,
       environment: {
@@ -117,6 +150,34 @@ describe('PreviewHelpDialog', () => {
       taskId: 'task-1',
       mode: 'repair',
     });
+  });
+
+  it('disables the repair agent launch when the deployment is read-only', async () => {
+    authState.isAdmin = true;
+    authState.managedAccess = {
+      state: 'read_only',
+      reason: 'billing_required',
+      revision: 2,
+      effectiveAt: '2026-01-02T00:00:00.000Z',
+      restrictionStartsAt: null,
+      remediationUrl: null,
+    };
+
+    renderDialog();
+
+    expect(
+      await screen.findByText(
+        'This deployment is read-only. New task launches are paused.',
+      ),
+    ).toBeInTheDocument();
+
+    const button = screen.getByRole('button', {
+      name: /fix previews with an agent/i,
+    });
+
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(startSetupMock).not.toHaveBeenCalled();
   });
 
   it('tells non-admins to ask an administrator', async () => {

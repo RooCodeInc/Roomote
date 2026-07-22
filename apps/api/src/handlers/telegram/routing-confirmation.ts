@@ -14,6 +14,10 @@ import {
   type RoutingContext,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
+import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  isDeploymentReadOnlyError,
+} from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import {
@@ -841,6 +845,19 @@ export async function handleTelegramRoutingCallback(params: {
     await storePendingTelegramRoute(action.pendingRouteId, claimed).catch(
       () => undefined,
     );
+    if (isDeploymentReadOnlyError(error)) {
+      await answerTelegramCallbackQueryBestEffort({
+        callbackQueryId: query.id,
+        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+      });
+      await finalizeConfirmationCard({
+        chatId,
+        messageId: String(message.message_id),
+        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+      });
+      return;
+    }
+
     apiLogger.warn(
       `[telegram] Failed to launch task from routing confirmation: ${
         error instanceof Error ? error.message : String(error)
