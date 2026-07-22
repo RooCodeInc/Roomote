@@ -5,24 +5,37 @@
  * persisted vendor `roomote` — while `ROOMOTE_CLOUD_BACKEND` selects which
  * engine actually runs the sandboxes.
  *
- * Only the Modal backend exists today. Adding an engine means extending this
- * list and the two dispatch sites that branch on the resolved backend: the
+ * Two backends exist today: `modal` (direct Modal SDK access with a Modal
+ * token pair in the deployment env) and `broker` (the hosting operator's
+ * compute broker performs the Modal operations; the deployment holds only a
+ * derived per-tenant broker credential in the same token env vars, plus
+ * `ROOMOTE_CLOUD_BROKER_URL`). Adding an engine means extending this list
+ * and the two dispatch sites that branch on the resolved backend: the
  * compute-provider factory (client construction) and the controller's spawn
  * switch — plus making the static per-provider metadata (capabilities,
  * worker label, resource model, usage policy) backend-aware.
  *
- * Note: the backend is a per-deployment choice. Switching it on a live
- * deployment requires draining `roomote`-vendor task runs and dropping
- * environment snapshots first — machine ids and snapshots are
- * engine-specific.
+ * Note: the backend is a per-deployment choice. Switching between distinct
+ * engines on a live deployment requires draining `roomote`-vendor task runs
+ * and dropping environment snapshots first — machine ids and snapshots are
+ * engine-specific. `modal` ↔ `broker` is the exception: the broker fronts
+ * the same Modal workspace with the same `roomote-<slug>` app naming, so
+ * machine ids and snapshots remain valid across that flip.
  */
-export const ROOMOTE_CLOUD_BACKENDS = ['modal'] as const;
+export const ROOMOTE_CLOUD_BACKENDS = ['modal', 'broker'] as const;
 
 export type RoomoteCloudBackend = (typeof ROOMOTE_CLOUD_BACKENDS)[number];
 
 export const DEFAULT_ROOMOTE_CLOUD_BACKEND: RoomoteCloudBackend = 'modal';
 
 export const ROOMOTE_CLOUD_BACKEND_ENV_VAR = 'ROOMOTE_CLOUD_BACKEND';
+
+/**
+ * Base URL of the hosting operator's compute broker, required by the
+ * `broker` backend. With this backend the deployment's token env vars carry
+ * a derived per-tenant broker credential instead of Modal workspace tokens.
+ */
+export const ROOMOTE_CLOUD_BROKER_URL_ENV_VAR = 'ROOMOTE_CLOUD_BROKER_URL';
 
 /**
  * Engine-neutral deployment identity for the managed provider. Backends map

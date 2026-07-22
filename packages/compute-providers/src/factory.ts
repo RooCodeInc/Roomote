@@ -18,6 +18,7 @@ import type {
 import { assertDefined } from './errors';
 import {
   ModalClient,
+  RoomoteBrokerClient,
   DockerClient,
   DaytonaClient,
   E2bClient,
@@ -61,11 +62,66 @@ export function createComputeProviderClient(
     case 'modal':
     case 'roomote': {
       if (options.provider === 'roomote') {
-        // Throws on an unsupported backend; the resolved value is 'modal'
-        // until more ROOMOTE_CLOUD_BACKENDS exist.
-        resolveRoomoteCloudBackend({
+        // Throws on an unsupported backend.
+        const backend = resolveRoomoteCloudBackend({
           ROOMOTE_CLOUD_BACKEND: envValue('ROOMOTE_CLOUD_BACKEND'),
         });
+
+        // Broker backend: the deployment holds no Modal credentials. The
+        // token env vars carry the tenant id + derived broker credential,
+        // and registry/ECR pull secrets are broker-side by design — never
+        // read them here.
+        if (backend === 'broker') {
+          const brokerUrl = envValue('ROOMOTE_CLOUD_BROKER_URL');
+          const tenantId = envValue('ROOMOTE_CLOUD_TOKEN_ID');
+          const brokerKey = envValue('ROOMOTE_CLOUD_TOKEN_SECRET');
+          const brokerBaseImageRef =
+            options.config?.baseImageRef ??
+            resolveEffectiveModalBaseImageRef({
+              MODAL_BASE_IMAGE_REF: envValue('MODAL_BASE_IMAGE_REF'),
+              DOCKER_WORKER_IMAGE: envValue('DOCKER_WORKER_IMAGE'),
+              RELEASE_VERSION: envValue('RELEASE_VERSION'),
+              ROOMOTE_WORKER_IMAGE_REPO: envValue('ROOMOTE_WORKER_IMAGE_REPO'),
+              APP_ENV: envValue('APP_ENV'),
+              NODE_ENV: envValue('NODE_ENV'),
+            }) ??
+            undefined;
+
+          assertDefined(brokerUrl, 'Missing ROOMOTE_CLOUD_BROKER_URL');
+          assertDefined(tenantId, 'Missing ROOMOTE_CLOUD_TOKEN_ID');
+          assertDefined(brokerKey, 'Missing ROOMOTE_CLOUD_TOKEN_SECRET');
+          assertDefined(brokerBaseImageRef, 'Missing MODAL_BASE_IMAGE_REF');
+
+          const brokerResources = resolveConfiguredComputeProviderResources({
+            provider: options.provider,
+            configuredCpuCores: options.config?.cpu,
+            configuredMemoryMiB: options.config?.memoryMiB,
+          });
+          const brokerRegions =
+            parseModalRegions(options.config?.regions) ??
+            parseModalRegions(envValue('MODAL_REGIONS'));
+
+          return new RoomoteBrokerClient({
+            brokerUrl,
+            tenantId,
+            brokerKey,
+            baseImageRef: brokerBaseImageRef,
+            ...(brokerRegions ? { regions: brokerRegions } : {}),
+            ...(options.config?.timeoutMs
+              ? { timeoutMs: options.config.timeoutMs }
+              : {}),
+            ...(brokerResources.configuredCpuCores !== null
+              ? { cpu: brokerResources.configuredCpuCores }
+              : {}),
+            cpuLimit: options.config?.cpuLimit ?? SANDBOX_DEFAULT_VCPUS,
+            ...(brokerResources.configuredMemoryMiB !== null
+              ? { memoryMiB: brokerResources.configuredMemoryMiB }
+              : {}),
+            memoryLimitMiB:
+              options.config?.memoryLimitMiB ?? MODAL_DEFAULT_MEMORY_LIMIT_MIB,
+            ...(options.config?.vmRuntime ? { vmRuntime: true } : {}),
+          });
+        }
       }
 
       const tokenIdEnvVar =

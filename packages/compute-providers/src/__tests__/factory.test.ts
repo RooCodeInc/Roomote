@@ -3,6 +3,7 @@ import type { DaytonaConfig, E2bConfig, ModalConfig } from '../types';
 
 const {
   modalClientMock,
+  roomoteBrokerClientMock,
   dockerClientMock,
   daytonaClientMock,
   e2bClientMock,
@@ -13,6 +14,7 @@ const {
   modalCapabilities,
 } = vi.hoisted(() => ({
   modalClientMock: vi.fn(),
+  roomoteBrokerClientMock: vi.fn(),
   dockerClientMock: vi.fn(),
   daytonaClientMock: vi.fn(),
   e2bClientMock: vi.fn(),
@@ -42,6 +44,7 @@ const {
 vi.mock('../adapters', () => ({
   DockerClient: dockerClientMock,
   ModalClient: modalClientMock,
+  RoomoteBrokerClient: roomoteBrokerClientMock,
   DaytonaClient: daytonaClientMock,
   E2bClient: e2bClientMock,
   BlaxelClient: blaxelClientMock,
@@ -188,6 +191,57 @@ describe('createComputeProviderClient', () => {
         },
       }),
     ).toThrow('Unsupported ROOMOTE_CLOUD_BACKEND "e2b"');
+  });
+
+  it('builds the broker client for the broker backend without Modal credentials', () => {
+    process.env.MODAL_REGISTRY_USERNAME = 'ghcr-user';
+    process.env.MODAL_REGISTRY_PASSWORD = 'ghcr-token';
+
+    createComputeProviderClient({
+      provider: 'roomote',
+      envFallback: {
+        ROOMOTE_CLOUD_BACKEND: 'broker',
+        ROOMOTE_CLOUD_BROKER_URL: 'https://broker.roomote.dev',
+        ROOMOTE_CLOUD_TOKEN_ID: 'deployment-id',
+        ROOMOTE_CLOUD_TOKEN_SECRET: 'rbk_derived-credential',
+        MODAL_BASE_IMAGE_REF: 'ghcr.io/roomote/modal-worker:test',
+      },
+    });
+
+    expect(modalClientMock).not.toHaveBeenCalled();
+    expect(roomoteBrokerClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brokerUrl: 'https://broker.roomote.dev',
+        tenantId: 'deployment-id',
+        brokerKey: 'rbk_derived-credential',
+        baseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        cpuLimit: 8,
+        memoryLimitMiB: 32_768,
+      }),
+    );
+
+    // Registry pull credentials are broker-side by design; the tenant
+    // client must never receive them.
+    const config = roomoteBrokerClientMock.mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(JSON.stringify(config)).not.toContain('ghcr-user');
+    expect(JSON.stringify(config)).not.toContain('ghcr-token');
+  });
+
+  it('requires the broker URL for the broker backend', () => {
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'roomote',
+        envFallback: {
+          ROOMOTE_CLOUD_BACKEND: 'broker',
+          ROOMOTE_CLOUD_TOKEN_ID: 'deployment-id',
+          ROOMOTE_CLOUD_TOKEN_SECRET: 'rbk_derived-credential',
+          MODAL_BASE_IMAGE_REF: 'ghcr.io/roomote/modal-worker:test',
+        },
+      }),
+    ).toThrow('Missing ROOMOTE_CLOUD_BROKER_URL');
   });
 
   it('resolves Modal private registry credentials from env', () => {

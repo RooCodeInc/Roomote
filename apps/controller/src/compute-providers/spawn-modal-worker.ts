@@ -19,6 +19,7 @@ import {
   createComputeProviderClient,
   createModalMachine,
   parseModalRegions,
+  RoomoteBrokerClient,
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
@@ -123,6 +124,14 @@ export async function spawnModalWorker(
      * spawn path with deployment-managed credentials. Defaults to `modal`.
      */
     vendor?: 'modal' | 'roomote';
+    /**
+     * Engine backing a `roomote` spawn. With `broker`, modalTokenId /
+     * modalTokenSecret carry the tenant id + derived broker credential and
+     * all Modal operations go through the compute broker at `brokerUrl`;
+     * no Modal workspace credentials exist in this deployment.
+     */
+    backend?: 'modal' | 'broker';
+    brokerUrl?: string;
     modalTokenId: string;
     modalTokenSecret: string;
     modalEndpoint?: string;
@@ -156,6 +165,8 @@ export async function spawnModalWorker(
 }> {
   const {
     vendor = 'modal',
+    backend = 'modal',
+    brokerUrl,
     modalTokenId,
     modalTokenSecret,
     modalEndpoint,
@@ -307,10 +318,27 @@ export async function spawnModalWorker(
     timeoutMs: modalTimeoutMs,
   };
 
-  const computeClient = createComputeProviderClient({
-    provider: 'modal',
-    config: modalConfig,
-  });
+  const computeClient =
+    backend === 'broker'
+      ? new RoomoteBrokerClient({
+          brokerUrl: brokerUrl ?? '',
+          tenantId: modalTokenId,
+          brokerKey: modalTokenSecret,
+          baseImageRef: modalBaseImageRef,
+          ...(parsedModalRegions ? { regions: parsedModalRegions } : {}),
+          ...(useVmRuntime ? { vmRuntime: true } : {}),
+          ...(configuredResources.configuredCpuCores !== null
+            ? { cpu: configuredResources.configuredCpuCores }
+            : {}),
+          ...(configuredResources.configuredMemoryMiB !== null
+            ? { memoryMiB: configuredResources.configuredMemoryMiB }
+            : {}),
+          timeoutMs: modalTimeoutMs,
+        })
+      : createComputeProviderClient({
+          provider: 'modal',
+          config: modalConfig,
+        });
 
   // Stamp provisionStartedAt + launchMode before the Modal API call. Only-if-
   // null semantics preserve the earliest provision timestamp.
