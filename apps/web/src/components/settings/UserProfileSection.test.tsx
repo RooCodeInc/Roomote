@@ -85,9 +85,7 @@ describe('UserProfileSection', () => {
     expect(screen.getByText('Ada User')).toBeInTheDocument();
     expect(screen.getByText('ada@example.com')).toBeInTheDocument();
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Edit' }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
     expect(screen.queryByText('Deployment operator')).not.toBeInTheDocument();
     expect(
       screen.queryByText(
@@ -115,7 +113,7 @@ describe('UserProfileSection', () => {
     expect(image).toHaveAttribute('alt', '');
   });
 
-  it('shows credential details and expands the edit form for credential users', () => {
+  it('shows credential details and expands the profile edit form for credential users', () => {
     render(
       <UserProfileSection
         canChangePassword={true}
@@ -136,12 +134,9 @@ describe('UserProfileSection', () => {
 
     expect(screen.getByLabelText('Name')).toHaveValue('Ada User');
     expect(screen.getByLabelText('Email')).toHaveValue('ada@example.com');
-    expect(screen.getByLabelText('Current password')).toBeInTheDocument();
-    expect(screen.getByLabelText('New password')).toBeInTheDocument();
-    expect(screen.getByLabelText('Confirm password')).toBeInTheDocument();
   });
 
-  it('updates name, email, and password from the expanded profile form', async () => {
+  it('updates name and email from the expanded profile form', async () => {
     render(
       <UserProfileSection
         canChangePassword={true}
@@ -160,15 +155,6 @@ describe('UserProfileSection', () => {
     fireEvent.change(screen.getByLabelText('Email'), {
       target: { value: 'new@example.com' },
     });
-    fireEvent.change(screen.getByLabelText('Current password'), {
-      target: { value: 'current-password' },
-    });
-    fireEvent.change(screen.getByLabelText('New password'), {
-      target: { value: 'new-password' },
-    });
-    fireEvent.change(screen.getByLabelText('Confirm password'), {
-      target: { value: 'new-password' },
-    });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
@@ -177,11 +163,7 @@ describe('UserProfileSection', () => {
         newEmail: 'new@example.com',
       });
     });
-    expect(changePasswordMock).toHaveBeenCalledWith({
-      currentPassword: 'current-password',
-      newPassword: 'new-password',
-      revokeOtherSessions: true,
-    });
+    expect(changePasswordMock).not.toHaveBeenCalled();
     expect(toast.success).toHaveBeenCalledWith('Profile updated.');
     expect(routerRefreshMock).toHaveBeenCalled();
   });
@@ -238,34 +220,5 @@ describe('UserProfileSection', () => {
       expect(routerRefreshMock).toHaveBeenCalled();
     });
     expect(toast.error).toHaveBeenCalledWith('Email update failed');
-  });
-
-  it('validates matching passwords before updating credentials', () => {
-    render(
-      <UserProfileSection
-        canChangePassword={true}
-        profile={{
-          email: 'ada@example.com',
-          imageUrl: '',
-          name: 'Ada User',
-        }}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Current password'), {
-      target: { value: 'current-password' },
-    });
-    fireEvent.change(screen.getByLabelText('New password'), {
-      target: { value: 'new-password' },
-    });
-    fireEvent.change(screen.getByLabelText('Confirm password'), {
-      target: { value: 'different-password' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-    expect(toast.error).toHaveBeenCalledWith('Passwords do not match.');
-    expect(changeEmailMock).not.toHaveBeenCalled();
-    expect(changePasswordMock).not.toHaveBeenCalled();
   });
 });
