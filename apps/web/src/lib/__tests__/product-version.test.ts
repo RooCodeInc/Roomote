@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   compareProductVersions,
+  isParsableProductVersion,
   isProductVersionNewer,
   normalizeProductVersion,
   toReleaseTag,
@@ -12,6 +13,17 @@ describe('product-version', () => {
     expect(normalizeProductVersion(' v0.14.1 ')).toBe('0.14.1');
     expect(normalizeProductVersion(null)).toBeNull();
     expect(normalizeProductVersion('')).toBeNull();
+  });
+
+  it('detects parsable product versions', () => {
+    expect(isParsableProductVersion('0.16.0')).toBe(true);
+    expect(isParsableProductVersion('v0.16.0')).toBe(true);
+    expect(isParsableProductVersion('0.16.0-rc.1')).toBe(true);
+    expect(isParsableProductVersion('main-037146ca')).toBe(false);
+    expect(isParsableProductVersion('develop-abc12345')).toBe(false);
+    expect(isParsableProductVersion('self-host-production')).toBe(false);
+    expect(isParsableProductVersion(null)).toBe(false);
+    expect(isParsableProductVersion('')).toBe(false);
   });
 
   it('compares numeric segments', () => {

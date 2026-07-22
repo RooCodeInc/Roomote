@@ -124,6 +124,10 @@ const serverSchema = {
   ROOMOTE_FORCE_TELEMETRY: z.string().optional(),
   // Release tag baked into published app images by the publish workflow.
   RELEASE_VERSION: z.string().min(1).optional(),
+  // Product (changelog) version baked into published app images alongside
+  // RELEASE_VERSION, so channel builds (develop-<sha>/main-<sha>) still know
+  // which product release they contain. Read by the in-app release notices.
+  RELEASE_PRODUCT_VERSION: z.string().min(1).optional(),
   TRPC_URL: z.string().min(1),
   R_MODEL: z.string().min(1).optional(),
   R_SMALL_MODEL: z.string().min(1).optional(),
@@ -400,6 +404,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WORKER_RELEASE_CHANNEL',
   'WORKER_RELEASE_VERSION',
   'RELEASE_VERSION',
+  'RELEASE_PRODUCT_VERSION',
   'R_PING_BASE_URL',
   'R_INSTANCE_ID',
   'R_INTERCOM_APP_ID',

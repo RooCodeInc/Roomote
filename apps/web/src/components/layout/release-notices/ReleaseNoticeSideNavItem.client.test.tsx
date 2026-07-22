@@ -116,6 +116,22 @@ describe('ReleaseNoticeSideNavItem', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('discards an unorderable stored baseline and re-seeds silently', async () => {
+    mockReadWhatsNewSeenVersion.mockReturnValue('main-037146ca');
+    mockStatusData.mockReturnValue({
+      runningVersion: '0.16.0',
+      latestKnownVersion: null,
+      updateAvailable: false,
+    });
+
+    const { container } = render(<ReleaseNoticeSideNavItem />);
+
+    await waitFor(() => {
+      expect(mockWriteWhatsNewSeenVersion).toHaveBeenCalledWith('0.16.0');
+    });
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('shows whats-new before update-available', async () => {
     mockReadWhatsNewSeenVersion.mockReturnValue('0.14.0');
     mockStatusData.mockReturnValue({
