@@ -619,7 +619,7 @@ describe('Gitea API helpers', () => {
         new Response(
           JSON.stringify({
             total_count: 2,
-            workflow_runs: [
+            entries: [
               {
                 id: 10,
                 name: 'other.yml',

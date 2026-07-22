@@ -191,9 +191,19 @@ const giteaActionWorkflowRunListSchema = z.object({
   total_count: z.number().optional(),
 });
 
-// Gitea ≤1.24 lists runs as ActionTask via GET .../actions/tasks (same
-// ActionTaskResponse shape: { total_count, workflow_runs: ActionTask[] }).
-const giteaActionTaskListSchema = giteaActionWorkflowRunListSchema;
+// Gitea ActionTaskResponse uses Go field Entries; the API tags it as
+// `workflow_runs` on current releases, but some payloads/docs use `entries`.
+// Accept either and normalize to `tasks`.
+const giteaActionTaskListSchema = z
+  .object({
+    total_count: z.number().optional(),
+    workflow_runs: z.array(giteaActionWorkflowRunSchema).optional(),
+    entries: z.array(giteaActionWorkflowRunSchema).optional(),
+  })
+  .transform((value) => ({
+    total_count: value.total_count,
+    tasks: value.workflow_runs ?? value.entries ?? [],
+  }));
 
 const giteaActionWorkflowJobSchema = z
   .object({
@@ -470,9 +480,8 @@ export async function getLatestGiteaActionRun(params: {
     throw new GiteaApiError(tasksResponse.status, tasksResponse.statusText);
   }
 
-  const { workflow_runs: tasks } = giteaActionTaskListSchema.parse(
-    await tasksResponse.json(),
-  );
+  const parsed = giteaActionTaskListSchema.parse(await tasksResponse.json());
+  const tasks = parsed.tasks;
 
   // Tasks are typically newest-first; pick the first matching branch tip.
   const match = tasks.find(
