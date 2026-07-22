@@ -320,6 +320,62 @@ describe('RoomoteBrokerClient', () => {
     expect(exitCodes).toEqual([7]);
   });
 
+  it('recovers onExit via polling when started arrives late and the stream drops', async () => {
+    vi.useFakeTimers();
+    try {
+      const encoder = new TextEncoder();
+      let controller!: ReadableStreamDefaultController<Uint8Array>;
+      const { client } = harness((request) => {
+        if (request.path.endsWith('/exec')) {
+          const stream = new ReadableStream<Uint8Array>({
+            start(streamController) {
+              controller = streamController;
+            },
+          });
+          return new Response(stream, { status: 200 });
+        }
+
+        // Exec-status poll must use the late-arriving exec id.
+        if (request.path.endsWith('/exec/exec-late')) {
+          return jsonResponse({ status: 'exited', exitCode: 5 });
+        }
+
+        return jsonResponse({ error: 'unexpected path' }, 500);
+      });
+
+      const exitCodes: number[] = [];
+      const resultPromise = client.runCommand({
+        instanceId: 'sb-1',
+        cmd: 'worker',
+        detached: true,
+        onExit: ({ exitCode }) => {
+          exitCodes.push(exitCode);
+        },
+      });
+
+      // No events inside the grace period: the command reports as running.
+      await vi.advanceTimersByTimeAsync(1_100);
+      await expect(resultPromise).resolves.toEqual({
+        commandId: undefined,
+        exitCode: null,
+      });
+
+      // started lands only now, then the stream drops before exit.
+      controller.enqueue(
+        encoder.encode(
+          `${JSON.stringify({ type: 'started', execId: 'exec-late' })}\n`,
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      controller.error(new Error('connection reset'));
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      expect(exitCodes).toEqual([5]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('writes files as base64 payloads', async () => {
     const { client, requests } = harness(() => jsonResponse({}));
 

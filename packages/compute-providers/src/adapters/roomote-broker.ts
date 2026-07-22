@@ -409,22 +409,26 @@ export class RoomoteBrokerClient implements ComputeProviderClient {
 
     void (async () => {
       const streamed = await consumeExecEvents(grace.remaining, undefined, {
+        tolerateStreamErrors: true,
         onOutput: (event) => {
           for (const line of event.data.trimEnd().split('\n')) {
             console.log(`[${label}:${event.stream}] ${line}`);
           }
         },
-      }).catch(() => undefined);
+      });
 
-      let exitCode = streamed?.exitCode ?? null;
+      // The started event may arrive only after the grace period, so the
+      // background outcome is the more complete source of the exec id.
+      const execId = streamed.execId ?? grace.execId;
+      let exitCode = streamed.exitCode;
 
-      if (exitCode === null && grace.execId) {
-        exitCode = await this.pollForExit(input.instanceId, grace.execId);
+      if (exitCode === null && execId) {
+        exitCode = await this.pollForExit(input.instanceId, execId);
       }
 
       if (exitCode === null) {
         console.warn(
-          `[${label}] Lost track of detached command ${grace.execId ?? '(unknown)'}; onExit will not fire`,
+          `[${label}] Lost track of detached command ${execId ?? '(unknown)'}; onExit will not fire`,
         );
         return;
       }
@@ -611,7 +615,16 @@ type ExecOutcome = {
 async function consumeExecEvents(
   events: ExecEventPump,
   graceMs?: number,
-  hooks?: { onOutput?: (event: CommandOutputEvent) => void },
+  hooks?: {
+    onOutput?: (event: CommandOutputEvent) => void;
+    /**
+     * Return the partial outcome instead of throwing when the stream drops.
+     * The detached watcher needs everything observed so far — in particular
+     * a `started` event that arrived after the grace period — so it can
+     * fall back to exec-status polling with the right id.
+     */
+    tolerateStreamErrors?: boolean;
+  },
 ): Promise<ExecOutcome> {
   const outcome: ExecOutcome = {
     execId: undefined,
@@ -626,22 +639,30 @@ async function consumeExecEvents(
   while (true) {
     let result: IteratorResult<BrokerExecEvent>;
 
-    if (deadline !== undefined) {
-      const timeLeft = deadline - Date.now();
+    try {
+      if (deadline !== undefined) {
+        const timeLeft = deadline - Date.now();
 
-      if (timeLeft <= 0) {
+        if (timeLeft <= 0) {
+          return outcome;
+        }
+
+        const raced = await events.nextWithTimeout(timeLeft);
+
+        if (raced === 'timeout') {
+          return outcome;
+        }
+
+        result = raced;
+      } else {
+        result = await events.next();
+      }
+    } catch (error) {
+      if (hooks?.tolerateStreamErrors) {
         return outcome;
       }
 
-      const raced = await events.nextWithTimeout(timeLeft);
-
-      if (raced === 'timeout') {
-        return outcome;
-      }
-
-      result = raced;
-    } else {
-      result = await events.next();
+      throw error;
     }
 
     if (result.done) {
