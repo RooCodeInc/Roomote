@@ -95,6 +95,9 @@ Pick one path. You will have a working Roomote instance at the end.
 
 ### Option A: One-click deploy (Railway)
 
+New to Railway? [Sign up with our referral link](https://railway.com?referralCode=roomote)
+to get $20 in credit.
+
 1. Click the button:
 
    [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo)
