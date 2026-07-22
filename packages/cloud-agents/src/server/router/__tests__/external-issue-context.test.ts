@@ -74,6 +74,22 @@ describe('gatherExternalIssueContext', () => {
     expect(result.toolsUsed).toEqual(['github.get_issue']);
   });
 
+  it('strips every trailing punctuation character from a pasted issue URL', async () => {
+    vi.mocked(callRouterMcpTool).mockResolvedValue({
+      title: 'Fix dashboard refresh',
+    });
+
+    await gatherExternalIssueContext(
+      createContext('Investigate https://github.com/acme/web/issues/42...'),
+    );
+
+    expect(callRouterMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: expect.objectContaining({ issue_number: 42 }),
+      }),
+    );
+  });
+
   it('continues routing when an issue cannot be fetched', async () => {
     vi.mocked(callRouterMcpTool).mockRejectedValue(new Error('Not connected'));
 

@@ -21,6 +21,16 @@ type ExternalIssueReference =
       identifier: string;
     };
 
+function trimTrailingUrlPunctuation(value: string): string {
+  let end = value.length;
+
+  while (end > 0 && '.,;:!?'.includes(value[end - 1]!)) {
+    end -= 1;
+  }
+
+  return value.slice(0, end);
+}
+
 function parseExternalIssueReferences(text: string): ExternalIssueReference[] {
   const references: ExternalIssueReference[] = [];
   const urls = text.match(/https?:\/\/[^\s<>'"\])}]+/gi) ?? [];
@@ -30,7 +40,7 @@ function parseExternalIssueReferences(text: string): ExternalIssueReference[] {
       break;
     }
 
-    const url = rawUrl.replace(/[.,;:!?]$/, '');
+    const url = trimTrailingUrlPunctuation(rawUrl);
 
     try {
       const parsedUrl = new URL(url);
