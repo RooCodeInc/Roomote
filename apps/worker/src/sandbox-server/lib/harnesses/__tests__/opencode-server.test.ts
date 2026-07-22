@@ -2835,6 +2835,57 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('redacts credential-shaped values from provider error messages', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Start work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'Incorrect API key provided: sk-secret-token',
+              isRetryable: false,
+            },
+          },
+        },
+      });
+
+      const errorMessage = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          String(envelope.payload.text ?? '').includes(
+            'The provider returned an error',
+          ),
+      );
+
+      expect(String(errorMessage?.payload.text)).toBe(
+        'The provider returned an error: Incorrect [REDACTED]',
+      );
+      expect(String(errorMessage?.payload.text)).not.toContain('sk-secret');
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('records OpenCode question tool requests and delivers answers as a follow-up prompt', async () => {
     const beforeQueuedPrompt = vi.fn(async () => undefined);
     const { client, harness } = createHarness(undefined, {
