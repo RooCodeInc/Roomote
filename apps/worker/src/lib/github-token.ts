@@ -1,4 +1,11 @@
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
 import { createServer } from 'http';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -293,6 +300,25 @@ export function ensureGhCliWrapper(): string {
   });
 
   return GH_CLI_WRAPPER_PATH;
+}
+
+type GitHubTokenFileStatus = {
+  present: boolean;
+  nonEmpty: boolean;
+};
+
+/**
+ * Redacted status of the file-backed GitHub token the git credential helper
+ * reads. Exposes only presence signals, never token material, so callers can
+ * log it and fail fast before attempting anonymous git operations.
+ */
+export function getGitHubTokenFileStatus(): GitHubTokenFileStatus {
+  try {
+    const content = readFileSync(GH_TOKEN_FILE_PATH, 'utf-8');
+    return { present: true, nonEmpty: content.trim().length > 0 };
+  } catch {
+    return { present: false, nonEmpty: false };
+  }
 }
 
 function writeGhToken(token: string): void {

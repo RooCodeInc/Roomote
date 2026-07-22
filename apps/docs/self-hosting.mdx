@@ -157,8 +157,13 @@ deployment should let you:
 - **Callbacks fail.** For providers that use callbacks or webhooks, confirm the
   deployment has a public HTTPS URL and that the provider is using that exact
   URL. Discord uses its Gateway service instead of a public callback.
-- **The first task cannot clone a repository.** Check source-control
-  installation scope and repository permissions.
+- **The first task cannot clone a repository.** Workers authenticate git with a
+  short-lived GitHub App installation token created when the run starts — they
+  do not read a `GH_TOKEN`/`GITHUB_TOKEN` from the container environment. If a
+  task fails with "No GitHub credentials are available", verify the GitHub App
+  is installed for the repository owner, the installation covers the
+  repository, and the repository appears in the source-control settings after a
+  sync.
 - **The agent cannot run useful commands.** Add missing services, environment
   variables, setup commands, or tool versions to the environment.
 - **Chat messages do not reach Roomote.** Confirm the app is installed, invited
