@@ -302,7 +302,7 @@ export function ensureGhCliWrapper(): string {
   return GH_CLI_WRAPPER_PATH;
 }
 
-export type GitHubTokenFileStatus = {
+type GitHubTokenFileStatus = {
   present: boolean;
   nonEmpty: boolean;
 };
