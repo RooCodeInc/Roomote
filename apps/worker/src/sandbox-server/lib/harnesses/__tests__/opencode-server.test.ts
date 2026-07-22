@@ -2878,7 +2878,7 @@ describe('OpenCodeServerHarness', () => {
       );
 
       expect(String(errorMessage?.payload.text)).toBe(
-        'The provider returned an error: [REDACTED]',
+        'The provider returned an error: Authorization: [redacted]',
       );
       expect(String(errorMessage?.payload.text)).not.toContain('eyJ-secret');
     } finally {
