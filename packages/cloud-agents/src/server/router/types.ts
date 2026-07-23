@@ -20,23 +20,6 @@ export const LINEAR_AUTO_CONFIRM_TIMEOUT_MS = 120_000;
 export const R_SMALL_MODEL_LABEL = 'roomote-small-model';
 
 /**
- * Default model for workspace-routing inference. Routing is a
- * latency-sensitive precheck that also gates the external issue fetch, so it
- * needs a model that asks for a lookup only when the message alone cannot
- * route. An explicit context.routingModel wins, then the R_ROUTER_MODEL
- * deployment override, then this default.
- */
-const DEFAULT_ROUTING_MODEL = 'google/gemini-3.6-flash';
-
-export function resolveRoutingModel(explicitModel?: string): string {
-  return (
-    explicitModel?.trim() ||
-    process.env.R_ROUTER_MODEL?.trim() ||
-    DEFAULT_ROUTING_MODEL
-  );
-}
-
-/**
  * Maximum length for task descriptions to prevent excessive token usage.
  */
 export const MAX_TASK_DESCRIPTION_LENGTH = 2000;
