@@ -101,6 +101,7 @@ vi.mock('@roomote/sdk/server', () => ({
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
   dispatchPrReviewFollowUp: mockDispatchFollowUp,
+  attachPendingPrReviewActionMessage: vi.fn(),
 }));
 
 import type { Job } from 'bullmq';

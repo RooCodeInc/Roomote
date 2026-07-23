@@ -15,6 +15,7 @@ import {
 import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
+  attachPendingPrReviewActionMessage,
   getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
@@ -138,7 +139,7 @@ async function postPrReviewNotification({
 
     const slack = new SlackNotifier(slackInstallation.botAccessToken);
 
-    return postSlackThreadMessageWithStickyFooter({
+    const messageTs = await postSlackThreadMessageWithStickyFooter({
       slack,
       channel: route.channelId,
       threadTs: route.threadId,
@@ -155,6 +156,12 @@ async function postPrReviewNotification({
         : {}),
       utmCampaign: 'slack.pr_review',
     });
+
+    if (nonce && messageTs) {
+      await attachPendingPrReviewActionMessage(nonce, messageTs);
+    }
+
+    return messageTs;
   }
 
   const adapter = await getCommunicationProviderAdapter(route.provider);
@@ -187,7 +194,11 @@ async function postPrReviewNotification({
     ];
   }
 
-  await adapter.postMessage(postInput);
+  const posted = await adapter.postMessage(postInput);
+
+  if (nonce && posted?.messageId) {
+    await attachPendingPrReviewActionMessage(nonce, posted.messageId);
+  }
 
   return null;
 }
