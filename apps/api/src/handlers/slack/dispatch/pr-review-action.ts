@@ -234,8 +234,8 @@ async function dispatchAcceptedPrReviewAction({
   }
 
   const resolution = enableAutoHandle
-    ? `:zap: Auto-handling enabled by <@${payload.user.id}> — future review feedback on this PR lands in this task automatically.`
-    : `:white_check_mark: On it — requested by <@${payload.user.id}>.`;
+    ? `Auto-handling enabled by <@${payload.user.id}> — future review feedback on this PR lands in this task automatically.`
+    : `On it — requested by <@${payload.user.id}>.`;
 
   await updateNotificationMessage({ payload, resolution });
 }
