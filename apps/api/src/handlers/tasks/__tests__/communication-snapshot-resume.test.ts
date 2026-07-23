@@ -8,12 +8,12 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mocks.enqueueTask,
 }));
 
-vi.mock('../communication-out-of-band-context', () => ({
+vi.mock('../communication-out-of-band-context.js', () => ({
   attachOutOfBandContextToCommunicationMessage: mocks.attachOutOfBand,
   releaseCommunicationOutOfBandClaim: mocks.releaseOutOfBand,
 }));
 
-import { resumeCommunicationTaskFromSnapshot } from '../communication-snapshot-resume';
+import { resumeCommunicationTaskFromSnapshot } from '../communication-snapshot-resume.js';
 
 describe('resumeCommunicationTaskFromSnapshot', () => {
   beforeEach(() => {

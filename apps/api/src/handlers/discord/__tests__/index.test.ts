@@ -85,13 +85,10 @@ vi.mock('@roomote/sdk/server', () => ({
   upsertDiscordInstallation: mocks.upsertInstallation,
 }));
 
-vi.mock('@roomote/sdk/server/communication', () => ({
+vi.mock('../../tasks/communication-task-run-lookup.js', () => ({
   findActiveCommunicationTaskRun: mocks.findActiveRun,
   findCompletedCommunicationTaskRunWithSnapshot: mocks.findCompletedRun,
   findCommunicationTaskRunBySourceEvent: mocks.findSourceRun,
-  resumeCommunicationTaskFromSnapshot: mocks.resumeTask,
-  attachOutOfBandContextToCommunicationMessage: mocks.attachOutOfBand,
-  releaseCommunicationOutOfBandClaim: mocks.releaseOutOfBand,
 }));
 
 vi.mock('../attachments.js', () => ({
@@ -115,6 +112,15 @@ vi.mock('@roomote/communication/messages', () => ({
 
 vi.mock('../../tasks/acting-user-sync.js', () => ({
   syncActingUserForInboundMessage: mocks.syncActingUser,
+}));
+
+vi.mock('../../tasks/communication-snapshot-resume.js', () => ({
+  resumeCommunicationTaskFromSnapshot: mocks.resumeTask,
+}));
+
+vi.mock('../../tasks/communication-out-of-band-context.js', () => ({
+  attachOutOfBandContextToCommunicationMessage: mocks.attachOutOfBand,
+  releaseCommunicationOutOfBandClaim: mocks.releaseOutOfBand,
 }));
 
 vi.mock('../thread-context.js', () => ({

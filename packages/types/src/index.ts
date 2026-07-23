@@ -7,7 +7,6 @@ export * from './background-agents';
 export * from './background-automation-registry';
 export * from './automation-destination-fields';
 export * from './cloud-agents';
-export * from './pr-review-action';
 export * from './task-runs';
 export * from './chatgpt-subscription';
 export * from './github-copilot-subscription';

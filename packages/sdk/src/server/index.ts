@@ -201,8 +201,6 @@ export {
   type PreparedPrReviewNotification,
   type PrReviewTriageContext,
 } from './lib/task-runs/pr-review-notification-delivery';
-export * from './lib/task-runs/pr-review-action';
-export * from './lib/task-runs/pr-review-follow-up-dispatch';
 
 export {
   formatPrStatusChangeTaskHistoryText,

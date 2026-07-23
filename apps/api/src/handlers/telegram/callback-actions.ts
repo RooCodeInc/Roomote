@@ -3,7 +3,6 @@ import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   activeRunStatuses,
   isDeploymentReadOnlyError,
-  parsePrReviewActionCallbackData,
 } from '@roomote/types';
 import {
   and,
@@ -340,18 +339,6 @@ export async function handleTelegramCallbackQuery(
 
   if (routeAction !== null) {
     await handleTelegramRoutingCallback({ query, action: routeAction });
-    return;
-  }
-
-  const prReviewAction = parsePrReviewActionCallbackData(data);
-  if (prReviewAction) {
-    const { handleTelegramPrReviewActionCallback } =
-      await import('./pr-review-action.js');
-    await handleTelegramPrReviewActionCallback({
-      query,
-      choice: prReviewAction.choice,
-      nonce: prReviewAction.nonce,
-    });
     return;
   }
 

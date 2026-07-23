@@ -69,7 +69,7 @@ import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
-} from '@roomote/sdk/server/communication';
+} from '../tasks/communication-out-of-band-context.js';
 import { verifyBotFrameworkJwt } from './bot-framework-auth.js';
 import {
   findActiveTeamsTaskRun,

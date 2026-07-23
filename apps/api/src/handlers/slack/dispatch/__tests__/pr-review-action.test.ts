@@ -2,19 +2,27 @@ import type { SlackInteractivePayload } from '@roomote/slack';
 
 const {
   claimPendingMock,
-  dispatchFollowUpMock,
-  enableAutoHandleMock,
   postSlackInteractiveResponseMock,
+  queueSlackMessageMock,
+  resolveSlackReactionNamesMock,
+  setTrustedRunActingUserMock,
   slackUserMappingsFindFirstMock,
   dbSelectMock,
+  resolveRouteMock,
+  dispatchFollowUpMock,
+  processSnapshotResumeMock,
   updateMessageMock,
 } = vi.hoisted(() => ({
   claimPendingMock: vi.fn(),
-  dispatchFollowUpMock: vi.fn(),
-  enableAutoHandleMock: vi.fn(),
   postSlackInteractiveResponseMock: vi.fn(),
+  queueSlackMessageMock: vi.fn(),
+  resolveSlackReactionNamesMock: vi.fn(),
+  setTrustedRunActingUserMock: vi.fn(),
   slackUserMappingsFindFirstMock: vi.fn(),
   dbSelectMock: vi.fn(),
+  resolveRouteMock: vi.fn(),
+  dispatchFollowUpMock: vi.fn(),
+  processSnapshotResumeMock: vi.fn(),
   updateMessageMock: vi.fn(),
 }));
 
@@ -27,16 +35,13 @@ vi.mock('@roomote/slack', async (importOriginal) => {
 
   return {
     ...original,
+    claimPendingSlackPrReviewAction: claimPendingMock,
     postSlackInteractiveResponse: postSlackInteractiveResponseMock,
+    queueSlackMessage: queueSlackMessageMock,
+    resolveSlackReactionNames: resolveSlackReactionNamesMock,
     SlackNotifier: MockSlackNotifier,
   };
 });
-
-vi.mock('@roomote/sdk/server', () => ({
-  claimPendingPrReviewAction: claimPendingMock,
-  dispatchPrReviewFollowUp: dispatchFollowUpMock,
-  enableAutoHandlePrReviewFeedback: enableAutoHandleMock,
-}));
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ and: args })),
@@ -49,25 +54,33 @@ vi.mock('@roomote/db/server', () => ({
       },
     },
   },
+  setTrustedRunActingUser: setTrustedRunActingUserMock,
   slackInstallations: { teamId: 'teamId' },
   slackUserMappings: { slackUserId: 'slackUserId', slackTeamId: 'slackTeamId' },
 }));
 
+vi.mock('../../events/thread-follow-up-dispatch.js', () => ({
+  resolveSlackThreadFollowUpRoute: resolveRouteMock,
+  dispatchSlackThreadFollowUp: dispatchFollowUpMock,
+}));
+
+vi.mock('../../events/snapshot-resume.js', () => ({
+  processSnapshotResume: processSnapshotResumeMock,
+}));
+
 import {
-  handleSlackPrReviewActionAuto,
   handleSlackPrReviewActionDismiss,
   handleSlackPrReviewActionYes,
 } from '../pr-review-action.js';
 
 const pendingAction = {
   nonce: 'nonce-1',
-  provider: 'slack' as const,
   taskId: 'task-1',
   repository: 'owner/repo',
   prNumber: 42,
   prUrl: 'https://github.com/owner/repo/pull/42',
   channelId: 'C123',
-  threadId: '111.222',
+  threadTs: '111.222',
   followUpPrompt: 'Address the review feedback on owner/repo#42.',
 };
 
@@ -105,35 +118,73 @@ function makePayload(actionId: string): SlackInteractivePayload {
   };
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
-
-  slackUserMappingsFindFirstMock.mockResolvedValue({ userId: 'user-1' });
-  claimPendingMock.mockResolvedValue(pendingAction);
-  dispatchFollowUpMock.mockResolvedValue({ outcome: 'queued', runId: 7 });
-  dbSelectMock.mockReturnValue({
-    from: () => ({
-      where: () => ({
-        limit: async () => [{ botAccessToken: 'xoxb-token', botUserId: 'B1' }],
-      }),
-    }),
-  });
-  updateMessageMock.mockResolvedValue(true);
-});
-
 describe('handleSlackPrReviewActionYes', () => {
-  it('claims the offer, dispatches the follow-up, and marks the message resolved', async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    slackUserMappingsFindFirstMock.mockResolvedValue({ userId: 'user-1' });
+    claimPendingMock.mockResolvedValue(pendingAction);
+    dbSelectMock.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            { botAccessToken: 'xoxb-token', botUserId: 'B1' },
+          ],
+        }),
+      }),
+    });
+    resolveRouteMock.mockResolvedValue({
+      kind: 'active',
+      activeRun: { id: 7, taskId: 'task-1', payload: {} },
+    });
+    dispatchFollowUpMock.mockImplementation(
+      async ({
+        route,
+        onActive,
+        onResume,
+      }: {
+        route: { kind: string; activeRun?: unknown; completedRun?: unknown };
+        onActive?: (run: unknown) => Promise<unknown>;
+        onResume?: (
+          run: unknown,
+        ) => Promise<{ handled: boolean; value?: unknown }>;
+      }) => {
+        if (route.kind === 'active' && onActive) {
+          return { kind: 'active', value: await onActive(route.activeRun) };
+        }
+
+        if (route.kind === 'resume' && onResume) {
+          const result = await onResume(route.completedRun);
+
+          return result.handled
+            ? { kind: 'resume', value: result.value }
+            : { kind: 'fresh' };
+        }
+
+        return { kind: 'fresh' };
+      },
+    );
+    resolveSlackReactionNamesMock.mockResolvedValue({
+      ackEmoji: 'eyes',
+      completionEmoji: 'white_check_mark',
+    });
+    processSnapshotResumeMock.mockResolvedValue(true);
+    updateMessageMock.mockResolvedValue(true);
+  });
+
+  it('queues the follow-up prompt into the active run and marks the message resolved', async () => {
     await handleSlackPrReviewActionYes(makePayload('pr_review_action_yes'));
 
     expect(claimPendingMock).toHaveBeenCalledWith('nonce-1');
-    expect(enableAutoHandleMock).not.toHaveBeenCalled();
-    expect(dispatchFollowUpMock).toHaveBeenCalledWith({
-      provider: 'slack',
-      channelId: 'C123',
-      threadId: '111.222',
-      followUpPrompt: pendingAction.followUpPrompt,
-      actingUserId: 'user-1',
-      providerUserId: 'U1',
+    expect(setTrustedRunActingUserMock).toHaveBeenCalledWith({
+      runId: 7,
+      userId: 'user-1',
+    });
+    expect(queueSlackMessageMock).toHaveBeenCalledWith(7, {
+      text: pendingAction.followUpPrompt,
+      user: 'U1',
+      userId: 'user-1',
+      ts: expect.any(String),
     });
     expect(updateMessageMock).toHaveBeenCalledWith({
       channel: 'C123',
@@ -156,12 +207,39 @@ describe('handleSlackPrReviewActionYes', () => {
     expect(postSlackInteractiveResponseMock).not.toHaveBeenCalled();
   });
 
+  it('resumes a slept task from its snapshot with a synthetic thread event', async () => {
+    resolveRouteMock.mockResolvedValue({
+      kind: 'resume',
+      completedRun: { id: 9, snapshotId: 'snap-1' },
+    });
+
+    await handleSlackPrReviewActionYes(makePayload('pr_review_action_yes'));
+
+    expect(processSnapshotResumeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '111.222',
+        text: pendingAction.followUpPrompt,
+        user: 'U1',
+      }),
+      expect.anything(),
+      { id: 9, snapshotId: 'snap-1' },
+      '111.222',
+      'user-1',
+      'eyes',
+      'white_check_mark',
+      'B1',
+    );
+    expect(queueSlackMessageMock).not.toHaveBeenCalled();
+    expect(updateMessageMock).toHaveBeenCalled();
+  });
+
   it('reports an expired offer without dispatching anything', async () => {
     claimPendingMock.mockResolvedValue(null);
 
     await handleSlackPrReviewActionYes(makePayload('pr_review_action_yes'));
 
-    expect(dispatchFollowUpMock).not.toHaveBeenCalled();
+    expect(queueSlackMessageMock).not.toHaveBeenCalled();
     expect(updateMessageMock).not.toHaveBeenCalled();
     expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
       'https://hooks.slack.test/response',
@@ -185,8 +263,8 @@ describe('handleSlackPrReviewActionYes', () => {
     );
   });
 
-  it('reports a dead task when the dispatch is unavailable', async () => {
-    dispatchFollowUpMock.mockResolvedValue({ outcome: 'unavailable' });
+  it('reports a dead task when neither an active run nor a snapshot exists', async () => {
+    resolveRouteMock.mockResolvedValue({ kind: 'fresh' });
 
     await handleSlackPrReviewActionYes(makePayload('pr_review_action_yes'));
 
@@ -200,61 +278,33 @@ describe('handleSlackPrReviewActionYes', () => {
   });
 });
 
-describe('handleSlackPrReviewActionAuto', () => {
-  it('enables auto-handling, dispatches, and notes the standing behavior', async () => {
-    await handleSlackPrReviewActionAuto(makePayload('pr_review_action_auto'));
-
-    expect(enableAutoHandleMock).toHaveBeenCalledWith({
-      taskId: 'task-1',
-      repository: 'owner/repo',
-      prNumber: 42,
-      userId: 'user-1',
-    });
-    expect(dispatchFollowUpMock).toHaveBeenCalled();
-    expect(updateMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: {
-          blocks: expect.arrayContaining([
-            expect.objectContaining({
-              elements: [
-                expect.objectContaining({
-                  text: expect.stringContaining('Auto-handling enabled'),
-                }),
-              ],
-            }),
-          ]),
-        },
-      }),
-    );
-  });
-
-  it('keeps auto-handling enabled even when the current dispatch is unavailable', async () => {
-    dispatchFollowUpMock.mockResolvedValue({ outcome: 'unavailable' });
-
-    await handleSlackPrReviewActionAuto(makePayload('pr_review_action_auto'));
-
-    expect(enableAutoHandleMock).toHaveBeenCalled();
-    expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
-      'https://hooks.slack.test/response',
-      expect.objectContaining({
-        text: expect.stringContaining('Auto-handling is enabled'),
-      }),
-    );
-    // The message still resolves to the auto-handling note.
-    expect(updateMessageMock).toHaveBeenCalled();
-  });
-});
-
 describe('handleSlackPrReviewActionDismiss', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    claimPendingMock.mockResolvedValue(pendingAction);
+    dbSelectMock.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            { botAccessToken: 'xoxb-token', botUserId: 'B1' },
+          ],
+        }),
+      }),
+    });
+    updateMessageMock.mockResolvedValue(true);
+  });
+
   it('claims the offer and notes the dismissal on the message', async () => {
     await handleSlackPrReviewActionDismiss(
       makePayload('pr_review_action_dismiss'),
     );
 
     expect(claimPendingMock).toHaveBeenCalledWith('nonce-1');
-    expect(dispatchFollowUpMock).not.toHaveBeenCalled();
     expect(updateMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        channel: 'C123',
+        ts: '333.444',
         message: {
           blocks: expect.arrayContaining([
             expect.objectContaining({

@@ -2,37 +2,28 @@ import {
   and,
   db,
   eq,
+  setTrustedRunActingUser,
   slackInstallations,
   slackUserMappings,
 } from '@roomote/db/server';
 import {
-  claimPendingPrReviewAction,
-  dispatchPrReviewFollowUp,
-  enableAutoHandlePrReviewFeedback,
-  type PendingPrReviewAction,
-} from '@roomote/sdk/server';
-import {
+  claimPendingSlackPrReviewAction,
   parseSlackPrReviewActionButtonValue,
+  type PendingSlackPrReviewAction,
   postSlackInteractiveResponse,
+  queueSlackMessage,
+  resolveSlackReactionNames,
+  type SlackEvent,
   type SlackInteractivePayload,
   SlackNotifier,
 } from '@roomote/slack';
 
 import { apiLogger } from '../../../logging.js';
-
-async function getSlackTeamNotifier(teamId: string) {
-  const [slackInstallation] = await db
-    .select()
-    .from(slackInstallations)
-    .where(eq(slackInstallations.teamId, teamId))
-    .limit(1);
-
-  if (!slackInstallation) {
-    throw new Error('Slack installation not found');
-  }
-
-  return { slack: new SlackNotifier(slackInstallation.botAccessToken) };
-}
+import { processSnapshotResume } from '../events/snapshot-resume.js';
+import {
+  dispatchSlackThreadFollowUp,
+  resolveSlackThreadFollowUpRoute,
+} from '../events/thread-follow-up-dispatch.js';
 
 const QUESTION_BLOCK_ID = 'pr_review_action_question';
 const ACTIONS_BLOCK_ID = 'pr_review_action';
@@ -77,15 +68,15 @@ function buildResolvedMessageBlocks(
 }
 
 async function updateNotificationMessage({
+  slack,
   payload,
   resolution,
 }: {
+  slack: SlackNotifier;
   payload: SlackInteractivePayload;
   resolution: string;
 }): Promise<void> {
   try {
-    const { slack } = await getSlackTeamNotifier(payload.team.id);
-
     await slack.updateMessage({
       channel: payload.channel.id,
       ts: payload.message.ts,
@@ -100,6 +91,23 @@ async function updateNotificationMessage({
       }`,
     );
   }
+}
+
+async function getSlackTeamContext(teamId: string) {
+  const [slackInstallation] = await db
+    .select()
+    .from(slackInstallations)
+    .where(eq(slackInstallations.teamId, teamId))
+    .limit(1);
+
+  if (!slackInstallation) {
+    throw new Error('Slack installation not found');
+  }
+
+  return {
+    slack: new SlackNotifier(slackInstallation.botAccessToken),
+    slackInstallation,
+  };
 }
 
 function parseNonce(payload: SlackInteractivePayload): string | null {
@@ -123,9 +131,25 @@ async function respondEphemeral(
   });
 }
 
-async function resolveLinkedUserId(
+/**
+ * "Yes, take a look" on a PR review-feedback notification: claim the pending
+ * offer and dispatch its follow-up prompt into the owning task's thread —
+ * queued into the active run when one is live, or resuming the task from its
+ * snapshot when the run already exited. This deliberately rides the same
+ * follow-up routing as a typed thread reply so waking a slept task works.
+ */
+export async function handleSlackPrReviewActionYes(
   payload: SlackInteractivePayload,
-): Promise<string | null> {
+): Promise<void> {
+  const nonce = parseNonce(payload);
+
+  if (!nonce) {
+    apiLogger.warn(
+      '[SlackPrReviewAction] Yes click carried no parseable nonce',
+    );
+    return;
+  }
+
   const userMapping = await db.query.slackUserMappings.findFirst({
     where: and(
       eq(slackUserMappings.slackUserId, payload.user.id),
@@ -133,26 +157,7 @@ async function resolveLinkedUserId(
     ),
   });
 
-  return userMapping?.userId ?? null;
-}
-
-async function handleAcceptedPrReviewAction({
-  payload,
-  enableAutoHandle,
-}: {
-  payload: SlackInteractivePayload;
-  enableAutoHandle: boolean;
-}): Promise<void> {
-  const nonce = parseNonce(payload);
-
-  if (!nonce) {
-    apiLogger.warn('[SlackPrReviewAction] Click carried no parseable nonce');
-    return;
-  }
-
-  const userId = await resolveLinkedUserId(payload);
-
-  if (!userId) {
+  if (!userMapping) {
     // Not claimed: a teammate with a linked account can still accept.
     await respondEphemeral(
       payload,
@@ -161,7 +166,7 @@ async function handleAcceptedPrReviewAction({
     return;
   }
 
-  const pending = await claimPendingPrReviewAction(nonce);
+  const pending = await claimPendingSlackPrReviewAction(nonce);
 
   if (!pending) {
     await respondEphemeral(
@@ -172,12 +177,7 @@ async function handleAcceptedPrReviewAction({
   }
 
   try {
-    await dispatchAcceptedPrReviewAction({
-      payload,
-      pending,
-      userId,
-      enableAutoHandle,
-    });
+    await dispatchPrReviewFollowUp({ payload, pending, userMapping });
   } catch (error) {
     apiLogger.error(
       `[SlackPrReviewAction] Failed to dispatch follow-up for ${pending.repository}#${pending.prNumber}: ${
@@ -191,81 +191,88 @@ async function handleAcceptedPrReviewAction({
   }
 }
 
-async function dispatchAcceptedPrReviewAction({
+async function dispatchPrReviewFollowUp({
   payload,
   pending,
-  userId,
-  enableAutoHandle,
+  userMapping,
 }: {
   payload: SlackInteractivePayload;
-  pending: PendingPrReviewAction;
-  userId: string;
-  enableAutoHandle: boolean;
+  pending: PendingSlackPrReviewAction;
+  userMapping: { userId: string };
 }): Promise<void> {
-  if (enableAutoHandle) {
-    await enableAutoHandlePrReviewFeedback({
-      taskId: pending.taskId,
-      repository: pending.repository,
-      prNumber: pending.prNumber,
-      userId,
-    });
-  }
-
-  const dispatched = await dispatchPrReviewFollowUp({
-    provider: 'slack',
-    channelId: pending.channelId,
-    threadId: pending.threadId,
-    followUpPrompt: pending.followUpPrompt,
-    actingUserId: userId,
-    providerUserId: payload.user.id,
+  const { slack, slackInstallation } = await getSlackTeamContext(
+    payload.team.id,
+  );
+  const route = await resolveSlackThreadFollowUpRoute({
+    threadId: pending.threadTs,
   });
 
-  if (dispatched.outcome === 'unavailable') {
+  const result = await dispatchSlackThreadFollowUp({
+    route,
+    slack,
+    channel: pending.channelId,
+    threadId: pending.threadTs,
+    onActive: async (activeRun) => {
+      await setTrustedRunActingUser({
+        runId: activeRun.id,
+        userId: userMapping.userId,
+      });
+      await queueSlackMessage(activeRun.id, {
+        text: pending.followUpPrompt,
+        user: payload.user.id,
+        userId: userMapping.userId,
+        ts: new Date().toISOString(),
+      });
+
+      return true;
+    },
+    onResume: async (completedRun) => {
+      const { ackEmoji, completionEmoji } = await resolveSlackReactionNames();
+      // The resume path expects the follow-up as a thread message event;
+      // synthesize one carrying the prepared follow-up prompt so the resumed
+      // task starts from the same text a typed reply would have delivered.
+      const syntheticEvent: SlackEvent = {
+        type: 'message',
+        channel: pending.channelId,
+        user: payload.user.id,
+        text: pending.followUpPrompt,
+        ts: (Date.now() / 1000).toFixed(6),
+        thread_ts: pending.threadTs,
+      };
+
+      const handled = await processSnapshotResume(
+        syntheticEvent,
+        slack,
+        completedRun,
+        pending.threadTs,
+        userMapping.userId,
+        ackEmoji,
+        completionEmoji,
+        slackInstallation.botUserId,
+      );
+
+      return handled ? { handled: true, value: true } : { handled: false };
+    },
+  });
+
+  if (result.kind === 'fresh' || result.value !== true) {
     await respondEphemeral(
       payload,
-      enableAutoHandle
-        ? 'Auto-handling is enabled for future feedback, but this task can no longer be resumed for the current feedback. Reply in the thread to start fresh.'
-        : 'This task can no longer be resumed. Reply in the thread to start fresh.',
+      'This task can no longer be resumed. Reply in the thread to start fresh.',
     );
-
-    if (!enableAutoHandle) {
-      return;
-    }
+    return;
   }
 
-  const resolution = enableAutoHandle
-    ? `:zap: Auto-handling enabled by <@${payload.user.id}> — future review feedback on this PR lands in this task automatically.`
-    : `:white_check_mark: On it — requested by <@${payload.user.id}>.`;
-
-  await updateNotificationMessage({ payload, resolution });
+  await updateNotificationMessage({
+    slack,
+    payload,
+    resolution: `:white_check_mark: On it — requested by <@${payload.user.id}>.`,
+  });
 }
 
 /**
- * "Yes, take a look": claim the pending offer and dispatch its follow-up
- * prompt into the owning task's thread — queued into the active run when one
- * is live, or resuming the task from its snapshot when the run already
- * exited.
- */
-export async function handleSlackPrReviewActionYes(
-  payload: SlackInteractivePayload,
-): Promise<void> {
-  await handleAcceptedPrReviewAction({ payload, enableAutoHandle: false });
-}
-
-/**
- * "Always auto-handle": dispatch the current feedback like Yes and mark the
- * task's PR so future review feedback is dispatched automatically without
- * asking.
- */
-export async function handleSlackPrReviewActionAuto(
-  payload: SlackInteractivePayload,
-): Promise<void> {
-  await handleAcceptedPrReviewAction({ payload, enableAutoHandle: true });
-}
-
-/**
- * "Dismiss": claim the pending offer so the buttons are dead for everyone and
- * note the dismissal on the message.
+ * "Dismiss" on a PR review-feedback notification: claim the pending offer so
+ * the buttons are dead for everyone and note the dismissal on the message.
  */
 export async function handleSlackPrReviewActionDismiss(
   payload: SlackInteractivePayload,
@@ -279,7 +286,7 @@ export async function handleSlackPrReviewActionDismiss(
     return;
   }
 
-  const pending = await claimPendingPrReviewAction(nonce);
+  const pending = await claimPendingSlackPrReviewAction(nonce);
 
   if (!pending) {
     await respondEphemeral(
@@ -289,7 +296,10 @@ export async function handleSlackPrReviewActionDismiss(
     return;
   }
 
+  const { slack } = await getSlackTeamContext(payload.team.id);
+
   await updateNotificationMessage({
+    slack,
     payload,
     resolution: `Dismissed by <@${payload.user.id}>.`,
   });

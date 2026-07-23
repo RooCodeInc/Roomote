@@ -1,7 +1,7 @@
 import {
   findActiveCommunicationTaskRun,
   findCompletedCommunicationTaskRunWithSnapshot,
-} from '@roomote/sdk/server/communication';
+} from '../tasks/communication-task-run-lookup.js';
 import type { TelegramConversationRef } from './types.js';
 
 export async function findActiveTelegramTaskRun(

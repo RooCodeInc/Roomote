@@ -20,10 +20,6 @@
       "import": "./src/server/index.ts",
       "require": "./src/server/index.ts"
     },
-    "./server/communication": {
-      "import": "./src/server/lib/communication/index.ts",
-      "require": "./src/server/lib/communication/index.ts"
-    },
     "./server/slack-conversation-log": {
       "import": "./src/server/lib/slack-conversation-log.ts",
       "require": "./src/server/lib/slack-conversation-log.ts"

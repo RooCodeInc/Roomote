@@ -12,7 +12,7 @@ import {
 import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
-} from './communication-out-of-band-context';
+} from './communication-out-of-band-context.js';
 
 type CompletedCommunicationTaskRun = {
   id: number;
