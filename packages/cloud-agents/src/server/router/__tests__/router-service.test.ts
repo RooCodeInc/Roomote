@@ -106,32 +106,6 @@ describe('routeTask', () => {
     });
   });
 
-  it('uses the R_ROUTER_MODEL override and never a hardcoded model id', async () => {
-    vi.stubEnv('R_ROUTER_MODEL', 'openrouter/google/gemini-3.6-flash');
-
-    try {
-      mockGenerateTrackedNonTaskObject.mockResolvedValue({
-        object: {
-          workspaceValue: 'Full Stack',
-          reasoning: 'Full Stack is the best fit.',
-          confidence: 0.9,
-          needsExternalLookup: false,
-          externalReference: null,
-        },
-      });
-
-      await routeTask(createContext());
-
-      expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: 'openrouter/google/gemini-3.6-flash',
-        }),
-      );
-    } finally {
-      vi.unstubAllEnvs();
-    }
-  });
-
   it('fetches pasted GitHub issue context when the precheck asks for it', async () => {
     mockCallRouterMcpTool.mockResolvedValue({
       title: 'Fix the dashboard refresh failure',

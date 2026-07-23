@@ -19,11 +19,7 @@ import type {
   RoutingTaskModelSelection,
   WorkspaceResponse,
 } from './types';
-import {
-  resolveRoutingModel,
-  R_SMALL_MODEL_LABEL,
-  PLATFORM_WORKSPACE_VALUE,
-} from './types';
+import { R_SMALL_MODEL_LABEL, PLATFORM_WORKSPACE_VALUE } from './types';
 import { gatherContextFromConfiguredMcps } from './mcp-gather';
 import { callRouterMcpTool } from './mcp-tool-call';
 import { FOLLOWUP_PROMPT } from './prompts/followup-prompt';
@@ -335,8 +331,7 @@ async function runRoutingDecision(
     forceDisablePlatformWorkspace?: boolean;
   },
 ): Promise<InternalRoutingResult> {
-  const routingModel = resolveRoutingModel(context.routingModel);
-  const routingModelLabel = routingModel ?? R_SMALL_MODEL_LABEL;
+  const routingModel = context.routingModel?.trim() || R_SMALL_MODEL_LABEL;
 
   try {
     const promptContext = context;
@@ -350,7 +345,7 @@ async function runRoutingDecision(
 
     const responseResult = await gatherContextFromConfiguredMcps(
       promptContext,
-      routingModel,
+      context.routingModel?.trim(),
       routingPrompt,
       contextMessages,
       workspaceResponseSchema,
@@ -369,7 +364,7 @@ async function runRoutingDecision(
             reason: built.fallbackReason,
           },
           phase: responseResult.phase ?? 'fallback',
-          model: routingModelLabel,
+          model: routingModel,
           toolsUsed: responseResult.toolsUsed,
           needsExternalLookup: responseResult.needsExternalLookup,
           confidence: built.confidence,
@@ -384,7 +379,7 @@ async function runRoutingDecision(
             reasoning: built.reasoning,
           },
           phase: responseResult.phase ?? 'direct',
-          model: routingModelLabel,
+          model: routingModel,
           toolsUsed: responseResult.toolsUsed,
           needsExternalLookup: responseResult.needsExternalLookup,
           confidence: built.confidence,
@@ -398,7 +393,7 @@ async function runRoutingDecision(
           result: built.result,
         },
         phase: responseResult.phase ?? 'direct',
-        model: routingModelLabel,
+        model: routingModel,
         toolsUsed: responseResult.toolsUsed,
         needsExternalLookup: responseResult.needsExternalLookup,
         confidence: built.confidence,
@@ -415,7 +410,7 @@ async function runRoutingDecision(
           error instanceof Error ? error.message : 'Unknown routing error',
       },
       phase: 'fallback',
-      model: routingModelLabel,
+      model: routingModel,
       toolsUsed: [],
       needsExternalLookup: null,
       confidence: null,
@@ -587,8 +582,7 @@ export async function routeTask(
 export async function routeGitHubTask(
   context: RoutingContext,
 ): Promise<GitHubRoutingDecision> {
-  const routingModel = resolveRoutingModel(context.routingModel);
-  const routingModelLabel = routingModel ?? R_SMALL_MODEL_LABEL;
+  const routingModel = context.routingModel?.trim() || R_SMALL_MODEL_LABEL;
 
   if (context.source.type !== 'github') {
     return {
@@ -606,7 +600,7 @@ export async function routeGitHubTask(
     const { object: response } = await generateTrackedNonTaskObject({
       userId: context.routingActor?.userId,
       surface: NON_TASK_INFERENCE_SURFACES.routerGitHubRouting,
-      model: routingModel,
+      model: context.routingModel?.trim(),
       schema: gitHubRoutingResponseSchema,
       system: buildGitHubRoutingPrompt(),
       prompt: JSON.stringify(buildContextMessages(context), null, 2),
@@ -629,7 +623,7 @@ export async function routeGitHubTask(
     console.info(
       formatSingleLineLog('[LLM Router] Routed GitHub task', {
         sourceType: context.source.type,
-        model: routingModelLabel,
+        model: routingModel,
         phase: 'direct',
         toolsUsed: [],
         needsExternalLookup: false,
@@ -651,7 +645,7 @@ export async function routeGitHubTask(
     console.warn(
       formatSingleLineLog('[LLM Router] GitHub routing fallback', {
         sourceType: context.source.type,
-        model: routingModelLabel,
+        model: routingModel,
         phase: 'fallback',
         toolsUsed: [],
         needsExternalLookup: null,

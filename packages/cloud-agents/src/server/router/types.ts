@@ -20,21 +20,6 @@ export const LINEAR_AUTO_CONFIRM_TIMEOUT_MS = 120_000;
 export const R_SMALL_MODEL_LABEL = 'roomote-small-model';
 
 /**
- * Model for workspace-routing inference: an explicit context.routingModel
- * wins, then the R_ROUTER_MODEL deployment override. No model id is ever
- * hardcoded here — the correct id depends on the deployment's provider
- * configuration (e.g. openrouter/google/... vs google/...), so returning
- * undefined defers to the deployment small-model resolution.
- */
-export function resolveRoutingModel(
-  explicitModel?: string,
-): string | undefined {
-  return (
-    explicitModel?.trim() || process.env.R_ROUTER_MODEL?.trim() || undefined
-  );
-}
-
-/**
  * Maximum length for task descriptions to prevent excessive token usage.
  */
 export const MAX_TASK_DESCRIPTION_LENGTH = 2000;
