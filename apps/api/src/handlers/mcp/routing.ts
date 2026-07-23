@@ -27,5 +27,6 @@ mcpRouting.route(
   '/github',
   createGithubMcp({
     allowAuthTokens: true,
+    allowedToolNames: getAllowedRouterMcpToolNames('github'),
   }),
 );

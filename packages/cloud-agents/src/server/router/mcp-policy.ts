@@ -25,6 +25,7 @@ type RouterMcpToolGroup =
   | 'linear-issue-context'
   | 'linear-comment-context'
   | 'github-pr-context'
+  | 'github-issue-context'
   | 'github-repo-context';
 
 interface RouterMcpUpstreamConstraints {
@@ -55,6 +56,7 @@ const ROUTER_MCP_TOOL_GROUPS: Record<RouterMcpToolGroup, readonly string[]> = {
     'list_pull_requests',
     'search_pull_requests',
   ],
+  'github-issue-context': ['issue_read', 'get_issue'],
   'github-repo-context': [
     'get_file_contents',
     'search_code',
@@ -92,6 +94,8 @@ const ROUTER_GITHUB_ALLOWED_TOOLS = [
   'pull_request_read',
   'list_pull_requests',
   'search_pull_requests',
+  'issue_read',
+  'get_issue',
   'get_file_contents',
   'search_code',
   'get_commit',
@@ -123,10 +127,10 @@ const ROUTER_MCP_SERVER_POLICIES: Record<
     purpose: 'github-pr-context',
     exposureMode: 'allowlist',
     allowedTools: ROUTER_GITHUB_ALLOWED_TOOLS,
-    requiredToolGroups: ['github-pr-context'],
+    requiredToolGroups: ['github-pr-context', 'github-issue-context'],
     upstreamConstraints: {
       readonly: true,
-      toolsets: ['repos', 'pull_requests'],
+      toolsets: ['repos', 'pull_requests', 'issues'],
     },
   },
 };
