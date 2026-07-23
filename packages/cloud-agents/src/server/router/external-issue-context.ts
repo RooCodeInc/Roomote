@@ -162,9 +162,11 @@ function serializeExternalContext(value: unknown): string {
 }
 
 async function withExternalLookupTimeout<T>(
-  operation: Promise<T>,
+  operation: () => Promise<T>,
   deadline: number,
 ): Promise<T | null> {
+  // Checked before invoking so an exhausted deadline never dispatches
+  // another MCP call whose result nothing will await.
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
     return null;
@@ -174,7 +176,7 @@ async function withExternalLookupTimeout<T>(
 
   try {
     return await Promise.race([
-      operation,
+      operation(),
       new Promise<null>((resolve) => {
         timeout = setTimeout(resolve, remainingMs, null);
       }),
@@ -195,12 +197,13 @@ async function fetchExternalIssueContext(
 
     for (const attempt of reference.fetchAttempts) {
       const result = await withExternalLookupTimeout(
-        callRouterMcpTool({
-          context,
-          serverId: attempt.serverId,
-          toolName: attempt.toolName,
-          args: attempt.args,
-        }),
+        () =>
+          callRouterMcpTool({
+            context,
+            serverId: attempt.serverId,
+            toolName: attempt.toolName,
+            args: attempt.args,
+          }),
         deadline,
       );
 

@@ -100,6 +100,25 @@ describe('gatherExternalIssueContext', () => {
     expect(result).toEqual({ contextMessages: [], toolsUsed: [] });
   });
 
+  it('shares one lookup deadline across fetch attempts instead of extending it', async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.mocked(callRouterMcpTool).mockReturnValue(new Promise(() => {}));
+
+      const pending = gatherExternalIssueContext(
+        createContext('Investigate https://github.com/acme/web/issues/42'),
+      );
+
+      await vi.advanceTimersByTimeAsync(8_000);
+
+      expect(await pending).toEqual({ contextMessages: [], toolsUsed: [] });
+      expect(callRouterMcpTool).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('resolves a bare Linear identifier from the precheck', async () => {
     vi.mocked(callRouterMcpTool).mockResolvedValue({
       title: 'Fix OAuth callback',
@@ -124,10 +143,7 @@ describe('gatherExternalIssueContext', () => {
     vi.mocked(callRouterMcpTool).mockResolvedValue({ title: 'Some issue' });
 
     const result = await gatherExternalIssueContext(
-      createContextWithRepos('Check issue #234', [
-        'acme/web',
-        'acme/api',
-      ]),
+      createContextWithRepos('Check issue #234', ['acme/web', 'acme/api']),
       '#234',
     );
 
