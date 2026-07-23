@@ -841,6 +841,7 @@ describe('enqueueTask snapshot resume', () => {
           repo: 'acme/widgets',
           description: 'Do the thing',
           sourceControlProvider: 'ado',
+          sourceControlHost: 'dev.azure.com',
         },
       }),
       initiator: { kind: 'user', userId },
@@ -865,9 +866,16 @@ describe('enqueueTask snapshot resume', () => {
     );
 
     expect(
-      (resumeRun.payload as { sourceControlProvider?: string })
-        .sourceControlProvider,
+      (
+        resumeRun.payload as {
+          sourceControlProvider?: string;
+          sourceControlHost?: string;
+        }
+      ).sourceControlProvider,
     ).toBe('gitea');
+    expect(
+      (resumeRun.payload as { sourceControlHost?: string }).sourceControlHost,
+    ).toBeUndefined();
   });
 
   it('rejects a resume without a source run id', async () => {

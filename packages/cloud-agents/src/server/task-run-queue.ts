@@ -1917,7 +1917,9 @@ function inheritSnapshotResumeSourceControlStamps(
     sourceControlHost?: unknown;
   };
 
-  if (payload.sourceControlProvider === undefined) {
+  const inheritsProvider = payload.sourceControlProvider === undefined;
+
+  if (inheritsProvider) {
     const provider = sourceControlProviderSchema.safeParse(
       source.sourceControlProvider,
     );
@@ -1927,7 +1929,7 @@ function inheritSnapshotResumeSourceControlStamps(
     }
   }
 
-  if (payload.sourceControlHost === undefined) {
+  if (inheritsProvider && payload.sourceControlHost === undefined) {
     const host =
       typeof source.sourceControlHost === 'string'
         ? source.sourceControlHost.trim()
