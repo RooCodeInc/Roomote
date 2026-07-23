@@ -44,6 +44,7 @@ import {
   resumeCommunicationTaskFromSnapshot,
 } from '@roomote/sdk/server/communication';
 import { tryHandleDiscordRequestUserInputMessage } from './request-user-input.js';
+import { retireDiscordPrReviewOffersBestEffort } from './pr-review-action.js';
 import { promptDiscordAccountLink } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
 import {
@@ -617,6 +618,11 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         activeRun.id,
         messageWithOutOfBand,
       );
+      // A typed reply supersedes any pending PR review offers here.
+      retireDiscordPrReviewOffersBestEffort({
+        channelId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId ?? null,
+      });
       // Dedupe hit: nothing new will be delivered, so put claimed OOB
       // messages and undelivered thread claims back for a later real follow-up.
       if (!queued) {
@@ -717,6 +723,11 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       await markDiscordThreadHistoryDelivered({
         channelId: channel.channelId,
         messageIds: [queuedMessage.ts],
+      });
+      // A typed reply supersedes any pending PR review offers here.
+      retireDiscordPrReviewOffersBestEffort({
+        channelId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId ?? null,
       });
       return { ok: true, resumed: true, runId: resumed.id };
     } catch (error) {

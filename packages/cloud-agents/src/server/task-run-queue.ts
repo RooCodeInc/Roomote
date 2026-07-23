@@ -1917,7 +1917,9 @@ function inheritSnapshotResumeSourceControlStamps(
     sourceControlHost?: unknown;
   };
 
-  if (payload.sourceControlProvider === undefined) {
+  const inheritsProvider = payload.sourceControlProvider === undefined;
+
+  if (inheritsProvider) {
     const provider = sourceControlProviderSchema.safeParse(
       source.sourceControlProvider,
     );
@@ -1927,7 +1929,7 @@ function inheritSnapshotResumeSourceControlStamps(
     }
   }
 
-  if (payload.sourceControlHost === undefined) {
+  if (inheritsProvider && payload.sourceControlHost === undefined) {
     const host =
       typeof source.sourceControlHost === 'string'
         ? source.sourceControlHost.trim()
@@ -2012,12 +2014,17 @@ async function enqueueSnapshotResume(
   ) {
     const parentRun = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, parentRunId),
-      columns: { payloadKind: true, sourceRunId: true },
+      columns: { payloadKind: true, sourceRunId: true, payload: true },
     });
 
     if (!parentRun) {
       break;
     }
+
+    // Resume rows created before stamps were inherited may lack them even
+    // though an ancestor has them; pick up whatever is still missing while
+    // walking, nearest ancestor first.
+    inheritSnapshotResumeSourceControlStamps(task.payload, parentRun.payload);
 
     sourceTaskType = parentRun.payloadKind;
     parentRunId = parentRun.sourceRunId;

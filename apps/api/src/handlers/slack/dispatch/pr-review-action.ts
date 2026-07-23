@@ -12,6 +12,7 @@ import {
   type PendingPrReviewAction,
 } from '@roomote/sdk/server';
 import {
+  buildResolvedSlackPrReviewMessageBlocks,
   parseSlackPrReviewActionButtonValue,
   postSlackInteractiveResponse,
   type SlackInteractivePayload,
@@ -34,48 +35,6 @@ async function getSlackTeamNotifier(teamId: string) {
   return { slack: new SlackNotifier(slackInstallation.botAccessToken) };
 }
 
-const QUESTION_BLOCK_ID = 'pr_review_action_question';
-const ACTIONS_BLOCK_ID = 'pr_review_action';
-
-/**
- * Rewrites the posted notification once the offer is resolved: the question
- * and button blocks are replaced with a one-line resolution note while every
- * other block (summary, relocated footers) is preserved as-is.
- */
-function buildResolvedMessageBlocks(
-  originalBlocks: unknown[] | undefined,
-  resolution: string,
-): unknown[] {
-  const resolutionBlock = {
-    type: 'context',
-    elements: [{ type: 'mrkdwn', text: resolution }],
-  };
-
-  if (!originalBlocks || originalBlocks.length === 0) {
-    return [resolutionBlock];
-  }
-
-  const kept = originalBlocks.filter((block) => {
-    const blockId = (block as { block_id?: unknown }).block_id;
-
-    return blockId !== QUESTION_BLOCK_ID && blockId !== ACTIONS_BLOCK_ID;
-  });
-  const actionsIndex = originalBlocks.findIndex(
-    (block) => (block as { block_id?: unknown }).block_id === ACTIONS_BLOCK_ID,
-  );
-  // Insert the resolution where the buttons were; fall back to appending.
-  const removedBeforeActions = originalBlocks
-    .slice(0, actionsIndex < 0 ? 0 : actionsIndex)
-    .filter(
-      (block) =>
-        (block as { block_id?: unknown }).block_id === QUESTION_BLOCK_ID,
-    ).length;
-  const insertAt =
-    actionsIndex < 0 ? kept.length : actionsIndex - removedBeforeActions;
-
-  return [...kept.slice(0, insertAt), resolutionBlock, ...kept.slice(insertAt)];
-}
-
 async function updateNotificationMessage({
   payload,
   resolution,
@@ -90,7 +49,10 @@ async function updateNotificationMessage({
       channel: payload.channel.id,
       ts: payload.message.ts,
       message: {
-        blocks: buildResolvedMessageBlocks(payload.message.blocks, resolution),
+        blocks: buildResolvedSlackPrReviewMessageBlocks(
+          payload.message.blocks,
+          resolution,
+        ),
       },
     });
   } catch (error) {
@@ -224,7 +186,7 @@ async function dispatchAcceptedPrReviewAction({
     await respondEphemeral(
       payload,
       enableAutoHandle
-        ? "I'll take future feedback from here, but this task can no longer be resumed for the current one. Reply in the thread to start fresh."
+        ? "I'll resolve future feedback on this PR, but this task can no longer be resumed for the current feedback. Reply in the thread to start fresh."
         : 'This task can no longer be resumed. Reply in the thread to start fresh.',
     );
 
@@ -234,7 +196,7 @@ async function dispatchAcceptedPrReviewAction({
   }
 
   const resolution = enableAutoHandle
-    ? `Taking it from here — requested by <@${payload.user.id}>. Future review feedback on this PR gets handled in this task.`
+    ? `Resolving all issues — requested by <@${payload.user.id}>. Future review feedback on this PR gets resolved in this task automatically.`
     : `On it — requested by <@${payload.user.id}>.`;
 
   await updateNotificationMessage({ payload, resolution });

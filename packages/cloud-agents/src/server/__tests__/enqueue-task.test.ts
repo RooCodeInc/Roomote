@@ -728,6 +728,156 @@ describe('enqueueTask snapshot resume', () => {
     expect(runsForTask).toHaveLength(2);
   });
 
+  it('inherits source-control stamps from the source run payload', async () => {
+    const userId = await createUser();
+
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'roomote/Test ADO/Test ADO',
+          description: 'Do the thing',
+          sourceControlProvider: 'ado',
+          sourceControlHost: 'dev.azure.com',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    // Resume entry points rebuild the payload from scratch and historically
+    // dropped the provider stamp, which made workspace prep resolve the
+    // repository against the GitHub default and fail.
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'roomote/Test ADO/Test ADO',
+        sourceSnapshotId: 'snap-ado-1',
+        sourceRunId: freshRun.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    const resumePayload = resumeRun.payload as {
+      sourceControlProvider?: string;
+      sourceControlHost?: string;
+    };
+
+    expect(resumePayload.sourceControlProvider).toBe('ado');
+    expect(resumePayload.sourceControlHost).toBe('dev.azure.com');
+  });
+
+  it('walks the resume chain for stamps when the source run predates inheritance', async () => {
+    const userId = await createUser();
+
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'roomote/Test ADO/Test ADO',
+          description: 'Do the thing',
+          sourceControlProvider: 'ado',
+          sourceControlHost: 'dev.azure.com',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    // Simulate a resume row created before stamps were inherited: it points
+    // at the stamped fresh run but its own rebuilt payload carries no stamps.
+    const [legacyResume] = await db
+      .insert(taskRuns)
+      .values({
+        taskId: freshRun.taskId,
+        kind: 'resume',
+        sourceRunId: freshRun.id,
+        payloadKind: TaskPayloadKind.SnapshotResume,
+        status: RunStatus.Completed,
+        sourceSnapshotId: 'snap-legacy-1',
+        payload: {
+          repo: 'roomote/Test ADO/Test ADO',
+          sourceSnapshotId: 'snap-legacy-1',
+          sourceRunId: freshRun.id,
+        },
+      })
+      .returning();
+
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'roomote/Test ADO/Test ADO',
+        sourceSnapshotId: 'snap-legacy-1',
+        sourceRunId: legacyResume!.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    const resumePayload = resumeRun.payload as {
+      sourceControlProvider?: string;
+      sourceControlHost?: string;
+    };
+
+    expect(resumePayload.sourceControlProvider).toBe('ado');
+    expect(resumePayload.sourceControlHost).toBe('dev.azure.com');
+  });
+
+  it('keeps an explicit source-control provider on the resume payload', async () => {
+    const userId = await createUser();
+
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          sourceControlProvider: 'ado',
+          sourceControlHost: 'dev.azure.com',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-explicit-1',
+        sourceRunId: freshRun.id,
+        sourceControlProvider: 'gitea',
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    expect(
+      (
+        resumeRun.payload as {
+          sourceControlProvider?: string;
+          sourceControlHost?: string;
+        }
+      ).sourceControlProvider,
+    ).toBe('gitea');
+    expect(
+      (resumeRun.payload as { sourceControlHost?: string }).sourceControlHost,
+    ).toBeUndefined();
+  });
+
   it('rejects a resume without a source run id', async () => {
     const resumeTask = {
       type: TaskPayloadKind.SnapshotResume,

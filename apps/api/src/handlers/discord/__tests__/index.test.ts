@@ -83,6 +83,7 @@ vi.mock('@roomote/sdk/server', () => ({
   restoreDiscordLinkCode: mocks.restoreLinkCode,
   upsertDiscordUserMapping: mocks.upsertUserMapping,
   upsertDiscordInstallation: mocks.upsertInstallation,
+  claimPendingPrReviewActionsForThread: vi.fn(async () => []),
 }));
 
 vi.mock('@roomote/sdk/server/communication', () => ({

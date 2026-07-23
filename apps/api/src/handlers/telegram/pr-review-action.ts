@@ -1,6 +1,7 @@
 import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
 import {
   claimPendingPrReviewAction,
+  claimPendingPrReviewActionsForThread,
   dispatchPrReviewFollowUp,
   enableAutoHandlePrReviewFeedback,
 } from '@roomote/sdk/server';
@@ -105,7 +106,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
           ...(messageId ? { replyToMessageId: messageId } : {}),
           text:
             choice === 'auto'
-              ? "I'll take future feedback from here, but this task can no longer be resumed for the current one. Reply here to start fresh."
+              ? "I'll resolve future feedback on this PR, but this task can no longer be resumed for the current feedback. Reply here to start fresh."
               : 'This task can no longer be resumed. Reply here to start fresh.',
         });
       }
@@ -117,7 +118,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
 
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: query.id,
-      text: choice === 'auto' ? 'Taking it from here.' : 'On it.',
+      text: choice === 'auto' ? 'Resolving all issues.' : 'On it.',
     });
 
     if (chatId && messageId) {
@@ -130,8 +131,8 @@ export async function handleTelegramPrReviewActionCallback(params: {
           replyToMessageId: messageId,
           text:
             choice === 'auto'
-              ? "I'll take it from here — future review feedback on this PR gets handled in this task. Looking at the current feedback now."
-              : 'On it — taking a look at the review feedback.',
+              ? "I'll resolve these and any future feedback on this PR automatically. Starting on the current feedback now."
+              : 'On it — resolving the review feedback.',
         });
       }
     }
@@ -146,4 +147,40 @@ export async function handleTelegramPrReviewActionCallback(params: {
       text: 'Failed to start the follow-up. Reply in this chat to ask again.',
     });
   }
+}
+
+/**
+ * Retires any pending PR review offers bound to a Telegram conversation
+ * because a typed reply superseded them. Claims atomically and strips the
+ * buttons from each posted offer. Fire-and-forget.
+ */
+export function retireTelegramPrReviewOffersBestEffort({
+  chatId,
+  threadId,
+}: {
+  chatId: string;
+  threadId: string | null;
+}): void {
+  void (async () => {
+    const claimed = await claimPendingPrReviewActionsForThread({
+      provider: 'telegram',
+      channelId: chatId,
+      threadId,
+    });
+
+    for (const pending of claimed) {
+      if (pending.messageId) {
+        await clearTelegramMessageButtonsBestEffort({
+          chatId,
+          messageId: pending.messageId,
+        });
+      }
+    }
+  })().catch((error: unknown) => {
+    apiLogger.warn(
+      `[telegram] Failed to retire PR review offers for chat ${chatId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 }

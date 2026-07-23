@@ -2,6 +2,24 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.19.0 (2026-07-23)
+
+This release makes pull-request review feedback clearer and safer to handle across chat, with more reliable task resumption.
+
+### Highlights
+
+- Resolve the feedback in a notification or have Roomote handle all future feedback on a pull request.
+- Replying in a review-feedback thread retires its pending buttons so stale actions cannot conflict with the conversation.
+- Resumed tasks retain their original source-control provider through older resume chains.
+
+### Minor changes
+
+- Make pull-request review feedback easier to handle by retiring stale offers after thread replies and providing clear actions to resolve selected or all issues.
+
+### Patch changes
+
+- Keep snapshot-resumed tasks connected to their original source-control provider when they resume through older task chains.
+
 ## 0.18.0 (2026-07-23)
 
 This release makes pull-request feedback easier to act on across chat, extends Gitea automations, and improves task routing and reliability.

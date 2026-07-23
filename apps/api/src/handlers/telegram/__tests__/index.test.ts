@@ -261,6 +261,10 @@ vi.mock('@roomote/sdk/server', () => ({
     /^link-[A-Za-z0-9_-]{16,}$/.test(value.trim()),
   findTelegramPrimaryChatId: vi.fn(async () => null),
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME: 'TELEGRAM_PRIMARY_CHAT_ID',
+  claimPendingPrReviewAction: vi.fn(async () => null),
+  claimPendingPrReviewActionsForThread: vi.fn(async () => []),
+  dispatchPrReviewFollowUp: vi.fn(),
+  enableAutoHandlePrReviewFeedback: vi.fn(),
 }));
 
 vi.mock('@roomote/communication/telegram-provider', () => ({

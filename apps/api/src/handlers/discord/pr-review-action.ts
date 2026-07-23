@@ -2,6 +2,7 @@ import type { DiscordInteraction } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import {
   claimPendingPrReviewAction,
+  claimPendingPrReviewActionsForThread,
   dispatchPrReviewFollowUp,
   enableAutoHandlePrReviewFeedback,
   findDiscordMappedUserId,
@@ -83,7 +84,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
     if (dispatched.outcome === 'unavailable') {
       await reply(
         input.choice === 'auto'
-          ? "I'll take future feedback from here, but this task can no longer be resumed for the current one. Reply here to start fresh."
+          ? "I'll resolve future feedback on this PR, but this task can no longer be resumed for the current feedback. Reply here to start fresh."
           : 'This task can no longer be resumed. Reply here to start fresh.',
       );
       return;
@@ -91,8 +92,8 @@ export async function handleDiscordPrReviewActionCallback(input: {
 
     await reply(
       input.choice === 'auto'
-        ? "I'll take it from here — future review feedback on this PR gets handled in this task. Looking at the current feedback now."
-        : 'On it — taking a look at the review feedback.',
+        ? "I'll resolve these and any future feedback on this PR automatically. Starting on the current feedback now."
+        : 'On it — resolving the review feedback.',
     );
   } catch (error) {
     apiLogger.error(
@@ -102,4 +103,32 @@ export async function handleDiscordPrReviewActionCallback(input: {
     );
     await reply('Failed to start the follow-up. Reply here to ask again.');
   }
+}
+
+/**
+ * Retires any pending PR review offers bound to a Discord conversation
+ * because a typed reply superseded them. Claims atomically so later clicks
+ * report "already handled"; the buttons stay visible but dead (Discord
+ * message component editing is not wired up yet). Fire-and-forget.
+ */
+export function retireDiscordPrReviewOffersBestEffort({
+  channelId,
+  threadId,
+}: {
+  channelId: string;
+  threadId: string | null;
+}): void {
+  void (async () => {
+    await claimPendingPrReviewActionsForThread({
+      provider: 'discord',
+      channelId,
+      threadId,
+    });
+  })().catch((error: unknown) => {
+    apiLogger.warn(
+      `[discord] Failed to retire PR review offers for channel ${channelId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 }

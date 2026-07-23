@@ -60,7 +60,11 @@ export function buildSlackPrReviewActionBlocks(params: {
         {
           type: 'button',
           action_id: PR_REVIEW_ACTION_YES_ACTION_ID,
-          text: { type: 'plain_text', text: 'Yes, take a look', emoji: true },
+          text: {
+            type: 'plain_text',
+            text: 'Resolve these issues',
+            emoji: true,
+          },
           style: 'primary',
           value,
         },
@@ -69,7 +73,7 @@ export function buildSlackPrReviewActionBlocks(params: {
           action_id: PR_REVIEW_ACTION_AUTO_ACTION_ID,
           text: {
             type: 'plain_text',
-            text: 'Take it from here',
+            text: 'Resolve all issues',
             emoji: true,
           },
           value,
@@ -83,4 +87,46 @@ export function buildSlackPrReviewActionBlocks(params: {
       ],
     },
   ] as SlackBlock[];
+}
+
+const QUESTION_BLOCK_ID = 'pr_review_action_question';
+const ACTIONS_BLOCK_ID = 'pr_review_action';
+
+/**
+ * Rewrites a posted PR review offer once it is resolved or superseded: the
+ * question and button blocks are replaced with a one-line resolution note
+ * while every other block (summary, relocated footers) is preserved as-is.
+ */
+export function buildResolvedSlackPrReviewMessageBlocks(
+  originalBlocks: unknown[] | undefined | null,
+  resolution: string,
+): unknown[] {
+  const resolutionBlock = {
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: resolution }],
+  };
+
+  if (!originalBlocks || originalBlocks.length === 0) {
+    return [resolutionBlock];
+  }
+
+  const kept = originalBlocks.filter((block) => {
+    const blockId = (block as { block_id?: unknown }).block_id;
+
+    return blockId !== QUESTION_BLOCK_ID && blockId !== ACTIONS_BLOCK_ID;
+  });
+  const actionsIndex = originalBlocks.findIndex(
+    (block) => (block as { block_id?: unknown }).block_id === ACTIONS_BLOCK_ID,
+  );
+  // Insert the resolution where the buttons were; fall back to appending.
+  const removedBeforeActions = originalBlocks
+    .slice(0, actionsIndex < 0 ? 0 : actionsIndex)
+    .filter(
+      (block) =>
+        (block as { block_id?: unknown }).block_id === QUESTION_BLOCK_ID,
+    ).length;
+  const insertAt =
+    actionsIndex < 0 ? kept.length : actionsIndex - removedBeforeActions;
+
+  return [...kept.slice(0, insertAt), resolutionBlock, ...kept.slice(insertAt)];
 }

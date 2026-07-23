@@ -33,6 +33,7 @@ import {
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
 
 import { apiLogger } from '../../../logging.js';
+import { retireSlackPrReviewOffersBestEffort } from '../pr-review-retire.js';
 import { syncActingUserForInboundMessage } from '../../tasks/acting-user-sync.js';
 import {
   buildResolvedCurrentMessageText,
@@ -527,6 +528,12 @@ export async function processActiveRunMessage(
         turnPolicy,
       });
       await clearLatestUserMessage(activeRun.id);
+      // A typed reply supersedes any pending PR review offers in the thread.
+      retireSlackPrReviewOffersBestEffort({
+        slack,
+        channelId: event.channel,
+        threadTs: threadId,
+      });
     } catch (error) {
       await deliveryTracker.rollback().catch(() => {});
       throw error;
