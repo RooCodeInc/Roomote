@@ -10,18 +10,20 @@ describe('isTelemetryEnvAllowedFor', () => {
         appEnv: 'production',
         releaseVersion: 'v1.2.3',
         forceTelemetry: undefined,
+        pingBaseUrl: undefined,
       }),
     ).toBe(true);
   });
 
-  it('allows preview releases', () => {
+  it('blocks preview releases', () => {
     expect(
       isTelemetryEnvAllowedFor({
         appEnv: 'preview',
         releaseVersion: 'v1.2.3',
         forceTelemetry: undefined,
+        pingBaseUrl: undefined,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('blocks development even with a release version', () => {
@@ -30,6 +32,7 @@ describe('isTelemetryEnvAllowedFor', () => {
         appEnv: 'development',
         releaseVersion: 'v1.2.3',
         forceTelemetry: undefined,
+        pingBaseUrl: undefined,
       }),
     ).toBe(false);
   });
@@ -40,6 +43,7 @@ describe('isTelemetryEnvAllowedFor', () => {
         appEnv: 'production',
         releaseVersion: undefined,
         forceTelemetry: undefined,
+        pingBaseUrl: undefined,
       }),
     ).toBe(false);
     expect(
@@ -47,20 +51,33 @@ describe('isTelemetryEnvAllowedFor', () => {
         appEnv: 'production',
         releaseVersion: '   ',
         forceTelemetry: undefined,
+        pingBaseUrl: undefined,
       }),
     ).toBe(false);
   });
 
-  it('force flag overrides every other gate', () => {
+  it('force flag enables telemetry when a Ping endpoint is explicitly configured', () => {
     for (const value of ['1', 'true', 'TRUE', 'yes']) {
       expect(
         isTelemetryEnvAllowedFor({
           appEnv: 'development',
           releaseVersion: undefined,
           forceTelemetry: value,
+          pingBaseUrl: 'https://ping-preview.roomote.dev',
         }),
       ).toBe(true);
     }
+  });
+
+  it('force flag does not use the default Ping endpoint outside production', () => {
+    expect(
+      isTelemetryEnvAllowedFor({
+        appEnv: 'preview',
+        releaseVersion: 'v1.2.3',
+        forceTelemetry: 'true',
+        pingBaseUrl: undefined,
+      }),
+    ).toBe(false);
   });
 
   it('non-truthy force values do not enable telemetry', () => {
@@ -70,6 +87,7 @@ describe('isTelemetryEnvAllowedFor', () => {
           appEnv: 'development',
           releaseVersion: undefined,
           forceTelemetry: value,
+          pingBaseUrl: 'https://ping-preview.roomote.dev',
         }),
       ).toBe(false);
     }
