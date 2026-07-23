@@ -19,7 +19,8 @@ const LOG_PREFIX = '[instancePing]';
  * 2. Anonymous instance stats report (covered by the admin opt-out).
  *
  * Sends nothing at all in environments where telemetry is not allowed
- * (development / no RELEASE_VERSION, unless force-enabled).
+ * (non-production / no RELEASE_VERSION, unless force-enabled with an explicit
+ * Ping endpoint).
  */
 export async function instancePingJob(): Promise<void> {
   if (!isTelemetryEnvAllowed()) {
