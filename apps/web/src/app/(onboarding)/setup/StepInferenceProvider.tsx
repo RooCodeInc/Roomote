@@ -301,7 +301,7 @@ export function StepInferenceProvider({
             setSelectedProvider(value as SetupModelProviderId)
           }
         >
-          <SelectTrigger aria-label="Model provider" className="min-w-40">
+          <SelectTrigger aria-label="Model provider" className="min-w-44">
             <SelectValue placeholder="Pick your provider" />
           </SelectTrigger>
           <SelectContent>
@@ -313,7 +313,7 @@ export function StepInferenceProvider({
           </SelectContent>
         </Select>
 
-        {isOAuthProvider ? null : (
+        {selectedProvider && !isOAuthProvider ? (
           <Input
             type={isEndpointProvider ? 'url' : undefined}
             inputMode={isEndpointProvider ? 'url' : undefined}
@@ -339,7 +339,7 @@ export function StepInferenceProvider({
             disabled={saveModelConfig.isPending || hasRuntimeProviderKey}
             data-1p-ignore
           />
-        )}
+        ) : null}
 
         {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
       </div>

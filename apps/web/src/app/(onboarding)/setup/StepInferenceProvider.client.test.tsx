@@ -240,6 +240,23 @@ describe('StepInferenceProvider configured API key display', () => {
     setupQueryMocks({ chatgptConnected: false });
   });
 
+  it('waits to show the API field until a provider is selected', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup()}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+    selectProvider('openrouter');
+
+    expect(
+      screen.getByPlaceholderText('API key for OpenRouter'),
+    ).toBeInTheDocument();
+  });
+
   it('shows a mask for a runtime-satisfied API key', () => {
     render(
       <StepInferenceProvider
