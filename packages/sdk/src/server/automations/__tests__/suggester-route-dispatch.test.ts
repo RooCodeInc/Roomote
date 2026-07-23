@@ -1,6 +1,11 @@
-const { mockEnqueueTask, mockRecordAutomationRunOutcome } = vi.hoisted(() => ({
+const {
+  mockEnqueueTask,
+  mockRecordAutomationRunOutcome,
+  mockPartitionActiveRepositoriesByProvider,
+} = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockRecordAutomationRunOutcome: vi.fn(),
+  mockPartitionActiveRepositoriesByProvider: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
@@ -16,6 +21,11 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
 vi.mock('@roomote/db/server', () => ({
   db: {},
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
+}));
+
+vi.mock('../github-deployment-scope', () => ({
+  partitionActiveRepositoriesByProvider:
+    mockPartitionActiveRepositoriesByProvider,
 }));
 
 import { buildSuggestedTasksPrompt } from '@roomote/cloud-agents/server';
@@ -73,6 +83,13 @@ describe('dispatchSuggestionRoutes', () => {
 
     mockEnqueueTask.mockResolvedValue({ id: 1, taskId: 'task-1' });
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
+    mockPartitionActiveRepositoriesByProvider.mockResolvedValue([
+      {
+        provider: 'github',
+        host: null,
+        repositoryFullNames: ['acme/api'],
+      },
+    ]);
   });
 
   afterEach(() => {
@@ -98,6 +115,7 @@ describe('dispatchSuggestionRoutes', () => {
         payload: {
           repo: ALL_REPOSITORIES,
           selectedRepositories: ['acme/api'],
+          sourceControlProvider: 'github',
           teamId: 'T-1',
           description: buildSuggestedTasksPrompt({
             repositoryFullNames: ['acme/api'],
@@ -141,6 +159,76 @@ describe('dispatchSuggestionRoutes', () => {
         at: new Date('2026-04-09T03:00:00.000Z'),
       }),
     );
+  });
+
+  it('launches one stamped scan per provider partition when the route scope spans providers', async () => {
+    const params = {
+      ...buildParams(),
+      repositoryFullNames: ['acme/api', 'acme/mobile'],
+      repositoryCoverage: [
+        { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-1' },
+        { repositoryFullName: 'acme/mobile', targetEnvironmentId: 'env-2' },
+      ],
+    };
+    mockPartitionActiveRepositoriesByProvider.mockResolvedValue([
+      {
+        provider: 'bitbucket',
+        host: 'bitbucket.org',
+        repositoryFullNames: ['acme/api'],
+      },
+      {
+        provider: 'ado',
+        host: 'dev.azure.com',
+        repositoryFullNames: ['acme/mobile'],
+      },
+    ]);
+    mockEnqueueTask
+      .mockResolvedValueOnce({ id: 1, taskId: 'task-bitbucket' })
+      .mockResolvedValueOnce({ id: 2, taskId: 'task-ado' });
+
+    const result = await dispatchSuggestionRoutes(params);
+
+    expect(result).toEqual({
+      successfulRoutes: 1,
+      firstLaunchedTaskId: 'task-bitbucket',
+      errors: [],
+    });
+    expect(mockPartitionActiveRepositoriesByProvider).toHaveBeenCalledWith([
+      'acme/api',
+      'acme/mobile',
+    ]);
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
+
+    const [firstCall, secondCall] = mockEnqueueTask.mock.calls.map(
+      ([input]) => input.task.payload,
+    );
+
+    expect(firstCall).toMatchObject({
+      selectedRepositories: ['acme/api'],
+      sourceControlProvider: 'bitbucket',
+      sourceControlHost: 'bitbucket.org',
+    });
+    expect(firstCall.description).toContain('acme/api');
+    expect(firstCall.description).not.toContain('acme/mobile');
+    expect(secondCall).toMatchObject({
+      selectedRepositories: ['acme/mobile'],
+      sourceControlProvider: 'ado',
+      sourceControlHost: 'dev.azure.com',
+    });
+    expect(secondCall.description).toContain('acme/mobile');
+  });
+
+  it('fails the route without enqueueing when no active repositories match the scope', async () => {
+    const params = buildParams();
+    mockPartitionActiveRepositoriesByProvider.mockResolvedValue([]);
+
+    const result = await dispatchSuggestionRoutes(params);
+
+    expect(result.successfulRoutes).toBe(0);
+    expect(result.errors).toEqual([
+      'C123SUGGEST: No active repositories matched the route repository scope.',
+    ]);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('fans out grouped routes and reports per-route failures without stopping later routes', async () => {

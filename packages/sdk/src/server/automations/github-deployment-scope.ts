@@ -10,7 +10,10 @@ import {
   repositories,
   sql,
 } from '@roomote/db/server';
-import type { SourceControlProvider } from '@roomote/types';
+import {
+  sourceControlProviders,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 export async function hasActiveGitHubInstallation(): Promise<boolean> {
   const [installation] = await db
@@ -67,6 +70,71 @@ export async function getActiveGitHubRepositoryFullNames(): Promise<string[]> {
 
   return [...new Set(rows.map((row) => row.fullName).filter(Boolean))].sort(
     (left, right) => left.localeCompare(right),
+  );
+}
+
+export type ActiveRepositoryProviderPartition = {
+  provider: SourceControlProvider;
+  host: string | null;
+  repositoryFullNames: string[];
+};
+
+/**
+ * Group active repositories into per-(provider, host) partitions so scan
+ * launchers can keep every launched run single-provider: a run's
+ * source-control token is minted for exactly one provider, and a scope that
+ * spans providers otherwise falls back to the GitHub default and fails token
+ * creation on the non-GitHub repositories. Partition order is deterministic:
+ * the provider enum order, then host lexicographically. Names that no longer
+ * match an active repository are dropped.
+ */
+export async function partitionActiveRepositoriesByProvider(
+  repositoryFullNames: string[],
+): Promise<ActiveRepositoryProviderPartition[]> {
+  if (repositoryFullNames.length === 0) {
+    return [];
+  }
+
+  const rows = await db
+    .select({
+      fullName: repositories.fullName,
+      sourceControlProvider: repositories.sourceControlProvider,
+      host: repositories.host,
+    })
+    .from(repositories)
+    .where(
+      and(
+        eq(repositories.isActive, true),
+        inArray(repositories.fullName, repositoryFullNames),
+      ),
+    )
+    .orderBy(repositories.fullName);
+
+  const partitions = new Map<string, ActiveRepositoryProviderPartition>();
+
+  for (const row of rows) {
+    if (!row.fullName) {
+      continue;
+    }
+
+    const partitionKey = `${row.sourceControlProvider}\u0000${row.host ?? ''}`;
+    const partition = partitions.get(partitionKey);
+
+    if (!partition) {
+      partitions.set(partitionKey, {
+        provider: row.sourceControlProvider as SourceControlProvider,
+        host: row.host,
+        repositoryFullNames: [row.fullName],
+      });
+    } else if (!partition.repositoryFullNames.includes(row.fullName)) {
+      partition.repositoryFullNames.push(row.fullName);
+    }
+  }
+
+  return sourceControlProviders.flatMap((provider) =>
+    [...partitions.values()]
+      .filter((partition) => partition.provider === provider)
+      .sort((left, right) => (left.host ?? '').localeCompare(right.host ?? '')),
   );
 }
 
