@@ -218,7 +218,7 @@ describe('handleSlackPrReviewActionAuto', () => {
             expect.objectContaining({
               elements: [
                 expect.objectContaining({
-                  text: expect.stringContaining('Auto-handling enabled'),
+                  text: expect.stringContaining('Taking it from here'),
                 }),
               ],
             }),
@@ -237,7 +237,7 @@ describe('handleSlackPrReviewActionAuto', () => {
     expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
       'https://hooks.slack.test/response',
       expect.objectContaining({
-        text: expect.stringContaining('Auto-handling is enabled'),
+        text: expect.stringContaining('take future feedback from here'),
       }),
     );
     // The message still resolves to the auto-handling note.
