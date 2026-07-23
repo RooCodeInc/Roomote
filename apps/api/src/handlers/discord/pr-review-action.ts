@@ -118,11 +118,13 @@ export function retireDiscordPrReviewOffersBestEffort({
   channelId: string;
   threadId: string | null;
 }): void {
-  void claimPendingPrReviewActionsForThread({
-    provider: 'discord',
-    channelId,
-    threadId,
-  }).catch((error: unknown) => {
+  void (async () => {
+    await claimPendingPrReviewActionsForThread({
+      provider: 'discord',
+      channelId,
+      threadId,
+    });
+  })().catch((error: unknown) => {
     apiLogger.warn(
       `[discord] Failed to retire PR review offers for channel ${channelId}: ${
         error instanceof Error ? error.message : String(error)

@@ -2012,12 +2012,17 @@ async function enqueueSnapshotResume(
   ) {
     const parentRun = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, parentRunId),
-      columns: { payloadKind: true, sourceRunId: true },
+      columns: { payloadKind: true, sourceRunId: true, payload: true },
     });
 
     if (!parentRun) {
       break;
     }
+
+    // Resume rows created before stamps were inherited may lack them even
+    // though an ancestor has them; pick up whatever is still missing while
+    // walking, nearest ancestor first.
+    inheritSnapshotResumeSourceControlStamps(task.payload, parentRun.payload);
 
     sourceTaskType = parentRun.payloadKind;
     parentRunId = parentRun.sourceRunId;
