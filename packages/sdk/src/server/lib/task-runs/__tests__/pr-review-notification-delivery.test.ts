@@ -433,7 +433,7 @@ describe('triagePrReviewActivity', () => {
     expect(system).toContain(
       'current pull request state includes "- Merge conflicts: yes"',
     );
-    expect(system).toContain('Do you want me to fix it?');
+    expect(system).toContain('Would you like me to resolve this?');
   });
 
   it('includes the latest Roomote review summary comment verbatim for self-review results', async () => {

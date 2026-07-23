@@ -438,8 +438,11 @@ offers to act go in "followUpQuestion" and "followUpPrompt" instead. Rules:
   headers
 - when the feedback contains findings, requested changes, failed CI, or
   merge conflicts that are not already handled, write "followUpQuestion" as
-  one short question asking whether the user wants the agent to work on them
-  (for example: Want me to take a look?), and write "followUpPrompt" as a
+  one short question asking whether the user wants the agent to resolve
+  them, phrased with the verb "resolve" so it matches the reply buttons
+  labeled "Resolve these issues" and "Resolve all issues" (for example:
+  Would you like me to resolve these issues? or, for a single finding,
+  Would you like me to resolve this issue?), and write "followUpPrompt" as a
   self-contained imperative instruction to the coding agent describing
   exactly what to investigate and address - name the feedback source, the
   affected pull request, any failed check, and include the relevant links
@@ -463,7 +466,7 @@ offers to act go in "followUpQuestion" and "followUpPrompt" instead. Rules:
   "looked good" review wrap-up. Prefer a summary shape like "I reviewed
   [owner/repo#42](pull request URL) on GitHub and the code looked good
   overall, but a test is failing in CI." with the offer to fix it carried by
-  "followUpQuestion" (for example: Do you want me to fix it?). Name the
+  "followUpQuestion" (for example: Would you like me to resolve this?). Name the
   failed check when one is listed. Pending checks may get a brief mention but
   must not overshadow a hard failure
 - when open feedback is already actionable (findings, requested changes, or
