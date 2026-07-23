@@ -66,48 +66,28 @@ export async function gatherContextFromConfiguredMcps<
     z.infer<TSubmitRoutingDecisionSchema> & LookupAwareRoutingResponse
   >
 > {
-  const generateRoutingDecision = async (messages: ModelMessage[]) => {
-    const { object } = await generateTrackedNonTaskObject({
-      userId: context.routingActor?.userId,
-      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
-      model: routingModel,
-      schema: submitRoutingDecisionSchema,
-      system: routingPrompt,
-      prompt: serializeContextMessages(messages),
-    });
-
-    return object as z.infer<TSubmitRoutingDecisionSchema> &
-      LookupAwareRoutingResponse;
-  };
-
-  const response = await generateRoutingDecision(contextMessages);
-  const needsExternalLookup =
-    typeof response.needsExternalLookup === 'boolean'
-      ? response.needsExternalLookup
-      : null;
-
-  if (needsExternalLookup !== true) {
-    return { response, toolsUsed: [], phase: 'direct', needsExternalLookup };
-  }
-
-  // The precheck asked for the linked issue, so the fetch deadline is only
-  // paid when it can change the decision. Fail-open: with nothing fetched,
-  // the precheck decision stands.
   const externalIssueContext = await gatherExternalIssueContext(context);
-
-  if (externalIssueContext.contextMessages.length === 0) {
-    return { response, toolsUsed: [], phase: 'direct', needsExternalLookup };
-  }
-
-  const informedResponse = await generateRoutingDecision([
-    ...contextMessages,
-    ...externalIssueContext.contextMessages,
-  ]);
+  const { object } = await generateTrackedNonTaskObject({
+    userId: context.routingActor?.userId,
+    surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+    model: routingModel,
+    schema: submitRoutingDecisionSchema,
+    system: routingPrompt,
+    prompt: serializeContextMessages([
+      ...contextMessages,
+      ...externalIssueContext.contextMessages,
+    ]),
+  });
+  const response = object as z.infer<TSubmitRoutingDecisionSchema> &
+    LookupAwareRoutingResponse;
 
   return {
-    response: informedResponse,
+    response,
     toolsUsed: externalIssueContext.toolsUsed,
-    phase: 'mcp',
-    needsExternalLookup: true,
+    phase: externalIssueContext.toolsUsed.length > 0 ? 'mcp' : 'direct',
+    needsExternalLookup:
+      typeof response.needsExternalLookup === 'boolean'
+        ? response.needsExternalLookup
+        : null,
   };
 }
