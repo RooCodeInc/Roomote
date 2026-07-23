@@ -6,7 +6,7 @@ import type {
 } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SetupModelStatus } from '@roomote/types';
+import type { SetupModelProviderId, SetupModelStatus } from '@roomote/types';
 import { toast } from 'sonner';
 
 const { mutateAsyncMock } = vi.hoisted(() => ({
@@ -100,15 +100,16 @@ vi.mock('@/components/system', () => ({
     onValueChange,
     children,
   }: {
-    value: string;
+    value?: string;
     onValueChange: (value: string) => void;
     children: ReactNode;
   }) => (
     <select
-      value={value}
+      value={value ?? ''}
       onChange={(event) => onValueChange(event.target.value)}
       aria-label="Model provider"
     >
+      <option value="">Pick your provider</option>
       {children}
     </select>
   ),
@@ -145,6 +146,28 @@ function chatgptProviderStatus(
     additionalEnvValues: {},
     runtimeApiKeySatisfied: false,
     savedApiKeySatisfied: connected,
+  };
+}
+
+function githubCopilotProviderStatus(
+  connected: boolean,
+): SetupModelStatus['providers'][number] {
+  return {
+    id: 'github-copilot',
+    label: 'GitHub Copilot',
+    envVarName: undefined,
+    defaultRoomoteModel: 'github-copilot/claude-sonnet-5',
+    authKind: 'oauth',
+    suggestedTaskModels: [],
+    additionalEnvFields: [],
+    additionalEnvValues: {},
+    runtimeApiKeySatisfied: false,
+    savedApiKeySatisfied: connected,
+    credentialHelp: {
+      text: 'Connect a GitHub account with an active Copilot plan.',
+      href: 'https://docs.github.com/en/copilot',
+      linkLabel: 'GitHub Copilot docs',
+    },
   };
 }
 
@@ -223,6 +246,12 @@ function setupQueryMocks(options: {
   } as unknown as ReturnType<typeof mockUseQuery>);
 }
 
+function selectProvider(provider: SetupModelProviderId) {
+  fireEvent.change(screen.getByRole('combobox', { name: 'Model provider' }), {
+    target: { value: provider },
+  });
+}
+
 describe('StepInferenceProvider configured API key display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -231,6 +260,23 @@ describe('StepInferenceProvider configured API key display', () => {
     } as unknown as ReturnType<typeof mockUseQueryClient>);
     setupMutationMock();
     setupQueryMocks({ chatgptConnected: false });
+  });
+
+  it('waits to show the API field until a provider is selected', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup()}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+    selectProvider('openrouter');
+
+    expect(
+      screen.getByPlaceholderText('API key for OpenRouter'),
+    ).toBeInTheDocument();
   });
 
   it('shows a mask for a runtime-satisfied API key', () => {
@@ -250,8 +296,34 @@ describe('StepInferenceProvider configured API key display', () => {
     );
 
     expect(
+      screen.getByRole('combobox', { name: 'Model provider' }),
+    ).toHaveValue('');
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(
+      screen.getByText(
+        'Popular choices are ChatGPT subscriptions and OpenRouter.',
+      ),
+    ).toBeInTheDocument();
+
+    selectProvider('openrouter');
+
+    expect(
       screen.getByDisplayValue('••••••••••••••••••••••••••••'),
     ).toBeDisabled();
+  });
+
+  it('selects OpenRouter after a successful OAuth callback', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup()}
+        openRouterOauthStatus="connected"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Model provider' }),
+    ).toHaveValue('openrouter');
   });
 
   it('shows a mask for a saved API key until the field is edited', () => {
@@ -269,6 +341,8 @@ describe('StepInferenceProvider configured API key display', () => {
         onContinue={vi.fn()}
       />,
     );
+
+    selectProvider('openrouter');
 
     const input = screen.getByDisplayValue('••••••••••••••••••••••••••••');
     expect(input).not.toBeDisabled();
@@ -296,6 +370,8 @@ describe('StepInferenceProvider configured API key display', () => {
         onContinue={vi.fn()}
       />,
     );
+
+    selectProvider('ollama');
 
     fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
       target: { value: 'http://ollama.example' },
@@ -342,6 +418,8 @@ describe('StepInferenceProvider configured API key display', () => {
       />,
     );
 
+    selectProvider('ollama');
+
     fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
       target: { value: 'http://ollama.example' },
     });
@@ -376,6 +454,8 @@ describe('StepInferenceProvider configured API key display', () => {
         onContinue={vi.fn()}
       />,
     );
+
+    selectProvider('ollama');
 
     fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
       target: { value: 'http://ollama.example' },
@@ -413,6 +493,15 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
                 href: 'https://example.com/model-garden',
                 linkLabel: 'Open Model Garden',
               },
+              additionalEnvFields: [
+                {
+                  envVarName: 'GOOGLE_CLOUD_PROJECT',
+                  label: 'Project ID',
+                  placeholder: 'my-project',
+                  required: true,
+                  secret: false,
+                },
+              ],
             },
             chatgptProviderStatus(false),
           ],
@@ -421,11 +510,19 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
       />,
     );
 
-    expect(
-      screen.getByText('Enable Claude in Model Garden first.', {
-        exact: false,
-      }),
-    ).toBeInTheDocument();
+    selectProvider('openrouter');
+
+    const projectIdInput = screen.getByRole('textbox', {
+      name: 'Project ID for OpenRouter',
+    });
+    const credentialHelp = screen.getByText(
+      'Enable Claude in Model Garden first.',
+      { exact: false },
+    );
+
+    expect(projectIdInput.compareDocumentPosition(credentialHelp)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(
       screen.getByRole('link', { name: 'Open Model Garden' }),
     ).toHaveAttribute('href', 'https://example.com/model-garden');
@@ -442,13 +539,46 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
       />,
     );
 
+    selectProvider('chatgpt');
+
     expect(
       screen.getByRole('button', { name: /connect chatgpt/i }),
     ).toBeInTheDocument();
     expect(
       screen.queryByPlaceholderText(/API key for ChatGPT/i),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Connect a ChatGPT Plus or Pro account/i),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+  });
+
+  it('renders the GitHub Copilot connect button inline with its documentation below', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            openrouterProviderStatus(),
+            githubCopilotProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('github-copilot');
+
+    expect(
+      screen.getByRole('button', { name: 'Connect GitHub Copilot' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'GitHub Copilot docs' }),
+    ).toHaveAttribute('href', 'https://docs.github.com/en/copilot');
+    expect(
+      screen.queryByText(
+        'Connect a GitHub account with an active Copilot plan:',
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('opens the ChatGPT connect dialog from the connect button', () => {
@@ -461,6 +591,8 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
         onContinue={vi.fn()}
       />,
     );
+
+    selectProvider('chatgpt');
 
     expect(
       screen.queryByTestId('chatgpt-connect-dialog'),
@@ -486,6 +618,8 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
         onContinue={onContinue}
       />,
     );
+
+    selectProvider('chatgpt');
 
     expect(
       screen.getByText(/Connected as owner@example.com/i),

@@ -58,7 +58,7 @@ function getOpenRouterOauthErrorMessage(reason: string | null): string {
 
 function getProviderStatus(
   modelSetup: SetupModelStatus,
-  providerId: SetupModelProviderId,
+  providerId: SetupModelProviderId | null,
 ) {
   return modelSetup.providers.find((provider) => provider.id === providerId);
 }
@@ -79,7 +79,7 @@ export function StepInferenceProvider({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] =
-    useState<SetupModelProviderId>(modelSetup.preselectedProvider);
+    useState<SetupModelProviderId | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [connectionName, setConnectionName] = useState('');
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
@@ -116,10 +116,6 @@ export function StepInferenceProvider({
   );
 
   useEffect(() => {
-    setSelectedProvider(modelSetup.preselectedProvider);
-  }, [modelSetup.preselectedProvider]);
-
-  useEffect(() => {
     setApiKey(
       selectedProvider === 'ollama'
         ? 'http://localhost:11434'
@@ -136,6 +132,7 @@ export function StepInferenceProvider({
 
   useEffect(() => {
     if (openRouterOauthStatus === 'connected') {
+      setSelectedProvider('openrouter');
       toast.success(
         'Connected to OpenRouter. Your new API key has been saved.',
         {
@@ -202,6 +199,7 @@ export function StepInferenceProvider({
     saveModelConfig.isPending ||
     discoverProviderModels.isPending ||
     qualifyProviderModel.isPending ||
+    selectedProvider === null ||
     hasMissingRequiredFields ||
     hasMissingConnectionName ||
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
@@ -210,6 +208,10 @@ export function StepInferenceProvider({
     (discoverProviderModels.isPending || qualifyProviderModel.isPending);
 
   const handleContinue = async () => {
+    if (!selectedProvider) {
+      return;
+    }
+
     let modelId: string | undefined;
     let endpointConnectionMessage: string | undefined;
     let qualificationError: string | undefined;
@@ -287,19 +289,20 @@ export function StepInferenceProvider({
       <div className="space-y-3">
         <p>
           Roomote needs a model provider for, you know, AI stuff. Pick yours and
-          connect it:
+          connect it.
         </p>
+        <p>Popular choices are ChatGPT subscriptions and OpenRouter.</p>
       </div>
 
       <div className="flex items-center gap-2 max-w-lg">
         <Select
-          value={selectedProvider}
+          value={selectedProvider ?? undefined}
           onValueChange={(value) =>
             setSelectedProvider(value as SetupModelProviderId)
           }
         >
-          <SelectTrigger aria-label="Model provider" className="min-w-40">
-            <SelectValue placeholder="Choose a provider" />
+          <SelectTrigger aria-label="Model provider" className="min-w-44">
+            <SelectValue placeholder="Pick your provider" />
           </SelectTrigger>
           <SelectContent>
             {sortedModelProviders.map((provider) => (
@@ -310,7 +313,7 @@ export function StepInferenceProvider({
           </SelectContent>
         </Select>
 
-        {isOAuthProvider ? null : (
+        {selectedProvider && !isOAuthProvider ? (
           <Input
             type={isEndpointProvider ? 'url' : undefined}
             inputMode={isEndpointProvider ? 'url' : undefined}
@@ -336,14 +339,40 @@ export function StepInferenceProvider({
             disabled={saveModelConfig.isPending || hasRuntimeProviderKey}
             data-1p-ignore
           />
-        )}
+        ) : null}
+
+        {isChatGptProvider && !hasRuntimeProviderKey && !chatgptConnected ? (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            disabled={saveModelConfig.isPending}
+            onClick={() => setIsChatGptDialogOpen(true)}
+          >
+            Connect ChatGPT
+          </Button>
+        ) : null}
+
+        {isGitHubCopilotProvider &&
+        !hasRuntimeProviderKey &&
+        !githubCopilotConnected ? (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            disabled={saveModelConfig.isPending}
+            onClick={() => setIsGitHubCopilotDialogOpen(true)}
+          >
+            Connect GitHub Copilot
+          </Button>
+        ) : null}
 
         {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
       </div>
 
       {requiresConnectionName && !hasRuntimeProviderKey ? (
         <div className="flex max-w-lg items-center gap-2">
-          <span className="w-48 shrink-0 text-sm text-muted-foreground">
+          <span className="w-44 shrink-0 text-sm text-muted-foreground">
             Connection name
           </span>
           <Input
@@ -356,7 +385,10 @@ export function StepInferenceProvider({
         </div>
       ) : null}
 
-      {selectedProviderStatus?.credentialHelp && !hasRuntimeProviderKey ? (
+      {selectedProviderStatus?.credentialHelp &&
+      !hasRuntimeProviderKey &&
+      !isGitHubCopilotProvider &&
+      additionalEnvFields.length === 0 ? (
         <p className="max-w-lg text-xs text-muted-foreground">
           {selectedProviderStatus.credentialHelp.text}{' '}
           <a
@@ -371,57 +403,34 @@ export function StepInferenceProvider({
         </p>
       ) : null}
 
-      {isChatGptProvider && !hasRuntimeProviderKey ? (
-        <div className="flex max-w-lg items-center gap-3">
-          {chatgptConnected ? (
-            <span className="text-sm text-muted-foreground">
-              {chatgptStatus?.email
-                ? `Connected as ${chatgptStatus.email}`
-                : 'Connected to a ChatGPT account.'}
-            </span>
-          ) : (
-            <>
-              <span className="text-sm text-muted-foreground">
-                Connect a ChatGPT Plus or Pro account to run tasks on your
-                subscription:
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={saveModelConfig.isPending}
-                onClick={() => setIsChatGptDialogOpen(true)}
-              >
-                Connect ChatGPT
-              </Button>
-            </>
-          )}
-        </div>
+      {isChatGptProvider && !hasRuntimeProviderKey && chatgptConnected ? (
+        <span className="text-sm text-muted-foreground">
+          {chatgptStatus?.email
+            ? `Connected as ${chatgptStatus.email}`
+            : 'Connected to a ChatGPT account.'}
+        </span>
       ) : null}
 
       {isGitHubCopilotProvider && !hasRuntimeProviderKey ? (
-        <div className="flex max-w-lg items-center gap-3">
-          {githubCopilotConnected ? (
-            <span className="text-sm text-muted-foreground">
-              Connected to a GitHub Copilot account.
-            </span>
-          ) : (
-            <>
-              <span className="text-sm text-muted-foreground">
-                Connect a GitHub account with an active Copilot plan:
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={saveModelConfig.isPending}
-                onClick={() => setIsGitHubCopilotDialogOpen(true)}
-              >
-                Connect GitHub Copilot
-              </Button>
-            </>
-          )}
-        </div>
+        githubCopilotConnected ? (
+          <span className="text-sm text-muted-foreground">
+            Connected to a GitHub Copilot account.
+          </span>
+        ) : selectedProviderStatus?.credentialHelp &&
+          additionalEnvFields.length === 0 ? (
+          <p className="max-w-lg text-xs text-muted-foreground">
+            {selectedProviderStatus.credentialHelp.text}{' '}
+            <a
+              className="font-medium underline underline-offset-2 hover:text-foreground"
+              href={selectedProviderStatus.credentialHelp.href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {selectedProviderStatus.credentialHelp.linkLabel}
+            </a>
+            .
+          </p>
+        ) : null
       ) : null}
 
       {!hasRuntimeProviderKey &&
@@ -430,7 +439,7 @@ export function StepInferenceProvider({
             key={field.envVarName}
             className="flex max-w-lg items-center gap-2"
           >
-            <span className="w-48 shrink-0 text-sm text-muted-foreground">
+            <span className="w-44 shrink-0 text-sm text-muted-foreground">
               {field.label}
               {field.required ? '' : ' (optional)'}
             </span>
@@ -450,6 +459,23 @@ export function StepInferenceProvider({
             />
           </div>
         ))}
+
+      {selectedProviderStatus?.credentialHelp &&
+      !hasRuntimeProviderKey &&
+      additionalEnvFields.length > 0 ? (
+        <p className="max-w-lg text-xs text-muted-foreground">
+          {selectedProviderStatus.credentialHelp.text}{' '}
+          <a
+            className="font-medium underline underline-offset-2 hover:text-foreground"
+            href={selectedProviderStatus.credentialHelp.href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {selectedProviderStatus.credentialHelp.linkLabel}
+          </a>
+          .
+        </p>
+      ) : null}
 
       {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (
         <div className="flex items-center gap-3">
