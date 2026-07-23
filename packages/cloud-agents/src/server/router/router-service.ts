@@ -19,7 +19,11 @@ import type {
   RoutingTaskModelSelection,
   WorkspaceResponse,
 } from './types';
-import { resolveRoutingModel, PLATFORM_WORKSPACE_VALUE } from './types';
+import {
+  resolveRoutingModel,
+  R_SMALL_MODEL_LABEL,
+  PLATFORM_WORKSPACE_VALUE,
+} from './types';
 import { gatherContextFromConfiguredMcps } from './mcp-gather';
 import { callRouterMcpTool } from './mcp-tool-call';
 import { FOLLOWUP_PROMPT } from './prompts/followup-prompt';
@@ -332,6 +336,7 @@ async function runRoutingDecision(
   },
 ): Promise<InternalRoutingResult> {
   const routingModel = resolveRoutingModel(context.routingModel);
+  const routingModelLabel = routingModel ?? R_SMALL_MODEL_LABEL;
 
   try {
     const promptContext = context;
@@ -364,7 +369,7 @@ async function runRoutingDecision(
             reason: built.fallbackReason,
           },
           phase: responseResult.phase ?? 'fallback',
-          model: routingModel,
+          model: routingModelLabel,
           toolsUsed: responseResult.toolsUsed,
           needsExternalLookup: responseResult.needsExternalLookup,
           confidence: built.confidence,
@@ -379,7 +384,7 @@ async function runRoutingDecision(
             reasoning: built.reasoning,
           },
           phase: responseResult.phase ?? 'direct',
-          model: routingModel,
+          model: routingModelLabel,
           toolsUsed: responseResult.toolsUsed,
           needsExternalLookup: responseResult.needsExternalLookup,
           confidence: built.confidence,
@@ -393,7 +398,7 @@ async function runRoutingDecision(
           result: built.result,
         },
         phase: responseResult.phase ?? 'direct',
-        model: routingModel,
+        model: routingModelLabel,
         toolsUsed: responseResult.toolsUsed,
         needsExternalLookup: responseResult.needsExternalLookup,
         confidence: built.confidence,
@@ -410,7 +415,7 @@ async function runRoutingDecision(
           error instanceof Error ? error.message : 'Unknown routing error',
       },
       phase: 'fallback',
-      model: routingModel,
+      model: routingModelLabel,
       toolsUsed: [],
       needsExternalLookup: null,
       confidence: null,
@@ -583,6 +588,7 @@ export async function routeGitHubTask(
   context: RoutingContext,
 ): Promise<GitHubRoutingDecision> {
   const routingModel = resolveRoutingModel(context.routingModel);
+  const routingModelLabel = routingModel ?? R_SMALL_MODEL_LABEL;
 
   if (context.source.type !== 'github') {
     return {
@@ -623,7 +629,7 @@ export async function routeGitHubTask(
     console.info(
       formatSingleLineLog('[LLM Router] Routed GitHub task', {
         sourceType: context.source.type,
-        model: routingModel,
+        model: routingModelLabel,
         phase: 'direct',
         toolsUsed: [],
         needsExternalLookup: false,
@@ -645,7 +651,7 @@ export async function routeGitHubTask(
     console.warn(
       formatSingleLineLog('[LLM Router] GitHub routing fallback', {
         sourceType: context.source.type,
-        model: routingModel,
+        model: routingModelLabel,
         phase: 'fallback',
         toolsUsed: [],
         needsExternalLookup: null,
