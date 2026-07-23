@@ -149,6 +149,28 @@ function chatgptProviderStatus(
   };
 }
 
+function githubCopilotProviderStatus(
+  connected: boolean,
+): SetupModelStatus['providers'][number] {
+  return {
+    id: 'github-copilot',
+    label: 'GitHub Copilot',
+    envVarName: undefined,
+    defaultRoomoteModel: 'github-copilot/claude-sonnet-5',
+    authKind: 'oauth',
+    suggestedTaskModels: [],
+    additionalEnvFields: [],
+    additionalEnvValues: {},
+    runtimeApiKeySatisfied: false,
+    savedApiKeySatisfied: connected,
+    credentialHelp: {
+      text: 'Connect a GitHub account with an active Copilot plan.',
+      href: 'https://docs.github.com/en/copilot',
+      linkLabel: 'GitHub Copilot docs',
+    },
+  };
+}
+
 function openrouterProviderStatus(): SetupModelStatus['providers'][number] {
   return {
     id: 'openrouter',
@@ -471,6 +493,15 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
                 href: 'https://example.com/model-garden',
                 linkLabel: 'Open Model Garden',
               },
+              additionalEnvFields: [
+                {
+                  envVarName: 'GOOGLE_CLOUD_PROJECT',
+                  label: 'Project ID',
+                  placeholder: 'my-project',
+                  required: true,
+                  secret: false,
+                },
+              ],
             },
             chatgptProviderStatus(false),
           ],
@@ -481,11 +512,17 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
 
     selectProvider('openrouter');
 
-    expect(
-      screen.getByText('Enable Claude in Model Garden first.', {
-        exact: false,
-      }),
-    ).toBeInTheDocument();
+    const projectIdInput = screen.getByRole('textbox', {
+      name: 'Project ID for OpenRouter',
+    });
+    const credentialHelp = screen.getByText(
+      'Enable Claude in Model Garden first.',
+      { exact: false },
+    );
+
+    expect(projectIdInput.compareDocumentPosition(credentialHelp)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(
       screen.getByRole('link', { name: 'Open Model Garden' }),
     ).toHaveAttribute('href', 'https://example.com/model-garden');
@@ -510,7 +547,38 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
     expect(
       screen.queryByPlaceholderText(/API key for ChatGPT/i),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Connect a ChatGPT Plus or Pro account/i),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+  });
+
+  it('renders the GitHub Copilot connect button inline with its documentation below', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            openrouterProviderStatus(),
+            githubCopilotProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('github-copilot');
+
+    expect(
+      screen.getByRole('button', { name: 'Connect GitHub Copilot' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'GitHub Copilot docs' }),
+    ).toHaveAttribute('href', 'https://docs.github.com/en/copilot');
+    expect(
+      screen.queryByText(
+        'Connect a GitHub account with an active Copilot plan:',
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('opens the ChatGPT connect dialog from the connect button', () => {

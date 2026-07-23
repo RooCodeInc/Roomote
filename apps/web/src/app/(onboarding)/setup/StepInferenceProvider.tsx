@@ -341,12 +341,38 @@ export function StepInferenceProvider({
           />
         ) : null}
 
+        {isChatGptProvider && !hasRuntimeProviderKey && !chatgptConnected ? (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            disabled={saveModelConfig.isPending}
+            onClick={() => setIsChatGptDialogOpen(true)}
+          >
+            Connect ChatGPT
+          </Button>
+        ) : null}
+
+        {isGitHubCopilotProvider &&
+        !hasRuntimeProviderKey &&
+        !githubCopilotConnected ? (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            disabled={saveModelConfig.isPending}
+            onClick={() => setIsGitHubCopilotDialogOpen(true)}
+          >
+            Connect GitHub Copilot
+          </Button>
+        ) : null}
+
         {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
       </div>
 
       {requiresConnectionName && !hasRuntimeProviderKey ? (
         <div className="flex max-w-lg items-center gap-2">
-          <span className="w-48 shrink-0 text-sm text-muted-foreground">
+          <span className="w-44 shrink-0 text-sm text-muted-foreground">
             Connection name
           </span>
           <Input
@@ -359,7 +385,10 @@ export function StepInferenceProvider({
         </div>
       ) : null}
 
-      {selectedProviderStatus?.credentialHelp && !hasRuntimeProviderKey ? (
+      {selectedProviderStatus?.credentialHelp &&
+      !hasRuntimeProviderKey &&
+      !isGitHubCopilotProvider &&
+      additionalEnvFields.length === 0 ? (
         <p className="max-w-lg text-xs text-muted-foreground">
           {selectedProviderStatus.credentialHelp.text}{' '}
           <a
@@ -374,57 +403,34 @@ export function StepInferenceProvider({
         </p>
       ) : null}
 
-      {isChatGptProvider && !hasRuntimeProviderKey ? (
-        <div className="flex max-w-lg items-center gap-3">
-          {chatgptConnected ? (
-            <span className="text-sm text-muted-foreground">
-              {chatgptStatus?.email
-                ? `Connected as ${chatgptStatus.email}`
-                : 'Connected to a ChatGPT account.'}
-            </span>
-          ) : (
-            <>
-              <span className="text-sm text-muted-foreground">
-                Connect a ChatGPT Plus or Pro account to run tasks on your
-                subscription:
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={saveModelConfig.isPending}
-                onClick={() => setIsChatGptDialogOpen(true)}
-              >
-                Connect ChatGPT
-              </Button>
-            </>
-          )}
-        </div>
+      {isChatGptProvider && !hasRuntimeProviderKey && chatgptConnected ? (
+        <span className="text-sm text-muted-foreground">
+          {chatgptStatus?.email
+            ? `Connected as ${chatgptStatus.email}`
+            : 'Connected to a ChatGPT account.'}
+        </span>
       ) : null}
 
       {isGitHubCopilotProvider && !hasRuntimeProviderKey ? (
-        <div className="flex max-w-lg items-center gap-3">
-          {githubCopilotConnected ? (
-            <span className="text-sm text-muted-foreground">
-              Connected to a GitHub Copilot account.
-            </span>
-          ) : (
-            <>
-              <span className="text-sm text-muted-foreground">
-                Connect a GitHub account with an active Copilot plan:
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={saveModelConfig.isPending}
-                onClick={() => setIsGitHubCopilotDialogOpen(true)}
-              >
-                Connect GitHub Copilot
-              </Button>
-            </>
-          )}
-        </div>
+        githubCopilotConnected ? (
+          <span className="text-sm text-muted-foreground">
+            Connected to a GitHub Copilot account.
+          </span>
+        ) : selectedProviderStatus?.credentialHelp &&
+          additionalEnvFields.length === 0 ? (
+          <p className="max-w-lg text-xs text-muted-foreground">
+            {selectedProviderStatus.credentialHelp.text}{' '}
+            <a
+              className="font-medium underline underline-offset-2 hover:text-foreground"
+              href={selectedProviderStatus.credentialHelp.href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {selectedProviderStatus.credentialHelp.linkLabel}
+            </a>
+            .
+          </p>
+        ) : null
       ) : null}
 
       {!hasRuntimeProviderKey &&
@@ -433,7 +439,7 @@ export function StepInferenceProvider({
             key={field.envVarName}
             className="flex max-w-lg items-center gap-2"
           >
-            <span className="w-48 shrink-0 text-sm text-muted-foreground">
+            <span className="w-44 shrink-0 text-sm text-muted-foreground">
               {field.label}
               {field.required ? '' : ' (optional)'}
             </span>
@@ -453,6 +459,23 @@ export function StepInferenceProvider({
             />
           </div>
         ))}
+
+      {selectedProviderStatus?.credentialHelp &&
+      !hasRuntimeProviderKey &&
+      additionalEnvFields.length > 0 ? (
+        <p className="max-w-lg text-xs text-muted-foreground">
+          {selectedProviderStatus.credentialHelp.text}{' '}
+          <a
+            className="font-medium underline underline-offset-2 hover:text-foreground"
+            href={selectedProviderStatus.credentialHelp.href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {selectedProviderStatus.credentialHelp.linkLabel}
+          </a>
+          .
+        </p>
+      ) : null}
 
       {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (
         <div className="flex items-center gap-3">
