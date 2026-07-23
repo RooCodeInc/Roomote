@@ -51,6 +51,35 @@ redis.call('del', KEYS[1])
 return val
 `;
 
+// Attaching a message must not revive an offer that a typed reply or button
+// click claimed after the notification was posted.
+const ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA = `
+local val = redis.call('get', KEYS[1])
+if not val then return 0 end
+local pending = cjson.decode(val)
+pending.messageId = ARGV[1]
+redis.call('set', KEYS[1], cjson.encode(pending), 'KEEPTTL')
+return 1
+`;
+
+// Read, clear, and claim the complete conversation index in one operation so
+// offers added concurrently remain indexed for a later typed reply.
+const CLAIM_PR_REVIEW_ACTIONS_FOR_THREAD_LUA = `
+local nonces = redis.call('smembers', KEYS[1])
+if #nonces == 0 then return {} end
+redis.call('del', KEYS[1])
+local claimed = {}
+for _, nonce in ipairs(nonces) do
+  local actionKey = ARGV[1] .. nonce
+  local val = redis.call('get', actionKey)
+  if val then
+    redis.call('del', actionKey)
+    table.insert(claimed, val)
+  end
+end
+return claimed
+`;
+
 function getPrReviewActionKey(nonce: string): string {
   return `${PR_REVIEW_ACTION_PREFIX}${nonce}`;
 }
@@ -94,25 +123,14 @@ export async function attachPendingPrReviewActionMessage(
   messageId: string,
 ): Promise<void> {
   const redis = getRedis();
-  const key = getPrReviewActionKey(nonce);
-  const raw = await redis.get(key);
-
-  if (typeof raw !== 'string') {
-    return;
-  }
-
-  try {
-    const pending = JSON.parse(raw) as PendingPrReviewAction;
-
-    await redis.set(
-      key,
-      JSON.stringify({ ...pending, messageId }),
-      'EX',
-      PR_REVIEW_ACTION_TTL_SECONDS,
-    );
-  } catch {
-    // Malformed record; leave it to expire.
-  }
+  await redis
+    .eval(
+      ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA,
+      1,
+      getPrReviewActionKey(nonce),
+      messageId,
+    )
+    .catch(() => undefined);
 }
 
 export async function claimPendingPrReviewAction(
@@ -155,23 +173,16 @@ export async function claimPendingPrReviewActionsForThread(input: {
 }): Promise<PendingPrReviewAction[]> {
   const redis = getRedis();
   const threadKey = getPrReviewActionThreadKey(input);
-  const nonces = await redis.smembers(threadKey);
-
-  if (nonces.length === 0) {
-    return [];
-  }
-
-  await redis.del(threadKey).catch(() => undefined);
+  const rawClaims = await redis.eval(
+    CLAIM_PR_REVIEW_ACTIONS_FOR_THREAD_LUA,
+    1,
+    threadKey,
+    PR_REVIEW_ACTION_PREFIX,
+  );
 
   const claimed: PendingPrReviewAction[] = [];
 
-  for (const nonce of nonces) {
-    const raw = await redis.eval(
-      CLAIM_PR_REVIEW_ACTION_LUA,
-      1,
-      getPrReviewActionKey(nonce),
-    );
-
+  for (const raw of Array.isArray(rawClaims) ? rawClaims : []) {
     if (typeof raw !== 'string') {
       continue;
     }
