@@ -183,7 +183,7 @@ async function postPrReviewNotification({
           callbackData: buildPrReviewActionCallbackData('yes', nonce),
         },
         {
-          text: 'Resolve all issues',
+          text: 'Auto-resolve on this PR',
           callbackData: buildPrReviewActionCallbackData('auto', nonce),
         },
         {

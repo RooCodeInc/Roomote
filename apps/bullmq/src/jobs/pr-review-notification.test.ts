@@ -315,7 +315,7 @@ describe('prReviewNotificationJob', () => {
               callbackData: `prr:y:${storedNonce}`,
             }),
             expect.objectContaining({
-              text: 'Resolve all issues',
+              text: 'Auto-resolve on this PR',
               callbackData: `prr:a:${storedNonce}`,
             }),
             expect.objectContaining({
