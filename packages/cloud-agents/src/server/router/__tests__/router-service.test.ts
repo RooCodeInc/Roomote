@@ -80,7 +80,7 @@ describe('routeTask', () => {
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: undefined,
-        model: undefined,
+        model: 'google/gemini-3.6-flash',
         system: expect.stringContaining(
           'You are a workspace routing assistant',
         ),
@@ -106,20 +106,30 @@ describe('routeTask', () => {
     });
   });
 
-  it('uses pasted GitHub issue context when choosing a workspace', async () => {
+  it('fetches pasted GitHub issue context when the precheck asks for it', async () => {
     mockCallRouterMcpTool.mockResolvedValue({
       title: 'Fix the dashboard refresh failure',
       body: 'The dashboard API request belongs to the web application.',
     });
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'The linked issue describes the web application.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-      },
-    });
+    mockGenerateTrackedNonTaskObject
+      .mockResolvedValueOnce({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The message alone does not identify the workspace.',
+          confidence: 0.4,
+          needsExternalLookup: true,
+          externalReference: 'acme/web#42',
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The linked issue describes the web application.',
+          confidence: 0.92,
+          needsExternalLookup: false,
+          externalReference: null,
+        },
+      });
 
     const result = await routeTask(
       createContext({
@@ -142,7 +152,8 @@ describe('routeTask', () => {
         issue_number: 42,
       },
     });
-    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenLastCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining('Fix the dashboard refresh failure'),
       }),
@@ -153,6 +164,71 @@ describe('routeTask', () => {
         debug: {
           phase: 'mcp',
           toolsUsed: ['github.issue_read'],
+          needsExternalLookup: true,
+        },
+      },
+    });
+  });
+
+  it('skips the issue fetch when the precheck routes without external context', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'The message already identifies the dashboard work.',
+        confidence: 0.95,
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        taskDescription:
+          'Fix the dashboard refresh bug, context: https://github.com/acme/web/issues/42',
+      }),
+    );
+
+    expect(mockCallRouterMcpTool).not.toHaveBeenCalled();
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        debug: {
+          phase: 'direct',
+          toolsUsed: [],
+          needsExternalLookup: false,
+        },
+      },
+    });
+  });
+
+  it('keeps the precheck decision when the requested fetch returns nothing', async () => {
+    mockCallRouterMcpTool.mockRejectedValue(new Error('Not connected'));
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'Best guess without the linked issue.',
+        confidence: 0.4,
+        needsExternalLookup: true,
+        externalReference: 'acme/web#42',
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        taskDescription:
+          'Please investigate https://github.com/acme/web/issues/42',
+      }),
+    );
+
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        debug: {
+          phase: 'direct',
+          toolsUsed: [],
+          needsExternalLookup: true,
         },
       },
     });
