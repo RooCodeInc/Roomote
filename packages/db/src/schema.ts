@@ -839,6 +839,14 @@ export const taskPullRequests = pgTable(
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),
 
+    // When set, new review feedback on this PR is dispatched into the owning
+    // task automatically instead of asking first; the referenced user (who
+    // enabled auto-handling from the notification) becomes the acting user
+    // for the auto-dispatched follow-ups. Null means ask every time.
+    autoHandleFeedbackByUserId: text(
+      'auto_handle_feedback_by_user_id',
+    ).references(() => users.id),
+
     // Timestamps
     detectedAt: timestamp('detected_at').notNull().defaultNow(),
     createdAt: timestamp('created_at').notNull().defaultNow(),

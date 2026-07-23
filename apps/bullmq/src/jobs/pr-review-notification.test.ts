@@ -15,6 +15,7 @@ const {
   mockDiscordPostMessage,
   mockStickyFooterPost,
   mockSetPendingPrReviewAction,
+  mockDispatchFollowUp,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -30,6 +31,7 @@ const {
   mockDiscordPostMessage: vi.fn(),
   mockStickyFooterPost: vi.fn(),
   mockSetPendingPrReviewAction: vi.fn(),
+  mockDispatchFollowUp: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -66,7 +68,6 @@ vi.mock('@roomote/slack', async (importOriginal) => {
   return {
     buildSlackPrReviewActionBlocks: actual.buildSlackPrReviewActionBlocks,
     postSlackThreadMessageWithStickyFooter: mockStickyFooterPost,
-    setPendingSlackPrReviewAction: mockSetPendingPrReviewAction,
     SlackNotifier: vi.fn().mockImplementation(function () {
       return {};
     }),
@@ -98,6 +99,8 @@ vi.mock('@roomote/sdk/server', () => ({
   ),
   preparePrReviewNotificationDelivery: mockPrepareDelivery,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
+  setPendingPrReviewAction: mockSetPendingPrReviewAction,
+  dispatchPrReviewFollowUp: mockDispatchFollowUp,
 }));
 
 import type { Job } from 'bullmq';
@@ -133,7 +136,10 @@ describe('prReviewNotificationJob', () => {
       status: RunStatus.Idle,
       taskPhase: 'waiting_for_prompt',
     });
-    mockFindFirstTaskPullRequest.mockResolvedValue({ status: 'open' });
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: null,
+    });
     mockFindFirstSlackInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-token',
     });
@@ -222,12 +228,13 @@ describe('prReviewNotificationJob', () => {
 
     expect(mockSetPendingPrReviewAction).toHaveBeenCalledWith(
       expect.objectContaining({
+        provider: 'slack',
         taskId: 'task-1',
         repository: 'owner/repo',
         prNumber: 42,
         prUrl: 'https://github.com/owner/repo/pull/42',
         channelId: 'C123',
-        threadTs: '111.222',
+        threadId: '111.222',
         followUpPrompt: 'Address the review feedback on owner/repo#42.',
         nonce: expect.any(String),
       }),
@@ -257,6 +264,7 @@ describe('prReviewNotificationJob', () => {
     };
     expect(actionsBlock.elements.map((element) => element.action_id)).toEqual([
       'pr_review_action_yes',
+      'pr_review_action_auto',
       'pr_review_action_dismiss',
     ]);
     for (const element of actionsBlock.elements) {
@@ -271,7 +279,7 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('appends the follow-up question as text for providers without buttons', async () => {
+  it('posts callback buttons and stores the pending offer for Telegram routes', async () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: {
@@ -286,12 +294,126 @@ describe('prReviewNotificationJob', () => {
 
     await prReviewNotificationJob(makeJob() as never);
 
-    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockSetPendingPrReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        channelId: '12345',
+        threadId: 'thread-9',
+        followUpPrompt: 'Address the review feedback on owner/repo#42.',
+        nonce: expect.any(String),
+      }),
+    );
+    const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
     expect(mockTelegramPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'formatted-message\nWant me to take a look?',
+        buttons: [
+          [
+            expect.objectContaining({
+              text: 'Yes, take a look',
+              callbackData: `prr:y:${storedNonce}`,
+            }),
+            expect.objectContaining({
+              text: 'Always auto-handle',
+              callbackData: `prr:a:${storedNonce}`,
+            }),
+            expect.objectContaining({
+              text: 'Dismiss',
+              callbackData: `prr:d:${storedNonce}`,
+            }),
+          ],
+        ],
+      }),
+    );
+  });
+
+  it('keeps Teams routes on the plain trailing-question text', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'teams',
+        channelId: '19:abc',
+        threadId: 'thread-1',
+        serviceUrl: 'https://smba.example.com',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockTeamsPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         text: 'formatted-message\nWant me to take a look?',
       }),
     );
+    expect(mockTeamsPostMessage.mock.calls[0]?.[0]?.buttons).toBeUndefined();
+  });
+
+  it('auto-dispatches the follow-up and posts an informational line when auto-handling is enabled', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'slack',
+      channelId: 'C123',
+      threadId: '111.222',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+      actingUserId: 'user-9',
+    });
+    // Informational line, no offer buttons, no pending record.
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
+    expect(postedCall.text).toContain('Auto-handling new review feedback');
+    expect(postedCall.blocks).toBeUndefined();
+    expect(mockRecordDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Auto-handling new review feedback'),
+      }),
+    );
+  });
+
+  it('falls back to the interactive offer when auto-dispatch is unavailable', async () => {
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'unavailable' });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSetPendingPrReviewAction).toHaveBeenCalled();
+    const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
+    expect(postedCall.blocks).toBeDefined();
   });
 
   it('posts plain text without buttons when the triage produced no follow-up', async () => {

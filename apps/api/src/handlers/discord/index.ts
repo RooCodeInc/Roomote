@@ -36,16 +36,14 @@ import {
 import { apiLogger } from '../../logging.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
-  findActiveCommunicationTaskRun,
-  findCompletedCommunicationTaskRunWithSnapshot,
-  findCommunicationTaskRunBySourceEvent,
-} from '../tasks/communication-task-run-lookup.js';
-import { resumeCommunicationTaskFromSnapshot } from '../tasks/communication-snapshot-resume.js';
-import { tryHandleDiscordRequestUserInputMessage } from './request-user-input.js';
-import {
   attachOutOfBandContextToCommunicationMessage,
+  findActiveCommunicationTaskRun,
+  findCommunicationTaskRunBySourceEvent,
+  findCompletedCommunicationTaskRunWithSnapshot,
   releaseCommunicationOutOfBandClaim,
-} from '../tasks/communication-out-of-band-context.js';
+  resumeCommunicationTaskFromSnapshot,
+} from '@roomote/sdk/server/communication';
+import { tryHandleDiscordRequestUserInputMessage } from './request-user-input.js';
 import { promptDiscordAccountLink } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
 import {

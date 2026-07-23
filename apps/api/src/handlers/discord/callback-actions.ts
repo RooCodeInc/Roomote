@@ -19,6 +19,7 @@ import {
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { findDiscordMappedUserId } from '@roomote/sdk/server';
+import { parsePrReviewActionCallbackData } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
@@ -395,6 +396,22 @@ export async function handleDiscordComponentInteraction(input: {
     });
     return 'handled';
   }
+  const prReviewAction = parsePrReviewActionCallbackData(customId);
+  if (prReviewAction) {
+    const { handleDiscordPrReviewActionCallback } =
+      await import('./pr-review-action.js');
+    await handleDiscordPrReviewActionCallback({
+      provider: input.provider,
+      applicationId: input.applicationId,
+      interaction: input.interaction,
+      interactionDeferred: input.interactionDeferred,
+      channel: input.channel,
+      choice: prReviewAction.choice,
+      nonce: prReviewAction.nonce,
+    });
+    return 'handled';
+  }
+
   const cancelRunId = parseCancelCallbackData(customId);
   if (cancelRunId) {
     await handleCancelCallback({ ...input, runId: cancelRunId });
