@@ -314,7 +314,7 @@ describe('prReviewNotificationJob', () => {
               callbackData: `prr:y:${storedNonce}`,
             }),
             expect.objectContaining({
-              text: 'Always auto-handle',
+              text: 'Take it from here',
               callbackData: `prr:a:${storedNonce}`,
             }),
             expect.objectContaining({
@@ -382,11 +382,11 @@ describe('prReviewNotificationJob', () => {
     // Informational line, no offer buttons, no pending record.
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
-    expect(postedCall.text).toContain('Auto-handling new review feedback');
+    expect(postedCall.text).toContain("New review feedback — I'm on it");
     expect(postedCall.blocks).toBeUndefined();
     expect(mockRecordDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringContaining('Auto-handling new review feedback'),
+        text: expect.stringContaining("New review feedback — I'm on it"),
       }),
     );
   });

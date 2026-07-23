@@ -33,6 +33,7 @@ import {
   resolveTaskRuntimePolicy,
   resolveTaskWorkspace,
   resolveComputeProviderTarget,
+  sourceControlProviderSchema,
   TASK_TIMEOUT_MS,
   isManagedDeploymentReadOnly,
   isRoomoteDeploymentDisabled,
@@ -1900,6 +1901,44 @@ export async function enqueueTaskRelaunch(
   return taskRun;
 }
 
+/**
+ * Resume runs execute in the source run's repositories, but resume entry
+ * points rebuild the payload from scratch and may not copy the source-control
+ * stamps forward. Without them, workspace preparation and token minting fall
+ * back to the GitHub default and non-GitHub resumes fail with
+ * "Repository not found".
+ */
+function inheritSnapshotResumeSourceControlStamps(
+  payload: SnapshotResumeTask['payload'],
+  sourcePayload: unknown,
+): void {
+  const source = (sourcePayload ?? {}) as {
+    sourceControlProvider?: unknown;
+    sourceControlHost?: unknown;
+  };
+
+  if (payload.sourceControlProvider === undefined) {
+    const provider = sourceControlProviderSchema.safeParse(
+      source.sourceControlProvider,
+    );
+
+    if (provider.success) {
+      payload.sourceControlProvider = provider.data;
+    }
+  }
+
+  if (payload.sourceControlHost === undefined) {
+    const host =
+      typeof source.sourceControlHost === 'string'
+        ? source.sourceControlHost.trim()
+        : '';
+
+    if (host) {
+      payload.sourceControlHost = host;
+    }
+  }
+}
+
 async function enqueueSnapshotResume(
   input: ResumeTaskLaunch,
   options: EnqueueTaskOptions,
@@ -1937,6 +1976,8 @@ async function enqueueSnapshotResume(
       `Source run ${sourceRunId} was not found for snapshot resume.`,
     );
   }
+
+  inheritSnapshotResumeSourceControlStamps(task.payload, sourceRun.payload);
 
   await recordSnapshotResumeRequestEvent({
     runId: sourceRun.id,

@@ -176,7 +176,7 @@ async function postPrReviewNotification({
           callbackData: buildPrReviewActionCallbackData('yes', nonce),
         },
         {
-          text: 'Always auto-handle',
+          text: 'Take it from here',
           callbackData: buildPrReviewActionCallbackData('auto', nonce),
         },
         {
@@ -329,7 +329,7 @@ export const prReviewNotificationJob = async (
       });
 
       if (dispatched.outcome !== 'unavailable') {
-        const autoText = `Auto-handling new review feedback:
+        const autoText = `New review feedback — I'm on it:
 ${delivery.text}`;
         const messageTs = await postPrReviewNotification({
           taskId: data.taskId,

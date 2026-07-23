@@ -224,7 +224,7 @@ async function dispatchAcceptedPrReviewAction({
     await respondEphemeral(
       payload,
       enableAutoHandle
-        ? 'Auto-handling is enabled for future feedback, but this task can no longer be resumed for the current feedback. Reply in the thread to start fresh.'
+        ? "I'll take future feedback from here, but this task can no longer be resumed for the current one. Reply in the thread to start fresh."
         : 'This task can no longer be resumed. Reply in the thread to start fresh.',
     );
 
@@ -234,7 +234,7 @@ async function dispatchAcceptedPrReviewAction({
   }
 
   const resolution = enableAutoHandle
-    ? `Auto-handling enabled by <@${payload.user.id}> — future review feedback on this PR lands in this task automatically.`
+    ? `Taking it from here — requested by <@${payload.user.id}>. Future review feedback on this PR gets handled in this task.`
     : `On it — requested by <@${payload.user.id}>.`;
 
   await updateNotificationMessage({ payload, resolution });
@@ -253,7 +253,7 @@ export async function handleSlackPrReviewActionYes(
 }
 
 /**
- * "Always auto-handle": dispatch the current feedback like Yes and mark the
+ * "Take it from here": dispatch the current feedback like Yes and mark the
  * task's PR so future review feedback is dispatched automatically without
  * asking.
  */

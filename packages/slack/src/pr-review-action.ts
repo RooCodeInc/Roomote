@@ -69,7 +69,7 @@ export function buildSlackPrReviewActionBlocks(params: {
           action_id: PR_REVIEW_ACTION_AUTO_ACTION_ID,
           text: {
             type: 'plain_text',
-            text: 'Always auto-handle',
+            text: 'Take it from here',
             emoji: true,
           },
           value,

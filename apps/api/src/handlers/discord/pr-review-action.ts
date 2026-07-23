@@ -83,7 +83,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
     if (dispatched.outcome === 'unavailable') {
       await reply(
         input.choice === 'auto'
-          ? 'Auto-handling is enabled for future feedback, but this task can no longer be resumed for the current feedback. Reply here to start fresh.'
+          ? "I'll take future feedback from here, but this task can no longer be resumed for the current one. Reply here to start fresh."
           : 'This task can no longer be resumed. Reply here to start fresh.',
       );
       return;
@@ -91,7 +91,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
 
     await reply(
       input.choice === 'auto'
-        ? 'Auto-handling enabled — future review feedback on this PR lands in this task automatically. Taking a look at the current feedback now.'
+        ? "I'll take it from here — future review feedback on this PR gets handled in this task. Looking at the current feedback now."
         : 'On it — taking a look at the review feedback.',
     );
   } catch (error) {

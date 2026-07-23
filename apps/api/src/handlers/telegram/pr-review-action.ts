@@ -105,7 +105,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
           ...(messageId ? { replyToMessageId: messageId } : {}),
           text:
             choice === 'auto'
-              ? 'Auto-handling is enabled for future feedback, but this task can no longer be resumed for the current feedback. Reply here to start fresh.'
+              ? "I'll take future feedback from here, but this task can no longer be resumed for the current one. Reply here to start fresh."
               : 'This task can no longer be resumed. Reply here to start fresh.',
         });
       }
@@ -117,7 +117,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
 
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: query.id,
-      text: choice === 'auto' ? 'Auto-handling enabled.' : 'On it.',
+      text: choice === 'auto' ? 'Taking it from here.' : 'On it.',
     });
 
     if (chatId && messageId) {
@@ -130,7 +130,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
           replyToMessageId: messageId,
           text:
             choice === 'auto'
-              ? 'Auto-handling enabled — future review feedback on this PR lands in this task automatically. Taking a look at the current feedback now.'
+              ? "I'll take it from here — future review feedback on this PR gets handled in this task. Looking at the current feedback now."
               : 'On it — taking a look at the review feedback.',
         });
       }
