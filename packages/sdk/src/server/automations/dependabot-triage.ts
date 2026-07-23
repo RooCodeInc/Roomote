@@ -12,7 +12,7 @@ import {
   type ResolvedAutomationDestination,
 } from './destination';
 import {
-  getActiveRepositoryFullNames,
+  getActiveGitHubRepositoryFullNames,
   hasActiveGitHubInstallation,
 } from './github-deployment-scope';
 import { createScheduledTriageJob } from './scheduled-triage-runner';
@@ -83,7 +83,11 @@ export const dependabotTriageJob = createScheduledTriageJob({
       return { kind: 'skip', reason: 'GitHub is not configured' };
     }
 
-    const selectedRepositories = await getActiveRepositoryFullNames();
+    // Dependabot alerts only exist on GitHub, so the scan scope must never
+    // include repositories from other providers: a mixed-provider scope
+    // leaves the run's source-control provider ambiguous and GitHub token
+    // minting then fails on the non-GitHub repository names.
+    const selectedRepositories = await getActiveGitHubRepositoryFullNames();
     const repositoryCoverage =
       await buildRepositoryCoverage(selectedRepositories);
     // Dependabot follow-ups must run validation before opening PRs, so the
@@ -91,6 +95,14 @@ export const dependabotTriageJob = createScheduledTriageJob({
     const environmentBackedRepositories = getEnvironmentBackedCoverage(
       repositoryCoverage,
     ).map((coverage) => coverage.repositoryFullName);
+
+    if (environmentBackedRepositories.length === 0) {
+      return {
+        kind: 'skip',
+        reason: 'No active GitHub repositories have configured environments',
+      };
+    }
+
     const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
       automationKey: 'dependabot_triage',
       slackChannelId: channelId,
@@ -99,26 +111,27 @@ export const dependabotTriageJob = createScheduledTriageJob({
 
     return {
       kind: 'scan',
-      payload: {
-        repo: ALL_REPOSITORIES,
-        ...(environmentBackedRepositories.length > 0
-          ? { selectedRepositories: environmentBackedRepositories }
-          : {}),
-        description: buildDependabotTriagePrompt({
-          channelId,
-          destination,
-          repositoryFullNames: environmentBackedRepositories,
-          repositoryCoverage,
-          manualTrigger,
-          recentThreadFeedback,
-        }),
-        trigger: 'scheduled',
-        ...(destination.provider === 'slack'
-          ? { notifySlack: true, slackChannel: channelId }
-          : {}),
-        suggestionSource: 'dependabot_triage',
-        visibleInTranscript: false,
-      },
+      payloads: [
+        {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: environmentBackedRepositories,
+          sourceControlProvider: 'github',
+          description: buildDependabotTriagePrompt({
+            channelId,
+            destination,
+            repositoryFullNames: environmentBackedRepositories,
+            repositoryCoverage,
+            manualTrigger,
+            recentThreadFeedback,
+          }),
+          trigger: 'scheduled',
+          ...(destination.provider === 'slack'
+            ? { notifySlack: true, slackChannel: channelId }
+            : {}),
+          suggestionSource: 'dependabot_triage',
+          visibleInTranscript: false,
+        },
+      ],
     };
   },
 });

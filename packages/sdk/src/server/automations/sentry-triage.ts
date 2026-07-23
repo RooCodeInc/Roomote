@@ -12,14 +12,22 @@ import {
   isNull,
   mcpConnections,
 } from '@roomote/db/server';
-import { ALL_REPOSITORIES, type SentryTriageFrequency } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  type SentryTriageFrequency,
+  type SourceControlProvider,
+  type SuggestedTasksTask,
+} from '@roomote/types';
 
 import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback';
 import {
   buildDestinationPromptContext,
   type ResolvedAutomationDestination,
 } from './destination';
-import { getActiveRepositoryFullNames } from './github-deployment-scope';
+import {
+  getActiveRepositoryFullNames,
+  partitionActiveRepositoriesByProvider,
+} from './github-deployment-scope';
 import {
   createScheduledTriageJob,
   type TriageScanBuild,
@@ -158,36 +166,86 @@ export const sentryTriageJob = createScheduledTriageJob({
       surface: destination.provider,
     });
 
+    const projectSlugs = getAutomationTargetRefs(
+      runtime,
+      'sentry',
+      'sentry_project',
+    );
+
+    const buildPayload = ({
+      partitionRepositories,
+      partitionCoverage,
+      providerStamp,
+    }: {
+      partitionRepositories: string[];
+      partitionCoverage: RepositoryCoverage[];
+      providerStamp?: {
+        sourceControlProvider: SourceControlProvider;
+        sourceControlHost?: string;
+      };
+    }): SuggestedTasksTask['payload'] => ({
+      repo: ALL_REPOSITORIES,
+      ...(partitionRepositories.length > 0
+        ? { selectedRepositories: partitionRepositories }
+        : {}),
+      ...providerStamp,
+      ...(deployment.slackTeamId ? { teamId: deployment.slackTeamId } : {}),
+      description: buildSentryTriagePrompt({
+        channelId,
+        destination,
+        frequency,
+        projectSlugs,
+        repositoryFullNames: partitionRepositories,
+        repositoryCoverage: partitionCoverage,
+        manualTrigger,
+        recentThreadFeedback: recentThreadFeedback.promptText,
+      }),
+      trigger: 'scheduled',
+      ...(destination.provider === 'slack'
+        ? { notifySlack: true, slackChannel: channelId }
+        : {}),
+      suggestionSource: 'sentry_triage',
+      historicalThreadFeedbackDebugSnippet: recentThreadFeedback.debugSnippet,
+      visibleInTranscript: false,
+    });
+
+    // Sentry issues can map to repositories on any provider, but a run's
+    // source-control token is minted for exactly one provider, so a scope
+    // that spans providers launches one scan per (provider, host) partition
+    // with an explicit stamp. Without repositories in scope the run only
+    // reports Sentry MCP blockers, so a single unpartitioned scan launches.
+    const partitions = await partitionActiveRepositoriesByProvider(
+      environmentBackedRepositories,
+    );
+
+    if (partitions.length === 0) {
+      return {
+        kind: 'scan',
+        payloads: [
+          buildPayload({
+            partitionRepositories: [],
+            partitionCoverage: repositoryCoverage,
+          }),
+        ],
+      };
+    }
+
     return {
       kind: 'scan',
-      payload: {
-        repo: ALL_REPOSITORIES,
-        ...(environmentBackedRepositories.length > 0
-          ? { selectedRepositories: environmentBackedRepositories }
-          : {}),
-        ...(deployment.slackTeamId ? { teamId: deployment.slackTeamId } : {}),
-        description: buildSentryTriagePrompt({
-          channelId,
-          destination,
-          frequency,
-          projectSlugs: getAutomationTargetRefs(
-            runtime,
-            'sentry',
-            'sentry_project',
+      payloads: partitions.map((partition) => {
+        const partitionNames = new Set(partition.repositoryFullNames);
+
+        return buildPayload({
+          partitionRepositories: partition.repositoryFullNames,
+          partitionCoverage: repositoryCoverage.filter((coverage) =>
+            partitionNames.has(coverage.repositoryFullName),
           ),
-          repositoryFullNames: environmentBackedRepositories,
-          repositoryCoverage,
-          manualTrigger,
-          recentThreadFeedback: recentThreadFeedback.promptText,
-        }),
-        trigger: 'scheduled',
-        ...(destination.provider === 'slack'
-          ? { notifySlack: true, slackChannel: channelId }
-          : {}),
-        suggestionSource: 'sentry_triage',
-        historicalThreadFeedbackDebugSnippet: recentThreadFeedback.debugSnippet,
-        visibleInTranscript: false,
-      },
+          providerStamp: {
+            sourceControlProvider: partition.provider,
+            ...(partition.host ? { sourceControlHost: partition.host } : {}),
+          },
+        });
+      }),
     };
   },
 });

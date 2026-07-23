@@ -36,7 +36,13 @@ type TriageDeploymentContext = {
 };
 
 export type TriageScanBuild =
-  | { kind: 'scan'; payload: SuggestedTasksTask['payload'] }
+  /**
+   * One task run launches per payload. Builders whose repository scope can
+   * span source-control providers must return one payload per provider so
+   * every launched run stays single-provider (a run's source-control token
+   * is minted for exactly one provider).
+   */
+  | { kind: 'scan'; payloads: SuggestedTasksTask['payload'][] }
   | { kind: 'skip'; reason: string };
 
 type ScheduledTriageAutomationConfig = {
@@ -187,28 +193,44 @@ export function createScheduledTriageJob(
           continue;
         }
 
+        if (scanTask.payloads.length === 0) {
+          console.log(
+            `${logPrefix} Skipping deployment: builder returned no scan payloads`,
+          );
+          result.skippedReason = 'No scan payloads to launch.';
+          skipped++;
+          continue;
+        }
+
         // Automation scans run as the deployment service principal; a manual
         // trigger is still an automation launch, just with a manual trigger
         // kind on the task record. Non-Slack destinations ride along as
         // communication payload fields so the surface-generic worker tools
-        // target the destination conversation.
-        const launchResult = await enqueueTask({
-          task: {
-            type: TaskPayloadKind.Scan,
-            payload: {
-              ...scanTask.payload,
-              ...buildDestinationTaskPayloadFields(destination),
+        // target the destination conversation. Multi-provider builders return
+        // one payload per provider partition; each launches its own run.
+        let firstLaunchedTaskId: string | null = null;
+
+        for (const payload of scanTask.payloads) {
+          const launchResult = await enqueueTask({
+            task: {
+              type: TaskPayloadKind.Scan,
+              payload: {
+                ...payload,
+                ...buildDestinationTaskPayloadFields(destination),
+              },
             },
-          },
-          initiator: { kind: 'automation', key: config.automationKey },
-          workflow: 'scan',
-          surface: 'system',
-          trigger: opts.manualTrigger ? 'manual' : 'schedule',
-          visibility: 'hidden',
-          ...(destination.provider === 'slack'
-            ? { channels: { slackChannelId: channelId } }
-            : {}),
-        });
+            initiator: { kind: 'automation', key: config.automationKey },
+            workflow: 'scan',
+            surface: 'system',
+            trigger: opts.manualTrigger ? 'manual' : 'schedule',
+            visibility: 'hidden',
+            ...(destination.provider === 'slack'
+              ? { channels: { slackChannelId: channelId } }
+              : {}),
+          });
+
+          firstLaunchedTaskId ??= launchResult.taskId;
+        }
 
         await recordAutomationRunOutcome(db, {
           key: config.automationKey,
@@ -232,7 +254,7 @@ export function createScheduledTriageJob(
           });
         }
 
-        result.launchedTaskId ??= launchResult.taskId;
+        result.launchedTaskId ??= firstLaunchedTaskId;
         processed++;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
