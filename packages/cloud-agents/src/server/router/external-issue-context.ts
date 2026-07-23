@@ -10,6 +10,7 @@ import type { RoutingContext } from './types';
 const MAX_EXTERNAL_ISSUES = 2;
 const MAX_EXTERNAL_CONTEXT_CHARS = 8_000;
 const EXTERNAL_LOOKUP_TIMEOUT_MS = 8_000;
+const MAX_BARE_REFERENCE_REPOS = 3;
 
 interface ExternalIssueReference {
   url: string;
@@ -49,6 +50,103 @@ function parseExternalIssueReferences(text: string): ExternalIssueReference[] {
   }
 
   return references;
+}
+
+function referenceFromCanonicalUrl(
+  label: string,
+  canonicalUrl: string,
+): ExternalIssueReference | null {
+  try {
+    const match = matchExternalIssueUrl(new URL(canonicalUrl));
+
+    return match ? { url: label, fetchAttempts: match.fetchAttempts } : null;
+  } catch {
+    return null;
+  }
+}
+
+function uniqueConfiguredRepositories(context: RoutingContext): string[] {
+  const repositories = new Set<string>();
+
+  for (const environment of context.availableEnvironments) {
+    for (const name of environment.repositoryNames ?? []) {
+      repositories.add(name);
+    }
+  }
+
+  return [...repositories];
+}
+
+/**
+ * Resolves a bare reference the routing precheck extracted (for example
+ * "#234", "acme/web#234", or "ENG-512") against the deployment's own
+ * configuration. The model only proposes the reference text; the fetch
+ * targets always come from this closed candidate set, so a steered or
+ * hallucinated reference can at most read issues the deployment already
+ * routes for. An ambiguous issue number fans out across configured
+ * repositories only when that set is small enough to stay bounded.
+ */
+function resolveBareIssueReferences(
+  context: RoutingContext,
+  externalReference: string | null | undefined,
+): ExternalIssueReference[] {
+  const raw = externalReference?.trim();
+
+  if (!raw) {
+    return [];
+  }
+
+  if (/^[A-Za-z]+-\d+$/.test(raw)) {
+    const reference = referenceFromCanonicalUrl(
+      raw,
+      `https://linear.app/_/issue/${raw}`,
+    );
+
+    return reference ? [reference] : [];
+  }
+
+  const configuredRepositories = uniqueConfiguredRepositories(context);
+  const githubReference = (fullRepository: string, issueNumber: string) =>
+    referenceFromCanonicalUrl(
+      `${fullRepository}#${issueNumber}`,
+      `https://github.com/${fullRepository}/issues/${issueNumber}`,
+    );
+
+  const qualified = raw.match(
+    /^(?<owner>[^\s/#]+)\/(?<repository>[^\s/#]+)#(?<issueNumber>\d+)$/,
+  );
+
+  if (qualified?.groups) {
+    const fullRepository = configuredRepositories.find(
+      (name) =>
+        name.toLowerCase() ===
+        `${qualified.groups!.owner}/${qualified.groups!.repository}`.toLowerCase(),
+    );
+    const reference =
+      fullRepository &&
+      githubReference(fullRepository, qualified.groups.issueNumber!);
+
+    return reference ? [reference] : [];
+  }
+
+  const bareNumber = raw.match(/^#?(?<issueNumber>\d+)$/);
+
+  if (
+    bareNumber?.groups &&
+    configuredRepositories.length > 0 &&
+    configuredRepositories.length <= MAX_BARE_REFERENCE_REPOS
+  ) {
+    return configuredRepositories.flatMap((fullRepository) => {
+      const reference = githubReference(
+        fullRepository,
+        bareNumber.groups!.issueNumber!,
+      );
+
+      return reference ? [reference] : [];
+    });
+  }
+
+  return [];
 }
 
 function serializeExternalContext(value: unknown): string {
@@ -120,8 +218,13 @@ async function fetchExternalIssueContext(
 
 export async function gatherExternalIssueContext(
   context: RoutingContext,
+  externalReference?: string | null,
 ): Promise<{ contextMessages: ModelMessage[]; toolsUsed: string[] }> {
-  const references = parseExternalIssueReferences(context.taskDescription);
+  const urlReferences = parseExternalIssueReferences(context.taskDescription);
+  const references =
+    urlReferences.length > 0
+      ? urlReferences
+      : resolveBareIssueReferences(context, externalReference);
   const results = await Promise.all(
     references.map(async (reference) => ({
       reference,

@@ -91,9 +91,13 @@ export async function gatherContextFromConfiguredMcps<
   }
 
   // The precheck asked for the linked issue, so the fetch deadline is only
-  // paid when it can change the decision. Fail-open: with nothing fetched,
-  // the precheck decision stands.
-  const externalIssueContext = await gatherExternalIssueContext(context);
+  // paid when it can change the decision. Bare references (no pasted URL)
+  // resolve against the deployment's configured repositories only. Fail-open:
+  // with nothing fetched, the precheck decision stands.
+  const externalIssueContext = await gatherExternalIssueContext(
+    context,
+    response.externalReference,
+  );
 
   if (externalIssueContext.contextMessages.length === 0) {
     return { response, toolsUsed: [], phase: 'direct', needsExternalLookup };
