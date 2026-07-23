@@ -196,7 +196,7 @@ async function dispatchAcceptedPrReviewAction({
   }
 
   const resolution = enableAutoHandle
-    ? `Resolving all issues — requested by <@${payload.user.id}>. Future review feedback on this PR gets resolved in this task automatically.`
+    ? `Auto-resolve enabled — requested by <@${payload.user.id}>. Future review feedback on this PR gets resolved in this task automatically.`
     : `On it — requested by <@${payload.user.id}>.`;
 
   await updateNotificationMessage({ payload, resolution });
@@ -215,7 +215,7 @@ export async function handleSlackPrReviewActionYes(
 }
 
 /**
- * "Take it from here": dispatch the current feedback like Yes and mark the
+ * "Auto-resolve on this PR": dispatch the current feedback like Yes and mark
  * task's PR so future review feedback is dispatched automatically without
  * asking.
  */

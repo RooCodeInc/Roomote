@@ -73,7 +73,7 @@ export function buildSlackPrReviewActionBlocks(params: {
           action_id: PR_REVIEW_ACTION_AUTO_ACTION_ID,
           text: {
             type: 'plain_text',
-            text: 'Resolve all issues',
+            text: 'Auto-resolve on this PR',
             emoji: true,
           },
           value,

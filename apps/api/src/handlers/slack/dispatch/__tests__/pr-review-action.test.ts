@@ -218,7 +218,7 @@ describe('handleSlackPrReviewActionAuto', () => {
             expect.objectContaining({
               elements: [
                 expect.objectContaining({
-                  text: expect.stringContaining('Resolving all issues'),
+                  text: expect.stringContaining('Auto-resolve enabled'),
                 }),
               ],
             }),
