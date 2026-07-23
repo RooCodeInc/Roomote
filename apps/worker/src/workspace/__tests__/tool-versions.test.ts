@@ -45,6 +45,9 @@ vi.mock('../../lib/github-token', () => ({
   ensureGitCredentialHelper: vi
     .fn()
     .mockReturnValue('/tmp/git-credential-roomote.sh'),
+  getGitHubTokenFileStatus: vi
+    .fn()
+    .mockReturnValue({ present: true, nonEmpty: true }),
   SOURCE_CONTROL_GIT_CONFIG_PATH: '/tmp/source-control-gitconfig',
 }));
 
@@ -293,7 +296,7 @@ describe('WorkspaceManager tool versions', () => {
       });
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "git clone 'https://github.com/acme/backend.git' 'acme/backend'",
+        run: "rm -rf -- 'acme/backend' && git clone 'https://github.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -317,7 +320,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "git clone 'https://gitlab.com/acme/backend.git' 'acme/backend'",
+        run: "rm -rf -- 'acme/backend' && git clone 'https://gitlab.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -366,7 +369,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "git clone 'https://git.example.com/acme/backend.git' 'acme/backend'",
+        run: "rm -rf -- 'acme/backend' && git clone 'https://git.example.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -413,7 +416,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "git clone 'https://dev.azure.com/acme/Platform/_git/backend' 'acme/Platform/backend'",
+        run: "rm -rf -- 'acme/Platform/backend' && git clone 'https://dev.azure.com/acme/Platform/_git/backend' 'acme/Platform/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -548,7 +551,9 @@ describe('WorkspaceManager tool versions', () => {
 
     it('reuses legacy snapshot clone paths during preserveGitState resumes', async () => {
       vi.mocked(existsSync).mockImplementation(
-        (targetPath) => targetPath === '/workspace/backend',
+        (targetPath) =>
+          targetPath === '/workspace/backend' ||
+          targetPath === join('/workspace/backend', '.git'),
       );
 
       vi.mocked(sdk.repositories.findRepository).mockResolvedValue({

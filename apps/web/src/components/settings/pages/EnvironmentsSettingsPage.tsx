@@ -21,8 +21,8 @@ export function EnvironmentsSettingsPage() {
           </a>
           .
         </p>
-        <EnvVars />
         <Environments />
+        <EnvVars />
       </div>
     </SettingsShell>
   );

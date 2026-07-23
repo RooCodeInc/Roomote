@@ -24,6 +24,8 @@ import { createWorkspaceRepositoryPreparationError } from '../commands/setup/wor
 import {
   SOURCE_CONTROL_GIT_CONFIG_PATH,
   ensureGitCredentialHelper,
+  getGitHubTokenFileStatus,
+  writeGitHubTokenFile,
 } from '../lib/github-token';
 
 interface PrepareRepositoryOptions {
@@ -510,6 +512,68 @@ export class WorkspaceManager {
     });
   }
 
+  /**
+   * Resolve a repository-relative path and reject any value that escapes
+   * the workspace root. Repository full names are provider-synced and reach
+   * both shell commands and recursive deletes, so traversal segments (`..`)
+   * from a hostile or misconfigured source-control origin must never
+   * resolve outside the workspace.
+   */
+  private resolveContainedWorkspacePath(relativePath: string): string {
+    const targetPath = join(this.workspaceRoot, relativePath);
+    const relativeToRoot = relative(this.workspaceRoot, targetPath);
+
+    if (
+      relativeToRoot === '' ||
+      relativeToRoot.startsWith('..') ||
+      isAbsolute(relativeToRoot)
+    ) {
+      throw new Error(
+        `Repository path '${relativePath}' resolves outside the workspace root and was rejected.`,
+      );
+    }
+
+    return targetPath;
+  }
+
+  /**
+   * GitHub task runs always receive a GitHub App installation token at
+   * dequeue, which the worker writes to the file-backed git credential
+   * helper before repository setup. If no credential signal is present
+   * here, git would fall back to slow anonymous clone retries and fail
+   * checkout with a cryptic error — fail fast with an operator-actionable
+   * message instead. Logs presence signals only, never token material.
+   */
+  private ensureGitHubCredentialsAvailable(repoFullName: string): void {
+    const tokenFile = getGitHubTokenFileStatus();
+    const envToken = this.env.GH_TOKEN?.trim() || this.env.GITHUB_TOKEN?.trim();
+
+    console.log(
+      `GitHub credential check for ${repoFullName}: tokenFilePresent=${tokenFile.present} tokenFileNonEmpty=${tokenFile.nonEmpty} envTokenPresent=${Boolean(envToken)}`,
+    );
+
+    if (tokenFile.nonEmpty) {
+      return;
+    }
+
+    if (envToken) {
+      // The git credential helper and gh wrapper only read the token file;
+      // a token that exists solely as an env var would never reach git and
+      // the clone would still run anonymously.
+      console.log(
+        'GitHub token file is empty; writing the GH_TOKEN/GITHUB_TOKEN env var to the token file for git authentication.',
+      );
+      writeGitHubTokenFile(envToken);
+      return;
+    }
+
+    throw new Error(
+      `No GitHub credentials are available for ${repoFullName}: the worker's token file (~/.roomote/gh-token) is missing or empty and no GH_TOKEN/GITHUB_TOKEN env var is set. ` +
+        'The control plane creates a GitHub App installation token when the run is dequeued; verify the GitHub App is installed for the repository owner, the installation covers this repository, and repositories are synced. ' +
+        'Anonymous git access is rate limited and fails for private repositories, so repository setup was stopped before cloning.',
+    );
+  }
+
   public async prepareRepository(
     repoFullName: string,
     branch: string | undefined,
@@ -556,19 +620,41 @@ export class WorkspaceManager {
 
     console.log(`Preparing ${fullName}#${targetBranch}`);
 
-    const repoPath = join(this.workspaceRoot, fullName);
-    const legacyRepoPath = join(
-      this.workspaceRoot,
+    const repoPath = this.resolveContainedWorkspacePath(fullName);
+    const legacyRepoPath = this.resolveContainedWorkspacePath(
       fullName.split('/').pop() ?? fullName,
     );
-    const resolvedRepoPath =
+    let resolvedRepoPath =
       preserveGitState &&
       repoPath !== legacyRepoPath &&
       !existsSync(repoPath) &&
       existsSync(legacyRepoPath)
         ? legacyRepoPath
         : repoPath;
+
+    // An interrupted earlier run can leave a directory behind that is not a
+    // git repository (e.g. a clone killed before .git was written). Treating
+    // it as an existing clone would skip cloning here and fail much later at
+    // checkout with a cryptic "'origin/<branch>' is not a commit" error.
+    if (
+      existsSync(resolvedRepoPath) &&
+      !existsSync(join(resolvedRepoPath, '.git'))
+    ) {
+      console.warn(
+        `Repository path ${resolvedRepoPath} exists but is not a git repository; removing it and cloning again.`,
+      );
+      await rm(resolvedRepoPath, { recursive: true, force: true });
+      resolvedRepoPath = repoPath;
+    }
+
     const needsClone = !existsSync(resolvedRepoPath);
+
+    if (
+      sourceControlProvider === 'github' &&
+      (needsClone || !preserveGitState)
+    ) {
+      this.ensureGitHubCredentialsAvailable(fullName);
+    }
 
     if (!needsClone) {
       console.log(`Repository ${fullName} already exists, skipping clone`);
@@ -589,7 +675,12 @@ export class WorkspaceManager {
           // file-backed credential helper and avoids gh's extra API lookup.
           // Escape both args: cloneUrl is provider-synced and may include
           // shell metacharacters from a hostile self-hosted origin.
-          run: `git clone '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
+          // Retries re-run this same line, and a clone killed mid-transfer
+          // (e.g. by the timeout) leaves a partial target directory that
+          // would make every retry fail with "destination path already
+          // exists" — remove it first. Safe: needsClone guarantees the path
+          // did not exist before the first attempt.
+          run: `rm -rf -- '${shellEscape(fullName)}' && git clone '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
           // Allow brief auth and repository visibility propagation delays.
           retries: 4,
           timeout: 300,

@@ -30,6 +30,8 @@ describe('redactSecrets', () => {
       'github ghp_ABCdef123456789012345678901234567890',
       'slack xoxb-1234567890-abcdefghijklmnop',
       'Authorization: Bearer abcDEF123456789.token-value',
+      'Authorization: Basic dXNlcjpwYXNz',
+      'Authorization: Digest username="user", response="secret"',
       'jwt eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c',
     ].join('\n');
 
@@ -39,16 +41,31 @@ describe('redactSecrets', () => {
     expect(output).not.toContain('ghp_ABCdef');
     expect(output).not.toContain('xoxb-1234567890');
     expect(output).not.toContain('abcDEF123456789.token-value');
+    expect(output).not.toContain('dXNlcjpwYXNz');
+    expect(output).not.toContain('response="secret"');
     expect(output).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9');
     expect(output).toContain('[redacted]');
   });
 
   it('redacts credential-shaped assignments while keeping the key name', () => {
-    const output = redactSecrets('DATABASE_PASSWORD=hunter2 api_key: 12345');
+    const output = redactSecrets(
+      'DATABASE_PASSWORD=hunter2 api_key: 12345 service-api-key=abcdef',
+    );
 
     expect(output).toContain('PASSWORD=[redacted]');
     expect(output).not.toContain('hunter2');
     expect(output).toContain('api_key: [redacted]');
+    expect(output).toContain('service-api-key=[redacted]');
+  });
+
+  it('scans long hyphenated non-secret assignments without backtracking', () => {
+    const publicKey = `public-${'-'.repeat(50_000)}value`;
+    const input = `${publicKey}=visible DATABASE_PASSWORD=hunter2`;
+    const output = redactSecrets(input);
+
+    expect(output).toContain(`${publicKey}=visible`);
+    expect(output).toContain('DATABASE_PASSWORD=[redacted]');
+    expect(output).not.toContain('hunter2');
   });
 
   it('keeps an identifying prefix on hash-shaped values', () => {

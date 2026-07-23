@@ -15,7 +15,7 @@ import {
 } from '@roomote/types';
 
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
-import { findCommunicationTaskRunBySourceEvent } from '../tasks/communication-task-run-lookup.js';
+import { findCommunicationTaskRunBySourceEvent } from '@roomote/sdk/server/communication';
 import { processDiscordAttachments } from './attachments.js';
 import { replyToDiscordEvent } from './replies.js';
 import {

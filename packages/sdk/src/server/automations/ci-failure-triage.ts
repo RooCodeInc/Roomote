@@ -28,6 +28,15 @@ import {
   stripUuidBraces,
 } from '@roomote/bitbucket';
 import {
+  getGiteaActionRunConclusion,
+  getGiteaActionRunFailureEvidence,
+  getGiteaActionRunWebUrl,
+  isGiteaActionRunFailed,
+  getGiteaWorkflowName,
+  getLatestGiteaActionRun,
+  resolveGiteaInstanceHost,
+} from '@roomote/gitea';
+import {
   getGitLabPipelineFailureEvidence,
   getLatestGitLabPipeline,
   isNestedGitLabPipelineSource,
@@ -116,6 +125,7 @@ export async function ciFailureTriageJob(
     let deploymentGitLabHost: string | undefined;
     let deploymentAdoHost: string | undefined;
     let deploymentBitbucketHost: string | undefined;
+    let deploymentGiteaHost: string | undefined;
 
     // Walk every provider+host+fullName identity and resolve coverage through
     // the repository-id environment mapping (not fullName).
@@ -380,6 +390,86 @@ export async function ciFailureTriageJob(
             error instanceof Error ? error.message : String(error);
           result.errors.push(
             `${selectedRepository.fullName}: failed to inspect Bitbucket pipeline (${message})`,
+          );
+          continue;
+        }
+      }
+
+      if (sourceControlProvider === 'gitea') {
+        try {
+          deploymentGiteaHost ??= await resolveGiteaInstanceHost();
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to resolve the Gitea instance host (${message})`,
+          );
+          continue;
+        }
+
+        // Run ids and host path uniqueness are instance-scoped; only inspect
+        // repositories that match the deployment Gitea base URL host.
+        const repositoryHost = selectedRepository.host?.trim().toLowerCase();
+        if (repositoryHost !== deploymentGiteaHost) {
+          console.log(
+            `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: repository host ${repositoryHost ?? 'unknown'} does not match the deployment Gitea instance ${deploymentGiteaHost}`,
+          );
+          continue;
+        }
+
+        try {
+          const latestRun = await getLatestGiteaActionRun({
+            repositoryFullName: selectedRepository.fullName,
+            branch: selectedRepository.defaultBranch,
+          });
+          const conclusion = latestRun
+            ? getGiteaActionRunConclusion(latestRun)
+            : '';
+
+          if (!latestRun || !isGiteaActionRunFailed(conclusion)) {
+            console.log(
+              `${LOG_PREFIX} Skipping ${selectedRepository.fullName}: latest Gitea default-branch Actions run is not failed`,
+            );
+            continue;
+          }
+
+          const failureEvidence = await getGiteaActionRunFailureEvidence({
+            repositoryFullName: selectedRepository.fullName,
+            runId: latestRun.id,
+          }).catch((error) => {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            console.log(
+              `${LOG_PREFIX} Gitea Actions evidence unavailable for ${selectedRepository.fullName}: ${message}`,
+            );
+            return null;
+          });
+          workflowName = getGiteaWorkflowName(latestRun);
+          headBranch =
+            (latestRun.head_branch ?? '')
+              .replace(/^refs\/heads\//, '')
+              .trim() ||
+            selectedRepository.defaultBranch ||
+            'main';
+          const runUrl = getGiteaActionRunWebUrl({
+            repositoryFullName: selectedRepository.fullName,
+            run: latestRun,
+          });
+          claimMarker = runUrl;
+          triggeringRun = {
+            repositoryFullName: selectedRepository.fullName,
+            workflowName,
+            runUrl,
+            headBranch,
+            headSha: (latestRun.head_sha ?? '').trim() || 'unknown',
+            provider: 'gitea',
+            failureEvidence,
+          };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          result.errors.push(
+            `${selectedRepository.fullName}: failed to inspect Gitea Actions run (${message})`,
           );
           continue;
         }

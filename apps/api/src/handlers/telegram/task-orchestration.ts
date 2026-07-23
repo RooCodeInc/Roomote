@@ -25,7 +25,7 @@ import type {
   QueuedTelegramCommunicationMessage,
   TelegramConversationRef,
 } from './types.js';
-import { resumeCommunicationTaskFromSnapshot } from '../tasks/communication-snapshot-resume.js';
+import { resumeCommunicationTaskFromSnapshot } from '@roomote/sdk/server/communication';
 
 function cleanOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();

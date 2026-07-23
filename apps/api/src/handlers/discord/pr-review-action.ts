@@ -1,0 +1,105 @@
+import type { DiscordInteraction } from '@roomote/communication/discord-event';
+import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import {
+  claimPendingPrReviewAction,
+  dispatchPrReviewFollowUp,
+  enableAutoHandlePrReviewFeedback,
+  findDiscordMappedUserId,
+} from '@roomote/sdk/server';
+import type { PrReviewActionChoice } from '@roomote/types';
+
+import { apiLogger } from '../../logging.js';
+import { replyToDiscordEvent } from './replies.js';
+import type { DiscordChannelContext } from './task-launch.js';
+
+/**
+ * Handles clicks on a PR review-feedback notification's Yes / auto-handle /
+ * Dismiss buttons in Discord: claims the nonce-keyed pending offer and, on
+ * acceptance, dispatches the prepared follow-up prompt into the owning task —
+ * queued into the live run or waking the task from its snapshot.
+ */
+export async function handleDiscordPrReviewActionCallback(input: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  interaction: DiscordInteraction;
+  interactionDeferred: boolean;
+  channel: DiscordChannelContext;
+  choice: PrReviewActionChoice;
+  nonce: string;
+}): Promise<void> {
+  const reply = (text: string) =>
+    replyToDiscordEvent({
+      provider: input.provider,
+      applicationId: input.applicationId,
+      channel: input.channel,
+      interaction: {
+        interaction: input.interaction,
+        interactionDeferred: input.interactionDeferred,
+      },
+      text,
+    });
+  const user = input.interaction.member?.user ?? input.interaction.user;
+  const mappedUserId = await findDiscordMappedUserId(user?.id);
+
+  if (input.choice !== 'dismiss' && !mappedUserId) {
+    // Not claimed: a teammate with a linked account can still accept.
+    await reply(
+      'Link your Roomote account to start work from this notification.',
+    );
+    return;
+  }
+
+  const pending = await claimPendingPrReviewAction(input.nonce);
+
+  if (!pending) {
+    await reply('This offer was already handled or has expired.');
+    return;
+  }
+
+  if (input.choice === 'dismiss') {
+    await reply('Dismissed.');
+    return;
+  }
+
+  try {
+    if (input.choice === 'auto') {
+      await enableAutoHandlePrReviewFeedback({
+        taskId: pending.taskId,
+        repository: pending.repository,
+        prNumber: pending.prNumber,
+        userId: mappedUserId!,
+      });
+    }
+
+    const dispatched = await dispatchPrReviewFollowUp({
+      provider: 'discord',
+      channelId: pending.channelId,
+      threadId: pending.threadId,
+      followUpPrompt: pending.followUpPrompt,
+      actingUserId: mappedUserId!,
+      providerUserId: user?.id,
+    });
+
+    if (dispatched.outcome === 'unavailable') {
+      await reply(
+        input.choice === 'auto'
+          ? "I'll take future feedback from here, but this task can no longer be resumed for the current one. Reply here to start fresh."
+          : 'This task can no longer be resumed. Reply here to start fresh.',
+      );
+      return;
+    }
+
+    await reply(
+      input.choice === 'auto'
+        ? "I'll take it from here — future review feedback on this PR gets handled in this task. Looking at the current feedback now."
+        : 'On it — taking a look at the review feedback.',
+    );
+  } catch (error) {
+    apiLogger.error(
+      `[discord] Failed to dispatch PR review follow-up for ${pending.repository}#${pending.prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    await reply('Failed to start the follow-up. Reply here to ask again.');
+  }
+}

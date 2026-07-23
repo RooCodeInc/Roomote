@@ -123,6 +123,7 @@ roomoteMcpServer.registerTool(
     title: 'Show Widget',
     description:
       'Render a presentational HTML widget in the current task transcript. ' +
+      'Use it proactively when the user asks to show, mock up, preview, or visualize an interface or interaction; prefer it over an ASCII or text-only example when a compact visual would answer the request better. ' +
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +

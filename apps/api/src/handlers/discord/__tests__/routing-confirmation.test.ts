@@ -33,7 +33,7 @@ vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUser,
 }));
 
-vi.mock('../../tasks/communication-task-run-lookup.js', () => ({
+vi.mock('@roomote/sdk/server/communication', () => ({
   findCommunicationTaskRunBySourceEvent: mocks.findSourceRun,
 }));
 

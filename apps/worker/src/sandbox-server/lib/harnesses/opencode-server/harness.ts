@@ -17,6 +17,7 @@ import {
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
   TaskEventName,
 } from '@roomote/types';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import type {
   AcpMessage,
   AcpPersistedEnvelope,
@@ -44,6 +45,7 @@ import type {
   TaskCommand,
 } from '../../harness';
 import {
+  TERMINAL_PROVIDER_ERROR_SAY,
   TaskCommandName,
   extractQueuedMessageId,
   extractQueuedMessageMove,
@@ -1045,10 +1047,7 @@ function isOpenCodeMessageAbortedError(error: unknown): boolean {
   return name === 'MessageAbortedError' || message === 'Aborted';
 }
 
-const SESSION_ERROR_FALLBACK_MAX_CHARS = 600;
-
 const MAX_RESOLVED_USER_INPUT_REQUEST_IDS = 256;
-
 /**
  * Session errors used to be dumped into the transcript as the raw
  * `JSON.stringify(error)` blob (status codes, response headers, provider
@@ -1062,22 +1061,18 @@ function formatOpenCodeSessionErrorText(error: unknown): string {
     asString(asRecord(record?.data)?.message) ?? asString(record?.message);
 
   if (message) {
+    const redactedMessage = redactSecrets(message);
+
     return name && name !== 'APIError'
-      ? `The provider returned an error (${name}): ${message}`
-      : `The provider returned an error: ${message}`;
+      ? `The provider returned an error (${name}): ${redactedMessage}`
+      : `The provider returned an error: ${redactedMessage}`;
   }
 
   if (name) {
     return `The session ended with an error: ${name}`;
   }
 
-  const serialized = JSON.stringify(error ?? {});
-
-  return `The session ended with an error: ${
-    serialized.length > SESSION_ERROR_FALLBACK_MAX_CHARS
-      ? `${serialized.slice(0, SESSION_ERROR_FALLBACK_MAX_CHARS)}…`
-      : serialized
-  }`;
+  return 'The session ended with an unknown provider error.';
 }
 
 function formatOpenCodeUserInputResponsePrompt(options: {
@@ -1574,6 +1569,13 @@ export class OpenCodeServerHarness
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
   private finalizedAssistantTurn: FinalizedAssistantTurn | null = null;
   private suppressNextReplayAbortError = false;
+  // Queue id of an answered user-input replay awaiting delivery. While that
+  // exact prompt is still queued, an idle transition must drain it instead of
+  // running Slack closeout enforcement. Keyed by id (ids are never reused) so
+  // the suppression expires the moment the replay is dequeued and can never
+  // leak onto a later, unrelated queued prompt.
+  private queuedUserInputReplayPromptId: string | null = null;
+  private ignoreNextUserInputReplaySessionIdle = false;
   private replayAbortErrorSuppressionTimeout:
     | ReturnType<typeof setTimeout>
     | undefined;
@@ -2068,6 +2070,8 @@ export class OpenCodeServerHarness
     this.clearProviderErrorRecoveryState();
     this.clearAllExecuteToolProgress();
     this.stopHookReminderCount = 0;
+    this.queuedUserInputReplayPromptId = null;
+    this.ignoreNextUserInputReplaySessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
     this.cancelRequestedBeforeSession = false;
@@ -3027,6 +3031,7 @@ export class OpenCodeServerHarness
         userId: command.data.userId,
       });
       this.prompts.prioritize(queuedId);
+      this.queuedUserInputReplayPromptId = queuedId;
 
       if (this.providerErrorRecoveryQueuedPromptId !== null) {
         this.frontloadProviderErrorRecoveryIfQueued();
@@ -3587,6 +3592,7 @@ export class OpenCodeServerHarness
       // Retry transitions prove the session is alive, but not that the turn's
       // loop advanced. Keep the stall watchdog armed during transient backoff.
       this.ignoreNextProviderRecoverySessionIdle = false;
+      this.ignoreNextUserInputReplaySessionIdle = false;
       this.inFlight = true;
       this.stallWatchdogs.noteActivity();
       this.stallWatchdogs.ensureTurnStallArmed();
@@ -3597,6 +3603,7 @@ export class OpenCodeServerHarness
       // If OpenCode omitted the paired session.idle event, do not let a stale
       // guard consume the retry's eventual idle transition.
       this.ignoreNextProviderRecoverySessionIdle = false;
+      this.ignoreNextUserInputReplaySessionIdle = false;
       this.inFlight = true;
       // Status transitions prove the session is alive (e.g. a provider retry
       // loop), but not that the turn's loop advanced — a steer awaiting
@@ -3611,7 +3618,7 @@ export class OpenCodeServerHarness
         return;
       }
 
-      await this.finishCurrentTurn();
+      await this.finishCurrentTurn('session_status');
     }
   }
 
@@ -3679,11 +3686,16 @@ export class OpenCodeServerHarness
       return;
     }
 
+    if (this.ignoreNextUserInputReplaySessionIdle) {
+      this.ignoreNextUserInputReplaySessionIdle = false;
+      return;
+    }
+
     if (await this.drainProviderErrorRecoveryAfterIdle('session_idle')) {
       return;
     }
 
-    await this.finishCurrentTurn();
+    await this.finishCurrentTurn('session_idle');
   }
 
   private async handleSessionError(
@@ -3728,12 +3740,31 @@ export class OpenCodeServerHarness
     }
 
     if (sessionId) {
+      const errorText = formatOpenCodeSessionErrorText(error);
+
       this.logger.error(
         `OpenCode session error sessionId=${sessionId}: ${JSON.stringify(error ?? {})}`,
       );
       this.runtimeEvents.assistantMessage({
         sessionId,
-        text: formatOpenCodeSessionErrorText(error),
+        text: errorText,
+      });
+      // Pair the transcript message with a semantic error event so the harness
+      // manager persists the provider detail when it finalizes the failed run.
+      this.emit('taskEvent', {
+        eventName: TaskEventName.Message,
+        payload: [
+          {
+            taskId: sessionId,
+            action: 'created',
+            message: {
+              ts: Date.now(),
+              type: 'say',
+              say: TERMINAL_PROVIDER_ERROR_SAY,
+              text: errorText,
+            },
+          },
+        ],
       });
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();
@@ -4366,7 +4397,9 @@ export class OpenCodeServerHarness
     await this.finalizeAssistantMessage(info.id);
   }
 
-  private async finishCurrentTurn(): Promise<void> {
+  private async finishCurrentTurn(
+    source: 'session_status' | 'session_idle' = 'session_idle',
+  ): Promise<void> {
     if (!this.inFlight && !this.prompts.hasQueuedMessages()) {
       return;
     }
@@ -4395,7 +4428,18 @@ export class OpenCodeServerHarness
     this.lastOpenCodeRetryStatusMessage = null;
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
 
-    if (sessionId) {
+    // A blocked question answer queues an abort-and-replay prompt. Its abort
+    // can emit session.status(idle)/session.idle before the answer is
+    // submitted, so defer closeout enforcement while that exact prompt is
+    // still queued. The suppression self-expires once the replay is dequeued;
+    // it never carries over to later, unrelated queued prompts.
+    const skipStopHookForQueuedReplay =
+      this.queuedUserInputReplayPromptId !== null &&
+      this.prompts.has(this.queuedUserInputReplayPromptId);
+    this.ignoreNextUserInputReplaySessionIdle =
+      skipStopHookForQueuedReplay && source === 'session_status';
+
+    if (sessionId && !skipStopHookForQueuedReplay) {
       const stopDecision = this.evaluateSlackStopHook(sessionId);
 
       if (stopDecision.blocked) {

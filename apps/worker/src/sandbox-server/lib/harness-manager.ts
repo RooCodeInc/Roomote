@@ -23,7 +23,11 @@ import { captureWorkerMessage } from '../../monitoring/sentry';
 export { isActiveTaskPhase };
 export type { TaskPhase };
 
-import type { CancelTaskAttribution, Harness } from './harness';
+import {
+  TERMINAL_PROVIDER_ERROR_SAY,
+  type CancelTaskAttribution,
+  type Harness,
+} from './harness';
 
 /**
  * Event names used by the HarnessManager.
@@ -95,6 +99,7 @@ const ERROR_SAY_TYPES = new Set([
   'error',
   'api_req_failed',
   'api_req_retry_delayed',
+  TERMINAL_PROVIDER_ERROR_SAY,
 ]);
 
 const ACTIVE_SLEEP_HEARTBEAT_INTERVAL_MS = 45 * 1_000;
@@ -188,6 +193,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   private shutdownPromise: Promise<TaskState>;
   private runtimeQueuedMessagesCount = 0;
   private deferredTurnSettlement: DeferredTurnSettlement | null = null;
+  private terminalProviderErrorPending = false;
 
   /** Last task state event received for the parent task. */
   private lastTaskStateEvent: TaskStateEvent | null = null;
@@ -269,6 +275,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       // A successful send means we're attempting recovery from any previous
       // provider error; clear stale error UI until a new error arrives.
       this.state.lastErrorMessage = undefined;
+      this.terminalProviderErrorPending = false;
 
       const hasPendingUserInput =
         (this.harness.getPendingUserInputRequests?.() ?? []).length > 0;
@@ -530,6 +537,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     this.state.taskAbortedAt = undefined;
     this.state.cancelTriggeredAt = undefined;
     this.state.lastErrorMessage = undefined;
+    this.terminalProviderErrorPending = false;
 
     // Keep stopped-task resume as an inert handoff until the caller sends or
     // resumes work explicitly.
@@ -812,12 +820,14 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     this.lastTaskStateEvent = null;
     this.runtimeQueuedMessagesCount = 0;
     this.deferredTurnSettlement = null;
+    this.terminalProviderErrorPending = false;
   }
 
   private clearTurnSettlementState(): void {
     this.state.taskFinishedAt = undefined;
     this.state.taskAbortedAt = undefined;
     this.state.cancelTriggeredAt = undefined;
+    this.terminalProviderErrorPending = false;
   }
 
   private invokeOnStart(taskId: string): void {
@@ -1244,6 +1254,9 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       if (ERROR_SAY_TYPES.has(message.say ?? '')) {
         this.state.lastErrorMessage =
           message.text || message.say || 'Unknown error';
+        if (message.say === TERMINAL_PROVIDER_ERROR_SAY) {
+          this.terminalProviderErrorPending = true;
+        }
 
         this.logger.warn(`[HarnessManager] provider error '${message.say}'`);
       }
@@ -1338,6 +1351,14 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   private onTaskAborted(payload: TaskEventAbortedPayload): void {
     if (payload[0] === this.state.sessionId) {
       this.logger.info(`[HarnessManager] Task aborted: ${payload[0]}`);
+
+      // A provider error is terminal, unlike a user-initiated abort. Preserve
+      // the error and shut down without setting the cancellation stamp so the
+      // worker resolves this run as Failed rather than Canceled.
+      if (this.terminalProviderErrorPending && !this.state.cancelTriggeredAt) {
+        this.triggerShutdown();
+        return;
+      }
 
       this.state.taskAbortedAt = Date.now();
 

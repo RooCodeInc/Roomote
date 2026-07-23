@@ -38,6 +38,7 @@ export interface TelemetryEnvInput {
   appEnv: string | undefined;
   releaseVersion: string | undefined;
   forceTelemetry: string | undefined;
+  pingBaseUrl: string | undefined;
 }
 
 function isTruthyFlag(value: string | undefined): boolean {
@@ -50,12 +51,13 @@ function isTruthyFlag(value: string | undefined): boolean {
 
 /**
  * Pure environment gate: telemetry (analytics and version checks alike) may
- * only leave real deployments. Local development and builds without a
- * RELEASE_VERSION send nothing at all unless force-enabled for testing.
+ * only leave production releases. Development and preview send nothing unless
+ * force-enabled with an explicitly configured Ping endpoint. Builds without a
+ * RELEASE_VERSION also stay silent unless force-enabled.
  */
 export function isTelemetryEnvAllowedFor(input: TelemetryEnvInput): boolean {
   if (isTruthyFlag(input.forceTelemetry)) {
-    return true;
+    return input.appEnv === 'production' || Boolean(input.pingBaseUrl?.trim());
   }
 
   const releaseVersion = input.releaseVersion?.trim();
@@ -63,7 +65,34 @@ export function isTelemetryEnvAllowedFor(input: TelemetryEnvInput): boolean {
     return false;
   }
 
-  return input.appEnv !== 'development';
+  return input.appEnv === 'production';
+}
+
+export function getTelemetryConfigurationNotice(
+  input: TelemetryEnvInput,
+): string | null {
+  if (input.appEnv !== 'development' && input.appEnv !== 'preview') {
+    return null;
+  }
+
+  const forceEnabled = isTruthyFlag(input.forceTelemetry);
+  const pingEndpointConfigured = Boolean(input.pingBaseUrl?.trim());
+
+  if (pingEndpointConfigured && !forceEnabled) {
+    return (
+      'R_PING_BASE_URL is configured, but Ping telemetry is disabled outside production. ' +
+      'Set ROOMOTE_FORCE_TELEMETRY=true to enable it.'
+    );
+  }
+
+  if (forceEnabled && !pingEndpointConfigured) {
+    return (
+      'ROOMOTE_FORCE_TELEMETRY is enabled, but R_PING_BASE_URL is not configured. ' +
+      'Set an explicit Ping endpoint to enable telemetry outside production.'
+    );
+  }
+
+  return null;
 }
 
 function readTelemetryEnv(): TelemetryEnvInput {
@@ -71,11 +100,28 @@ function readTelemetryEnv(): TelemetryEnvInput {
     appEnv: Env.APP_ENV,
     releaseVersion: Env.RELEASE_VERSION,
     forceTelemetry: Env.ROOMOTE_FORCE_TELEMETRY,
+    // Env supplies a production Ping default, but forced non-production
+    // telemetry must opt in to an endpoint rather than using that default.
+    pingBaseUrl: process.env.R_PING_BASE_URL,
   };
 }
 
+const emittedConfigurationNotices = new Set<string>();
+
+export function logTelemetryConfigurationNotice(
+  input: TelemetryEnvInput,
+): void {
+  const notice = getTelemetryConfigurationNotice(input);
+  if (notice && !emittedConfigurationNotices.has(notice)) {
+    emittedConfigurationNotices.add(notice);
+    console.info(`${LOG_PREFIX} ${notice}`);
+  }
+}
+
 export function isTelemetryEnvAllowed(): boolean {
-  return isTelemetryEnvAllowedFor(readTelemetryEnv());
+  const input = readTelemetryEnv();
+  logTelemetryConfigurationNotice(input);
+  return isTelemetryEnvAllowedFor(input);
 }
 
 function getAppVersion(): string | undefined {
@@ -255,7 +301,8 @@ export async function captureInstanceEvent(
 
 /**
  * Asks the Ping service for the latest released version. Mandatory (not
- * gated by the analytics setting) but still env-gated: dev sends nothing.
+ * gated by the analytics setting) but still env-gated: non-production sends
+ * nothing without an explicit force flag and Ping endpoint.
  * Returns null on any failure.
  */
 export async function checkLatestVersion(): Promise<PingVersionCheckResponse | null> {

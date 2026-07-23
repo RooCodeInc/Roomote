@@ -141,7 +141,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     manualTriggerRequirements: ['repository'],
     usesManagerChannel: false,
     supportedCommunicationProviders: [],
-    supportedSourceControlProviders: ['github', 'gitlab', 'ado'],
+    supportedSourceControlProviders: ['github', 'gitlab', 'ado', 'gitea'],
   },
   {
     automationKey: 'suggester',
@@ -257,13 +257,20 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'CI Failure Triage',
     availability: 'stable',
     scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
-    // GitHub workflow_run, GitLab Pipeline, Azure DevOps build.complete, and
-    // Bitbucket Pipelines commit-status hooks are wired; open-ended SCM
-    // requirement so non-GitHub-only deployments can still Run now.
+    // GitHub workflow_run, GitLab Pipeline, Azure DevOps build.complete,
+    // Bitbucket Pipelines commit-status, and Gitea Actions workflow_run hooks
+    // are wired; open-ended SCM requirement so non-GitHub-only deployments can
+    // still Run now.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
-    supportedSourceControlProviders: ['github', 'gitlab', 'ado', 'bitbucket'],
+    supportedSourceControlProviders: [
+      'github',
+      'gitlab',
+      'ado',
+      'bitbucket',
+      'gitea',
+    ],
     scheduledSuggestionSource: 'ci_failure_triage',
   },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];

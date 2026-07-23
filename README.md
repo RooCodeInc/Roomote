@@ -22,7 +22,7 @@ something else.
 Source-available. Self-hostable. Use your ChatGPT subscription or bring your own
 API keys.
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo?referralCode=roomote)
 &nbsp;&nbsp;
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote)
 
@@ -95,9 +95,12 @@ Pick one path. You will have a working Roomote instance at the end.
 
 ### Option A: One-click deploy (Railway)
 
+New to Railway? [Sign up with our referral link](https://railway.com?referralCode=roomote)
+to get $20 in credit.
+
 1. Click the button:
 
-   [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo)
+   [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo?referralCode=roomote)
 
 2. Railway provisions Postgres, Redis, and the app. Follow the prompts to set
    your admin email and password.

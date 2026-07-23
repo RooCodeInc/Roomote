@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai';
 import { z } from 'zod';
 
 import type { RoutingContext } from './types';
+import { gatherExternalIssueContext } from './external-issue-context';
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
@@ -65,21 +66,25 @@ export async function gatherContextFromConfiguredMcps<
     z.infer<TSubmitRoutingDecisionSchema> & LookupAwareRoutingResponse
   >
 > {
+  const externalIssueContext = await gatherExternalIssueContext(context);
   const { object } = await generateTrackedNonTaskObject({
     userId: context.routingActor?.userId,
     surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
     model: routingModel,
     schema: submitRoutingDecisionSchema,
     system: routingPrompt,
-    prompt: serializeContextMessages(contextMessages),
+    prompt: serializeContextMessages([
+      ...contextMessages,
+      ...externalIssueContext.contextMessages,
+    ]),
   });
   const response = object as z.infer<TSubmitRoutingDecisionSchema> &
     LookupAwareRoutingResponse;
 
   return {
     response,
-    toolsUsed: [],
-    phase: 'direct',
+    toolsUsed: externalIssueContext.toolsUsed,
+    phase: externalIssueContext.toolsUsed.length > 0 ? 'mcp' : 'direct',
     needsExternalLookup:
       typeof response.needsExternalLookup === 'boolean'
         ? response.needsExternalLookup

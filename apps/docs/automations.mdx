@@ -156,15 +156,17 @@ Cards also show capability badges for what each automation supports today:
 the chat surfaces it can report to and the source-control providers it works
 with. Triage Dependabot Alerts and Triage CodeQL Alerts are GitHub-only by
 nature. CI Failure Triage supports GitHub Actions, GitLab Pipelines, Azure
-DevOps builds, and Bitbucket Pipelines. Triage Issues supports GitHub, GitLab,
+DevOps builds, Bitbucket Pipelines, and Gitea Actions. Triage Issues supports GitHub, GitLab,
 and Gitea issues.
 Security Auditor, Code Quality Auditor, Weekly Manager
 Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
 any connected source-control provider. Resolve PR Conflicts supports GitHub,
-GitLab, and Azure DevOps. CI Failure Triage reacts immediately to GitHub
-Actions, GitLab Pipeline, Azure DevOps `build.complete`, and Bitbucket
-Pipelines commit-status webhooks rather than running on a daily or weekly
-schedule.
+GitLab, Azure DevOps, and Gitea. Bitbucket is not supported because its API
+does not expose the mergeability and label signals required for an unattended
+opt-in scan. CI Failure Triage reacts immediately to GitHub
+Actions, GitLab Pipeline, Azure DevOps `build.complete`, Bitbucket
+Pipelines commit-status, and Gitea Actions `workflow_run` webhooks rather than
+running on a daily or weekly schedule.
 
 **Code Quality Auditor** inspects recently merged PR diffs and only posts
 high-confidence maintainability issues worth a real follow-up task. It is
@@ -190,7 +192,7 @@ and secure-by-default gaps that are worth a real follow-up task.
 
 **CI Failure Triage** reacts the moment CI fails on a repository's default
 branch (GitHub Actions workflow runs, GitLab Pipelines, Azure DevOps
-builds, and Bitbucket Pipelines). When a failure persists (it is not already fixed by a newer run and is
+builds, Bitbucket Pipelines, and Gitea Actions). When a failure persists (it is not already fixed by a newer run and is
 not a one-off flake), Roomote starts a fix task that reproduces the failing
 job inside the repository's configured environment, finds the root cause, opens
 a PR with the fix, and posts one summary to the Manager Channel when it
@@ -199,6 +201,9 @@ triaged. For GitLab, ensure Pipeline Hooks are enabled on the webhook Roomote
 receives. For Azure DevOps, Roomote ensures the project-scoped
 `build.complete` service hook when Azure DevOps repositories are synced. For Bitbucket, repository webhooks include `repo:commit_status_created` and
 `repo:commit_status_updated`, and the OAuth client needs the Pipelines scope.
+For Gitea, repository webhook resync includes the `workflow_run` event so
+Actions completions reach Roomote; host matching uses the deployment
+`GITEA_BASE_URL`.
 
 ## Add instructions to reduce noise
 
