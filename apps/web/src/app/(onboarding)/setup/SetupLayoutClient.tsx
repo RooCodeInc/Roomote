@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useSetupBootstrapOpen, useUser } from '@/hooks/useUser';
 import {
@@ -12,12 +12,16 @@ import {
 } from '@/components/layout';
 import { Spinner } from '@/components/system';
 
+import { getSetupDocsStep, SetupDocs } from './SetupDocs';
+
 export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { authStatus, isSignedIn } = useUser();
   const setupBootstrapOpen = useSetupBootstrapOpen();
   const [userMenuPortalContainer, setUserMenuPortalContainer] =
     useState<HTMLDivElement | null>(null);
+  const docsStep = getSetupDocsStep(searchParams.get('step'));
 
   useEffect(() => {
     if (authStatus === 'signed-out' && !setupBootstrapOpen) {
@@ -37,6 +41,7 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
     <div className="notranslate light text-foreground relative min-h-viewport w-full overflow-hidden bg-white md:h-viewport">
       <RoomoteWordmark className="absolute top-8 left-8 h-8 hidden lg:block" />
       <div ref={setUserMenuPortalContainer} className="light text-foreground" />
+      <SetupDocs step={docsStep} />
       <FramedSurface
         variant="bold"
         frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden"
@@ -44,9 +49,12 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
       >
         {isSignedIn ? (
           <>
-            <div className="z-50 flex w-full gap-2 justify-end px-4 pt-4 md:fixed md:right-9 md:top-9 md:w-auto md:px-0 md:pt-0">
+            <div className="z-50 flex w-full gap-2 justify-end px-4 pt-4 md:fixed md:bottom-9 md:left-9 md:w-auto md:px-0 md:pt-0">
               <RoomoteWordmark className="h-8 hidden sm:block lg:hidden" />
-              <UserMenu portalContainer={userMenuPortalContainer} />
+              <UserMenu
+                portalContainer={userMenuPortalContainer}
+                menuSide="top"
+              />
             </div>
           </>
         ) : null}

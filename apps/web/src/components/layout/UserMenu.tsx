@@ -19,10 +19,12 @@ import {
 export const UserMenu = ({
   portalContainer,
   expanded = false,
+  menuSide = 'left',
   switchOrgRedirectPath,
 }: {
   portalContainer?: HTMLElement | null;
   expanded?: boolean;
+  menuSide?: 'top' | 'right' | 'bottom' | 'left';
   switchOrgRedirectPath?: string;
 } = {}) => {
   const { isSignedIn, user } = useUser();
@@ -34,6 +36,7 @@ export const UserMenu = ({
   return (
     <SignedInUserMenu
       expanded={expanded}
+      menuSide={menuSide}
       portalContainer={portalContainer}
       switchOrgRedirectPath={switchOrgRedirectPath}
       user={user}
@@ -44,10 +47,12 @@ export const UserMenu = ({
 function SignedInUserMenu({
   portalContainer,
   expanded,
+  menuSide,
   user,
 }: {
   portalContainer?: HTMLElement | null;
   expanded: boolean;
+  menuSide: 'top' | 'right' | 'bottom' | 'left';
   switchOrgRedirectPath?: string;
   user: NonNullable<ReturnType<typeof useUser>['user']>;
 }) {
@@ -91,7 +96,7 @@ function SignedInUserMenu({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
-          side="left"
+          side={menuSide}
           className="min-w-76"
           portalContainer={portalContainer}
         >

@@ -51,6 +51,7 @@ import { StepRepoSelection, type SetupRetryReason } from './StepRepoSelection';
 import { getSetupStepPath } from './types';
 import {
   getBootstrapAuthProvider,
+  getBootstrapStepPath,
   getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
@@ -132,8 +133,14 @@ export default function SetupPage() {
 
       bootstrapStepRef.current = nextStep;
       setBootstrapStep(nextStep);
+      router.replace(
+        getBootstrapStepPath(
+          nextStep,
+          new URLSearchParams(window.location.search),
+        ),
+      );
     },
-    [],
+    [router],
   );
   const [pendingAuthProvider, setPendingAuthProvider] =
     useState<CommunicationProviderChoice | null>(null);
