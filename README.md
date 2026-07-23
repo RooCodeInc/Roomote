@@ -7,7 +7,7 @@ repo into an isolated sandbox, writes the code, runs the tests, takes a
 screenshot, and opens a PR. You review the diff like you would from any teammate.
 
 No IDE plugin. No terminal session. No babysitting. It works while you do
-something else.
+something else, all the way.
 
 ```
 "Fix the 500 on /api/billing for annual plans"
@@ -19,14 +19,17 @@ something else.
 → you review, merge, done
 ```
 
-Source-available. Self-hostable. Use your ChatGPT subscription or bring your own
+Source-available. Self-hostable or our Cloud. Use your ChatGPT subscription or bring your own
 API keys.
 
+![Roomote chat workflow demo](assets/roomote-hero.gif)
+
+[![Deploy on Roomote Cloud](https://roomote.dev/images/deploy-button.png)](https://cloud.roomote.dev/sign-up)
+&nbsp;&nbsp;
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo?referralCode=roomote)
 &nbsp;&nbsp;
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote)
 
-![Roomote chat workflow demo](assets/roomote-hero.gif)
 
 ---
 
@@ -93,52 +96,40 @@ cleans up after itself.
 
 Pick one path. You will have a working Roomote instance at the end.
 
-### Option A: One-click deploy (Railway)
+### Roomote Cloud (fastest, ~2 min)
+
+Don't want to run infrastructure? We'll host your deployment: free 7-day trial, no credit card. Same single-tenant product — your own isolated instance, connect your ChatGPT subscription or bring an API key. Move to self-hosting anytime. [Start free →](https://cloud.roomote.dev/sign-up)
+
+### One-click deploy (Railway)
 
 New to Railway? [Sign up with our referral link](https://railway.com?referralCode=roomote)
 to get $20 in credit.
 
-1. Click the button:
+1. [Use the template](https://railway.com/deploy/Rj2cFo?referralCode=roomote)
 
-   [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo?referralCode=roomote)
+2. Railway provisions Postgres, Redis, and the app.
 
-2. Railway provisions Postgres, Redis, and the app. Follow the prompts to set
-   your admin email and password.
+3. Open the setup link Railway gives you. Configure your communication, source control and inference providers.
 
-3. Open the setup link Railway gives you. Connect models. Two options:
-   - **ChatGPT subscription:** Sign in with your ChatGPT account. If you
-     already pay for Plus or Pro, you're done. No API key needed.
-   - **API key:** Paste a key from OpenRouter, Anthropic, OpenAI, or any other
-     supported provider.
+4. Connect your sandbox provider.
 
-4. Connect source control: GitHub, GitLab, Gitea, Azure DevOps, or Bitbucket
-   Cloud.
+5. Open Slack/Telegram/Discord/Teams, send Roomote a message and you're off.
 
-5. Open Slack, send Roomote a message:
+You now have a working cloud coding agent. Total time: ~6 minutes.
 
-   ```
-   What files are in the root of the repo?
-   ```
+### One-click deploy (Render)
 
-   **Expected output:** Roomote lists your repo's top-level files and asks what
-   you'd like to work on.
+1. [Use the template](https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote)
 
-You now have a working cloud coding agent. Total time: ~3 minutes.
+2. Render provisions Postgres, Redis, and the app.
 
-### Option B: One-click deploy (Render)
+3. Open the setup link Render gives you. Configure your communication, source control and inference providers.
 
-1. Click the button:
+4. Connect your sandbox provider.
 
-   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote)
+5. Open Slack/Telegram/Discord/Teams, send Roomote a message and you're off.
 
-2. Render creates managed Postgres, Redis, and the app. Set your admin
-   credentials when prompted.
-
-3. Open the setup link, connect a model provider and source control.
-
-4. Send Roomote a test message in Slack. Same expected output as above.
-
-### Option C: Self-host on your own server
+### Self-host on your own server
 
 SSH into a fresh Ubuntu/Debian machine (4 GB RAM recommended) and run:
 
@@ -147,13 +138,13 @@ curl -fsSL https://get.roomote.dev | bash
 ```
 
 The installer handles Docker, secrets, and the Compose stack. It prints a setup
-link when it finishes. Connect your model provider and repo, then send a test
+link when it finishes. Follow the on-screen instructions, then send a test
 message.
 
 For production, point DNS at your server and pass `--domain roomote.example.com`.
 
 See also: [Coolify](deploy/coolify/README.md) and [Fly.io](deploy/fly/README.md)
-deployment guides.
+for more deployment guides.
 
 ---
 
@@ -211,11 +202,8 @@ Features that matter at scale:
 
 ### Enterprise
 
-Need SSO, custom SLAs, or dedicated support? Email
+Need SSO, custom SLAs, or dedicated support? Get in touch:
 [help@roomote.dev](mailto:help@roomote.dev).
-
-Want a managed deployment instead of self-hosting? We can run it for you.
-[Get in touch](mailto:help@roomote.dev).
 
 ---
 
@@ -255,6 +243,7 @@ GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud. Connect one or many.
 **What does it cost?**
 Self-hosting is free for up to 10 registered users. You pay your own model
 provider for tokens (or use the models bundled with your ChatGPT subscription).
+Cloud starts at $49/mo, depending on total user count.
 For larger teams, licenses are available by emailing
 [help@roomote.dev](mailto:help@roomote.dev).
 
