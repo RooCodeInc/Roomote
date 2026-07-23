@@ -15,6 +15,8 @@ import {
   handleTaskConfiguration,
   MANAGER_MCP_SETUP_CONFIGURE_ACTION_ID,
   MANAGER_MCP_SETUP_NO_THANKS_ACTION_ID,
+  PR_REVIEW_ACTION_DISMISS_ACTION_ID,
+  PR_REVIEW_ACTION_YES_ACTION_ID,
   SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_CONFIGURE_ACTION_ID,
   SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_IGNORE_ACTION_ID,
   SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_TEXT,
@@ -23,6 +25,10 @@ import {
   type SlackInteractivePayload,
 } from '@roomote/slack';
 import { and, db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  handleSlackPrReviewActionDismiss,
+  handleSlackPrReviewActionYes,
+} from './pr-review-action.js';
 import { handleTaskCancellation } from './task-cancellation.js';
 import { handleThreadReplyDetailsToggle } from './thread-reply-details-toggle.js';
 
@@ -210,6 +216,12 @@ export async function handleSlackInteractivePayload(
       break;
     case actionId === ROOMOTE_SLACK_REPLY_TOGGLE_ACTION_ID:
       await handleThreadReplyDetailsToggle(interactivePayload);
+      break;
+    case actionId === PR_REVIEW_ACTION_YES_ACTION_ID:
+      await handleSlackPrReviewActionYes(interactivePayload);
+      break;
+    case actionId === PR_REVIEW_ACTION_DISMISS_ACTION_ID:
+      await handleSlackPrReviewActionDismiss(interactivePayload);
       break;
     case actionId === 'nevermind_task':
       await handleNevermind(interactivePayload);

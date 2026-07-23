@@ -187,6 +187,8 @@ describe('preparePrReviewNotificationDelivery', () => {
         worthNotifying: true,
         summary:
           'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
+        followUpQuestion: '',
+        followUpPrompt: '',
       },
     });
     mockFormatMessage.mockReturnValue('formatted-message');
@@ -208,6 +210,8 @@ describe('preparePrReviewNotificationDelivery', () => {
         threadId: '111.222',
       },
       text: 'formatted-message',
+      followUpQuestion: null,
+      followUpPrompt: null,
     });
     expect(mockFormatMessage).toHaveBeenCalledWith({
       repository: 'owner/repo',
@@ -285,6 +289,8 @@ describe('preparePrReviewNotificationDelivery', () => {
         worthNotifying: true,
         summary:
           'I reviewed [owner/repo#42](https://github.com/owner/repo/pull/42) on GitHub and found no issues.',
+        followUpQuestion: '',
+        followUpPrompt: '',
       },
     });
     mockFormatMessage.mockReturnValue(
@@ -297,6 +303,8 @@ describe('preparePrReviewNotificationDelivery', () => {
       post: true,
       route: null,
       text: 'I reviewed [owner/repo#42](https://github.com/owner/repo/pull/42) on GitHub and found no issues.',
+      followUpQuestion: null,
+      followUpPrompt: null,
     });
     expect(mockGenerateObject).toHaveBeenCalled();
     expect(mockFormatMessage).toHaveBeenCalledWith(
@@ -306,7 +314,12 @@ describe('preparePrReviewNotificationDelivery', () => {
 
   it('propagates a triage skip decision', async () => {
     mockGenerateObject.mockResolvedValue({
-      object: { worthNotifying: false, summary: '' },
+      object: {
+        worthNotifying: false,
+        summary: '',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
     });
 
     await expect(
@@ -329,6 +342,8 @@ describe('triagePrReviewActivity', () => {
       object: {
         worthNotifying: true,
         summary: '  alice approved and bob left one comment.  ',
+        followUpQuestion: '',
+        followUpPrompt: '',
       },
     });
 
@@ -337,6 +352,8 @@ describe('triagePrReviewActivity', () => {
     expect(decision).toEqual({
       post: true,
       summary: 'alice approved and bob left one comment.',
+      followUpQuestion: null,
+      followUpPrompt: null,
     });
     expect(mockGenerateObject).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -368,7 +385,12 @@ describe('triagePrReviewActivity', () => {
 
   it('passes the source-control provider label into the triage prompt', async () => {
     mockGenerateObject.mockResolvedValue({
-      object: { worthNotifying: true, summary: 'ok.' },
+      object: {
+        worthNotifying: true,
+        summary: 'ok.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
     });
 
     await triagePrReviewActivity({
@@ -416,7 +438,12 @@ describe('triagePrReviewActivity', () => {
 
   it('includes the latest Roomote review summary comment verbatim for self-review results', async () => {
     mockGenerateObject.mockResolvedValue({
-      object: { worthNotifying: true, summary: 'ok.' },
+      object: {
+        worthNotifying: true,
+        summary: 'ok.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
     });
 
     await triagePrReviewActivity({
@@ -454,7 +481,12 @@ describe('triagePrReviewActivity', () => {
 
   it('includes merge conflicts in the triage prompt for self-review results', async () => {
     mockGenerateObject.mockResolvedValue({
-      object: { worthNotifying: true, summary: 'ok.' },
+      object: {
+        worthNotifying: true,
+        summary: 'ok.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
     });
 
     await triagePrReviewActivity({
@@ -481,7 +513,12 @@ describe('triagePrReviewActivity', () => {
 
   it('returns a skip decision when the model says the activity is not worth notifying', async () => {
     mockGenerateObject.mockResolvedValue({
-      object: { worthNotifying: false, summary: '' },
+      object: {
+        worthNotifying: false,
+        summary: '',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
     });
 
     await expect(
@@ -494,6 +531,8 @@ describe('triagePrReviewActivity', () => {
       object: {
         worthNotifying: false,
         summary: 'The automated review found no blocking issues.',
+        followUpQuestion: '',
+        followUpPrompt: '',
       },
     });
 
@@ -502,12 +541,19 @@ describe('triagePrReviewActivity', () => {
     ).resolves.toEqual({
       post: true,
       summary: 'The automated review found no blocking issues.',
+      followUpQuestion: null,
+      followUpPrompt: null,
     });
   });
 
   it('throws when the model wants to notify but returns an empty summary', async () => {
     mockGenerateObject.mockResolvedValue({
-      object: { worthNotifying: true, summary: '   ' },
+      object: {
+        worthNotifying: true,
+        summary: '   ',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
     });
 
     await expect(
