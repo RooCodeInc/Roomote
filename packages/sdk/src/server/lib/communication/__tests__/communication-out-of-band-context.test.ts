@@ -11,7 +11,7 @@ vi.mock('@roomote/db/server', () => ({
 import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
-} from '../communication-out-of-band-context.js';
+} from '../communication-out-of-band-context';
 
 describe('attachOutOfBandContextToCommunicationMessage', () => {
   beforeEach(() => {

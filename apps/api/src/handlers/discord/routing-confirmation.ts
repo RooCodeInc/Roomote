@@ -25,7 +25,7 @@ import {
 
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { apiLogger } from '../../logging.js';
-import { findCommunicationTaskRunBySourceEvent } from '../tasks/communication-task-run-lookup.js';
+import { findCommunicationTaskRunBySourceEvent } from '@roomote/sdk/server';
 import {
   replyToDiscordEvent,
   type DiscordMessageToReplace,

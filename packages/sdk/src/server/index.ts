@@ -142,6 +142,9 @@ export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 
 export { getCommunicationProviderAdapter } from './lib/communication-providers';
+export * from './lib/communication/communication-snapshot-resume';
+export * from './lib/communication/communication-task-run-lookup';
+export * from './lib/communication/communication-out-of-band-context';
 
 export {
   findTelegramPrimaryChatId,
