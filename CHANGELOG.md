@@ -2,6 +2,29 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.18.0 (2026-07-23)
+
+This release makes pull-request feedback easier to act on across chat, extends Gitea automations, and improves task routing and reliability.
+
+### Highlights
+
+- Act on pull-request review feedback from Slack, Discord, and Telegram, or have future feedback handled automatically.
+- Use Gitea with CI Failure Triage and Resolve PR Conflicts automations.
+- Route tasks with useful context from pasted GitHub and configured Linear issue links.
+- See safe provider error details in the task conversation when a run fails.
+
+### Minor changes
+
+- Handle pull-request review feedback directly from Slack, Discord, and Telegram, including an option to automatically send future feedback to the owning task.
+- Use Gitea with CI Failure Triage and Resolve PR Conflicts automations for failed builds and labeled conflicting pull requests.
+- Route tasks using context from pasted GitHub and configured Linear issue links when that context is available.
+
+### Patch changes
+
+- Improve task conversations with uninterrupted structured answers, native Discord footer styling, and clearer visual-preview guidance for agents.
+- Show safe provider error details in the original task conversation when a task fails, so users can understand what needs attention.
+- Improve operator reliability with clearer environment-variable setup, safer worker credential handling, and more resilient instance reporting.
+
 ## 0.17.0 (2026-07-22)
 
 Managed deployments gain stronger access and credential protections, while users get safer account controls and more reliable links, notices, and Discord updates.
