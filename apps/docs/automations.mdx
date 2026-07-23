@@ -161,7 +161,9 @@ and Gitea issues.
 Security Auditor, Code Quality Auditor, Weekly Manager
 Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
 any connected source-control provider. Resolve PR Conflicts supports GitHub,
-GitLab, and Azure DevOps. CI Failure Triage reacts immediately to GitHub
+GitLab, Azure DevOps, and Gitea. Bitbucket is not supported because its API
+does not expose the mergeability and label signals required for an unattended
+opt-in scan. CI Failure Triage reacts immediately to GitHub
 Actions, GitLab Pipeline, Azure DevOps `build.complete`, Bitbucket
 Pipelines commit-status, and Gitea Actions `workflow_run` webhooks rather than
 running on a daily or weekly schedule.

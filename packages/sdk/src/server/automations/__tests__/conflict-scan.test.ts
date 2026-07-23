@@ -170,7 +170,7 @@ describe('conflictScanJob', () => {
       managerSlackChannelId: null,
     });
     mockFindInstallation.mockResolvedValue({ id: 'install-row-1' });
-    // Select order: eligible installations, provider-neutral (GitLab/ADO)
+    // Select order: eligible installations, provider-neutral (GitLab/ADO/Gitea)
     // repos, then the installation's GitHub repos.
     mockSelectWhere
       .mockResolvedValueOnce([{ orgId: 'org-1', installationId: 123 }])
@@ -648,6 +648,55 @@ describe('conflictScanJob', () => {
     expect('sourceControlHost' in enqueueArg.task.payload).toBe(false);
     expect('host' in enqueueArg.prLinkage).toBe(false);
     expect(result.launchedTaskId).toBe('task-9');
+  });
+
+  it('enqueues Gitea conflict resolutions after Gitea reports a definitive conflict signal', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+    queueProviderNeutralRepo({
+      id: 'repo-gitea',
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitea.example.com/acme/backend',
+    });
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitea',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [
+        makePullRequestSummary({
+          url: 'https://gitea.example.com/acme/backend/pulls/42',
+        }),
+      ],
+      warnings: [],
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 10, taskId: 'task-10' });
+
+    await conflictScanJob();
+
+    expect(mockListOpenPullRequests).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'gitea',
+        repository: expect.objectContaining({ fullName: 'acme/backend' }),
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'gitea',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'gitea',
+            sourceControlHost: 'gitea.example.com',
+          }),
+        }),
+        prLinkage: expect.objectContaining({
+          provider: 'gitea',
+          host: 'gitea.example.com',
+        }),
+      }),
+    );
   });
 
   it('stamps the repository host into the conflict-resolution payload when the repo row has one', async () => {

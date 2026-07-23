@@ -53,13 +53,15 @@ const LOG_PREFIX = '[conflictScan]';
 
 /**
  * Providers the scan covers through the provider-neutral list/read primitive.
- * Gitea and Bitbucket stay unsupported: Bitbucket exposes no mergeable
- * signal at all and Gitea computes mergeability asynchronously, so neither
- * yields a trustworthy conflict signal for an unattended automation.
+ * Gitea can report mergeability asynchronously. A scan skips an unknown
+ * result and checks it again on the next scheduled pass. Bitbucket stays
+ * unsupported because its API exposes neither a mergeability signal nor PR
+ * labels for the automation's opt-in boundary.
  */
 const PROVIDER_NEUTRAL_SCAN_PROVIDERS = [
   'gitlab',
   'ado',
+  'gitea',
 ] as const satisfies readonly SourceControlProvider[];
 
 /** Cap on open PRs fetched per non-GitHub repository in one scan pass. */
@@ -234,7 +236,7 @@ export async function conflictScanJob(
 
   if (installations.length === 0 && providerNeutralRepos.length === 0) {
     result.skippedReason =
-      'No active GitHub installation or GitLab/Azure DevOps repositories.';
+      'No active GitHub installation or GitLab/Azure DevOps/Gitea repositories.';
   }
 
   let totalCandidates = 0;
@@ -522,7 +524,7 @@ export async function conflictScanJob(
 }
 
 /**
- * Scan GitLab/Azure DevOps repositories through the provider-neutral pull
+ * Scan GitLab/Azure DevOps/Gitea repositories through the provider-neutral pull
  * request primitives. Conflict detection uses the list summaries' mergeable
  * signal (GitLab `has_conflicts`) and falls back to a single-PR detail read
  * when the list payload carries none (e.g. an ADO row missing mergeStatus).

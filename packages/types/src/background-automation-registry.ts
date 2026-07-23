@@ -141,7 +141,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     manualTriggerRequirements: ['repository'],
     usesManagerChannel: false,
     supportedCommunicationProviders: [],
-    supportedSourceControlProviders: ['github', 'gitlab', 'ado'],
+    supportedSourceControlProviders: ['github', 'gitlab', 'ado', 'gitea'],
   },
   {
     automationKey: 'suggester',
