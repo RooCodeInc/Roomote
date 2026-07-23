@@ -48,11 +48,24 @@ describe('redactSecrets', () => {
   });
 
   it('redacts credential-shaped assignments while keeping the key name', () => {
-    const output = redactSecrets('DATABASE_PASSWORD=hunter2 api_key: 12345');
+    const output = redactSecrets(
+      'DATABASE_PASSWORD=hunter2 api_key: 12345 service-api-key=abcdef',
+    );
 
     expect(output).toContain('PASSWORD=[redacted]');
     expect(output).not.toContain('hunter2');
     expect(output).toContain('api_key: [redacted]');
+    expect(output).toContain('service-api-key=[redacted]');
+  });
+
+  it('scans long hyphenated non-secret assignments without backtracking', () => {
+    const publicKey = `public-${'-'.repeat(50_000)}value`;
+    const input = `${publicKey}=visible DATABASE_PASSWORD=hunter2`;
+    const output = redactSecrets(input);
+
+    expect(output).toContain(`${publicKey}=visible`);
+    expect(output).toContain('DATABASE_PASSWORD=[redacted]');
+    expect(output).not.toContain('hunter2');
   });
 
   it('keeps an identifying prefix on hash-shaped values', () => {
