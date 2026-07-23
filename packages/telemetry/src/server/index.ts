@@ -68,6 +68,33 @@ export function isTelemetryEnvAllowedFor(input: TelemetryEnvInput): boolean {
   return input.appEnv === 'production';
 }
 
+export function getTelemetryConfigurationNotice(
+  input: TelemetryEnvInput,
+): string | null {
+  if (input.appEnv !== 'development' && input.appEnv !== 'preview') {
+    return null;
+  }
+
+  const forceEnabled = isTruthyFlag(input.forceTelemetry);
+  const pingEndpointConfigured = Boolean(input.pingBaseUrl?.trim());
+
+  if (pingEndpointConfigured && !forceEnabled) {
+    return (
+      'R_PING_BASE_URL is configured, but Ping telemetry is disabled outside production. ' +
+      'Set ROOMOTE_FORCE_TELEMETRY=true to enable it.'
+    );
+  }
+
+  if (forceEnabled && !pingEndpointConfigured) {
+    return (
+      'ROOMOTE_FORCE_TELEMETRY is enabled, but R_PING_BASE_URL is not configured. ' +
+      'Set an explicit Ping endpoint to enable telemetry outside production.'
+    );
+  }
+
+  return null;
+}
+
 function readTelemetryEnv(): TelemetryEnvInput {
   return {
     appEnv: Env.APP_ENV,
@@ -79,8 +106,22 @@ function readTelemetryEnv(): TelemetryEnvInput {
   };
 }
 
+const emittedConfigurationNotices = new Set<string>();
+
+export function logTelemetryConfigurationNotice(
+  input: TelemetryEnvInput,
+): void {
+  const notice = getTelemetryConfigurationNotice(input);
+  if (notice && !emittedConfigurationNotices.has(notice)) {
+    emittedConfigurationNotices.add(notice);
+    console.info(`${LOG_PREFIX} ${notice}`);
+  }
+}
+
 export function isTelemetryEnvAllowed(): boolean {
-  return isTelemetryEnvAllowedFor(readTelemetryEnv());
+  const input = readTelemetryEnv();
+  logTelemetryConfigurationNotice(input);
+  return isTelemetryEnvAllowedFor(input);
 }
 
 function getAppVersion(): string | undefined {
