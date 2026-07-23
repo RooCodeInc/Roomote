@@ -6,7 +6,7 @@ import type {
 } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SetupModelStatus } from '@roomote/types';
+import type { SetupModelProviderId, SetupModelStatus } from '@roomote/types';
 import { toast } from 'sonner';
 
 const { mutateAsyncMock } = vi.hoisted(() => ({
@@ -100,15 +100,16 @@ vi.mock('@/components/system', () => ({
     onValueChange,
     children,
   }: {
-    value: string;
+    value?: string;
     onValueChange: (value: string) => void;
     children: ReactNode;
   }) => (
     <select
-      value={value}
+      value={value ?? ''}
       onChange={(event) => onValueChange(event.target.value)}
       aria-label="Model provider"
     >
+      <option value="">Pick your provider</option>
       {children}
     </select>
   ),
@@ -223,6 +224,12 @@ function setupQueryMocks(options: {
   } as unknown as ReturnType<typeof mockUseQuery>);
 }
 
+function selectProvider(provider: SetupModelProviderId) {
+  fireEvent.change(screen.getByRole('combobox', { name: 'Model provider' }), {
+    target: { value: provider },
+  });
+}
+
 describe('StepInferenceProvider configured API key display', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -250,6 +257,18 @@ describe('StepInferenceProvider configured API key display', () => {
     );
 
     expect(
+      screen.getByRole('combobox', { name: 'Model provider' }),
+    ).toHaveValue('');
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+    expect(
+      screen.getByText(
+        'Popular choices are ChatGPT subscriptions and OpenRouter.',
+      ),
+    ).toBeInTheDocument();
+
+    selectProvider('openrouter');
+
+    expect(
       screen.getByDisplayValue('••••••••••••••••••••••••••••'),
     ).toBeDisabled();
   });
@@ -269,6 +288,8 @@ describe('StepInferenceProvider configured API key display', () => {
         onContinue={vi.fn()}
       />,
     );
+
+    selectProvider('openrouter');
 
     const input = screen.getByDisplayValue('••••••••••••••••••••••••••••');
     expect(input).not.toBeDisabled();
@@ -296,6 +317,8 @@ describe('StepInferenceProvider configured API key display', () => {
         onContinue={vi.fn()}
       />,
     );
+
+    selectProvider('ollama');
 
     fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
       target: { value: 'http://ollama.example' },
@@ -342,6 +365,8 @@ describe('StepInferenceProvider configured API key display', () => {
       />,
     );
 
+    selectProvider('ollama');
+
     fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
       target: { value: 'http://ollama.example' },
     });
@@ -376,6 +401,8 @@ describe('StepInferenceProvider configured API key display', () => {
         onContinue={vi.fn()}
       />,
     );
+
+    selectProvider('ollama');
 
     fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
       target: { value: 'http://ollama.example' },
@@ -421,6 +448,8 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
       />,
     );
 
+    selectProvider('openrouter');
+
     expect(
       screen.getByText('Enable Claude in Model Garden first.', {
         exact: false,
@@ -442,6 +471,8 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
       />,
     );
 
+    selectProvider('chatgpt');
+
     expect(
       screen.getByRole('button', { name: /connect chatgpt/i }),
     ).toBeInTheDocument();
@@ -461,6 +492,8 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
         onContinue={vi.fn()}
       />,
     );
+
+    selectProvider('chatgpt');
 
     expect(
       screen.queryByTestId('chatgpt-connect-dialog'),
@@ -486,6 +519,8 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
         onContinue={onContinue}
       />,
     );
+
+    selectProvider('chatgpt');
 
     expect(
       screen.getByText(/Connected as owner@example.com/i),

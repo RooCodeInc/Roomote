@@ -58,7 +58,7 @@ function getOpenRouterOauthErrorMessage(reason: string | null): string {
 
 function getProviderStatus(
   modelSetup: SetupModelStatus,
-  providerId: SetupModelProviderId,
+  providerId: SetupModelProviderId | null,
 ) {
   return modelSetup.providers.find((provider) => provider.id === providerId);
 }
@@ -79,7 +79,7 @@ export function StepInferenceProvider({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] =
-    useState<SetupModelProviderId>(modelSetup.preselectedProvider);
+    useState<SetupModelProviderId | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [connectionName, setConnectionName] = useState('');
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
@@ -114,10 +114,6 @@ export function StepInferenceProvider({
   const qualifyProviderModel = useMutation(
     trpc.taskModels.qualifyProviderModel.mutationOptions(),
   );
-
-  useEffect(() => {
-    setSelectedProvider(modelSetup.preselectedProvider);
-  }, [modelSetup.preselectedProvider]);
 
   useEffect(() => {
     setApiKey(
@@ -202,6 +198,7 @@ export function StepInferenceProvider({
     saveModelConfig.isPending ||
     discoverProviderModels.isPending ||
     qualifyProviderModel.isPending ||
+    selectedProvider === null ||
     hasMissingRequiredFields ||
     hasMissingConnectionName ||
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
@@ -210,6 +207,10 @@ export function StepInferenceProvider({
     (discoverProviderModels.isPending || qualifyProviderModel.isPending);
 
   const handleContinue = async () => {
+    if (!selectedProvider) {
+      return;
+    }
+
     let modelId: string | undefined;
     let endpointConnectionMessage: string | undefined;
     let qualificationError: string | undefined;
@@ -287,19 +288,20 @@ export function StepInferenceProvider({
       <div className="space-y-3">
         <p>
           Roomote needs a model provider for, you know, AI stuff. Pick yours and
-          connect it:
+          connect it.
         </p>
+        <p>Popular choices are ChatGPT subscriptions and OpenRouter.</p>
       </div>
 
       <div className="flex items-center gap-2 max-w-lg">
         <Select
-          value={selectedProvider}
+          value={selectedProvider ?? undefined}
           onValueChange={(value) =>
             setSelectedProvider(value as SetupModelProviderId)
           }
         >
           <SelectTrigger aria-label="Model provider" className="min-w-40">
-            <SelectValue placeholder="Choose a provider" />
+            <SelectValue placeholder="Pick your provider" />
           </SelectTrigger>
           <SelectContent>
             {sortedModelProviders.map((provider) => (
