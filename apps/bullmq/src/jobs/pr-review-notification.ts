@@ -329,7 +329,7 @@ export const prReviewNotificationJob = async (
       });
 
       if (dispatched.outcome !== 'unavailable') {
-        const autoText = `⚡ Auto-handling new review feedback:
+        const autoText = `Auto-handling new review feedback:
 ${delivery.text}`;
         const messageTs = await postPrReviewNotification({
           taskId: data.taskId,

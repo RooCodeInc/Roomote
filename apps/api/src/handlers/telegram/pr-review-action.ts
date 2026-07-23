@@ -130,8 +130,8 @@ export async function handleTelegramPrReviewActionCallback(params: {
           replyToMessageId: messageId,
           text:
             choice === 'auto'
-              ? '⚡ Auto-handling enabled — future review feedback on this PR lands in this task automatically. Taking a look at the current feedback now.'
-              : '✅ On it — taking a look at the review feedback.',
+              ? 'Auto-handling enabled — future review feedback on this PR lands in this task automatically. Taking a look at the current feedback now.'
+              : 'On it — taking a look at the review feedback.',
         });
       }
     }
