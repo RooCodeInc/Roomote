@@ -26,7 +26,7 @@ export const R_SMALL_MODEL_LABEL = 'roomote-small-model';
  * route. An explicit context.routingModel wins, then the R_ROUTER_MODEL
  * deployment override, then this default.
  */
-export const DEFAULT_ROUTING_MODEL = 'google/gemini-3.6-flash';
+const DEFAULT_ROUTING_MODEL = 'google/gemini-3.6-flash';
 
 export function resolveRoutingModel(explicitModel?: string): string {
   return (
