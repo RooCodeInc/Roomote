@@ -26,7 +26,9 @@ export const R_SMALL_MODEL_LABEL = 'roomote-small-model';
  * configuration (e.g. openrouter/google/... vs google/...), so returning
  * undefined defers to the deployment small-model resolution.
  */
-export function resolveRoutingModel(explicitModel?: string): string | undefined {
+export function resolveRoutingModel(
+  explicitModel?: string,
+): string | undefined {
   return (
     explicitModel?.trim() || process.env.R_ROUTER_MODEL?.trim() || undefined
   );
