@@ -19,7 +19,7 @@ import type {
   RoutingTaskModelSelection,
   WorkspaceResponse,
 } from './types';
-import { R_SMALL_MODEL_LABEL, PLATFORM_WORKSPACE_VALUE } from './types';
+import { resolveRoutingModel, PLATFORM_WORKSPACE_VALUE } from './types';
 import { gatherContextFromConfiguredMcps } from './mcp-gather';
 import { callRouterMcpTool } from './mcp-tool-call';
 import { FOLLOWUP_PROMPT } from './prompts/followup-prompt';
@@ -331,7 +331,7 @@ async function runRoutingDecision(
     forceDisablePlatformWorkspace?: boolean;
   },
 ): Promise<InternalRoutingResult> {
-  const routingModel = context.routingModel?.trim() || R_SMALL_MODEL_LABEL;
+  const routingModel = resolveRoutingModel(context.routingModel);
 
   try {
     const promptContext = context;
@@ -345,7 +345,7 @@ async function runRoutingDecision(
 
     const responseResult = await gatherContextFromConfiguredMcps(
       promptContext,
-      context.routingModel?.trim(),
+      routingModel,
       routingPrompt,
       contextMessages,
       workspaceResponseSchema,
@@ -582,7 +582,7 @@ export async function routeTask(
 export async function routeGitHubTask(
   context: RoutingContext,
 ): Promise<GitHubRoutingDecision> {
-  const routingModel = context.routingModel?.trim() || R_SMALL_MODEL_LABEL;
+  const routingModel = resolveRoutingModel(context.routingModel);
 
   if (context.source.type !== 'github') {
     return {
@@ -600,7 +600,7 @@ export async function routeGitHubTask(
     const { object: response } = await generateTrackedNonTaskObject({
       userId: context.routingActor?.userId,
       surface: NON_TASK_INFERENCE_SURFACES.routerGitHubRouting,
-      model: context.routingModel?.trim(),
+      model: routingModel,
       schema: gitHubRoutingResponseSchema,
       system: buildGitHubRoutingPrompt(),
       prompt: JSON.stringify(buildContextMessages(context), null, 2),
