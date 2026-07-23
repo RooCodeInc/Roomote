@@ -60,7 +60,11 @@ export function buildSlackPrReviewActionBlocks(params: {
         {
           type: 'button',
           action_id: PR_REVIEW_ACTION_YES_ACTION_ID,
-          text: { type: 'plain_text', text: 'Yes, take a look', emoji: true },
+          text: {
+            type: 'plain_text',
+            text: 'Resolve these issues',
+            emoji: true,
+          },
           style: 'primary',
           value,
         },
@@ -69,7 +73,7 @@ export function buildSlackPrReviewActionBlocks(params: {
           action_id: PR_REVIEW_ACTION_AUTO_ACTION_ID,
           text: {
             type: 'plain_text',
-            text: 'Take it from here',
+            text: 'Resolve all issues',
             emoji: true,
           },
           value,

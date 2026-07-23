@@ -179,11 +179,11 @@ async function postPrReviewNotification({
     postInput.buttons = [
       [
         {
-          text: 'Yes, take a look',
+          text: 'Resolve these issues',
           callbackData: buildPrReviewActionCallbackData('yes', nonce),
         },
         {
-          text: 'Take it from here',
+          text: 'Resolve all issues',
           callbackData: buildPrReviewActionCallbackData('auto', nonce),
         },
         {

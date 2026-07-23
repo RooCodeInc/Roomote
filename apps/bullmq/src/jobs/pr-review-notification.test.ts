@@ -311,11 +311,11 @@ describe('prReviewNotificationJob', () => {
         buttons: [
           [
             expect.objectContaining({
-              text: 'Yes, take a look',
+              text: 'Resolve these issues',
               callbackData: `prr:y:${storedNonce}`,
             }),
             expect.objectContaining({
-              text: 'Take it from here',
+              text: 'Resolve all issues',
               callbackData: `prr:a:${storedNonce}`,
             }),
             expect.objectContaining({
