@@ -3087,10 +3087,12 @@ describe('OpenCodeServerHarness', () => {
   it('surfaces a readable provider message instead of the raw session error JSON', async () => {
     const { client, harness } = createHarness();
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const taskEvents: TaskEvent[] = [];
 
     harness.subscribeRuntimePersistedEnvelope((envelope) =>
       persistedEnvelopes.push(envelope),
     );
+    harness.subscribe((event) => taskEvents.push(event));
 
     try {
       await connectHarness(harness, client);
@@ -3142,6 +3144,69 @@ describe('OpenCodeServerHarness', () => {
         'responseHeaders',
       );
       expect(String(errorMessage?.payload.text)).not.toContain('cf-ray');
+      expect(taskEvents).toContainEqual({
+        eventName: TaskEventName.Message,
+        payload: [
+          expect.objectContaining({
+            taskId: 'ses_1',
+            message: expect.objectContaining({
+              say: 'terminal_provider_error',
+              text: 'The provider returned an error: [xAI] The model grok-4.5 is not available in your region.',
+            }),
+          }),
+        ],
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('redacts credential-shaped values from provider error messages', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Start work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'Authorization: Bearer eyJ-secret-token',
+              isRetryable: false,
+            },
+          },
+        },
+      });
+
+      const errorMessage = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          String(envelope.payload.text ?? '').includes(
+            'The provider returned an error',
+          ),
+      );
+
+      expect(String(errorMessage?.payload.text)).toBe(
+        'The provider returned an error: Authorization: [redacted]',
+      );
+      expect(String(errorMessage?.payload.text)).not.toContain('eyJ-secret');
     } finally {
       harness.dispose();
     }

@@ -12,6 +12,7 @@
     "./messages": "./src/messages.ts",
     "./mock-discord-server": "./src/mock-discord-server.ts",
     "./provider": "./src/provider.ts",
+    "./redact-secrets": "./src/redact-secrets.ts",
     "./request-user-input": "./src/request-user-input.ts",
     "./task-thread-title": "./src/task-thread-title.ts",
     "./teams-activity": "./src/teams-activity.ts",

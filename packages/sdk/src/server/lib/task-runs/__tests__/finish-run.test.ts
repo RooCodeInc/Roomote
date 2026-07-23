@@ -230,6 +230,14 @@ vi.mock('@roomote/communication/teams-provider', () => ({
     mockCreateTeamsCommunicationProviderFromEnv(...args),
 }));
 
+const mockCreateTelegramCommunicationProvider = vi.fn();
+const mockTelegramPostMessage = vi.fn();
+vi.mock('../../telegram-communication', () => ({
+  createTelegramCommunicationProviderFromRuntimeCredentials: (
+    ...args: unknown[]
+  ) => mockCreateTelegramCommunicationProvider(...args),
+}));
+
 vi.mock('@roomote/communication/discord-provider', () => ({
   DiscordCommunicationProvider: class MockDiscordCommunicationProvider {
     postMessage = mockDiscordPostMessage;
@@ -1263,6 +1271,50 @@ describe('finishRun', () => {
       });
     });
 
+    it('redacts provider credentials and escapes Slack mentions at delivery', async () => {
+      const job = makeRun(
+        {
+          payloadKind: TaskPayloadKind.SlackAppMention,
+          payload: {
+            repo: 'owner/repo',
+            channel: 'C123',
+            user: 'U456',
+            text: 'test',
+            ts: '111.222',
+          },
+        },
+        { slackChannelId: 'C123', slackThreadTs: '111.222' },
+      );
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+      mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
+      mockFindFirstSlackInstallation.mockResolvedValue({
+        id: 'slack-inst-1',
+        botAccessToken: 'xoxb-test',
+        isActive: true,
+      });
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error:
+          'The provider returned an error: Invalid credential xoxb-1234567890-abcdefghijklmnop; <!channel> authentication unavailable.',
+      });
+
+      const messageText = String(
+        (
+          mockBuildTaskFailedMessage.mock.calls.at(-1)?.[0] as
+            | { messageText?: string }
+            | undefined
+        )?.messageText,
+      );
+      expect(messageText).toContain(
+        'The provider returned an error: Invalid credential [redacted]; &lt;!channel&gt; authentication unavailable.',
+      );
+      expect(messageText).not.toContain('xoxb-1234567890');
+      expect(messageText).not.toContain('<!channel>');
+    });
+
     it('suppresses the failure notification when a stop was requested before the failure', async () => {
       const job = makeRun(
         {
@@ -1526,7 +1578,7 @@ describe('finishRun', () => {
       expect(mockPostMessage).toHaveBeenCalledWith({
         channel: 'C123',
         thread_ts: '111.222',
-        text: `I ran into an issue when setting things up. <${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.failed|Continue on the web app> to fix it.`,
+        text: `I ran into an issue when setting things up.\n\n<${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.failed|Continue on the web app> to fix it.`,
         unfurl_links: false,
         unfurl_media: false,
       });
@@ -1624,7 +1676,7 @@ describe('finishRun', () => {
       await finishRun({
         id: 1,
         status: RunStatus.Failed,
-        error: 'spawn timeout',
+        error: 'The provider returned an error: Model is not available.',
       });
 
       expect(mockTeamsPostMessage).toHaveBeenCalledWith({
@@ -1632,7 +1684,7 @@ describe('finishRun', () => {
         serviceUrl: 'https://smba.trafficmanager.net/amer/',
         threadId: 'activity-root',
         replyToMessageId: 'activity-root',
-        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: Model is not available.\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
     });
@@ -1761,13 +1813,13 @@ describe('finishRun', () => {
       await finishRun({
         id: 1,
         status: RunStatus.Failed,
-        error: 'spawn timeout',
+        error: 'The provider returned an error: Model is not available.',
       });
 
       expect(mockDiscordPostMessage).toHaveBeenCalledWith({
         channelId: 'channel-1',
         threadId: 'thread-1',
-        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: Model is not available.\n\n[Open the task](https://example.com/task)",
         textFormat: 'markdown',
       });
     });
@@ -1847,6 +1899,39 @@ describe('finishRun', () => {
       await expect(
         finishRun({ id: 1, status: RunStatus.Failed, error: 'task failed' }),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('Telegram task notifications', () => {
+    const telegramPayload = {
+      repo: 'owner/repo',
+      communicationProvider: 'telegram',
+      communicationChannelId: 'chat-1',
+      communicationThreadId: 'topic-1',
+      communicationMessageId: 'message-1',
+    } as unknown as TaskRun['payload'];
+
+    beforeEach(() => {
+      mockCreateTelegramCommunicationProvider.mockResolvedValue({
+        postMessage: mockTelegramPostMessage,
+      });
+    });
+
+    it('posts failure details into the originating Telegram topic', async () => {
+      mockFindFirstRun.mockResolvedValue(makeRun({ payload: telegramPayload }));
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'The provider returned an error: API key is invalid.',
+      });
+
+      expect(mockTelegramPostMessage).toHaveBeenCalledWith({
+        channelId: 'chat-1',
+        threadId: 'topic-1',
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n**Error details:** The provider returned an error: API key is invalid.\n\n[Open the task](https://example.com/task)",
+        textFormat: 'markdown',
+      });
     });
   });
 
