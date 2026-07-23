@@ -1,25 +1,20 @@
 import type { ModelMessage } from 'ai';
 
 import { callRouterMcpTool } from './mcp-tool-call';
+import {
+  matchExternalIssueUrl,
+  type ExternalIssueFetchAttempt,
+} from './external-issue-providers';
 import type { RoutingContext } from './types';
 
 const MAX_EXTERNAL_ISSUES = 2;
 const MAX_EXTERNAL_CONTEXT_CHARS = 8_000;
 const EXTERNAL_LOOKUP_TIMEOUT_MS = 8_000;
 
-type ExternalIssueReference =
-  | {
-      serverId: 'github';
-      url: string;
-      owner: string;
-      repository: string;
-      issueNumber: number;
-    }
-  | {
-      serverId: 'linear';
-      url: string;
-      identifier: string;
-    };
+interface ExternalIssueReference {
+  url: string;
+  fetchAttempts: readonly ExternalIssueFetchAttempt[];
+}
 
 function trimTrailingUrlPunctuation(value: string): string {
   let end = value.length;
@@ -43,43 +38,10 @@ function parseExternalIssueReferences(text: string): ExternalIssueReference[] {
     const url = trimTrailingUrlPunctuation(rawUrl);
 
     try {
-      const parsedUrl = new URL(url);
-      const githubMatch = parsedUrl.pathname.match(
-        /^\/(?<owner>[^/]+)\/(?<repository>[^/]+)\/issues\/(?<issueNumber>\d+)(?:\/.*)?$/,
-      );
+      const match = matchExternalIssueUrl(new URL(url));
 
-      const owner = githubMatch?.groups?.owner;
-      const repository = githubMatch?.groups?.repository;
-      const issueNumber = githubMatch?.groups?.issueNumber;
-
-      if (
-        parsedUrl.hostname === 'github.com' &&
-        owner &&
-        repository &&
-        issueNumber
-      ) {
-        references.push({
-          serverId: 'github',
-          url,
-          owner,
-          repository,
-          issueNumber: Number(issueNumber),
-        });
-        continue;
-      }
-
-      const linearMatch = parsedUrl.pathname.match(
-        /^\/[^/]+\/issue\/(?<identifier>[A-Za-z]+-\d+)(?:\/.*)?$/,
-      );
-
-      const identifier = linearMatch?.groups?.identifier;
-
-      if (parsedUrl.hostname === 'linear.app' && identifier) {
-        references.push({
-          serverId: 'linear',
-          url,
-          identifier,
-        });
+      if (match) {
+        references.push({ url, fetchAttempts: match.fetchAttempts });
       }
     } catch {
       // Ignore malformed links; routing can still proceed from the task text.
@@ -133,56 +95,23 @@ async function fetchExternalIssueContext(
   try {
     const deadline = Date.now() + EXTERNAL_LOOKUP_TIMEOUT_MS;
 
-    if (reference.serverId === 'linear') {
+    for (const attempt of reference.fetchAttempts) {
       const result = await withExternalLookupTimeout(
         callRouterMcpTool({
           context,
-          serverId: 'linear',
-          toolName: 'get_issue',
-          args: { id: reference.identifier },
+          serverId: attempt.serverId,
+          toolName: attempt.toolName,
+          args: attempt.args,
         }),
         deadline,
       );
 
-      return result === null ? null : { toolName: 'linear.get_issue', result };
+      if (result !== null) {
+        return { toolName: `${attempt.serverId}.${attempt.toolName}`, result };
+      }
     }
 
-    const issueReadResult = await withExternalLookupTimeout(
-      callRouterMcpTool({
-        context,
-        serverId: 'github',
-        toolName: 'issue_read',
-        args: {
-          method: 'get',
-          owner: reference.owner,
-          repo: reference.repository,
-          issue_number: reference.issueNumber,
-        },
-      }),
-      deadline,
-    );
-
-    if (issueReadResult !== null) {
-      return { toolName: 'github.issue_read', result: issueReadResult };
-    }
-
-    const getIssueResult = await withExternalLookupTimeout(
-      callRouterMcpTool({
-        context,
-        serverId: 'github',
-        toolName: 'get_issue',
-        args: {
-          owner: reference.owner,
-          repo: reference.repository,
-          issue_number: reference.issueNumber,
-        },
-      }),
-      deadline,
-    );
-
-    return getIssueResult === null
-      ? null
-      : { toolName: 'github.get_issue', result: getIssueResult };
+    return null;
   } catch {
     // A disconnected integration or inaccessible issue must not block routing.
     return null;
