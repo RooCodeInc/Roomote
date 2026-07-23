@@ -34,6 +34,12 @@ export interface PendingPrReviewAction {
    * summary.
    */
   followUpPrompt: string;
+  /**
+   * Provider-native id of the posted notification message (Slack ts, Discord
+   * or Telegram message id), attached after posting so the offer can be
+   * visually retired later.
+   */
+  messageId?: string | null;
 }
 
 // GETDEL is atomic: exactly one clicker receives the record; every later
@@ -49,17 +55,64 @@ function getPrReviewActionKey(nonce: string): string {
   return `${PR_REVIEW_ACTION_PREFIX}${nonce}`;
 }
 
+// Secondary index: every pending offer nonce for a conversation, so a typed
+// reply in the thread can retire all of them at once.
+function getPrReviewActionThreadKey(input: {
+  provider: PrReviewActionProvider;
+  channelId: string;
+  threadId: string | null;
+}): string {
+  return `${PR_REVIEW_ACTION_PREFIX}thread:${input.provider}:${input.channelId}:${input.threadId ?? '-'}`;
+}
+
 export async function setPendingPrReviewAction(
   pending: PendingPrReviewAction,
 ): Promise<void> {
   const redis = getRedis();
+  const threadKey = getPrReviewActionThreadKey(pending);
 
-  await redis.set(
-    getPrReviewActionKey(pending.nonce),
-    JSON.stringify(pending),
-    'EX',
-    PR_REVIEW_ACTION_TTL_SECONDS,
-  );
+  await redis
+    .multi()
+    .set(
+      getPrReviewActionKey(pending.nonce),
+      JSON.stringify(pending),
+      'EX',
+      PR_REVIEW_ACTION_TTL_SECONDS,
+    )
+    .sadd(threadKey, pending.nonce)
+    .expire(threadKey, PR_REVIEW_ACTION_TTL_SECONDS)
+    .exec();
+}
+
+/**
+ * Records the posted notification message id on an already-stored pending
+ * offer so retirement can edit the message later. No-op when the offer was
+ * already claimed.
+ */
+export async function attachPendingPrReviewActionMessage(
+  nonce: string,
+  messageId: string,
+): Promise<void> {
+  const redis = getRedis();
+  const key = getPrReviewActionKey(nonce);
+  const raw = await redis.get(key);
+
+  if (typeof raw !== 'string') {
+    return;
+  }
+
+  try {
+    const pending = JSON.parse(raw) as PendingPrReviewAction;
+
+    await redis.set(
+      key,
+      JSON.stringify({ ...pending, messageId }),
+      'EX',
+      PR_REVIEW_ACTION_TTL_SECONDS,
+    );
+  } catch {
+    // Malformed record; leave it to expire.
+  }
 }
 
 export async function claimPendingPrReviewAction(
@@ -77,10 +130,60 @@ export async function claimPendingPrReviewAction(
   }
 
   try {
-    return JSON.parse(raw) as PendingPrReviewAction;
+    const pending = JSON.parse(raw) as PendingPrReviewAction;
+
+    await redis
+      .srem(getPrReviewActionThreadKey(pending), nonce)
+      .catch(() => undefined);
+
+    return pending;
   } catch {
     return null;
   }
+}
+
+/**
+ * Claims every pending offer bound to a conversation — used when a typed
+ * reply lands in the thread, which supersedes the offers: the person chose
+ * their own response, so the buttons must die. Returns the claimed records
+ * so callers can visually retire the posted messages.
+ */
+export async function claimPendingPrReviewActionsForThread(input: {
+  provider: PrReviewActionProvider;
+  channelId: string;
+  threadId: string | null;
+}): Promise<PendingPrReviewAction[]> {
+  const redis = getRedis();
+  const threadKey = getPrReviewActionThreadKey(input);
+  const nonces = await redis.smembers(threadKey);
+
+  if (nonces.length === 0) {
+    return [];
+  }
+
+  await redis.del(threadKey).catch(() => undefined);
+
+  const claimed: PendingPrReviewAction[] = [];
+
+  for (const nonce of nonces) {
+    const raw = await redis.eval(
+      CLAIM_PR_REVIEW_ACTION_LUA,
+      1,
+      getPrReviewActionKey(nonce),
+    );
+
+    if (typeof raw !== 'string') {
+      continue;
+    }
+
+    try {
+      claimed.push(JSON.parse(raw) as PendingPrReviewAction);
+    } catch {
+      // Malformed record; skip.
+    }
+  }
+
+  return claimed;
 }
 
 /**

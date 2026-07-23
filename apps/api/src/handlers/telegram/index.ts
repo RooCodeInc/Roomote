@@ -28,6 +28,7 @@ import {
   findActiveTelegramTaskRun,
   findCompletedTelegramTaskRunWithSnapshot,
 } from './task-run-lookup.js';
+import { retireTelegramPrReviewOffersBestEffort } from './pr-review-action.js';
 import {
   consumeTelegramLinkCode,
   isTelegramLinkCode,
@@ -451,6 +452,11 @@ telegram.post('/', async (c) => {
       senderUserId: queuedMessage.userId,
     });
     await queueCommunicationMessage('telegram', activeRun.id, queuedMessage);
+    // A typed reply supersedes any pending PR review offers in the chat.
+    retireTelegramPrReviewOffersBestEffort({
+      chatId: conversation.chatId,
+      threadId: conversation.threadId ?? null,
+    });
     // Track the latest inbound user message id so later outbound replies quote
     // the most recent user message instead of the original launch message.
     await setLatestInboundMessageId(
@@ -533,6 +539,12 @@ telegram.post('/', async (c) => {
         completedRun,
         queuedMessage,
         metadata,
+      });
+
+      // A typed reply supersedes any pending PR review offers in the chat.
+      retireTelegramPrReviewOffersBestEffort({
+        chatId: conversation.chatId,
+        threadId: conversation.threadId ?? null,
       });
 
       await replyToTelegramSnapshotResume({

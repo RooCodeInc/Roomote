@@ -2,6 +2,7 @@ import type { DiscordInteraction } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import {
   claimPendingPrReviewAction,
+  claimPendingPrReviewActionsForThread,
   dispatchPrReviewFollowUp,
   enableAutoHandlePrReviewFeedback,
   findDiscordMappedUserId,
@@ -102,4 +103,30 @@ export async function handleDiscordPrReviewActionCallback(input: {
     );
     await reply('Failed to start the follow-up. Reply here to ask again.');
   }
+}
+
+/**
+ * Retires any pending PR review offers bound to a Discord conversation
+ * because a typed reply superseded them. Claims atomically so later clicks
+ * report "already handled"; the buttons stay visible but dead (Discord
+ * message component editing is not wired up yet). Fire-and-forget.
+ */
+export function retireDiscordPrReviewOffersBestEffort({
+  channelId,
+  threadId,
+}: {
+  channelId: string;
+  threadId: string | null;
+}): void {
+  void claimPendingPrReviewActionsForThread({
+    provider: 'discord',
+    channelId,
+    threadId,
+  }).catch((error: unknown) => {
+    apiLogger.warn(
+      `[discord] Failed to retire PR review offers for channel ${channelId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 }

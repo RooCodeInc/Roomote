@@ -1,6 +1,7 @@
 import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
 import {
   claimPendingPrReviewAction,
+  claimPendingPrReviewActionsForThread,
   dispatchPrReviewFollowUp,
   enableAutoHandlePrReviewFeedback,
 } from '@roomote/sdk/server';
@@ -146,4 +147,40 @@ export async function handleTelegramPrReviewActionCallback(params: {
       text: 'Failed to start the follow-up. Reply in this chat to ask again.',
     });
   }
+}
+
+/**
+ * Retires any pending PR review offers bound to a Telegram conversation
+ * because a typed reply superseded them. Claims atomically and strips the
+ * buttons from each posted offer. Fire-and-forget.
+ */
+export function retireTelegramPrReviewOffersBestEffort({
+  chatId,
+  threadId,
+}: {
+  chatId: string;
+  threadId: string | null;
+}): void {
+  void (async () => {
+    const claimed = await claimPendingPrReviewActionsForThread({
+      provider: 'telegram',
+      channelId: chatId,
+      threadId,
+    });
+
+    for (const pending of claimed) {
+      if (pending.messageId) {
+        await clearTelegramMessageButtonsBestEffort({
+          chatId,
+          messageId: pending.messageId,
+        });
+      }
+    }
+  })().catch((error: unknown) => {
+    apiLogger.warn(
+      `[telegram] Failed to retire PR review offers for chat ${chatId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 }

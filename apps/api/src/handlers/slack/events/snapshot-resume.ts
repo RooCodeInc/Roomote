@@ -26,6 +26,7 @@ import {
 } from '@roomote/cloud-agents';
 
 import { apiLogger } from '../../../logging.js';
+import { retireSlackPrReviewOffersBestEffort } from '../pr-review-retire.js';
 import {
   buildResolvedCurrentMessageText,
   processSlackAttachments,
@@ -227,6 +228,12 @@ export async function processSnapshotResume(
 
     await queueSlackMessage(resumeRunId, queuedSlackMessage);
     await clearLatestUserMessage(resumeRunId);
+    // A typed reply supersedes any pending PR review offers in the thread.
+    retireSlackPrReviewOffersBestEffort({
+      slack,
+      channelId: event.channel,
+      threadTs: threadId,
+    });
     deliveryTracker.track(event.ts);
     return true;
   } catch (error) {
