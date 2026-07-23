@@ -19,19 +19,23 @@ import {
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
+  dispatchPrReviewFollowUp,
   preparePrReviewNotificationDelivery,
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
   requeuePendingPrReviewActivity,
   schedulePrReviewNotificationJob,
+  setPendingPrReviewAction,
 } from '@roomote/sdk/server';
 import {
   buildSlackPrReviewActionBlocks,
   postSlackThreadMessageWithStickyFooter,
-  setPendingSlackPrReviewAction,
   SlackNotifier,
 } from '@roomote/slack';
-import { isTaskExecutingTurn } from '@roomote/types';
+import {
+  buildPrReviewActionCallbackData,
+  isTaskExecutingTurn,
+} from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
 
@@ -72,8 +76,8 @@ function buildPrReviewNotificationPostInput(
   }
 }
 
-type SlackPrReviewAction = {
-  /** Summary text already in Slack mrkdwn link syntax, without the question. */
+type PrReviewNotificationAction = {
+  /** Summary text in the route provider's link syntax, without the question. */
   summaryText: string;
   question: string;
   followUpPrompt: string;
@@ -82,18 +86,45 @@ type SlackPrReviewAction = {
   prUrl: string;
 };
 
+const BUTTON_ROUTE_PROVIDERS = ['slack', 'discord', 'telegram'] as const;
+type ButtonRouteProvider = (typeof BUTTON_ROUTE_PROVIDERS)[number];
+
+function isButtonRouteProvider(
+  provider: PrReviewNotificationRoute['provider'],
+): provider is ButtonRouteProvider {
+  return (BUTTON_ROUTE_PROVIDERS as readonly string[]).includes(provider);
+}
+
 async function postPrReviewNotification({
   taskId,
   route,
   text,
-  slackAction,
+  action,
 }: {
   taskId: string;
   route: PrReviewNotificationRoute;
   text: string;
-  /** When set (Slack routes only), post Yes/Dismiss action buttons. */
-  slackAction?: SlackPrReviewAction;
+  /** When set (button-capable routes only), post the action buttons. */
+  action?: PrReviewNotificationAction;
 }): Promise<string | null> {
+  // Stored before posting: an orphaned record just expires, while a posted
+  // message without a record would leave dead buttons.
+  const nonce = action ? randomUUID() : null;
+
+  if (action && nonce && isButtonRouteProvider(route.provider)) {
+    await setPendingPrReviewAction({
+      nonce,
+      provider: route.provider,
+      taskId,
+      repository: action.repository,
+      prNumber: action.prNumber,
+      prUrl: action.prUrl,
+      channelId: route.channelId,
+      threadId: route.threadId ?? null,
+      followUpPrompt: action.followUpPrompt,
+    });
+  }
+
   if (route.provider === 'slack') {
     const slackInstallation = await db.query.slackInstallations.findFirst({
       where: eq(slackInstallations.isActive, true),
@@ -107,43 +138,21 @@ async function postPrReviewNotification({
 
     const slack = new SlackNotifier(slackInstallation.botAccessToken);
 
-    if (slackAction) {
-      // Stored before posting: an orphaned record just expires, while a
-      // posted message without a record would leave dead buttons.
-      const nonce = randomUUID();
-
-      await setPendingSlackPrReviewAction({
-        nonce,
-        taskId,
-        repository: slackAction.repository,
-        prNumber: slackAction.prNumber,
-        prUrl: slackAction.prUrl,
-        channelId: route.channelId,
-        threadTs: route.threadId,
-        followUpPrompt: slackAction.followUpPrompt,
-      });
-
-      return postSlackThreadMessageWithStickyFooter({
-        slack,
-        channel: route.channelId,
-        threadTs: route.threadId,
-        taskId,
-        text,
-        blocks: buildSlackPrReviewActionBlocks({
-          text: slackAction.summaryText,
-          question: slackAction.question,
-          nonce,
-        }),
-        utmCampaign: 'slack.pr_review',
-      });
-    }
-
     return postSlackThreadMessageWithStickyFooter({
       slack,
       channel: route.channelId,
       threadTs: route.threadId,
       taskId,
       text,
+      ...(action && nonce
+        ? {
+            blocks: buildSlackPrReviewActionBlocks({
+              text: action.summaryText,
+              question: action.question,
+              nonce,
+            }),
+          }
+        : {}),
       utmCampaign: 'slack.pr_review',
     });
   }
@@ -157,7 +166,28 @@ async function postPrReviewNotification({
     return null;
   }
 
-  await adapter.postMessage(buildPrReviewNotificationPostInput(route, text));
+  const postInput = buildPrReviewNotificationPostInput(route, text);
+
+  if (action && nonce && isButtonRouteProvider(route.provider)) {
+    postInput.buttons = [
+      [
+        {
+          text: 'Yes, take a look',
+          callbackData: buildPrReviewActionCallbackData('yes', nonce),
+        },
+        {
+          text: 'Always auto-handle',
+          callbackData: buildPrReviewActionCallbackData('auto', nonce),
+        },
+        {
+          text: 'Dismiss',
+          callbackData: buildPrReviewActionCallbackData('dismiss', nonce),
+        },
+      ],
+    ];
+  }
+
+  await adapter.postMessage(postInput);
 
   return null;
 }
@@ -233,7 +263,7 @@ export const prReviewNotificationJob = async (
       eq(taskPullRequests.repository, data.repository),
       eq(taskPullRequests.prNumber, data.prNumber),
     ),
-    columns: { status: true },
+    columns: { status: true, autoHandleFeedbackByUserId: true },
   });
 
   if (prLink?.status === 'merged' || prLink?.status === 'closed') {
@@ -280,6 +310,51 @@ export const prReviewNotificationJob = async (
       ? `${delivery.text}\n${followUp.question}`
       : delivery.text;
 
+    // Auto-handled PRs skip the offer entirely: the prepared follow-up is
+    // dispatched straight into the owning task and the conversation gets an
+    // informational line instead of buttons. Falls back to the normal offer
+    // when the task can no longer be reached (e.g. no resumable snapshot).
+    if (
+      followUp &&
+      prLink?.autoHandleFeedbackByUserId &&
+      delivery.route &&
+      isButtonRouteProvider(delivery.route.provider)
+    ) {
+      const dispatched = await dispatchPrReviewFollowUp({
+        provider: delivery.route.provider,
+        channelId: delivery.route.channelId,
+        threadId: delivery.route.threadId ?? null,
+        followUpPrompt: followUp.prompt,
+        actingUserId: prLink.autoHandleFeedbackByUserId,
+      });
+
+      if (dispatched.outcome !== 'unavailable') {
+        const autoText = `⚡ Auto-handling new review feedback:
+${delivery.text}`;
+        const messageTs = await postPrReviewNotification({
+          taskId: data.taskId,
+          route: delivery.route,
+          text: autoText,
+        });
+
+        await recordPrReviewNotificationDeliveryBestEffort({
+          runId: latestJob.id,
+          taskId: data.taskId,
+          route: delivery.route,
+          text: autoText,
+          ...(messageTs ? { messageTs } : {}),
+        });
+        console.log(
+          `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
+        );
+        return;
+      }
+
+      console.warn(
+        `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
+      );
+    }
+
     // Chat delivery is optional (web-only tasks have no route). Task history is
     // always recorded so the web task view shows the self-review summary.
     let messageTs: string | null = null;
@@ -288,9 +363,9 @@ export const prReviewNotificationJob = async (
         taskId: data.taskId,
         route: delivery.route,
         text: textWithQuestion,
-        ...(followUp && delivery.route.provider === 'slack'
+        ...(followUp && isButtonRouteProvider(delivery.route.provider)
           ? {
-              slackAction: {
+              action: {
                 summaryText: delivery.text,
                 question: followUp.question,
                 followUpPrompt: followUp.prompt,

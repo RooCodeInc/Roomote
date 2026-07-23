@@ -142,9 +142,6 @@ export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 
 export { getCommunicationProviderAdapter } from './lib/communication-providers';
-export * from './lib/communication/communication-snapshot-resume';
-export * from './lib/communication/communication-task-run-lookup';
-export * from './lib/communication/communication-out-of-band-context';
 
 export {
   findTelegramPrimaryChatId,
@@ -204,6 +201,8 @@ export {
   type PreparedPrReviewNotification,
   type PrReviewTriageContext,
 } from './lib/task-runs/pr-review-notification-delivery';
+export * from './lib/task-runs/pr-review-action';
+export * from './lib/task-runs/pr-review-follow-up-dispatch';
 
 export {
   formatPrStatusChangeTaskHistoryText,

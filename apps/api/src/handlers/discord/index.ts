@@ -42,7 +42,7 @@ import {
   findCompletedCommunicationTaskRunWithSnapshot,
   releaseCommunicationOutOfBandClaim,
   resumeCommunicationTaskFromSnapshot,
-} from '@roomote/sdk/server';
+} from '@roomote/sdk/server/communication';
 import { tryHandleDiscordRequestUserInputMessage } from './request-user-input.js';
 import { promptDiscordAccountLink } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';

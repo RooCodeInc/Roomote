@@ -22,7 +22,7 @@ vi.mock('@roomote/sdk/server', () => ({
   findDiscordInstallationByGuildId: mocks.findInstallation,
 }));
 
-vi.mock('../../tasks/communication-task-run-lookup.js', () => ({
+vi.mock('@roomote/sdk/server/communication', () => ({
   findCommunicationTaskRunBySourceEvent: mocks.findSourceRun,
 }));
 
