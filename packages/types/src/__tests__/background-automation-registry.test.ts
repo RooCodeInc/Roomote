@@ -120,4 +120,16 @@ describe('background automation registry', () => {
       'gitea',
     ]);
   });
+
+  it('supports Gitea conflict scans alongside GitHub, GitLab, and Azure DevOps', () => {
+    const descriptor =
+      getTriggerableBackgroundAutomationDescriptorByKey('conflict_resolver');
+
+    expect(descriptor?.supportedSourceControlProviders).toEqual([
+      'github',
+      'gitlab',
+      'ado',
+      'gitea',
+    ]);
+  });
 });
