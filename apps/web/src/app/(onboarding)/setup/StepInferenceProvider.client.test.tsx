@@ -273,6 +273,20 @@ describe('StepInferenceProvider configured API key display', () => {
     ).toBeDisabled();
   });
 
+  it('selects OpenRouter after a successful OAuth callback', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup()}
+        openRouterOauthStatus="connected"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Model provider' }),
+    ).toHaveValue('openrouter');
+  });
+
   it('shows a mask for a saved API key until the field is edited', () => {
     render(
       <StepInferenceProvider

@@ -132,6 +132,7 @@ export function StepInferenceProvider({
 
   useEffect(() => {
     if (openRouterOauthStatus === 'connected') {
+      setSelectedProvider('openrouter');
       toast.success(
         'Connected to OpenRouter. Your new API key has been saved.',
         {
