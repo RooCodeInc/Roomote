@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
 import { SetupDocs } from './SetupDocs';
 import { SetupDocsContentProvider } from './SetupDocsContext';
 
+const SETUP_DOCS_OPEN_STORAGE_KEY = 'roomote:setup-docs-open';
+
 export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { authStatus, isSignedIn } = useUser();
@@ -25,6 +27,26 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
     useState<HTMLDivElement | null>(null);
   const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [docsContent, setDocsContent] = useState<ReactNode>(null);
+
+  useEffect(() => {
+    try {
+      setIsDocsOpen(
+        window.localStorage.getItem(SETUP_DOCS_OPEN_STORAGE_KEY) === 'true',
+      );
+    } catch {
+      // Ignore localStorage failures.
+    }
+  }, []);
+
+  const handleDocsOpenChange = (isOpen: boolean) => {
+    setIsDocsOpen(isOpen);
+
+    try {
+      window.localStorage.setItem(SETUP_DOCS_OPEN_STORAGE_KEY, String(isOpen));
+    } catch {
+      // Ignore localStorage failures.
+    }
+  };
 
   useEffect(() => {
     if (authStatus === 'signed-out' && !setupBootstrapOpen) {
@@ -53,7 +75,7 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
           frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw)] scroll-minimal overflow-hidden"
           surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center relative"
         >
-          <SetupDocs isOpen={isDocsOpen} onOpenChange={setIsDocsOpen}>
+          <SetupDocs isOpen={isDocsOpen} onOpenChange={handleDocsOpenChange}>
             {docsContent}
           </SetupDocs>
           {isSignedIn ? (

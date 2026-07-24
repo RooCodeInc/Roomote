@@ -30,6 +30,11 @@ describe('SetupDocs', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Docs' }));
 
     expect(screen.getByText('Docs content')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', {
+        name: 'Open this documentation page in a new tab',
+      }),
+    ).toHaveAttribute('href', 'https://docs.roomote.dev/index');
 
     fireEvent.click(screen.getByRole('button', { name: 'Close docs' }));
 
