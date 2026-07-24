@@ -302,11 +302,11 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toEqual({ shouldRoute: false });
   });
 
-  it('routes a first-time sender replying in a custom automation report thread', async () => {
+  it('routes a first-time sender replying in an automation report thread', async () => {
     findRoomoteOwnedSlackThreadMock.mockResolvedValue({
       userId: null,
       slackUserId: null,
-      isCustomAutomationThread: true,
+      isAutomationReportThread: true,
     });
     fetchThreadMessagesMock.mockResolvedValue([
       botMessage(THREAD_TS, 'Automation report root'),

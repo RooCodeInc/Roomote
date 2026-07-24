@@ -11,6 +11,7 @@ const {
   mockGetTaskUrl,
   mockRecordAutomationRunOutcome,
   mockUpsertBackgroundAutomationSlackThread,
+  mockUpdateBackgroundAutomationSlackThreadMetadata,
   mockTryClaimCiFailureTriageInvestigation,
   mockReleaseCiFailureTriageInvestigation,
   mockRedisSet,
@@ -33,6 +34,7 @@ const {
   ),
   mockRecordAutomationRunOutcome: vi.fn(),
   mockUpsertBackgroundAutomationSlackThread: vi.fn(),
+  mockUpdateBackgroundAutomationSlackThreadMetadata: vi.fn(),
   mockTryClaimCiFailureTriageInvestigation: vi.fn(),
   mockReleaseCiFailureTriageInvestigation: vi.fn(),
   mockRedisSet: vi.fn(),
@@ -98,6 +100,8 @@ vi.mock('@roomote/db/server', () => ({
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
   upsertBackgroundAutomationSlackThread:
     mockUpsertBackgroundAutomationSlackThread,
+  updateBackgroundAutomationSlackThreadMetadata:
+    mockUpdateBackgroundAutomationSlackThreadMetadata,
   slackInstallations: {
     botAccessToken: 'slackInstallations.botAccessToken',
     isActive: 'slackInstallations.isActive',
@@ -248,6 +252,7 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockPostMessage.mockResolvedValue('1781300000.000100');
     mockUpdateMessage.mockResolvedValue(true);
     mockUpsertBackgroundAutomationSlackThread.mockResolvedValue(undefined);
+    mockUpdateBackgroundAutomationSlackThreadMetadata.mockResolvedValue(true);
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
     mockEnqueueTask.mockResolvedValue({
       success: true,
@@ -330,6 +335,14 @@ describe('launchCiFailureTriageForFailedRun', () => {
         threadTs: '1781300000.000100',
       }),
     );
+    expect(
+      mockUpdateBackgroundAutomationSlackThreadMetadata,
+    ).toHaveBeenCalledWith(expect.anything(), {
+      surface: 'slack',
+      slackChannelId: 'C123MANAGER',
+      threadTs: '1781300000.000100',
+      metadata: { sourceTaskId: 'task-scan-1' },
+    });
   });
 
   it('still launches without a thread when the announcement fails', async () => {
