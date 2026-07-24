@@ -195,6 +195,7 @@ describe('Discord request_user_input callbacks', () => {
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         text: 'Picked: First option\n\nNEXT PROMPT',
+        buttons: [[{ text: 'Second option' }]],
         ephemeral: true,
       }),
     );

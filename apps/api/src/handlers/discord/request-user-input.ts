@@ -199,6 +199,10 @@ async function advanceDiscordRequestUserInputQuestion(params: {
     currentQuestionIndex: nextQuestionIndex,
   };
   const nextPromptText = buildDiscordRequestUserInputPromptText(nextPrompt);
+  const nextPromptButtons = buildDiscordRequestUserInputButtons({
+    runId: params.pendingRequest.runId,
+    request: nextPrompt,
+  });
   let rendered = false;
 
   if (params.pendingRequest.promptMessageId) {
@@ -207,10 +211,7 @@ async function advanceDiscordRequestUserInputQuestion(params: {
         channelId: conversationId,
         messageId: params.pendingRequest.promptMessageId,
         text: nextPromptText,
-        buttons: buildDiscordRequestUserInputButtons({
-          runId: params.pendingRequest.runId,
-          request: nextPrompt,
-        }),
+        buttons: nextPromptButtons,
       });
       rendered = true;
     } catch (error) {
@@ -233,6 +234,7 @@ async function advanceDiscordRequestUserInputQuestion(params: {
     text: rendered
       ? `Picked: ${params.answerText}`
       : `Picked: ${params.answerText}\n\n${nextPromptText}`,
+    ...(!rendered && nextPromptButtons ? { buttons: nextPromptButtons } : {}),
     ...(params.interaction ? { ephemeral: true } : {}),
   });
   return 'advanced';
