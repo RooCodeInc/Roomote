@@ -114,7 +114,7 @@ describe('telegram pairing commands', () => {
         pairingId: PAIRING_ID,
         pollToken: 'secret-poll-token',
         suggestedUsername: 'roomote_abc_bot',
-        deepLink: 'https://t.me/newbot/RoomoteSetupBot/roomote_abc_bot',
+        deepLink: 'https://t.me/RoomoteSetupBot?start=opaque-claim-token',
         expiresInSeconds: 900,
       });
 
@@ -126,7 +126,7 @@ describe('telegram pairing commands', () => {
       );
       expect(result).toEqual({
         pairingId: PAIRING_ID,
-        deepLink: 'https://t.me/newbot/RoomoteSetupBot/roomote_abc_bot',
+        deepLink: 'https://t.me/RoomoteSetupBot?start=opaque-claim-token',
         suggestedUsername: 'roomote_abc_bot',
         expiresInSeconds: 900,
       });

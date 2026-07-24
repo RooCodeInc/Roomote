@@ -16,8 +16,8 @@ export type TelegramPairingSuccess = {
 };
 
 /**
- * Automatic Telegram bot creation via Telegram's Managed Bots feature: one
- * tap in Telegram creates a deployment-owned bot, and the pairing service
+ * Automatic Telegram bot creation via Telegram's Managed Bots feature: the
+ * manager bot requests a deployment-owned bot, and the pairing service
  * hands the token straight to the server, so the admin never touches
  * BotFather or copies a token.
  */
@@ -106,9 +106,10 @@ export function TelegramManagedBotPairing({
     return (
       <div className="space-y-4">
         <p>
-          Scan this QR code with your phone, or open the link on this device.
-          When Telegram opens, tap{' '}
-          <span className="font-medium">Create Bot</span> to confirm.
+          Scan this QR code with your phone, or open the link on this device. In
+          Telegram, tap <span className="font-medium">Start</span>, then{' '}
+          <span className="font-medium">Create Bot</span>. You can edit the
+          bot&apos;s name or username before confirming.
         </p>
         <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
           <div className="rounded-lg bg-white p-3">
@@ -140,9 +141,9 @@ export function TelegramManagedBotPairing({
   return (
     <div className="space-y-4">
       <p>
-        Roomote can create your Telegram bot for you — no BotFather, no token
-        copy-paste. You confirm the new bot with one tap in Telegram and Roomote
-        connects it automatically.
+        Roomote can create your Telegram bot for you — no BotFather or token
+        copy-paste. Follow the prompts in Telegram, choose the name and username
+        you want, and Roomote connects it automatically.
       </p>
       {expired && (
         <p className="text-sm text-muted-foreground">
