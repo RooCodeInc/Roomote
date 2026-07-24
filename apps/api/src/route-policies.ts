@@ -209,7 +209,7 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   },
   {
     name: 'internal-discord-events',
-    match: { type: 'exact', path: '/api/internal/discord/events' },
+    match: { type: 'prefix', path: '/api/internal/discord/events' },
     policy: 'webhook',
     rateLimits: WEBHOOK_RATE_LIMITS,
   },

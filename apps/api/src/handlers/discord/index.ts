@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 
 import {
   discordEventToQueuedCommunicationMessage,
@@ -34,6 +34,7 @@ import {
   restoreDiscordLinkCode,
   upsertDiscordInstallation,
   upsertDiscordUserMapping,
+  enqueueDiscordGatewayEvent,
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
@@ -850,26 +851,52 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
 
 export const discord = new Hono();
 
-discord.post('/events', async (c) => {
+async function parseAuthorizedDiscordGatewayEvent(c: Context) {
   const authError = await verifyDiscordGatewaySecret(
     c.req.header(DISCORD_GATEWAY_SECRET_HEADER),
   );
   if (authError) {
-    return c.json({ ok: false, error: authError.error }, authError.status);
+    return {
+      response: c.json({ ok: false, error: authError.error }, authError.status),
+    };
   }
   let rawBody: unknown;
   try {
     rawBody = await c.req.json();
   } catch {
-    return c.json({ ok: false, error: 'invalid_json' }, 400);
+    return { response: c.json({ ok: false, error: 'invalid_json' }, 400) };
   }
   const parsed = parseDiscordGatewayEvent(rawBody);
   if (!parsed.success) {
-    return c.json({ ok: false, error: 'invalid_discord_event' }, 400);
+    return {
+      response: c.json({ ok: false, error: 'invalid_discord_event' }, 400),
+    };
   }
+  return { event: parsed.data };
+}
+
+discord.post('/events', async (c) => {
+  const parsed = await parseAuthorizedDiscordGatewayEvent(c);
+  if ('response' in parsed) return parsed.response;
+
+  try {
+    await enqueueDiscordGatewayEvent(parsed.event);
+    return c.json({ ok: true, queued: true }, 202);
+  } catch (error) {
+    apiLogger.error(
+      `[discord] Failed to enqueue event ${parsed.event.eventId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return c.json({ ok: false, error: 'discord_event_enqueue_failed' }, 503);
+  }
+});
+
+discord.post('/events/process', async (c) => {
+  const parsed = await parseAuthorizedDiscordGatewayEvent(c);
+  if ('response' in parsed) return parsed.response;
+
   const eventRef = {
-    eventType: parsed.data.eventType,
-    eventId: parsed.data.eventId,
+    eventType: parsed.event.eventType,
+    eventId: parsed.event.eventId,
   };
   const claim = await claimDiscordApiEvent(eventRef);
   if (claim.status === 'completed') {
@@ -879,10 +906,9 @@ discord.post('/events', async (c) => {
     return c.json({ ok: false, error: 'discord_event_in_progress' }, 425);
   }
   try {
-    const result = await processDiscordGatewayEvent(parsed.data);
-    // The 2xx response is sufficient for the durable Gateway to acknowledge
-    // this entry. If Redis is unavailable for this final bookkeeping write,
-    // the short processing lease expires instead of failing completed work.
+    const result = await processDiscordGatewayEvent(parsed.event);
+    // The queue retries processing failures. If this bookkeeping write is
+    // unavailable, the short lease expires and a later job attempt can claim it.
     await completeDiscordApiEvent({ ...eventRef, token: claim.token }).catch(
       (error) => {
         apiLogger.warn(
@@ -893,9 +919,6 @@ discord.post('/events', async (c) => {
     return c.json(result);
   } catch (error) {
     if (isPermanentDiscordEventError(error)) {
-      // The channel/message no longer exists or the bot cannot access it.
-      // Retrying this specific event cannot make progress, so complete it
-      // instead of eventually poisoning the Gateway's durable delivery queue.
       await completeDiscordApiEvent({
         ...eventRef,
         token: claim.token,
@@ -923,8 +946,6 @@ discord.post('/events', async (c) => {
       apiLogger.warn(
         `[discord] Discord API unavailable while processing event ${eventRef.eventId}: ${error.message}`,
       );
-      // The Gateway treats 503 as delivery infrastructure and retains the
-      // stream entry without applying its poison-event attempt cap.
       return c.json({ ok: false, error: 'discord_api_unavailable' }, 503);
     }
     apiLogger.error(

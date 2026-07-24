@@ -133,6 +133,54 @@ describe('startNewDiscordTask', () => {
     );
   });
 
+  it('clears intake eyes when a retried source event already started a task', async () => {
+    mocks.findSourceRun.mockResolvedValue({
+      id: 41,
+      taskId: 'task-1',
+      status: 'running',
+      payload: {
+        communicationProvider: 'discord',
+        communicationSourceEventId: 'message-1',
+      },
+    });
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    await startNewDiscordTask({
+      provider: { removeReaction } as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      intakeAckPinned: true,
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky test',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+    });
+
+    expect(removeReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
+  });
+
   it('launches in-thread with full history and attachment context (Slack parity)', async () => {
     const provider = {
       fetchChannelMessages: vi.fn().mockResolvedValue({
@@ -611,5 +659,71 @@ describe('startNewDiscordTask', () => {
 
     expect(result.status).toBe('replied_inline');
     expect(removeReaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: 'the source event lookup fails',
+      setup: () =>
+        mocks.findSourceRun.mockRejectedValue(new Error('lookup failed')),
+    },
+    {
+      name: 'routing fails',
+      setup: () =>
+        mocks.routeTask.mockRejectedValue(new Error('routing failed')),
+    },
+    {
+      name: 'routing confirmation fails',
+      setup: () => {
+        mocks.shouldAutoConfirm.mockReturnValue(false);
+        mocks.requestConfirmation.mockRejectedValue(
+          new Error('confirmation failed'),
+        );
+      },
+    },
+    {
+      name: 'the routed workspace is unavailable',
+      setup: () => mocks.resolveWorkspace.mockResolvedValue(null),
+    },
+  ])('clears intake eyes when $name', async ({ setup }) => {
+    setup();
+    const removeReaction = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      startNewDiscordTask({
+        provider: { removeReaction } as never,
+        applicationId: 'application-1',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        intakeAckPinned: true,
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix the flaky test',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+          communicationAnchorMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+      }),
+    ).rejects.toThrow();
+
+    expect(removeReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'eyes',
+    });
   });
 });
