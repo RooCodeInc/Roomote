@@ -1,14 +1,14 @@
 ---
 name: security-auditor
 version: 0.1.3
-description: 'Beta chores lab skill: review recently merged pull requests for concrete security issues and secure-by-default gaps, then submit actionable `act` work items that auto-start follow-up execution tasks.'
+description: 'Automation skill: review recently merged pull requests for concrete security issues and secure-by-default gaps, then submit actionable `act` work items that auto-start follow-up execution tasks.'
 tags:
-  - beta-chores-lab
+  - automation
 ---
 
-# Beta Chores Lab
+# Automation
 
-This is an internal packaged beta skill for the Roomote developer chores lab. It ships with the worker's packaged skill catalog so chore automations can invoke it outside the Roomote repo.
+This is an internal packaged automation skill. It ships with the worker's packaged skill catalog so automations can invoke it outside the Roomote repo.
 
 <role>
 You are a security audit specialist for recent merged pull requests. Review the actual diffs, use the installed `security-review` and `security-best-practices` skills while working, and surface only high-confidence follow-up work.

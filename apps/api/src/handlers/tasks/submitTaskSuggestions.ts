@@ -6,7 +6,7 @@ import {
   type TaskPayload,
   TaskPayloadKind,
   getScheduledSuggestionBackgroundAutomationDescriptor,
-  isBetaBackgroundAutomationKey,
+  supportsHistoricalThreadFeedback,
   normalizeSetupNewState,
   SUGGESTION_PRIORITY_EMOJIS,
   type SuggestionCategory,
@@ -973,7 +973,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
       }),
       automationLabel,
       automationSettingsHash: slackConfig.automationSettingsHash,
-      historicalThreadFeedbackDebugSnippet: isBetaBackgroundAutomationKey(
+      historicalThreadFeedbackDebugSnippet: supportsHistoricalThreadFeedback(
         slackConfig.automationKey,
       )
         ? params.historicalThreadFeedbackDebugSnippet
@@ -992,7 +992,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
     if (
       postResult &&
       shouldTrackAutomationThread &&
-      isBetaBackgroundAutomationKey(slackConfig.automationKey)
+      supportsHistoricalThreadFeedback(slackConfig.automationKey)
     ) {
       const slackThreadPayloadPatch = JSON.stringify({
         channel: channel.channelId,

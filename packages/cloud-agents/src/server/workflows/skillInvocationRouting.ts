@@ -1,4 +1,4 @@
-export { PACKAGED_BETA_CHORE_SKILL_INVOCATIONS } from '../../packaged-skill-invocations';
+export { PACKAGED_AUTOMATION_SKILL_INVOCATIONS } from '../../packaged-skill-invocations';
 
 import { PACKAGED_SKILL_INVOCATIONS } from '../../packaged-skill-invocations';
 

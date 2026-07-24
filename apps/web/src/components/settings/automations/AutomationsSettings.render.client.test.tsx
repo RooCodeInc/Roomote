@@ -467,6 +467,17 @@ describe('AutomationsSettings', () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
+  it('does not label automations as beta', async () => {
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('button', {
+        name: 'Expand Weekly Manager Stats',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {
     state.featureFlags = {};
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;

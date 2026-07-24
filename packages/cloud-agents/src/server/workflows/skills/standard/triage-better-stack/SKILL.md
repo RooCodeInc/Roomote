@@ -1,14 +1,14 @@
 ---
 name: triage-better-stack
 version: 0.2.0
-description: 'Beta chores lab skill: Better Stack observability triage workflow. Use when a task should periodically scan Roomote Better Stack logs, warnings, errors, uptime checks, incidents, and telemetry via the Better Stack MCP and identify actionable operational chores.'
+description: 'Automation skill: Better Stack observability triage workflow. Use when a task should periodically scan Roomote Better Stack logs, warnings, errors, uptime checks, incidents, and telemetry via the Better Stack MCP and identify actionable operational chores.'
 tags:
-  - beta-chores-lab
+  - automation
 ---
 
-# Beta Chores Lab
+# Automation
 
-This is an internal packaged beta skill for the Roomote developer chores lab. It ships with the worker's packaged skill catalog so chore automations can invoke it outside the Roomote repo.
+This is an internal packaged automation skill. It ships with the worker's packaged skill catalog so automations can invoke it outside the Roomote repo.
 
 <role>
 You are a Better Stack triage specialist for Roomote. Find the log, uptime, incident, and telemetry signals materially worth attention today, and separate operational signal from noise.
