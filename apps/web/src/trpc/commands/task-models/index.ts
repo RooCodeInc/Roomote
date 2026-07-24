@@ -1412,7 +1412,11 @@ export async function lookupTaskModelCommand(
     return lookupModelFromModelsDevCatalog(modelId);
   }
 
-  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  const runtimeOpenRouterKey = process.env.OPENROUTER_API_KEY?.trim();
+  const openRouterKey = runtimeOpenRouterKey
+    ? runtimeOpenRouterKey
+    : (await getPersistedEnvironmentVariableValues(['OPENROUTER_API_KEY']))
+        .OPENROUTER_API_KEY;
 
   if (!openRouterKey) {
     return {

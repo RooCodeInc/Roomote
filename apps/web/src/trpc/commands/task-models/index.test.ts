@@ -345,6 +345,41 @@ describe('lookupTaskModelCommand', () => {
     );
   });
 
+  it('uses a persisted OpenRouter key for custom model lookup', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      OPENROUTER_API_KEY: 'saved-openrouter-key',
+    });
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            id: 'google/gemini-3.5-flash-lite',
+            name: 'Google: Gemini 3.5 Flash Lite',
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'openrouter/google/gemini-3.5-flash-lite',
+      }),
+    ).resolves.toMatchObject({
+      displayName: 'Google: Gemini 3.5 Flash Lite',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/model/google/gemini-3.5-flash-lite',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer saved-openrouter-key',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
   it('extracts reasoning support from the OpenRouter supported_parameters list', async () => {
     process.env.OPENROUTER_API_KEY = 'openrouter-test-key';
     fetchMock.mockResolvedValue(
