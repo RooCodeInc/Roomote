@@ -101,7 +101,7 @@ export async function publishCommunicationRequestUserInput(params: {
   // still use its existing one-reply text flow.
   const buttons =
     provider !== 'discord' &&
-    !(provider === 'telegram' && params.request.questions.length === 1)
+    !(provider === 'telegram' && params.request.questions.length <= 1)
       ? undefined
       : buildDiscordRequestUserInputButtons({
           runId: params.runId,

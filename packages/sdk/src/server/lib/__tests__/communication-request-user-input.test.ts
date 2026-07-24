@@ -96,4 +96,19 @@ describe('publishCommunicationRequestUserInput', () => {
       expect.objectContaining({ buttons: [[{ text: 'One' }]] }),
     );
   });
+
+  it('keeps Telegram Cancel available for an empty prompt', async () => {
+    mocks.buildButtons.mockReturnValue([[{ text: 'Cancel' }]]);
+
+    await publishCommunicationRequestUserInput({
+      runId: 1,
+      taskId: 'task-1',
+      payload: { provider: 'telegram' },
+      request: { requestId: 'request-1', questions: [] },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ buttons: [[{ text: 'Cancel' }]] }),
+    );
+  });
 });

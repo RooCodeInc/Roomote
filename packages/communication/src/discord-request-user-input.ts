@@ -200,7 +200,17 @@ export function buildDiscordRequestUserInputButtons(params: {
 }): CommunicationMessageButton[][] | undefined {
   const current = getDiscordRequestUserInputCurrentQuestion(params.request);
   if (!current) {
-    return undefined;
+    return [
+      [
+        {
+          text: 'Cancel',
+          callbackData: buildDiscordRequestUserInputCancelCallbackData({
+            runId: params.runId,
+            requestId: params.request.requestId,
+          }),
+        },
+      ],
+    ];
   }
 
   const { question, questionIndex } = current;

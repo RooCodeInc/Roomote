@@ -70,6 +70,22 @@ describe('discord request_user_input helpers', () => {
     expect(buttons!.at(-1)?.[0]?.text).toBe('Cancel');
   });
 
+  it('builds a Cancel button when no question can be rendered', () => {
+    expect(
+      buildDiscordRequestUserInputButtons({
+        runId: 99,
+        request: { requestId: 'rui:session:turn:callid12', questions: [] },
+      }),
+    ).toEqual([
+      [
+        {
+          text: 'Cancel',
+          callbackData: 'discord:rui_cancel:99:callid12',
+        },
+      ],
+    ]);
+  });
+
   it('renders the current question and option buttons for multi-question prompts', () => {
     const text = buildDiscordRequestUserInputPromptText({
       requestId: 'rui:1',
