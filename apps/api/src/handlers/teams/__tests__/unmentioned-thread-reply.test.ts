@@ -7,12 +7,18 @@ import type {
   TeamsGraphMessageMention,
 } from '@roomote/communication/teams-graph-client';
 
-const { findLatestTeamsThreadTaskRunMock } = vi.hoisted(() => ({
+const {
+  findLatestTeamsThreadTaskRunMock,
+  findTaskBackedTeamsAutomationReportRunMock,
+} = vi.hoisted(() => ({
   findLatestTeamsThreadTaskRunMock: vi.fn(),
+  findTaskBackedTeamsAutomationReportRunMock: vi.fn(),
 }));
 
 vi.mock('../find-active-teams-run.js', () => ({
   findLatestTeamsThreadTaskRun: findLatestTeamsThreadTaskRunMock,
+  findTaskBackedTeamsAutomationReportRun:
+    findTaskBackedTeamsAutomationReportRunMock,
 }));
 
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from '../unmentioned-thread-reply';
@@ -110,6 +116,7 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
       id: 7,
       userId: 'user-1',
     });
+    findTaskBackedTeamsAutomationReportRunMock.mockResolvedValue(undefined);
     fetchThreadMessagesMock.mockResolvedValue(null);
   });
 
@@ -125,6 +132,28 @@ describe('shouldRouteUnmentionedTeamsThreadReplyToAgent', () => {
     ]);
 
     await expect(routeDecision(threadReplyActivity())).resolves.toBe(true);
+  });
+
+  it('recognizes an announcer report root when no regular task run owns the thread', async () => {
+    findLatestTeamsThreadTaskRunMock.mockResolvedValue(undefined);
+    findTaskBackedTeamsAutomationReportRunMock.mockResolvedValue({
+      id: 8,
+      userId: null,
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanGraphMessage({
+        id: THREAD_ROOT_ID,
+        userId: 'aad-user-1',
+        mentions: [botMention()],
+      }),
+      botGraphMessage('1700000000100'),
+    ]);
+
+    await expect(routeDecision(threadReplyActivity())).resolves.toBe(true);
+    expect(findTaskBackedTeamsAutomationReportRunMock).toHaveBeenCalledWith({
+      conversationId: `19:conversation@thread.tacv2;messageid=${THREAD_ROOT_ID}`,
+      threadId: THREAD_ROOT_ID,
+    });
   });
 
   it('keeps routing consecutive replies from the same sender before the bot answers', async () => {

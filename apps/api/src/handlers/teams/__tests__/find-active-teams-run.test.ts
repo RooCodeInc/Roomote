@@ -15,6 +15,7 @@ const { selectWhereMock, selectRowsMock } = vi.hoisted(() => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
+  asc: vi.fn((value: unknown) => ({ asc: value })),
   taskRuns: {
     payload: 'payload',
     status: 'status',

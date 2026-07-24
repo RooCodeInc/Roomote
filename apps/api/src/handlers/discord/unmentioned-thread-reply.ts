@@ -96,6 +96,8 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   isRoomoteThread: boolean;
   /** Roomote user id of the thread task owner when known. */
   ownedThreadUserId: string | null | undefined;
+  /** True when the reply targets an announcer report root. */
+  isAutomationReportThread?: boolean;
   fetchThreadMessages: () => Promise<DiscordThreadHistoryMessage[] | null>;
 }): Promise<boolean> {
   const { message, botUserId } = params;
@@ -161,6 +163,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
       Boolean(params.ownedThreadUserId) &&
       params.ownedThreadUserId === params.mappedUserId,
     isThreadRootAuthor,
+    isAutomationReportThread: params.isAutomationReportThread,
     threadMessages: toSharedHistoryMessages(
       threadMessages,
       botUserId,

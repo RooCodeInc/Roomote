@@ -22,6 +22,9 @@ import {
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  RunStatus,
+  activeRunStatuses,
+  isSnapshotResumable,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
 import {
@@ -40,6 +43,7 @@ import {
   findActiveCommunicationTaskRun,
   findCommunicationTaskRunBySourceEvent,
   findCompletedCommunicationTaskRunWithSnapshot,
+  findTaskBackedAutomationReportRun,
   releaseCommunicationOutOfBandClaim,
   resumeCommunicationTaskFromSnapshot,
 } from '@roomote/sdk/server/communication';
@@ -328,13 +332,34 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       : {}),
   };
   const forceNewTask = command?.name === 'new';
-  let activeRun = forceNewTask
-    ? undefined
-    : await findActiveCommunicationTaskRun(conversation);
+  const repliedToAutomationReport =
+    !forceNewTask && message?.message_reference?.message_id
+      ? await findTaskBackedAutomationReportRun({
+          provider: 'discord',
+          channelId: metadata.communicationChannelId,
+          messageId: message.message_reference.message_id,
+        })
+      : null;
+  let activeRun =
+    !forceNewTask && repliedToAutomationReport
+      ? activeRunStatuses.some(
+          (status) => status === repliedToAutomationReport.status,
+        )
+        ? repliedToAutomationReport
+        : undefined
+      : forceNewTask
+        ? undefined
+        : await findActiveCommunicationTaskRun(conversation);
   const completedRun =
     forceNewTask || activeRun
       ? null
-      : await findCompletedCommunicationTaskRunWithSnapshot(conversation);
+      : repliedToAutomationReport
+        ? repliedToAutomationReport.status === RunStatus.Completed &&
+          repliedToAutomationReport.snapshotId &&
+          isSnapshotResumable(repliedToAutomationReport.snapshotCreatedAt)
+          ? repliedToAutomationReport
+          : null
+        : await findCompletedCommunicationTaskRunWithSnapshot(conversation);
   const pendingRoutingReply =
     message && senderUserId && !forceNewTask
       ? await findDiscordPendingRoutingReply({
@@ -345,7 +370,10 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         })
       : null;
   const isRoomoteThread = Boolean(
-    activeRun || completedRun || pendingRoutingReply,
+    activeRun ||
+    completedRun ||
+    pendingRoutingReply ||
+    repliedToAutomationReport,
   );
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
@@ -409,7 +437,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         ownedThreadUserId:
           activeRun?.userId ??
           completedRun?.userId ??
+          repliedToAutomationReport?.userId ??
           (pendingRoutingReply ? senderUserId : null),
+        isAutomationReportThread: Boolean(repliedToAutomationReport),
         fetchThreadMessages: async () => {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,

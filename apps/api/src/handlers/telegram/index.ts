@@ -6,6 +6,9 @@ import {
 } from '@roomote/communication/messages';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  RunStatus,
+  activeRunStatuses,
+  isSnapshotResumable,
   isDeploymentReadOnlyError,
 } from '@roomote/types';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
@@ -27,6 +30,7 @@ import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
   findActiveTelegramTaskRun,
   findCompletedTelegramTaskRunWithSnapshot,
+  findTelegramAutomationReportRun,
 } from './task-run-lookup.js';
 import { retireTelegramPrReviewOffersBestEffort } from './pr-review-action.js';
 import {
@@ -397,7 +401,25 @@ telegram.post('/', async (c) => {
     });
   }
 
-  const activeRun = await findActiveTelegramTaskRun(conversation);
+  const repliedToReportRootId =
+    message.reply_to_message &&
+    typeof message.reply_to_message === 'object' &&
+    'message_id' in message.reply_to_message
+      ? message.reply_to_message.message_id
+      : undefined;
+  const repliedToAutomationReport = repliedToReportRootId
+    ? await findTelegramAutomationReportRun({
+        chatId: metadata.communicationChannelId,
+        messageId: String(repliedToReportRootId),
+      })
+    : null;
+  const activeRun = repliedToAutomationReport
+    ? activeRunStatuses.some(
+        (status) => status === repliedToAutomationReport.status,
+      )
+      ? repliedToAutomationReport
+      : undefined
+    : await findActiveTelegramTaskRun(conversation);
 
   if (activeRun && newTaskCommand) {
     const commandLabel = `/${newTaskCommand.command}`;
@@ -498,13 +520,19 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
-  const isTaskEntry = isTelegramTaskEntryUpdate(update, {
-    botUsername: botUsername ?? undefined,
-  });
+  const isTaskEntry =
+    isTelegramTaskEntryUpdate(update, {
+      botUsername: botUsername ?? undefined,
+    }) || Boolean(repliedToAutomationReport);
   // Only task-owned topics are explicit Roomote conversations. A user-owned
   // forum topic still requires a group @mention before an old task resumes.
-  const completedRunCandidate =
-    !newTaskCommand && (isTaskEntry || metadata.communicationThreadId)
+  const completedRunCandidate = repliedToAutomationReport
+    ? repliedToAutomationReport.status === RunStatus.Completed &&
+      repliedToAutomationReport.snapshotId &&
+      isSnapshotResumable(repliedToAutomationReport.snapshotCreatedAt)
+      ? repliedToAutomationReport
+      : null
+    : !newTaskCommand && (isTaskEntry || metadata.communicationThreadId)
       ? await findCompletedTelegramTaskRunWithSnapshot(conversation)
       : null;
   const completedRun =

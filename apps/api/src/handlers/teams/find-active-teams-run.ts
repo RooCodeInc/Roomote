@@ -1,5 +1,6 @@
 import {
   and,
+  asc,
   db,
   desc,
   eq,
@@ -194,6 +195,36 @@ export async function findLatestTeamsThreadTaskRun(input: {
     .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
     .where(and(teamsProviderMatch, conversationMatch, threadMatch))
     .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  return row ? withResolvedUserId(row) : undefined;
+}
+
+/** Finds an announcer report by its immutable Teams thread root. */
+export async function findTaskBackedTeamsAutomationReportRun(input: {
+  conversationId: string;
+  threadId: string;
+}) {
+  const { teamsProviderMatch, conversationMatch, threadMatch } =
+    buildTeamsTaskRunMatchConditions(input);
+  const [row] = await db
+    .select({
+      id: taskRuns.id,
+      initiatorUserId: tasks.initiatorUserId,
+      actingUserId: taskRuns.actingUserId,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        teamsProviderMatch,
+        conversationMatch,
+        threadMatch,
+        sql`${taskRuns.payload}->>'backgroundAutomationKey' = 'announcer'`,
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .orderBy(asc(taskRuns.createdAt))
     .limit(1);
 
   return row ? withResolvedUserId(row) : undefined;
