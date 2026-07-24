@@ -347,14 +347,28 @@ export async function launchActWorkItems(params: {
         workItemChatTarget.threadTs &&
         linkedTaskId
       ) {
-        await updateBackgroundAutomationSlackThreadMetadata(db, {
-          surface: 'slack',
-          slackChannelId: workItemChatTarget.channelId,
-          threadTs: workItemChatTarget.threadTs,
-          metadata: {
-            sourceTaskId: linkedTaskId,
-          },
-        });
+        try {
+          const linked = await updateBackgroundAutomationSlackThreadMetadata(
+            db,
+            {
+              surface: 'slack',
+              slackChannelId: workItemChatTarget.channelId,
+              threadTs: workItemChatTarget.threadTs,
+              metadata: { sourceTaskId: linkedTaskId },
+            },
+          );
+          if (!linked) {
+            apiLogger.warn(
+              `[submitAutomationWorkItems] Could not link Slack thread ${workItemChatTarget.threadTs} to task ${linkedTaskId}`,
+            );
+          }
+        } catch (error) {
+          apiLogger.warn(
+            `[submitAutomationWorkItems] Failed to link Slack thread ${workItemChatTarget.threadTs} to task ${linkedTaskId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
       }
     } catch (error) {
       failedCount += 1;
