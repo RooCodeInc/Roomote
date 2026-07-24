@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Button, ExternalLink, FileText, X } from '@/components/system';
+import { Button, ExternalLink } from '@/components/system';
 
 import { getSetupDocsPath, getSetupDocsStep } from './setup-docs';
 import { ArrowLeftToLine, ArrowRightToLine } from 'lucide-react';

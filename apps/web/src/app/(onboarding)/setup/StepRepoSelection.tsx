@@ -13,7 +13,6 @@ import {
 import { useCreateGitHubInstallation } from '@/hooks/github';
 import { useRepositories } from '@/hooks/source-control';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
-import { DOCS_ENVIRONMENT_DEFINITION_URL } from '@/lib/docs';
 import {
   areAllRepositoriesEmpty,
   getEmptyRepositories,
@@ -45,7 +44,6 @@ import { ModelSelect } from '@/components/tasks';
 import { SetupFooter } from './SetupFooter';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
-import { InflateRaw } from 'node:zlib';
 
 const REPO_SELECTION_STEP = getSetupStepDefinition('repo-selection');
 
