@@ -24,6 +24,10 @@
       "import": "./src/server/lib/communication/index.ts",
       "require": "./src/server/lib/communication/index.ts"
     },
+    "./server/automation-post-launch-finalization": {
+      "import": "./src/server/automations/post-launch-finalization.ts",
+      "require": "./src/server/automations/post-launch-finalization.ts"
+    },
     "./server/slack-conversation-log": {
       "import": "./src/server/lib/slack-conversation-log.ts",
       "require": "./src/server/lib/slack-conversation-log.ts"

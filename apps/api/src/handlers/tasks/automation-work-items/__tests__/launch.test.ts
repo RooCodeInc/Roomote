@@ -148,7 +148,7 @@ vi.mock('@roomote/db/server', () => {
   };
 });
 
-vi.mock('@roomote/sdk/server', () => ({
+vi.mock('@roomote/sdk/server/automation-post-launch-finalization', () => ({
   finalizeAutomationLaunch: (...args: unknown[]) =>
     mockFinalizeAutomationLaunch(...args),
 }));

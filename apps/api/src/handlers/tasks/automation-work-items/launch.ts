@@ -6,7 +6,7 @@ import {
   enqueueTask,
   escapeTaskContextText,
 } from '@roomote/cloud-agents/server';
-import { finalizeAutomationLaunch } from '@roomote/sdk/server';
+import { finalizeAutomationLaunch } from '@roomote/sdk/server/automation-post-launch-finalization';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
   and,
