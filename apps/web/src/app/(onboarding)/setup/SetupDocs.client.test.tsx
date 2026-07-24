@@ -50,7 +50,9 @@ describe('SetupDocs', () => {
 
     expect(screen.queryByText('Docs content')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Docs' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Need help? Docs are here' }),
+    );
 
     expect(screen.getByText('Docs content')).toBeInTheDocument();
     expect(
