@@ -1,8 +1,8 @@
 import type { SetupStep } from './types';
 
-export type SetupDocsStep = SetupStep | 'email-account' | 'email-password';
+type SetupDocsStep = SetupStep | 'email-account' | 'email-password';
 
-export type SetupDocsContext = {
+type SetupDocsContext = {
   authProvider?: string | null;
   computeProvider?: string | null;
   modelProvider?: string | null;

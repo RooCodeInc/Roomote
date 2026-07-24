@@ -5,7 +5,7 @@ import matter from 'gray-matter';
 
 const DOCS_DIRECTORY = resolve(process.cwd(), '..', 'docs');
 
-export type DocsPage = {
+type DocsPage = {
   slug: string;
   title: string;
   description?: string;

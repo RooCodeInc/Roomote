@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -82,10 +82,13 @@ export function StepInferenceProvider({
   const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] =
     useState<SetupModelProviderId | null>(null);
-  const selectProvider = (provider: SetupModelProviderId | null) => {
-    setSelectedProvider(provider);
-    onSelectedProviderChange?.(provider);
-  };
+  const selectProvider = useCallback(
+    (provider: SetupModelProviderId | null) => {
+      setSelectedProvider(provider);
+      onSelectedProviderChange?.(provider);
+    },
+    [onSelectedProviderChange],
+  );
   const [apiKey, setApiKey] = useState('');
   const [connectionName, setConnectionName] = useState('');
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
@@ -150,7 +153,7 @@ export function StepInferenceProvider({
         id: 'openrouter-oauth-result',
       });
     }
-  }, [openRouterOauthStatus, openRouterOauthErrorReason]);
+  }, [openRouterOauthStatus, openRouterOauthErrorReason, selectProvider]);
 
   const selectedProviderStatus = useMemo(
     () => getProviderStatus(modelSetup, selectedProvider),
