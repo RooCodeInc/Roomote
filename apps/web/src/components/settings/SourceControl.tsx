@@ -140,6 +140,34 @@ type TokenProviderState = {
   };
 };
 
+export function getProviderConfigOAuthAuthorizePath(
+  provider: SourceControlTokenBackedProvider,
+): string | null {
+  return provider === 'gitlab' ||
+    provider === 'gitea' ||
+    provider === 'bitbucket'
+    ? `/api/source-control/${provider}/oauth/authorize`
+    : null;
+}
+
+export function completeProviderConfigSave({
+  provider,
+  navigate,
+  sync,
+}: {
+  provider: SourceControlTokenBackedProvider;
+  navigate: (path: string) => void;
+  sync: () => void;
+}): void {
+  const authorizePath = getProviderConfigOAuthAuthorizePath(provider);
+
+  if (authorizePath) {
+    navigate(authorizePath);
+  } else {
+    sync();
+  }
+}
+
 export function SourceControl() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -369,15 +397,13 @@ export function SourceControl() {
             provider={provider}
             configStatus={sourceControlConfigStatus.data}
             saveSuccessMessage={`${sourceControlProviderDescriptors[provider].label} credentials saved.`}
-            onSaved={() => {
-              if (provider === 'bitbucket') {
-                window.location.assign(
-                  '/api/source-control/bitbucket/oauth/authorize',
-                );
-              } else {
-                tokenProviderState[provider].sync.mutate();
-              }
-            }}
+            onSaved={() =>
+              completeProviderConfigSave({
+                provider,
+                navigate: (path) => window.location.assign(path),
+                sync: tokenProviderState[provider].sync.mutate,
+              })
+            }
           />
         ),
       }),

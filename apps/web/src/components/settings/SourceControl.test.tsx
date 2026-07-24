@@ -310,7 +310,11 @@ vi.mock('./SourceControlConfigForm', () => ({
   ),
 }));
 
-import { SourceControl } from './SourceControl';
+import {
+  completeProviderConfigSave,
+  getProviderConfigOAuthAuthorizePath,
+  SourceControl,
+} from './SourceControl';
 
 describe('SourceControl settings', () => {
   beforeEach(() => {
@@ -360,6 +364,35 @@ describe('SourceControl settings', () => {
       { provider: 'bitbucket', configSatisfied: true },
     ];
   });
+
+  it('starts OAuth authorization after saving OAuth provider credentials', () => {
+    expect(getProviderConfigOAuthAuthorizePath('gitlab')).toBe(
+      '/api/source-control/gitlab/oauth/authorize',
+    );
+    expect(getProviderConfigOAuthAuthorizePath('gitea')).toBe(
+      '/api/source-control/gitea/oauth/authorize',
+    );
+    expect(getProviderConfigOAuthAuthorizePath('bitbucket')).toBe(
+      '/api/source-control/bitbucket/oauth/authorize',
+    );
+    expect(getProviderConfigOAuthAuthorizePath('ado')).toBeNull();
+  });
+
+  it.each([
+    ['gitea', '/api/source-control/gitea/oauth/authorize'],
+    ['gitlab', '/api/source-control/gitlab/oauth/authorize'],
+  ] as const)(
+    'redirects to OAuth instead of syncing after %s credentials save',
+    (provider, authorizePath) => {
+      const navigate = vi.fn();
+      const sync = vi.fn();
+
+      completeProviderConfigSave({ provider, navigate, sync });
+
+      expect(navigate).toHaveBeenCalledWith(authorizePath);
+      expect(sync).not.toHaveBeenCalled();
+    },
+  );
 
   it('renders source control providers with repo lists and controls', () => {
     render(<SourceControl />);
