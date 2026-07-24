@@ -805,6 +805,23 @@ describe('StepRepoSelection', () => {
     });
   });
 
+  it('leaves the only available repository unselected by default', async () => {
+    mockRepositories.splice(0, mockRepositories.length, {
+      id: 'repo-1',
+      fullName: 'acme/api',
+      private: false,
+      defaultBranch: 'main',
+    });
+
+    await renderStepRepoSelection();
+
+    expect(screen.getByLabelText(/acme\/api/i)).not.toBeChecked();
+    expect(
+      screen.queryByRole('button', { name: 'Continue' }),
+    ).not.toBeInTheDocument();
+    expect(mockSaveSelection).not.toHaveBeenCalled();
+  });
+
   it('requires at least one repository before Continue persists selection', async () => {
     const onContinue = vi.fn();
 
