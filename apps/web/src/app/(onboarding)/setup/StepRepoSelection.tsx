@@ -37,6 +37,7 @@ import {
   Search,
   Spinner,
   Textarea,
+  Info,
   X,
 } from '@/components/system';
 import { EnvironmentRepositorySelector } from '@/components/settings/environments/EnvironmentRepositorySelector';
@@ -44,6 +45,7 @@ import { ModelSelect } from '@/components/tasks';
 import { SetupFooter } from './SetupFooter';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
+import { InflateRaw } from 'node:zlib';
 
 const REPO_SELECTION_STEP = getSetupStepDefinition('repo-selection');
 
@@ -383,29 +385,24 @@ export function StepRepoSelection({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <StepTitle text={REPO_SELECTION_STEP.title} />
       </div>
-      <div className="space-y-3 text-sm text-foreground">
+      <div className="space-y-3 text-foreground">
         {!showForm && (
-          <p>
-            <span className="font-semibold">
-              {PRODUCT_NAME} excels by verifying its work.
-            </span>{' '}
-            To do that, it needs to run your app locally, click around, take
-            screenshots. So we need to configure an environment, which includes
-            any required repos, dependencies, and related setup.{' '}
-            <a
-              href={DOCS_ENVIRONMENT_DEFINITION_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium underline underline-offset-4"
-            >
-              See docs
-            </a>
-            .
-          </p>
+          <div className="space-y-2 flex gap-2 items-start">
+            <Info className="size-4 shrink-0 mt-1" />
+            <p>
+              <span className="font-semibold">
+                {PRODUCT_NAME} needs environments to verify its work.
+              </span>
+              <br />
+              That lets it run your app locally, click around, make API calls,
+              take screenshots.
+            </p>
+          </div>
         )}
-        <p className="font-semibold text-foreground">
-          Pick the repo(s) needed for the very first environment you want to set
-          up.
+        <p className={`text-foreground ${!showForm && 'ml-6'}`}>
+          Pick the repo(s) needed for the first env to set up.
+          <br />
+          Roomote will install dependencies and figure it all out on its own.
         </p>
       </div>
 
