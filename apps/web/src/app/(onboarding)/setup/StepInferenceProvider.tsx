@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -69,17 +69,26 @@ export function StepInferenceProvider({
   openRouterOauthErrorReason = null,
   onContinue,
   onBack,
+  onSelectedProviderChange,
 }: {
   modelSetup: SetupModelStatus;
   openRouterOauthStatus?: OpenRouterOauthEntryStatus | null;
   openRouterOauthErrorReason?: string | null;
   onContinue: () => void;
   onBack?: () => void;
+  onSelectedProviderChange?: (provider: SetupModelProviderId | null) => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] =
     useState<SetupModelProviderId | null>(null);
+  const selectProvider = useCallback(
+    (provider: SetupModelProviderId | null) => {
+      setSelectedProvider(provider);
+      onSelectedProviderChange?.(provider);
+    },
+    [onSelectedProviderChange],
+  );
   const [apiKey, setApiKey] = useState('');
   const [connectionName, setConnectionName] = useState('');
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
@@ -132,7 +141,7 @@ export function StepInferenceProvider({
 
   useEffect(() => {
     if (openRouterOauthStatus === 'connected') {
-      setSelectedProvider('openrouter');
+      selectProvider('openrouter');
       toast.success(
         'Connected to OpenRouter. Your new API key has been saved.',
         {
@@ -144,7 +153,7 @@ export function StepInferenceProvider({
         id: 'openrouter-oauth-result',
       });
     }
-  }, [openRouterOauthStatus, openRouterOauthErrorReason]);
+  }, [openRouterOauthStatus, openRouterOauthErrorReason, selectProvider]);
 
   const selectedProviderStatus = useMemo(
     () => getProviderStatus(modelSetup, selectedProvider),
@@ -298,7 +307,7 @@ export function StepInferenceProvider({
         <Select
           value={selectedProvider ?? undefined}
           onValueChange={(value) =>
-            setSelectedProvider(value as SetupModelProviderId)
+            selectProvider(value as SetupModelProviderId)
           }
         >
           <SelectTrigger aria-label="Model provider" className="min-w-44">

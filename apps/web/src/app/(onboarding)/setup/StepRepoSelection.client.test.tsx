@@ -214,6 +214,7 @@ vi.mock('@/components/system', () => ({
   Eye: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   EyeClosed: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Github: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Info: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Loader2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,

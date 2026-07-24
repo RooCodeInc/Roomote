@@ -39,10 +39,6 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Connect source control',
   },
   {
-    id: 'qualification-blocked',
-    title: 'Thanks for your interest!',
-  },
-  {
     id: 'compute-provider',
     title: 'Sandbox provider',
   },

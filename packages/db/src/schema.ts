@@ -1695,6 +1695,9 @@ export const githubInstallationsRelations = relations(
 
 /**
  * setup_qualification_blocks
+ *
+ * N-1 rollback compatibility: this legacy table remains declared until the
+ * next release, even though no current application code reads or writes it.
  */
 
 export const setupQualificationBlocks = pgTable(
