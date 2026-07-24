@@ -83,3 +83,13 @@ export function getSetupStepDefinition(step: SetupStep) {
 export function getSetupStepPath(step: SetupStep): string {
   return `/setup?step=${step}`;
 }
+
+/**
+ * Canonical setup URL for a full query string. The setup URL carries both the
+ * active `step` and the provider params the docs panel renders from, so every
+ * writer builds the complete query and formats it here.
+ */
+export function getSetupPath(params: URLSearchParams): string {
+  const query = params.toString();
+  return query ? `/setup?${query}` : '/setup';
+}

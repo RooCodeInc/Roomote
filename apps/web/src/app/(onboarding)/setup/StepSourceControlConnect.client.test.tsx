@@ -598,6 +598,7 @@ describe('StepSourceControlConnect', () => {
       value: { ...window.location, pathname: '/setup', search: '?sync=1' },
     });
     const onContinue = vi.fn();
+    const onRemoveSyncMarker = vi.fn();
 
     render(
       <StepSourceControlConnect
@@ -615,10 +616,12 @@ describe('StepSourceControlConnect', () => {
           ],
         })}
         onContinue={onContinue}
+        onRemoveSyncMarker={onRemoveSyncMarker}
       />,
     );
 
     expect(onContinue).toHaveBeenCalledOnce();
+    expect(onRemoveSyncMarker).toHaveBeenCalledOnce();
   });
 
   it('reports Gitea webhook setup failures as repositories', async () => {

@@ -53,7 +53,6 @@ import { getSetupStepPath } from './types';
 import { useSetSetupDocsContent } from './SetupDocsContext';
 import {
   getBootstrapAuthProvider,
-  getBootstrapStepPath,
   getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
@@ -131,28 +130,6 @@ export default function SetupPageClient({
     useState<'forward' | 'backward'>('forward');
   const bootstrapStepRef = useRef(bootstrapStep);
   bootstrapStepRef.current = bootstrapStep;
-  const setBootstrapStepWithTransition = useCallback(
-    (nextStep: BootstrapStep) => {
-      const currentIndex = BOOTSTRAP_STEPS.indexOf(bootstrapStepRef.current);
-      const nextIndex = BOOTSTRAP_STEPS.indexOf(nextStep);
-
-      if (nextStep !== bootstrapStepRef.current) {
-        setBootstrapTransitionDirection(
-          nextIndex >= currentIndex ? 'forward' : 'backward',
-        );
-      }
-
-      bootstrapStepRef.current = nextStep;
-      setBootstrapStep(nextStep);
-      router.replace(
-        getBootstrapStepPath(
-          nextStep,
-          new URLSearchParams(window.location.search),
-        ),
-      );
-    },
-    [router],
-  );
   const [pendingAuthProvider, setPendingAuthProvider] =
     useState<CommunicationProviderChoice | null>(null);
   const pendingSetupAuthProvider =
@@ -206,6 +183,8 @@ export default function SetupPageClient({
     goToNextStep,
     canGoBack,
     goToNextPostOnboardingStep,
+    readSetupSearchParams,
+    commitSetupUrl,
     status,
     setupSession,
     isLoading,
@@ -214,6 +193,30 @@ export default function SetupPageClient({
     enabled: isSignedIn && isAdmin,
     pendingAuthProvider: pendingSetupAuthProvider,
   });
+  const setBootstrapStepWithTransition = useCallback(
+    (nextStep: BootstrapStep) => {
+      const currentIndex = BOOTSTRAP_STEPS.indexOf(bootstrapStepRef.current);
+      const nextIndex = BOOTSTRAP_STEPS.indexOf(nextStep);
+
+      if (nextStep !== bootstrapStepRef.current) {
+        setBootstrapTransitionDirection(
+          nextIndex >= currentIndex ? 'forward' : 'backward',
+        );
+      }
+
+      bootstrapStepRef.current = nextStep;
+      setBootstrapStep(nextStep);
+      const params = readSetupSearchParams();
+      params.set('step', nextStep);
+      commitSetupUrl(params);
+    },
+    [commitSetupUrl, readSetupSearchParams],
+  );
+  const removeSourceControlSyncMarker = useCallback(() => {
+    const params = readSetupSearchParams();
+    params.delete('sync');
+    commitSetupUrl(params);
+  }, [commitSetupUrl, readSetupSearchParams]);
   const saveSourceControlProviderChoice = useMutation(
     trpc.setupNew.saveSourceControlProviderChoice.mutationOptions({
       onSuccess: async (_data, variables) => {
@@ -298,8 +301,12 @@ export default function SetupPageClient({
   const selectedModelProvider =
     pendingModelProvider ?? status?.setupNewState.modelProvider;
 
+  // The docs panel is server-rendered from these params, so keep them on the
+  // URL. Read and write through the setup flow's shared query view rather than
+  // `window.location`: a step navigation may not have reached the address bar
+  // yet, and writing a stale `step` back would leave the docs on the old step.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = readSetupSearchParams();
     const providerParams = {
       authProvider: selectedAuthProvider,
       computeProvider: selectedComputeProvider,
@@ -319,10 +326,11 @@ export default function SetupPageClient({
     }
 
     if (changed) {
-      router.replace(`${window.location.pathname}?${params}`);
+      commitSetupUrl(params);
     }
   }, [
-    router,
+    commitSetupUrl,
+    readSetupSearchParams,
     selectedAuthProvider,
     selectedComputeProvider,
     selectedModelProvider,
@@ -746,6 +754,7 @@ export default function SetupPageClient({
             <StepSourceControlConnect
               sourceControlSetup={status.sourceControlSetup}
               onContinue={goToNextStep}
+              onRemoveSyncMarker={removeSourceControlSyncMarker}
               onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}

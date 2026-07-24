@@ -1397,6 +1397,34 @@ describe('useSetupFlow', () => {
     expect(routerMock.push).toHaveBeenCalledWith('/setup?step=auth-provider');
   });
 
+  it('merges a later URL write into a step navigation the address bar has not committed yet', async () => {
+    mockStatus();
+    setLocationSearch('?step=welcome');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('welcome');
+    });
+
+    act(() => {
+      result.current.goToStep('auth-env-vars');
+    });
+
+    // `router.push` commits asynchronously, so `window.location.search` still
+    // describes the previous step while the navigation is in flight.
+    const params = result.current.readSetupSearchParams();
+    params.set('authProvider', 'slack');
+
+    act(() => {
+      result.current.commitSetupUrl(params);
+    });
+
+    expect(routerMock.replace).toHaveBeenLastCalledWith(
+      '/setup?step=auth-env-vars&authProvider=slack',
+    );
+  });
+
   it('pushes a direct step URL when goToStep is called', async () => {
     mockStatus();
 
