@@ -88,8 +88,6 @@ function getInitialAdditionalEnvValues(
     ),
   );
 
-  // Seed selectable fields (e.g. Z.AI region) with their first option so
-  // required selects submit a value without an extra click.
   for (const field of provider.additionalEnvFields ?? []) {
     if (
       field.options &&

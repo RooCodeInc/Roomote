@@ -106,8 +106,7 @@ export type RecommendedModelPreset = {
  * An additional credential value a provider needs beyond its primary API-key
  * env var (`envVarName`), such as an AWS region or a GCP project id. The
  * connect UI renders one input per field; `required` fields also participate
- * in the provider's connected/satisfied status. When `options` is set, the UI
- * renders a select and submitted values must match an option value.
+ * in the provider's connected/satisfied status.
  */
 export type SetupModelProviderEnvField = {
   envVarName: string;
@@ -115,11 +114,10 @@ export type SetupModelProviderEnvField = {
   secret: boolean;
   required: boolean;
   placeholder?: string;
-  /** When set, connect UIs render a select instead of a text input. */
+  /** When set, connect UIs render a select; values must match an option. */
   options?: readonly { value: string; label: string }[];
 };
 
-/** Region choices for Z.AI / Z.AI Coding Plan (maps to models.dev host). */
 export const ZAI_REGION_OPTIONS = [
   { value: 'global', label: 'International' },
   { value: 'china', label: 'China' },

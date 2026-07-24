@@ -125,10 +125,8 @@ export interface InferenceGatewayProvider {
    */
   region?: { envVarName: string; default: string };
   /**
-   * When set with `region`, resolves the upstream base URL from the configured
-   * region value. Missing region uses `region.default`. Values must be keys of
-   * this map (not AWS-style region strings validated by
-   * `INFERENCE_GATEWAY_REGION_PATTERN`).
+   * Discrete upstream bases keyed by region env value (e.g. `global` / `china`).
+   * Not AWS-style regions; do not use `INFERENCE_GATEWAY_REGION_PATTERN`.
    */
   regionBaseUrls?: Readonly<Record<string, string>>;
   /** How the upstream expects its API key when the gateway forwards. */
@@ -174,10 +172,7 @@ const ANTHROPIC_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
   '/v1/models',
 ];
 
-/**
- * Z.AI / Zhipu OpenAI-compatible paths. The models.dev base already ends in
- * `/v4`, so OpenCode calls `/chat/completions` without an extra `/v1` segment.
- */
+/** Paths relative to the models.dev v4 base (not OpenAI `/v1/...`). */
 export const ZAI_INFERENCE_PATHS: readonly string[] = [
   '/chat/completions',
   '/completions',
