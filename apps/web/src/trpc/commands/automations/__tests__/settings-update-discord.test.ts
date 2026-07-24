@@ -6,6 +6,7 @@ import {
   discordInstallations,
   eq,
   slackInstallations,
+  teamsInstallations,
   upsertAutomation,
   users,
 } from '@roomote/db/server';
@@ -125,6 +126,7 @@ function buildInput(
     announcerInstructions: null,
     platformIssueSlackChannel: null,
     platformIssueDiscordChannel: null,
+    platformIssueTeamsChannel: null,
     ...overrides,
   };
 }
@@ -200,6 +202,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
+    await db.delete(teamsInstallations);
     await db.delete(users);
   });
 
@@ -482,6 +485,115 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       expect(result.settings.platformIssueDiscordChannelId).toBe('D111');
       expect(result.settings.platformIssueSlackChannelId).toBeNull();
     }
+  }, 15_000);
+
+  it('persists an explicit Teams destination for platform issue alerts', async () => {
+    await db.insert(teamsInstallations).values({
+      installationKey: 'team:teams-alerts',
+      tenantId: 'tenant-1',
+      conversationId: 'teams-alerts',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      botAppId: 'bot-app-1',
+      isActive: true,
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueTeamsChannel: 'teams-alerts',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('platform_issue_alerts')).toEqual([
+      {
+        provider: 'teams',
+        targetKind: 'teams_channel',
+        externalRef: 'teams-alerts',
+      },
+    ]);
+    if (result.success) {
+      expect(result.settings.platformIssueTeamsChannelId).toBe('teams-alerts');
+      expect(result.settings.platformIssueSlackChannelId).toBeNull();
+      expect(result.settings.platformIssueDiscordChannelId).toBeNull();
+    }
+  }, 15_000);
+
+  it('replaces the Teams destination when platform issue alerts switch to Slack', async () => {
+    await db.insert(teamsInstallations).values({
+      installationKey: 'team:teams-alerts',
+      tenantId: 'tenant-1',
+      conversationId: 'teams-alerts',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      botAppId: 'bot-app-1',
+      isActive: true,
+    });
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueTeamsChannel: 'teams-alerts',
+      }),
+    );
+    await insertSlackInstallation();
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueSlackChannel: 'C123456NEW',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('platform_issue_alerts')).toEqual([
+      {
+        provider: 'slack',
+        targetKind: 'slack_channel',
+        externalRef: 'C123456NEW',
+      },
+    ]);
+  }, 15_000);
+
+  it('replaces the Teams destination when platform issue alerts switch to Discord', async () => {
+    await db.insert(teamsInstallations).values({
+      installationKey: 'team:teams-alerts',
+      tenantId: 'tenant-1',
+      conversationId: 'teams-alerts',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      botAppId: 'bot-app-1',
+      isActive: true,
+    });
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueTeamsChannel: 'teams-alerts',
+      }),
+    );
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueDiscordChannel: 'D111',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('platform_issue_alerts')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      },
+    ]);
   }, 15_000);
 
   it('preserves a Discord target when an older client omits the optional field on a same-automation save', async () => {

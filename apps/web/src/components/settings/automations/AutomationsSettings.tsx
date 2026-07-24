@@ -736,6 +736,7 @@ function mapSettingsToFormState(
     platformIssueSlackChannelId: string | null;
     platformIssueSlackChannelName?: string | null;
     platformIssueDiscordChannelId: string | null;
+    platformIssueTeamsChannelId: string | null;
     securityAuditorSlackChannelId: string | null;
     securityAuditorSlackChannelName?: string | null;
     securityAuditorDiscordChannelId: string | null;
@@ -850,6 +851,7 @@ function mapSettingsToFormState(
       settings.platformIssueSlackChannelId ??
       '',
     platformIssueDiscordChannel: settings.platformIssueDiscordChannelId ?? '',
+    platformIssueTeamsChannel: settings.platformIssueTeamsChannelId ?? '',
     securityAuditorSlackChannel:
       settings.securityAuditorSlackChannelName ??
       settings.securityAuditorSlackChannelId ??
@@ -897,16 +899,21 @@ export function buildSlackWorkflowLaunchUrl(
 
 export function isPlatformIssueAlertsEnabled(
   formState:
-    | Pick<
-        FormState,
-        'platformIssueSlackChannel' | 'platformIssueDiscordChannel'
+    | Partial<
+        Pick<
+          FormState,
+          | 'platformIssueSlackChannel'
+          | 'platformIssueDiscordChannel'
+          | 'platformIssueTeamsChannel'
+        >
       >
     | null
     | undefined,
 ): boolean {
   return Boolean(
-    formState?.platformIssueSlackChannel.trim() ||
-    formState?.platformIssueDiscordChannel.trim(),
+    formState?.platformIssueSlackChannel?.trim() ||
+    formState?.platformIssueDiscordChannel?.trim() ||
+    formState?.platformIssueTeamsChannel?.trim(),
   );
 }
 
@@ -2544,6 +2551,9 @@ export function AutomationsSettings() {
                     DISCORD_DESTINATION_OPTION_PREFIX.length,
                   ),
                   ...clearSuggesterAltDestinations,
+                  ...(field === 'platformIssueSlackChannel'
+                    ? { platformIssueTeamsChannel: '' }
+                    : {}),
                 };
               }
 
@@ -2552,6 +2562,9 @@ export function AutomationsSettings() {
                 [field]: nextValue ?? '',
                 [discordField]: '',
                 ...clearSuggesterAltDestinations,
+                ...(field === 'platformIssueSlackChannel'
+                  ? { platformIssueTeamsChannel: '' }
+                  : {}),
               };
             })
           }
@@ -4509,6 +4522,48 @@ If unclear, send to manager channel.`}
                 warningChannelId:
                   slackChannelAccessWarnings.platformIssueSlackChannel,
               })}
+              {(settingsQuery.data?.teamsConversations.length ?? 0) > 0 ? (
+                <div className="space-y-2">
+                  <Label htmlFor="platform-issue-teams-channel">
+                    Or post alerts to this Teams conversation
+                  </Label>
+                  <Select
+                    value={formState?.platformIssueTeamsChannel || '__none__'}
+                    onValueChange={(value) =>
+                      setFormState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              platformIssueTeamsChannel:
+                                value === '__none__' ? '' : value,
+                              platformIssueSlackChannel: '',
+                              platformIssueDiscordChannel: '',
+                            }
+                          : prev,
+                      )
+                    }
+                  >
+                    <SelectTrigger id="platform-issue-teams-channel">
+                      <SelectValue placeholder="Select a Teams conversation" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">
+                        Select a Teams conversation
+                      </SelectItem>
+                      {settingsQuery.data?.teamsConversations.map(
+                        (conversation) => (
+                          <SelectItem
+                            key={conversation.conversationId}
+                            value={conversation.conversationId}
+                          >
+                            {conversation.label}
+                          </SelectItem>
+                        ),
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
             </div>
           </AutomationCard>
         </div>

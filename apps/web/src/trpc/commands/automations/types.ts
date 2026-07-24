@@ -50,6 +50,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'suggesterDiscordChannel'
   | 'announcerDiscordChannel'
   | 'platformIssueDiscordChannel'
+  | 'platformIssueTeamsChannel'
   | 'suggesterUseTelegram'
   | 'suggesterUseTeams'
   | 'sentryTriageProjectSlugs'
@@ -286,6 +287,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   announcerInstructions: string | null;
   platformIssueSlackChannel: string | null;
   platformIssueDiscordChannel?: string | null;
+  platformIssueTeamsChannel?: string | null;
   securityAuditorSlackChannel?: string | null;
   securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;

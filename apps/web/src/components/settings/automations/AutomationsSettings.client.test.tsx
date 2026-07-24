@@ -89,6 +89,7 @@ const baseFormState: FormState = {
   announcerInstructions: '',
   platformIssueSlackChannel: '',
   platformIssueDiscordChannel: '',
+  platformIssueTeamsChannel: '',
 };
 
 describe('Automations selection helpers', () => {

@@ -21,6 +21,7 @@ import {
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
+  findTeamsConversationServiceUrl,
   findTeamsPrimaryConversation,
   findTelegramPrimaryChatId,
   resolveAutomationRuntimeDestination,
@@ -532,6 +533,31 @@ export async function updateBackgroundAgentSettingsCommand(
   const announcerDiscordResult = destinationResults.announcer.discord;
   const platformIssueDiscordResult =
     destinationResults.platformIssueAlerts.discord;
+
+  const savingPlatformIssueAlerts =
+    input.savingAutomation === 'platformIssueAlerts';
+  const platformIssueTeamsChannelId = savingPlatformIssueAlerts
+    ? (input.platformIssueTeamsChannel ?? null)
+    : existingSettings.platformIssueTeamsChannelId;
+  let platformIssueTeamsTarget: AutomationTarget | null = null;
+
+  if (platformIssueTeamsChannelId) {
+    const serviceUrl = await findTeamsConversationServiceUrl(
+      platformIssueTeamsChannelId,
+    );
+    if (!serviceUrl) {
+      fieldErrors.platformIssueTeamsChannel =
+        'This Microsoft Teams conversation is not available to Roomote.';
+    } else {
+      platformIssueTeamsTarget = {
+        provider: 'teams',
+        targetKind: 'teams_channel',
+        externalRef: platformIssueTeamsChannelId,
+      };
+      destinationResults.platformIssueAlerts.slack = { channelId: null };
+      destinationResults.platformIssueAlerts.discord = { channelId: null };
+    }
+  }
 
   // Suggest Ideas may target Telegram (sticky topic) or Teams (primary
   // conversation) as one-of destinations alongside Slack/Discord channels.
@@ -1062,12 +1088,16 @@ export async function updateBackgroundAgentSettingsCommand(
             ...(suggesterTeamsTarget ? [suggesterTeamsTarget] : []),
           ]
         : [];
+    const platformIssueExtraTargets: AutomationTarget[] =
+      automationId === 'platformIssueAlerts' && platformIssueTeamsTarget
+        ? [platformIssueTeamsTarget]
+        : [];
     return {
       targets: [
         ...buildDestinationChannelTargets(
           result.slack.channelId,
           result.discord.channelId,
-          suggesterExtraTargets,
+          [...suggesterExtraTargets, ...platformIssueExtraTargets],
         ),
         ...extraTargets,
       ],
@@ -1078,7 +1108,9 @@ export async function updateBackgroundAgentSettingsCommand(
               'telegram_chat' as const,
               'teams_channel' as const,
             ]
-          : [...descriptor.managedTargetKinds],
+          : automationId === 'platformIssueAlerts'
+            ? [...descriptor.managedTargetKinds, 'teams_channel' as const]
+            : [...descriptor.managedTargetKinds],
     };
   }
 
@@ -1284,7 +1316,8 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'platform_issue_alerts',
       enabled:
         platformIssueChannelResult.channelId != null ||
-        platformIssueDiscordResult.channelId != null,
+        platformIssueDiscordResult.channelId != null ||
+        platformIssueTeamsTarget != null,
       ...destinationUpsertFields('platformIssueAlerts'),
       updatedAt: now,
     });

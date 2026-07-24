@@ -566,6 +566,13 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
+        platformIssueTeamsChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         securityAuditorSlackChannel: z
           .string()
           .trim()

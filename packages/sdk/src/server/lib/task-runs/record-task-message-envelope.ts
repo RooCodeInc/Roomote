@@ -27,6 +27,8 @@ import {
   trackSlackBotReply,
 } from '@roomote/slack';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
+import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
+import { findTeamsConversationServiceUrl } from '../../automations/destination';
 import {
   appendManagerSlackFooter,
   degradeSlackMrkdwnToMarkdown,
@@ -162,7 +164,7 @@ function getPlatformIssueReportFromToolPayload(
 
 function buildPlatformIssueTaskUrl(
   taskId: string,
-  utmSource: 'slack' | 'discord',
+  utmSource: 'slack' | 'discord' | 'teams',
 ): string {
   const url = new URL(`/task/${taskId}`, process.env.R_APP_URL);
 
@@ -176,7 +178,7 @@ function buildPlatformIssueTaskUrl(
 function buildPlatformIssueAlertText(params: {
   taskId: string;
   report: { title: string; summary: string };
-  utmSource: 'slack' | 'discord';
+  utmSource: 'slack' | 'discord' | 'teams';
 }): string {
   const taskUrl = buildPlatformIssueTaskUrl(params.taskId, params.utmSource);
 
@@ -221,9 +223,9 @@ async function maybeNotifyPlatformIssue(params: {
     }),
   ]);
 
-  // When the platform_issue_alerts automation's own destination target is a
-  // Discord channel, the alert belongs there instead of Slack.
+  // An explicitly selected automation destination always owns the alert.
   const discordChannelId = settings.platformIssueDiscordChannelId;
+  const teamsChannelId = settings.platformIssueTeamsChannelId;
 
   if (discordChannelId) {
     const discord =
@@ -252,43 +254,67 @@ async function maybeNotifyPlatformIssue(params: {
     return;
   }
 
+  if (teamsChannelId) {
+    const [teams, serviceUrl] = await Promise.all([
+      createTeamsCommunicationProviderFromRuntimeCredentials(),
+      findTeamsConversationServiceUrl(teamsChannelId),
+    ]);
+
+    if (!teams || !serviceUrl) {
+      console.warn(
+        `[recordTaskMessageEnvelope] No Teams credentials or service URL, skipping platform issue Teams alert for task ${params.taskId}`,
+      );
+      return;
+    }
+
+    await teams.postMessage({
+      channelId: teamsChannelId,
+      serviceUrl,
+      text: degradeSlackMrkdwnToMarkdown(
+        buildPlatformIssueAlertText({
+          taskId: params.taskId,
+          report: params.report,
+          utmSource: 'teams',
+        }),
+      ),
+      textFormat: 'markdown',
+    });
+    await markPlatformIssueReportPosted(params.reportRowId);
+    return;
+  }
+
   // Two-level fallback: the platform_issue_alerts automation target wins,
   // otherwise the deployment-wide manager channel.
   const channelId =
     settings.platformIssueSlackChannelId ?? settings.managerSlackChannelId;
 
-  if (!channelId) {
+  if (
+    channelId &&
+    slackInstallation?.botAccessToken &&
+    slackInstallation.isActive
+  ) {
+    const slack = new SlackNotifier(slackInstallation.botAccessToken);
+    const messageTs = await slack.postMessage({
+      channel: channelId,
+      text: buildPlatformIssueAlertText({
+        taskId: params.taskId,
+        report: params.report,
+        utmSource: 'slack',
+      }),
+      unfurl_links: false,
+      unfurl_media: false,
+    });
+
+    if (!messageTs) {
+      console.warn(
+        `[recordTaskMessageEnvelope] Failed to post platform issue Slack alert for task ${params.taskId}`,
+      );
+      return;
+    }
+
+    await markPlatformIssueReportPosted(params.reportRowId);
     return;
   }
-
-  if (!slackInstallation?.botAccessToken || !slackInstallation.isActive) {
-    console.warn(
-      `[recordTaskMessageEnvelope] No active Slack installation, skipping platform issue Slack alert for task ${params.taskId}`,
-    );
-    return;
-  }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
-
-  const messageTs = await slack.postMessage({
-    channel: channelId,
-    text: buildPlatformIssueAlertText({
-      taskId: params.taskId,
-      report: params.report,
-      utmSource: 'slack',
-    }),
-    unfurl_links: false,
-    unfurl_media: false,
-  });
-
-  if (!messageTs) {
-    console.warn(
-      `[recordTaskMessageEnvelope] Failed to post platform issue Slack alert for task ${params.taskId}`,
-    );
-    return;
-  }
-
-  await markPlatformIssueReportPosted(params.reportRowId);
 }
 
 async function maybePersistPlatformIssueReport(params: {
