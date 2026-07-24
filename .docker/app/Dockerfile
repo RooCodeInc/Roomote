@@ -81,6 +81,9 @@ COPY apps/bullmq ./apps/bullmq/
 COPY apps/discord-gateway ./apps/discord-gateway/
 COPY apps/preview-proxy ./apps/preview-proxy/
 COPY apps/worker ./apps/worker/
+# The web app reads setup-flow documentation from apps/docs at runtime and
+# copies its logo assets into public/ during `pnpm docs:assets`.
+COPY apps/docs ./apps/docs/
 
 ARG R_APP_ENV
 ARG RELEASE_VERSION
@@ -349,6 +352,9 @@ RUN chmod +x /entrypoint.sh
 COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/.next/standalone ./
 COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/.next/static ./apps/web/.next/static/
 COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/web/public ./apps/web/public/
+# The web server (cwd /roomote/apps/web) reads setup-flow docs from
+# ../docs at request time, so the MDX sources must ship in the image.
+COPY --chown=roomote-app:roomote-app --from=build-web /roomote/apps/docs ./apps/docs/
 COPY --from=build-api /roomote/apps/api/package.json ./apps/api/
 COPY --from=build-api /roomote/apps/api/dist ./apps/api/dist/
 COPY --from=build-api /runtime-deps/node_modules ./apps/api/node_modules/
