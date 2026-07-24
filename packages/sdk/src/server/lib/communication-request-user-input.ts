@@ -91,10 +91,15 @@ export async function publishCommunicationRequestUserInput(params: {
     answers: existingForEdit?.answers,
   });
 
-  const promptText = buildDiscordRequestUserInputPromptText(promptState);
-  // Teams has no callback-button intake yet; keep options in the text body.
+  const promptText = buildDiscordRequestUserInputPromptText({
+    ...promptState,
+    // Telegram and Teams still collect multi-question answers in one text
+    // reply, so retain the full form until their handlers support advancing.
+    ...(provider === 'discord' ? {} : { showAllQuestions: true }),
+  });
+  // Discord is the only provider with a per-question callback flow.
   const buttons =
-    provider === 'teams'
+    provider !== 'discord'
       ? undefined
       : buildDiscordRequestUserInputButtons({
           runId: params.runId,

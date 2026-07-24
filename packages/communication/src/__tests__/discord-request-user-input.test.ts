@@ -126,6 +126,21 @@ describe('discord request_user_input helpers', () => {
     expect(buttons?.[0]?.[0]?.callbackData).toContain(':1:0:');
   });
 
+  it('renders every question for providers that collect one text reply', () => {
+    const text = buildDiscordRequestUserInputPromptText({
+      requestId: 'rui:1',
+      questions: [
+        sampleQuestion,
+        { ...sampleQuestion, id: 'q2', question: 'Second question?' },
+      ],
+      showAllQuestions: true,
+    });
+
+    expect(text).toContain('Question 1 of 2');
+    expect(text).toContain('Question 2 of 2');
+    expect(text).toContain('one answer per line');
+  });
+
   it('reserves a button row for Cancel when options exceed Discord row capacity', () => {
     const buttons = buildDiscordRequestUserInputButtons({
       runId: 99,

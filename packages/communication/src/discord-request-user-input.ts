@@ -6,6 +6,7 @@ type DiscordRequestUserInputPromptState = {
   requestId: string;
   questions: AcpRequestUserInputQuestion[];
   currentQuestionIndex?: number;
+  showAllQuestions?: boolean;
 };
 
 function formatDisplayedOptionLabel(label: string): string {
@@ -155,6 +156,21 @@ export function buildDiscordRequestUserInputPromptText(
   }
 
   const lines: string[] = [];
+  if (state.showAllQuestions && state.questions.length > 1) {
+    state.questions.forEach((question, index) => {
+      if (index > 0) {
+        lines.push('');
+      }
+      lines.push(`**Question ${index + 1} of ${state.questions.length}**`);
+      lines.push(formatSingleQuestion(question));
+    });
+    lines.push('');
+    lines.push(
+      '_Reply with one answer per line in order (option number, label, or allowed custom text). Reply `cancel` to skip._',
+    );
+    return lines.join('\n');
+  }
+
   if (state.questions.length > 1) {
     lines.push(
       `**Question ${current.questionIndex + 1} of ${state.questions.length}**`,
