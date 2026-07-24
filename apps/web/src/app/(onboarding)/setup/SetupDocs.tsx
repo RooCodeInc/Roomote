@@ -52,7 +52,7 @@ export function SetupDocs({
                 </Button>
               </div>
             </div>
-            <div className="docs-content h-[calc(100%-2.75rem)] overflow-y-auto px-5 py-6 scroll-minimal">
+            <div className="docs-content h-[calc(100%-2.75rem)] overflow-y-auto px-5 py-6 border-l-2 border-background">
               {children}
             </div>
           </section>
