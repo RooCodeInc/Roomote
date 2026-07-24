@@ -65,7 +65,6 @@ export function buildSlackPrReviewActionBlocks(params: {
             text: 'Resolve these issues',
             emoji: true,
           },
-          style: 'primary',
           value,
         },
         {
