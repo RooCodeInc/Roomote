@@ -41,12 +41,12 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
     <div className="notranslate light text-foreground relative min-h-viewport w-full overflow-hidden bg-white md:h-viewport">
       <RoomoteWordmark className="absolute top-8 left-8 h-8 hidden lg:block" />
       <div ref={setUserMenuPortalContainer} className="light text-foreground" />
-      <SetupDocs step={docsStep} />
       <FramedSurface
         variant="bold"
-        frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden"
-        surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center"
+        frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw)] scroll-minimal overflow-hidden"
+        surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center relative"
       >
+        <SetupDocs step={docsStep} />
         {isSignedIn ? (
           <>
             <div className="z-50 flex w-full gap-2 justify-end px-4 pt-4 md:fixed md:bottom-9 md:left-9 md:w-auto md:px-0 md:pt-0">

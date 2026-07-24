@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { Button, X } from '@/components/system';
+import { Button, FileText, X } from '@/components/system';
 import { DOCS_BASE_URL } from '@/lib/docs';
 
 import type { SetupStep } from './types';
@@ -39,10 +39,10 @@ export function SetupDocs({ step }: { step: SetupDocsStep }) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="fixed top-9 right-9 z-40 hidden items-end gap-3 md:flex md:flex-col">
+    <div className="fixed top-0 right-0 pr-2 pt-[8px] pb-[12px] z-40 hidden items-end md:flex md:flex-col h-full">
       {isOpen ? (
-        <section className="h-[calc(100vh-6.5rem)] w-[min(42vw,42rem)] overflow-hidden rounded-xl border border-border bg-background shadow-xl">
-          <div className="flex h-11 items-center justify-between border-b px-3">
+        <section className="h-full w-[max(20%,24rem)] overflow-hidden rounded-r-2xl bg-card border-2 border-background border-l-4 border-l-card z-2">
+          <div className="flex h-11 items-center justify-between px-3 bg-background">
             <span className="text-sm font-medium">Setup docs</span>
             <Button
               type="button"
@@ -58,13 +58,21 @@ export function SetupDocs({ step }: { step: SetupDocsStep }) {
             key={step}
             src={getSetupDocsUrl(step)}
             title="Roomote setup documentation"
-            className="h-[calc(100%-2.75rem)] w-full border-0"
+            className="h-[calc(100%-2.75rem)] w-full border-0 bg-background"
           />
         </section>
       ) : null}
-      <Button type="button" onClick={() => setIsOpen(true)}>
-        Show docs
-      </Button>
+      <div className="mt-4 mr-4 absolute">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setIsOpen(true)}
+        >
+          <FileText />
+          Docs
+        </Button>
+      </div>
     </div>
   );
 }
