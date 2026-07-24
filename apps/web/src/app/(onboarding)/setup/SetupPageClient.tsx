@@ -299,6 +299,10 @@ export default function SetupPageClient({
     pendingModelProvider ?? status?.setupNewState.modelProvider;
 
   useEffect(() => {
+    if (!isSignedIn || !isAdmin) {
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     let changed = false;
     // Status updates can land immediately after advancing the wizard. Preserve
@@ -328,6 +332,8 @@ export default function SetupPageClient({
       router.replace(`${window.location.pathname}?${params}`);
     }
   }, [
+    isAdmin,
+    isSignedIn,
     router,
     selectedAuthProvider,
     selectedComputeProvider,
