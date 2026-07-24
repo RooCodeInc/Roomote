@@ -741,7 +741,7 @@
 
 /* In-app documentation is compiled from apps/docs MDX at build time. */
 .docs-content {
-  @apply text-[0.9375rem] leading-7 text-foreground;
+  @apply text-[0.9375rem] text-foreground;
 }
 
 .docs-content > * + * {
@@ -755,15 +755,15 @@
 }
 
 .docs-content h2 {
-  @apply mt-12 text-2xl;
+  @apply mt-12 text-xl;
 }
 
 .docs-content h3 {
-  @apply mt-8 text-xl;
+  @apply mt-8 text-lg;
 }
 
 .docs-content h4 {
-  @apply mt-6 text-lg;
+  @apply mt-6 text-base font-semibold;
 }
 
 .docs-content a {
