@@ -153,6 +153,91 @@ async function finalizeDiscordRequestUserInputAnswer(params: {
   return 'queued';
 }
 
+async function advanceDiscordRequestUserInputQuestion(params: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  channel: DiscordChannelContext;
+  pendingRequest: PendingCommunicationRequestUserInput;
+  answers: AcpRequestUserInputAnswers;
+  answerText: string;
+  interaction?: {
+    interaction: DiscordInteraction;
+    interactionDeferred: boolean;
+  };
+  replyToMessageId?: string;
+}): Promise<'advanced' | 'already_received'> {
+  const conversationId = conversationIdForChannel(params.channel);
+  const current = getDiscordRequestUserInputCurrentQuestion(
+    params.pendingRequest,
+  );
+  if (!current) {
+    return 'already_received';
+  }
+
+  const nextQuestionIndex = current.questionIndex + 1;
+  const advanced = await advancePendingCommunicationRequestUserInputQuestion(
+    'discord',
+    conversationId,
+    params.pendingRequest,
+    nextQuestionIndex,
+    params.answers,
+  );
+  if (!advanced) {
+    await postAlreadyReceivedNotice({
+      provider: params.provider,
+      applicationId: params.applicationId,
+      channel: params.channel,
+      interaction: params.interaction,
+      replyToMessageId: params.replyToMessageId,
+    });
+    return 'already_received';
+  }
+
+  const nextPrompt = {
+    requestId: params.pendingRequest.requestId,
+    questions: params.pendingRequest.questions,
+    currentQuestionIndex: nextQuestionIndex,
+  };
+  const nextPromptText = buildDiscordRequestUserInputPromptText(nextPrompt);
+  let rendered = false;
+
+  if (params.pendingRequest.promptMessageId) {
+    try {
+      await params.provider.editMessage({
+        channelId: conversationId,
+        messageId: params.pendingRequest.promptMessageId,
+        text: nextPromptText,
+        buttons: buildDiscordRequestUserInputButtons({
+          runId: params.pendingRequest.runId,
+          request: nextPrompt,
+        }),
+      });
+      rendered = true;
+    } catch (error) {
+      apiLogger.warn(
+        `[discord.request_user_input] Failed to advance prompt message ${params.pendingRequest.promptMessageId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  await replyToDiscordEvent({
+    provider: params.provider,
+    applicationId: params.applicationId,
+    channel: params.channel,
+    ...(params.interaction ? { interaction: params.interaction } : {}),
+    ...(params.replyToMessageId
+      ? { replyToMessageId: params.replyToMessageId }
+      : {}),
+    text: rendered
+      ? `Picked: ${params.answerText}`
+      : `Picked: ${params.answerText}\n\n${nextPromptText}`,
+    ...(params.interaction ? { ephemeral: true } : {}),
+  });
+  return 'advanced';
+}
+
 /**
  * Try to treat an inbound Discord message as an answer to a pending
  * request_user_input prompt. Returns true when the message was consumed.
@@ -228,51 +313,16 @@ export async function tryHandleDiscordRequestUserInputMessage(params: {
     const nextQuestionIndex = current.questionIndex + 1;
 
     if (nextQuestionIndex < pendingRequest.questions.length) {
-      const advanced =
-        await advancePendingCommunicationRequestUserInputQuestion(
-          'discord',
-          conversationId,
-          pendingRequest,
-          nextQuestionIndex,
-          answers,
-        );
-      if (!advanced) {
-        await postAlreadyReceivedNotice({
-          provider: params.provider,
-          applicationId: params.applicationId,
-          channel: params.channel,
-          replyToMessageId: params.replyToMessageId,
-        });
-        return true;
-      }
-
-      if (pendingRequest.promptMessageId) {
-        const nextPrompt = {
-          requestId: pendingRequest.requestId,
-          questions: pendingRequest.questions,
-          currentQuestionIndex: nextQuestionIndex,
-        };
-        await params.provider.editMessage({
-          channelId: conversationId,
-          messageId: pendingRequest.promptMessageId,
-          text: buildDiscordRequestUserInputPromptText(nextPrompt),
-          buttons: buildDiscordRequestUserInputButtons({
-            runId: pendingRequest.runId,
-            request: nextPrompt,
-          }),
-        });
-      }
-
-      await replyToDiscordEvent({
+      await advanceDiscordRequestUserInputQuestion({
         provider: params.provider,
         applicationId: params.applicationId,
         channel: params.channel,
-        ...(params.replyToMessageId
-          ? { replyToMessageId: params.replyToMessageId }
-          : {}),
-        text: `Picked: ${Object.values(parsedReply.answers)
+        pendingRequest,
+        answers,
+        answerText: Object.values(parsedReply.answers)
           .flatMap((entry) => entry.answers)
-          .join(', ')}`,
+          .join(', '),
+        replyToMessageId: params.replyToMessageId,
       });
       return true;
     }
@@ -467,56 +517,14 @@ export async function tryHandleDiscordRequestUserInputCallback(params: {
 
   const nextQuestionIndex = current.questionIndex + 1;
   if (nextQuestionIndex < pendingRequest.questions.length) {
-    const advanced = await advancePendingCommunicationRequestUserInputQuestion(
-      'discord',
-      conversationId,
-      pendingRequest,
-      nextQuestionIndex,
-      answers,
-    );
-    if (!advanced) {
-      await postAlreadyReceivedNotice({
-        provider: params.provider,
-        applicationId: params.applicationId,
-        channel: params.channel,
-        interaction: interactionCtx,
-      });
-      return true;
-    }
-
-    if (!pendingRequest.promptMessageId) {
-      await replyToDiscordEvent({
-        provider: params.provider,
-        applicationId: params.applicationId,
-        channel: params.channel,
-        interaction: interactionCtx,
-        text: 'Your answer was saved. Reply in the thread to continue.',
-        ephemeral: true,
-      });
-      return true;
-    }
-
-    const nextPrompt = {
-      requestId: pendingRequest.requestId,
-      questions: pendingRequest.questions,
-      currentQuestionIndex: nextQuestionIndex,
-    };
-    await params.provider.editMessage({
-      channelId: conversationId,
-      messageId: pendingRequest.promptMessageId,
-      text: buildDiscordRequestUserInputPromptText(nextPrompt),
-      buttons: buildDiscordRequestUserInputButtons({
-        runId: pendingRequest.runId,
-        request: nextPrompt,
-      }),
-    });
-    await replyToDiscordEvent({
+    await advanceDiscordRequestUserInputQuestion({
       provider: params.provider,
       applicationId: params.applicationId,
       channel: params.channel,
+      pendingRequest,
+      answers,
+      answerText: option.label,
       interaction: interactionCtx,
-      text: `Picked: ${option.label}`,
-      ephemeral: true,
     });
     return true;
   }
