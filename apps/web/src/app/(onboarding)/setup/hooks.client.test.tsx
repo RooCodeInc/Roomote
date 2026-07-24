@@ -151,9 +151,6 @@ function mockStatus(overrides: Partial<Record<string, unknown>> = {}) {
           },
         ],
       },
-      setupQualification: {
-        activeBlock: null,
-      },
       setupNewState: {
         authProvider: null,
         modelProvider: null,

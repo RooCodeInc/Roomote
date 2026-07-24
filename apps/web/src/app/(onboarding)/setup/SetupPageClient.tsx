@@ -44,7 +44,6 @@ import { StepComputeConfig } from './StepComputeConfig';
 import { StepSourceControlProvider } from './StepSourceControlProvider';
 import { StepSourceControlConfig } from './StepSourceControlConfig';
 import { StepSourceControlConnect } from './StepSourceControlConnect';
-import { StepQualificationBlocked } from './StepQualificationBlocked';
 import { StepCommunicationConnect } from './StepCommunicationConnect';
 import { StepInvoke } from './StepInvoke';
 import { useSetupFlow } from './hooks';
@@ -693,10 +692,6 @@ export default function SetupPageClient({
               onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
-          {step === 'qualification-blocked' &&
-          status.setupQualification.activeBlock ? (
-            <StepQualificationBlocked />
-          ) : null}
           {step === 'compute-provider' && (
             <StepComputeProvider
               computeSetup={status.computeSetup}

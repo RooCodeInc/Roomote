@@ -13,7 +13,6 @@ const SETUP_DOC_PATHS: Record<SetupDocsStep, string | null> = {
   'source-control-provider': 'source-control',
   'source-control-config': 'source-control',
   'source-control-connect': 'source-control',
-  'qualification-blocked': 'self-hosting',
   'compute-provider': 'compute',
   'compute-config': 'compute',
   'repo-selection': 'environments',
