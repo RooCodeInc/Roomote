@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  getSetupModelProvider,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
@@ -133,20 +134,19 @@ export function StepInferenceProvider({
           : '',
     );
     setConnectionName('');
-    const providerStatus = getProviderStatus(modelSetup, selectedProvider);
     const defaults: Record<string, string> = {};
-    for (const field of providerStatus?.additionalEnvFields ?? []) {
-      if (field.options && field.options.length > 0) {
-        defaults[field.envVarName] = field.options[0]!.value;
+    if (selectedProvider) {
+      for (const field of getSetupModelProvider(selectedProvider)
+        .additionalEnvFields ?? []) {
+        if (field.options && field.options.length > 0) {
+          defaults[field.envVarName] = field.options[0]!.value;
+        }
       }
     }
     setAdditionalEnvValues(defaults);
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
     setIsGitHubCopilotDialogOpen(false);
-    // Only re-seed when the selected provider changes; modelSetup refresh
-    // must not wipe in-progress credential form state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- modelSetup read for option defaults at selection time
   }, [selectedProvider]);
 
   useEffect(() => {
