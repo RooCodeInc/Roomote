@@ -12,7 +12,8 @@ export default async function SetupPage({
   searchParams: Promise<{ step?: string }>;
 }) {
   const setupDocsStep = getSetupDocsStep((await searchParams).step ?? null);
-  const docsPage = await getDocsPage(getSetupDocsPath(setupDocsStep));
+  const docsPath = getSetupDocsPath(setupDocsStep);
+  const docsPage = docsPath ? await getDocsPage(docsPath) : null;
   const { content } = docsPage
     ? await compileMDX({
         source: docsPage.source,

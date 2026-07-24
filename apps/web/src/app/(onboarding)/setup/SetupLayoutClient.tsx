@@ -27,6 +27,7 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
     useState<HTMLDivElement | null>(null);
   const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [docsContent, setDocsContent] = useState<ReactNode>(null);
+  const hasDocsContent = docsContent !== null;
 
   useEffect(() => {
     try {
@@ -75,9 +76,11 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
           frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw)] scroll-minimal overflow-hidden"
           surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center relative"
         >
-          <SetupDocs isOpen={isDocsOpen} onOpenChange={handleDocsOpenChange}>
-            {docsContent}
-          </SetupDocs>
+          {hasDocsContent ? (
+            <SetupDocs isOpen={isDocsOpen} onOpenChange={handleDocsOpenChange}>
+              {docsContent}
+            </SetupDocs>
+          ) : null}
           {isSignedIn ? (
             <>
               <div className="z-50 flex w-full gap-2 justify-end px-4 pt-4 md:fixed md:bottom-9 md:left-9 md:w-auto md:px-0 md:pt-0">
@@ -93,7 +96,9 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
           <div
             className={cn(
               'relative flex w-full max-w-3xl flex-col transition-transform duration-200 md:min-h-full',
-              isDocsOpen && 'min-[1050px]:-translate-x-[max(10vw,12rem)]',
+              hasDocsContent &&
+                isDocsOpen &&
+                'min-[1050px]:-translate-x-[max(10vw,12rem)]',
             )}
           >
             <div className="pointer-events-none absolute inset-y-0 left-0 hidden border-black border-l-2 border-dotted md:block" />

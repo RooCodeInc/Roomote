@@ -63,10 +63,16 @@ export function SetupDocs({
             variant="ghost"
             size="sm"
             onClick={() => onOpenChange(true)}
-            className="rounded-full hover:bg-foreground hover:text-accent-bright-foreground"
+            className="rounded-full hover:bg-foreground hover:text-accent-bright-foreground gap-0"
           >
-            <ArrowLeftToLine />
-            Docs are here
+            <ArrowLeftToLine className="mr-1" />
+            <span className="animate-[squish-out_0.5s_1_6000ms_forwards] mr-1">
+              Need help?
+            </span>
+            <span>Docs</span>
+            <span className="animate-[squish-out_0.5s_1_6000ms_forwards] ml-1">
+              are here
+            </span>
           </Button>
         </div>
       </div>

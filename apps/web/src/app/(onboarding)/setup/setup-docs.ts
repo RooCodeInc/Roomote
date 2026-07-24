@@ -2,8 +2,8 @@ import type { SetupStep } from './types';
 
 export type SetupDocsStep = SetupStep | 'email-account' | 'email-password';
 
-const SETUP_DOC_PATHS: Record<SetupDocsStep, string> = {
-  welcome: 'index',
+const SETUP_DOC_PATHS: Record<SetupDocsStep, string | null> = {
+  welcome: null,
   'email-account': 'self-hosting',
   'email-password': 'self-hosting',
   'auth-provider': 'communications',
@@ -24,6 +24,6 @@ export function getSetupDocsStep(step: string | null): SetupDocsStep {
   return step && step in SETUP_DOC_PATHS ? (step as SetupDocsStep) : 'welcome';
 }
 
-export function getSetupDocsPath(step: SetupDocsStep): string {
+export function getSetupDocsPath(step: SetupDocsStep): string | null {
   return SETUP_DOC_PATHS[step];
 }

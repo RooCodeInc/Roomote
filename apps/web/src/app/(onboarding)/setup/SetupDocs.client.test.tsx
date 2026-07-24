@@ -1,5 +1,10 @@
 import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { vi } from 'vitest';
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams('step=auth-provider'),
+}));
 
 import { SetupDocs } from './SetupDocs';
 import { getSetupDocsPath, getSetupDocsStep } from './setup-docs';
@@ -8,6 +13,7 @@ describe('SetupDocs', () => {
   it('maps setup steps to the matching documentation pages', () => {
     expect(getSetupDocsPath('auth-provider')).toBe('communications');
     expect(getSetupDocsPath('repo-selection')).toBe('environments');
+    expect(getSetupDocsPath('welcome')).toBeNull();
     expect(getSetupDocsStep('email-account')).toBe('email-account');
     expect(getSetupDocsStep(null)).toBe('welcome');
   });
@@ -34,7 +40,7 @@ describe('SetupDocs', () => {
       screen.getByRole('link', {
         name: 'Open this documentation page in a new tab',
       }),
-    ).toHaveAttribute('href', 'https://docs.roomote.dev/index');
+    ).toHaveAttribute('href', 'https://docs.roomote.dev/communications');
 
     fireEvent.click(screen.getByRole('button', { name: 'Close docs' }));
 
