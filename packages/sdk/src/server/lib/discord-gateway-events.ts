@@ -14,11 +14,14 @@ function getDiscordGatewayEventsQueue(): Queue<DiscordGatewayEvent> {
       {
         connection: getRedis(),
         defaultJobOptions: {
-          attempts: 5,
+          // Eight exponential backoffs total 510 seconds, exceeding the API's
+          // five-minute processing lease before this job is dead-lettered.
+          attempts: 9,
           backoff: { type: 'exponential', delay: 2_000 },
           removeOnComplete: { age: 3600, count: 1_000 },
-          // A retry from Discord must be able to re-enqueue this deterministic job ID.
-          removeOnFail: true,
+          // Keep exhausted jobs for inspection rather than silently dropping
+          // them and allowing a redelivery to hide the original failure.
+          removeOnFail: { age: 7 * 24 * 3600, count: 1_000 },
         },
       },
     );

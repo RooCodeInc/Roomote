@@ -47,8 +47,9 @@ describe('enqueueDiscordGatewayEvent', () => {
       DISCORD_GATEWAY_EVENTS_QUEUE_NAME,
       expect.objectContaining({
         defaultJobOptions: expect.objectContaining({
-          attempts: 5,
+          attempts: 9,
           backoff: { type: 'exponential', delay: 2_000 },
+          removeOnFail: { age: 7 * 24 * 3600, count: 1_000 },
         }),
       }),
     );
@@ -61,7 +62,7 @@ describe('enqueueDiscordGatewayEvent', () => {
     );
   });
 
-  it('removes exhausted failed jobs so Discord can enqueue a retry', async () => {
+  it('retains exhausted failed jobs for dead-letter inspection', async () => {
     vi.resetModules();
     const { enqueueDiscordGatewayEvent: enqueueEvent } =
       await import('./discord-gateway-events');
@@ -83,7 +84,9 @@ describe('enqueueDiscordGatewayEvent', () => {
     expect(queueMock).toHaveBeenCalledWith(
       'discord-gateway-events',
       expect.objectContaining({
-        defaultJobOptions: expect.objectContaining({ removeOnFail: true }),
+        defaultJobOptions: expect.objectContaining({
+          removeOnFail: { age: 7 * 24 * 3600, count: 1_000 },
+        }),
       }),
     );
   });

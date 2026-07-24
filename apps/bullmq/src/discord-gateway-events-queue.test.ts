@@ -55,6 +55,7 @@ describe('processDiscordGatewayEventJob', () => {
           'x-roomote-discord-gateway-secret': 'gateway-secret',
         },
         body: JSON.stringify(event),
+        signal: expect.any(AbortSignal),
       }),
     );
   });

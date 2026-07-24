@@ -8,6 +8,7 @@ import { DISCORD_GATEWAY_EVENTS_QUEUE_NAME } from '@roomote/sdk/server';
 import { getRedis } from './redis';
 
 const DISCORD_GATEWAY_SECRET_HEADER = 'x-roomote-discord-gateway-secret';
+const DISCORD_GATEWAY_EVENT_WORKER_TIMEOUT_MS = 4 * 60 * 1000 + 15_000;
 
 function processUrl(): string {
   return new URL(
@@ -31,6 +32,8 @@ export async function processDiscordGatewayEventJob(
       [DISCORD_GATEWAY_SECRET_HEADER]: secret,
     },
     body: JSON.stringify(job.data),
+    // Let the API release its lease and return its retryable timeout first.
+    signal: AbortSignal.timeout(DISCORD_GATEWAY_EVENT_WORKER_TIMEOUT_MS),
   });
 
   // A completed event can outlive its retained BullMQ job. The API's durable

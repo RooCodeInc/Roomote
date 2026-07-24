@@ -147,7 +147,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: mocks.getTaskUrl,
 }));
 
-import { discord } from '../index.js';
+import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
 
 const app = new Hono();
 app.route('/api/internal/discord', discord);
@@ -476,6 +476,33 @@ describe('Discord Gateway event handler', () => {
       expect(mocks.completeEvent).not.toHaveBeenCalled();
     },
   );
+
+  it('times out slow processing and releases the event lease for a retry', async () => {
+    const originalTimeout = discordGatewayEventProcessingTimeout.timeoutMs;
+    vi.useFakeTimers();
+    discordGatewayEventProcessingTimeout.timeoutMs = 10;
+    mocks.getChannel.mockImplementation(() => new Promise(() => undefined));
+
+    try {
+      const responsePromise = postEvent(envelope(message()));
+      await vi.advanceTimersByTimeAsync(10);
+      const response = await responsePromise;
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'discord_api_unavailable',
+      });
+      expect(mocks.releaseEvent).toHaveBeenCalledWith({
+        eventType: 'MESSAGE_CREATE',
+        eventId: 'message-1',
+        token: 'claim-token',
+      });
+    } finally {
+      discordGatewayEventProcessingTimeout.timeoutMs = originalTimeout;
+      vi.useRealTimers();
+    }
+  });
 
   it.each([403, 404])(
     'acknowledges an event whose Discord resource returns %s',

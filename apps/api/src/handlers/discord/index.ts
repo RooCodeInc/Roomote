@@ -86,6 +86,38 @@ import {
 } from './thread-context.js';
 import { shouldRouteUnmentionedDiscordThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
+export const discordGatewayEventProcessingTimeout = {
+  timeoutMs: 4 * 60 * 1000,
+};
+
+class DiscordGatewayEventProcessingTimeoutError extends Error {
+  constructor() {
+    super('Discord Gateway event processing timed out');
+  }
+}
+
+function withDiscordGatewayEventProcessingTimeout<T>(
+  promise: Promise<T>,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new DiscordGatewayEventProcessingTimeoutError()),
+      discordGatewayEventProcessingTimeout.timeoutMs,
+    );
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 const DISCORD_HELP_MESSAGE = [
   "👋 I'm Roomote. Mention me in a server channel or message me directly to start a task.",
   '',
@@ -906,7 +938,9 @@ discord.post('/events/process', async (c) => {
     return c.json({ ok: false, error: 'discord_event_in_progress' }, 425);
   }
   try {
-    const result = await processDiscordGatewayEvent(parsed.event);
+    const result = await withDiscordGatewayEventProcessingTimeout(
+      processDiscordGatewayEvent(parsed.event),
+    );
     // The queue retries processing failures. If this bookkeeping write is
     // unavailable, the short lease expires and a later job attempt can claim it.
     await completeDiscordApiEvent({ ...eventRef, token: claim.token }).catch(
@@ -942,7 +976,10 @@ discord.post('/events/process', async (c) => {
         503,
       );
     }
-    if (isRetryableDiscordProviderError(error)) {
+    if (
+      error instanceof DiscordGatewayEventProcessingTimeoutError ||
+      isRetryableDiscordProviderError(error)
+    ) {
       apiLogger.warn(
         `[discord] Discord API unavailable while processing event ${eventRef.eventId}: ${error.message}`,
       );
