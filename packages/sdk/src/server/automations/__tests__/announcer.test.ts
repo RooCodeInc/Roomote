@@ -146,12 +146,7 @@ vi.mock('../scheduling-utils', () => ({
   resolveSlackWorkspaceTimezone: vi.fn(async () => 'UTC'),
 }));
 
-import { SUMMARIZE_MERGED_PRS_SETTINGS_HASH } from '@roomote/types';
-
 import { announcerJob } from '../announcer';
-
-const SUMMARY = 'Shipped *two fixes* today.';
-const SETTINGS_URL = `https://app.example.com/automations#${SUMMARIZE_MERGED_PRS_SETTINGS_HASH}`;
 
 const MERGED_PR_ROWS = [
   {
