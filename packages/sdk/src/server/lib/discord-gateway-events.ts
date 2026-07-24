@@ -17,7 +17,8 @@ function getDiscordGatewayEventsQueue(): Queue<DiscordGatewayEvent> {
           attempts: 5,
           backoff: { type: 'exponential', delay: 2_000 },
           removeOnComplete: { age: 3600, count: 1_000 },
-          removeOnFail: { age: 24 * 3600 },
+          // A retry from Discord must be able to re-enqueue this deterministic job ID.
+          removeOnFail: true,
         },
       },
     );

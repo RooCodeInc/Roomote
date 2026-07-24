@@ -60,4 +60,31 @@ describe('enqueueDiscordGatewayEvent', () => {
       },
     );
   });
+
+  it('removes exhausted failed jobs so Discord can enqueue a retry', async () => {
+    vi.resetModules();
+    const { enqueueDiscordGatewayEvent: enqueueEvent } =
+      await import('./discord-gateway-events');
+
+    await enqueueEvent({
+      eventId: 'message-2',
+      eventType: 'MESSAGE_CREATE',
+      payload: {
+        id: 'message-2',
+        channel_id: 'channel-1',
+        content: 'hello',
+        author: { id: 'user-1', username: 'user' },
+        mentions: [],
+        attachments: [],
+      },
+      receivedAt: '2026-07-24T00:00:00.000Z',
+    });
+
+    expect(queueMock).toHaveBeenCalledWith(
+      'discord-gateway-events',
+      expect.objectContaining({
+        defaultJobOptions: expect.objectContaining({ removeOnFail: true }),
+      }),
+    );
+  });
 });
