@@ -83,4 +83,17 @@ describe('publishCommunicationRequestUserInput', () => {
       expect.not.objectContaining({ buttons: expect.anything() }),
     );
   });
+
+  it('keeps Telegram buttons for a single-question prompt', async () => {
+    await publishCommunicationRequestUserInput({
+      runId: 1,
+      taskId: 'task-1',
+      payload: { provider: 'telegram' },
+      request: { requestId: 'request-1', questions: [question] },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ buttons: [[{ text: 'One' }]] }),
+    );
+  });
 });

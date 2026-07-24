@@ -97,9 +97,11 @@ export async function publishCommunicationRequestUserInput(params: {
     // reply, so retain the full form until their handlers support advancing.
     ...(provider === 'discord' ? {} : { showAllQuestions: true }),
   });
-  // Discord is the only provider with a per-question callback flow.
+  // Telegram supports buttons for a single answer, but multi-question prompts
+  // still use its existing one-reply text flow.
   const buttons =
-    provider !== 'discord'
+    provider !== 'discord' &&
+    !(provider === 'telegram' && params.request.questions.length === 1)
       ? undefined
       : buildDiscordRequestUserInputButtons({
           runId: params.runId,
