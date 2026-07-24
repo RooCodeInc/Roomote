@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { addMock, queueMock } = vi.hoisted(() => ({
+const { addMock, getJobMock, queueMock } = vi.hoisted(() => ({
   addMock: vi.fn(),
+  getJobMock: vi.fn(),
   queueMock: vi.fn().mockImplementation(function () {
-    return { add: addMock };
+    return { add: addMock, getJob: getJobMock };
   }),
 }));
 
@@ -22,6 +23,7 @@ describe('enqueueDiscordGatewayEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     addMock.mockResolvedValue({ id: 'event-message-1' });
+    getJobMock.mockResolvedValue(undefined);
   });
 
   it('persists a validated event with a deterministic id and retry policy', async () => {
@@ -88,6 +90,36 @@ describe('enqueueDiscordGatewayEvent', () => {
           removeOnFail: { age: 7 * 24 * 3600, count: 1_000 },
         }),
       }),
+    );
+  });
+
+  it('creates a new generation when the deterministic job is retained as failed', async () => {
+    getJobMock
+      .mockResolvedValueOnce({ getState: vi.fn().mockResolvedValue('failed') })
+      .mockResolvedValueOnce(undefined);
+    const event = {
+      eventId: 'message-3',
+      eventType: 'MESSAGE_CREATE' as const,
+      payload: {
+        id: 'message-3',
+        channel_id: 'channel-1',
+        content: 'hello',
+        author: { id: 'user-1', username: 'user' },
+        mentions: [],
+        attachments: [],
+      },
+      receivedAt: '2026-07-24T00:00:00.000Z',
+    };
+
+    await expect(enqueueDiscordGatewayEvent(event)).resolves.toEqual({
+      jobId: 'discord-gateway-event-MESSAGE_CREATE-message-3-redelivery-1',
+    });
+    expect(addMock).toHaveBeenCalledWith(
+      'process-discord-gateway-event',
+      event,
+      {
+        jobId: 'discord-gateway-event-MESSAGE_CREATE-message-3-redelivery-1',
+      },
     );
   });
 });

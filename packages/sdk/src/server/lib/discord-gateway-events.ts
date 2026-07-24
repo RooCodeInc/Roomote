@@ -38,17 +38,37 @@ function discordGatewayEventJobId(event: DiscordGatewayEvent): string {
   ].join('-');
 }
 
+async function discordGatewayEventRedeliveryJobId(
+  queue: Queue<DiscordGatewayEvent>,
+  jobId: string,
+): Promise<string> {
+  const originalJob = await queue.getJob(jobId);
+  if (!originalJob || (await originalJob.getState()) !== 'failed') {
+    return jobId;
+  }
+
+  // Keep each exhausted generation for diagnosis, but do not let it prevent a
+  // later gateway delivery from being queued.
+  for (let generation = 1; ; generation += 1) {
+    const redeliveryJobId = `${jobId}-redelivery-${generation}`;
+    const redeliveryJob = await queue.getJob(redeliveryJobId);
+    if (!redeliveryJob || (await redeliveryJob.getState()) !== 'failed') {
+      return redeliveryJobId;
+    }
+  }
+}
+
 /** Persist a validated Gateway event before acknowledging the Gateway. */
 export async function enqueueDiscordGatewayEvent(
   event: DiscordGatewayEvent,
 ): Promise<{ jobId: string }> {
-  const jobId = discordGatewayEventJobId(event);
-  await getDiscordGatewayEventsQueue().add(
-    'process-discord-gateway-event',
-    event,
-    {
-      jobId,
-    },
+  const queue = getDiscordGatewayEventsQueue();
+  const jobId = await discordGatewayEventRedeliveryJobId(
+    queue,
+    discordGatewayEventJobId(event),
   );
+  await queue.add('process-discord-gateway-event', event, {
+    jobId,
+  });
   return { jobId };
 }
