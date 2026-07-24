@@ -6,6 +6,7 @@ import type { UserAuthSuccess } from '@/types';
 
 import { assertAdmin } from '../environment-variables';
 import { saveCommsAuthConfigCommand } from './index';
+import { setTelegramBotProfilePhotoBestEffort } from './telegram-profile-photo';
 
 /**
  * Client half of Telegram managed-bot pairing: talks to the pairing service
@@ -103,6 +104,7 @@ type TelegramPairingCheckResult =
       status: 'ready';
       botUsername: string | null;
       telegramWebhook: { registered: boolean; error: string | null } | null;
+      telegramProfilePhoto: { updated: boolean; error: string | null };
     };
 
 type StashedPairingResult = {
@@ -216,6 +218,10 @@ export async function checkTelegramPairingCommand(
     values: { R_TELEGRAM_BOT_TOKEN: fetched.result.token },
   });
 
+  const telegramProfilePhoto = await setTelegramBotProfilePhotoBestEffort({
+    botToken: fetched.result.token,
+  });
+
   const redis = getRedis();
   await redis.del(`${CLIENT_PAIRING_RESULT_KEY_PREFIX}${input.pairingId}`);
   await redis.del(`${CLIENT_PAIRING_KEY_PREFIX}${input.pairingId}`);
@@ -224,5 +230,6 @@ export async function checkTelegramPairingCommand(
     status: 'ready',
     botUsername: fetched.result.botUsername,
     telegramWebhook: saved.telegramWebhook ?? null,
+    telegramProfilePhoto,
   };
 }

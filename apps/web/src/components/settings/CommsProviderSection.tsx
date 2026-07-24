@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -34,6 +34,7 @@ type CommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
   telegramBotUsername?: string | null;
+  telegramPairingAvailable?: boolean;
   discord?: import('@/trpc/commands/comms').DiscordCommsStatus | null;
 };
 
@@ -87,6 +88,10 @@ import {
 } from '@/components/system';
 import { Section } from './Section';
 import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
+import {
+  TelegramManagedBotPairing,
+  type TelegramPairingSuccess,
+} from '@/app/(onboarding)/setup/TelegramManagedBotPairing';
 import { DiscordSetupStatus } from './DiscordSetupStatus';
 
 const MICROSOFT_APP_ID_PATTERN =
@@ -569,6 +574,7 @@ export function CommsProviderSection({
     hasConfiguredValues: boolean;
   } | null>(null);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [useManualTelegramSetup, setUseManualTelegramSetup] = useState(false);
 
   useEffect(() => {
     setValues(nonSecretInitialValues);
@@ -662,7 +668,14 @@ export function CommsProviderSection({
   const hasEditableFields = visibleFields.some(
     (field) => !field.runtimeSatisfied,
   );
-  const providerOwnsActions = provider.id === 'slack' && !hasConfiguredValues;
+  const showManagedTelegramSetup =
+    provider.id === 'telegram' &&
+    provider.telegramPairingAvailable === true &&
+    !hasConfiguredValues &&
+    !useManualTelegramSetup;
+  const providerOwnsActions =
+    (provider.id === 'slack' && !hasConfiguredValues) ||
+    showManagedTelegramSetup;
 
   const teamsBotAppIdField = provider.fields.find(
     (field) => field.envVarName === 'R_TEAMS_BOT_APP_ID',
@@ -718,6 +731,41 @@ export function CommsProviderSection({
     onClear(provider.id);
   };
 
+  const handleTelegramPaired = useCallback(
+    async (result: TelegramPairingSuccess) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: trpc.comms.status.queryKey(),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: trpc.environmentVariables.list.queryKey(),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: trpc.linkedAccounts.telegram.queryKey(),
+        }),
+      ]);
+
+      if (result.webhookWarning) {
+        toast.warning(
+          `Your bot was created, but Roomote could not connect it: ${result.webhookWarning}`,
+        );
+      }
+      if (result.profilePhotoWarning) {
+        toast.warning(
+          `Your bot is connected, but Roomote could not set its profile photo: ${result.profilePhotoWarning}`,
+        );
+      }
+      if (!result.webhookWarning && !result.profilePhotoWarning) {
+        toast.success(
+          result.botUsername
+            ? `@${result.botUsername} is connected.`
+            : 'Your Telegram bot is connected.',
+        );
+      }
+    },
+    [queryClient, trpc],
+  );
+
   return (
     <>
       <Section
@@ -748,43 +796,75 @@ export function CommsProviderSection({
           </p>
         ) : (
           <div className="space-y-8">
-            <ProviderSetupExperience
-              provider={provider}
-              values={values}
-              publicOrigin={publicOrigin}
-              disabled={savePending}
-              editingSavedValues={editingSavedValues}
-              clearedSavedValues={clearedSavedValues}
-              teamsAppPackageHref={teamsAppPackageHref}
-              createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
-              createSlackAppPending={createSlackApp.isPending}
-              surface="settings"
-              envVarsInfoNote={
-                !provider.runtimeSatisfied && provider.id === 'telegram'
-                  ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
-                  : !provider.runtimeSatisfied && provider.id === 'discord'
-                    ? 'Roomote validates the token, derives the bot identity, and registers /new, /link, and /help when you save.'
-                    : undefined
-              }
-              onCreateSlackApp={(configToken) =>
-                createSlackApp.mutate({ configToken })
-              }
-              onValueChange={(envVarName, value) =>
-                setValues((current) => ({ ...current, [envVarName]: value }))
-              }
-              onEditingSavedValueChange={(envVarName, editing) =>
-                setEditingSavedValues((current) => ({
-                  ...current,
-                  [envVarName]: editing,
-                }))
-              }
-              onClearedSavedValueChange={(envVarName, cleared) =>
-                setClearedSavedValues((current) => ({
-                  ...current,
-                  [envVarName]: cleared,
-                }))
-              }
-            />
+            {showManagedTelegramSetup ? (
+              <div className="space-y-4">
+                <TelegramManagedBotPairing
+                  onPaired={handleTelegramPaired}
+                  disabled={savePending}
+                />
+                <button
+                  type="button"
+                  className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                  onClick={() => setUseManualTelegramSetup(true)}
+                >
+                  Enter a bot token manually instead
+                </button>
+              </div>
+            ) : provider.id === 'telegram' && hasConfiguredValues ? null : (
+              <div className="space-y-4">
+                {provider.id === 'telegram' &&
+                  provider.telegramPairingAvailable === true &&
+                  !hasConfiguredValues && (
+                    <button
+                      type="button"
+                      className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                      onClick={() => setUseManualTelegramSetup(false)}
+                    >
+                      ← Use automatic setup instead
+                    </button>
+                  )}
+                <ProviderSetupExperience
+                  provider={provider}
+                  values={values}
+                  publicOrigin={publicOrigin}
+                  disabled={savePending}
+                  editingSavedValues={editingSavedValues}
+                  clearedSavedValues={clearedSavedValues}
+                  teamsAppPackageHref={teamsAppPackageHref}
+                  createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
+                  createSlackAppPending={createSlackApp.isPending}
+                  surface="settings"
+                  envVarsInfoNote={
+                    !provider.runtimeSatisfied && provider.id === 'telegram'
+                      ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
+                      : !provider.runtimeSatisfied && provider.id === 'discord'
+                        ? 'Roomote validates the token, derives the bot identity, and registers /new, /link, and /help when you save.'
+                        : undefined
+                  }
+                  onCreateSlackApp={(configToken) =>
+                    createSlackApp.mutate({ configToken })
+                  }
+                  onValueChange={(envVarName, value) =>
+                    setValues((current) => ({
+                      ...current,
+                      [envVarName]: value,
+                    }))
+                  }
+                  onEditingSavedValueChange={(envVarName, editing) =>
+                    setEditingSavedValues((current) => ({
+                      ...current,
+                      [envVarName]: editing,
+                    }))
+                  }
+                  onClearedSavedValueChange={(envVarName, cleared) =>
+                    setClearedSavedValues((current) => ({
+                      ...current,
+                      [envVarName]: cleared,
+                    }))
+                  }
+                />
+              </div>
+            )}
 
             <div className="space-y-2 text-sm text-muted-foreground">
               {provider.id === 'telegram' && provider.telegramWebhook && (
@@ -856,17 +936,18 @@ export function CommsProviderSection({
                     {clearPending ? <Spinner /> : null}
                   </Button>
                 )}
-                {hasEditableFields && (
-                  <Button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={isActionDisabled || savePending}
-                  >
-                    <Check />
-                    {savePending ? 'Saving...' : 'Save'}
-                    {savePending ? <Spinner /> : null}
-                  </Button>
-                )}
+                {hasEditableFields &&
+                  !(provider.id === 'telegram' && hasConfiguredValues) && (
+                    <Button
+                      type="button"
+                      onClick={handleSave}
+                      disabled={isActionDisabled || savePending}
+                    >
+                      <Check />
+                      {savePending ? 'Saving...' : 'Save'}
+                      {savePending ? <Spinner /> : null}
+                    </Button>
+                  )}
               </div>
             )}
           </div>

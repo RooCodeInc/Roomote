@@ -37,6 +37,7 @@ type CommsProviderStatus = {
     lastErrorMessage: string | null;
   } | null;
   telegramBotUsername?: string | null;
+  telegramPairingAvailable?: boolean;
 };
 
 const state = vi.hoisted(() => ({
@@ -193,6 +194,12 @@ vi.mock('@/hooks/teams', () => ({
 
 vi.mock('./TelegramLinkAccountStep', () => ({
   TelegramLinkAccountStep: () => <div>Telegram link step</div>,
+}));
+
+vi.mock('@/app/(onboarding)/setup/TelegramManagedBotPairing', () => ({
+  TelegramManagedBotPairing: () => (
+    <button type="button">Create my Telegram bot</button>
+  ),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -779,6 +786,52 @@ describe('CommsProviderSection', () => {
       ).toBeInTheDocument();
     });
 
+    it('defaults to managed Telegram pairing when it is available', () => {
+      render(
+        <CommsProviderSection
+          provider={buildTelegramProvider({
+            telegramPairingAvailable: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(
+        screen.getByRole('button', { name: 'Create my Telegram bot' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', {
+          name: 'Enter a bot token manually instead',
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText('Telegram Bot Token'),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Enter a bot token manually instead',
+        }),
+      );
+
+      expect(
+        screen.getByPlaceholderText('Telegram Bot Token'),
+      ).toBeInTheDocument();
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: '← Use automatic setup instead',
+        }),
+      );
+      expect(
+        screen.getByRole('button', { name: 'Create my Telegram bot' }),
+      ).toBeInTheDocument();
+    });
+
     it('lets users save Telegram with only a bot token when the secret is auto-managed', () => {
       const onSave = vi.fn();
 
@@ -845,6 +898,8 @@ describe('CommsProviderSection', () => {
         <CommsProviderSection
           provider={buildTelegramProvider({
             telegramBotUsername: 'RoomoteBot',
+            savedSatisfied: true,
+            setupSatisfied: true,
             telegramWebhook: {
               status: 'connected',
               registeredUrl: 'https://app.example.com/api/webhooks/telegram',
@@ -859,10 +914,21 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
-
       expect(screen.getByText('Connected to @RoomoteBot')).toBeInTheDocument();
       expect(screen.queryByText('Webhook connected')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Create a new Telegram bot/),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText('Telegram Bot Token'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Save' }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('Telegram link step')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Remove' }),
+      ).toBeInTheDocument();
     });
   });
 

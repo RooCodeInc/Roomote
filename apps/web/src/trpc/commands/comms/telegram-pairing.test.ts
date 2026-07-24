@@ -2,33 +2,39 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UserAuthSuccess } from '@/types';
 
-const { envMock, redisStore, redisMock, saveCommsAuthConfigMock } = vi.hoisted(
-  () => {
-    const store = new Map<string, string>();
-    return {
-      envMock: {
-        R_TELEGRAM_PAIRING_URL: 'https://pairing.example.com' as
-          | string
-          | undefined,
-      },
-      redisStore: store,
-      redisMock: {
-        get: vi.fn(async (key: string) => store.get(key) ?? null),
-        set: vi.fn(async (key: string, value: string, ..._args: unknown[]) => {
-          store.set(key, value);
-          return 'OK';
-        }),
-        del: vi.fn(async (key: string) => {
-          store.delete(key);
-          return 1;
-        }),
-      },
-      saveCommsAuthConfigMock: vi.fn(async () => ({
-        telegramWebhook: { registered: true, error: null },
-      })),
-    };
-  },
-);
+const {
+  envMock,
+  profilePhotoMock,
+  redisStore,
+  redisMock,
+  saveCommsAuthConfigMock,
+} = vi.hoisted(() => {
+  const store = new Map<string, string>();
+  return {
+    envMock: {
+      R_TELEGRAM_PAIRING_URL: 'https://pairing.example.com' as
+        | string
+        | undefined,
+      TELEGRAM_API_BASE_URL: 'https://telegram.example.com',
+    },
+    profilePhotoMock: vi.fn(),
+    redisStore: store,
+    redisMock: {
+      get: vi.fn(async (key: string) => store.get(key) ?? null),
+      set: vi.fn(async (key: string, value: string, ..._args: unknown[]) => {
+        store.set(key, value);
+        return 'OK';
+      }),
+      del: vi.fn(async (key: string) => {
+        store.delete(key);
+        return 1;
+      }),
+    },
+    saveCommsAuthConfigMock: vi.fn(async () => ({
+      telegramWebhook: { registered: true, error: null },
+    })),
+  };
+});
 
 vi.mock('@/lib/server/env', () => ({ Env: envMock }));
 vi.mock('@roomote/redis', () => ({ getRedis: () => redisMock }));
@@ -42,6 +48,10 @@ vi.mock('../environment-variables', () => ({
 vi.mock('./index', () => ({
   isTelegramPairingAvailable: () => Boolean(envMock.R_TELEGRAM_PAIRING_URL),
   saveCommsAuthConfigCommand: saveCommsAuthConfigMock,
+}));
+
+vi.mock('./telegram-profile-photo', () => ({
+  setTelegramBotProfilePhotoBestEffort: profilePhotoMock,
 }));
 
 import {
@@ -78,6 +88,10 @@ describe('telegram pairing commands', () => {
     envMock.R_TELEGRAM_PAIRING_URL = 'https://pairing.example.com';
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+    profilePhotoMock.mockResolvedValue({
+      updated: true,
+      error: null,
+    });
   });
 
   describe('startTelegramPairingCommand', () => {
@@ -174,10 +188,14 @@ describe('telegram pairing commands', () => {
         provider: 'telegram',
         values: { R_TELEGRAM_BOT_TOKEN: CHILD_BOT_TOKEN },
       });
+      expect(profilePhotoMock).toHaveBeenCalledWith({
+        botToken: CHILD_BOT_TOKEN,
+      });
       expect(result).toEqual({
         status: 'ready',
         botUsername: 'roomote_abc_bot',
         telegramWebhook: { registered: true, error: null },
+        telegramProfilePhoto: { updated: true, error: null },
       });
       expect(redisStore.has(`telegram-pairing-client:${PAIRING_ID}`)).toBe(
         false,
@@ -214,6 +232,7 @@ describe('telegram pairing commands', () => {
         status: 'ready',
         botUsername: 'roomote_abc_bot',
         telegramWebhook: { registered: true, error: null },
+        telegramProfilePhoto: { updated: true, error: null },
       });
       expect(redisStore.has(`telegram-pairing-result:${PAIRING_ID}`)).toBe(
         false,
@@ -221,6 +240,33 @@ describe('telegram pairing commands', () => {
       expect(redisStore.has(`telegram-pairing-client:${PAIRING_ID}`)).toBe(
         false,
       );
+    });
+
+    it('keeps pairing successful when the profile photo cannot be set', async () => {
+      redisStore.set(`telegram-pairing-client:${PAIRING_ID}`, 'token');
+      stubFetchJson(200, {
+        status: 'ready',
+        token: CHILD_BOT_TOKEN,
+        botUsername: 'roomote_abc_bot',
+      });
+      profilePhotoMock.mockResolvedValue({
+        updated: false,
+        error: 'Photo dimensions are invalid',
+      });
+
+      await expect(
+        checkTelegramPairingCommand(buildMockAuth(), {
+          pairingId: PAIRING_ID,
+        }),
+      ).resolves.toEqual({
+        status: 'ready',
+        botUsername: 'roomote_abc_bot',
+        telegramWebhook: { registered: true, error: null },
+        telegramProfilePhoto: {
+          updated: false,
+          error: 'Photo dimensions are invalid',
+        },
+      });
     });
 
     it('treats a 404 from the service as an expired pairing', async () => {

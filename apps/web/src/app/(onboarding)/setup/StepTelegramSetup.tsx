@@ -85,7 +85,13 @@ export function StepTelegramSetup({
       toast.warning(
         `Your bot was created, but Roomote could not connect it: ${result.webhookWarning}`,
       );
-    } else {
+    }
+    if (result.profilePhotoWarning) {
+      toast.warning(
+        `Your bot is connected, but Roomote could not set its profile photo: ${result.profilePhotoWarning}`,
+      );
+    }
+    if (!result.webhookWarning && !result.profilePhotoWarning) {
       toast.success(
         result.botUsername
           ? `@${result.botUsername} is connected.`
