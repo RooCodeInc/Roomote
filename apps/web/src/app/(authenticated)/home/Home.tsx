@@ -309,38 +309,12 @@ export function Home({
       return;
     }
 
-    // Auto (or unset) stored preference: wait for environments so we can
-    // default the sole environment instead of writing Auto over the selector.
-    if (environments.isPending || !environments.isSuccess) {
-      return;
-    }
-
-    const soleEnvironment =
-      environments.data?.length === 1 ? environments.data[0] : undefined;
-
-    if (soleEnvironment) {
-      form.setValue('repository', soleEnvironment.id);
-      form.setValue('environmentId', soleEnvironment.id);
-      form.setValue('branch', '');
-      setWorkspace({
-        workspace: { type: 'environment', id: soleEnvironment.id },
-      });
-    } else {
-      form.setValue('repository', AUTO_WORKSPACE_VALUE);
-      form.setValue('environmentId', undefined);
-      form.setValue('branch', '');
-    }
+    form.setValue('repository', AUTO_WORKSPACE_VALUE);
+    form.setValue('environmentId', undefined);
+    form.setValue('branch', '');
 
     hasRestoredWorkspace.current = true;
-  }, [
-    environmentIdParam,
-    environments.data,
-    environments.isPending,
-    environments.isSuccess,
-    form,
-    setWorkspace,
-    workspace,
-  ]);
+  }, [environmentIdParam, form, setWorkspace, workspace]);
 
   const wiggleWorkspace = useCallback(() => {
     const el = workspaceRef.current;

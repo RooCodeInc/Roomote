@@ -1053,7 +1053,7 @@ describe('Home', () => {
     expect(persisted).not.toHaveProperty('harnessPreference');
   });
 
-  it('defaults to the sole environment on load when workspace storage is Auto', async () => {
+  it('keeps Auto on load when one environment exists and storage is Auto', async () => {
     localStorage.setItem(
       'roomote-workspace:deployment',
       JSON.stringify({ workspace: { type: 'auto' } }),
@@ -1064,15 +1064,17 @@ describe('Home', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('repository')).toHaveTextContent('env-sole');
-      expect(screen.getByTestId('environment')).toHaveTextContent('env-sole');
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        AUTO_WORKSPACE_VALUE,
+      );
+      expect(screen.getByTestId('environment')).toHaveTextContent('');
     });
 
     expect(
       JSON.parse(localStorage.getItem('roomote-workspace:deployment') ?? '{}'),
     ).toEqual(
       expect.objectContaining({
-        workspace: { type: 'environment', id: 'env-sole' },
+        workspace: { type: 'auto' },
       }),
     );
   });

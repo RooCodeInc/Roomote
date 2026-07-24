@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import {
   Settings,
@@ -72,10 +72,6 @@ export const SelectEnvironmentOrRepository = ({
   const { setWorkspace } = useWorkspaceStorage();
   const [hasAppliedDefaultWorkspace, setHasAppliedDefaultWorkspace] =
     useState(false);
-  // Tracks menu choices only so programmatic form resets (e.g. Home workspace
-  // restoration writing Auto after this selector defaults the sole env) can
-  // re-apply the sole-environment default.
-  const hasUserSelectedWorkspaceRef = useRef(false);
 
   const fullEnvironments = useEnvironments({ enabled: isAdmin });
   const availableEnvironments = useAvailableEnvironments(repositoryFilter);
@@ -120,15 +116,7 @@ export const SelectEnvironmentOrRepository = ({
       return;
     }
 
-    const canRetrySoleDefaultAfterReset =
-      hasAppliedDefaultWorkspace &&
-      !hasUserSelectedWorkspaceRef.current &&
-      allowAuto &&
-      !environmentId &&
-      (!repository || repository === AUTO_WORKSPACE_VALUE) &&
-      sortedEnvironments.length === 1;
-
-    if (hasAppliedDefaultWorkspace && !canRetrySoleDefaultAfterReset) {
+    if (hasAppliedDefaultWorkspace) {
       return;
     }
 
@@ -137,31 +125,16 @@ export const SelectEnvironmentOrRepository = ({
       return;
     }
 
-    // Keep intentional non-Auto allowAuto selections (e.g. a repository).
-    // When homepage is still on Auto, keep going so a sole environment can
-    // become the default — including when it appears after setup.
-    if (allowAuto && repository && repository !== AUTO_WORKSPACE_VALUE) {
+    if (allowAuto && repository) {
       setHasAppliedDefaultWorkspace(true);
       return;
     }
 
-    // Auto-select the environment when there's a repositoryFilter with matching environments,
-    // or when there's exactly one environment configured (making it the default).
+    // Auto-select the environment when a repository-filtered flow has matches.
     const shouldAutoSelect =
-      (repositoryFilter && sortedEnvironments.length > 0) ||
-      sortedEnvironments.length === 1;
+      Boolean(repositoryFilter) && sortedEnvironments.length > 0;
 
     if (!shouldAutoSelect) {
-      // Stay open while Auto has zero environments so the sole environment
-      // created right after setup can still become the default.
-      if (
-        allowAuto &&
-        sortedEnvironments.length === 0 &&
-        (!repository || repository === AUTO_WORKSPACE_VALUE)
-      ) {
-        return;
-      }
-
       setHasAppliedDefaultWorkspace(true);
       return;
     }
@@ -221,7 +194,6 @@ export const SelectEnvironmentOrRepository = ({
       setValue('repository', AUTO_WORKSPACE_VALUE);
       setValue('branch', '');
       setWorkspace({ workspace: { type: 'auto' } });
-      // Allow the sole remaining environment (if any) to become the default.
       setHasAppliedDefaultWorkspace(false);
       return;
     }
@@ -305,8 +277,6 @@ export const SelectEnvironmentOrRepository = ({
         onCreate();
         return;
       }
-
-      hasUserSelectedWorkspaceRef.current = true;
 
       if (value.startsWith(ENV_PREFIX)) {
         const environmentId = value.slice(ENV_PREFIX.length);
