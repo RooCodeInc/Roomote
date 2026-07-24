@@ -70,7 +70,7 @@ describe('discord request_user_input helpers', () => {
     expect(buttons!.at(-1)?.[0]?.text).toBe('Cancel');
   });
 
-  it('renders all questions for multi-question prompts without option buttons', () => {
+  it('renders the current question and option buttons for multi-question prompts', () => {
     const text = buildDiscordRequestUserInputPromptText({
       requestId: 'rui:1',
       questions: [
@@ -85,8 +85,8 @@ describe('discord request_user_input helpers', () => {
       ],
     });
     expect(text).toContain('Question 1 of 2');
-    expect(text).toContain('Question 2 of 2');
-    expect(text).toContain('one answer per line');
+    expect(text).not.toContain('Question 2 of 2');
+    expect(text).toContain('Pick a button');
 
     const buttons = buildDiscordRequestUserInputButtons({
       runId: 99,
@@ -95,13 +95,34 @@ describe('discord request_user_input helpers', () => {
         questions: [sampleQuestion, { ...sampleQuestion, id: 'q2' }],
       },
     });
-    expect(buttons).toEqual([
-      [
-        {
-          text: 'Cancel',
-          callbackData: 'discord:rui_cancel:99:callid12',
-        },
-      ],
-    ]);
+    expect(buttons?.[0]).toHaveLength(3);
+    expect(buttons?.at(-1)?.[0]?.text).toBe('Cancel');
+  });
+
+  it('renders a later multi-question prompt from its current question index', () => {
+    const secondQuestion = {
+      ...sampleQuestion,
+      id: 'q2',
+      question: 'Which release branch should I use?',
+    };
+    const text = buildDiscordRequestUserInputPromptText({
+      requestId: 'rui:1',
+      questions: [sampleQuestion, secondQuestion],
+      currentQuestionIndex: 1,
+    });
+
+    expect(text).toContain('Question 2 of 2');
+    expect(text).toContain('Which release branch should I use?');
+    expect(text).not.toContain('What bump level should I cut?');
+
+    const buttons = buildDiscordRequestUserInputButtons({
+      runId: 99,
+      request: {
+        requestId: 'rui:session:turn:callid12',
+        questions: [sampleQuestion, secondQuestion],
+        currentQuestionIndex: 1,
+      },
+    });
+    expect(buttons?.[0]?.[0]?.callbackData).toContain(':1:0:');
   });
 });

@@ -286,6 +286,25 @@ export async function submitPendingCommunicationRequestUserInputAnswer(
   });
 }
 
+export async function advancePendingCommunicationRequestUserInputQuestion(
+  provider: CommunicationProvider,
+  conversationId: string,
+  request: PendingCommunicationRequestUserInput,
+  nextQuestionIndex: number,
+  answers: AcpRequestUserInputAnswers,
+): Promise<boolean> {
+  return claimPendingCommunicationRequestUserInputUpdate({
+    provider,
+    conversationId,
+    expectedQuestionIndex: request.currentQuestionIndex ?? 0,
+    request: {
+      ...request,
+      currentQuestionIndex: nextQuestionIndex,
+      answers,
+    },
+  });
+}
+
 export async function queueCommunicationRequestUserInputAnswer(
   provider: CommunicationProvider,
   runId: number,

@@ -1,6 +1,9 @@
 import {
+  advancePendingCommunicationRequestUserInputQuestion,
   buildDiscordAnsweredRequestUserInputText,
   buildDiscordCancelledRequestUserInputText,
+  buildDiscordRequestUserInputButtons,
+  buildDiscordRequestUserInputPromptText,
   getDiscordRequestUserInputCurrentQuestion,
   getPendingCommunicationRequestUserInput,
   clearPendingCommunicationRequestUserInput,
@@ -190,8 +193,9 @@ export async function tryHandleDiscordRequestUserInputMessage(params: {
     return true;
   }
 
+  const current = getDiscordRequestUserInputCurrentQuestion(pendingRequest);
   const parsedReply = parseAcpRequestUserInputAnswerReply(
-    pendingRequest.questions,
+    current ? [current.question] : pendingRequest.questions,
     params.text,
   );
 
@@ -212,6 +216,79 @@ export async function tryHandleDiscordRequestUserInputMessage(params: {
       answerText: 'cancel',
       replyToMessageId: params.replyToMessageId,
       cancelled: true,
+    });
+    return true;
+  }
+
+  if (current && pendingRequest.questions.length > 1) {
+    const answers = {
+      ...(pendingRequest.answers ?? {}),
+      ...parsedReply.answers,
+    };
+    const nextQuestionIndex = current.questionIndex + 1;
+
+    if (nextQuestionIndex < pendingRequest.questions.length) {
+      const advanced =
+        await advancePendingCommunicationRequestUserInputQuestion(
+          'discord',
+          conversationId,
+          pendingRequest,
+          nextQuestionIndex,
+          answers,
+        );
+      if (!advanced) {
+        await postAlreadyReceivedNotice({
+          provider: params.provider,
+          applicationId: params.applicationId,
+          channel: params.channel,
+          replyToMessageId: params.replyToMessageId,
+        });
+        return true;
+      }
+
+      if (pendingRequest.promptMessageId) {
+        const nextPrompt = {
+          requestId: pendingRequest.requestId,
+          questions: pendingRequest.questions,
+          currentQuestionIndex: nextQuestionIndex,
+        };
+        await params.provider.editMessage({
+          channelId: conversationId,
+          messageId: pendingRequest.promptMessageId,
+          text: buildDiscordRequestUserInputPromptText(nextPrompt),
+          buttons: buildDiscordRequestUserInputButtons({
+            runId: pendingRequest.runId,
+            request: nextPrompt,
+          }),
+        });
+      }
+
+      await replyToDiscordEvent({
+        provider: params.provider,
+        applicationId: params.applicationId,
+        channel: params.channel,
+        ...(params.replyToMessageId
+          ? { replyToMessageId: params.replyToMessageId }
+          : {}),
+        text: `Picked: ${Object.values(parsedReply.answers)
+          .flatMap((entry) => entry.answers)
+          .join(', ')}`,
+      });
+      return true;
+    }
+
+    await finalizeDiscordRequestUserInputAnswer({
+      provider: params.provider,
+      applicationId: params.applicationId,
+      channel: params.channel,
+      activeRunId: params.activeRun.id,
+      pendingRequest,
+      answers,
+      userId: params.userId,
+      answerText: Object.values(parsedReply.answers)
+        .flatMap((entry) => entry.answers)
+        .join(', '),
+      replyToMessageId: params.replyToMessageId,
     });
     return true;
   }
@@ -384,16 +461,61 @@ export async function tryHandleDiscordRequestUserInputCallback(params: {
   }
 
   const answers: AcpRequestUserInputAnswers = {
+    ...(pendingRequest.answers ?? {}),
     [current.question.id]: { answers: [option.label] },
   };
 
-  if (pendingRequest.questions.length !== 1) {
+  const nextQuestionIndex = current.questionIndex + 1;
+  if (nextQuestionIndex < pendingRequest.questions.length) {
+    const advanced = await advancePendingCommunicationRequestUserInputQuestion(
+      'discord',
+      conversationId,
+      pendingRequest,
+      nextQuestionIndex,
+      answers,
+    );
+    if (!advanced) {
+      await postAlreadyReceivedNotice({
+        provider: params.provider,
+        applicationId: params.applicationId,
+        channel: params.channel,
+        interaction: interactionCtx,
+      });
+      return true;
+    }
+
+    if (!pendingRequest.promptMessageId) {
+      await replyToDiscordEvent({
+        provider: params.provider,
+        applicationId: params.applicationId,
+        channel: params.channel,
+        interaction: interactionCtx,
+        text: 'Your answer was saved. Reply in the thread to continue.',
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const nextPrompt = {
+      requestId: pendingRequest.requestId,
+      questions: pendingRequest.questions,
+      currentQuestionIndex: nextQuestionIndex,
+    };
+    await params.provider.editMessage({
+      channelId: conversationId,
+      messageId: pendingRequest.promptMessageId,
+      text: buildDiscordRequestUserInputPromptText(nextPrompt),
+      buttons: buildDiscordRequestUserInputButtons({
+        runId: pendingRequest.runId,
+        request: nextPrompt,
+      }),
+    });
     await replyToDiscordEvent({
       provider: params.provider,
       applicationId: params.applicationId,
       channel: params.channel,
       interaction: interactionCtx,
-      text: 'Reply in the thread with one answer per line for multi-question prompts.',
+      text: `Picked: ${option.label}`,
       ephemeral: true,
     });
     return true;

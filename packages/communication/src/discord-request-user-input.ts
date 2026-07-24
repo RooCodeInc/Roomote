@@ -149,28 +149,23 @@ export function buildDiscordRequestUserInputPromptText(
     return '**Input needed**\n\nI could not render this question. Reply with your answer, or `cancel` to skip.';
   }
 
-  const lines: string[] = [];
-  if (state.questions.length === 1) {
-    lines.push(formatSingleQuestion(state.questions[0]!));
-  } else {
-    state.questions.forEach((question, index) => {
-      if (index > 0) {
-        lines.push('');
-      }
-      lines.push(`**Question ${index + 1} of ${state.questions.length}**`);
-      lines.push(formatSingleQuestion(question));
-    });
+  const current = getDiscordRequestUserInputCurrentQuestion(state);
+  if (!current) {
+    return '**Input needed**\n\nI could not render this question. Reply with your answer, or `cancel` to skip.';
   }
 
-  const single = state.questions.length === 1 ? state.questions[0]! : null;
-  lines.push('');
-  if (!single) {
+  const lines: string[] = [];
+  if (state.questions.length > 1) {
     lines.push(
-      '_Reply with one answer per line in order (option number, label, or allowed custom text). Reply `cancel` to skip._',
+      `**Question ${current.questionIndex + 1} of ${state.questions.length}**`,
     );
-  } else if (!single.options || single.options.length === 0) {
+  }
+  lines.push(formatSingleQuestion(current.question));
+
+  lines.push('');
+  if (!current.question.options || current.question.options.length === 0) {
     lines.push('_Reply with your answer, or `cancel` to skip._');
-  } else if (questionAllowsCustomAnswer(single)) {
+  } else if (questionAllowsCustomAnswer(current.question)) {
     lines.push(
       '_Pick a button, reply with an option number/label or a custom answer, or `cancel` to skip._',
     );
@@ -187,22 +182,6 @@ export function buildDiscordRequestUserInputButtons(params: {
   runId: number;
   request: DiscordRequestUserInputPromptState;
 }): CommunicationMessageButton[][] | undefined {
-  // Buttons are only safe for single-option questions. Multi-question prompts
-  // must be answered via thread text (one answer per line).
-  if (params.request.questions.length !== 1) {
-    return [
-      [
-        {
-          text: 'Cancel',
-          callbackData: buildDiscordRequestUserInputCancelCallbackData({
-            runId: params.runId,
-            requestId: params.request.requestId,
-          }),
-        },
-      ],
-    ];
-  }
-
   const current = getDiscordRequestUserInputCurrentQuestion(params.request);
   if (!current) {
     return undefined;
