@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'sonner';
@@ -36,6 +36,7 @@ export function TelegramManagedBotPairing({
   const [expired, setExpired] = useState(false);
   const pollBusyRef = useRef(false);
   const lastErrorRef = useRef<string | null>(null);
+  const autoStartedRef = useRef(false);
 
   const start = useMutation(
     trpc.comms.startTelegramPairing.mutationOptions({
@@ -50,9 +51,15 @@ export function TelegramManagedBotPairing({
   const check = useMutation(trpc.comms.checkTelegramPairing.mutationOptions());
   const checkMutateAsync = check.mutateAsync;
 
-  const stopPairing = useCallback(() => {
-    setPairing(null);
-  }, []);
+  const startMutate = start.mutate;
+  useEffect(() => {
+    if (disabled || autoStartedRef.current) {
+      return;
+    }
+
+    autoStartedRef.current = true;
+    startMutate();
+  }, [disabled, startMutate]);
 
   useEffect(() => {
     if (!pairing) {
@@ -129,9 +136,6 @@ export function TelegramManagedBotPairing({
               <Spinner />
               Waiting for you to confirm in Telegram…
             </div>
-            <Button variant="ghost" size="sm" onClick={stopPairing}>
-              Cancel
-            </Button>
           </div>
         </div>
       </div>
@@ -145,20 +149,32 @@ export function TelegramManagedBotPairing({
         copy-paste. Follow the prompts in Telegram, choose the name and username
         you want, and Roomote connects it automatically.
       </p>
-      {expired && (
-        <p className="text-sm text-muted-foreground">
-          That pairing expired before the bot was created. Start again when
-          you&apos;re ready.
-        </p>
+      {expired || start.isError ? (
+        <>
+          <p className="text-sm text-muted-foreground">
+            {expired
+              ? 'That pairing expired before the bot was created.'
+              : 'Telegram setup could not be prepared.'}
+          </p>
+          <Button
+            type="button"
+            disabled={disabled || start.isPending}
+            onClick={() => {
+              setExpired(false);
+              start.reset();
+              start.mutate();
+            }}
+          >
+            Try again
+            {start.isPending && <Spinner />}
+          </Button>
+        </>
+      ) : (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner />
+          Preparing Telegram setup…
+        </div>
       )}
-      <Button
-        type="button"
-        disabled={disabled || start.isPending}
-        onClick={() => start.mutate()}
-      >
-        {start.isPending ? 'Preparing…' : 'Create my Telegram bot'}
-        {start.isPending && <Spinner />}
-      </Button>
     </div>
   );
 }
