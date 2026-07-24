@@ -15,6 +15,7 @@ import {
   getAutomationRuntime,
   recordAutomationRunOutcome,
   slackInstallations,
+  updateBackgroundAutomationSlackThreadMetadata,
   upsertBackgroundAutomationSlackThread,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
@@ -452,6 +453,30 @@ export async function launchCiFailureTriageForFailedRun(
         launchClass: 'automation',
       },
     );
+
+    // The Slack root is posted before the task exists. Link it now so an
+    // unmentioned reply can be routed back to this automation task.
+    if (destination.provider === 'slack' && announcementTs) {
+      try {
+        const linked = await updateBackgroundAutomationSlackThreadMetadata(db, {
+          surface: 'slack',
+          slackChannelId: channelId,
+          threadTs: announcementTs,
+          metadata: { sourceTaskId: launchResult.taskId },
+        });
+        if (!linked) {
+          console.warn(
+            `${LOG_PREFIX} Could not link investigation announcement thread to task ${launchResult.taskId}`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `${LOG_PREFIX} Failed to link investigation announcement thread to task ${launchResult.taskId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
 
     await recordAutomationRunOutcome(db, {
       key: 'ci_failure_triage',
