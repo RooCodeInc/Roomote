@@ -69,17 +69,23 @@ export function StepInferenceProvider({
   openRouterOauthErrorReason = null,
   onContinue,
   onBack,
+  onSelectedProviderChange,
 }: {
   modelSetup: SetupModelStatus;
   openRouterOauthStatus?: OpenRouterOauthEntryStatus | null;
   openRouterOauthErrorReason?: string | null;
   onContinue: () => void;
   onBack?: () => void;
+  onSelectedProviderChange?: (provider: SetupModelProviderId | null) => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] =
     useState<SetupModelProviderId | null>(null);
+  const selectProvider = (provider: SetupModelProviderId | null) => {
+    setSelectedProvider(provider);
+    onSelectedProviderChange?.(provider);
+  };
   const [apiKey, setApiKey] = useState('');
   const [connectionName, setConnectionName] = useState('');
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
@@ -132,7 +138,7 @@ export function StepInferenceProvider({
 
   useEffect(() => {
     if (openRouterOauthStatus === 'connected') {
-      setSelectedProvider('openrouter');
+      selectProvider('openrouter');
       toast.success(
         'Connected to OpenRouter. Your new API key has been saved.',
         {
@@ -298,7 +304,7 @@ export function StepInferenceProvider({
         <Select
           value={selectedProvider ?? undefined}
           onValueChange={(value) =>
-            setSelectedProvider(value as SetupModelProviderId)
+            selectProvider(value as SetupModelProviderId)
           }
         >
           <SelectTrigger aria-label="Model provider" className="min-w-44">

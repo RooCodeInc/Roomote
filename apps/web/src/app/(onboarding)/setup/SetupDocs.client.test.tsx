@@ -26,6 +26,9 @@ describe('SetupDocs', () => {
     expect(getSetupDocsPath('compute-config', { computeProvider: 'e2b' })).toBe(
       'providers/compute/e2b',
     );
+    expect(getSetupDocsPath('env-vars', { modelProvider: 'vllm' })).toBe(
+      'providers/inference/vllm',
+    );
     expect(getSetupDocsPath('repo-selection')).toBe('environments');
     expect(getSetupDocsPath('welcome')).toBeNull();
     expect(getSetupDocsStep('email-account')).toBe('email-account');

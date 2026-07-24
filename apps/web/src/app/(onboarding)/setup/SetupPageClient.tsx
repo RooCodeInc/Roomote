@@ -11,6 +11,7 @@ import {
   isComputeCredentialField,
   isSetupProvisionableComputeProvider,
   type ComputeProvider,
+  type SetupModelProviderId,
   type SourceControlProvider,
 } from '@roomote/types';
 
@@ -162,6 +163,8 @@ export default function SetupPageClient({
     useState<SourceControlProvider | null>(null);
   const [pendingComputeProvider, setPendingComputeProvider] =
     useState<ComputeProvider | null>(null);
+  const [pendingModelProvider, setPendingModelProvider] =
+    useState<SetupModelProviderId | null>(null);
   const [setupToken, setSetupToken] = useState<string | null>(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -280,7 +283,8 @@ export default function SetupPageClient({
     pendingSetupAuthProvider,
   );
   const setupRetryReason = status ? getSetupRetryReason(status) : null;
-  const selectedComputeProvider = status?.setupNewState.computeProvider;
+  const selectedComputeProvider =
+    pendingComputeProvider ?? status?.setupNewState.computeProvider;
   const selectedAuthProvider =
     pendingAuthProvider ??
     status?.setupNewState.authProvider ??
@@ -291,7 +295,8 @@ export default function SetupPageClient({
     status?.setupNewState.sourceControlProvider ??
     status?.sourceControlSetup.runtimeConfiguredProvider ??
     status?.sourceControlSetup.selectedProvider;
-  const selectedModelProvider = status?.setupNewState.modelProvider;
+  const selectedModelProvider =
+    pendingModelProvider ?? status?.setupNewState.modelProvider;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -435,6 +440,12 @@ export default function SetupPageClient({
       setPendingAuthProvider(null);
     }
   }, [status?.setupNewState.authProvider]);
+
+  useEffect(() => {
+    if (status?.setupNewState.modelProvider) {
+      setPendingModelProvider(null);
+    }
+  }, [status?.setupNewState.modelProvider]);
 
   useEffect(() => {
     // The setup token doubles as the system invite for the first admin
@@ -694,8 +705,12 @@ export default function SetupPageClient({
               openRouterOauthErrorReason={
                 entryContext.openrouterOauthErrorReason
               }
-              onContinue={goToNextStep}
+              onContinue={() => {
+                setPendingModelProvider(null);
+                goToNextStep();
+              }}
               onBack={canGoBack ? goToPreviousStep : undefined}
+              onSelectedProviderChange={setPendingModelProvider}
             />
           )}
           {step === 'source-control-provider' && (
