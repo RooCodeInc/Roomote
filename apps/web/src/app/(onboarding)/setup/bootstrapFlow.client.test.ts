@@ -2,6 +2,7 @@ import type { SetupAuthProviderId, SetupAuthStatus } from '@roomote/types';
 
 import {
   getBootstrapAuthProvider,
+  getBootstrapStepPath,
   getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
@@ -97,5 +98,14 @@ describe('bootstrapFlow', () => {
       getBootstrapStepFromSetupStepParam('source-control-config'),
     ).toBeNull();
     expect(getBootstrapStepFromSetupStepParam(null)).toBeNull();
+  });
+
+  it('preserves setup query parameters when a bootstrap step changes', () => {
+    expect(
+      getBootstrapStepPath(
+        'email-account',
+        new URLSearchParams('token=invite-token'),
+      ),
+    ).toBe('/setup?token=invite-token&step=email-account');
   });
 });

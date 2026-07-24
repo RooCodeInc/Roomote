@@ -125,7 +125,6 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {},
   slackUserMappings: {},
   sql: vi.fn(),
-  syncSetupQualificationBlock: vi.fn(),
   users: {},
   workItems: {},
 }));

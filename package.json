@@ -112,6 +112,7 @@
       "@better-auth/core>zod": "^4.3.6",
       "js-cookie": "3.0.7",
       "js-yaml": "4.2.0",
+      "gray-matter>js-yaml": "3.15.0",
       "read-yaml-file@1>js-yaml": "3.15.0",
       "nise>path-to-regexp": "8.4.0",
       "protobufjs": "7.6.3",

@@ -34,7 +34,6 @@ import {
   purgeSavedDeploymentWorkerImage,
   resolveTelegramRuntimeCredentials,
   resolveDiscordRuntimeCredentials,
-  syncSetupQualificationBlock,
   isChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected,
   type DatabaseOrTransaction,
@@ -177,25 +176,12 @@ type MutableQueuedSetupTask = PersistedQueuedSetupTask & {
   launchClaimedAt: Date | null;
 };
 
-type ActiveSetupQualificationBlock = {
-  reason: 'github_organization_required';
-  email: string | null;
-  emailDomain: string | null;
-  githubAccountLogin: string | null;
-  githubAccountType: string | null;
-  lastBlockedAt: Date;
-};
-
 async function assertSetupBootstrapOpen() {
   const bootstrapState = await getSetupBootstrapState();
 
   if (!bootstrapState.setupOpen) {
     throw new Error('Initial setup is no longer open.');
   }
-}
-
-function getSetupQualificationBlockErrorMessage() {
-  return 'Setup is currently limited to work email addresses. Use another work email or contact the team if this seems wrong.';
 }
 
 async function getPersistedSetupNewState(
@@ -1287,31 +1273,6 @@ async function getMatchingEnvironmentSummary({
   return null;
 }
 
-async function getActiveSetupQualificationBlock(
-  auth: UserAuthSuccess,
-): Promise<ActiveSetupQualificationBlock | null> {
-  await Promise.all([
-    syncSetupQualificationBlock({
-      userId: auth.userId,
-      reason: 'github_organization_required',
-      blocked: false,
-    }),
-  ]);
-
-  return null;
-}
-
-async function assertSetupQualificationNotBlocked(auth: UserAuthSuccess) {
-  const activeSetupQualificationBlock =
-    await getActiveSetupQualificationBlock(auth);
-
-  if (!activeSetupQualificationBlock) {
-    return;
-  }
-
-  throw new Error(getSetupQualificationBlockErrorMessage());
-}
-
 export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
@@ -1356,8 +1317,6 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
   ]);
-  const activeSetupQualificationBlock =
-    await getActiveSetupQualificationBlock(auth);
   let setupNewState = normalizeSetupNewState(baseStatus.setupNewState);
 
   if (
@@ -1498,9 +1457,6 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     modelSetup,
     computeSetup,
     sourceControlSetup,
-    setupQualification: {
-      activeBlock: activeSetupQualificationBlock,
-    },
   };
 }
 
@@ -2403,8 +2359,6 @@ export async function saveSetupNewSelectionCommand(
   },
 ) {
   assertAdmin(auth);
-  await assertSetupQualificationNotBlocked(auth);
-
   const { userId } = auth;
 
   if (input.repositoryIds.length === 0) {
@@ -2463,8 +2417,6 @@ export async function startSetupNewOnboardingTaskCommand(
   auth: UserAuthSuccess,
 ) {
   assertAdmin(auth);
-  await assertSetupQualificationNotBlocked(auth);
-
   const { userId } = auth;
   const startResult = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('setup-new'))`);
@@ -3022,8 +2974,6 @@ export async function saveSetupNewQueuedTasksCommand(
   },
 ) {
   assertAdmin(auth);
-  await assertSetupQualificationNotBlocked(auth);
-
   const setupNewState = await getPersistedSetupNewState();
 
   if (!setupNewState.onboardingTaskId) {

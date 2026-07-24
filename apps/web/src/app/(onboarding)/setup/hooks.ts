@@ -341,8 +341,6 @@ export function useSetupFlow(
       }
 
       const replayEntryVisit = isInitialReplayVisit(status);
-      const activeQualificationBlock =
-        status.setupQualification.activeBlock ?? null;
       // A communication provider that the user actually chose (either pending
       // in the current session or already saved). Runtime env vars alone must
       // not count as a choice so the chooser still renders and lets the user
@@ -369,9 +367,8 @@ export function useSetupFlow(
           // before account creation, so skip the wizard's copy when this
           // browser session already saw it.
           return (
-            activeQualificationBlock !== null ||
-            (!replayEntryVisit &&
-              (hasSeenSetupWelcome() || hasRealProgress(status)))
+            !replayEntryVisit &&
+            (hasSeenSetupWelcome() || hasRealProgress(status))
           );
         case 'auth-provider':
           return communicationStepResolved || chosenAuthProvider !== null;
@@ -409,8 +406,6 @@ export function useSetupFlow(
         }
         case 'source-control-connect':
           return status.sourceControlSetup.setupSatisfied;
-        case 'qualification-blocked':
-          return activeQualificationBlock === null;
         case 'compute-provider':
           return (
             !hasStaleComputeProvider &&
