@@ -125,4 +125,25 @@ describe('discord request_user_input helpers', () => {
     });
     expect(buttons?.[0]?.[0]?.callbackData).toContain(':1:0:');
   });
+
+  it('reserves a button row for Cancel when options exceed Discord row capacity', () => {
+    const buttons = buildDiscordRequestUserInputButtons({
+      runId: 99,
+      request: {
+        requestId: 'rui:session:turn:callid12',
+        questions: [
+          {
+            ...sampleQuestion,
+            options: Array.from({ length: 21 }, (_, index) => ({
+              label: `Option ${index + 1}`,
+              description: '',
+            })),
+          },
+        ],
+      },
+    });
+
+    expect(buttons).toHaveLength(5);
+    expect(buttons?.at(-1)?.[0]?.text).toBe('Cancel');
+  });
 });
