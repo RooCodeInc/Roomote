@@ -212,6 +212,11 @@ export default function SetupPageClient({
     },
     [commitSetupUrl, readSetupSearchParams],
   );
+  const removeSourceControlSyncMarker = useCallback(() => {
+    const params = readSetupSearchParams();
+    params.delete('sync');
+    commitSetupUrl(params);
+  }, [commitSetupUrl, readSetupSearchParams]);
   const saveSourceControlProviderChoice = useMutation(
     trpc.setupNew.saveSourceControlProviderChoice.mutationOptions({
       onSuccess: async (_data, variables) => {
@@ -749,6 +754,7 @@ export default function SetupPageClient({
             <StepSourceControlConnect
               sourceControlSetup={status.sourceControlSetup}
               onContinue={goToNextStep}
+              onRemoveSyncMarker={removeSourceControlSyncMarker}
               onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
