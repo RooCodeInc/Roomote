@@ -202,6 +202,53 @@ describe('routeTask', () => {
     });
   });
 
+  it('resolves a bare issue reference from the precheck against configured repos', async () => {
+    mockCallRouterMcpTool.mockResolvedValue({
+      title: 'Dashboard export button broken',
+    });
+    mockGenerateTrackedNonTaskObject
+      .mockResolvedValueOnce({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The message references an issue by number only.',
+          confidence: 0.4,
+          needsExternalLookup: true,
+          externalReference: '#234',
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The referenced issue describes dashboard work.',
+          confidence: 0.9,
+          needsExternalLookup: false,
+          externalReference: null,
+        },
+      });
+
+    const result = await routeTask(
+      createContext({ taskDescription: 'Check issue #234' }),
+    );
+
+    expect(mockCallRouterMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: 'github',
+        toolName: 'issue_read',
+        args: expect.objectContaining({ issue_number: 234 }),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        debug: {
+          phase: 'mcp',
+          needsExternalLookup: true,
+        },
+      },
+    });
+  });
+
   it('keeps the precheck decision when the requested fetch returns nothing', async () => {
     mockCallRouterMcpTool.mockRejectedValue(new Error('Not connected'));
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
