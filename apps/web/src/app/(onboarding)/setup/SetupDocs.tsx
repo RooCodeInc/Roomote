@@ -1,7 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-
 import { Button, FileText, X } from '@/components/system';
 import { DOCS_BASE_URL } from '@/lib/docs';
 
@@ -35,13 +33,19 @@ export function getSetupDocsUrl(step: SetupDocsStep): string {
   return `${DOCS_BASE_URL}${SETUP_DOC_PATHS[step]}`;
 }
 
-export function SetupDocs({ step }: { step: SetupDocsStep }) {
-  const [isOpen, setIsOpen] = useState(false);
-
+export function SetupDocs({
+  step,
+  isOpen,
+  onOpenChange,
+}: {
+  step: SetupDocsStep;
+  isOpen: boolean;
+  onOpenChange: (isOpen: boolean) => void;
+}) {
   return (
-    <div className="fixed top-0 right-0 pr-2 pt-[8px] pb-[12px] z-40 hidden items-end md:flex md:flex-col h-full">
+    <div className="fixed top-0 right-0 pr-2 pt-[8px] pb-[12px] z-40 hidden items-end min-[1050px]:flex flex-col h-full">
       {isOpen ? (
-        <section className="h-full w-[max(20%,24rem)] overflow-hidden rounded-r-2xl bg-card border-2 border-background border-l-4 border-l-card z-2">
+        <section className="h-full w-[min(30vw,30rem)] overflow-hidden rounded-r-2xl bg-card border-2 border-background border-l-4 border-l-card z-2">
           <div className="flex h-11 items-center justify-between px-3 bg-background">
             <span className="text-sm font-medium">Setup docs</span>
             <Button
@@ -49,7 +53,7 @@ export function SetupDocs({ step }: { step: SetupDocsStep }) {
               variant="ghost"
               size="icon"
               aria-label="Close docs"
-              onClick={() => setIsOpen(false)}
+              onClick={() => onOpenChange(false)}
             >
               <X />
             </Button>
@@ -67,7 +71,7 @@ export function SetupDocs({ step }: { step: SetupDocsStep }) {
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => setIsOpen(true)}
+          onClick={() => onOpenChange(true)}
         >
           <FileText />
           Docs
