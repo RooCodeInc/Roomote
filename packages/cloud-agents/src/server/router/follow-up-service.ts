@@ -1,3 +1,5 @@
+import { recordUserRoutingPreference } from '@roomote/db/server';
+
 import { classifyFollowUp, routeTask } from './router-service';
 import { MAX_THREAD_MESSAGES } from './types';
 import type { RoutingContext, RoutingDecision } from './types';
@@ -68,8 +70,31 @@ export async function resolveRoutingFollowUp(input: {
     ...(input.suggestion ? { previousSuggestion: input.suggestion } : {}),
   };
 
+  const routingDecision = await routeTask(routingContext);
+
+  if (
+    routingDecision.status === 'routed' &&
+    routingDecision.result.workspace.type === 'environment' &&
+    !classification.isFallback &&
+    input.userId &&
+    input.suggestion?.workspaceValue !== routingDecision.result.workspace.id
+  ) {
+    try {
+      await recordUserRoutingPreference({
+        userId: input.userId,
+        environmentId: routingDecision.result.workspace.id,
+      });
+    } catch (error) {
+      console.warn(
+        `[RoutingCorrection] Failed to record user routing preference: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
   return {
     intent: 'correct',
-    routingDecision: await routeTask(routingContext),
+    routingDecision,
   };
 }

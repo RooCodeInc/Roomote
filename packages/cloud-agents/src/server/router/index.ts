@@ -4,6 +4,7 @@
 
 export type {
   RoutingContext,
+  RoutingEnvironmentPreference,
   RoutingSource,
   SlackRoutingSource,
   TeamsRoutingSource,

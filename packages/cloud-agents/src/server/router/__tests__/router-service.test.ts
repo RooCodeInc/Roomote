@@ -33,6 +33,12 @@ describe('routeTask', () => {
       description: 'Main app workspace',
       repositoryNames: ['acme/web', 'acme/api'],
     },
+    {
+      id: 'env-api',
+      name: 'API',
+      description: 'Backend services',
+      repositoryNames: ['acme/api'],
+    },
   ];
 
   function createContext(
@@ -102,6 +108,131 @@ describe('routeTask', () => {
         needsExternalLookup: false,
         confidence: 0.92,
         workspaceRemapped: false,
+      },
+    });
+  });
+
+  it('uses recent correction memory only to resolve a low-confidence route', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'Both environments could contain the work.',
+        confidence: 0.5,
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        environmentPreference: {
+          environmentId: 'env-api',
+          correctionCount: 2,
+          lastCorrectedAt: new Date(),
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-api', name: 'API' },
+        kickoffMessage: undefined,
+        debug: {
+          environmentSource: 'memory',
+          environmentPreferenceWeight: expect.any(Number),
+        },
+      },
+    });
+  });
+
+  it('does not let memory override a confident router decision', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'The login flow belongs in Full Stack.',
+        confidence: 0.92,
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        environmentPreference: {
+          environmentId: 'env-api',
+          correctionCount: 3,
+          lastCorrectedAt: new Date(),
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-full-stack' },
+        debug: { environmentSource: 'router' },
+      },
+    });
+  });
+
+  it('does not let memory override an explicit environment mention', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'The user named Full Stack.',
+        confidence: 0.4,
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        taskDescription: 'Use Full Stack for this task.',
+        environmentPreference: {
+          environmentId: 'env-api',
+          correctionCount: 3,
+          lastCorrectedAt: new Date(),
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-full-stack' },
+        debug: { environmentSource: 'router' },
+      },
+    });
+  });
+
+  it('expires a one-off correction after its half-life', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'Both environments could contain the work.',
+        confidence: 0.4,
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        environmentPreference: {
+          environmentId: 'env-api',
+          correctionCount: 1,
+          lastCorrectedAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-full-stack' },
+        debug: { environmentSource: 'router' },
       },
     });
   });

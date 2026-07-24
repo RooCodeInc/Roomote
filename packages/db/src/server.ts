@@ -74,6 +74,7 @@ export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
 export * from './lib/router-debug-settings';
+export * from './lib/user-routing-preferences';
 export * from './lib/pr-action-settings';
 export * from './lib/setup-qualification';
 export * from './lib/setup-qualification-blocks';
@@ -87,6 +88,8 @@ export * from './lib/managed-access';
 export {
   users,
   userRelations,
+  userRoutingPreferences,
+  userRoutingPreferencesRelations,
   deploymentSettings,
   invites,
   authUsers,
