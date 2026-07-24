@@ -244,6 +244,7 @@ export type PollingIntervals = {
     Record<CommunicationProvider, () => Promise<void>>
   >;
   linearMessageInterval: NodeJS.Timeout | undefined;
+  linearMessageCleanup?: () => Promise<void>;
   githubTokenRefreshInterval: NodeJS.Timeout | undefined;
 };
 

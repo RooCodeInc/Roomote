@@ -10,11 +10,13 @@ import {
 
 import { recordChatTurnStart } from '../../mcp/roomote-mcp-server/chat-reply-satisfaction';
 import { isActiveTaskPhase } from '../../sandbox-server/lib/harness-manager';
+import { createDiagnosticEventRecorder } from '../diagnostic-events';
 import type { ListenerOptions } from '../types';
 import {
   logPollingTransportError,
   runPollingSdkCall,
 } from './poll-error-context';
+import { createSerializedPollLoop } from './serialized-poll-loop';
 
 /** Interval (ms) between polling for new Slack messages during SlackAppMention tasks. */
 const SLACK_MESSAGE_CHECK_INTERVAL_MS = 5_000;
@@ -64,16 +66,13 @@ export function createSlackMessageInterval({
   logger,
   prepareActorScopedTurn,
 }: ListenerOptions): NodeJS.Timeout {
-  let stopping = false;
-  let activePoll = Promise.resolve();
-
-  state.slackMessageCleanup = async () => {
-    stopping = true;
-    await activePoll;
-  };
+  const diagnostics = createDiagnosticEventRecorder({
+    runId: taskRun.id,
+    logger,
+  });
 
   const pollOnce = async () => {
-    if (stopping || !state.sessionId) {
+    if (!state.sessionId) {
       return;
     }
 
@@ -216,6 +215,16 @@ export function createSlackMessageInterval({
             logger.warn(
               `[listenForSlackEvents] Delaying Slack follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
             );
+            diagnostics.record({
+              kind: 'queued_message_requeued',
+              message: `Requeued ${deliveryOrder.length - index} queued Slack message(s) because actor-scoped turn preparation did not succeed.`,
+              details: {
+                provider: 'slack',
+                reason: 'actor_prep_failed',
+                count: deliveryOrder.length - index,
+                ts: msg.ts,
+              },
+            });
 
             try {
               await requeueSlackMessages(taskRun.id, deliveryOrder, index);
@@ -234,6 +243,15 @@ export function createSlackMessageInterval({
             logger.warn(
               `[listenForSlackEvents] Skipped Slack follow-up for task ${state.sessionId}: sender is not the server-side acting user (ts=${msg.ts})`,
             );
+            diagnostics.record({
+              kind: 'queued_message_skipped',
+              message: `Skipped queued Slack message ts=${msg.ts}: sender is not the server-side acting user.`,
+              details: {
+                provider: 'slack',
+                reason: 'actor_mismatch',
+                ts: msg.ts,
+              },
+            });
             index += 1;
             continue;
           }
@@ -261,6 +279,16 @@ export function createSlackMessageInterval({
             logger.warn(
               `[listenForSlackEvents] Failed to send follow-up prompt for task ${state.sessionId}`,
             );
+            diagnostics.record({
+              kind: 'queued_message_requeued',
+              message: `Requeued ${deliveryOrder.length - index} queued Slack message(s) because the harness rejected the prompt.`,
+              details: {
+                provider: 'slack',
+                reason: 'send_failed',
+                count: deliveryOrder.length - index,
+                ts: msg.ts,
+              },
+            });
 
             try {
               await requeueSlackMessages(taskRun.id, deliveryOrder, index);
@@ -274,6 +302,17 @@ export function createSlackMessageInterval({
 
             return;
           }
+
+          diagnostics.record({
+            kind: 'queued_message_delivered',
+            message: `Delivered queued Slack message ts=${msg.ts} to the harness.`,
+            details: {
+              provider: 'slack',
+              ts: msg.ts,
+              clientMessageId: getSlackClientMessageId(msg),
+              promptLength: prompt.length,
+            },
+          });
 
           recordChatTurnStart({
             turnMessageTs: msg.ts,
@@ -299,11 +338,41 @@ export function createSlackMessageInterval({
     }
   };
 
-  const interval = setInterval(() => {
-    activePoll = activePoll.then(async () => {
-      await pollOnce();
-    });
-  }, SLACK_MESSAGE_CHECK_INTERVAL_MS);
+  const { interval, cleanup } = createSerializedPollLoop({
+    pollOnce,
+    intervalMs: SLACK_MESSAGE_CHECK_INTERVAL_MS,
+    onStall: ({ stalledForMs }) => {
+      logPollingTransportError({
+        stage: 'listenForSlackEvents',
+        runId: taskRun.id,
+        sessionId: state.sessionId ?? '',
+        sdkMethod: 'listenForSlackEvents.pollOnce',
+        failurePoint: 'queuedSlackPollStalled',
+        logger,
+        error: new Error(
+          `Slack queued-message poll stalled for ${stalledForMs}ms`,
+        ),
+        message: `[listenForSlackEvents] Queued Slack message poll for job ${taskRun.id} stalled for ${stalledForMs}ms; abandoning it and starting a fresh poll`,
+      });
+      diagnostics.record({
+        kind: 'message_poller_stalled',
+        message: `Queued Slack message poll stalled for ${stalledForMs}ms and was abandoned; a fresh poll took over.`,
+        details: { provider: 'slack', stalledForMs },
+      });
+    },
+    onStallRecovered: ({ ranForMs }) => {
+      logger.warn(
+        `[listenForSlackEvents] A previously stalled Slack poll for job ${taskRun.id} settled after ${ranForMs}ms`,
+      );
+      diagnostics.record({
+        kind: 'message_poller_stall_recovered',
+        message: `A previously stalled Slack poll settled after ${ranForMs}ms.`,
+        details: { provider: 'slack', ranForMs },
+      });
+    },
+  });
+
+  state.slackMessageCleanup = cleanup;
 
   return interval;
 }

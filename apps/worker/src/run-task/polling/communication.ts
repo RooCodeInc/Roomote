@@ -8,11 +8,13 @@ import { sdk } from '@roomote/sdk/client';
 
 import { isActiveTaskPhase } from '../../sandbox-server/lib/harness-manager';
 import { recordChatTurnStart } from '../../mcp/roomote-mcp-server/chat-reply-satisfaction';
+import { createDiagnosticEventRecorder } from '../diagnostic-events';
 import type { ListenerOptions } from '../types';
 import {
   logPollingTransportError,
   runPollingSdkCall,
 } from './poll-error-context';
+import { createSerializedPollLoop } from './serialized-poll-loop';
 import { wrapCommunicationMessage } from '../communication-message-prompt';
 
 const COMMUNICATION_MESSAGE_CHECK_INTERVAL_MS = 5_000;
@@ -64,17 +66,13 @@ export function createCommunicationMessageInterval({
     prepareActorScopedTurn,
     answerUserInputRequest,
   } = options;
-  let stopping = false;
-  let activePoll = Promise.resolve();
-
-  state.communicationMessageCleanups ??= {};
-  state.communicationMessageCleanups[provider] = async () => {
-    stopping = true;
-    await activePoll;
-  };
+  const diagnostics = createDiagnosticEventRecorder({
+    runId: taskRun.id,
+    logger,
+  });
 
   const pollOnce = async () => {
-    if (stopping || !state.sessionId) {
+    if (!state.sessionId) {
       return;
     }
 
@@ -216,6 +214,16 @@ export function createCommunicationMessageInterval({
           logger.warn(
             `[listenFor${provider}Events] Delaying ${provider} follow-up for task ${state.sessionId} until actor-scoped turn preparation succeeds`,
           );
+          diagnostics.record({
+            kind: 'queued_message_requeued',
+            message: `Requeued ${deliveryOrder.length - index} queued ${provider} message(s) because actor-scoped turn preparation did not succeed.`,
+            details: {
+              provider,
+              reason: 'actor_prep_failed',
+              count: deliveryOrder.length - index,
+              ts: message.ts,
+            },
+          });
 
           try {
             await requeueCommunicationMessages(
@@ -239,6 +247,11 @@ export function createCommunicationMessageInterval({
           logger.warn(
             `[listenFor${provider}Events] Skipped ${provider} follow-up for task ${state.sessionId}: sender is not the server-side acting user (ts=${message.ts})`,
           );
+          diagnostics.record({
+            kind: 'queued_message_skipped',
+            message: `Skipped queued ${provider} message ts=${message.ts}: sender is not the server-side acting user.`,
+            details: { provider, reason: 'actor_mismatch', ts: message.ts },
+          });
           index += 1;
           continue;
         }
@@ -260,6 +273,16 @@ export function createCommunicationMessageInterval({
           logger.warn(
             `[listenFor${provider}Events] Failed to send follow-up prompt for task ${state.sessionId}`,
           );
+          diagnostics.record({
+            kind: 'queued_message_requeued',
+            message: `Requeued ${deliveryOrder.length - index} queued ${provider} message(s) because the harness rejected the prompt.`,
+            details: {
+              provider,
+              reason: 'send_failed',
+              count: deliveryOrder.length - index,
+              ts: message.ts,
+            },
+          });
 
           try {
             await requeueCommunicationMessages(
@@ -278,6 +301,17 @@ export function createCommunicationMessageInterval({
 
           return;
         }
+
+        diagnostics.record({
+          kind: 'queued_message_delivered',
+          message: `Delivered queued ${provider} message ts=${message.ts} to the harness.`,
+          details: {
+            provider,
+            ts: message.ts,
+            clientMessageId: getCommunicationClientMessageId(provider, message),
+            promptLength: prompt.length,
+          },
+        });
 
         if (
           provider === 'telegram' ||
@@ -311,11 +345,42 @@ export function createCommunicationMessageInterval({
     }
   };
 
-  const interval = setInterval(() => {
-    activePoll = activePoll.then(async () => {
-      await pollOnce();
-    });
-  }, COMMUNICATION_MESSAGE_CHECK_INTERVAL_MS);
+  const { interval, cleanup } = createSerializedPollLoop({
+    pollOnce,
+    intervalMs: COMMUNICATION_MESSAGE_CHECK_INTERVAL_MS,
+    onStall: ({ stalledForMs }) => {
+      logPollingTransportError({
+        stage: `listenFor${provider}Events`,
+        runId: taskRun.id,
+        sessionId: state.sessionId ?? '',
+        sdkMethod: 'listenForCommunicationEvents.pollOnce',
+        failurePoint: 'queuedCommunicationPollStalled',
+        logger,
+        error: new Error(
+          `${provider} queued-message poll stalled for ${stalledForMs}ms`,
+        ),
+        message: `[listenFor${provider}Events] Queued ${provider} message poll for job ${taskRun.id} stalled for ${stalledForMs}ms; abandoning it and starting a fresh poll`,
+      });
+      diagnostics.record({
+        kind: 'message_poller_stalled',
+        message: `Queued ${provider} message poll stalled for ${stalledForMs}ms and was abandoned; a fresh poll took over.`,
+        details: { provider, stalledForMs },
+      });
+    },
+    onStallRecovered: ({ ranForMs }) => {
+      logger.warn(
+        `[listenFor${provider}Events] A previously stalled ${provider} poll for job ${taskRun.id} settled after ${ranForMs}ms`,
+      );
+      diagnostics.record({
+        kind: 'message_poller_stall_recovered',
+        message: `A previously stalled ${provider} poll settled after ${ranForMs}ms.`,
+        details: { provider, ranForMs },
+      });
+    },
+  });
+
+  state.communicationMessageCleanups ??= {};
+  state.communicationMessageCleanups[provider] = cleanup;
 
   return interval;
 }

@@ -5,11 +5,13 @@ import {
 } from '@roomote/linear/client';
 
 import { isActiveTaskPhase } from '../../sandbox-server/lib/harness-manager';
+import { createDiagnosticEventRecorder } from '../diagnostic-events';
 import type { ListenerOptions } from '../types';
 import {
   logPollingTransportError,
   runPollingSdkCall,
 } from './poll-error-context';
+import { createSerializedPollLoop } from './serialized-poll-loop';
 
 const LINEAR_MESSAGE_CHECK_INTERVAL_MS = 5_000;
 
@@ -42,7 +44,12 @@ export function createLinearMessageInterval({
   logger,
   prepareActorScopedTurn,
 }: ListenerOptions): NodeJS.Timeout {
-  return setInterval(async () => {
+  const diagnostics = createDiagnosticEventRecorder({
+    runId: taskRun.id,
+    logger,
+  });
+
+  const pollOnce = async () => {
     if (!state.sessionId) {
       return;
     }
@@ -223,6 +230,12 @@ export function createLinearMessageInterval({
             logger.warn(
               `[listenForLinearEvents] Failed to send follow-up prompt for task ${state.sessionId}`,
             );
+          } else {
+            diagnostics.record({
+              kind: 'queued_message_delivered',
+              message: `Delivered queued Linear message to the harness.`,
+              details: { provider: 'linear', promptLength: text.length },
+            });
           }
 
           logger.log(
@@ -242,5 +255,43 @@ export function createLinearMessageInterval({
         message: `[listenForLinearEvents] Unexpected error while delivering queued Linear events for job ${taskRun.id}`,
       });
     }
-  }, LINEAR_MESSAGE_CHECK_INTERVAL_MS);
+  };
+
+  const { interval, cleanup } = createSerializedPollLoop({
+    pollOnce,
+    intervalMs: LINEAR_MESSAGE_CHECK_INTERVAL_MS,
+    onStall: ({ stalledForMs }) => {
+      logPollingTransportError({
+        stage: 'listenForLinearEvents',
+        runId: taskRun.id,
+        sessionId: state.sessionId ?? '',
+        sdkMethod: 'listenForLinearEvents.pollOnce',
+        failurePoint: 'queuedLinearPollStalled',
+        logger,
+        error: new Error(
+          `Linear queued-message poll stalled for ${stalledForMs}ms`,
+        ),
+        message: `[listenForLinearEvents] Queued Linear message poll for job ${taskRun.id} stalled for ${stalledForMs}ms; abandoning it and starting a fresh poll`,
+      });
+      diagnostics.record({
+        kind: 'message_poller_stalled',
+        message: `Queued Linear message poll stalled for ${stalledForMs}ms and was abandoned; a fresh poll took over.`,
+        details: { provider: 'linear', stalledForMs },
+      });
+    },
+    onStallRecovered: ({ ranForMs }) => {
+      logger.warn(
+        `[listenForLinearEvents] A previously stalled Linear poll for job ${taskRun.id} settled after ${ranForMs}ms`,
+      );
+      diagnostics.record({
+        kind: 'message_poller_stall_recovered',
+        message: `A previously stalled Linear poll settled after ${ranForMs}ms.`,
+        details: { provider: 'linear', ranForMs },
+      });
+    },
+  });
+
+  state.linearMessageCleanup = cleanup;
+
+  return interval;
 }
