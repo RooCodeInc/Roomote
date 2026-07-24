@@ -360,6 +360,44 @@ describe('launchCiFailureTriageForFailedRun', () => {
     expect(mockUpdateMessage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      'returns false',
+      () =>
+        mockUpdateBackgroundAutomationSlackThreadMetadata.mockResolvedValue(
+          false,
+        ),
+    ],
+    [
+      'throws',
+      () =>
+        mockUpdateBackgroundAutomationSlackThreadMetadata.mockRejectedValue(
+          new Error('metadata unavailable'),
+        ),
+    ],
+  ])(
+    'keeps the launched investigation active when metadata linking %s',
+    async (_scenario, arrange) => {
+      arrange();
+
+      await expect(
+        launchCiFailureTriageForFailedRun(failedRun),
+      ).resolves.toEqual(
+        expect.objectContaining({ status: 'ok', taskId: 'task-scan-1' }),
+      );
+
+      expect(mockReleaseCiFailureTriageInvestigation).not.toHaveBeenCalled();
+      expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ status: 'succeeded' }),
+      );
+      expect(mockRecordAutomationRunOutcome).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ status: 'failed' }),
+      );
+    },
+  );
+
   it('preserves GitLab host and failure evidence in the launched task', async () => {
     mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-gl');
 
