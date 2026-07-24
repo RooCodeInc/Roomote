@@ -300,14 +300,20 @@ export default function SetupPageClient({
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    let changed = false;
+    // Status updates can land immediately after advancing the wizard. Preserve
+    // the active client step so provider-query synchronization cannot restore
+    // the previous step and leave the documentation panel stale.
+    if (params.get('step') !== step) {
+      params.set('step', step);
+      changed = true;
+    }
     const providerParams = {
       authProvider: selectedAuthProvider,
       computeProvider: selectedComputeProvider,
       modelProvider: selectedModelProvider,
       sourceControlProvider: selectedSourceControlProvider,
     };
-    let changed = false;
-
     for (const [key, value] of Object.entries(providerParams)) {
       if (value && params.get(key) !== value) {
         params.set(key, value);
@@ -327,6 +333,7 @@ export default function SetupPageClient({
     selectedComputeProvider,
     selectedModelProvider,
     selectedSourceControlProvider,
+    step,
   ]);
   const computeProvisioning =
     status &&
