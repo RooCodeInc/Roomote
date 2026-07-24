@@ -82,11 +82,25 @@ function getInitialAdditionalEnvValues(
     (provider.additionalEnvFields ?? []).map((field) => field.envVarName),
   );
 
-  return Object.fromEntries(
+  const values = Object.fromEntries(
     Object.entries(provider.additionalEnvValues ?? {}).filter(([name]) =>
       declaredNames.has(name),
     ),
   );
+
+  // Seed selectable fields (e.g. Z.AI region) with their first option so
+  // required selects submit a value without an extra click.
+  for (const field of provider.additionalEnvFields ?? []) {
+    if (
+      field.options &&
+      field.options.length > 0 &&
+      !values[field.envVarName]?.trim()
+    ) {
+      values[field.envVarName] = field.options[0]!.value;
+    }
+  }
+
+  return values;
 }
 
 function getInitialPrimaryCredential(
@@ -112,11 +126,23 @@ function getSubmitAdditionalEnvValues(
     additionalEnvFields.map((field) => field.envVarName),
   );
 
-  return Object.fromEntries(
+  const values = Object.fromEntries(
     Object.entries(additionalEnvValues).filter(([name]) =>
       declaredNames.has(name),
     ),
   );
+
+  for (const field of additionalEnvFields) {
+    if (
+      field.options &&
+      field.options.length > 0 &&
+      !values[field.envVarName]?.trim()
+    ) {
+      values[field.envVarName] = field.options[0]!.value;
+    }
+  }
+
+  return values;
 }
 
 function ConnectedProviderRow({
@@ -485,21 +511,56 @@ function ProviderCredentialsDialog({
                         {field.label}
                         {field.required ? '' : ' (optional)'}
                       </span>
-                      <Input
-                        secret={field.secret}
-                        className={field.secret ? 'font-mono' : undefined}
-                        value={additionalEnvValues[field.envVarName] ?? ''}
-                        onChange={(event) =>
-                          setAdditionalEnvValues((values) => ({
-                            ...values,
-                            [field.envVarName]: event.target.value,
-                          }))
-                        }
-                        placeholder={field.placeholder}
-                        disabled={isSaving}
-                        aria-label={`${field.label} for ${selectedProvider.label}`}
-                        data-1p-ignore
-                      />
+                      {field.options && field.options.length > 0 ? (
+                        <Select
+                          value={
+                            additionalEnvValues[field.envVarName] ||
+                            field.options[0]?.value ||
+                            ''
+                          }
+                          onValueChange={(value) =>
+                            setAdditionalEnvValues((values) => ({
+                              ...values,
+                              [field.envVarName]: value,
+                            }))
+                          }
+                          disabled={isSaving}
+                        >
+                          <SelectTrigger
+                            aria-label={`${field.label} for ${selectedProvider.label}`}
+                          >
+                            <SelectValue
+                              placeholder={field.placeholder ?? field.label}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {field.options.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input
+                          secret={field.secret}
+                          className={field.secret ? 'font-mono' : undefined}
+                          value={additionalEnvValues[field.envVarName] ?? ''}
+                          onChange={(event) =>
+                            setAdditionalEnvValues((values) => ({
+                              ...values,
+                              [field.envVarName]: event.target.value,
+                            }))
+                          }
+                          placeholder={field.placeholder}
+                          disabled={isSaving}
+                          aria-label={`${field.label} for ${selectedProvider.label}`}
+                          data-1p-ignore
+                        />
+                      )}
                     </div>
                   ))}
                 </>

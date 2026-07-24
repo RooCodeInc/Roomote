@@ -133,10 +133,20 @@ export function StepInferenceProvider({
           : '',
     );
     setConnectionName('');
-    setAdditionalEnvValues({});
+    const providerStatus = getProviderStatus(modelSetup, selectedProvider);
+    const defaults: Record<string, string> = {};
+    for (const field of providerStatus?.additionalEnvFields ?? []) {
+      if (field.options && field.options.length > 0) {
+        defaults[field.envVarName] = field.options[0]!.value;
+      }
+    }
+    setAdditionalEnvValues(defaults);
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
     setIsGitHubCopilotDialogOpen(false);
+    // Only re-seed when the selected provider changes; modelSetup refresh
+    // must not wipe in-progress credential form state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- modelSetup read for option defaults at selection time
   }, [selectedProvider]);
 
   useEffect(() => {
@@ -452,20 +462,51 @@ export function StepInferenceProvider({
               {field.label}
               {field.required ? '' : ' (optional)'}
             </span>
-            <Input
-              secret={field.secret}
-              value={additionalEnvValues[field.envVarName] ?? ''}
-              onChange={(event) =>
-                setAdditionalEnvValues((values) => ({
-                  ...values,
-                  [field.envVarName]: event.target.value,
-                }))
-              }
-              placeholder={field.placeholder}
-              disabled={saveModelConfig.isPending}
-              aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
-              data-1p-ignore
-            />
+            {field.options && field.options.length > 0 ? (
+              <Select
+                value={
+                  additionalEnvValues[field.envVarName] ||
+                  field.options[0]?.value ||
+                  ''
+                }
+                onValueChange={(value) =>
+                  setAdditionalEnvValues((values) => ({
+                    ...values,
+                    [field.envVarName]: value,
+                  }))
+                }
+                disabled={saveModelConfig.isPending}
+              >
+                <SelectTrigger
+                  className="min-w-44"
+                  aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
+                >
+                  <SelectValue placeholder={field.placeholder ?? field.label} />
+                </SelectTrigger>
+                <SelectContent>
+                  {field.options.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                secret={field.secret}
+                value={additionalEnvValues[field.envVarName] ?? ''}
+                onChange={(event) =>
+                  setAdditionalEnvValues((values) => ({
+                    ...values,
+                    [field.envVarName]: event.target.value,
+                  }))
+                }
+                placeholder={field.placeholder}
+                disabled={saveModelConfig.isPending}
+                aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
+                data-1p-ignore
+              />
+            )}
           </div>
         ))}
 
