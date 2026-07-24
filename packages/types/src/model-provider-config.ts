@@ -243,7 +243,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
       'claude-haiku-4-5': 'vercel/anthropic/claude-haiku-4.5',
-      'claude-opus-4-8': 'vercel/anthropic/claude-opus-4.8',
+      'claude-opus-5': 'vercel/anthropic/claude-opus-5',
       'claude-sonnet-5': 'vercel/anthropic/claude-sonnet-5',
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
@@ -341,7 +341,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'anthropic/claude-fable-5',
       'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
-      'claude-opus-4-8': 'anthropic/claude-opus-4-8',
+      'claude-opus-5': 'anthropic/claude-opus-5',
       'claude-sonnet-5': 'anthropic/claude-sonnet-5',
     }),
     recommendedRoleModels: {
@@ -417,7 +417,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'opencode/claude-fable-5',
       'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
-      'claude-opus-4-8': 'opencode/claude-opus-4-8',
+      'claude-opus-5': 'opencode/claude-opus-5',
       'claude-sonnet-5': 'opencode/claude-sonnet-5',
       'gemini-3-1-pro': 'opencode/gemini-3.1-pro',
       'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
@@ -467,7 +467,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
       'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
-      'claude-opus-4-8': 'bedrock-mantle/anthropic.claude-opus-4-8',
+      'claude-opus-5': 'bedrock-mantle/anthropic.claude-opus-5',
       'claude-sonnet-5': 'bedrock-mantle/anthropic.claude-sonnet-5',
     }),
     recommendedRoleModels: {
@@ -524,7 +524,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'github-copilot/claude-fable-5',
       'claude-haiku-4-5': 'github-copilot/claude-haiku-4.5',
-      'claude-opus-4-8': 'github-copilot/claude-opus-4.8',
+      'claude-opus-5': 'github-copilot/claude-opus-5',
       'claude-sonnet-5': 'github-copilot/claude-sonnet-5',
       'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
