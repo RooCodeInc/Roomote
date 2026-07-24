@@ -15,7 +15,7 @@ const {
   mockClaimedAt,
   mockDbUpdate,
   mockEnqueueTask,
-  mockUpdateBackgroundAutomationSlackThreadMetadata,
+  mockFinalizeAutomationLaunch,
 } = vi.hoisted(() => ({
   mockClaimedAt: new Date('2026-07-01T12:00:00.000Z'),
   MockTaskRunQueueEnqueueError: class extends Error {
@@ -37,7 +37,7 @@ const {
   },
   mockDbUpdate: vi.fn(),
   mockEnqueueTask: vi.fn(),
-  mockUpdateBackgroundAutomationSlackThreadMetadata: vi.fn(),
+  mockFinalizeAutomationLaunch: vi.fn().mockResolvedValue({ attached: true }),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -145,10 +145,13 @@ vi.mock('@roomote/db/server', () => {
     claimWorkItem,
     finalizeWorkItemLaunched,
     releaseWorkItemClaim: vi.fn(),
-    updateBackgroundAutomationSlackThreadMetadata: (...args: unknown[]) =>
-      mockUpdateBackgroundAutomationSlackThreadMetadata(...args),
   };
 });
+
+vi.mock('@roomote/sdk/server', () => ({
+  finalizeAutomationLaunch: (...args: unknown[]) =>
+    mockFinalizeAutomationLaunch(...args),
+}));
 
 vi.mock('../telegram.js', () => ({
   resolveAutomationTelegramTarget: vi.fn(),
@@ -264,8 +267,8 @@ function mockSuccessfulTaskEnqueue(taskId = 'task-1') {
 describe('launchActWorkItems', () => {
   beforeEach(() => {
     mockEnqueueTask.mockReset();
-    mockUpdateBackgroundAutomationSlackThreadMetadata.mockReset();
-    mockUpdateBackgroundAutomationSlackThreadMetadata.mockResolvedValue(true);
+    mockFinalizeAutomationLaunch.mockReset();
+    mockFinalizeAutomationLaunch.mockResolvedValue({ attached: true });
     vi.mocked(postLateBoundWorkItemFailureMessage).mockReset();
     vi.mocked(postLateBoundWorkItemFailureMessage).mockResolvedValue(undefined);
     vi.mocked(createAutomationDiscordTaskThread).mockClear();
@@ -597,6 +600,7 @@ describe('launchActWorkItems', () => {
   it('replies into an existing investigation thread when the slack target carries one', async () => {
     const updateSets = setupDbUpdateMock();
     mockSuccessfulTaskEnqueue('task-direct-threaded');
+    mockFinalizeAutomationLaunch.mockResolvedValueOnce({ attached: false });
 
     const result = await launchActWorkItems({
       automationKey: 'sentry_triage',
@@ -625,16 +629,14 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload.description).not.toEqual(
       expect.stringContaining('may create a new top-level thread'),
     );
-    expect(
-      mockUpdateBackgroundAutomationSlackThreadMetadata,
-    ).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(mockFinalizeAutomationLaunch).toHaveBeenCalledWith(
       expect.objectContaining({
-        slackChannelId: 'C456',
-        threadTs: '1781300000.000100',
-        metadata: {
-          sourceTaskId: 'task-direct-threaded',
+        conversation: {
+          provider: 'slack',
+          channelId: 'C456',
+          rootMessageId: '1781300000.000100',
         },
+        taskId: 'task-direct-threaded',
       }),
     );
     expect(updateSets).toEqual([
@@ -672,9 +674,7 @@ describe('launchActWorkItems', () => {
       workItem: expect.objectContaining({ id: workItem.id }),
       reason: 'enqueue failed',
     });
-    expect(
-      mockUpdateBackgroundAutomationSlackThreadMetadata,
-    ).not.toHaveBeenCalled();
+    expect(mockFinalizeAutomationLaunch).not.toHaveBeenCalled();
   });
 
   it('resolves an existing investigation thread when a threaded launch fails terminally', async () => {

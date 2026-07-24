@@ -28,6 +28,10 @@ export {
   type ResolvedAutomationDestination,
 } from './destination';
 export {
+  finalizeAutomationLaunch,
+  type FinalizeAutomationLaunchParams,
+} from './post-launch-finalization';
+export {
   loadAutomationThreadFeedbackContext,
   loadAutomationThreadFeedbackReport,
 } from './automation-thread-feedback';
