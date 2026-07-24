@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import type { ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { useSetupBootstrapOpen, useUser } from '@/hooks/useUser';
 import {
@@ -13,17 +14,17 @@ import {
 import { Spinner } from '@/components/system';
 import { cn } from '@/lib/utils';
 
-import { getSetupDocsStep, SetupDocs } from './SetupDocs';
+import { SetupDocs } from './SetupDocs';
+import { SetupDocsContentProvider } from './SetupDocsContext';
 
 export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { authStatus, isSignedIn } = useUser();
   const setupBootstrapOpen = useSetupBootstrapOpen();
   const [userMenuPortalContainer, setUserMenuPortalContainer] =
     useState<HTMLDivElement | null>(null);
   const [isDocsOpen, setIsDocsOpen] = useState(false);
-  const docsStep = getSetupDocsStep(searchParams.get('step'));
+  const [docsContent, setDocsContent] = useState<ReactNode>(null);
 
   useEffect(() => {
     if (authStatus === 'signed-out' && !setupBootstrapOpen) {
@@ -40,44 +41,47 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="notranslate light text-foreground relative min-h-viewport w-full overflow-hidden bg-white md:h-viewport">
-      <RoomoteWordmark className="absolute top-8 left-8 h-8 hidden lg:block" />
-      <div ref={setUserMenuPortalContainer} className="light text-foreground" />
-      <FramedSurface
-        variant="bold"
-        frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw)] scroll-minimal overflow-hidden"
-        surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center relative"
-      >
-        <SetupDocs
-          step={docsStep}
-          isOpen={isDocsOpen}
-          onOpenChange={setIsDocsOpen}
-        />
-        {isSignedIn ? (
-          <>
-            <div className="z-50 flex w-full gap-2 justify-end px-4 pt-4 md:fixed md:bottom-9 md:left-9 md:w-auto md:px-0 md:pt-0">
-              <RoomoteWordmark className="h-8 hidden sm:block lg:hidden" />
-              <UserMenu
-                portalContainer={userMenuPortalContainer}
-                menuSide="top"
-              />
-            </div>
-          </>
-        ) : null}
-
+    <SetupDocsContentProvider setContent={setDocsContent}>
+      <div className="notranslate light text-foreground relative min-h-viewport w-full overflow-hidden bg-white md:h-viewport">
+        <RoomoteWordmark className="absolute top-8 left-8 h-8 hidden lg:block" />
         <div
-          className={cn(
-            'relative flex w-full max-w-3xl flex-col transition-transform duration-200 md:min-h-full',
-            isDocsOpen && 'min-[1050px]:-translate-x-[max(10vw,12rem)]',
-          )}
+          ref={setUserMenuPortalContainer}
+          className="light text-foreground"
+        />
+        <FramedSurface
+          variant="bold"
+          frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw)] scroll-minimal overflow-hidden"
+          surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center relative"
         >
-          <div className="pointer-events-none absolute inset-y-0 left-0 hidden border-black border-l-2 border-dotted md:block" />
-          <div className="flex w-full flex-col px-4 py-6 md:my-auto md:px-0 md:py-10 md:pl-6">
-            <OriginMismatchAlert />
-            {children}
+          <SetupDocs isOpen={isDocsOpen} onOpenChange={setIsDocsOpen}>
+            {docsContent}
+          </SetupDocs>
+          {isSignedIn ? (
+            <>
+              <div className="z-50 flex w-full gap-2 justify-end px-4 pt-4 md:fixed md:bottom-9 md:left-9 md:w-auto md:px-0 md:pt-0">
+                <RoomoteWordmark className="h-8 hidden sm:block lg:hidden" />
+                <UserMenu
+                  portalContainer={userMenuPortalContainer}
+                  menuSide="top"
+                />
+              </div>
+            </>
+          ) : null}
+
+          <div
+            className={cn(
+              'relative flex w-full max-w-3xl flex-col transition-transform duration-200 md:min-h-full',
+              isDocsOpen && 'min-[1050px]:-translate-x-[max(10vw,12rem)]',
+            )}
+          >
+            <div className="pointer-events-none absolute inset-y-0 left-0 hidden border-black border-l-2 border-dotted md:block" />
+            <div className="flex w-full flex-col px-4 py-6 md:my-auto md:px-0 md:py-10 md:pl-6">
+              <OriginMismatchAlert />
+              {children}
+            </div>
           </div>
-        </div>
-      </FramedSurface>
-    </div>
+        </FramedSurface>
+      </div>
+    </SetupDocsContentProvider>
   );
 }

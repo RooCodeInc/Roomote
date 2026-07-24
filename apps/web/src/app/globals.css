@@ -739,6 +739,69 @@
   @apply my-2;
 }
 
+/* In-app documentation is compiled from apps/docs MDX at build time. */
+.docs-content {
+  @apply text-[0.9375rem] leading-7 text-foreground;
+}
+
+.docs-content > * + * {
+  @apply mt-5;
+}
+
+.docs-content h2,
+.docs-content h3,
+.docs-content h4 {
+  @apply scroll-mt-6 font-semibold tracking-tight;
+}
+
+.docs-content h2 {
+  @apply mt-12 text-2xl;
+}
+
+.docs-content h3 {
+  @apply mt-8 text-xl;
+}
+
+.docs-content h4 {
+  @apply mt-6 text-lg;
+}
+
+.docs-content a {
+  @apply text-primary underline underline-offset-4 hover:text-primary/80;
+}
+
+.docs-content ul {
+  @apply ml-6 list-disc space-y-2;
+}
+
+.docs-content ol:not(:has(> li > p.font-medium)) {
+  @apply ml-6 list-decimal space-y-2;
+}
+
+.docs-content :not(pre) > code {
+  @apply rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8125rem];
+}
+
+.docs-content pre {
+  @apply overflow-x-auto rounded-lg border border-border bg-muted p-4 text-sm leading-6;
+}
+
+.docs-content pre code {
+  @apply font-mono;
+}
+
+.docs-content table {
+  @apply my-6 block max-w-full overflow-x-auto border-collapse text-left text-sm;
+}
+
+.docs-content th {
+  @apply border-b border-border px-3 py-2 font-semibold;
+}
+
+.docs-content td {
+  @apply border-b border-border px-3 py-2 align-top;
+}
+
 /* User messages have a different background color, requiring some overrides */
 .chat-message.is-user [data-streamdown='code-block'] {
   @apply border-none;

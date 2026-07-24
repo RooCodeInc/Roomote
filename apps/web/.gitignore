@@ -2,6 +2,7 @@
 /.next
 /.source
 /out
+/public/docs
 next-env.d.ts
 
 *storybook.log

@@ -37,7 +37,7 @@ const nextConfig: NextConfig = {
   // Always bundle the env files the runtime may need so preview deploys can
   // load preview secrets even when build-time env detection resolves differently.
   outputFileTracingIncludes: {
-    '/*': webEnvFiles,
+    '/*': [...webEnvFiles, '../docs/**/*'],
   },
   experimental: {
     serverActions: {
@@ -68,9 +68,6 @@ const nextConfig: NextConfig = {
   // (e.g. "taskid-web.preview-john.ngrok.app"), so we need *.domain entries.
   allowedDevOrigins: getAllowedDevOrigins(process.env.PREVIEW_DOMAINS),
   async redirects() {
-    // Public product docs now live at the standalone Mintlify site
-    // (https://docs.roomote.dev). Preserve old in-app /docs URLs by
-    // redirecting them to the external docs site.
     return [
       {
         source: '/docs',

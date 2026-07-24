@@ -1,16 +1,13 @@
 import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { getSetupDocsStep, getSetupDocsUrl, SetupDocs } from './SetupDocs';
+import { SetupDocs } from './SetupDocs';
+import { getSetupDocsPath, getSetupDocsStep } from './setup-docs';
 
 describe('SetupDocs', () => {
   it('maps setup steps to the matching documentation pages', () => {
-    expect(getSetupDocsUrl('auth-provider')).toBe(
-      'https://docs.roomote.dev/communications',
-    );
-    expect(getSetupDocsUrl('repo-selection')).toBe(
-      'https://docs.roomote.dev/environments',
-    );
+    expect(getSetupDocsPath('auth-provider')).toBe('communications');
+    expect(getSetupDocsPath('repo-selection')).toBe('environments');
     expect(getSetupDocsStep('email-account')).toBe('email-account');
     expect(getSetupDocsStep(null)).toBe('welcome');
   });
@@ -20,31 +17,22 @@ describe('SetupDocs', () => {
       const [isOpen, setIsOpen] = useState(false);
 
       return (
-        <SetupDocs
-          step="compute-config"
-          isOpen={isOpen}
-          onOpenChange={setIsOpen}
-        />
+        <SetupDocs isOpen={isOpen} onOpenChange={setIsOpen}>
+          <p>Docs content</p>
+        </SetupDocs>
       );
     }
 
     render(<SetupDocsHarness />);
 
-    expect(
-      screen.queryByTitle('Roomote setup documentation'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Docs content')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Docs' }));
 
-    expect(screen.getByTitle('Roomote setup documentation')).toHaveAttribute(
-      'src',
-      'https://docs.roomote.dev/compute',
-    );
+    expect(screen.getByText('Docs content')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close docs' }));
 
-    expect(
-      screen.queryByTitle('Roomote setup documentation'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Docs content')).not.toBeInTheDocument();
   });
 });
