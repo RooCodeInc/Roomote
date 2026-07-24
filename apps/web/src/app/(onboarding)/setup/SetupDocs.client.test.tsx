@@ -12,6 +12,20 @@ import { getSetupDocsPath, getSetupDocsStep } from './setup-docs';
 describe('SetupDocs', () => {
   it('maps setup steps to the matching documentation pages', () => {
     expect(getSetupDocsPath('auth-provider')).toBe('communications');
+    expect(
+      getSetupDocsPath('auth-env-vars', { authProvider: 'microsoft' }),
+    ).toBe('providers/communications/microsoft-teams');
+    expect(getSetupDocsPath('slack', { authProvider: 'microsoft' })).toBe(
+      'providers/communications/microsoft-teams',
+    );
+    expect(
+      getSetupDocsPath('source-control-connect', {
+        sourceControlProvider: 'github',
+      }),
+    ).toBe('providers/source-control/github');
+    expect(getSetupDocsPath('compute-config', { computeProvider: 'e2b' })).toBe(
+      'providers/compute/e2b',
+    );
     expect(getSetupDocsPath('repo-selection')).toBe('environments');
     expect(getSetupDocsPath('welcome')).toBeNull();
     expect(getSetupDocsStep('email-account')).toBe('email-account');

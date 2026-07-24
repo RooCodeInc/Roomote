@@ -19,6 +19,12 @@ export function SetupDocs({
   const searchParams = useSearchParams();
   const docsPath = getSetupDocsPath(
     getSetupDocsStep(searchParams?.get('step') ?? null),
+    {
+      authProvider: searchParams?.get('authProvider'),
+      computeProvider: searchParams?.get('computeProvider'),
+      modelProvider: searchParams?.get('modelProvider'),
+      sourceControlProvider: searchParams?.get('sourceControlProvider'),
+    },
   );
 
   return (

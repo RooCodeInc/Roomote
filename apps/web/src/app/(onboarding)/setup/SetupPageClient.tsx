@@ -281,6 +281,48 @@ export default function SetupPageClient({
   );
   const setupRetryReason = status ? getSetupRetryReason(status) : null;
   const selectedComputeProvider = status?.setupNewState.computeProvider;
+  const selectedAuthProvider =
+    pendingAuthProvider ??
+    status?.setupNewState.authProvider ??
+    status?.authSetup.runtimeConfiguredProvider ??
+    status?.authSetup.selectedProvider;
+  const selectedSourceControlProvider =
+    pendingSourceControlProvider ??
+    status?.setupNewState.sourceControlProvider ??
+    status?.sourceControlSetup.runtimeConfiguredProvider ??
+    status?.sourceControlSetup.selectedProvider;
+  const selectedModelProvider = status?.setupNewState.modelProvider;
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const providerParams = {
+      authProvider: selectedAuthProvider,
+      computeProvider: selectedComputeProvider,
+      modelProvider: selectedModelProvider,
+      sourceControlProvider: selectedSourceControlProvider,
+    };
+    let changed = false;
+
+    for (const [key, value] of Object.entries(providerParams)) {
+      if (value && params.get(key) !== value) {
+        params.set(key, value);
+        changed = true;
+      } else if (!value && params.has(key)) {
+        params.delete(key);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      router.replace(`${window.location.pathname}?${params}`);
+    }
+  }, [
+    router,
+    selectedAuthProvider,
+    selectedComputeProvider,
+    selectedModelProvider,
+    selectedSourceControlProvider,
+  ]);
   const computeProvisioning =
     status &&
     selectedComputeProvider &&

@@ -9,10 +9,22 @@ import { getSetupDocsPath, getSetupDocsStep } from './setup-docs';
 export default async function SetupPage({
   searchParams,
 }: {
-  searchParams: Promise<{ step?: string }>;
+  searchParams: Promise<{
+    authProvider?: string;
+    computeProvider?: string;
+    modelProvider?: string;
+    sourceControlProvider?: string;
+    step?: string;
+  }>;
 }) {
-  const setupDocsStep = getSetupDocsStep((await searchParams).step ?? null);
-  const docsPath = getSetupDocsPath(setupDocsStep);
+  const params = await searchParams;
+  const setupDocsStep = getSetupDocsStep(params.step ?? null);
+  const docsPath = getSetupDocsPath(setupDocsStep, {
+    authProvider: params.authProvider,
+    computeProvider: params.computeProvider,
+    modelProvider: params.modelProvider,
+    sourceControlProvider: params.sourceControlProvider,
+  });
   const docsPage = docsPath ? await getDocsPage(docsPath) : null;
   const { content } = docsPage
     ? await compileMDX({
