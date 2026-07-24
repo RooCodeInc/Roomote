@@ -205,13 +205,10 @@ export type AutomationScanCursor = {
   externalPullRequestId?: number;
 };
 
-export type BackgroundAutomationAvailability = 'stable' | 'beta';
-
 type ScheduleOnlyBackgroundAutomationDefinition = {
   id: string;
   label: string;
   hashAliases: readonly string[];
-  availability: BackgroundAutomationAvailability;
   automationKey: BackgroundAutomationKey;
   frequencyField: `${string}Frequency`;
   lastRunAtField: `${string}LastRunAt`;
@@ -226,7 +223,6 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
     id: 'securityAuditor',
     label: 'Security Auditor',
     hashAliases: ['security-auditor', 'securityauditor'],
-    availability: 'stable',
     automationKey: 'security_auditor',
     frequencyField: 'securityAuditorFrequency',
     lastRunAtField: 'securityAuditorLastRunAt',
@@ -239,7 +235,6 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
     id: 'codeQualityAuditor',
     label: 'Code Quality Auditor',
     hashAliases: ['code-quality-auditor', 'codequalityauditor'],
-    availability: 'stable',
     automationKey: 'code_quality_auditor',
     frequencyField: 'codeQualityAuditorFrequency',
     lastRunAtField: 'codeQualityAuditorLastRunAt',
@@ -252,7 +247,6 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
     id: 'ciFailureTriage',
     label: 'CI Failure Triage',
     hashAliases: ['ci-failure-triage', 'cifailuretriage'],
-    availability: 'stable',
     automationKey: 'ci_failure_triage',
     frequencyField: 'ciFailureTriageFrequency',
     lastRunAtField: 'ciFailureTriageLastRunAt',
@@ -274,7 +268,6 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
       'triage-github-issues',
       'triagegithubissues',
     ],
-    availability: 'stable',
     automationKey: 'issue_fixer',
     frequencyField: 'issueFixerFrequency',
     lastRunAtField: 'issueFixerLastRunAt',
@@ -306,7 +299,7 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST = Object.values(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS,
 ) as ScheduleOnlyBackgroundAutomationMetadata[];
 
-export const BETA_BACKGROUND_AUTOMATION_KEYS = [
+const AUTOMATION_KEYS_WITH_HISTORICAL_THREAD_FEEDBACK = [
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
@@ -316,17 +309,15 @@ export const BETA_BACKGROUND_AUTOMATION_KEYS = [
   'ci_failure_triage',
 ] as const satisfies readonly BackgroundAutomationKey[];
 
-export type BetaBackgroundAutomationKey =
-  (typeof BETA_BACKGROUND_AUTOMATION_KEYS)[number];
+const AUTOMATION_KEYS_WITH_HISTORICAL_THREAD_FEEDBACK_SET =
+  new Set<BackgroundAutomationKey>(
+    AUTOMATION_KEYS_WITH_HISTORICAL_THREAD_FEEDBACK,
+  );
 
-const BETA_BACKGROUND_AUTOMATION_KEY_SET = new Set<BackgroundAutomationKey>(
-  BETA_BACKGROUND_AUTOMATION_KEYS,
-);
-
-export function isBetaBackgroundAutomationKey(
+export function supportsHistoricalThreadFeedback(
   automationKey: BackgroundAutomationKey,
-): automationKey is BetaBackgroundAutomationKey {
-  return BETA_BACKGROUND_AUTOMATION_KEY_SET.has(automationKey);
+): boolean {
+  return AUTOMATION_KEYS_WITH_HISTORICAL_THREAD_FEEDBACK_SET.has(automationKey);
 }
 
 const TASK_BACKED_REPORT_AUTOMATION_KEYS = [
@@ -342,12 +333,6 @@ export function isTaskBackedReportAutomationKey(
   return (TASK_BACKED_REPORT_AUTOMATION_KEYS as readonly string[]).includes(
     automationKey,
   );
-}
-
-export function getBackgroundAutomationAvailability(
-  automationKey: BackgroundAutomationKey,
-): BackgroundAutomationAvailability {
-  return isBetaBackgroundAutomationKey(automationKey) ? 'beta' : 'stable';
 }
 
 export type BackgroundAgentSettingsLike = Record<string, unknown>;

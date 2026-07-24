@@ -6,7 +6,7 @@ import { isRecognizedInitialSkillInvocation } from '../skillInvocationRouting';
 describe('packaged skill invocation routing', () => {
   const workflowsDir = path.resolve(import.meta.dirname, '..');
   const legacyImplementAlias = 'implement-repo' + '-change';
-  const betaChoreSkillNames = [
+  const automationSkillNames = [
     'code-quality-auditor',
     'fix-sentry-error',
     'refactor-code',
@@ -65,8 +65,8 @@ describe('packaged skill invocation routing', () => {
     ).toBe(true);
   });
 
-  it('recognizes packaged beta chore skills regardless of repository', () => {
-    for (const skillName of betaChoreSkillNames) {
+  it('recognizes packaged automation skills regardless of repository', () => {
+    for (const skillName of automationSkillNames) {
       expect(
         isRecognizedInitialSkillInvocation({
           skillName,
@@ -94,8 +94,8 @@ describe('packaged skill invocation routing', () => {
     expect(skillContent).toContain('org-scoped');
   });
 
-  it('ships beta chore skills in the standard packaged skill catalog', () => {
-    for (const skillName of betaChoreSkillNames) {
+  it('ships automation skills in the standard packaged skill catalog', () => {
+    for (const skillName of automationSkillNames) {
       expect(
         fs.existsSync(
           path.join(workflowsDir, 'skills', 'standard', skillName, 'SKILL.md'),

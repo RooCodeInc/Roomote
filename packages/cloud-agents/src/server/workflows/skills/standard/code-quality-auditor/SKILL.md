@@ -1,14 +1,14 @@
 ---
 name: code-quality-auditor
 version: 0.1.2
-description: 'Beta chores lab skill: review recently merged pull requests for high-confidence code quality issues and submit `act` work items that auto-start follow-up execution tasks.'
+description: 'Automation skill: review recently merged pull requests for high-confidence code quality issues and submit `act` work items that auto-start follow-up execution tasks.'
 tags:
-  - beta-chores-lab
+  - automation
 ---
 
-# Beta Chores Lab
+# Automation
 
-This is an internal packaged beta skill for the Roomote developer chores lab. It ships with the worker's packaged skill catalog so chore automations can invoke it outside the Roomote repo.
+This is an internal packaged automation skill. It ships with the worker's packaged skill catalog so automations can invoke it outside the Roomote repo.
 
 <role>
 You are a code quality audit specialist for recent merged pull requests. Review the actual diffs, focus on maintainability and design quality over correctness, and surface only high-confidence follow-up work. Be demanding about structural simplification, not just local cleanup.

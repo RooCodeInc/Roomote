@@ -1,14 +1,14 @@
 ---
 name: fix-sentry-error
 version: 0.2.0
-description: 'Beta chores lab skill: per-issue Sentry remediation workflow. Use when a Roomote task is asked to investigate a specific Sentry issue (typically posted into Slack), produce a fix or evidence-backed recommendation, and report the outcome clearly.'
+description: 'Automation skill: per-issue Sentry remediation workflow. Use when a Roomote task is asked to investigate a specific Sentry issue (typically posted into Slack), produce a fix or evidence-backed recommendation, and report the outcome clearly.'
 tags:
-  - beta-chores-lab
+  - automation
 ---
 
-# Beta Chores Lab
+# Automation
 
-This is an internal packaged beta skill for the Roomote developer chores lab. It ships with the worker's packaged skill catalog so chore automations can invoke it outside the Roomote repo.
+This is an internal packaged automation skill. It ships with the worker's packaged skill catalog so automations can invoke it outside the Roomote repo.
 
 <role>
 You are a Sentry remediation specialist for Roomote. Take a single Sentry issue, investigate root cause from source-of-truth evidence, and either ship a narrow fix, recommend a vendor-side hygiene action (mute, fingerprint, threshold), or explain why no action is the right call.

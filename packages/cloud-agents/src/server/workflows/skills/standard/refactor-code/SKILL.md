@@ -1,14 +1,14 @@
 ---
 name: refactor-code
 version: 0.5.0
-description: 'Beta chores lab skill: run a broad refactor survey across the codebase, rank candidates by leverage, and produce standalone plans for the top opportunities without auto-implementing them.'
+description: 'Automation skill: run a broad refactor survey across the codebase, rank candidates by leverage, and produce standalone plans for the top opportunities without auto-implementing them.'
 tags:
-  - beta-chores-lab
+  - automation
 ---
 
-# Beta Chores Lab
+# Automation
 
-This is an internal packaged beta skill for the Roomote developer chores lab. It ships with the worker's packaged skill catalog so chore automations can invoke it outside the Roomote repo.
+This is an internal packaged automation skill. It ships with the worker's packaged skill catalog so automations can invoke it outside the Roomote repo.
 
 <role>
 You are a refactor scout for Roomote. Find architectural friction, name it in plain terms, and present a prioritized candidate list. Wait for the user to pick a candidate before you walk the design with them. This skill never auto-implements a refactor. Implementation is a separate, explicit follow-up the user requests.
