@@ -805,7 +805,7 @@ describe('StepRepoSelection', () => {
     });
   });
 
-  it('auto-selects the only available repository by default', async () => {
+  it('leaves the only available repository unselected by default', async () => {
     mockRepositories.splice(0, mockRepositories.length, {
       id: 'repo-1',
       fullName: 'acme/api',
@@ -815,35 +815,11 @@ describe('StepRepoSelection', () => {
 
     await renderStepRepoSelection();
 
-    expect(screen.getByLabelText(/acme\/api/i)).toBeChecked();
+    expect(screen.getByLabelText(/acme\/api/i)).not.toBeChecked();
     expect(
-      screen.getByRole('button', {
-        name: 'Continue',
-      }),
-    ).toBeEnabled();
-  });
-
-  it('does not re-select the only repository after the user unchecks it', async () => {
-    mockRepositories.splice(0, mockRepositories.length, {
-      id: 'repo-1',
-      fullName: 'acme/api',
-      private: false,
-      defaultBranch: 'main',
-    });
-
-    await renderStepRepoSelection();
-
-    const checkbox = screen.getByLabelText(/acme\/api/i);
-    expect(checkbox).toBeChecked();
-
-    fireEvent.click(checkbox);
-
-    expect(checkbox).not.toBeChecked();
-    expect(
-      screen.queryByRole('button', {
-        name: 'Continue',
-      }),
+      screen.queryByRole('button', { name: 'Continue' }),
     ).not.toBeInTheDocument();
+    expect(mockSaveSelection).not.toHaveBeenCalled();
   });
 
   it('requires at least one repository before Continue persists selection', async () => {

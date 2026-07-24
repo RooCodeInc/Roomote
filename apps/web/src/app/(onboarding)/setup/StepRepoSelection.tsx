@@ -109,9 +109,6 @@ export function StepRepoSelection({
   const [setupGuidance, setSetupGuidance] = useState(initialSetupGuidance);
   const [isRefreshPending, setIsRefreshPending] = useState(false);
   const refreshPromiseRef = useRef<Promise<unknown> | null>(null);
-  const hasAutoSelectedSingleRepoRef = useRef(
-    initialSelectedRepositoryIds.length > 0,
-  );
   const savedLaunchInputRef = useRef<{
     repositoryIds: string[];
     setupGuidance?: string;
@@ -154,33 +151,6 @@ export function StepRepoSelection({
     [repositories.data],
   );
   const showRepositoryFilter = sortedRepositories.length > 5;
-
-  useEffect(() => {
-    if (hasAutoSelectedSingleRepoRef.current) {
-      return;
-    }
-
-    if (repositories.isPending || repositories.data === undefined) {
-      return;
-    }
-
-    if (selectedRepositoryIds.length > 0) {
-      hasAutoSelectedSingleRepoRef.current = true;
-      return;
-    }
-
-    if (sortedRepositories.length !== 1) {
-      return;
-    }
-
-    hasAutoSelectedSingleRepoRef.current = true;
-    setSelectedRepositoryIds([sortedRepositories[0]!.id]);
-  }, [
-    repositories.data,
-    repositories.isPending,
-    selectedRepositoryIds.length,
-    sortedRepositories,
-  ]);
 
   useEffect(() => {
     if (!showRepositoryFilter && repositoryFilter) {
