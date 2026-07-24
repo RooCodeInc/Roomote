@@ -327,6 +327,17 @@
       opacity: 1;
     }
   }
+
+  @keyframes squish-out {
+    0% {
+      overflow: hidden;
+      max-width: 1000px;
+    }
+    100% {
+      overflow: hidden;
+      max-width: 0;
+    }
+  }
 }
 
 /* Lucide icon defaults */
