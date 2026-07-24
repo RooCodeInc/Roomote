@@ -24,7 +24,6 @@ knip.json
 # monorepo
 .turbo/
 **/.turbo/
-apps/docs/
 
 # next.js
 **/.next/

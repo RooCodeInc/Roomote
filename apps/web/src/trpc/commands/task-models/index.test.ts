@@ -345,6 +345,41 @@ describe('lookupTaskModelCommand', () => {
     );
   });
 
+  it('uses a persisted OpenRouter key for custom model lookup', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      OPENROUTER_API_KEY: 'saved-openrouter-key',
+    });
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            id: 'google/gemini-3.5-flash-lite',
+            name: 'Google: Gemini 3.5 Flash Lite',
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'openrouter/google/gemini-3.5-flash-lite',
+      }),
+    ).resolves.toMatchObject({
+      displayName: 'Google: Gemini 3.5 Flash Lite',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/model/google/gemini-3.5-flash-lite',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer saved-openrouter-key',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
   it('extracts reasoning support from the OpenRouter supported_parameters list', async () => {
     process.env.OPENROUTER_API_KEY = 'openrouter-test-key';
     fetchMock.mockResolvedValue(
@@ -1190,7 +1225,7 @@ describe('task model provider commands', () => {
     expect(anthropicModels.map((model) => model.id)).toEqual(
       expect.arrayContaining([
         'anthropic/claude-sonnet-5',
-        'anthropic/claude-opus-4-8',
+        'anthropic/claude-opus-5',
         'anthropic/claude-haiku-4-5',
       ]),
     );
@@ -1202,6 +1237,43 @@ describe('task model provider commands', () => {
     // Unconnected providers contribute nothing.
     expect(result.models.some((model) => model.id.startsWith('google/'))).toBe(
       false,
+    );
+  });
+
+  it('keeps role-selected models listed and enabled after they leave the recommended list', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
+    // Both role selections reference models that are no longer in the
+    // recommended catalog (a release dropped them).
+    mockFindDeploymentSettings.mockResolvedValue({
+      taskModelSettings: null,
+      runtimeModelConfig: {
+        roomoteSmallModel: 'openrouter/google/gemini-3.5-flash',
+        roomoteCodeReviewModel: 'openrouter/anthropic/claude-opus-4.8',
+        // Anthropic direct is not connected, so this dangling selection must
+        // not resurrect a row the deployment cannot run.
+        roomotePlanningModel: 'anthropic/claude-opus-4.8',
+      },
+    });
+
+    const result = await getTaskModelSettingsCommand(buildMockAuth());
+    const modelById = new Map(result.models.map((model) => [model.id, model]));
+
+    expect(modelById.get('openrouter/google/gemini-3.5-flash')).toMatchObject({
+      enabled: true,
+    });
+    expect(modelById.get('openrouter/anthropic/claude-opus-4.8')).toMatchObject(
+      { enabled: true },
+    );
+    expect(modelById.has('anthropic/claude-opus-4.8')).toBe(false);
+
+    // The role selectors keep rendering their current selection.
+    expect(result.helperModelOptions.map((option) => option.id)).toEqual(
+      expect.arrayContaining([
+        'openrouter/google/gemini-3.5-flash',
+        'openrouter/anthropic/claude-opus-4.8',
+      ]),
     );
   });
 
@@ -1343,13 +1415,13 @@ describe('task model provider commands', () => {
     ).toEqual([
       'anthropic/claude-fable-5',
       'anthropic/claude-haiku-4-5',
-      'anthropic/claude-opus-4-8',
+      'anthropic/claude-opus-5',
       'anthropic/claude-sonnet-5',
     ]);
     expect([...seededSettings.allowedModelIds].sort()).toEqual([
       'anthropic/claude-fable-5',
       'anthropic/claude-haiku-4-5',
-      'anthropic/claude-opus-4-8',
+      'anthropic/claude-opus-5',
       'anthropic/claude-sonnet-5',
     ]);
     expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5');

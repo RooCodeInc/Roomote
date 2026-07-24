@@ -1,5 +1,5 @@
 import { standardTask } from '../standardTask';
-import { PACKAGED_BETA_CHORE_SKILL_INVOCATIONS } from '../skillInvocationRouting';
+import { PACKAGED_AUTOMATION_SKILL_INVOCATIONS } from '../skillInvocationRouting';
 import { buildStructuredTaskRequest } from '../utils';
 
 describe('Standard Task explicit invocation routing', () => {
@@ -157,12 +157,12 @@ describe('Standard Task explicit invocation routing', () => {
     expect(prompt.startsWith('$update-dependencies\n<request>')).toBe(true);
   });
 
-  // Independent catalog of packaged beta chore skills that should route as
+  // Independent catalog of packaged automation skills that should route as
   // authoritative entry points for every repo. Hardcoded here on purpose so a
   // future edit that drops a skill from the production list also has to
   // delete its line below; otherwise the equality assertion below catches
   // the drift instead of letting both lists shrink in lockstep.
-  const EXPECTED_BETA_CHORE_SKILLS = [
+  const EXPECTED_AUTOMATION_SKILLS = [
     'code-quality-auditor',
     'fix-sentry-error',
     'refactor-code',
@@ -171,17 +171,17 @@ describe('Standard Task explicit invocation routing', () => {
     'triage-sentry',
   ] as const;
 
-  it('exposes the packaged beta chore skill catalog as authoritative entry points', () => {
-    expect([...PACKAGED_BETA_CHORE_SKILL_INVOCATIONS].sort()).toEqual(
-      [...EXPECTED_BETA_CHORE_SKILLS].sort(),
+  it('exposes the packaged automation skill catalog as authoritative entry points', () => {
+    expect([...PACKAGED_AUTOMATION_SKILL_INVOCATIONS].sort()).toEqual(
+      [...EXPECTED_AUTOMATION_SKILLS].sort(),
     );
   });
 
-  it('treats canonical beta chore lab skill invocations as authoritative inside the Roomote internal repo', () => {
-    for (const skillName of EXPECTED_BETA_CHORE_SKILLS) {
+  it('treats canonical automation skill invocations as authoritative inside the Roomote internal repo', () => {
+    for (const skillName of EXPECTED_AUTOMATION_SKILLS) {
       const invocation = `$${skillName}`;
       const { prompt } = standardTask({
-        description: `${invocation}\n\nRun the beta chore lab workflow.`,
+        description: `${invocation}\n\nRun the automation workflow.`,
         repo: 'Roomote/example-app',
         requestFormat: 'structured',
       });
@@ -190,11 +190,11 @@ describe('Standard Task explicit invocation routing', () => {
     }
   });
 
-  it('treats beta chore lab skill invocations as authoritative in other customer repos too', () => {
-    for (const skillName of EXPECTED_BETA_CHORE_SKILLS) {
+  it('treats automation skill invocations as authoritative in other customer repos too', () => {
+    for (const skillName of EXPECTED_AUTOMATION_SKILLS) {
       const invocation = `$${skillName}`;
       const { prompt } = standardTask({
-        description: `${invocation}\n\nRun the beta chore lab workflow.`,
+        description: `${invocation}\n\nRun the automation workflow.`,
         repo: 'acme/widgets',
         requestFormat: 'structured',
       });

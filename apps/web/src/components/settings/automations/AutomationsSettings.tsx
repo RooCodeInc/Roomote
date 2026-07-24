@@ -239,7 +239,6 @@ type AutomationDefinition = {
   label: string;
   description: string;
   icon: ComponentType<{ className?: string }>;
-  availability?: 'stable' | 'beta';
   /** Compact label for the chat surfaces the automation can report to. */
   commsBadge?: string;
   /** Compact label for the source-control providers the automation supports. */
@@ -398,7 +397,6 @@ function getAutomationDefinition(
     label: descriptor.label,
     description: TRIGGERABLE_AUTOMATION_DESCRIPTIONS[automationKey],
     icon,
-    availability: descriptor.availability,
     ...getAutomationCapabilityBadges(automationKey),
   };
 }
@@ -463,7 +461,6 @@ const SCHEDULE_ONLY_AUTOMATION_DEFINITIONS = Object.fromEntries(
       description:
         SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id].description,
       icon: SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id].icon,
-      availability: automation.availability,
       ...getAutomationCapabilityBadges(automation.automationKey),
     },
   ]),
@@ -1598,9 +1595,6 @@ function AutomationTitle({ automation }: { automation: AutomationDefinition }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <span>{automation.label}</span>
-      {automation.availability === 'beta' ? (
-        <Badge variant="secondary">Beta</Badge>
-      ) : null}
       {automation.commsBadge ? (
         <Badge variant="outline" className="font-normal text-muted-foreground">
           {automation.commsBadge}

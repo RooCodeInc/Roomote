@@ -411,7 +411,7 @@ export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
  * when the workspace repositories are unknown or span providers.
  */
 async function resolveTaskRunSourceControlProvider(
-  taskRun: Pick<TaskRun, 'payload'>,
+  taskRun: Pick<TaskRun, 'id' | 'payload'>,
 ): Promise<SourceControlProvider> {
   const payload = taskRun.payload as { sourceControlProvider?: unknown };
 
@@ -436,6 +436,15 @@ async function resolveTaskRunSourceControlProvider(
   if (resolvedProvider) {
     return resolvedProvider;
   }
+
+  // The GitHub default is wrong whenever the workspace actually spans
+  // providers — token minting then fails on the non-GitHub repository names.
+  // Launch sites are expected to stamp the payload or split multi-provider
+  // scopes into per-provider runs; log loudly so the surface that forgot is
+  // diagnosable from the run's cancellation.
+  console.warn(
+    `[resolveTaskRunSourceControlProvider] Task run ${taskRun.id} has no sourceControlProvider stamp and its ${workspace.type} workspace resolves to no single provider; falling back to the GitHub default. The launch site should stamp the payload or split multi-provider scopes into per-provider runs.`,
+  );
 
   return resolveSourceControlProviderFromPayload(taskRun.payload);
 }

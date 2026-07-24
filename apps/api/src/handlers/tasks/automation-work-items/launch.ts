@@ -6,6 +6,7 @@ import {
   enqueueTask,
   escapeTaskContextText,
 } from '@roomote/cloud-agents/server';
+import { finalizeAutomationLaunch } from '@roomote/sdk/server/automation-post-launch-finalization';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
   and,
@@ -13,7 +14,6 @@ import {
   db,
   eq,
   finalizeWorkItemLaunched,
-  updateBackgroundAutomationSlackThreadMetadata,
   workItems,
 } from '@roomote/db/server';
 
@@ -342,18 +342,26 @@ export async function launchActWorkItems(params: {
         },
       );
 
-      if (
-        workItemChatTarget?.provider === 'slack' &&
-        workItemChatTarget.threadTs &&
-        linkedTaskId
-      ) {
-        await updateBackgroundAutomationSlackThreadMetadata(db, {
-          surface: 'slack',
-          slackChannelId: workItemChatTarget.channelId,
-          threadTs: workItemChatTarget.threadTs,
-          metadata: {
-            sourceTaskId: linkedTaskId,
+      if (workItemChatTarget && linkedTaskId) {
+        await finalizeAutomationLaunch({
+          conversation: {
+            provider: workItemChatTarget.provider,
+            channelId:
+              workItemChatTarget.provider === 'telegram'
+                ? workItemChatTarget.chatId
+                : workItemChatTarget.provider === 'teams'
+                  ? workItemChatTarget.conversationId
+                  : workItemChatTarget.channelId,
+            rootMessageId:
+              workItemChatTarget.provider === 'slack'
+                ? workItemChatTarget.threadTs
+                : workItemChatTarget.provider === 'discord'
+                  ? workItemChatTarget.messageId
+                  : undefined,
           },
+          taskId: linkedTaskId,
+          context: '[submitAutomationWorkItems]',
+          warn: apiLogger.warn.bind(apiLogger),
         });
       }
     } catch (error) {

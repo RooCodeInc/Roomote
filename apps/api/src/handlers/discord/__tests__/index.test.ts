@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   upsertInstallation: vi.fn(),
   findActiveRun: vi.fn(),
   findCompletedRun: vi.fn(),
+  findAutomationReportRun: vi.fn(),
   findSourceRun: vi.fn(),
   processAttachments: vi.fn(),
   queueMessage: vi.fn(),
@@ -89,6 +90,7 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/sdk/server/communication', () => ({
   findActiveCommunicationTaskRun: mocks.findActiveRun,
   findCompletedCommunicationTaskRunWithSnapshot: mocks.findCompletedRun,
+  findTaskBackedAutomationReportRun: mocks.findAutomationReportRun,
   findCommunicationTaskRunBySourceEvent: mocks.findSourceRun,
   resumeCommunicationTaskFromSnapshot: mocks.resumeTask,
   attachOutOfBandContextToCommunicationMessage: mocks.attachOutOfBand,
@@ -221,6 +223,7 @@ describe('Discord Gateway event handler', () => {
     mocks.findInstallation.mockResolvedValue(null);
     mocks.findActiveRun.mockResolvedValue(undefined);
     mocks.findCompletedRun.mockResolvedValue(null);
+    mocks.findAutomationReportRun.mockResolvedValue(null);
     mocks.findSourceRun.mockResolvedValue(null);
     mocks.removeReaction.mockResolvedValue(undefined);
     mocks.processAttachments.mockResolvedValue({
@@ -510,6 +513,144 @@ describe('Discord Gateway event handler', () => {
         }),
       }),
     );
+  });
+
+  it('treats an unmentioned reply to an announcer report root as a task entry', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+    mocks.findAutomationReportRun.mockResolvedValue({
+      id: 11,
+      taskId: 'announcer-task',
+      userId: null,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          id: 'message-2',
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: 'Could you expand on the migration note?',
+          message_reference: {
+            message_id: 'announcer-root',
+            channel_id: 'channel-1',
+          },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.findAutomationReportRun).toHaveBeenCalledWith({
+      provider: 'discord',
+      channelId: 'channel-1',
+      messageId: 'announcer-root',
+    });
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isRoomoteThread: true,
+        ownedThreadUserId: null,
+        isAutomationReportThread: true,
+      }),
+    );
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({ replyToMessageId: 'announcer-root' }),
+    );
+  });
+
+  it('routes an exact active announcer root ahead of a newer run in the channel', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+    mocks.findAutomationReportRun.mockResolvedValue({
+      id: 11,
+      status: 'running',
+      taskId: 'announcer-task-one',
+      userId: 'roomote-user-1',
+    });
+    mocks.findActiveRun.mockResolvedValue({
+      id: 22,
+      status: 'running',
+      taskId: 'announcer-task-two',
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          id: 'message-2',
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> follow up on the first report',
+          mentions: [{ id: 'bot-1', username: 'roomote' }],
+          message_reference: {
+            message_id: 'announcer-root-one',
+            channel_id: 'channel-1',
+          },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.queueMessage).toHaveBeenCalledWith(
+      'discord',
+      11,
+      expect.objectContaining({ text: 'follow up on the first report' }),
+    );
+    expect(mocks.findActiveRun).not.toHaveBeenCalled();
+  });
+
+  it('resumes an exact announcer root snapshot ahead of a newer run in the channel', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+    const reportRun = {
+      id: 11,
+      status: 'completed',
+      taskId: 'announcer-task-one',
+      payload: {},
+      port: null,
+      snapshotId: 'snapshot-one',
+      snapshotCreatedAt: new Date(),
+    };
+    mocks.findAutomationReportRun.mockResolvedValue(reportRun);
+    mocks.findActiveRun.mockResolvedValue({
+      id: 22,
+      status: 'running',
+      taskId: 'announcer-task-two',
+    });
+    mocks.resumeTask.mockResolvedValue({ id: 12, taskId: 'task-resumed' });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          id: 'message-2',
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> follow up on the first report',
+          mentions: [{ id: 'bot-1', username: 'roomote' }],
+          message_reference: {
+            message_id: 'announcer-root-one',
+            channel_id: 'channel-1',
+          },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.resumeTask).toHaveBeenCalledWith(
+      expect.objectContaining({ completedRun: reportRun }),
+    );
+    expect(mocks.findActiveRun).not.toHaveBeenCalled();
+    expect(mocks.findCompletedRun).not.toHaveBeenCalled();
   });
 
   it('still launches when the initial eyes reaction fails', async () => {

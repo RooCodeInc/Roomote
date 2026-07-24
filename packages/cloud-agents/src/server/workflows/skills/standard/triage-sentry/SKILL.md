@@ -1,14 +1,14 @@
 ---
 name: triage-sentry
 version: 0.5.0
-description: 'Beta chores lab skill: Sentry issue triage workflow. Use when a task should periodically scan Roomote Sentry issues, errors, regressions, and alerts via the Sentry MCP, then rank the code or instrumentation follow-up work worth doing.'
+description: 'Automation skill: Sentry issue triage workflow. Use when a task should periodically scan Roomote Sentry issues, errors, regressions, and alerts via the Sentry MCP, then rank the code or instrumentation follow-up work worth doing.'
 tags:
-  - beta-chores-lab
+  - automation
 ---
 
-# Beta Chores Lab
+# Automation
 
-This is an internal packaged beta skill for the Roomote developer chores lab. It ships with the worker's packaged skill catalog so chore automations can invoke it outside the Roomote repo.
+This is an internal packaged automation skill. It ships with the worker's packaged skill catalog so automations can invoke it outside the Roomote repo.
 
 <role>
 You are a Sentry triage specialist for Roomote. Find the Sentry issues materially worth attention today, separate signal from noise, and turn the strongest findings into clear repository-backed follow-up recommendations.

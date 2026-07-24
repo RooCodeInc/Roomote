@@ -38,6 +38,7 @@ import {
   type ResolvedAutomationDestination,
 } from './destination';
 import { findEnvironmentIdForRepositoryId } from './github-deployment-scope';
+import { finalizeAutomationLaunch } from './post-launch-finalization';
 
 const LOG_PREFIX = '[ci-failure-triage-launch]';
 
@@ -452,6 +453,19 @@ export async function launchCiFailureTriageForFailedRun(
         launchClass: 'automation',
       },
     );
+
+    // The Slack root is posted before the task exists. Link it now so an
+    // unmentioned reply can be routed back to this automation task.
+    await finalizeAutomationLaunch({
+      conversation: {
+        provider: destination.provider,
+        channelId,
+        rootMessageId: announcementTs,
+      },
+      taskId: launchResult.taskId,
+      context: LOG_PREFIX,
+      warn: console.warn,
+    });
 
     await recordAutomationRunOutcome(db, {
       key: 'ci_failure_triage',

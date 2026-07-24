@@ -2,7 +2,7 @@ import {
   stripLeadingRawSlackMention,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
-import { isBetaBackgroundAutomationKey } from '@roomote/types';
+import { isTaskBackedReportAutomationKey } from '@roomote/types';
 import { recordSlackConversationMessageBestEffort } from '@roomote/sdk/server';
 import {
   getLatestSlackBotReply,
@@ -58,11 +58,11 @@ type RoomoteOwnedSlackThreadMatch = {
   userId: string | null;
   slackUserId: string | null;
   /**
-   * True when the thread-bound task was launched by a custom automation.
-   * These report threads have a bot-authored root and no owning Slack user,
-   * so unmentioned-reply routing treats any human reply as eligible.
+   * True when the thread-bound task was launched by an automation. These
+   * report threads have a bot-authored root and no owning Slack user, so
+   * unmentioned-reply routing treats any human reply as eligible.
    */
-  isCustomAutomationThread: boolean;
+  isAutomationReportThread: boolean;
 };
 
 export async function findRoomoteOwnedSlackThread(params: {
@@ -117,7 +117,7 @@ export async function findRoomoteOwnedSlackThread(params: {
       const match = {
         userId: job.userId,
         slackUserId: typeof payload.user === 'string' ? payload.user : null,
-        isCustomAutomationThread,
+        isAutomationReportThread: isCustomAutomationThread,
       } satisfies RoomoteOwnedSlackThreadMatch;
 
       if (match.slackUserId) {
@@ -138,7 +138,7 @@ export async function findRoomoteOwnedSlackThread(params: {
   const sourceTaskId =
     trackedAutomationThread &&
     trackedAutomationThread.automationKey != null &&
-    isBetaBackgroundAutomationKey(trackedAutomationThread.automationKey) &&
+    isTaskBackedReportAutomationKey(trackedAutomationThread.automationKey) &&
     typeof trackedAutomationThread.metadata?.sourceTaskId === 'string' &&
     trackedAutomationThread.metadata.sourceTaskId.trim().length > 0
       ? trackedAutomationThread.metadata.sourceTaskId
@@ -153,7 +153,7 @@ export async function findRoomoteOwnedSlackThread(params: {
       return {
         userId: sourceTaskRun.userId,
         slackUserId: null,
-        isCustomAutomationThread,
+        isAutomationReportThread: true,
       };
     }
 
@@ -178,7 +178,7 @@ export async function findRoomoteOwnedSlackThread(params: {
         userId:
           sourceTaskRunById.initiatorUserId ?? sourceTaskRunById.actingUserId,
         slackUserId: null,
-        isCustomAutomationThread,
+        isAutomationReportThread: true,
       };
     }
   }
@@ -193,7 +193,7 @@ export async function findRoomoteOwnedSlackThread(params: {
       fallbackMatch ?? {
         userId: null,
         slackUserId: null,
-        isCustomAutomationThread,
+        isAutomationReportThread: isCustomAutomationThread,
       }
     );
   }

@@ -106,20 +106,30 @@ describe('routeTask', () => {
     });
   });
 
-  it('uses pasted GitHub issue context when choosing a workspace', async () => {
+  it('fetches pasted GitHub issue context when the precheck asks for it', async () => {
     mockCallRouterMcpTool.mockResolvedValue({
       title: 'Fix the dashboard refresh failure',
       body: 'The dashboard API request belongs to the web application.',
     });
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'The linked issue describes the web application.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-      },
-    });
+    mockGenerateTrackedNonTaskObject
+      .mockResolvedValueOnce({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The message alone does not identify the workspace.',
+          confidence: 0.4,
+          needsExternalLookup: true,
+          externalReference: 'acme/web#42',
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The linked issue describes the web application.',
+          confidence: 0.92,
+          needsExternalLookup: false,
+          externalReference: null,
+        },
+      });
 
     const result = await routeTask(
       createContext({
@@ -142,7 +152,8 @@ describe('routeTask', () => {
         issue_number: 42,
       },
     });
-    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenLastCalledWith(
       expect.objectContaining({
         prompt: expect.stringContaining('Fix the dashboard refresh failure'),
       }),
@@ -153,6 +164,118 @@ describe('routeTask', () => {
         debug: {
           phase: 'mcp',
           toolsUsed: ['github.issue_read'],
+          needsExternalLookup: true,
+        },
+      },
+    });
+  });
+
+  it('skips the issue fetch when the precheck routes without external context', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'The message already identifies the dashboard work.',
+        confidence: 0.95,
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        taskDescription:
+          'Fix the dashboard refresh bug, context: https://github.com/acme/web/issues/42',
+      }),
+    );
+
+    expect(mockCallRouterMcpTool).not.toHaveBeenCalled();
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        debug: {
+          phase: 'direct',
+          toolsUsed: [],
+          needsExternalLookup: false,
+        },
+      },
+    });
+  });
+
+  it('resolves a bare issue reference from the precheck against configured repos', async () => {
+    mockCallRouterMcpTool.mockResolvedValue({
+      title: 'Dashboard export button broken',
+    });
+    mockGenerateTrackedNonTaskObject
+      .mockResolvedValueOnce({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The message references an issue by number only.',
+          confidence: 0.4,
+          needsExternalLookup: true,
+          externalReference: '#234',
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The referenced issue describes dashboard work.',
+          confidence: 0.9,
+          needsExternalLookup: false,
+          externalReference: null,
+        },
+      });
+
+    const result = await routeTask(
+      createContext({ taskDescription: 'Check issue #234' }),
+    );
+
+    expect(mockCallRouterMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: 'github',
+        toolName: 'issue_read',
+        args: expect.objectContaining({ issue_number: 234 }),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        debug: {
+          phase: 'mcp',
+          needsExternalLookup: true,
+        },
+      },
+    });
+  });
+
+  it('keeps the precheck decision when the requested fetch returns nothing', async () => {
+    mockCallRouterMcpTool.mockRejectedValue(new Error('Not connected'));
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'Best guess without the linked issue.',
+        confidence: 0.4,
+        needsExternalLookup: true,
+        externalReference: 'acme/web#42',
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        taskDescription:
+          'Please investigate https://github.com/acme/web/issues/42',
+      }),
+    );
+
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        debug: {
+          phase: 'direct',
+          toolsUsed: [],
+          needsExternalLookup: true,
         },
       },
     });
@@ -189,7 +312,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-4.8',
+        requestedModelId: 'openrouter/anthropic/claude-opus-5',
         modelConfidence: 0.97,
       },
     });
@@ -202,8 +325,8 @@ describe('routeTask', () => {
     }
 
     expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-4.8',
-      displayName: 'Claude Opus 4.8',
+      id: 'openrouter/anthropic/claude-opus-5',
+      displayName: 'Claude Opus 5',
       source: 'preference',
       confidence: 0.97,
     });
@@ -218,7 +341,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-4.8',
+        requestedModelId: 'openrouter/anthropic/claude-opus-5',
         modelConfidence: 0.95,
       },
     });
@@ -235,8 +358,8 @@ describe('routeTask', () => {
     }
 
     expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-4.8',
-      displayName: 'Claude Opus 4.8',
+      id: 'openrouter/anthropic/claude-opus-5',
+      displayName: 'Claude Opus 5',
       source: 'preference',
       confidence: 0.95,
     });
@@ -250,7 +373,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-4.8',
+        requestedModelId: 'openrouter/anthropic/claude-opus-5',
         modelConfidence: 0.6,
       },
     });
@@ -267,8 +390,8 @@ describe('routeTask', () => {
       displayName: expect.any(String),
       source: 'default',
       rejectedPick: {
-        id: 'openrouter/anthropic/claude-opus-4.8',
-        displayName: 'Claude Opus 4.8',
+        id: 'openrouter/anthropic/claude-opus-5',
+        displayName: 'Claude Opus 5',
         confidence: 0.6,
         reason: 'below_threshold',
       },
@@ -284,7 +407,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-4.8',
+        requestedModelId: 'openrouter/anthropic/claude-opus-5',
       },
     });
 
@@ -300,8 +423,8 @@ describe('routeTask', () => {
       displayName: expect.any(String),
       source: 'default',
       rejectedPick: {
-        id: 'openrouter/anthropic/claude-opus-4.8',
-        displayName: 'Claude Opus 4.8',
+        id: 'openrouter/anthropic/claude-opus-5',
+        displayName: 'Claude Opus 5',
         confidence: null,
         reason: 'below_threshold',
       },
@@ -379,8 +502,8 @@ describe('routeTask', () => {
         previousSuggestion: {
           workspaceValue: 'Full Stack',
           workspaceDisplayName: 'Full Stack',
-          modelId: 'openrouter/anthropic/claude-opus-4.8',
-          modelDisplayName: 'Claude Opus 4.8',
+          modelId: 'openrouter/anthropic/claude-opus-5',
+          modelDisplayName: 'Claude Opus 5',
         },
       }),
     );
@@ -391,8 +514,8 @@ describe('routeTask', () => {
     }
 
     expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-4.8',
-      displayName: 'Claude Opus 4.8',
+      id: 'openrouter/anthropic/claude-opus-5',
+      displayName: 'Claude Opus 5',
       source: 'preserved',
     });
   });
@@ -415,8 +538,8 @@ describe('routeTask', () => {
         previousSuggestion: {
           workspaceValue: 'Full Stack',
           workspaceDisplayName: 'Full Stack',
-          modelId: 'openrouter/anthropic/claude-opus-4.8',
-          modelDisplayName: 'Claude Opus 4.8',
+          modelId: 'openrouter/anthropic/claude-opus-5',
+          modelDisplayName: 'Claude Opus 5',
         },
       }),
     );
@@ -427,8 +550,8 @@ describe('routeTask', () => {
     }
 
     expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-4.8',
-      displayName: 'Claude Opus 4.8',
+      id: 'openrouter/anthropic/claude-opus-5',
+      displayName: 'Claude Opus 5',
       source: 'preserved',
       rejectedPick: {
         id: 'openrouter/openai/gpt-5.6-terra',

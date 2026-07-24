@@ -108,24 +108,27 @@ export const codeqlTriageJob = createScheduledTriageJob({
 
     return {
       kind: 'scan',
-      payload: {
-        repo: ALL_REPOSITORIES,
-        selectedRepositories: environmentBackedRepositories,
-        description: buildCodeqlTriagePrompt({
-          channelId,
-          destination,
-          repositoryFullNames: environmentBackedRepositories,
-          repositoryCoverage,
-          manualTrigger,
-          recentThreadFeedback,
-        }),
-        trigger: 'scheduled',
-        ...(destination.provider === 'slack'
-          ? { notifySlack: true, slackChannel: channelId }
-          : {}),
-        suggestionSource: 'codeql_triage',
-        visibleInTranscript: false,
-      },
+      payloads: [
+        {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: environmentBackedRepositories,
+          sourceControlProvider: 'github',
+          description: buildCodeqlTriagePrompt({
+            channelId,
+            destination,
+            repositoryFullNames: environmentBackedRepositories,
+            repositoryCoverage,
+            manualTrigger,
+            recentThreadFeedback,
+          }),
+          trigger: 'scheduled',
+          ...(destination.provider === 'slack'
+            ? { notifySlack: true, slackChannel: channelId }
+            : {}),
+          suggestionSource: 'codeql_triage',
+          visibleInTranscript: false,
+        },
+      ],
     };
   },
 });

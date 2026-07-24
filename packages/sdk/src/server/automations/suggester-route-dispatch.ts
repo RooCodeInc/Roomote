@@ -7,6 +7,10 @@ import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 import type { WorkItemStatus } from '@roomote/types';
 
 import {
+  partitionActiveRepositoriesByProvider,
+  type ActiveRepositoryProviderPartition,
+} from './github-deployment-scope';
+import {
   formatSlackChannelName,
   type SuggesterDeploymentContext,
   type SuggestionDispatchPlan,
@@ -42,56 +46,90 @@ async function enqueueSuggestionRoute(params: {
       !destinationFields.communicationProvider ||
       destinationFields.communicationProvider === 'slack';
 
-    // Suggestion scans run as the deployment service principal.
-    const launchResult = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.Scan,
-        payload: {
-          repo: ALL_REPOSITORIES,
-          selectedRepositories: params.repositoryFullNames,
-          ...(params.deployment.slackTeamId
-            ? { teamId: params.deployment.slackTeamId }
-            : {}),
-          description: buildSuggestedTasksPrompt({
-            repositoryFullNames: params.repositoryFullNames,
-            repositoryCoverage: params.repositoryCoverage,
-            routeContext: params.route.routeInstructions
-              ? {
-                  destinationChannelName: params.route.channelName,
-                  excludedGroupLabels: params.route.excludedGroupLabels,
-                  groupLabel:
-                    params.route.groupLabel ??
-                    formatSlackChannelName(null, params.route.channelId),
-                  isFallbackRoute: params.route.isFallbackRoute,
-                  routeInstructions: params.route.routeInstructions,
-                }
-              : null,
-            setupGuidance: null,
-            suggesterInstructions: params.route.suggesterInstructions,
-            previousSuggestions: params.previousSuggestions,
-            recentThreadFeedback: params.route.recentThreadFeedback,
-          }),
-          trigger: 'scheduled',
-          notifySlack: true,
-          suggestionSource: 'suggest_ideas',
-          visibleInTranscript: false,
-          ...(isSlackDestination
-            ? { slackChannel: params.route.channelId }
-            : {}),
-          ...destinationFields,
-        },
-      },
-      initiator: { kind: 'automation', key: 'suggester' },
-      workflow: 'scan',
-      surface: 'system',
-      trigger: params.triggerKind === 'manual' ? 'manual' : 'schedule',
-      visibility: 'hidden',
-      ...(isSlackDestination
-        ? { channels: { slackChannelId: params.route.channelId } }
-        : {}),
-    });
+    // A run's source-control token is minted for exactly one provider, so a
+    // route whose repository scope spans providers launches one scan per
+    // (provider, host) partition with an explicit stamp instead of a single
+    // ambiguous run that would fall back to the GitHub default.
+    const partitions = await partitionActiveRepositoriesByProvider(
+      params.repositoryFullNames,
+    );
 
-    return { success: true, taskId: launchResult.taskId };
+    const launchPartition = async (
+      partition: ActiveRepositoryProviderPartition,
+    ): Promise<string> => {
+      const partitionNames = new Set(partition.repositoryFullNames);
+
+      // Suggestion scans run as the deployment service principal.
+      const launchResult = await enqueueTask({
+        task: {
+          type: TaskPayloadKind.Scan,
+          payload: {
+            repo: ALL_REPOSITORIES,
+            selectedRepositories: partition.repositoryFullNames,
+            sourceControlProvider: partition.provider,
+            ...(partition.host ? { sourceControlHost: partition.host } : {}),
+            ...(params.deployment.slackTeamId
+              ? { teamId: params.deployment.slackTeamId }
+              : {}),
+            description: buildSuggestedTasksPrompt({
+              repositoryFullNames: partition.repositoryFullNames,
+              repositoryCoverage: params.repositoryCoverage.filter((coverage) =>
+                partitionNames.has(coverage.repositoryFullName),
+              ),
+              routeContext: params.route.routeInstructions
+                ? {
+                    destinationChannelName: params.route.channelName,
+                    excludedGroupLabels: params.route.excludedGroupLabels,
+                    groupLabel:
+                      params.route.groupLabel ??
+                      formatSlackChannelName(null, params.route.channelId),
+                    isFallbackRoute: params.route.isFallbackRoute,
+                    routeInstructions: params.route.routeInstructions,
+                  }
+                : null,
+              setupGuidance: null,
+              suggesterInstructions: params.route.suggesterInstructions,
+              previousSuggestions: params.previousSuggestions,
+              recentThreadFeedback: params.route.recentThreadFeedback,
+            }),
+            trigger: 'scheduled',
+            notifySlack: true,
+            suggestionSource: 'suggest_ideas',
+            visibleInTranscript: false,
+            ...(isSlackDestination
+              ? { slackChannel: params.route.channelId }
+              : {}),
+            ...destinationFields,
+          },
+        },
+        initiator: { kind: 'automation', key: 'suggester' },
+        workflow: 'scan',
+        surface: 'system',
+        trigger: params.triggerKind === 'manual' ? 'manual' : 'schedule',
+        visibility: 'hidden',
+        ...(isSlackDestination
+          ? { channels: { slackChannelId: params.route.channelId } }
+          : {}),
+      });
+
+      return launchResult.taskId;
+    };
+
+    if (partitions.length === 0) {
+      return {
+        success: false,
+        error: 'No active repositories matched the route repository scope.',
+      };
+    }
+
+    let firstTaskId: string | undefined;
+
+    for (const partition of partitions) {
+      const taskId = await launchPartition(partition);
+      firstTaskId ??= taskId;
+    }
+
+    return { success: true, taskId: firstTaskId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 

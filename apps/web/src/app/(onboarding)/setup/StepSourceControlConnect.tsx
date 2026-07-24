@@ -70,10 +70,12 @@ function getTokenBackedConnectCopy({
 export function StepSourceControlConnect({
   sourceControlSetup,
   onContinue,
+  onRemoveSyncMarker,
   onBack,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   onContinue: () => void;
+  onRemoveSyncMarker?: () => void;
   onBack?: () => void;
 }) {
   const trpc = useTRPC();
@@ -329,18 +331,14 @@ export function StepSourceControlConnect({
     void handleSyncRepositories();
 
     if (oauthAutoSyncMarkerPresent) {
-      const params = new URLSearchParams(window.location.search);
-      params.delete('sync');
-      const query = params.toString();
-      window.history.replaceState(
-        {},
-        '',
-        query
-          ? `${window.location.pathname}?${query}`
-          : window.location.pathname,
-      );
+      onRemoveSyncMarker?.();
     }
-  }, [handleSyncRepositories, oauthAutoSyncMarkerPresent, shouldAutoSync]);
+  }, [
+    handleSyncRepositories,
+    oauthAutoSyncMarkerPresent,
+    onRemoveSyncMarker,
+    shouldAutoSync,
+  ]);
 
   useEffect(() => {
     if (
@@ -351,20 +349,14 @@ export function StepSourceControlConnect({
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    params.delete('sync');
-    const query = params.toString();
-    window.history.replaceState(
-      {},
-      '',
-      query ? `${window.location.pathname}?${query}` : window.location.pathname,
-    );
+    onRemoveSyncMarker?.();
     onContinue();
   }, [
     alreadyConnected,
     needsAdoMicrosoftConnection,
     oauthAutoSyncMarkerPresent,
     onContinue,
+    onRemoveSyncMarker,
   ]);
 
   return (

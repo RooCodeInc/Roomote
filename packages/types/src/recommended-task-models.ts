@@ -30,7 +30,7 @@ type RecommendedTaskModel = {
 export const RECOMMENDED_TASK_MODELS = [
   { id: 'claude-fable-5', displayName: 'Claude Fable 5', family: 'Fable' },
   { id: 'claude-haiku-4-5', displayName: 'Claude Haiku 4.5', family: 'Haiku' },
-  { id: 'claude-opus-4-8', displayName: 'Claude Opus 4.8', family: 'Opus' },
+  { id: 'claude-opus-5', displayName: 'Claude Opus 5', family: 'Opus' },
   { id: 'claude-sonnet-5', displayName: 'Claude Sonnet 5', family: 'Sonnet' },
   { id: 'gpt-5-6-sol', displayName: 'GPT 5.6 Sol', family: 'GPT' },
   { id: 'gpt-5-6-terra', displayName: 'GPT 5.6 Terra', family: 'GPT' },
@@ -97,7 +97,7 @@ export function mapRecommendedTaskModels(
 export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'claude-fable-5': 'openrouter/anthropic/claude-fable-5',
   'claude-haiku-4-5': 'openrouter/anthropic/claude-haiku-4.5',
-  'claude-opus-4-8': 'openrouter/anthropic/claude-opus-4.8',
+  'claude-opus-5': 'openrouter/anthropic/claude-opus-5',
   'claude-sonnet-5': 'openrouter/anthropic/claude-sonnet-5',
   'gpt-5-6-sol': 'openrouter/openai/gpt-5.6-sol',
   'gpt-5-6-terra': 'openrouter/openai/gpt-5.6-terra',

@@ -13,14 +13,36 @@ const mockInstallation = vi.fn();
 const mockConnectApp = vi.fn();
 
 describe('GET /api/slack/install-after-auth', () => {
+  // getCallbackHost rewrites internal request origins (localhost) to the
+  // configured public app URL, so machine-level R_APP_URL/R_PUBLIC_URL (e.g. an
+  // ngrok host in the shell) leak into redirect assertions. Pin them per test.
+  const originalAppUrl = process.env.R_APP_URL;
+  const originalPublicUrl = process.env.R_PUBLIC_URL;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.R_APP_URL = 'http://localhost:13000';
+    delete process.env.R_PUBLIC_URL;
     mockCreateServerCaller.mockResolvedValue({
       slack: {
         installation: mockInstallation,
         connectApp: mockConnectApp,
       },
     } as never);
+  });
+
+  afterEach(() => {
+    if (originalAppUrl === undefined) {
+      delete process.env.R_APP_URL;
+    } else {
+      process.env.R_APP_URL = originalAppUrl;
+    }
+
+    if (originalPublicUrl === undefined) {
+      delete process.env.R_PUBLIC_URL;
+    } else {
+      process.env.R_PUBLIC_URL = originalPublicUrl;
+    }
   });
 
   it('redirects to the requested path when Slack is already installed', async () => {

@@ -16,7 +16,10 @@ import {
   evaluateUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
 } from '../shared/unmentioned-thread-reply.js';
-import { findLatestTeamsThreadTaskRun } from './find-active-teams-run.js';
+import {
+  findLatestTeamsThreadTaskRun,
+  findTaskBackedTeamsAutomationReportRun,
+} from './find-active-teams-run.js';
 
 /**
  * Normalizes bot/application identifiers so Bot Framework ids (`28:<appId>`)
@@ -147,8 +150,13 @@ export async function shouldRouteUnmentionedTeamsThreadReplyToAgent(params: {
     conversationId: metadata.communicationChannelId,
     threadId,
   });
+  const automationReportRun = await findTaskBackedTeamsAutomationReportRun({
+    conversationId: metadata.communicationChannelId,
+    threadId,
+  });
+  const taskBackedThreadRun = ownedThreadRun ?? automationReportRun;
 
-  if (!ownedThreadRun) {
+  if (!taskBackedThreadRun) {
     return false;
   }
 
@@ -179,9 +187,10 @@ export async function shouldRouteUnmentionedTeamsThreadReplyToAgent(params: {
     eventMessageId: messageId,
     senderUserId: senderAadObjectId,
     isThreadTaskOwner:
-      Boolean(ownedThreadRun.userId) &&
-      ownedThreadRun.userId === params.mappedUserId,
+      Boolean(taskBackedThreadRun.userId) &&
+      taskBackedThreadRun.userId === params.mappedUserId,
     isThreadRootAuthor,
+    isAutomationReportThread: Boolean(automationReportRun),
     threadMessages: toSharedHistoryMessages(
       threadMessages,
       normalizedBotAppId,

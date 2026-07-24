@@ -440,7 +440,7 @@ offers to act go in "followUpQuestion" and "followUpPrompt" instead. Rules:
   merge conflicts that are not already handled, write "followUpQuestion" as
   one short question asking whether the user wants the agent to resolve
   them, phrased with the verb "resolve" so it matches the reply buttons
-  labeled "Resolve these issues" and "Resolve all issues" (for example:
+  labeled "Resolve these issues" and "Auto-resolve on this PR" (for example:
   Would you like me to resolve these issues? or, for a single finding,
   Would you like me to resolve this issue?), and write "followUpPrompt" as a
   self-contained imperative instruction to the coding agent describing

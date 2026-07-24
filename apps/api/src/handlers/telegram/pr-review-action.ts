@@ -118,7 +118,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
 
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: query.id,
-      text: choice === 'auto' ? 'Resolving all issues.' : 'On it.',
+      text: choice === 'auto' ? 'Auto-resolve enabled.' : 'On it.',
     });
 
     if (chatId && messageId) {

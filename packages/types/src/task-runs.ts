@@ -991,6 +991,8 @@ const sharedTaskPayloadSchema = z.object({
    * automation launch in the worker, so it must survive schema parsing.
    */
   customAutomationId: z.string().optional(),
+  /** Built-in automation that may create a late-bound channel report thread. */
+  backgroundAutomationKey: z.string().optional(),
 });
 
 const queuedSnapshotResumeSlackMessageSchema = z.object({

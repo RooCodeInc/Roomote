@@ -63,6 +63,7 @@ import {
 } from './models-dev';
 import {
   appendRecommendedTaskModels,
+  appendSelectedTaskModels,
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from './auto-add-models';
@@ -313,14 +314,34 @@ export async function getTaskModelSettingsCommand(
     chatgptConnected,
     githubCopilotConnected,
   });
+  // Models selected for a runtime role (or as the default coding model) stay
+  // listed and active even when a release drops them from the recommended
+  // list, so their selectors keep rendering and saves keep validating.
+  const selectedModelIds = new Set(
+    [
+      settings.defaultModelId,
+      persistedRuntimeModelConfig.roomoteModel,
+      persistedRuntimeModelConfig.roomoteSmallModel,
+      persistedRuntimeModelConfig.roomoteVisionModel,
+      persistedRuntimeModelConfig.roomoteCodeReviewModel,
+      persistedRuntimeModelConfig.roomoteExploreModel,
+      persistedRuntimeModelConfig.roomotePlanningModel,
+    ]
+      .filter((modelId): modelId is string => Boolean(modelId))
+      .map(normalizeTaskModelId),
+  );
   // A provider must be connected before its models can be selected. This also
   // removes stale rows created by the old implicit OpenRouter default catalog.
-  const catalog = appendRecommendedTaskModels({
-    models: getTaskModelCatalog(settings).filter((model) => {
-      const providerId = getTaskModelProviderId(model.id);
+  const catalog = appendSelectedTaskModels({
+    models: appendRecommendedTaskModels({
+      models: getTaskModelCatalog(settings).filter((model) => {
+        const providerId = getTaskModelProviderId(model.id);
 
-      return providerId !== null && connectedProviderIds.has(providerId);
+        return providerId !== null && connectedProviderIds.has(providerId);
+      }),
+      connectedProviderIds,
     }),
+    selectedModelIds,
     connectedProviderIds,
   });
 
@@ -329,7 +350,9 @@ export async function getTaskModelSettingsCommand(
     models: catalog.map((option) => ({
       ...option,
       metadata: option.metadata ?? null,
-      enabled: settings.allowedModelIds.includes(option.id),
+      enabled:
+        settings.allowedModelIds.includes(option.id) ||
+        selectedModelIds.has(option.id),
       isDefault: settings.defaultModelId === option.id,
     })),
     runtimeModels: resolveRuntimeModelStatus({
@@ -1389,7 +1412,11 @@ export async function lookupTaskModelCommand(
     return lookupModelFromModelsDevCatalog(modelId);
   }
 
-  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  const runtimeOpenRouterKey = process.env.OPENROUTER_API_KEY?.trim();
+  const openRouterKey = runtimeOpenRouterKey
+    ? runtimeOpenRouterKey
+    : (await getPersistedEnvironmentVariableValues(['OPENROUTER_API_KEY']))
+        .OPENROUTER_API_KEY;
 
   if (!openRouterKey) {
     return {

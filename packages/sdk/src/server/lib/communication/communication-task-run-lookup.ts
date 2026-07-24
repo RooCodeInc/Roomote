@@ -6,6 +6,7 @@ import {
 } from '@roomote/types';
 import {
   and,
+  asc,
   db,
   desc,
   eq,
@@ -14,6 +15,7 @@ import {
   sql,
   taskRuns,
   tasks,
+  trackedMessages,
 } from '@roomote/db/server';
 
 type CommunicationConversationRef = {
@@ -31,6 +33,9 @@ const ACTIVE_SELECTION = {
   machineId: taskRuns.machineId,
   taskId: taskRuns.taskId,
   payload: taskRuns.payload,
+  port: taskRuns.port,
+  snapshotId: taskRuns.snapshotId,
+  snapshotCreatedAt: taskRuns.snapshotCreatedAt,
 };
 
 const SNAPSHOT_SELECTION = {
@@ -112,6 +117,73 @@ export async function findCompletedCommunicationTaskRunWithSnapshot(
     return null;
   }
   return withResolvedUserId(row);
+}
+
+/**
+ * Finds the task that produced an automation report root. Inbound replies use
+ * the provider's reply target, not the newest task in the channel, so reports
+ * remain routable after later tasks have run in the same conversation.
+ */
+export async function findTaskBackedAutomationReportRun(input: {
+  provider: CommunicationProvider;
+  channelId: string;
+  messageId: string;
+}) {
+  const [row] = await db
+    .select(ACTIVE_SELECTION)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        sql`${taskRuns.payload}->>'communicationProvider' = ${input.provider}`,
+        sql`${taskRuns.payload}->>'communicationChannelId' = ${input.channelId}`,
+        sql`${taskRuns.payload}->>'communicationMessageId' = ${input.messageId}`,
+        sql`${taskRuns.payload}->>'backgroundAutomationKey' = 'announcer'`,
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    // A report root is immutable. Prefer its first binding if historical data
+    // contains a duplicate rather than letting a newer task steal the reply.
+    .orderBy(asc(taskRuns.createdAt))
+    .limit(1);
+
+  if (row) {
+    return withResolvedUserId(row);
+  }
+
+  // Root-message delivery can finish after the task run is cleaned up. The
+  // tracked automation thread preserves the task binding for that case.
+  const [trackedThread] = await db
+    .select({ sourceTaskId: sql`${trackedMessages.metadata}->>'sourceTaskId'` })
+    .from(trackedMessages)
+    .where(
+      and(
+        eq(trackedMessages.surface, input.provider),
+        eq(trackedMessages.kind, 'automation_thread'),
+        eq(trackedMessages.automationKey, 'announcer'),
+        eq(trackedMessages.channelId, input.channelId),
+        eq(trackedMessages.threadTs, input.messageId),
+      ),
+    )
+    .limit(1);
+
+  const sourceTaskId =
+    typeof trackedThread?.sourceTaskId === 'string'
+      ? trackedThread.sourceTaskId
+      : null;
+  if (!sourceTaskId) {
+    return null;
+  }
+
+  const [sourceRun] = await db
+    .select(ACTIVE_SELECTION)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
+    .where(and(eq(taskRuns.taskId, sourceTaskId), isNull(taskRuns.canceledAt)))
+    .orderBy(asc(taskRuns.createdAt))
+    .limit(1);
+
+  return sourceRun ? withResolvedUserId(sourceRun) : null;
 }
 
 /**

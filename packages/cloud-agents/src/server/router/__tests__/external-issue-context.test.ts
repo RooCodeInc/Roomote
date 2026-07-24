@@ -99,4 +99,142 @@ describe('gatherExternalIssueContext', () => {
 
     expect(result).toEqual({ contextMessages: [], toolsUsed: [] });
   });
+
+  it('shares one lookup deadline across fetch attempts instead of extending it', async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.mocked(callRouterMcpTool).mockReturnValue(new Promise(() => {}));
+
+      const pending = gatherExternalIssueContext(
+        createContext('Investigate https://github.com/acme/web/issues/42'),
+      );
+
+      await vi.advanceTimersByTimeAsync(8_000);
+
+      expect(await pending).toEqual({ contextMessages: [], toolsUsed: [] });
+      expect(callRouterMcpTool).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resolves a bare Linear identifier from the precheck', async () => {
+    vi.mocked(callRouterMcpTool).mockResolvedValue({
+      title: 'Fix OAuth callback',
+    });
+
+    const result = await gatherExternalIssueContext(
+      createContext('Check ENG-512 when you get a chance'),
+      'ENG-512',
+    );
+
+    expect(callRouterMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: 'linear',
+        toolName: 'get_issue',
+        args: { id: 'ENG-512' },
+      }),
+    );
+    expect(result.contextMessages[0]?.content).toContain('[ENG-512]');
+  });
+
+  it('fans a bare issue number out across the configured repositories', async () => {
+    vi.mocked(callRouterMcpTool).mockResolvedValue({ title: 'Some issue' });
+
+    const result = await gatherExternalIssueContext(
+      createContextWithRepos('Check issue #234', ['acme/web', 'acme/api']),
+      '#234',
+    );
+
+    expect(callRouterMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: 'github',
+        args: expect.objectContaining({ repo: 'web', issue_number: 234 }),
+      }),
+    );
+    expect(callRouterMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serverId: 'github',
+        args: expect.objectContaining({ repo: 'api', issue_number: 234 }),
+      }),
+    );
+    expect(result.contextMessages[0]?.content).toContain('[acme/web#234]');
+    expect(result.contextMessages[0]?.content).toContain('[acme/api#234]');
+  });
+
+  it('only resolves a repo-qualified reference against configured repositories', async () => {
+    vi.mocked(callRouterMcpTool).mockResolvedValue({ title: 'Some issue' });
+
+    const configured = await gatherExternalIssueContext(
+      createContextWithRepos('Check acme/web#42', ['acme/web']),
+      'acme/web#42',
+    );
+
+    expect(configured.toolsUsed).toEqual(['github.issue_read']);
+
+    vi.clearAllMocks();
+    vi.mocked(callRouterMcpTool).mockResolvedValue({ title: 'Some issue' });
+
+    const unconfigured = await gatherExternalIssueContext(
+      createContextWithRepos('Check evil/repo#1', ['acme/web']),
+      'evil/repo#1',
+    );
+
+    expect(callRouterMcpTool).not.toHaveBeenCalled();
+    expect(unconfigured).toEqual({ contextMessages: [], toolsUsed: [] });
+  });
+
+  it('caps a bare-number fan-out at the first five configured repositories', async () => {
+    vi.mocked(callRouterMcpTool).mockResolvedValue({ title: 'Some issue' });
+
+    const result = await gatherExternalIssueContext(
+      createContextWithRepos('Check issue #234', [
+        'acme/web',
+        'acme/api',
+        'acme/mobile',
+        'acme/infra',
+        'acme/docs',
+        'acme/tooling',
+        'acme/design',
+      ]),
+      '#234',
+    );
+
+    const fetchedRepos = vi
+      .mocked(callRouterMcpTool)
+      .mock.calls.map(([options]) => (options.args as { repo: string }).repo);
+
+    expect(new Set(fetchedRepos)).toEqual(
+      new Set(['web', 'api', 'mobile', 'infra', 'docs']),
+    );
+    expect(result.contextMessages[0]?.content).toContain('[acme/docs#234]');
+    expect(result.contextMessages[0]?.content).not.toContain('acme/tooling');
+  });
+
+  it('prefers pasted issue URLs over the precheck reference', async () => {
+    vi.mocked(callRouterMcpTool).mockResolvedValue({ title: 'Some issue' });
+
+    await gatherExternalIssueContext(
+      createContext('Investigate https://github.com/acme/web/issues/42'),
+      'ENG-512',
+    );
+
+    expect(callRouterMcpTool).not.toHaveBeenCalledWith(
+      expect.objectContaining({ serverId: 'linear' }),
+    );
+  });
 });
+
+function createContextWithRepos(
+  taskDescription: string,
+  repositoryNames: string[],
+): RoutingContext {
+  return {
+    taskDescription,
+    source: { type: 'slack' },
+    availableEnvironments: [
+      { id: 'env-1', name: 'Full Stack', repositoryNames },
+    ],
+  };
+}

@@ -1,4 +1,5 @@
 import { SlackNotifier } from '@roomote/slack';
+import type { BackgroundAutomationKey } from '@roomote/types';
 import {
   and,
   asc,
@@ -73,6 +74,7 @@ export async function bindLateSlackThreadToTask(params: {
   threadTs: string;
   summaryText: string;
   automationWorkItemId?: string | null;
+  backgroundAutomationKey?: BackgroundAutomationKey | null;
 }): Promise<void> {
   const slackThreadPayloadPatch = JSON.stringify({
     channel: params.channelId,
@@ -106,6 +108,19 @@ export async function bindLateSlackThreadToTask(params: {
         payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
       })
       .where(eq(taskRuns.taskId, params.taskId));
+
+    if (params.backgroundAutomationKey) {
+      await upsertBackgroundAutomationSlackThread(tx, {
+        surface: 'slack',
+        automationKey: params.backgroundAutomationKey,
+        slackChannelId: params.channelId,
+        threadTs: params.threadTs,
+        summaryText: params.summaryText,
+        postedAt: new Date(),
+        metadata: { sourceTaskId: params.taskId },
+      });
+      return;
+    }
 
     if (!params.automationWorkItemId) {
       return;
