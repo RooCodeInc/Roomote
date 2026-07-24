@@ -73,11 +73,21 @@ const WORKER_QUERY_RETRYABLE_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
 const WORKER_QUERY_RETRY_MAX_ATTEMPTS = 4;
 const WORKER_QUERY_RETRY_BASE_DELAY_MS = 250;
 
+// Every worker callback RPC must resolve or fail within a bounded window. A
+// fetch with no deadline can hang forever on a half-dead connection, which
+// silently freezes any worker loop that awaits it (the queued-message pollers
+// serialize on the previous poll, so one hung RPC used to stop delivery for
+// the rest of the run's life). Generous enough for slow endpoints such as
+// large message-envelope uploads.
+const WORKER_FETCH_ATTEMPT_TIMEOUT_MS = 60_000;
+
 type FetchLike = typeof fetch;
 
 export interface WorkerQueryRetryOptions {
   maxAttempts?: number;
   baseDelayMs?: number;
+  /** Per-attempt deadline; a timed-out attempt is retried like a transport error. */
+  attemptTimeoutMs?: number;
 }
 
 // The worker's first callbacks claim its job through the public edge, and a
@@ -259,6 +269,59 @@ function getWorkerQueryRetryDelayMs(
   return baseDelayMs * 2 ** (attemptNumber - 1);
 }
 
+/**
+ * Deliberately not named `AbortError`/`TimeoutError`: the retry layer treats
+ * those as caller-initiated aborts and rethrows immediately, while an attempt
+ * that hit its own deadline should be retried like any transport failure.
+ */
+export class WorkerFetchAttemptTimeoutError extends Error {
+  constructor(requestUrl: string, timeoutMs: number) {
+    super(
+      `Worker callback fetch to ${requestUrl} timed out after ${timeoutMs}ms`,
+    );
+    this.name = 'WorkerFetchAttemptTimeoutError';
+  }
+}
+
+async function fetchWithAttemptTimeout(
+  baseFetch: FetchLike,
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+  requestUrl: string,
+): Promise<Response> {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = init?.signal
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : timeoutSignal;
+
+  // The deadline is enforced by an explicit race, not just the abort signal:
+  // the whole point is to unblock callers even when the underlying transport
+  // never observes the abort. The signal is still passed so a well-behaved
+  // fetch tears down its socket.
+  return new Promise<Response>((resolve, reject) => {
+    const onTimeout = () =>
+      reject(new WorkerFetchAttemptTimeoutError(requestUrl, timeoutMs));
+
+    timeoutSignal.addEventListener('abort', onTimeout, { once: true });
+    baseFetch(input, { ...init, signal }).then(
+      (response) => {
+        timeoutSignal.removeEventListener('abort', onTimeout);
+        resolve(response);
+      },
+      (error: unknown) => {
+        timeoutSignal.removeEventListener('abort', onTimeout);
+
+        if (timeoutSignal.aborted && !init?.signal?.aborted) {
+          reject(new WorkerFetchAttemptTimeoutError(requestUrl, timeoutMs));
+        } else {
+          reject(error);
+        }
+      },
+    );
+  });
+}
+
 export function createWorkerFetchWithRetry(
   baseFetch: FetchLike = globalThis.fetch.bind(globalThis),
   options: WorkerQueryRetryOptions = {},
@@ -280,15 +343,25 @@ export function createWorkerFetchWithRetry(
       (retryPlan.retryable
         ? retryPlan.baseDelayMs
         : WORKER_QUERY_RETRY_BASE_DELAY_MS);
+    const attemptTimeoutMs =
+      options.attemptTimeoutMs ?? WORKER_FETCH_ATTEMPT_TIMEOUT_MS;
+    const fetchOnce = () =>
+      fetchWithAttemptTimeout(
+        baseFetch,
+        input,
+        init,
+        attemptTimeoutMs,
+        requestUrl,
+      );
 
     if (!retryPlan.retryable || maxAttempts <= 1) {
-      const response = await baseFetch(input, init);
+      const response = await fetchOnce();
 
       await assertValidWorkerTrpcResponse(response, requestUrl);
       return response;
     }
 
-    const response = await retryAsync(() => baseFetch(input, init), {
+    const response = await retryAsync(fetchOnce, {
       maxAttempts,
       signal: init?.signal,
       getDelayMs: (attemptNumber) =>

@@ -476,6 +476,76 @@ describe('createWorkerFetchWithRetry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('bounds a hung fetch attempt with the per-attempt deadline', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() => new Promise<Response>(() => {}));
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      maxAttempts: 1,
+      baseDelayMs: 0,
+      attemptTimeoutMs: 20,
+    });
+
+    await expect(
+      workerFetch('https://api.roomote.dev/trpc', { method: 'GET' }),
+    ).rejects.toThrow(/timed out after 20ms/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a timed-out attempt and returns the later success', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      maxAttempts: 2,
+      baseDelayMs: 0,
+      attemptTimeoutMs: 20,
+    });
+
+    const response = await workerFetch('https://api.roomote.dev/trpc', {
+      method: 'GET',
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces caller aborts without rewriting them into attempt timeouts', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted', 'AbortError')),
+          );
+        }),
+    );
+    const controller = new AbortController();
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      maxAttempts: 3,
+      baseDelayMs: 0,
+      attemptTimeoutMs: 5_000,
+    });
+
+    const pending = workerFetch('https://api.roomote.dev/trpc', {
+      method: 'GET',
+      signal: controller.signal,
+    });
+
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('fails fast with a callback diagnostic when TRPC returns HTML', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response('<!DOCTYPE html><html><body>Wrong host</body></html>', {
