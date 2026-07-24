@@ -30,15 +30,6 @@ export function getBootstrapStepFromSetupStepParam(
   return step === 'auth-provider' || step === 'auth-env-vars' ? step : null;
 }
 
-export function getBootstrapStepPath(
-  step: BootstrapStep,
-  currentParams: URLSearchParams,
-): string {
-  const params = new URLSearchParams(currentParams);
-  params.set('step', step);
-  return `/setup?${params.toString()}`;
-}
-
 export function getNextBootstrapStep(
   authSetup: SetupAuthStatus | null | undefined,
   pendingAuthProvider?: SetupAuthProviderId | null,

@@ -12,7 +12,7 @@ import {
 import { useTRPC } from '@/trpc/client';
 import { useUser } from '@/hooks/useUser';
 
-import { SETUP_STEPS, getSetupStepPath, type SetupStep } from './types';
+import { SETUP_STEPS, getSetupPath, type SetupStep } from './types';
 import { useSetupAsyncSession } from './setup-session';
 import { hasSeenSetupWelcome } from './welcome-seen';
 
@@ -105,31 +105,24 @@ function readUrlStep(): SetupStep | null {
  */
 const TRANSIENT_ENTRY_PARAMS = ['slack', 'openrouter', 'reason'] as const;
 
-function stripTransientEntryParams() {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const params = new URLSearchParams(window.location.search);
+/**
+ * Returns the params without the transient entry params, or `null` when none
+ * were present.
+ */
+function stripTransientEntryParams(
+  params: URLSearchParams,
+): URLSearchParams | null {
+  const stripped = new URLSearchParams(params);
   let changed = false;
 
   for (const key of TRANSIENT_ENTRY_PARAMS) {
-    if (params.has(key)) {
-      params.delete(key);
+    if (stripped.has(key)) {
+      stripped.delete(key);
       changed = true;
     }
   }
 
-  if (!changed) {
-    return;
-  }
-
-  const query = params.toString();
-  window.history.replaceState(
-    {},
-    '',
-    query ? `${window.location.pathname}?${query}` : window.location.pathname,
-  );
+  return changed ? stripped : null;
 }
 
 function hasRealProgress(status: {
@@ -274,6 +267,15 @@ export function useSetupFlow(
   const lastUrlStepRef = useRef<SetupStep | null>(null);
   const syncedStepRef = useRef<SetupStep | null>(null);
   const ensuredTaskIdRef = useRef<string | null>(null);
+  // `router.push`/`router.replace` commit the address bar asynchronously, so
+  // `window.location.search` can still describe the previous URL while a
+  // navigation is in flight. Setup writes the URL from two places — step
+  // navigation here and the provider params in SetupPageClient — and both read
+  // and record through this ref so the later write merges into the pending
+  // query instead of reverting the other's change. Reading `window.location`
+  // directly let a provider sync restore a stale `step`, which stranded the
+  // server-rendered docs panel on the previous step's page.
+  const pendingSearchRef = useRef<string | null>(null);
   const setupSession = useSetupAsyncSession({
     currentTaskId: status?.setupNewState.onboardingTaskId ?? null,
   });
@@ -562,20 +564,53 @@ export function useSetupFlow(
     [shouldSkipPostOnboarding],
   );
 
-  const pushStepUrl = useCallback(
-    (nextStep: SetupStep) => {
-      lastUrlStepRef.current = nextStep;
-      router.push(getSetupStepPath(nextStep));
+  const readSetupSearchParams = useCallback(() => {
+    if (pendingSearchRef.current !== null) {
+      return new URLSearchParams(pendingSearchRef.current);
+    }
+
+    return new URLSearchParams(
+      typeof window === 'undefined' ? '' : window.location.search,
+    );
+  }, []);
+
+  const commitSetupUrl = useCallback(
+    (params: URLSearchParams, mode: 'push' | 'replace' = 'replace') => {
+      pendingSearchRef.current = params.toString();
+      const path = getSetupPath(params);
+
+      if (mode === 'push') {
+        router.push(path);
+        return;
+      }
+
+      router.replace(path);
     },
     [router],
   );
 
+  const writeStepUrl = useCallback(
+    (nextStep: SetupStep, mode: 'push' | 'replace') => {
+      lastUrlStepRef.current = nextStep;
+      const params = readSetupSearchParams();
+      params.set('step', nextStep);
+      commitSetupUrl(params, mode);
+    },
+    [commitSetupUrl, readSetupSearchParams],
+  );
+
+  const pushStepUrl = useCallback(
+    (nextStep: SetupStep) => {
+      writeStepUrl(nextStep, 'push');
+    },
+    [writeStepUrl],
+  );
+
   const replaceStepUrl = useCallback(
     (nextStep: SetupStep) => {
-      lastUrlStepRef.current = nextStep;
-      router.replace(getSetupStepPath(nextStep));
+      writeStepUrl(nextStep, 'replace');
     },
-    [router],
+    [writeStepUrl],
   );
 
   // Resolve a requested step (from a deep link or browser back/forward) into
@@ -636,7 +671,13 @@ export function useSetupFlow(
     if (resolvedStep === requestedStep) {
       // Valid deep link: keep the canonical `step` in the URL and only drop
       // the transient callback params so a refresh does not reprocess them.
-      stripTransientEntryParams();
+      const strippedParams = stripTransientEntryParams(readSetupSearchParams());
+
+      if (strippedParams && typeof window !== 'undefined') {
+        pendingSearchRef.current = strippedParams.toString();
+        window.history.replaceState({}, '', getSetupPath(strippedParams));
+      }
+
       lastUrlStepRef.current = resolvedStep;
     } else {
       // Missing, invalid, or gated step: correct the URL to the resolved step
@@ -645,6 +686,7 @@ export function useSetupFlow(
     }
   }, [
     entryContext.step,
+    readSetupSearchParams,
     replaceStepUrl,
     resolveDeepLinkStep,
     setStepWithTransition,
@@ -721,6 +763,9 @@ export function useSetupFlow(
         return;
       }
 
+      // The browser already committed the address bar, so it is authoritative
+      // again and any pending query we were tracking is obsolete.
+      pendingSearchRef.current = null;
       const requestedStep = readUrlStep();
       navigationHistoryRef.current = [];
       const resolvedStep = resolveDeepLinkStep(requestedStep);
@@ -857,6 +902,8 @@ export function useSetupFlow(
     goToNextStep,
     goToNextPostOnboardingStep,
     advancePostOnboardingStep,
+    readSetupSearchParams,
+    commitSetupUrl,
     status,
     isLoading: isLoading || !setupSession.hydrated,
     isError,
