@@ -193,7 +193,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           codeReview: {
-            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            modelId: 'openrouter/anthropic/claude-opus-5',
             reasoningEffort: 'high',
           },
           explore: {
@@ -201,7 +201,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           planning: {
-            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            modelId: 'openrouter/anthropic/claude-opus-5',
             reasoningEffort: 'high',
           },
         },
@@ -219,7 +219,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           codeReview: {
-            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            modelId: 'openrouter/anthropic/claude-opus-5',
             reasoningEffort: 'medium',
           },
           explore: {
@@ -227,7 +227,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           planning: {
-            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            modelId: 'openrouter/anthropic/claude-opus-5',
             reasoningEffort: 'medium',
           },
         },
@@ -264,9 +264,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // work follows the coding model ("same as coding").
     recommendedRoleModels: {
       helper: 'vercel/google/gemini-3.6-flash',
-      codeReview: 'vercel/anthropic/claude-opus-4.8',
+      codeReview: 'vercel/anthropic/claude-opus-5',
       explore: 'vercel/google/gemini-3.6-flash',
-      planning: 'vercel/anthropic/claude-opus-4.8',
+      planning: 'vercel/anthropic/claude-opus-5',
     },
   },
   {
@@ -346,9 +346,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedRoleModels: {
       helper: 'anthropic/claude-haiku-4-5',
-      codeReview: 'anthropic/claude-opus-4-8',
+      codeReview: 'anthropic/claude-opus-5',
       explore: 'anthropic/claude-haiku-4-5',
-      planning: 'anthropic/claude-opus-4-8',
+      planning: 'anthropic/claude-opus-5',
     },
   },
   {
@@ -435,9 +435,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     recommendedRoleModels: {
       helper: 'opencode/gemini-3.6-flash',
       vision: 'opencode/claude-sonnet-5',
-      codeReview: 'opencode/claude-opus-4-8',
+      codeReview: 'opencode/claude-opus-5',
       explore: 'opencode/gemini-3.6-flash',
-      planning: 'opencode/claude-opus-4-8',
+      planning: 'opencode/claude-opus-5',
     },
   },
   {
@@ -472,9 +472,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedRoleModels: {
       helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
-      codeReview: 'bedrock-mantle/anthropic.claude-opus-4-8',
+      codeReview: 'bedrock-mantle/anthropic.claude-opus-5',
       explore: 'bedrock-mantle/anthropic.claude-haiku-4-5',
-      planning: 'bedrock-mantle/anthropic.claude-opus-4-8',
+      planning: 'bedrock-mantle/anthropic.claude-opus-5',
     },
   },
   {
@@ -534,9 +534,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedRoleModels: {
       helper: 'github-copilot/claude-haiku-4.5',
-      codeReview: 'github-copilot/claude-opus-4.8',
+      codeReview: 'github-copilot/claude-opus-5',
       explore: 'github-copilot/claude-haiku-4.5',
-      planning: 'github-copilot/claude-opus-4.8',
+      planning: 'github-copilot/claude-opus-5',
     },
   },
   {

@@ -312,7 +312,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-4.8',
+        requestedModelId: 'openrouter/anthropic/claude-opus-5',
         modelConfidence: 0.97,
       },
     });
@@ -325,8 +325,8 @@ describe('routeTask', () => {
     }
 
     expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-4.8',
-      displayName: 'Claude Opus 4.8',
+      id: 'openrouter/anthropic/claude-opus-5',
+      displayName: 'Claude Opus 5',
       source: 'preference',
       confidence: 0.97,
     });
@@ -341,7 +341,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-4.8',
+        requestedModelId: 'openrouter/anthropic/claude-opus-5',
         modelConfidence: 0.95,
       },
     });
@@ -358,8 +358,8 @@ describe('routeTask', () => {
     }
 
     expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-4.8',
-      displayName: 'Claude Opus 4.8',
+      id: 'openrouter/anthropic/claude-opus-5',
+      displayName: 'Claude Opus 5',
       source: 'preference',
       confidence: 0.95,
     });
@@ -373,7 +373,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-4.8',
+        requestedModelId: 'openrouter/anthropic/claude-opus-5',
         modelConfidence: 0.6,
       },
     });
@@ -390,8 +390,8 @@ describe('routeTask', () => {
       displayName: expect.any(String),
       source: 'default',
       rejectedPick: {
-        id: 'openrouter/anthropic/claude-opus-4.8',
-        displayName: 'Claude Opus 4.8',
+        id: 'openrouter/anthropic/claude-opus-5',
+        displayName: 'Claude Opus 5',
         confidence: 0.6,
         reason: 'below_threshold',
       },
@@ -407,7 +407,7 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-4.8',
+        requestedModelId: 'openrouter/anthropic/claude-opus-5',
       },
     });
 
@@ -423,8 +423,8 @@ describe('routeTask', () => {
       displayName: expect.any(String),
       source: 'default',
       rejectedPick: {
-        id: 'openrouter/anthropic/claude-opus-4.8',
-        displayName: 'Claude Opus 4.8',
+        id: 'openrouter/anthropic/claude-opus-5',
+        displayName: 'Claude Opus 5',
         confidence: null,
         reason: 'below_threshold',
       },
@@ -502,8 +502,8 @@ describe('routeTask', () => {
         previousSuggestion: {
           workspaceValue: 'Full Stack',
           workspaceDisplayName: 'Full Stack',
-          modelId: 'openrouter/anthropic/claude-opus-4.8',
-          modelDisplayName: 'Claude Opus 4.8',
+          modelId: 'openrouter/anthropic/claude-opus-5',
+          modelDisplayName: 'Claude Opus 5',
         },
       }),
     );
@@ -514,8 +514,8 @@ describe('routeTask', () => {
     }
 
     expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-4.8',
-      displayName: 'Claude Opus 4.8',
+      id: 'openrouter/anthropic/claude-opus-5',
+      displayName: 'Claude Opus 5',
       source: 'preserved',
     });
   });
@@ -538,8 +538,8 @@ describe('routeTask', () => {
         previousSuggestion: {
           workspaceValue: 'Full Stack',
           workspaceDisplayName: 'Full Stack',
-          modelId: 'openrouter/anthropic/claude-opus-4.8',
-          modelDisplayName: 'Claude Opus 4.8',
+          modelId: 'openrouter/anthropic/claude-opus-5',
+          modelDisplayName: 'Claude Opus 5',
         },
       }),
     );
@@ -550,8 +550,8 @@ describe('routeTask', () => {
     }
 
     expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-4.8',
-      displayName: 'Claude Opus 4.8',
+      id: 'openrouter/anthropic/claude-opus-5',
+      displayName: 'Claude Opus 5',
       source: 'preserved',
       rejectedPick: {
         id: 'openrouter/openai/gpt-5.6-terra',
