@@ -2,6 +2,31 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.20.0 (2026-07-24)
+
+This release makes it easier to give Roomote context, follow work across chat, and complete setup with guidance that matches the task at hand.
+
+### Highlights
+
+- Reference configured GitHub, GitLab, Gitea, Bitbucket, Azure DevOps, or Linear issues directly in task requests without pasting a full URL.
+- Follow contextual Roomote documentation throughout setup, matched to the provider and configuration step in progress.
+- Reply to merged pull-request reports in Slack, Discord, Teams, and Telegram to continue the related task conversation.
+- Get more reliable automation launches, CI investigation replies, model setup, and source-control setup.
+
+### Minor changes
+
+- Reference configured GitHub, GitLab, Gitea, Bitbucket, Azure DevOps, or Linear issues directly in task requests without pasting a full URL.
+- See contextual Roomote documentation throughout setup, with guidance matched to the provider and configuration step in progress.
+- Reply to merged pull-request reports in Slack, Discord, Teams, and Telegram to continue the related task conversation.
+
+### Patch changes
+
+- Keep automation launches and CI investigation replies connected to their tasks, and prevent stale pull-request review actions from conflicting with newer responses.
+- Show automations as generally available throughout the product.
+- Add models successfully when an OpenRouter key is stored in Settings, and keep role-selected models available when recommendations change.
+- Onboarding no longer auto-selects the only available GitHub repository.
+- Keep setup on the correct step after connecting source control and reconnect Gitea after credentials are saved.
+
 ## 0.19.0 (2026-07-23)
 
 This release makes pull-request review feedback clearer and safer to handle across chat, with more reliable task resumption.
