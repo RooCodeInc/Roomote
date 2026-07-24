@@ -104,7 +104,6 @@ type TelegramPairingCheckResult =
       status: 'ready';
       botUsername: string | null;
       telegramWebhook: { registered: boolean; error: string | null } | null;
-      telegramProfilePhoto: { updated: boolean; error: string | null };
     };
 
 type StashedPairingResult = {
@@ -218,7 +217,7 @@ export async function checkTelegramPairingCommand(
     values: { R_TELEGRAM_BOT_TOKEN: fetched.result.token },
   });
 
-  const telegramProfilePhoto = await setTelegramBotProfilePhotoBestEffort({
+  await setTelegramBotProfilePhotoBestEffort({
     botToken: fetched.result.token,
   });
 
@@ -230,6 +229,5 @@ export async function checkTelegramPairingCommand(
     status: 'ready',
     botUsername: fetched.result.botUsername,
     telegramWebhook: saved.telegramWebhook ?? null,
-    telegramProfilePhoto,
   };
 }

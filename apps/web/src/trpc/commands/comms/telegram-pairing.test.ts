@@ -195,7 +195,6 @@ describe('telegram pairing commands', () => {
         status: 'ready',
         botUsername: 'roomote_abc_bot',
         telegramWebhook: { registered: true, error: null },
-        telegramProfilePhoto: { updated: true, error: null },
       });
       expect(redisStore.has(`telegram-pairing-client:${PAIRING_ID}`)).toBe(
         false,
@@ -232,7 +231,6 @@ describe('telegram pairing commands', () => {
         status: 'ready',
         botUsername: 'roomote_abc_bot',
         telegramWebhook: { registered: true, error: null },
-        telegramProfilePhoto: { updated: true, error: null },
       });
       expect(redisStore.has(`telegram-pairing-result:${PAIRING_ID}`)).toBe(
         false,
@@ -262,10 +260,6 @@ describe('telegram pairing commands', () => {
         status: 'ready',
         botUsername: 'roomote_abc_bot',
         telegramWebhook: { registered: true, error: null },
-        telegramProfilePhoto: {
-          updated: false,
-          error: 'Photo dimensions are invalid',
-        },
       });
     });
 

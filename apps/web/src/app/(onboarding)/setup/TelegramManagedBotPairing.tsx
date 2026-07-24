@@ -13,7 +13,6 @@ const PAIRING_POLL_INTERVAL_MS = 2_000;
 export type TelegramPairingSuccess = {
   botUsername: string | null;
   webhookWarning: string | null;
-  profilePhotoWarning: string | null;
 };
 
 /**
@@ -77,11 +76,6 @@ export function TelegramManagedBotPairing({
             webhookWarning:
               result.telegramWebhook && !result.telegramWebhook.registered
                 ? (result.telegramWebhook.error ?? 'unknown error')
-                : null,
-            profilePhotoWarning:
-              result.telegramProfilePhoto &&
-              !result.telegramProfilePhoto.updated
-                ? (result.telegramProfilePhoto.error ?? 'unknown error')
                 : null,
           });
         } else if (result.status === 'expired') {
