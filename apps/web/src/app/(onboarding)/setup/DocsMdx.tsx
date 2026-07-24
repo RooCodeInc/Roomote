@@ -8,11 +8,16 @@ import {
 import { DOCS_BASE_URL } from '@/lib/docs';
 
 function DocsLink({ href = '', ...props }: ComponentProps<'a'>) {
-  if (href.startsWith('/')) {
-    return <a href={`${DOCS_BASE_URL}${href}`} {...props} />;
-  }
+  const resolvedHref = href.startsWith('/') ? `${DOCS_BASE_URL}${href}` : href;
 
-  return <a href={href} {...props} />;
+  return (
+    <a
+      {...props}
+      href={resolvedHref}
+      target="_blank"
+      rel="noopener noreferrer"
+    />
+  );
 }
 
 function Warning({ children }: { children: ReactNode }) {
