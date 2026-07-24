@@ -170,4 +170,30 @@ describe('resolveRoutingFollowUp', () => {
 
     expect(mocks.recordUserRoutingPreference).not.toHaveBeenCalled();
   });
+
+  it('does not persist a Slack-prefixed suggestion when the environment is unchanged', async () => {
+    mocks.classifyFollowUp.mockResolvedValueOnce({
+      intent: 'correct',
+      reasoning: 'clarified task details',
+    });
+    mocks.routeTask.mockResolvedValueOnce({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'api', name: 'API' },
+        reasoning: 'same environment',
+      },
+    });
+
+    await resolveRoutingFollowUp({
+      suggestion: {
+        workspaceValue: 'env:api',
+        workspaceDisplayName: 'API',
+      },
+      userResponse: 'also check the API logs',
+      userId: 'user-1',
+      buildCorrectionContext: async () => routingContext,
+    });
+
+    expect(mocks.recordUserRoutingPreference).not.toHaveBeenCalled();
+  });
 });

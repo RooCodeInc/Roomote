@@ -4,6 +4,18 @@ import { classifyFollowUp, routeTask } from './router-service';
 import { MAX_THREAD_MESSAGES } from './types';
 import type { RoutingContext, RoutingDecision } from './types';
 
+function getSuggestedEnvironmentId(
+  suggestion: RoutingContext['previousSuggestion'] | null,
+): string | null {
+  const value = suggestion?.workspaceValue;
+
+  if (!value) {
+    return null;
+  }
+
+  return value.startsWith('env:') ? value.slice('env:'.length) : value;
+}
+
 type RoutingFollowUpResolution =
   | { intent: 'confirm' }
   | { intent: 'cancel' }
@@ -71,13 +83,14 @@ export async function resolveRoutingFollowUp(input: {
   };
 
   const routingDecision = await routeTask(routingContext);
+  const suggestedEnvironmentId = getSuggestedEnvironmentId(input.suggestion);
 
   if (
     routingDecision.status === 'routed' &&
     routingDecision.result.workspace.type === 'environment' &&
     !classification.isFallback &&
     input.userId &&
-    input.suggestion?.workspaceValue !== routingDecision.result.workspace.id
+    suggestedEnvironmentId !== routingDecision.result.workspace.id
   ) {
     try {
       await recordUserRoutingPreference({
