@@ -2,7 +2,7 @@ import {
   stripLeadingRawSlackMention,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
-import { isBetaBackgroundAutomationKey } from '@roomote/types';
+import { isTaskBackedReportAutomationKey } from '@roomote/types';
 import { recordSlackConversationMessageBestEffort } from '@roomote/sdk/server';
 import {
   getLatestSlackBotReply,
@@ -138,7 +138,7 @@ export async function findRoomoteOwnedSlackThread(params: {
   const sourceTaskId =
     trackedAutomationThread &&
     trackedAutomationThread.automationKey != null &&
-    isBetaBackgroundAutomationKey(trackedAutomationThread.automationKey) &&
+    isTaskBackedReportAutomationKey(trackedAutomationThread.automationKey) &&
     typeof trackedAutomationThread.metadata?.sourceTaskId === 'string' &&
     trackedAutomationThread.metadata.sourceTaskId.trim().length > 0
       ? trackedAutomationThread.metadata.sourceTaskId

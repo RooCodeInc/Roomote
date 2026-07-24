@@ -1,14 +1,12 @@
-import { buildManagerAutomationRootSummaryPromptContract } from '@roomote/cloud-agents/server';
 import {
-  generateTrackedNonTaskText,
-  NON_TASK_INFERENCE_SURFACES,
-} from '@roomote/cloud-agents/server/non-task-provider-usage';
+  buildManagerAutomationRootSummaryPromptContract,
+  enqueueTask,
+} from '@roomote/cloud-agents/server';
 
 import {
   db,
   getAutomationRuntime,
   recordAutomationRunOutcome,
-  upsertBackgroundAutomationSlackThread,
   slackInstallations,
   taskPullRequests,
   tasks,
@@ -17,22 +15,17 @@ import {
   gte,
   isNotNull,
 } from '@roomote/db/server';
-import { SUMMARIZE_MERGED_PRS_SETTINGS_HASH } from '@roomote/types';
-import { SlackNotifier } from '@roomote/slack';
+import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
 import {
   listConnectedCommunicationProviders,
+  buildDestinationTaskPayloadFields,
+  buildDestinationPromptContext,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
 import { hasAnyActiveRepository } from './github-deployment-scope';
-import { getCommunicationProviderAdapter } from '../lib/communication-providers';
-import {
-  buildAutomationRootSummaryMessage,
-  buildManagerSlackSettingsUrl,
-  degradeSlackMrkdwnToMarkdown,
-} from '../lib/manager-slack';
 import { isRunDue, resolveSlackWorkspaceTimezone } from './scheduling-utils';
 import {
   emptyJobResult,
@@ -146,7 +139,7 @@ function buildAnnouncerSummaryPrompt(
     .map((pr) => `- ${pr.repo}#${pr.prNumber}: ${pr.prTitle} (${pr.prUrl})`)
     .join('\n');
 
-  return `You are writing the top-level Slack summary for an engineering automation that reports merged pull requests.
+  return `You are writing the top-level summary for an engineering automation that reports merged pull requests.
 
 The full merged pull request breakdown will be posted in the thread. Write a concise parent message that tells the team what shipped, what stands out, and where to look for the rest.
 
@@ -167,32 +160,7 @@ Additional guidance:
 Merged PRs:
 ${items}
 
-${recentThreadFeedback?.trim() ? `Recent feedback from earlier automation threads:\n${recentThreadFeedback.trim()}\n\n` : ''}${additionalInstructions?.trim() ? `Additional team instructions:\n${additionalInstructions.trim()}\n\n` : ''}Return only the final Slack-formatted message.`;
-}
-
-async function runAnnouncerAnalysis(
-  mergedPullRequests: MergedPullRequest[],
-  additionalInstructions?: string | null,
-  recentThreadFeedback?: string | null,
-): Promise<string | null> {
-  if (mergedPullRequests.length === 0) {
-    return null;
-  }
-
-  const prompt = buildAnnouncerSummaryPrompt(
-    mergedPullRequests,
-    additionalInstructions,
-    recentThreadFeedback,
-  );
-
-  const text = await generateTrackedNonTaskText({
-    surface: NON_TASK_INFERENCE_SURFACES.backgroundAnnouncer,
-    prompt,
-  });
-
-  const cleaned = text.trim();
-
-  return cleaned.length > 0 ? cleaned : null;
+${recentThreadFeedback?.trim() ? `Recent feedback from earlier automation threads:\n${recentThreadFeedback.trim()}\n\n` : ''}${additionalInstructions?.trim() ? `Additional team instructions:\n${additionalInstructions.trim()}\n\n` : ''}Return only the final Markdown message.`;
 }
 
 function buildAnnouncerDetailThreadMessages(
@@ -215,15 +183,15 @@ function buildAnnouncerDetailThreadMessages(
       (left, right) => left.prNumber - right.prNumber,
     );
 
-    let lines = [`*${repo}*`];
+    let lines = [`**${repo}**`];
 
     for (const pullRequest of sortedPullRequests) {
-      const line = `- ${pullRequest.prTitle} <${pullRequest.prUrl}|#${pullRequest.prNumber}>`;
+      const line = `- ${pullRequest.prTitle} [#${pullRequest.prNumber}](${pullRequest.prUrl})`;
       const nextMessage = [...lines, line].join('\n');
 
       if (nextMessage.length > MAX_DETAIL_MESSAGE_CHARS && lines.length > 1) {
         messages.push(lines.join('\n'));
-        lines = [`*${repo} (continued)*`, line];
+        lines = [`**${repo} (continued)**`, line];
         continue;
       }
 
@@ -238,83 +206,28 @@ function buildAnnouncerDetailThreadMessages(
   return messages;
 }
 
-/**
- * Posts the announcer report to a non-Slack destination through its
- * communication provider adapter: a markdown root message with an
- * automation-settings link button, the tracked automation thread, and the
- * per-repo detail messages threaded under the root message.
- */
-async function postAnnouncerReportViaCommunicationAdapter(params: {
+function buildAnnouncerTaskDescription(params: {
   destination: ResolvedAutomationDestination;
-  summary: string;
   mergedPullRequests: MergedPullRequest[];
-  windowDays: number;
-  now: Date;
-}): Promise<void> {
-  const { destination } = params;
-  const adapter = await getCommunicationProviderAdapter(destination.provider);
-
-  if (!adapter) {
-    throw new Error(
-      `Failed to post announcer summary: ${destination.provider} is not connected`,
-    );
-  }
-
-  const serviceUrlFields = destination.serviceUrl
-    ? { serviceUrl: destination.serviceUrl }
-    : {};
-
-  const root = await adapter.postMessage({
-    channelId: destination.channelId,
-    ...serviceUrlFields,
-    text: degradeSlackMrkdwnToMarkdown(params.summary),
-    textFormat: 'markdown',
-    buttons: [
-      [
-        {
-          text: 'Automation settings',
-          url: buildManagerSlackSettingsUrl(SUMMARIZE_MERGED_PRS_SETTINGS_HASH),
-        },
-      ],
-    ],
-  });
-
-  await upsertBackgroundAutomationSlackThread(db, {
-    surface: destination.provider,
-    automationKey: 'announcer',
-    slackChannelId: destination.channelId,
-    threadTs: root.messageId,
-    summaryText: params.summary,
-    postedAt: params.now,
-    metadata: {
-      mergedCount: params.mergedPullRequests.length,
-      windowDays: params.windowDays,
-    },
-  });
-
-  for (const detailMessage of buildAnnouncerDetailThreadMessages(
+  instructions?: string | null;
+  recentThreadFeedback?: string | null;
+}): string {
+  const promptContext = buildDestinationPromptContext(params.destination);
+  const detailMessages = buildAnnouncerDetailThreadMessages(
     params.mergedPullRequests,
-  )) {
-    try {
-      await adapter.postMessage({
-        channelId: destination.channelId,
-        ...serviceUrlFields,
-        threadId: root.messageId,
-        // Teams thread replies address the parent activity directly.
-        ...(destination.provider === 'teams'
-          ? { replyToMessageId: root.messageId }
-          : {}),
-        text: degradeSlackMrkdwnToMarkdown(detailMessage),
-        textFormat: 'markdown',
-      });
-    } catch (error) {
-      console.warn(
-        `${LOG_PREFIX} Failed to post announcer detail thread chunk: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
+  );
+
+  return `${buildAnnouncerSummaryPrompt(
+    params.mergedPullRequests,
+    params.instructions,
+    params.recentThreadFeedback,
+  )}
+
+Post the summary with \`send_chat_reply\`. Your first reply creates the report thread in the configured ${promptContext.surfaceLabel} channel. Then post each of these exact detail chunks as a separate \`send_chat_reply\` in that same thread:
+
+${detailMessages.map((message) => `---\n${message}`).join('\n')}
+
+Do not send an acknowledgement or progress update. Treat later replies in this thread as follow-up questions about the digest.`;
 }
 
 export async function announcerJob(
@@ -412,83 +325,36 @@ export async function announcerJob(
         surface: destination.provider,
         now,
       });
-      const summary = await runAnnouncerAnalysis(
-        mergedPullRequests,
-        runtime.instructions,
-        recentThreadFeedback,
-      );
-
-      if (!summary) {
-        console.warn(`${LOG_PREFIX} No summary output; skipping Slack post`);
-        await recordAutomationRunOutcome(db, {
-          key: 'announcer',
-          status: 'skipped',
-          at: new Date(),
-        });
-        result.skippedReason = 'Summary generation returned no output.';
-        skipped++;
-        continue;
-      }
-
-      if (destination.provider === 'slack') {
-        if (!deployment.slackBotToken) {
-          throw new Error(
-            'Announcer destination is Slack, but Slack is not connected',
-          );
-        }
-
-        const notifier = new SlackNotifier(deployment.slackBotToken);
-        const message = buildAutomationRootSummaryMessage({
-          summaryText: summary,
-          automationSettingsHash: SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
-        });
-
-        const ts = await notifier.postMessage({
-          channel: channelId,
-          ...message,
-        });
-
-        if (!ts) {
-          throw new Error('Failed to post announcer summary to Slack');
-        }
-
-        await upsertBackgroundAutomationSlackThread(db, {
-          surface: 'slack',
-          automationKey: 'announcer',
-          slackChannelId: channelId,
-          threadTs: ts,
-          summaryText: summary,
-          postedAt: now,
-          metadata: {
-            mergedCount: mergedPullRequests.length,
-            windowDays,
+      await enqueueTask({
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          payload: {
+            repo: ALL_REPOSITORIES,
+            description: buildAnnouncerTaskDescription({
+              destination,
+              mergedPullRequests,
+              instructions: runtime.instructions,
+              recentThreadFeedback,
+            }),
+            ...buildDestinationTaskPayloadFields(destination),
+            backgroundAutomationKey: 'announcer',
+            ...(destination.provider === 'slack'
+              ? {
+                  channel: channelId,
+                  slackChannel: channelId,
+                }
+              : {}),
           },
-        });
-
-        for (const detailMessage of buildAnnouncerDetailThreadMessages(
-          mergedPullRequests,
-        )) {
-          const detailTs = await notifier.postMessage({
-            channel: channelId,
-            thread_ts: ts,
-            text: detailMessage,
-          });
-
-          if (!detailTs) {
-            console.warn(
-              `${LOG_PREFIX} Failed to post announcer detail thread chunk`,
-            );
-          }
-        }
-      } else {
-        await postAnnouncerReportViaCommunicationAdapter({
-          destination,
-          summary,
-          mergedPullRequests,
-          windowDays,
-          now,
-        });
-      }
+        },
+        title: 'Summarize merged pull requests',
+        initiator: { kind: 'automation', key: 'announcer' },
+        workflow: 'standard',
+        surface: 'system',
+        trigger: opts.manualTrigger ? 'manual' : 'schedule',
+        ...(destination.provider === 'slack'
+          ? { channels: { slackChannelId: channelId } }
+          : {}),
+      });
 
       await recordAutomationRunOutcome(db, {
         key: 'announcer',

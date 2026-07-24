@@ -99,6 +99,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
+  asc: vi.fn((column: unknown) => ({ asc: column })),
   setTrustedRunActingUser: setTrustedRunActingUserMock,
   authUsers: {
     id: 'authUserId',
@@ -1001,6 +1002,134 @@ describe('Telegram webhook handler', () => {
       reason: 'not_task_entry',
     });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('starts a task for a reply to the exact announcer report root', async () => {
+    mockTelegramLinkedSender('launch-owner-report');
+    taskRunsFindFirstMock
+      .mockResolvedValueOnce({
+        id: 55,
+        status: 'completed',
+        taskId: 'announcer-task',
+        payload: { backgroundAutomationKey: 'announcer' },
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: 'Can you explain the release impact?',
+          reply_to_message: { message_id: 900, date: 1, chat: { id: 222 } },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      started: true,
+      runId: 88,
+    });
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationMessageId: '456',
+            description: 'Can you explain the release impact?',
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('routes a reply to its exact active announcer root instead of a newer run in the chat', async () => {
+    mockTelegramLinkedSender('launch-owner-report');
+    taskRunsFindFirstMock
+      .mockResolvedValueOnce({
+        id: 55,
+        status: 'running',
+        taskId: 'announcer-task-one',
+        payload: { backgroundAutomationKey: 'announcer' },
+      })
+      .mockResolvedValueOnce({
+        id: 99,
+        status: 'running',
+        taskId: 'announcer-task-two',
+        payload: {},
+      });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: 'Follow up on the first report',
+          reply_to_message: { message_id: 900, date: 1, chat: { id: 222 } },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 55,
+    });
+    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+      'telegram',
+      55,
+      expect.objectContaining({ text: 'Follow up on the first report' }),
+    );
+    expect(taskRunsFindFirstMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes the exact announcer root snapshot instead of a newer run in the chat', async () => {
+    mockTelegramLinkedSender('launch-owner-report');
+    taskRunsFindFirstMock
+      .mockResolvedValueOnce({
+        id: 55,
+        status: 'completed',
+        taskId: 'announcer-task-one',
+        payload: {
+          repo: 'RooCodeInc/Roomote',
+          environmentId: 'env-1',
+          backgroundAutomationKey: 'announcer',
+        },
+        port: 3000,
+        snapshotId: 'snapshot-one',
+        snapshotCreatedAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        id: 99,
+        status: 'running',
+        taskId: 'announcer-task-two',
+        payload: {},
+      });
+    enqueueTaskMock.mockResolvedValueOnce({ id: 100, taskId: 'task-resumed' });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: 'Follow up on the first report',
+          reply_to_message: { message_id: 900, date: 1, chat: { id: 222 } },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      resumed: true,
+      runId: 100,
+    });
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: 'snapshot_resume',
+          sourceRunId: 55,
+          sourceSnapshotId: 'snapshot-one',
+        }),
+      }),
+      expect.anything(),
+    );
+    expect(taskRunsFindFirstMock).toHaveBeenCalledTimes(1);
   });
 
   it('/new bypasses a resumable snapshot and starts a fresh task', async () => {

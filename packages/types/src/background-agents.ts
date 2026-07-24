@@ -329,6 +329,21 @@ export function isBetaBackgroundAutomationKey(
   return BETA_BACKGROUND_AUTOMATION_KEY_SET.has(automationKey);
 }
 
+const TASK_BACKED_REPORT_AUTOMATION_KEYS = [
+  'announcer',
+] as const satisfies readonly BackgroundAutomationKey[];
+
+export type TaskBackedReportAutomationKey =
+  (typeof TASK_BACKED_REPORT_AUTOMATION_KEYS)[number];
+
+export function isTaskBackedReportAutomationKey(
+  automationKey: BackgroundAutomationKey,
+): automationKey is TaskBackedReportAutomationKey {
+  return (TASK_BACKED_REPORT_AUTOMATION_KEYS as readonly string[]).includes(
+    automationKey,
+  );
+}
+
 export function getBackgroundAutomationAvailability(
   automationKey: BackgroundAutomationKey,
 ): BackgroundAutomationAvailability {

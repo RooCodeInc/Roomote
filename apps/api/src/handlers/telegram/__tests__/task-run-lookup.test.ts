@@ -1,7 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { whereMock } = vi.hoisted(() => ({
+const { limitMock, whereMock } = vi.hoisted(() => ({
+  limitMock: vi.fn(async () => []),
   whereMock: vi.fn(),
+}));
+
+const { findTaskBackedAutomationReportRunMock } = vi.hoisted(() => ({
+  findTaskBackedAutomationReportRunMock: vi.fn(),
+}));
+
+vi.mock('@roomote/sdk/server/communication', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@roomote/sdk/server/communication')
+  >()),
+  findTaskBackedAutomationReportRun: findTaskBackedAutomationReportRunMock,
 }));
 
 vi.mock('@roomote/db/server', () => {
@@ -10,7 +22,7 @@ vi.mock('@roomote/db/server', () => {
     innerJoin: vi.fn(),
     where: whereMock,
     orderBy: vi.fn(),
-    limit: vi.fn(async () => []),
+    limit: limitMock,
   };
   chain.from.mockReturnValue(chain);
   chain.innerJoin.mockReturnValue(chain);
@@ -42,6 +54,14 @@ vi.mock('@roomote/db/server', () => {
       status: 'taskRuns.status',
       taskId: 'taskRuns.taskId',
     },
+    trackedMessages: {
+      automationKey: 'trackedMessages.automationKey',
+      channelId: 'trackedMessages.channelId',
+      kind: 'trackedMessages.kind',
+      metadata: 'trackedMessages.metadata',
+      surface: 'trackedMessages.surface',
+      threadTs: 'trackedMessages.threadTs',
+    },
     tasks: {
       id: 'tasks.id',
       initiatorUserId: 'tasks.initiatorUserId',
@@ -49,11 +69,16 @@ vi.mock('@roomote/db/server', () => {
   };
 });
 
-import { findActiveTelegramTaskRun } from '../task-run-lookup';
+import {
+  findActiveTelegramTaskRun,
+  findTelegramAutomationReportRun,
+} from '../task-run-lookup';
 
 describe('Telegram task run topic lookup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    limitMock.mockReset();
+    limitMock.mockResolvedValue([]);
   });
 
   it('requires an absent task topic for a root-chat lookup', async () => {
@@ -81,5 +106,18 @@ describe('Telegram task run topic lookup', () => {
 
     expect(threadCondition?.strings?.join('')).not.toContain('IS NULL');
     expect(threadCondition?.values).toContain('77');
+  });
+
+  it('looks up an announcer report by the replied-to root message id', async () => {
+    await findTelegramAutomationReportRun({
+      chatId: '111000111',
+      messageId: 'report-root-77',
+    });
+
+    expect(findTaskBackedAutomationReportRunMock).toHaveBeenCalledWith({
+      provider: 'telegram',
+      channelId: '111000111',
+      messageId: 'report-root-77',
+    });
   });
 });

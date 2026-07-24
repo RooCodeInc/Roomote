@@ -8,6 +8,14 @@ import {
   type TelegramCommunicationProvider,
 } from '@roomote/communication';
 import {
+  db,
+  and,
+  eq,
+  sql,
+  taskRuns,
+  upsertBackgroundAutomationSlackThread,
+} from '@roomote/db/server';
+import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
@@ -172,6 +180,58 @@ function startTelegramTypingHeartbeat(
 // through.
 const DISCORD_TYPING_HEARTBEAT_MS = 8_000;
 
+async function bindLateCommunicationReportThread(params: {
+  taskRun: CommunicationReplyTaskRun;
+  provider: 'teams' | 'telegram' | 'discord';
+  messageId: string;
+}): Promise<void> {
+  const payload = params.taskRun.payload as
+    | { backgroundAutomationKey?: unknown }
+    | undefined;
+  const automationKey = payload?.backgroundAutomationKey;
+  const channelId = getCommunicationChannelFromTaskPayload(
+    params.taskRun.payload,
+  );
+
+  if (automationKey !== 'announcer' || !channelId) {
+    return;
+  }
+
+  const patch = JSON.stringify({
+    communicationMessageId: params.messageId,
+    ...(params.provider === 'teams'
+      ? { communicationThreadId: params.messageId }
+      : {}),
+  });
+  await db.transaction(async (tx) => {
+    const boundRuns = await tx
+      .update(taskRuns)
+      .set({
+        payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${patch}::jsonb`,
+      })
+      .where(
+        and(
+          eq(taskRuns.taskId, params.taskRun.taskId),
+          sql`${taskRuns.payload}->>'communicationMessageId' IS NULL`,
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (boundRuns.length === 0) {
+      return;
+    }
+    await upsertBackgroundAutomationSlackThread(tx, {
+      surface: params.provider,
+      automationKey: 'announcer',
+      slackChannelId: channelId,
+      threadTs: params.messageId,
+      summaryText: '',
+      postedAt: new Date(),
+      metadata: { sourceTaskId: params.taskRun.taskId },
+    });
+  });
+}
+
 /**
  * Show "typing…" while a Discord reply is being delivered. Fires immediately,
  * then on a heartbeat until the returned stop function runs. Entirely
@@ -333,6 +393,13 @@ async function sendTeamsThreadReply(params: {
     }
   }
 
+  await bindLateCommunicationReportThread({
+    taskRun: params.taskRun,
+    provider: 'teams',
+    messageId: reply.messageId,
+  }).catch((error) =>
+    console.error(`[${LOG_CONTEXT}] Failed to bind Teams report root:`, error),
+  );
   return new Response(JSON.stringify({ messageTs: reply.messageId }), {
     headers: { 'content-type': 'application/json' },
   });
@@ -432,6 +499,16 @@ async function sendTelegramThreadReply(params: {
     stopTyping();
   }
 
+  await bindLateCommunicationReportThread({
+    taskRun: params.taskRun,
+    provider: 'telegram',
+    messageId: reply.messageId,
+  }).catch((error) =>
+    console.error(
+      `[${LOG_CONTEXT}] Failed to bind Telegram report root:`,
+      error,
+    ),
+  );
   return new Response(JSON.stringify({ messageTs: reply.messageId }), {
     headers: { 'content-type': 'application/json' },
   });
@@ -581,6 +658,16 @@ async function sendDiscordThreadReply(params: {
     stopTyping();
   }
 
+  await bindLateCommunicationReportThread({
+    taskRun: params.taskRun,
+    provider: 'discord',
+    messageId: reply.messageId,
+  }).catch((error) =>
+    console.error(
+      `[${LOG_CONTEXT}] Failed to bind Discord report root:`,
+      error,
+    ),
+  );
   return new Response(JSON.stringify({ messageTs: reply.messageId }), {
     headers: { 'content-type': 'application/json' },
   });

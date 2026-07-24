@@ -16,6 +16,7 @@ import {
 } from '@roomote/db/server';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
+  type BackgroundAutomationKey,
   type SlackBlock,
 } from '@roomote/types';
 import {
@@ -262,6 +263,19 @@ function getCustomAutomationIdFromTaskPayload(payload: unknown): string | null {
 
   const value = (payload as Record<string, unknown>).customAutomationId;
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function getBackgroundAutomationKeyFromTaskPayload(
+  payload: unknown,
+): BackgroundAutomationKey | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const value = (payload as Record<string, unknown>).backgroundAutomationKey;
+  return typeof value === 'string' && value.trim().length > 0
+    ? (value as BackgroundAutomationKey)
+    : null;
 }
 
 function normalizeSlackQuoteText(text: string): string {
@@ -863,7 +877,8 @@ slackMcp.post('/thread_reply', async (c) => {
   if (
     !slackReplyTarget.threadTs &&
     !getAutomationWorkItemIdFromTaskPayload(taskRun.payload) &&
-    !getCustomAutomationIdFromTaskPayload(taskRun.payload)
+    !getCustomAutomationIdFromTaskPayload(taskRun.payload) &&
+    !getBackgroundAutomationKeyFromTaskPayload(taskRun.payload)
   ) {
     return c.json(
       {
@@ -923,6 +938,9 @@ slackMcp.post('/thread_reply', async (c) => {
     taskRun.payload,
   );
   const customAutomationId = getCustomAutomationIdFromTaskPayload(
+    taskRun.payload,
+  );
+  const backgroundAutomationKey = getBackgroundAutomationKeyFromTaskPayload(
     taskRun.payload,
   );
   const existingThreadTs = slackReplyTarget.threadTs;
@@ -1012,6 +1030,7 @@ slackMcp.post('/thread_reply', async (c) => {
           threadTs: rootMessageTs,
           summaryText: normalizedText ?? fallbackText,
           automationWorkItemId,
+          backgroundAutomationKey,
         });
         bindError = null;
         break;

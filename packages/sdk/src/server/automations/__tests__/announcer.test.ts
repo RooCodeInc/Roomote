@@ -11,6 +11,7 @@ const {
   mockHasAnyActiveRepository,
   mockGetCommunicationProviderAdapter,
   mockLoadAutomationThreadFeedbackContext,
+  mockEnqueueTask,
   mockGenerateTrackedNonTaskText,
   mockSlackNotifier,
   mockAdapterPostMessage,
@@ -39,6 +40,7 @@ const {
   mockHasAnyActiveRepository: vi.fn(),
   mockGetCommunicationProviderAdapter: vi.fn(),
   mockLoadAutomationThreadFeedbackContext: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGenerateTrackedNonTaskText: vi.fn(),
   mockSlackNotifier: vi.fn(),
   mockAdapterPostMessage: vi.fn(),
@@ -79,6 +81,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildManagerAutomationRootSummaryPromptContract: vi.fn(() => 'contract'),
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -97,6 +100,29 @@ vi.mock('../automation-thread-feedback', () => ({
 vi.mock('../destination', () => ({
   resolveAutomationRuntimeDestination: mockResolveAutomationRuntimeDestination,
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
+  buildDestinationTaskPayloadFields: (destination: {
+    provider: string;
+    channelId: string;
+    serviceUrl?: string;
+  }) =>
+    destination.provider === 'slack'
+      ? {}
+      : {
+          communicationProvider: destination.provider,
+          communicationChannelId: destination.channelId,
+          ...(destination.serviceUrl
+            ? { communicationServiceUrl: destination.serviceUrl }
+            : {}),
+        },
+  buildDestinationPromptContext: (destination: { provider: string }) => ({
+    channelTag:
+      destination.provider === 'slack' ? 'slack_channel_id' : 'channel_id',
+    postToolName:
+      destination.provider === 'slack'
+        ? 'post_to_slack_channel'
+        : 'post_to_channel',
+    surfaceLabel: destination.provider,
+  }),
 }));
 
 vi.mock('../github-deployment-scope', () => ({
@@ -145,9 +171,9 @@ const MERGED_PR_ROWS = [
 ];
 
 const EXPECTED_DETAIL_MESSAGE = [
-  '*acme/app*',
-  '- Fix bug <https://github.com/acme/app/pull/1|#1>',
-  '- Add thing <https://github.com/acme/app/pull/2|#2>',
+  '**acme/app**',
+  '- Fix bug [#1](https://github.com/acme/app/pull/1)',
+  '- Add thing [#2](https://github.com/acme/app/pull/2)',
 ].join('\n');
 
 describe('announcerJob non-Slack posting', () => {
@@ -167,7 +193,7 @@ describe('announcerJob non-Slack posting', () => {
     });
     mockMergedPullRequestRows.mockResolvedValue(MERGED_PR_ROWS);
     mockLoadAutomationThreadFeedbackContext.mockResolvedValue(null);
-    mockGenerateTrackedNonTaskText.mockResolvedValue(SUMMARY);
+    mockEnqueueTask.mockResolvedValue({ taskId: 'announcer-task-1' });
 
     let nextMessageId = 100;
     mockAdapterPostMessage.mockImplementation(
@@ -183,7 +209,7 @@ describe('announcerJob non-Slack posting', () => {
     });
   });
 
-  it('posts the report through the telegram adapter with markdown and a settings button', async () => {
+  it('launches a visible task for the telegram report', async () => {
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
       provider: 'telegram',
       channelId: '-100555',
@@ -193,38 +219,21 @@ describe('announcerJob non-Slack posting', () => {
 
     expect(result.completed).toBe(true);
     expect(result.errors).toEqual([]);
-    expect(mockSlackNotifier).not.toHaveBeenCalled();
-    expect(mockGetCommunicationProviderAdapter).toHaveBeenCalledWith(
-      'telegram',
-    );
-
-    // Root message: degraded markdown summary plus the settings link button.
-    expect(mockAdapterPostMessage).toHaveBeenNthCalledWith(1, {
-      channelId: '-100555',
-      text: `md(${SUMMARY})`,
-      textFormat: 'markdown',
-      buttons: [[{ text: 'Automation settings', url: SETTINGS_URL }]],
-    });
-
-    // Tracked automation thread lands on the destination surface.
-    expect(mockUpsertBackgroundAutomationSlackThread).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        surface: 'telegram',
-        automationKey: 'announcer',
-        slackChannelId: '-100555',
-        threadTs: 'msg-100',
-        summaryText: SUMMARY,
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: '__all_repositories__',
+            backgroundAutomationKey: 'announcer',
+            communicationProvider: 'telegram',
+            communicationChannelId: '-100555',
+            description: expect.stringContaining(EXPECTED_DETAIL_MESSAGE),
+          }),
+        }),
+        initiator: { kind: 'automation', key: 'announcer' },
+        trigger: 'manual',
       }),
     );
-
-    // Detail messages thread under the root message id.
-    expect(mockAdapterPostMessage).toHaveBeenNthCalledWith(2, {
-      channelId: '-100555',
-      threadId: 'msg-100',
-      text: `md(${EXPECTED_DETAIL_MESSAGE})`,
-      textFormat: 'markdown',
-    });
 
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
@@ -232,7 +241,7 @@ describe('announcerJob non-Slack posting', () => {
     );
   });
 
-  it('threads teams detail messages with serviceUrl and replyToMessageId', async () => {
+  it('stamps the Teams destination onto the task', async () => {
     mockListConnectedCommunicationProviders.mockResolvedValue(['teams']);
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
       provider: 'teams',
@@ -247,21 +256,17 @@ describe('announcerJob non-Slack posting', () => {
     const result = await announcerJob({ manualTrigger: true });
 
     expect(result.completed).toBe(true);
-    expect(mockAdapterPostMessage).toHaveBeenNthCalledWith(1, {
-      channelId: '19:conv@thread.v2',
-      serviceUrl: 'https://smba.example/amer/',
-      text: `md(${SUMMARY})`,
-      textFormat: 'markdown',
-      buttons: [[{ text: 'Automation settings', url: SETTINGS_URL }]],
-    });
-    expect(mockAdapterPostMessage).toHaveBeenNthCalledWith(2, {
-      channelId: '19:conv@thread.v2',
-      serviceUrl: 'https://smba.example/amer/',
-      threadId: 'msg-100',
-      replyToMessageId: 'msg-100',
-      text: `md(${EXPECTED_DETAIL_MESSAGE})`,
-      textFormat: 'markdown',
-    });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationProvider: 'teams',
+            communicationChannelId: '19:conv@thread.v2',
+            communicationServiceUrl: 'https://smba.example/amer/',
+          }),
+        }),
+      }),
+    );
   });
 
   it('looks up thread feedback on the destination surface', async () => {
@@ -281,20 +286,17 @@ describe('announcerJob non-Slack posting', () => {
     );
   });
 
-  it('records a failed outcome when the destination provider is not connected', async () => {
+  it('records a failed outcome when task launch fails', async () => {
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
       provider: 'telegram',
       channelId: '-100555',
     });
-    mockGetCommunicationProviderAdapter.mockResolvedValue(null);
+    mockEnqueueTask.mockRejectedValue(new Error('queue unavailable'));
 
     const result = await announcerJob({ manualTrigger: true });
 
     expect(result.completed).toBe(false);
-    expect(result.errors).toEqual([
-      'Failed to post announcer summary: telegram is not connected',
-    ]);
-    expect(mockUpsertBackgroundAutomationSlackThread).not.toHaveBeenCalled();
+    expect(result.errors).toEqual(['queue unavailable']);
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ key: 'announcer', status: 'failed' }),
