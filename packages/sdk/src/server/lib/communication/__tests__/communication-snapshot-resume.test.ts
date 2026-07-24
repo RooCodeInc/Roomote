@@ -2,10 +2,23 @@ const mocks = vi.hoisted(() => ({
   enqueueTask: vi.fn(),
   attachOutOfBand: vi.fn(),
   releaseOutOfBand: vi.fn(),
+  getCommunicationMessages: vi.fn(),
+  prependCommunicationMessages: vi.fn(),
+  recordTaskRunEvent: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mocks.enqueueTask,
+}));
+
+vi.mock('@roomote/communication', () => ({
+  getCommunicationMessages: mocks.getCommunicationMessages,
+  prependCommunicationMessages: mocks.prependCommunicationMessages,
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {},
+  recordTaskRunEvent: mocks.recordTaskRunEvent,
 }));
 
 vi.mock('../communication-out-of-band-context', () => ({
@@ -19,6 +32,8 @@ describe('resumeCommunicationTaskFromSnapshot', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enqueueTask.mockResolvedValue({ id: 42, taskId: 'task-1' });
+    mocks.getCommunicationMessages.mockResolvedValue([]);
+    mocks.recordTaskRunEvent.mockResolvedValue(undefined);
     mocks.attachOutOfBand.mockImplementation(
       async ({ message }: { message: Record<string, unknown> }) => ({
         message,
@@ -220,6 +235,142 @@ describe('resumeCommunicationTaskFromSnapshot', () => {
         }),
       }),
       { launchClass: 'human' },
+    );
+  });
+
+  it('carries undelivered source-run queue messages ahead of the new message', async () => {
+    const orphanedMessage = {
+      provider: 'discord',
+      text: 'address the review feedback',
+      user: 'roomote',
+      userId: 'user-1',
+      ts: 'orphaned-ts',
+    };
+    mocks.getCommunicationMessages.mockResolvedValue([orphanedMessage]);
+
+    await resumeCommunicationTaskFromSnapshot({
+      provider: 'discord',
+      completedRun: {
+        id: 41,
+        taskId: 'task-1',
+        payload: {
+          repo: 'acme/repo',
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+        },
+        port: null,
+        snapshotId: 'snapshot-1',
+      },
+      queuedMessage: {
+        provider: 'discord',
+        text: 'new follow-up',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-resume',
+      },
+      channelId: 'channel-1',
+    });
+
+    expect(mocks.getCommunicationMessages).toHaveBeenCalledWith('discord', 41);
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            queuedCommunicationMessages: [
+              expect.objectContaining({ ts: 'orphaned-ts' }),
+              expect.objectContaining({ ts: 'message-resume' }),
+            ],
+          }),
+        }),
+      }),
+      { launchClass: 'human' },
+    );
+    expect(mocks.recordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 41,
+        source: 'snapshot_resume',
+        details: expect.objectContaining({
+          carriedCount: 1,
+          carriedTs: ['orphaned-ts'],
+        }),
+      }),
+    );
+  });
+
+  it('does not duplicate the new message when it is still in the source queue', async () => {
+    mocks.getCommunicationMessages.mockResolvedValue([
+      {
+        provider: 'discord',
+        text: 'new follow-up',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-resume',
+      },
+    ]);
+
+    await resumeCommunicationTaskFromSnapshot({
+      provider: 'discord',
+      completedRun: {
+        id: 41,
+        taskId: 'task-1',
+        payload: { repo: 'acme/repo' },
+        port: null,
+        snapshotId: 'snapshot-1',
+      },
+      queuedMessage: {
+        provider: 'discord',
+        text: 'new follow-up',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-resume',
+      },
+      channelId: 'channel-1',
+    });
+
+    const payload = mocks.enqueueTask.mock.calls[0]?.[0]?.task?.payload as {
+      queuedCommunicationMessages: Array<{ ts: string }>;
+    };
+    expect(payload.queuedCommunicationMessages).toHaveLength(1);
+    expect(mocks.recordTaskRunEvent).not.toHaveBeenCalled();
+  });
+
+  it('requeues drained messages when the resume enqueue fails', async () => {
+    const orphanedMessage = {
+      provider: 'discord',
+      text: 'address the review feedback',
+      user: 'roomote',
+      userId: 'user-1',
+      ts: 'orphaned-ts',
+    };
+    mocks.getCommunicationMessages.mockResolvedValue([orphanedMessage]);
+    mocks.enqueueTask.mockRejectedValue(new Error('enqueue failed'));
+
+    await expect(
+      resumeCommunicationTaskFromSnapshot({
+        provider: 'discord',
+        completedRun: {
+          id: 41,
+          taskId: 'task-1',
+          payload: { repo: 'acme/repo' },
+          port: null,
+          snapshotId: 'snapshot-1',
+        },
+        queuedMessage: {
+          provider: 'discord',
+          text: 'new follow-up',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-resume',
+        },
+        channelId: 'channel-1',
+      }),
+    ).rejects.toThrow('enqueue failed');
+
+    expect(mocks.prependCommunicationMessages).toHaveBeenCalledWith(
+      'discord',
+      41,
+      [orphanedMessage],
     );
   });
 

@@ -31,7 +31,40 @@ import {
   findActiveCommunicationTaskRun,
   findCompletedCommunicationTaskRunWithSnapshot,
 } from '../communication/communication-task-run-lookup';
+import { recordTaskRunEvent } from './record-task-run-event';
 import type { PrReviewActionProvider } from './pr-review-action';
+
+/**
+ * Durable record that a PR review follow-up was queued into an active run's
+ * Redis queue. The queue itself is invisible after the sandbox dies, so this
+ * event is what lets an operator pair "queued" with the worker's popped/
+ * delivered events when a follow-up goes missing. Fire-and-forget.
+ */
+function recordFollowUpQueuedEvent(input: {
+  runId: number;
+  provider: PrReviewActionProvider;
+  ts: string;
+  runStatus?: string;
+}): void {
+  void recordTaskRunEvent({
+    runId: input.runId,
+    source: 'communication_queue',
+    eventType: 'decision',
+    message: `Queued a PR review follow-up (${input.provider} ts=${input.ts}) into the run's message queue.`,
+    details: {
+      provider: input.provider,
+      ts: input.ts,
+      kind: 'pr_review_follow_up',
+      ...(input.runStatus ? { runStatus: input.runStatus } : {}),
+    },
+  }).catch((error: unknown) => {
+    console.warn(
+      `[dispatchPrReviewFollowUp] Failed to record queued event for run ${input.runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
+}
 
 export type PrReviewFollowUpDispatchResult =
   | { outcome: 'queued'; runId: number }
@@ -89,6 +122,12 @@ async function dispatchSlackFollowUp(input: {
       userId: input.actingUserId,
     });
     await queueSlackMessage(activeRun.id, queuedMessage);
+    recordFollowUpQueuedEvent({
+      runId: activeRun.id,
+      provider: 'slack',
+      ts: queuedMessage.ts,
+      runStatus: activeRun.status,
+    });
 
     return { outcome: 'queued', runId: activeRun.id };
   }
@@ -211,6 +250,12 @@ async function dispatchCommunicationFollowUp(input: {
       userId: input.actingUserId,
     });
     await queueCommunicationMessage(provider, activeRun.id, queuedMessage);
+    recordFollowUpQueuedEvent({
+      runId: activeRun.id,
+      provider,
+      ts: queuedMessage.ts,
+      runStatus: activeRun.status,
+    });
 
     return { outcome: 'queued', runId: activeRun.id };
   }

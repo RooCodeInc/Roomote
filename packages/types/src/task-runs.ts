@@ -662,6 +662,7 @@ export const runEventSources = [
   'sleep_check',
   'compute_provider',
   'machine_oidc',
+  'communication_queue',
   'snapshot_request',
   'snapshot_queue',
   'snapshot_resume',

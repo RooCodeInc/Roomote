@@ -93,6 +93,7 @@ import {
   refreshGitHubTokenWithMetadata,
   fetchSnapshotEnv,
   recordTaskRunEvent,
+  recordQueuedMessagesPoppedEvent,
   stampTaskRunMilestone,
   taskRunMilestoneFields,
   updateTaskRunEnvironmentSetup,
@@ -552,7 +553,17 @@ export const taskRunsRouter = router({
     )
     .mutation(async ({ ctx, input }) => revertPrCommit(ctx.auth, input)),
   getSlackMessages: runScoped(z.object({ runId: z.number() }), 'runId').query(
-    async ({ input }) => getSlackMessages(input.runId),
+    async ({ input }) => {
+      const messages = await getSlackMessages(input.runId);
+
+      recordQueuedMessagesPoppedEvent({
+        runId: input.runId,
+        provider: 'slack',
+        poppedTs: messages.map((message) => message.ts),
+      });
+
+      return messages;
+    },
   ),
   getCommunicationMessages: runScoped(
     z.object({
@@ -560,9 +571,20 @@ export const taskRunsRouter = router({
       provider: communicationProviderSchema,
     }),
     'runId',
-  ).query(async ({ input }) =>
-    getCommunicationMessages(input.provider, input.runId),
-  ),
+  ).query(async ({ input }) => {
+    const messages = await getCommunicationMessages(
+      input.provider,
+      input.runId,
+    );
+
+    recordQueuedMessagesPoppedEvent({
+      runId: input.runId,
+      provider: input.provider,
+      poppedTs: messages.map((message) => message.ts),
+    });
+
+    return messages;
+  }),
   queueSlackMessage: runTokenOnlyScoped(
     z.object({
       runId: z.number(),

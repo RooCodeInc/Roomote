@@ -36,6 +36,7 @@ import {
 } from '@roomote/compute-providers';
 import { drainLinearMessagesToResumeRun } from '@roomote/linear';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
+import { drainCommunicationMessagesToResumeRun } from '@roomote/sdk/server/communication';
 import { drainSlackMessagesToResumeRun } from '@roomote/slack';
 import { z } from 'zod';
 
@@ -753,6 +754,34 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         `[SnapshotQueue] Failed to drain Slack messages for run #${runId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
       );
     }
+  }
+
+  // Drain pending Discord/Telegram/Teams messages using the same pattern.
+  // Without this, a follow-up queued into a run whose poller died before the
+  // snapshot stays orphaned in Redis: the run sleeps, nothing wakes it, and
+  // the sender's prompt silently expires.
+  try {
+    const drainResult = await drainCommunicationMessagesToResumeRun(
+      {
+        id: taskRun.id,
+        taskId: taskRun.taskId,
+        snapshotId,
+        payload: taskRun.payload as Record<string, unknown>,
+        port: taskRun.port,
+      },
+      snapshotId,
+    );
+
+    if (drainResult.resumed) {
+      console.log(
+        `[SnapshotQueue] Routed ${drainResult.messageCount} ${drainResult.provider} message(s) to SnapshotResume run ${drainResult.runId}`,
+      );
+    }
+  } catch (drainError) {
+    // Log but don't fail the snapshot -- the snapshot itself succeeded.
+    console.error(
+      `[SnapshotQueue] Failed to drain communication messages for run #${runId}: ${drainError instanceof Error ? drainError.message : String(drainError)}`,
+    );
   }
 };
 

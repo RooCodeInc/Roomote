@@ -1,5 +1,10 @@
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
+  getCommunicationMessages,
+  prependCommunicationMessages,
+} from '@roomote/communication';
+import { db, recordTaskRunEvent } from '@roomote/db/server';
+import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
   populateSnapshotResumeCommunicationMetadata,
@@ -13,6 +18,58 @@ import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
 } from './communication-out-of-band-context';
+
+/**
+ * Drain any messages still sitting in the source run's per-run Redis queue.
+ * They were queued while that run was alive but never delivered (for example
+ * when its poller wedged before the due-sleep snapshot), so a resume that
+ * ignored them would orphan those prompts permanently. Callers must either
+ * hand the drained messages to the resume run or put them back.
+ */
+async function drainUndeliveredCommunicationMessages(
+  provider: CommunicationProvider,
+  sourceRunId: number,
+): Promise<QueuedCommunicationMessage[]> {
+  try {
+    return await getCommunicationMessages(provider, sourceRunId);
+  } catch (error) {
+    console.error(
+      `[resumeCommunicationTaskFromSnapshot] Failed to drain undelivered ${provider} messages for source run ${sourceRunId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return [];
+  }
+}
+
+async function recordCarriedMessagesEvent(input: {
+  provider: CommunicationProvider;
+  sourceRunId: number;
+  taskId?: string;
+  carried: QueuedCommunicationMessage[];
+}): Promise<void> {
+  try {
+    await recordTaskRunEvent(db, {
+      runId: input.sourceRunId,
+      taskId: input.taskId,
+      source: 'snapshot_resume',
+      eventType: 'decision',
+      message: `Carried ${input.carried.length} undelivered queued ${input.provider} message(s) from run #${input.sourceRunId} into the snapshot resume payload.`,
+      details: {
+        provider: input.provider,
+        carriedCount: input.carried.length,
+        carriedTs: input.carried.map((message) => message.ts),
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `[resumeCommunicationTaskFromSnapshot] Failed to record carried-messages event for source run ${input.sourceRunId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
 
 type CompletedCommunicationTaskRun = {
   id: number;
@@ -78,6 +135,24 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
     outOfBandClaim = attached.claim;
   }
 
+  // Undelivered leftovers ride ahead of the new message so the resume run
+  // replays the conversation in its original order.
+  const undeliveredMessages = (
+    await drainUndeliveredCommunicationMessages(
+      input.provider,
+      input.completedRun.id,
+    )
+  ).filter((message) => message.ts !== queuedMessage.ts);
+
+  if (undeliveredMessages.length > 0) {
+    await recordCarriedMessagesEvent({
+      provider: input.provider,
+      sourceRunId: input.completedRun.id,
+      taskId: input.completedRun.taskId,
+      carried: undeliveredMessages,
+    });
+  }
+
   const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
     ...(environmentId ? { environmentId } : {}),
@@ -85,6 +160,10 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
     sourceSnapshotId: input.completedRun.snapshotId,
     sourceRunId: input.completedRun.id,
     queuedCommunicationMessages: [
+      ...undeliveredMessages.map((message) => ({
+        ...message,
+        provider: input.provider,
+      })),
       {
         ...queuedMessage,
         provider: input.provider,
@@ -134,6 +213,27 @@ export async function resumeCommunicationTaskFromSnapshot(input: {
     );
   } catch (error) {
     await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+
+    if (undeliveredMessages.length > 0) {
+      // The resume never launched; put the drained leftovers back so the next
+      // resume attempt can carry them again.
+      try {
+        await prependCommunicationMessages(
+          input.provider,
+          input.completedRun.id,
+          undeliveredMessages,
+        );
+      } catch (requeueError) {
+        console.error(
+          `[resumeCommunicationTaskFromSnapshot] Failed to requeue ${undeliveredMessages.length} drained ${input.provider} message(s) for source run ${input.completedRun.id}: ${
+            requeueError instanceof Error
+              ? requeueError.message
+              : String(requeueError)
+          }`,
+        );
+      }
+    }
+
     throw error;
   }
 }
