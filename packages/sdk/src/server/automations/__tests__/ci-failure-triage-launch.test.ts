@@ -11,7 +11,7 @@ const {
   mockGetTaskUrl,
   mockRecordAutomationRunOutcome,
   mockUpsertBackgroundAutomationSlackThread,
-  mockUpdateBackgroundAutomationSlackThreadMetadata,
+  mockFinalizeAutomationLaunch,
   mockTryClaimCiFailureTriageInvestigation,
   mockReleaseCiFailureTriageInvestigation,
   mockRedisSet,
@@ -34,7 +34,7 @@ const {
   ),
   mockRecordAutomationRunOutcome: vi.fn(),
   mockUpsertBackgroundAutomationSlackThread: vi.fn(),
-  mockUpdateBackgroundAutomationSlackThreadMetadata: vi.fn(),
+  mockFinalizeAutomationLaunch: vi.fn().mockResolvedValue({ attached: true }),
   mockTryClaimCiFailureTriageInvestigation: vi.fn(),
   mockReleaseCiFailureTriageInvestigation: vi.fn(),
   mockRedisSet: vi.fn(),
@@ -47,6 +47,10 @@ vi.mock('../destination', () => ({
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination: mockResolveAutomationRuntimeDestination,
   buildDestinationTaskPayloadFields: mockBuildDestinationTaskPayloadFields,
+}));
+
+vi.mock('../post-launch-finalization', () => ({
+  finalizeAutomationLaunch: mockFinalizeAutomationLaunch,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -100,8 +104,6 @@ vi.mock('@roomote/db/server', () => ({
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
   upsertBackgroundAutomationSlackThread:
     mockUpsertBackgroundAutomationSlackThread,
-  updateBackgroundAutomationSlackThreadMetadata:
-    mockUpdateBackgroundAutomationSlackThreadMetadata,
   slackInstallations: {
     botAccessToken: 'slackInstallations.botAccessToken',
     isActive: 'slackInstallations.isActive',
@@ -252,7 +254,8 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockPostMessage.mockResolvedValue('1781300000.000100');
     mockUpdateMessage.mockResolvedValue(true);
     mockUpsertBackgroundAutomationSlackThread.mockResolvedValue(undefined);
-    mockUpdateBackgroundAutomationSlackThreadMetadata.mockResolvedValue(true);
+    mockFinalizeAutomationLaunch.mockReset();
+    mockFinalizeAutomationLaunch.mockResolvedValue({ attached: true });
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
     mockEnqueueTask.mockResolvedValue({
       success: true,
@@ -335,14 +338,16 @@ describe('launchCiFailureTriageForFailedRun', () => {
         threadTs: '1781300000.000100',
       }),
     );
-    expect(
-      mockUpdateBackgroundAutomationSlackThreadMetadata,
-    ).toHaveBeenCalledWith(expect.anything(), {
-      surface: 'slack',
-      slackChannelId: 'C123MANAGER',
-      threadTs: '1781300000.000100',
-      metadata: { sourceTaskId: 'task-scan-1' },
-    });
+    expect(mockFinalizeAutomationLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: {
+          provider: 'slack',
+          channelId: 'C123MANAGER',
+          rootMessageId: '1781300000.000100',
+        },
+        taskId: 'task-scan-1',
+      }),
+    );
   });
 
   it('still launches without a thread when the announcement fails', async () => {
@@ -360,43 +365,23 @@ describe('launchCiFailureTriageForFailedRun', () => {
     expect(mockUpdateMessage).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      'returns false',
-      () =>
-        mockUpdateBackgroundAutomationSlackThreadMetadata.mockResolvedValue(
-          false,
-        ),
-    ],
-    [
-      'throws',
-      () =>
-        mockUpdateBackgroundAutomationSlackThreadMetadata.mockRejectedValue(
-          new Error('metadata unavailable'),
-        ),
-    ],
-  ])(
-    'keeps the launched investigation active when metadata linking %s',
-    async (_scenario, arrange) => {
-      arrange();
+  it('keeps the launched investigation active when finalization is unattached', async () => {
+    mockFinalizeAutomationLaunch.mockResolvedValueOnce({ attached: false });
 
-      await expect(
-        launchCiFailureTriageForFailedRun(failedRun),
-      ).resolves.toEqual(
-        expect.objectContaining({ status: 'ok', taskId: 'task-scan-1' }),
-      );
+    await expect(launchCiFailureTriageForFailedRun(failedRun)).resolves.toEqual(
+      expect.objectContaining({ status: 'ok', taskId: 'task-scan-1' }),
+    );
 
-      expect(mockReleaseCiFailureTriageInvestigation).not.toHaveBeenCalled();
-      expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ status: 'succeeded' }),
-      );
-      expect(mockRecordAutomationRunOutcome).not.toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ status: 'failed' }),
-      );
-    },
-  );
+    expect(mockReleaseCiFailureTriageInvestigation).not.toHaveBeenCalled();
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: 'succeeded' }),
+    );
+    expect(mockRecordAutomationRunOutcome).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: 'failed' }),
+    );
+  });
 
   it('preserves GitLab host and failure evidence in the launched task', async () => {
     mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-gl');
