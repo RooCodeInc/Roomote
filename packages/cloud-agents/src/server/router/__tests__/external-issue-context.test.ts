@@ -185,19 +185,31 @@ describe('gatherExternalIssueContext', () => {
     expect(unconfigured).toEqual({ contextMessages: [], toolsUsed: [] });
   });
 
-  it('fails open on a bare number when too many repositories are configured', async () => {
+  it('caps a bare-number fan-out at the first five configured repositories', async () => {
+    vi.mocked(callRouterMcpTool).mockResolvedValue({ title: 'Some issue' });
+
     const result = await gatherExternalIssueContext(
       createContextWithRepos('Check issue #234', [
         'acme/web',
         'acme/api',
         'acme/mobile',
         'acme/infra',
+        'acme/docs',
+        'acme/tooling',
+        'acme/design',
       ]),
       '#234',
     );
 
-    expect(callRouterMcpTool).not.toHaveBeenCalled();
-    expect(result).toEqual({ contextMessages: [], toolsUsed: [] });
+    const fetchedRepos = vi
+      .mocked(callRouterMcpTool)
+      .mock.calls.map(([options]) => (options.args as { repo: string }).repo);
+
+    expect(new Set(fetchedRepos)).toEqual(
+      new Set(['web', 'api', 'mobile', 'infra', 'docs']),
+    );
+    expect(result.contextMessages[0]?.content).toContain('[acme/docs#234]');
+    expect(result.contextMessages[0]?.content).not.toContain('acme/tooling');
   });
 
   it('prefers pasted issue URLs over the precheck reference', async () => {

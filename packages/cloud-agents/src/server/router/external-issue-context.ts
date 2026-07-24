@@ -10,7 +10,7 @@ import type { RoutingContext } from './types';
 const MAX_EXTERNAL_ISSUES = 2;
 const MAX_EXTERNAL_CONTEXT_CHARS = 8_000;
 const EXTERNAL_LOOKUP_TIMEOUT_MS = 8_000;
-const MAX_BARE_REFERENCE_REPOS = 3;
+const MAX_BARE_REFERENCE_REPOS = 5;
 
 interface ExternalIssueReference {
   url: string;
@@ -83,8 +83,9 @@ function uniqueConfiguredRepositories(context: RoutingContext): string[] {
  * configuration. The model only proposes the reference text; the fetch
  * targets always come from this closed candidate set, so a steered or
  * hallucinated reference can at most read issues the deployment already
- * routes for. An ambiguous issue number fans out across configured
- * repositories only when that set is small enough to stay bounded.
+ * routes for. An ambiguous issue number fans out across the first
+ * MAX_BARE_REFERENCE_REPOS configured repositories (environment order) so the
+ * fetch stays bounded on deployments with many repositories.
  */
 function resolveBareIssueReferences(
   context: RoutingContext,
@@ -131,19 +132,19 @@ function resolveBareIssueReferences(
 
   const bareNumber = raw.match(/^#?(?<issueNumber>\d+)$/);
 
-  if (
-    bareNumber?.groups &&
-    configuredRepositories.length > 0 &&
-    configuredRepositories.length <= MAX_BARE_REFERENCE_REPOS
-  ) {
-    return configuredRepositories.flatMap((fullRepository) => {
-      const reference = githubReference(
-        fullRepository,
-        bareNumber.groups!.issueNumber!,
-      );
+  if (bareNumber?.groups && configuredRepositories.length > 0) {
+    // Environment order decides which repositories make the cut; repos where
+    // the issue number does not exist drop out at fetch time anyway.
+    return configuredRepositories
+      .slice(0, MAX_BARE_REFERENCE_REPOS)
+      .flatMap((fullRepository) => {
+        const reference = githubReference(
+          fullRepository,
+          bareNumber.groups!.issueNumber!,
+        );
 
-      return reference ? [reference] : [];
-    });
+        return reference ? [reference] : [];
+      });
   }
 
   return [];
