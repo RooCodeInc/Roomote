@@ -5,6 +5,7 @@ import {
   getDefaultRecommendedModelPreset,
   getTaskModelCatalog,
   getTaskModelProviderId,
+  isTaskModelIdDisabled,
   normalizeTaskModelId,
   normalizeTaskModelSettings,
   taskModelSettingsSchema,
@@ -89,7 +90,57 @@ export function appendRecommendedTaskModels(options: {
     return [...options.models];
   }
 
-  return [...options.models, ...appendedModels].sort((left, right) =>
+  return sortTaskModelOptionsById([...options.models, ...appendedModels]);
+}
+
+/**
+ * Appends models that are still selected for a runtime role (or as the
+ * default coding model) but are missing from the catalog — typically because
+ * a release dropped them from the recommended list. A selected model must
+ * stay listed and active until an operator moves the role off it; otherwise
+ * its role selector renders blank and every settings save fails validation.
+ */
+export function appendSelectedTaskModels(options: {
+  models: readonly TaskModelOption[];
+  selectedModelIds: ReadonlySet<string>;
+  connectedProviderIds: ReadonlySet<string>;
+}): TaskModelOption[] {
+  const modelIds = new Set(options.models.map((model) => model.id));
+  const appendedModels: TaskModelOption[] = [];
+
+  for (const selectedModelId of options.selectedModelIds) {
+    const modelId = normalizeTaskModelId(selectedModelId);
+    const providerId = getTaskModelProviderId(modelId);
+
+    if (
+      modelIds.has(modelId) ||
+      isTaskModelIdDisabled(modelId) ||
+      providerId === null ||
+      !options.connectedProviderIds.has(providerId)
+    ) {
+      continue;
+    }
+
+    const model = buildTaskModelOption({
+      id: modelId,
+      displayName: deriveDisplayNameFromModelId(modelId),
+    });
+
+    modelIds.add(model.id);
+    appendedModels.push(model);
+  }
+
+  if (appendedModels.length === 0) {
+    return [...options.models];
+  }
+
+  return sortTaskModelOptionsById([...options.models, ...appendedModels]);
+}
+
+function sortTaskModelOptionsById(
+  models: TaskModelOption[],
+): TaskModelOption[] {
+  return [...models].sort((left, right) =>
     left.id.localeCompare(right.id, undefined, {
       sensitivity: 'base',
       numeric: true,

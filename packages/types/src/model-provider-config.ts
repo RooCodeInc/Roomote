@@ -193,7 +193,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           codeReview: {
-            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            modelId: 'openrouter/anthropic/claude-opus-5',
             reasoningEffort: 'high',
           },
           explore: {
@@ -201,7 +201,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           planning: {
-            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            modelId: 'openrouter/anthropic/claude-opus-5',
             reasoningEffort: 'high',
           },
         },
@@ -219,7 +219,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           codeReview: {
-            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            modelId: 'openrouter/anthropic/claude-opus-5',
             reasoningEffort: 'medium',
           },
           explore: {
@@ -227,7 +227,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           planning: {
-            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            modelId: 'openrouter/anthropic/claude-opus-5',
             reasoningEffort: 'medium',
           },
         },
@@ -243,7 +243,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
       'claude-haiku-4-5': 'vercel/anthropic/claude-haiku-4.5',
-      'claude-opus-4-8': 'vercel/anthropic/claude-opus-4.8',
+      'claude-opus-5': 'vercel/anthropic/claude-opus-5',
       'claude-sonnet-5': 'vercel/anthropic/claude-sonnet-5',
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
@@ -264,9 +264,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // work follows the coding model ("same as coding").
     recommendedRoleModels: {
       helper: 'vercel/google/gemini-3.6-flash',
-      codeReview: 'vercel/anthropic/claude-opus-4.8',
+      codeReview: 'vercel/anthropic/claude-opus-5',
       explore: 'vercel/google/gemini-3.6-flash',
-      planning: 'vercel/anthropic/claude-opus-4.8',
+      planning: 'vercel/anthropic/claude-opus-5',
     },
   },
   {
@@ -341,14 +341,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'anthropic/claude-fable-5',
       'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
-      'claude-opus-4-8': 'anthropic/claude-opus-4-8',
+      'claude-opus-5': 'anthropic/claude-opus-5',
       'claude-sonnet-5': 'anthropic/claude-sonnet-5',
     }),
     recommendedRoleModels: {
       helper: 'anthropic/claude-haiku-4-5',
-      codeReview: 'anthropic/claude-opus-4-8',
+      codeReview: 'anthropic/claude-opus-5',
       explore: 'anthropic/claude-haiku-4-5',
-      planning: 'anthropic/claude-opus-4-8',
+      planning: 'anthropic/claude-opus-5',
     },
   },
   {
@@ -417,7 +417,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'opencode/claude-fable-5',
       'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
-      'claude-opus-4-8': 'opencode/claude-opus-4-8',
+      'claude-opus-5': 'opencode/claude-opus-5',
       'claude-sonnet-5': 'opencode/claude-sonnet-5',
       'gemini-3-1-pro': 'opencode/gemini-3.1-pro',
       'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
@@ -435,9 +435,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     recommendedRoleModels: {
       helper: 'opencode/gemini-3.6-flash',
       vision: 'opencode/claude-sonnet-5',
-      codeReview: 'opencode/claude-opus-4-8',
+      codeReview: 'opencode/claude-opus-5',
       explore: 'opencode/gemini-3.6-flash',
-      planning: 'opencode/claude-opus-4-8',
+      planning: 'opencode/claude-opus-5',
     },
   },
   {
@@ -467,14 +467,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
       'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
-      'claude-opus-4-8': 'bedrock-mantle/anthropic.claude-opus-4-8',
+      'claude-opus-5': 'bedrock-mantle/anthropic.claude-opus-5',
       'claude-sonnet-5': 'bedrock-mantle/anthropic.claude-sonnet-5',
     }),
     recommendedRoleModels: {
       helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
-      codeReview: 'bedrock-mantle/anthropic.claude-opus-4-8',
+      codeReview: 'bedrock-mantle/anthropic.claude-opus-5',
       explore: 'bedrock-mantle/anthropic.claude-haiku-4-5',
-      planning: 'bedrock-mantle/anthropic.claude-opus-4-8',
+      planning: 'bedrock-mantle/anthropic.claude-opus-5',
     },
   },
   {
@@ -524,7 +524,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'github-copilot/claude-fable-5',
       'claude-haiku-4-5': 'github-copilot/claude-haiku-4.5',
-      'claude-opus-4-8': 'github-copilot/claude-opus-4.8',
+      'claude-opus-5': 'github-copilot/claude-opus-5',
       'claude-sonnet-5': 'github-copilot/claude-sonnet-5',
       'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
@@ -534,9 +534,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedRoleModels: {
       helper: 'github-copilot/claude-haiku-4.5',
-      codeReview: 'github-copilot/claude-opus-4.8',
+      codeReview: 'github-copilot/claude-opus-5',
       explore: 'github-copilot/claude-haiku-4.5',
-      planning: 'github-copilot/claude-opus-4.8',
+      planning: 'github-copilot/claude-opus-5',
     },
   },
   {

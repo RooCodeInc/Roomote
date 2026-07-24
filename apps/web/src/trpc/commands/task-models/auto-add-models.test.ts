@@ -7,6 +7,7 @@ import {
 
 import {
   appendRecommendedTaskModels,
+  appendSelectedTaskModels,
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from './auto-add-models';
@@ -279,6 +280,45 @@ describe('appendRecommendedTaskModels', () => {
 
     expect(result.length).toBeGreaterThan(0);
     expect(result.every((model) => model.id.startsWith('openai/'))).toBe(true);
+  });
+});
+
+describe('appendSelectedTaskModels', () => {
+  const glm = {
+    id: 'openrouter/z-ai/glm-5.2',
+    displayName: 'GLM 5.2',
+    family: 'GLM',
+  };
+
+  it('appends selected models that are missing from the catalog, sorted by id', () => {
+    const result = appendSelectedTaskModels({
+      models: [glm],
+      selectedModelIds: new Set([
+        'openrouter/anthropic/claude-opus-4.8',
+        glm.id,
+      ]),
+      connectedProviderIds: new Set(['openrouter']),
+    });
+
+    expect(result.map((model) => model.id)).toEqual([
+      'openrouter/anthropic/claude-opus-4.8',
+      glm.id,
+    ]);
+    expect(
+      result.find(
+        (model) => model.id === 'openrouter/anthropic/claude-opus-4.8',
+      ),
+    ).toMatchObject({ displayName: 'claude-opus-4.8' });
+  });
+
+  it('skips selections for providers that are not connected', () => {
+    expect(
+      appendSelectedTaskModels({
+        models: [glm],
+        selectedModelIds: new Set(['anthropic/claude-opus-4.8']),
+        connectedProviderIds: new Set(['openrouter']),
+      }).map((model) => model.id),
+    ).toEqual([glm.id]);
   });
 });
 
