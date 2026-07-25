@@ -9,6 +9,7 @@ import {
   eq,
   findBackgroundAutomationSlackThread,
   getCustomAutomationById,
+  getTaskAutomationInitiatorKey,
   slackInstallations,
   taskRuns,
   tasks,
@@ -16,7 +17,6 @@ import {
 } from '@roomote/db/server';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
-  type BackgroundAutomationKey,
   type SlackBlock,
 } from '@roomote/types';
 import {
@@ -263,19 +263,6 @@ function getCustomAutomationIdFromTaskPayload(payload: unknown): string | null {
 
   const value = (payload as Record<string, unknown>).customAutomationId;
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
-}
-
-function getBackgroundAutomationKeyFromTaskPayload(
-  payload: unknown,
-): BackgroundAutomationKey | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return null;
-  }
-
-  const value = (payload as Record<string, unknown>).backgroundAutomationKey;
-  return typeof value === 'string' && value.trim().length > 0
-    ? (value as BackgroundAutomationKey)
-    : null;
 }
 
 function normalizeSlackQuoteText(text: string): string {
@@ -872,13 +859,18 @@ slackMcp.post('/thread_reply', async (c) => {
   }
 
   // Creating a brand-new top-level channel message is reserved for late-bound
-  // automation tasks: execution tasks marked by automationWorkItemId and
-  // custom automation runs marked by customAutomationId in the payload.
+  // automation tasks: execution tasks marked by automationWorkItemId, custom
+  // automation runs marked by customAutomationId in the payload, and any task
+  // an automation launched.
+  const backgroundAutomationKey = await getTaskAutomationInitiatorKey(
+    taskRun.taskId,
+  );
+
   if (
     !slackReplyTarget.threadTs &&
     !getAutomationWorkItemIdFromTaskPayload(taskRun.payload) &&
     !getCustomAutomationIdFromTaskPayload(taskRun.payload) &&
-    !getBackgroundAutomationKeyFromTaskPayload(taskRun.payload)
+    !backgroundAutomationKey
   ) {
     return c.json(
       {
@@ -938,9 +930,6 @@ slackMcp.post('/thread_reply', async (c) => {
     taskRun.payload,
   );
   const customAutomationId = getCustomAutomationIdFromTaskPayload(
-    taskRun.payload,
-  );
-  const backgroundAutomationKey = getBackgroundAutomationKeyFromTaskPayload(
     taskRun.payload,
   );
   const existingThreadTs = slackReplyTarget.threadTs;

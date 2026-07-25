@@ -123,6 +123,10 @@ export async function findCompletedCommunicationTaskRunWithSnapshot(
  * Finds the task that produced an automation report root. Inbound replies use
  * the provider's reply target, not the newest task in the channel, so reports
  * remain routable after later tasks have run in the same conversation.
+ *
+ * Every automation-initiated task qualifies. The initiator columns carry that
+ * signal for all of them, unlike the run payload, which only some automations
+ * stamp with an automation key.
  */
 export async function findTaskBackedAutomationReportRun(input: {
   provider: CommunicationProvider;
@@ -138,7 +142,7 @@ export async function findTaskBackedAutomationReportRun(input: {
         sql`${taskRuns.payload}->>'communicationProvider' = ${input.provider}`,
         sql`${taskRuns.payload}->>'communicationChannelId' = ${input.channelId}`,
         sql`${taskRuns.payload}->>'communicationMessageId' = ${input.messageId}`,
-        sql`${taskRuns.payload}->>'backgroundAutomationKey' = 'announcer'`,
+        eq(tasks.initiatorKind, 'automation'),
         isNull(taskRuns.canceledAt),
       ),
     )
@@ -160,7 +164,6 @@ export async function findTaskBackedAutomationReportRun(input: {
       and(
         eq(trackedMessages.surface, input.provider),
         eq(trackedMessages.kind, 'automation_thread'),
-        eq(trackedMessages.automationKey, 'announcer'),
         eq(trackedMessages.channelId, input.channelId),
         eq(trackedMessages.threadTs, input.messageId),
       ),

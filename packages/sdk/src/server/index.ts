@@ -89,6 +89,11 @@ export {
 } from './lib/suggested-tasks-onboarding-followup';
 
 export {
+  DISCORD_GATEWAY_EVENTS_QUEUE_NAME,
+  enqueueDiscordGatewayEvent,
+} from './lib/discord-gateway-events';
+
+export {
   TELEGRAM_LINK_CODE_TTL_SECONDS,
   consumeTelegramLinkCode,
   createTelegramLinkCode,

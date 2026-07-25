@@ -73,6 +73,7 @@ const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/webhooks/teams',
   '/api/webhooks/telegram',
   '/api/internal/discord/events',
+  '/api/internal/discord/events/process',
   '/api/internal/cloud/deployment-access',
 ]);
 

@@ -208,8 +208,16 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
+    // The BullMQ worker authenticates this route with the Discord gateway
+    // secret. It has no client IP, so applying webhook limits would make every
+    // worker request share one bucket during an outage retry storm.
+    name: 'internal-discord-event-processing',
+    match: { type: 'exact', path: '/api/internal/discord/events/process' },
+    policy: 'webhook',
+  },
+  {
     name: 'internal-discord-events',
-    match: { type: 'exact', path: '/api/internal/discord/events' },
+    match: { type: 'prefix', path: '/api/internal/discord/events' },
     policy: 'webhook',
     rateLimits: WEBHOOK_RATE_LIMITS,
   },

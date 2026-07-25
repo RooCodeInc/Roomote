@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   markThreadHistoryDelivered: vi.fn(),
   fetchThreadHistory: vi.fn(),
   shouldRouteUnmentioned: vi.fn(),
+  enqueueGatewayEvent: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -84,6 +85,7 @@ vi.mock('@roomote/sdk/server', () => ({
   restoreDiscordLinkCode: mocks.restoreLinkCode,
   upsertDiscordUserMapping: mocks.upsertUserMapping,
   upsertDiscordInstallation: mocks.upsertInstallation,
+  enqueueDiscordGatewayEvent: mocks.enqueueGatewayEvent,
   claimPendingPrReviewActionsForThread: vi.fn(async () => []),
 }));
 
@@ -145,7 +147,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: mocks.getTaskUrl,
 }));
 
-import { discord } from '../index.js';
+import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
 
 const app = new Hono();
 app.route('/api/internal/discord', discord);
@@ -186,6 +188,17 @@ function message(overrides: Record<string, unknown> = {}) {
 }
 
 async function postEvent(body: unknown, secret = 'gateway-secret') {
+  return app.request('http://localhost/api/internal/discord/events/process', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-roomote-discord-gateway-secret': secret,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function postIngressEvent(body: unknown, secret = 'gateway-secret') {
   return app.request('http://localhost/api/internal/discord/events', {
     method: 'POST',
     headers: {
@@ -273,6 +286,7 @@ describe('Discord Gateway event handler', () => {
     mocks.fetchThreadHistory.mockResolvedValue([]);
     mocks.shouldRouteUnmentioned.mockResolvedValue(true);
     mocks.queueMessage.mockResolvedValue(true);
+    mocks.enqueueGatewayEvent.mockResolvedValue({ jobId: 'event-message-1' });
   });
 
   afterEach(() => {
@@ -339,6 +353,52 @@ describe('Discord Gateway event handler', () => {
     await expect(response.json()).resolves.toEqual({
       ok: false,
       error: 'discord_gateway_unauthorized',
+    });
+    expect(mocks.claimEvent).not.toHaveBeenCalled();
+  });
+
+  it('durably queues a valid event without invoking its processing pipeline', async () => {
+    const body = envelope(message());
+
+    const response = await postIngressEvent(body);
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ ok: true, queued: true });
+    expect(mocks.enqueueGatewayEvent).toHaveBeenCalledWith(body);
+    expect(mocks.claimEvent).not.toHaveBeenCalled();
+    expect(mocks.resolveProvider).not.toHaveBeenCalled();
+  });
+
+  it('rejects unauthorized ingress before enqueueing', async () => {
+    const response = await postIngressEvent(
+      envelope(message()),
+      'wrong-secret',
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.enqueueGatewayEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid ingress payloads before enqueueing', async () => {
+    const response = await postIngressEvent({ eventType: 'MESSAGE_CREATE' });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: 'invalid_discord_event',
+    });
+    expect(mocks.enqueueGatewayEvent).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when durable event enqueueing fails', async () => {
+    mocks.enqueueGatewayEvent.mockRejectedValue(new Error('Redis unavailable'));
+
+    const response = await postIngressEvent(envelope(message()));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: 'discord_event_enqueue_failed',
     });
     expect(mocks.claimEvent).not.toHaveBeenCalled();
   });
@@ -416,6 +476,33 @@ describe('Discord Gateway event handler', () => {
       expect(mocks.completeEvent).not.toHaveBeenCalled();
     },
   );
+
+  it('times out slow processing and releases the event lease for a retry', async () => {
+    const originalTimeout = discordGatewayEventProcessingTimeout.timeoutMs;
+    vi.useFakeTimers();
+    discordGatewayEventProcessingTimeout.timeoutMs = 10;
+    mocks.getChannel.mockImplementation(() => new Promise(() => undefined));
+
+    try {
+      const responsePromise = postEvent(envelope(message()));
+      await vi.advanceTimersByTimeAsync(10);
+      const response = await responsePromise;
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'discord_api_unavailable',
+      });
+      expect(mocks.releaseEvent).toHaveBeenCalledWith({
+        eventType: 'MESSAGE_CREATE',
+        eventId: 'message-1',
+        token: 'claim-token',
+      });
+    } finally {
+      discordGatewayEventProcessingTimeout.timeoutMs = originalTimeout;
+      vi.useRealTimers();
+    }
+  });
 
   it.each([403, 404])(
     'acknowledges an event whose Discord resource returns %s',

@@ -82,6 +82,7 @@ vi.mock('../middleware', async (importOriginal) => {
 
 import { createApiApp } from '../server';
 import { evaluateRoutePolicy } from '../middleware/routePolicyMiddleware';
+import { findRoutePolicyRule } from '../route-policies';
 
 describe('route policy enforcement', () => {
   beforeEach(() => {
@@ -238,6 +239,18 @@ describe('route policy enforcement', () => {
   });
 
   describe('webhook routes', () => {
+    it('exempts the secret-authenticated Discord worker route from shared IP limits', () => {
+      expect(
+        findRoutePolicyRule('/api/internal/discord/events/process'),
+      ).toMatchObject({
+        name: 'internal-discord-event-processing',
+        policy: 'webhook',
+      });
+      expect(
+        findRoutePolicyRule('/api/internal/discord/events/process')?.rateLimits,
+      ).toBeUndefined();
+    });
+
     it('lets webhook deliveries through to handler-level verification', async () => {
       const response = await createApiApp().request(
         'http://localhost/api/webhooks/linear',

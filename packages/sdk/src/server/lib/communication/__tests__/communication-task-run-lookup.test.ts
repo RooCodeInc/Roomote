@@ -46,6 +46,7 @@ vi.mock('@roomote/db/server', () => {
     },
     tasks: {
       id: 'tasks.id',
+      initiatorKind: 'tasks.initiatorKind',
       initiatorUserId: 'tasks.initiatorUserId',
     },
     trackedMessages: {
@@ -67,8 +68,14 @@ function automationRun(id: number, taskId: string) {
     taskId,
     initiatorUserId: null,
     actingUserId: null,
-    payload: { backgroundAutomationKey: 'announcer' },
+    payload: {},
   };
+}
+
+function whereConditions() {
+  return whereMock.mock.calls.flatMap(
+    ([condition]) => condition.conditions ?? [],
+  );
 }
 
 describe('findTaskBackedAutomationReportRun', () => {
@@ -77,49 +84,78 @@ describe('findTaskBackedAutomationReportRun', () => {
     queryResults.length = 0;
   });
 
-  it('keeps two announcer roots in the same channel bound to their own runs', async () => {
+  it('keeps two report roots in the same channel bound to their own runs', async () => {
     queryResults.push(
-      [automationRun(11, 'announcer-task-one')],
-      [automationRun(22, 'announcer-task-two')],
+      [automationRun(11, 'report-task-one')],
+      [automationRun(22, 'report-task-two')],
     );
 
     await expect(
       findTaskBackedAutomationReportRun({
         provider: 'discord',
         channelId: 'channel-1',
-        messageId: 'announcer-root-one',
+        messageId: 'report-root-one',
       }),
-    ).resolves.toMatchObject({ id: 11, taskId: 'announcer-task-one' });
+    ).resolves.toMatchObject({ id: 11, taskId: 'report-task-one' });
     await expect(
       findTaskBackedAutomationReportRun({
         provider: 'discord',
         channelId: 'channel-1',
-        messageId: 'announcer-root-two',
+        messageId: 'report-root-two',
       }),
-    ).resolves.toMatchObject({ id: 22, taskId: 'announcer-task-two' });
+    ).resolves.toMatchObject({ id: 22, taskId: 'report-task-two' });
 
-    const messageIds = whereMock.mock.calls
-      .flatMap(([condition]) => condition.conditions ?? [])
+    const messageIds = whereConditions()
       .flatMap((condition: { values?: unknown[] }) => condition.values ?? [])
       .filter((value) => typeof value === 'string');
     expect(messageIds).toEqual(
-      expect.arrayContaining(['announcer-root-one', 'announcer-root-two']),
+      expect.arrayContaining(['report-root-one', 'report-root-two']),
     );
+  });
+
+  it('matches any automation-initiated task, not one hardcoded automation key', async () => {
+    queryResults.push([automationRun(11, 'ci-triage-task')]);
+
+    await expect(
+      findTaskBackedAutomationReportRun({
+        provider: 'discord',
+        channelId: 'channel-1',
+        messageId: 'ci-triage-root',
+      }),
+    ).resolves.toMatchObject({ id: 11, taskId: 'ci-triage-task' });
+
+    const conditions = whereConditions();
+    expect(conditions).toContainEqual({
+      left: 'tasks.initiatorKind',
+      right: 'automation',
+    });
+    expect(
+      conditions.some((condition: { strings?: string[] }) =>
+        condition.strings?.some((fragment) => fragment.includes('announcer')),
+      ),
+    ).toBe(false);
   });
 
   it('falls back from a missing payload binding to the tracked automation thread source task', async () => {
     queryResults.push(
       [],
-      [{ sourceTaskId: 'announcer-task-one' }],
-      [automationRun(11, 'announcer-task-one')],
+      [{ sourceTaskId: 'report-task-one' }],
+      [automationRun(11, 'report-task-one')],
     );
 
     await expect(
       findTaskBackedAutomationReportRun({
         provider: 'telegram',
         channelId: 'chat-1',
-        messageId: 'announcer-root-one',
+        messageId: 'report-root-one',
       }),
-    ).resolves.toMatchObject({ id: 11, taskId: 'announcer-task-one' });
+    ).resolves.toMatchObject({ id: 11, taskId: 'report-task-one' });
+
+    // The tracked-thread fallback must not filter on a specific automation
+    // key either, or non-announcer reports lose their late-bound roots.
+    expect(whereConditions()).not.toContainEqual({
+      left: 'trackedMessages.automationKey',
+      right: 'announcer',
+    });
   });
 });
