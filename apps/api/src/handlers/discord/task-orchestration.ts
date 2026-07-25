@@ -103,6 +103,9 @@ export async function startNewDiscordTask(input: {
   const existingRun = await findCommunicationTaskRunBySourceEvent({
     provider: 'discord',
     sourceEventId: input.queuedMessage.ts,
+  }).catch(async (error) => {
+    await clearDiscordIntakeAckBestEffort(input);
+    throw error;
   });
   if (existingRun) {
     const taskUrl = getTaskUrl({
@@ -120,6 +123,7 @@ export async function startNewDiscordTask(input: {
           : 'This request already started a task.',
       }).catch(() => undefined);
     }
+    await clearDiscordIntakeAckBestEffort(input);
     return {
       status: 'already_started' as const,
       existingRun,
@@ -127,159 +131,207 @@ export async function startNewDiscordTask(input: {
     };
   }
 
-  // Full transcript + prior attachments belong on task start only when the
-  // launch already lives inside a Discord thread and is not /new (or another
-  // forced sibling). Matching Slack: continue-in-thread gets history; a fresh
-  // task must start clean. Top-level channel launches never dump unrelated
-  // channel history into the agent prompt — except the single message the user
-  // explicitly replied to via Discord's reply UI.
-  const includeFullThreadContext =
-    input.channel.isThread && !input.forceNewThread;
-  const shouldFetchRepliedTo =
-    Boolean(input.replyToMessageId) && !input.forceNewThread;
-  const [historyBase, repliedToMessage, installation] = await Promise.all([
-    includeFullThreadContext
-      ? fetchDiscordThreadHistoryBestEffort({
-          provider: input.provider,
-          channelId: input.channel.channelId,
-          ...(input.channel.parentChannelId
-            ? { parentChannelId: input.channel.parentChannelId }
-            : {}),
-        })
-      : Promise.resolve([] as DiscordThreadHistoryMessage[]),
-    shouldFetchRepliedTo && input.replyToMessageId
-      ? fetchDiscordRepliedToMessageBestEffort({
-          provider: input.provider,
-          channelId:
-            input.replyToChannelId ??
-            input.channel.parentChannelId ??
-            input.channel.channelId,
-          messageId: input.replyToMessageId,
-        })
-      : Promise.resolve(null),
-    input.channel.guildId
-      ? findDiscordInstallationByGuildId(input.channel.guildId)
-      : Promise.resolve(null),
-  ]);
-  const history = mergeDiscordRepliedToMessage({
-    messages: historyBase,
-    repliedTo: repliedToMessage,
-  });
-  const triggeringMessage: DiscordThreadHistoryMessage = {
-    id: input.queuedMessage.ts,
-    user: input.queuedMessage.user,
-    text: input.queuedMessage.text,
-    attachments: [],
-  };
-  const historyWithTrigger = history.some(
-    (message) => message.id === triggeringMessage.id,
-  )
-    ? history
-    : [...history, triggeringMessage];
-  // Full thread launches get the reconstructed transcript; top-level channel
-  // reply launches only pass the explicit reply target + current turn.
-  const includeReplyContext =
-    includeFullThreadContext ||
-    (Boolean(repliedToMessage) && !input.forceNewThread);
-  const routingThreadMessages = includeReplyContext
-    ? historyWithTrigger.map((message) => ({
-        user: message.username ?? message.user,
-        text: message.text,
-      }))
-    : [
-        {
-          user: triggeringMessage.user,
-          text: triggeringMessage.text,
-        },
-      ];
-  const historyAttachments = includeReplyContext
-    ? toDiscordAttachmentsFromHistory(history, {
-        excludeMessageId: input.queuedMessage.ts,
-      })
-    : [];
-  const threadAttachments = historyAttachments.length
-    ? await processDiscordAttachments(historyAttachments)
-    : { images: [], attachmentTexts: [], warnings: [] };
-  for (const warning of threadAttachments.warnings) {
-    console.warn(`[discord] Thread attachment warning: ${warning}`);
-  }
-
-  const taskDescriptionWithAttachments = appendAttachmentTextsToPromptText({
-    text: input.queuedMessage.text,
-    attachmentTexts: threadAttachments.attachmentTexts,
-  });
-  const allImages = [
-    ...(input.queuedMessage.images ?? []),
-    ...threadAttachments.images,
-  ];
-  const threadContext = includeReplyContext
-    ? formatDiscordThreadContext({
-        messages: historyWithTrigger,
-        currentMessageId: input.queuedMessage.ts,
-      })
-    : undefined;
-  const agentPromptPrefix = input.channelAutoStart?.agentPromptPrefix?.trim();
-  const agentPromptBody = [threadContext, taskDescriptionWithAttachments]
-    .filter((part): part is string => Boolean(part?.trim()))
-    .join('\n\n');
-  const agentPromptText = agentPromptPrefix
-    ? `${agentPromptPrefix}\n\n${agentPromptBody}`
-    : agentPromptBody !== input.queuedMessage.text
-      ? agentPromptBody
-      : undefined;
-  const routingContext = await buildDiscordRoutingContext({
-    userId: input.launchOwnerUserId,
-    taskDescription: taskDescriptionWithAttachments,
-    guildName: installation?.guildName ?? undefined,
-    channelName: input.channel.channelName,
-    threadMessages: routingThreadMessages,
-    ...(allImages.length ? { images: allImages } : {}),
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-  });
-  const routingDecision = await routeTask(routingContext);
-  if (routingDecision.status === 'platform_answer') {
-    // Auto-respond channels must not turn Roomote into a channel chatbot:
-    // a question-shaped message that routes to a platform answer is skipped
-    // silently (mirrors Slack's auto-routed path, which never posts answers).
-    if (input.channelAutoStart) {
-      await clearDiscordIntakeAckBestEffort(input);
-      return { status: 'skipped_platform_answer' as const, routingDecision };
-    }
-    await replyToDiscordEvent({
-      provider: input.provider,
-      applicationId: input.applicationId,
-      channel: input.channel,
-      ...(input.interaction ? { interaction: input.interaction } : {}),
-      text: routingDecision.result.answer,
+  try {
+    // Full transcript + prior attachments belong on task start only when the
+    // launch already lives inside a Discord thread and is not /new (or another
+    // forced sibling). Matching Slack: continue-in-thread gets history; a fresh
+    // task must start clean. Top-level channel launches never dump unrelated
+    // channel history into the agent prompt — except the single message the user
+    // explicitly replied to via Discord's reply UI.
+    const includeFullThreadContext =
+      input.channel.isThread && !input.forceNewThread;
+    const shouldFetchRepliedTo =
+      Boolean(input.replyToMessageId) && !input.forceNewThread;
+    const [historyBase, repliedToMessage, installation] = await Promise.all([
+      includeFullThreadContext
+        ? fetchDiscordThreadHistoryBestEffort({
+            provider: input.provider,
+            channelId: input.channel.channelId,
+            ...(input.channel.parentChannelId
+              ? { parentChannelId: input.channel.parentChannelId }
+              : {}),
+          })
+        : Promise.resolve([] as DiscordThreadHistoryMessage[]),
+      shouldFetchRepliedTo && input.replyToMessageId
+        ? fetchDiscordRepliedToMessageBestEffort({
+            provider: input.provider,
+            channelId:
+              input.replyToChannelId ??
+              input.channel.parentChannelId ??
+              input.channel.channelId,
+            messageId: input.replyToMessageId,
+          })
+        : Promise.resolve(null),
+      input.channel.guildId
+        ? findDiscordInstallationByGuildId(input.channel.guildId)
+        : Promise.resolve(null),
+    ]);
+    const history = mergeDiscordRepliedToMessage({
+      messages: historyBase,
+      repliedTo: repliedToMessage,
     });
-    // No worker onStart fires for inline answers; clear intake 👀 here.
-    await clearDiscordIntakeAckBestEffort(input);
-    return { status: 'replied_inline' as const, routingDecision };
-  }
+    const triggeringMessage: DiscordThreadHistoryMessage = {
+      id: input.queuedMessage.ts,
+      user: input.queuedMessage.user,
+      text: input.queuedMessage.text,
+      attachments: [],
+    };
+    const historyWithTrigger = history.some(
+      (message) => message.id === triggeringMessage.id,
+    )
+      ? history
+      : [...history, triggeringMessage];
+    // Full thread launches get the reconstructed transcript; top-level channel
+    // reply launches only pass the explicit reply target + current turn.
+    const includeReplyContext =
+      includeFullThreadContext ||
+      (Boolean(repliedToMessage) && !input.forceNewThread);
+    const routingThreadMessages = includeReplyContext
+      ? historyWithTrigger.map((message) => ({
+          user: message.username ?? message.user,
+          text: message.text,
+        }))
+      : [
+          {
+            user: triggeringMessage.user,
+            text: triggeringMessage.text,
+          },
+        ];
+    const historyAttachments = includeReplyContext
+      ? toDiscordAttachmentsFromHistory(history, {
+          excludeMessageId: input.queuedMessage.ts,
+        })
+      : [];
+    const threadAttachments = historyAttachments.length
+      ? await processDiscordAttachments(historyAttachments)
+      : { images: [], attachmentTexts: [], warnings: [] };
+    for (const warning of threadAttachments.warnings) {
+      console.warn(`[discord] Thread attachment warning: ${warning}`);
+    }
 
-  if (
-    !input.skipRoutingConfirmation &&
-    // Confirmation cards need a launch owner to accept on behalf of; the
-    // ownerless case only arises on auto-start paths, which skip them anyway.
-    input.launchOwnerUserId &&
-    !shouldAutoConfirmDiscordRoute(routingDecision)
-  ) {
-    const confirmation = await requestDiscordRoutingConfirmation({
+    const taskDescriptionWithAttachments = appendAttachmentTextsToPromptText({
+      text: input.queuedMessage.text,
+      attachmentTexts: threadAttachments.attachmentTexts,
+    });
+    const allImages = [
+      ...(input.queuedMessage.images ?? []),
+      ...threadAttachments.images,
+    ];
+    const threadContext = includeReplyContext
+      ? formatDiscordThreadContext({
+          messages: historyWithTrigger,
+          currentMessageId: input.queuedMessage.ts,
+        })
+      : undefined;
+    const agentPromptPrefix = input.channelAutoStart?.agentPromptPrefix?.trim();
+    const agentPromptBody = [threadContext, taskDescriptionWithAttachments]
+      .filter((part): part is string => Boolean(part?.trim()))
+      .join('\n\n');
+    const agentPromptText = agentPromptPrefix
+      ? `${agentPromptPrefix}\n\n${agentPromptBody}`
+      : agentPromptBody !== input.queuedMessage.text
+        ? agentPromptBody
+        : undefined;
+    const routingContext = await buildDiscordRoutingContext({
+      userId: input.launchOwnerUserId,
+      taskDescription: taskDescriptionWithAttachments,
+      guildName: installation?.guildName ?? undefined,
+      channelName: input.channel.channelName,
+      threadMessages: routingThreadMessages,
+      ...(allImages.length ? { images: allImages } : {}),
+      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+    });
+    const routingDecision = await routeTask(routingContext);
+    if (routingDecision.status === 'platform_answer') {
+      // Auto-respond channels must not turn Roomote into a channel chatbot:
+      // a question-shaped message that routes to a platform answer is skipped
+      // silently (mirrors Slack's auto-routed path, which never posts answers).
+      if (input.channelAutoStart) {
+        await clearDiscordIntakeAckBestEffort(input);
+        return { status: 'skipped_platform_answer' as const, routingDecision };
+      }
+      await replyToDiscordEvent({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        channel: input.channel,
+        ...(input.interaction ? { interaction: input.interaction } : {}),
+        text: routingDecision.result.answer,
+      });
+      // No worker onStart fires for inline answers; clear intake 👀 here.
+      await clearDiscordIntakeAckBestEffort(input);
+      return { status: 'replied_inline' as const, routingDecision };
+    }
+
+    if (
+      !input.skipRoutingConfirmation &&
+      // Confirmation cards need a launch owner to accept on behalf of; the
+      // ownerless case only arises on auto-start paths, which skip them anyway.
+      input.launchOwnerUserId &&
+      !shouldAutoConfirmDiscordRoute(routingDecision)
+    ) {
+      const confirmation = await requestDiscordRoutingConfirmation({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        ...(input.interaction ? { interaction: input.interaction } : {}),
+        requesterDiscordUserId: input.requesterDiscordUserId,
+        launchOwnerUserId: input.launchOwnerUserId,
+        queuedMessage: {
+          ...input.queuedMessage,
+          ...(allImages.length ? { images: allImages } : {}),
+        },
+        metadata: input.metadata,
+        routingContext,
+        channel: input.channel,
+        routingDecision,
+        forceNewThread: input.forceNewThread,
+        ...(agentPromptText ? { agentPromptText } : {}),
+        ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
+      });
+      if (includeReplyContext) {
+        await markDiscordThreadHistoryDelivered({
+          channelId: input.channel.channelId,
+          messageIds: historyWithTrigger.map((message) => message.id),
+        });
+      }
+      return {
+        status: 'confirmation_pending' as const,
+        routingDecision,
+        pendingRouteId: confirmation.pendingRouteId,
+      };
+    }
+
+    const workspace =
+      routingDecision.status === 'routed'
+        ? await resolveDiscordWorkspace(routingDecision.result.workspace)
+        : {
+            repoForPayload: ALL_REPOSITORIES,
+            workspaceDisplayName: 'all repos',
+          };
+    if (!workspace) {
+      throw new Error(
+        'Discord task routing selected an unavailable workspace.',
+      );
+    }
+    const kickoffMessage =
+      routingDecision.status === 'routed'
+        ? routingDecision.result.kickoffMessage
+        : undefined;
+    const launched = await launchDiscordTask({
       provider: input.provider,
-      applicationId: input.applicationId,
-      ...(input.interaction ? { interaction: input.interaction } : {}),
-      requesterDiscordUserId: input.requesterDiscordUserId,
       launchOwnerUserId: input.launchOwnerUserId,
+      ...(input.channelAutoStart
+        ? { initiator: input.channelAutoStart.initiator }
+        : {}),
+      ...(agentPromptText ? { agentPromptText } : {}),
       queuedMessage: {
         ...input.queuedMessage,
         ...(allImages.length ? { images: allImages } : {}),
       },
       metadata: input.metadata,
-      routingContext,
       channel: input.channel,
-      routingDecision,
+      workspace,
       forceNewThread: input.forceNewThread,
-      ...(agentPromptText ? { agentPromptText } : {}),
+      ...(kickoffMessage ? { kickoffMessage } : {}),
       ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
     });
     if (includeReplyContext) {
@@ -288,69 +340,28 @@ export async function startNewDiscordTask(input: {
         messageIds: historyWithTrigger.map((message) => message.id),
       });
     }
+    if (input.interaction) {
+      await replyToDiscordEvent({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        channel: input.channel,
+        interaction: input.interaction,
+        text: launched.createdThread
+          ? `Started in **${workspace.workspaceDisplayName}**. Continue in the new task thread.`
+          : `Started in **${workspace.workspaceDisplayName}**.`,
+        ...(launched.taskUrl
+          ? { buttons: [[{ text: 'Follow', url: launched.taskUrl }]] }
+          : {}),
+      });
+    }
     return {
-      status: 'confirmation_pending' as const,
+      status: 'started' as const,
       routingDecision,
-      pendingRouteId: confirmation.pendingRouteId,
+      workspace,
+      ...launched,
     };
+  } catch (error) {
+    await clearDiscordIntakeAckBestEffort(input);
+    throw error;
   }
-
-  const workspace =
-    routingDecision.status === 'routed'
-      ? await resolveDiscordWorkspace(routingDecision.result.workspace)
-      : {
-          repoForPayload: ALL_REPOSITORIES,
-          workspaceDisplayName: 'all repos',
-        };
-  if (!workspace) {
-    throw new Error('Discord task routing selected an unavailable workspace.');
-  }
-  const kickoffMessage =
-    routingDecision.status === 'routed'
-      ? routingDecision.result.kickoffMessage
-      : undefined;
-  const launched = await launchDiscordTask({
-    provider: input.provider,
-    launchOwnerUserId: input.launchOwnerUserId,
-    ...(input.channelAutoStart
-      ? { initiator: input.channelAutoStart.initiator }
-      : {}),
-    ...(agentPromptText ? { agentPromptText } : {}),
-    queuedMessage: {
-      ...input.queuedMessage,
-      ...(allImages.length ? { images: allImages } : {}),
-    },
-    metadata: input.metadata,
-    channel: input.channel,
-    workspace,
-    forceNewThread: input.forceNewThread,
-    ...(kickoffMessage ? { kickoffMessage } : {}),
-    ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
-  });
-  if (includeReplyContext) {
-    await markDiscordThreadHistoryDelivered({
-      channelId: input.channel.channelId,
-      messageIds: historyWithTrigger.map((message) => message.id),
-    });
-  }
-  if (input.interaction) {
-    await replyToDiscordEvent({
-      provider: input.provider,
-      applicationId: input.applicationId,
-      channel: input.channel,
-      interaction: input.interaction,
-      text: launched.createdThread
-        ? `Started in **${workspace.workspaceDisplayName}**. Continue in the new task thread.`
-        : `Started in **${workspace.workspaceDisplayName}**.`,
-      ...(launched.taskUrl
-        ? { buttons: [[{ text: 'Follow', url: launched.taskUrl }]] }
-        : {}),
-    });
-  }
-  return {
-    status: 'started' as const,
-    routingDecision,
-    workspace,
-    ...launched,
-  };
 }

@@ -37,6 +37,7 @@ import { startScheduler } from './scheduler';
 import { startSandboxOidcRefreshQueue } from './sandbox-oidc-refresh-queue';
 import { startSlackAccountLinkEducationQueue } from './slack-account-link-education-queue';
 import { startSuggestedTasksOnboardingFollowupQueue } from './suggested-tasks-onboarding-followup-queue';
+import { startDiscordGatewayEventsQueue } from './discord-gateway-events-queue';
 import { discordSuggestedTasksOnboardingFollowupJob } from './jobs/discord-suggested-tasks-onboarding-followup';
 import { slackSuggestedTasksOnboardingFollowupJob } from './jobs/slack-suggested-tasks-onboarding-followup';
 import { telegramSuggestedTasksOnboardingFollowupJob } from './jobs/telegram-suggested-tasks-onboarding-followup';
@@ -89,6 +90,8 @@ const discordGatewaySupervisor = startDiscordGatewaySupervisor(
       ),
   },
 );
+const { queue: discordGatewayEventsQueue, worker: discordGatewayEventsWorker } =
+  startDiscordGatewayEventsQueue();
 
 const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
   startScheduler();
@@ -170,6 +173,7 @@ createBullBoard({
     new BullMQAdapter(dockerValidationQueue, { readOnlyMode: false }),
     new BullMQAdapter(taskSleepQueue, { readOnlyMode: false }),
     new BullMQAdapter(slackAccountLinkEducationQueue, { readOnlyMode: false }),
+    new BullMQAdapter(discordGatewayEventsQueue, { readOnlyMode: false }),
     new BullMQAdapter(discordSuggestedTasksOnboardingFollowupQueue, {
       readOnlyMode: false,
     }),
@@ -325,6 +329,8 @@ async function gracefulShutdown() {
     await slackAccountLinkEducationWorker.close();
     await slackAccountLinkEducationQueueEvents.close();
     await slackAccountLinkEducationQueue.close();
+    await discordGatewayEventsWorker.close();
+    await discordGatewayEventsQueue.close();
     await discordSuggestedTasksOnboardingFollowupWorker.close();
     await discordSuggestedTasksOnboardingFollowupQueue.close();
     await slackSuggestedTasksOnboardingFollowupWorker.close();
