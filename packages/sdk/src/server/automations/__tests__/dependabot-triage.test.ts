@@ -147,6 +147,19 @@ describe('dependabotTriageJob buildScanTask', () => {
     );
   });
 
+  it('skips when there are no active GitHub repositories', async () => {
+    mockGetActiveGitHubRepositoryFullNames.mockResolvedValue([]);
+
+    const result = await config.buildScanTask(buildScanTaskParams());
+
+    expect(result).toEqual({
+      kind: 'skip',
+      reason: 'No active GitHub repositories',
+    });
+    expect(mockBuildRepositoryCoverage).not.toHaveBeenCalled();
+    expect(mockLoadAutomationThreadFeedbackContext).not.toHaveBeenCalled();
+  });
+
   it('skips when GitHub is not configured', async () => {
     mockHasActiveGitHubInstallation.mockResolvedValue(false);
 

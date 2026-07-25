@@ -90,6 +90,13 @@ export const dependabotTriageJob = createScheduledTriageJob({
     // leaves the run's source-control provider ambiguous and GitHub token
     // minting then fails on the non-GitHub repository names.
     const selectedRepositories = await getActiveGitHubRepositoryFullNames();
+    if (selectedRepositories.length === 0) {
+      return {
+        kind: 'skip',
+        reason: 'No active GitHub repositories',
+      };
+    }
+
     const repositoryCoverage =
       await buildRepositoryCoverage(selectedRepositories);
     const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
