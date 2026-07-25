@@ -469,8 +469,6 @@ jobs:
     name: Notify ops repository
     runs-on: ubuntu-latest
     needs: publish
-    # Main builds only: the ops repo's develop consumer (the retired nightly
-    # instance) is gone, so a develop dispatch would land on no listener.
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ROOMOTE_OPS_REPO != '' }}
     permissions:
       contents: read
