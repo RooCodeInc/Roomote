@@ -61,7 +61,9 @@ import { maybeHandleDiscordChannelAutoStart } from './channel-auto-start.js';
 import {
   claimDiscordApiEvent,
   completeDiscordApiEvent,
+  discordApiEventLeaseRenewal,
   releaseDiscordApiEvent,
+  renewDiscordApiEvent,
 } from './event-gate.js';
 import {
   DiscordProviderNotConfiguredError,
@@ -116,6 +118,22 @@ function withDiscordGatewayEventProcessingTimeout<T>(
       },
     );
   });
+}
+
+function renewDiscordApiEventLease(input: {
+  eventType: string;
+  eventId: string;
+  token: string;
+}): () => void {
+  const interval = setInterval(() => {
+    void renewDiscordApiEvent(input).catch((error) => {
+      apiLogger.warn(
+        `[discord] Failed to renew event lease ${input.eventId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+  }, discordApiEventLeaseRenewal.intervalMs);
+  interval.unref();
+  return () => clearInterval(interval);
 }
 
 const DISCORD_HELP_MESSAGE = [
@@ -937,10 +955,12 @@ discord.post('/events/process', async (c) => {
   if (claim.status === 'processing') {
     return c.json({ ok: false, error: 'discord_event_in_progress' }, 425);
   }
+  const eventLease = { ...eventRef, token: claim.token };
+  const stopLeaseRenewal = renewDiscordApiEventLease(eventLease);
+  const processing = processDiscordGatewayEvent(parsed.event);
   try {
-    const result = await withDiscordGatewayEventProcessingTimeout(
-      processDiscordGatewayEvent(parsed.event),
-    );
+    const result = await withDiscordGatewayEventProcessingTimeout(processing);
+    stopLeaseRenewal();
     // The queue retries processing failures. If this bookkeeping write is
     // unavailable, the short lease expires and a later job attempt can claim it.
     await completeDiscordApiEvent({ ...eventRef, token: claim.token }).catch(
@@ -952,6 +972,32 @@ discord.post('/events/process', async (c) => {
     );
     return c.json(result);
   } catch (error) {
+    if (error instanceof DiscordGatewayEventProcessingTimeoutError) {
+      // The timeout only ends this HTTP request. Keep the lease until the
+      // original handler settles so a retry cannot start duplicate work.
+      void processing
+        .then(
+          () =>
+            completeDiscordApiEvent(eventLease).catch((completionError) => {
+              apiLogger.warn(
+                `[discord] Failed to mark timed-out event ${eventRef.eventId} complete: ${completionError instanceof Error ? completionError.message : String(completionError)}`,
+              );
+            }),
+          (processingError: unknown) => {
+            const finalize = isPermanentDiscordEventError(processingError)
+              ? completeDiscordApiEvent(eventLease)
+              : releaseDiscordApiEvent(eventLease);
+            return finalize.catch(() => undefined);
+          },
+        )
+        .finally(stopLeaseRenewal);
+      apiLogger.warn(
+        `[discord] Discord API unavailable while processing event ${eventRef.eventId}: ${error.message}`,
+      );
+      return c.json({ ok: false, error: 'discord_api_unavailable' }, 503);
+    }
+
+    stopLeaseRenewal();
     if (isPermanentDiscordEventError(error)) {
       await completeDiscordApiEvent({
         ...eventRef,
@@ -976,10 +1022,7 @@ discord.post('/events/process', async (c) => {
         503,
       );
     }
-    if (
-      error instanceof DiscordGatewayEventProcessingTimeoutError ||
-      isRetryableDiscordProviderError(error)
-    ) {
+    if (isRetryableDiscordProviderError(error)) {
       apiLogger.warn(
         `[discord] Discord API unavailable while processing event ${eventRef.eventId}: ${error.message}`,
       );
