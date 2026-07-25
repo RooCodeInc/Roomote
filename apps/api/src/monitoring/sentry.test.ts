@@ -20,7 +20,7 @@ describe('api sentry monitoring', () => {
   });
 
   it('disables Sentry when the app environment is development', async () => {
-    process.env.APP_ENV = 'development';
+    process.env.R_APP_ENV = 'development';
 
     const { initApiSentry } = await import('./sentry');
 
@@ -46,7 +46,7 @@ describe('api sentry monitoring', () => {
   });
 
   it('enables Sentry outside development only when a DSN is configured', async () => {
-    process.env.APP_ENV = 'production';
+    process.env.R_APP_ENV = 'production';
     process.env.API_SENTRY_DSN = 'https://api.example/1';
 
     const { initApiSentry } = await import('./sentry');
@@ -62,7 +62,7 @@ describe('api sentry monitoring', () => {
   });
 
   it('stays disabled outside development when no DSN is configured', async () => {
-    process.env.APP_ENV = 'production';
+    process.env.R_APP_ENV = 'production';
 
     const { initApiSentry } = await import('./sentry');
 

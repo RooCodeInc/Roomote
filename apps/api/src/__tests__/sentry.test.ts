@@ -39,15 +39,23 @@ import { HTTPException } from 'hono/http-exception';
 
 import { createApiApp } from '../server';
 
+const originalRAppEnv = process.env.R_APP_ENV;
+
 describe('API Sentry integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.APP_ENV = 'preview';
+    process.env.R_APP_ENV = 'preview';
     process.env.API_SENTRY_DSN = 'https://api.example/1';
   });
 
   afterEach(() => {
     delete process.env.APP_ENV;
+    if (originalRAppEnv === undefined) {
+      delete process.env.R_APP_ENV;
+    } else {
+      process.env.R_APP_ENV = originalRAppEnv;
+    }
     delete process.env.API_SENTRY_DSN;
   });
 
