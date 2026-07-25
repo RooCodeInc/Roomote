@@ -7,6 +7,7 @@ import {
   inArray,
   isChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected,
+  isXaiSubscriptionConnected,
   isNull,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
@@ -298,12 +299,14 @@ export async function getTaskModelSettingsCommand(
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
   ]);
   // The Available Models list always shows the full recommended set for
   // every connected provider; entries that are not persisted yet render
@@ -313,6 +316,7 @@ export async function getTaskModelSettingsCommand(
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   });
   // Models selected for a runtime role (or as the default coding model) stay
   // listed and active even when a release drops them from the recommended
@@ -414,12 +418,14 @@ export async function getTaskModelProviderSetupCommand(
     setupNewState,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   ] = await Promise.all([
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
     getDeploymentSetupNewState(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
   ]);
 
   // Include non-secret OpenAI-compatible env values (base URLs + connection
@@ -459,6 +465,7 @@ export async function getTaskModelProviderSetupCommand(
     selectedProvider: setupNewState.modelProvider,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   });
 
   return { providerSetup };
@@ -561,7 +568,10 @@ export async function saveTaskModelProviderCommand(
   // When remapping a newly named OpenAI-compatible connection,, rewrite the
   // primary base URL key by treating apiKey as the template primary value and
   // collecting against the named descriptor.
-  const chatgptConnected = await isChatGptSubscriptionConnected();
+  const [chatgptConnected, xaiSubscriptionConnected] = await Promise.all([
+    isChatGptSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
+  ]);
 
   let addedRecommendedModelCount = 0;
 
@@ -614,6 +624,7 @@ export async function saveTaskModelProviderCommand(
         runtimeEnv: process.env,
         persistedEnvVarNames,
         chatgptConnected,
+        xaiSubscriptionConnected,
       }),
     ]);
     const autoAdd = buildAutoAddedTaskModelSettings({
@@ -837,12 +848,14 @@ export async function deleteTaskModelProviderCommand(
       persistedEnvVarNames,
       setupNewState,
       chatgptConnected,
+      xaiSubscriptionConnected,
       persistedTaskModelSettings,
     ] = await Promise.all([
       getDeploymentRuntimeModelConfig(),
       getPersistedEnvironmentVariableNames(tx),
       getDeploymentSetupNewState(tx),
       isChatGptSubscriptionConnected(),
+      isXaiSubscriptionConnected(),
       getDeploymentTaskModelSettings(),
     ]);
 
@@ -852,6 +865,7 @@ export async function deleteTaskModelProviderCommand(
       persistedEnvVarNames,
       selectedProvider: setupNewState.modelProvider,
       chatgptConnected,
+      xaiSubscriptionConnected,
     });
     const providerStatus = providerSetup.providers.find(
       (candidate) => candidate.id === provider.id,
@@ -920,11 +934,13 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     settings,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
     persistedEnvVarNames,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
     getPersistedEnvironmentVariableNames(),
   ]);
   const providerSetup = buildSetupModelStatus({
@@ -932,6 +948,7 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   });
   const openaiConnected = Boolean(
     providerSetup.providers.find(

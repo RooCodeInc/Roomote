@@ -29,12 +29,14 @@ export function collectConnectedTaskModelProviderIds(options: {
   persistedEnvVarNames: Iterable<string>;
   chatgptConnected: boolean;
   githubCopilotConnected?: boolean;
+  xaiSubscriptionConnected?: boolean;
 }): Set<string> {
   const status = buildSetupModelStatus({
     runtimeEnv: options.runtimeEnv,
     persistedEnvVarNames: options.persistedEnvVarNames,
     chatgptConnected: options.chatgptConnected,
     githubCopilotConnected: options.githubCopilotConnected,
+    xaiSubscriptionConnected: options.xaiSubscriptionConnected,
   });
 
   return new Set([

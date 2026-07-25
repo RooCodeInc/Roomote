@@ -36,6 +36,7 @@ import {
   resolveDiscordRuntimeCredentials,
   isChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected,
+  isXaiSubscriptionConnected,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
@@ -1291,6 +1292,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     nonSecretSourceControlEnvValues,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   ] = await Promise.all([
     getSetupBaseStatus(auth),
     getSetupSlackAccessStatus({ userId }),
@@ -1316,6 +1318,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     ]),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
   ]);
   let setupNewState = normalizeSetupNewState(baseStatus.setupNewState);
 
@@ -1403,6 +1406,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     selectedProvider: setupNewState.modelProvider,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   });
   const computeSetup = buildSetupComputeStatus({
     runtimeEnv: process.env,
@@ -1510,10 +1514,12 @@ export async function saveSetupNewModelConfigCommand(
   const provider = getSetupModelProvider(providerId);
   const isOauthProvider = provider.authKind === 'oauth';
 
-  const [chatgptConnected, githubCopilotConnected] = await Promise.all([
-    isChatGptSubscriptionConnected(),
-    isGitHubCopilotSubscriptionConnected(),
-  ]);
+  const [chatgptConnected, githubCopilotConnected, xaiSubscriptionConnected] =
+    await Promise.all([
+      isChatGptSubscriptionConnected(),
+      isGitHubCopilotSubscriptionConnected(),
+      isXaiSubscriptionConnected(),
+    ]);
   const selectedOauthConnected =
     provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
       ? chatgptConnected
@@ -1532,6 +1538,10 @@ export async function saveSetupNewModelConfigCommand(
     );
   }
 
+  // xAI can continue with either an API key or a Grok subscription.
+  const xaiSatisfiedBySubscription =
+    provider.id === 'xai' && xaiSubscriptionConnected;
+
   return db.transaction(async (tx) => {
     const [currentState, persistedEnvVarNames, persistedTaskModelSettings] =
       await Promise.all([
@@ -1542,39 +1552,50 @@ export async function saveSetupNewModelConfigCommand(
     const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
 
     if (!isOauthProvider) {
-      const { values: credentialValues, clearedEnvVarNames } =
-        collectSetupModelProviderCredentialValues({
-          provider,
-          apiKey,
-          additionalEnvValues,
-          isEnvVarSatisfied: (envVarName) =>
-            persistedEnvVarNameSet.has(envVarName) ||
-            isConfiguredEnvValue(process.env[envVarName]),
-          action: 'continue',
-        });
+      // When xAI is already covered by a Grok subscription and the operator
+      // did not submit a key, skip the API-key collector so Continue works
+      // without a key. If they did submit a key, still save it (dual path).
+      const skipCredentialCollection =
+        xaiSatisfiedBySubscription && !apiKey?.trim();
 
-      if (credentialValues.length > 0) {
-        await upsertDeploymentEnvironmentVariables(tx, {
-          userId,
-          values: credentialValues,
-        });
-      }
+      if (!skipCredentialCollection) {
+        const { values: credentialValues, clearedEnvVarNames } =
+          collectSetupModelProviderCredentialValues({
+            provider,
+            apiKey,
+            additionalEnvValues,
+            isEnvVarSatisfied: (envVarName) =>
+              persistedEnvVarNameSet.has(envVarName) ||
+              isConfiguredEnvValue(process.env[envVarName]) ||
+              (provider.id === 'xai' &&
+                envVarName === 'XAI_API_KEY' &&
+                xaiSatisfiedBySubscription),
+            action: 'continue',
+          });
 
-      // Optional fields submitted as blank clear their previously saved value
-      // (deployment-level rows only, mirroring how they are stored).
-      const clearedPersistedEnvVarNames = clearedEnvVarNames.filter((name) =>
-        persistedEnvVarNameSet.has(name),
-      );
+        if (credentialValues.length > 0) {
+          await upsertDeploymentEnvironmentVariables(tx, {
+            userId,
+            values: credentialValues,
+          });
+        }
 
-      if (clearedPersistedEnvVarNames.length > 0) {
-        await tx
-          .delete(environmentVariables)
-          .where(
-            and(
-              isNull(environmentVariables.userId),
-              inArray(environmentVariables.name, clearedPersistedEnvVarNames),
-            ),
-          );
+        // Optional fields submitted as blank clear their previously saved value
+        // (deployment-level rows only, mirroring how they are stored).
+        const clearedPersistedEnvVarNames = clearedEnvVarNames.filter((name) =>
+          persistedEnvVarNameSet.has(name),
+        );
+
+        if (clearedPersistedEnvVarNames.length > 0) {
+          await tx
+            .delete(environmentVariables)
+            .where(
+              and(
+                isNull(environmentVariables.userId),
+                inArray(environmentVariables.name, clearedPersistedEnvVarNames),
+              ),
+            );
+        }
       }
     }
 
@@ -1623,6 +1644,7 @@ export async function saveSetupNewModelConfigCommand(
         persistedEnvVarNames,
         chatgptConnected,
         githubCopilotConnected,
+        xaiSubscriptionConnected,
       }),
     ]);
     const autoAdd = buildAutoAddedTaskModelSettings({

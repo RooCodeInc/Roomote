@@ -10,18 +10,24 @@ import {
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
   resolveSetupModelProviderIdFromModel,
+  XAI_OPENCODE_PROVIDER_ID,
   type TaskModelOption,
 } from '@roomote/types';
 
 import { decryptSecrets } from '../encryption';
 import { resolveOpenCodeAuthContent } from './chatgpt-subscription';
 import { resolveGitHubCopilotOpenCodeAuthContent } from './github-copilot-subscription';
+import {
+  buildXaiOpenCodeAuthContent,
+  getFreshXaiAccessToken,
+} from './xai-subscription';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
@@ -438,12 +444,43 @@ async function resolveModelRuntimeEnv(
     : null;
   const routeGitHubCopilotThroughGateway =
     inferenceGateway && githubCopilotAuthContent != null;
+  // xAI Grok subscription: when a connected OAuth record exists and any role
+  // or switchable model uses `xai/`, route through the gateway (marker only)
+  // or mint a fresh access token for non-gateway control-plane use.
+  const usesXaiModel = [
+    ...resolvedRoleModels,
+    ...gatewaySwitchableModelIds,
+  ].some(
+    (modelId) =>
+      typeof modelId === 'string' &&
+      modelId.startsWith(`${XAI_OPENCODE_PROVIDER_ID}/`),
+  );
+  const xaiAccessToken = usesXaiModel
+    ? await getFreshXaiAccessToken({ executor })
+    : null;
+  const routeXaiThroughGateway = inferenceGateway && xaiAccessToken != null;
+  // Non-gateway control-plane paths that need a bearer can still use the
+  // OAuth record as OPENCODE_AUTH_CONTENT.
+  const xaiOpenCodeAuthContent =
+    xaiAccessToken && !routeXaiThroughGateway
+      ? buildXaiOpenCodeAuthContent(xaiAccessToken)
+      : null;
   const directOpenCodeAuthContent = [
     injectedOpenCodeAuthContent,
     githubCopilotAuthContent,
+    xaiOpenCodeAuthContent,
   ].reduce<Record<string, unknown>>((merged, content) => {
     return content ? { ...merged, ...JSON.parse(content) } : merged;
   }, {});
+
+  // When only the subscription is connected (no XAI_API_KEY), still advertise
+  // the provider key name so the worker knows xai models are gateway-covered.
+  // The marker alone drives rebase; R_INFERENCE_GATEWAY_KEYS stays key-based.
+  const xaiKeyAlreadyServed = gatewayServedKeyNameSet.has('XAI_API_KEY');
+  const effectiveGatewayServedKeyNames =
+    routeXaiThroughGateway && !xaiKeyAlreadyServed
+      ? [...gatewayServedKeyNames, 'XAI_API_KEY']
+      : gatewayServedKeyNames;
 
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
@@ -488,8 +525,9 @@ async function resolveModelRuntimeEnv(
       R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),
     ...resolvedProviderKeyValues,
-    ...(gatewayServedKeyNames.length > 0 && {
-      [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),
+    ...(effectiveGatewayServedKeyNames.length > 0 && {
+      [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]:
+        effectiveGatewayServedKeyNames.join(','),
     }),
     ...(routeChatGptThroughGateway
       ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }
@@ -497,8 +535,12 @@ async function resolveModelRuntimeEnv(
     ...(routeGitHubCopilotThroughGateway
       ? { [INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME]: '1' }
       : {}),
+    ...(routeXaiThroughGateway
+      ? { [INFERENCE_GATEWAY_XAI_ENV_VAR_NAME]: '1' }
+      : {}),
     ...(!routeChatGptThroughGateway &&
     !routeGitHubCopilotThroughGateway &&
+    !routeXaiThroughGateway &&
     Object.keys(directOpenCodeAuthContent).length > 0
       ? { OPENCODE_AUTH_CONTENT: JSON.stringify(directOpenCodeAuthContent) }
       : {}),

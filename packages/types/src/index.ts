@@ -11,6 +11,7 @@ export * from './pr-review-action';
 export * from './task-runs';
 export * from './chatgpt-subscription';
 export * from './github-copilot-subscription';
+export * from './xai-subscription';
 export * from './communication';
 export * from './communication-message-prompt';
 export * from './identity-display-name';

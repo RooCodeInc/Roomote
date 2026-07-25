@@ -66,6 +66,12 @@ export const INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME =
 export const INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME =
   'R_INFERENCE_GATEWAY_GITHUB_COPILOT';
 
+/**
+ * Marker indicating that the gateway holds an xAI Grok subscription OAuth
+ * token (and should serve `xai/` models even when `XAI_API_KEY` is absent).
+ */
+export const INFERENCE_GATEWAY_XAI_ENV_VAR_NAME = 'R_INFERENCE_GATEWAY_XAI';
+
 interface InferenceGatewayAuthHeader {
   name: string;
   scheme?: 'bearer';
@@ -76,11 +82,14 @@ interface InferenceGatewayAuthHeader {
  * - `api-key`: inject a static deployment key (the default).
  * - `chatgpt-oauth`: mint a fresh ChatGPT-subscription access token
  *   server-side and add the account-id header; the sandbox holds no key.
+ * - `xai-oauth`: prefer a connected Grok subscription access token, falling
+ *   back to `XAI_API_KEY` when no subscription is present.
  */
 export type InferenceGatewayAuthStrategy =
   | 'api-key'
   | 'chatgpt-oauth'
-  | 'github-copilot-oauth';
+  | 'github-copilot-oauth'
+  | 'xai-oauth';
 
 export interface InferenceGatewayProvider {
   /**
@@ -303,6 +312,9 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
     {
       id: 'xai',
       name: 'xAI',
+      // Prefer SuperGrok / Premium+ OAuth when connected; fall back to the
+      // deployment API key so BYOK setups keep working unchanged.
+      authStrategy: 'xai-oauth',
       envVarNames: ['XAI_API_KEY'],
       upstreamBaseUrl: 'https://api.x.ai',
       authHeader: { name: 'authorization', scheme: 'bearer' },

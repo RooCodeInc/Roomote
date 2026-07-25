@@ -570,6 +570,24 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(disconnected?.runtimeApiKeySatisfied).toBe(false);
     expect(disconnected?.savedApiKeySatisfied).toBe(false);
   });
+
+  it('marks xAI connected from SuperGrok OAuth without an API key', () => {
+    const status = buildSetupModelStatus({
+      xaiSubscriptionConnected: true,
+    });
+    const xai = status.providers.find((provider) => provider.id === 'xai');
+    expect(xai?.savedApiKeySatisfied).toBe(true);
+    expect(status.xaiSubscriptionConnected).toBe(true);
+    expect(status.xaiApiKeyConnected).toBe(false);
+  });
+
+  it('reports xaiApiKeyConnected when XAI_API_KEY is present', () => {
+    const status = buildSetupModelStatus({
+      persistedEnvVarNames: ['XAI_API_KEY'],
+    });
+    expect(status.xaiApiKeyConnected).toBe(true);
+    expect(status.xaiSubscriptionConnected).toBe(false);
+  });
 });
 
 describe('buildRecommendedDeploymentModelConfig', () => {

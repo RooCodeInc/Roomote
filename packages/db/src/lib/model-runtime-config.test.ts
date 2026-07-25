@@ -4,12 +4,16 @@ const {
   mockEnvironmentVariablesFindMany,
   mockResolveOpenCodeAuthContent,
   mockResolveGitHubCopilotOpenCodeAuthContent,
+  mockGetFreshXaiAccessToken,
+  mockBuildXaiOpenCodeAuthContent,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockDeploymentSettingsFindFirst: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockResolveOpenCodeAuthContent: vi.fn(),
   mockResolveGitHubCopilotOpenCodeAuthContent: vi.fn(),
+  mockGetFreshXaiAccessToken: vi.fn(),
+  mockBuildXaiOpenCodeAuthContent: vi.fn(),
 }));
 
 vi.mock('../encryption', () => ({
@@ -45,6 +49,13 @@ vi.mock('./github-copilot-subscription', () => ({
     mockResolveGitHubCopilotOpenCodeAuthContent(...args),
 }));
 
+vi.mock('./xai-subscription', () => ({
+  getFreshXaiAccessToken: (...args: unknown[]) =>
+    mockGetFreshXaiAccessToken(...args),
+  buildXaiOpenCodeAuthContent: (...args: unknown[]) =>
+    mockBuildXaiOpenCodeAuthContent(...args),
+}));
+
 vi.mock('../schema', () => ({
   deploymentSettings: { id: 'deploymentSettings.id' },
   eq: vi.fn(),
@@ -62,6 +73,8 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
     mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+    mockBuildXaiOpenCodeAuthContent.mockReturnValue(null);
   });
 
   it('prefers real runtime env values over persisted deployment config', async () => {

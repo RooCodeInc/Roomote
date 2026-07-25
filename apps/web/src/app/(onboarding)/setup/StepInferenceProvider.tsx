@@ -25,6 +25,7 @@ import {
 } from '@/components/system';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
+import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
 
 import { StepTitle } from './StepTitle';
 import { SetupFooter } from './SetupFooter';
@@ -98,12 +99,19 @@ export function StepInferenceProvider({
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
   const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
     useState(false);
+  const [isXaiDialogOpen, setIsXaiDialogOpen] = useState(false);
   const chatgptStatusQuery = useQuery(
     trpc.chatgptSubscription.status.queryOptions(undefined, {
       enabled: selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID,
     }),
   );
   const chatgptStatus = chatgptStatusQuery.data ?? null;
+  const xaiStatusQuery = useQuery(
+    trpc.xaiSubscription.status.queryOptions(undefined, {
+      enabled: selectedProvider === 'xai',
+    }),
+  );
+  const xaiStatus = xaiStatusQuery.data ?? null;
   const saveModelConfig = useMutation(
     trpc.setupNew.saveModelConfig.mutationOptions({
       onSuccess: async () => {
@@ -163,14 +171,19 @@ export function StepInferenceProvider({
     selectedProviderStatus?.authKind === 'oauth' &&
     selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   const isGitHubCopilotProvider = selectedProvider === 'github-copilot';
+  const isXaiProvider = selectedProvider === 'xai';
   const isOAuthProvider = selectedProviderStatus?.authKind === 'oauth';
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const githubCopilotConnected = Boolean(modelSetup.githubCopilotConnected);
+  const xaiSubscriptionConnected = Boolean(
+    modelSetup.xaiSubscriptionConnected || xaiStatus?.connected,
+  );
   const hasRuntimeProviderKey =
     selectedProviderStatus?.runtimeApiKeySatisfied === true;
   const hasSavedProviderKey =
-    selectedProviderStatus?.savedApiKeySatisfied === true;
+    selectedProviderStatus?.savedApiKeySatisfied === true ||
+    (isXaiProvider && xaiSubscriptionConnected);
   const primaryCredentialLabel =
     selectedProviderStatus?.envVarLabel ?? 'API key';
   const additionalEnvFields = selectedProviderStatus?.additionalEnvFields ?? [];
@@ -187,6 +200,12 @@ export function StepInferenceProvider({
     !isEndpointProvider &&
     !hasRuntimeProviderKey &&
     hasSavedProviderKey &&
+    // OAuth-only xAI has no API key to mask.
+    !(
+      isXaiProvider &&
+      xaiSubscriptionConnected &&
+      !modelSetup.xaiApiKeyConnected
+    ) &&
     apiKey.length === 0 &&
     !editingSavedValue;
   const shouldShowConfiguredMask =
@@ -379,6 +398,31 @@ export function StepInferenceProvider({
         {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
       </div>
 
+      {isXaiProvider && !hasRuntimeProviderKey && !xaiSubscriptionConnected ? (
+        <div className="flex max-w-lg flex-wrap items-center gap-3">
+          <span className="text-sm text-muted-foreground">
+            or connect a SuperGrok / eligible X Premium+ subscription:
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={saveModelConfig.isPending}
+            onClick={() => setIsXaiDialogOpen(true)}
+          >
+            Connect Grok subscription
+          </Button>
+        </div>
+      ) : null}
+
+      {isXaiProvider && !hasRuntimeProviderKey && xaiSubscriptionConnected ? (
+        <span className="text-sm text-muted-foreground">
+          {xaiStatus?.email
+            ? `Connected as ${xaiStatus.email}`
+            : 'Connected to a SuperGrok / X Premium+ account.'}
+        </span>
+      ) : null}
+
       {requiresConnectionName && !hasRuntimeProviderKey ? (
         <div className="flex max-w-lg items-center gap-2">
           <span className="w-44 shrink-0 text-sm text-muted-foreground">
@@ -517,6 +561,15 @@ export function StepInferenceProvider({
       <GitHubCopilotConnectDialog
         open={isGitHubCopilotDialogOpen}
         onOpenChange={setIsGitHubCopilotDialogOpen}
+        onConnected={async () => {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.setupNew.status.queryKey(),
+          });
+        }}
+      />
+      <XaiConnectDialog
+        open={isXaiDialogOpen}
+        onOpenChange={setIsXaiDialogOpen}
         onConnected={async () => {
           await queryClient.invalidateQueries({
             queryKey: trpc.setupNew.status.queryKey(),
