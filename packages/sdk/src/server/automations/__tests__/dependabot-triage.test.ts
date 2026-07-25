@@ -71,7 +71,7 @@ describe('dependabotTriageJob buildScanTask', () => {
     mockLoadAutomationThreadFeedbackContext.mockResolvedValue(null);
   });
 
-  it('scopes the scan to environment-backed GitHub repositories and stamps the provider', async () => {
+  it('scans all active GitHub repositories while keeping remediation environment-backed', async () => {
     mockGetActiveGitHubRepositoryFullNames.mockResolvedValue([
       'acme/api',
       'acme/no-environment',
@@ -89,10 +89,15 @@ describe('dependabotTriageJob buildScanTask', () => {
       throw new Error('expected a scan build');
     }
 
+    const [payload] = result.payloads;
+    if (!payload) {
+      throw new Error('expected a scan payload');
+    }
+
     expect(result.payloads).toHaveLength(1);
-    expect(result.payloads[0]).toMatchObject({
+    expect(payload).toMatchObject({
       repo: ALL_REPOSITORIES,
-      selectedRepositories: ['acme/api'],
+      selectedRepositories: ['acme/api', 'acme/no-environment'],
       sourceControlProvider: 'github',
       suggestionSource: 'dependabot_triage',
     });
@@ -103,9 +108,22 @@ describe('dependabotTriageJob buildScanTask', () => {
       'acme/api',
       'acme/no-environment',
     ]);
+    expect(payload.description).toContain(
+      'count its current open Dependabot alerts',
+    );
+    expect(payload.description).toContain('inspect its open pull requests');
+    expect(payload.description).toContain(
+      'always post one concise status message',
+    );
+    expect(payload.description).toContain(
+      'total number of open Dependabot alerts, the per-repository counts',
+    );
+    expect(payload.description).toContain(
+      'do not submit duplicate work for alerts it covers',
+    );
   });
 
-  it('skips when no active GitHub repository is backed by an environment', async () => {
+  it('scans and reports repositories without environments without permitting remediation launches', async () => {
     mockGetActiveGitHubRepositoryFullNames.mockResolvedValue([
       'acme/no-environment',
     ]);
@@ -115,10 +133,31 @@ describe('dependabotTriageJob buildScanTask', () => {
 
     const result = await config.buildScanTask(buildScanTaskParams());
 
+    expect(result.kind).toBe('scan');
+
+    if (result.kind !== 'scan') {
+      throw new Error('expected a scan build');
+    }
+
+    expect(result.payloads[0]).toMatchObject({
+      selectedRepositories: ['acme/no-environment'],
+    });
+    expect(result.payloads[0]?.description).toContain(
+      'Only consider repositories that appear in the "Repository environments" list below',
+    );
+  });
+
+  it('skips when there are no active GitHub repositories', async () => {
+    mockGetActiveGitHubRepositoryFullNames.mockResolvedValue([]);
+
+    const result = await config.buildScanTask(buildScanTaskParams());
+
     expect(result).toEqual({
       kind: 'skip',
-      reason: 'No active GitHub repositories have configured environments',
+      reason: 'No active GitHub repositories',
     });
+    expect(mockBuildRepositoryCoverage).not.toHaveBeenCalled();
+    expect(mockLoadAutomationThreadFeedbackContext).not.toHaveBeenCalled();
   });
 
   it('skips when GitHub is not configured', async () => {
