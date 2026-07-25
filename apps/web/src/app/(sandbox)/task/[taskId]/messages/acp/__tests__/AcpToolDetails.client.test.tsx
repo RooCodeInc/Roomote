@@ -58,11 +58,12 @@ describe('AcpToolDetails', () => {
     toolInputSpy.mockClear();
   });
 
-  it('shows the subagent launch prompt when expanding without debug mode', () => {
+  it('shows the subagent launch prompt and most recent message without debug mode', () => {
     render(
       <AcpToolDetails
         msg={buildMessage({
           prompt: 'Review the current branch and summarize the state.',
+          output: 'The branch is clean and the relevant tests pass.',
           model: 'gpt-5.4',
           reasoningEffort: 'low',
           isSubagentSpawn: true,
@@ -73,15 +74,21 @@ describe('AcpToolDetails', () => {
     expect(
       screen.getByText('Review the current branch and summarize the state.'),
     ).toBeInTheDocument();
+    expect(screen.getByText('Initial prompt')).toBeInTheDocument();
+    expect(screen.getByText('Last message')).toBeInTheDocument();
+    expect(
+      screen.getByText('The branch is clean and the relevant tests pass.'),
+    ).toBeInTheDocument();
     expect(toolInputSpy).not.toHaveBeenCalled();
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });
 
-  it('hides expanded details for subagent rows without a prompt', () => {
-    const { container } = render(
+  it('shows the most recent subagent message when no prompt is available', () => {
+    render(
       <AcpToolDetails
         msg={buildMessage({
           prompt: null,
+          output: 'Found the requested implementation detail.',
           model: 'gpt-5.4',
           reasoningEffort: 'low',
           isSubagentSpawn: true,
@@ -89,7 +96,10 @@ describe('AcpToolDetails', () => {
       />,
     );
 
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.getByText('Last message')).toBeInTheDocument();
+    expect(
+      screen.getByText('Found the requested implementation detail.'),
+    ).toBeInTheDocument();
     expect(toolInputSpy).not.toHaveBeenCalled();
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });

@@ -43,6 +43,14 @@ export function getSubagentPrompt(msg: AcpToolUiMessage): string | null {
   return asNonEmptyString((rawInput as Record<string, unknown>).prompt);
 }
 
+export function getSubagentLastMessage(msg: AcpToolUiMessage): string | null {
+  if (msg.kind !== 'tool_result' || !isSubagentToolPayload(msg.data)) {
+    return null;
+  }
+
+  return asNonEmptyString(msg.data.output);
+}
+
 export function hidesExpandedToolResult(
   msg: AcpToolUiMessage,
   options?: ToolDetailVisibilityOptions,
@@ -54,7 +62,9 @@ export function hidesExpandedToolResult(
       return false;
     }
 
-    return getSubagentPrompt(msg) === null;
+    return (
+      getSubagentPrompt(msg) === null && getSubagentLastMessage(msg) === null
+    );
   }
 
   return (

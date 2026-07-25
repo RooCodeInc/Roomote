@@ -114,4 +114,62 @@ describe('AcpProtocolService', () => {
       partial: true,
     });
   });
+
+  it('keeps an OpenCode subagent prompt from rawInput when its result arrives', () => {
+    const service = new AcpProtocolService();
+    const metadata = {
+      sessionId: 'session-opencode',
+      turnId: 'message-opencode',
+    };
+    const toolCall: AcpMessage = {
+      id: 'opencode-server:1',
+      ts: 1001,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      role: 'tool',
+      kind: 'tool_call',
+      contentBlocks: [],
+      metadata,
+      payload: {
+        toolCallId: 'subagent-call-1',
+        kind: 'subagent',
+        title: 'Launch explorer',
+        status: 'in_progress',
+        rawInput: {
+          prompt: 'Inspect the task transcript implementation.',
+          subagent_type: 'explore',
+        },
+      },
+    };
+    const toolResult: AcpMessage = {
+      id: 'opencode-server:2',
+      ts: 1002,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      kind: 'tool_result',
+      contentBlocks: [],
+      metadata,
+      payload: {
+        toolCallId: 'subagent-call-1',
+        kind: 'subagent',
+        title: 'Launch explorer',
+        status: 'completed',
+        output: 'The transcript renderer owns nested subagent rows.',
+      },
+    };
+
+    const initial = service.applyOutputEvent([], toolCall)!.acpMessages;
+    const completed = service.applyOutputEvent(
+      initial,
+      toolResult,
+    )!.acpMessages;
+
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({
+      kind: 'tool_result',
+      data: {
+        prompt: 'Inspect the task transcript implementation.',
+        output: 'The transcript renderer owns nested subagent rows.',
+      },
+    });
+  });
 });
