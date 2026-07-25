@@ -75,9 +75,19 @@ export function GitHubCopilotConnectDialog({
     if (!open || !deviceAuth || pollingRef.current) return;
     pollingRef.current = true;
 
+    const expiresAt = Date.now() + deviceAuth.expiresInMs;
+
     const poll = async () => {
       let intervalMs = deviceAuth.intervalMs;
       while (pollingRef.current) {
+        if (Date.now() >= expiresAt) {
+          pollingRef.current = false;
+          setError(
+            'GitHub authorization code expired. Restart the connection.',
+          );
+          return;
+        }
+
         const result = await pollMutation.mutateAsync({
           deviceCode: deviceAuth.deviceCode,
         });
@@ -107,8 +117,20 @@ export function GitHubCopilotConnectDialog({
           setError(result.error);
           return;
         }
-        if (result.intervalMs) intervalMs += result.intervalMs;
-        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        // slow_down returns the new absolute poll interval, not a delta.
+        if (result.intervalMs) intervalMs = result.intervalMs;
+
+        const remainingMs = expiresAt - Date.now();
+        if (remainingMs <= 0) {
+          pollingRef.current = false;
+          setError(
+            'GitHub authorization code expired. Restart the connection.',
+          );
+          return;
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(intervalMs, remainingMs)),
+        );
       }
     };
 

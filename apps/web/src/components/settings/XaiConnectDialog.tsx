@@ -90,10 +90,18 @@ export function XaiConnectDialog({
 
     const generation = ++pollGenerationRef.current;
     const activeDeviceCode = deviceAuth.deviceCode;
+    const expiresAt = Date.now() + deviceAuth.expiresInMs;
 
     const poll = async () => {
       let intervalMs = deviceAuth.intervalMs;
       while (pollGenerationRef.current === generation) {
+        if (Date.now() >= expiresAt) {
+          setError(
+            'xAI device authorization code expired. Restart the connection.',
+          );
+          return;
+        }
+
         const result = await pollMutation.mutateAsync({
           deviceCode: activeDeviceCode,
         });
@@ -128,10 +136,21 @@ export function XaiConnectDialog({
           setError(result.error);
           return;
         }
+        // slow_down returns the new absolute poll interval, not a delta.
         if (result.intervalMs) {
-          intervalMs += result.intervalMs;
+          intervalMs = result.intervalMs;
         }
-        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+
+        const remainingMs = expiresAt - Date.now();
+        if (remainingMs <= 0) {
+          setError(
+            'xAI device authorization code expired. Restart the connection.',
+          );
+          return;
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(intervalMs, remainingMs)),
+        );
       }
     };
 

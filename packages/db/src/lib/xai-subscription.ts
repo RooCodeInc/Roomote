@@ -10,7 +10,6 @@ import {
   XAI_OAUTH_DEVICE_VERIFICATION_URL,
   XAI_OAUTH_SCOPE,
   XAI_OAUTH_TOKEN_ENDPOINT,
-  XAI_OPENCODE_PROVIDER_ID,
   XAI_POLL_SLOW_DOWN_MS,
   XAI_REFRESH_SAFETY_MARGIN_MS,
 } from '@roomote/types';
@@ -527,39 +526,6 @@ export async function getFreshXaiAccessToken(
     expires: refreshed.expires,
     ...(refreshed.email && { email: refreshed.email }),
   };
-}
-
-/**
- * Build an OpenCode auth-content fragment for non-gateway control-plane
- * paths that need a bearer. Prefer the inference gateway in sandbox mode.
- */
-export function buildXaiOpenCodeAuthContent(input: {
-  access: string;
-  refresh: string;
-  expires: number;
-}): string {
-  return JSON.stringify({
-    [XAI_OPENCODE_PROVIDER_ID]: {
-      type: 'oauth',
-      refresh: input.refresh,
-      access: input.access,
-      expires: input.expires,
-    },
-  });
-}
-
-export async function resolveXaiOpenCodeAuthContent(
-  options: {
-    executor?: DatabaseOrTransaction;
-    fetchImpl?: typeof fetch;
-    now?: number;
-  } = {},
-): Promise<string | null> {
-  const fresh = await getFreshXaiAccessToken(options);
-  if (!fresh) {
-    return null;
-  }
-  return buildXaiOpenCodeAuthContent(fresh);
 }
 
 /**
