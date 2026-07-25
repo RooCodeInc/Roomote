@@ -692,6 +692,61 @@ describe('InferenceProviderSection', () => {
     });
   });
 
+  it('submits the first option for an untouched selectable field', async () => {
+    const { providerSetup } = buildProviderSetup();
+    providerSetup.providers = [
+      {
+        id: 'zai' as SetupModelProviderId,
+        label: 'Z.AI',
+        envVarName: 'ZAI_API_KEY',
+        defaultRoomoteModel: 'zai/glm-5.2',
+        authKind: 'api-key',
+        suggestedTaskModels: [],
+        additionalEnvFields: [
+          {
+            envVarName: 'ZAI_REGION',
+            label: 'Region',
+            secret: false,
+            required: true,
+            options: [
+              { value: 'global', label: 'International' },
+              { value: 'china', label: 'China' },
+            ],
+          },
+        ],
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: false,
+        additionalEnvValues: {},
+      },
+    ];
+    providerSetupData.current = { providerSetup };
+    mutateAsyncMock.mockResolvedValue({});
+
+    renderInferenceProviderSection();
+
+    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+
+    // A field with options renders as a select showing its first option, and
+    // saving must submit that value rather than the empty string the user
+    // never typed into.
+    expect(
+      screen.getByRole('combobox', { name: 'Region for Z.AI' }),
+    ).toHaveTextContent('International');
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('API key for Z.AI'), {
+        target: { value: 'zai-key' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      provider: 'zai',
+      apiKey: 'zai-key',
+      additionalEnvValues: { ZAI_REGION: 'global' },
+    });
+  });
+
   it('closes the endpoint dialog after connecting', async () => {
     const { providerSetup } = buildProviderSetup();
     providerSetup.providers = [

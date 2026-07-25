@@ -212,6 +212,20 @@ async function resolveProviderUpstreamBaseUrl(
     (await resolveModelProviderEnvValue([provider.region.envVarName])) ??
     provider.region.default;
 
+  // Providers with discrete regional hosts select a base outright; the
+  // `{region}` template and its cloud-region pattern do not apply to them.
+  if (provider.region.baseUrls) {
+    const baseUrl = provider.region.baseUrls[region];
+
+    if (!baseUrl) {
+      throw new Error(
+        `${provider.region.envVarName} must be one of ${Object.keys(provider.region.baseUrls).join(', ')} for ${provider.name}. Received "${region}".`,
+      );
+    }
+
+    return baseUrl;
+  }
+
   if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
     throw new Error(
       `${provider.region.envVarName} must be a valid region for ${provider.name}. Received "${region}".`,
