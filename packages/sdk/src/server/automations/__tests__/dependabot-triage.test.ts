@@ -128,6 +128,9 @@ describe('dependabotTriageJob buildScanTask', () => {
       'do not submit duplicate work for alerts it covers',
     );
     expect(payload.description).toContain(
+      'every eligible environment with uncovered actionable alerts',
+    );
+    expect(payload.description).toContain(
       'Do not post any Slack opening acknowledgement, scan announcement, progress update, or partial finding',
     );
     expect(payload.description).toContain(
