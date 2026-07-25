@@ -721,7 +721,7 @@ describe('getFreshXaiAccessToken', () => {
     ).resolves.toBeNull();
   });
 
-  it('marks the record errored and returns null when refresh fails', async () => {
+  it('marks the record errored and returns null when refresh fails terminally', async () => {
     const now = Date.now();
     const expires = now + 30_000; // inside the safety margin
     const existing = {
@@ -757,6 +757,44 @@ describe('getFreshXaiAccessToken', () => {
     expect(stored.error).toMatch(/xAI token refresh failed: 401/);
     // Keep the prior tokens so reconnect can be distinguished from wipe.
     expect(stored.access).toBe('stale-at');
+  });
+
+  it('keeps connected status on a transient refresh failure and serves remaining access', async () => {
+    const now = Date.now();
+    const expires = now + 30_000; // inside the safety margin but still valid
+    const existing = {
+      refresh: 'rt',
+      access: 'still-usable',
+      expires,
+      status: 'connected' as const,
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const { executor, store } = makeExecutor(
+      { [XAI_SUBSCRIPTION_INTERNAL.secretName]: existing },
+      { withTransaction: true },
+    );
+
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('upstream unavailable', { status: 503 }));
+
+    const fresh = await getFreshXaiAccessToken({
+      executor,
+      fetchImpl,
+      now,
+    });
+
+    expect(fresh).toMatchObject({
+      access: 'still-usable',
+      refresh: 'rt',
+    });
+    const stored = JSON.parse(
+      store.get(XAI_SUBSCRIPTION_INTERNAL.secretName)!,
+    ) as { status: string; access: string };
+    expect(stored.status).toBe('connected');
+    expect(stored.access).toBe('still-usable');
   });
 });
 

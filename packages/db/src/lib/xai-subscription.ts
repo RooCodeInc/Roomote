@@ -246,12 +246,18 @@ function isActivePendingDeviceFlow(
   );
 }
 
+type XaiLockKind = 'device' | 'refresh' | 'both';
+
 /**
- * Serialize device-code connect mutations. Unit-test executors may omit
+ * Serialize subscription mutations. Unit-test executors may omit
  * `transaction`; fall back to running the body directly on the executor.
+ *
+ * Lock order is always refresh then device when both are needed, to avoid
+ * deadlocks between disconnect, refresh, and device-code connect.
  */
-async function withDeviceAuthLock(
+async function withXaiSubscriptionLock(
   executor: DatabaseOrTransaction,
+  kind: XaiLockKind,
   body: (tx: DatabaseOrTransaction) => Promise<void>,
 ): Promise<void> {
   const maybeTx = executor as DatabaseOrTransaction & {
@@ -264,9 +270,16 @@ async function withDeviceAuthLock(
   if (typeof maybeTx.transaction === 'function') {
     await maybeTx.transaction(async (tx) => {
       if (typeof tx.execute === 'function') {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${XAI_SUBSCRIPTION_DEVICE_LOCK_KEY}))`,
-        );
+        if (kind === 'refresh' || kind === 'both') {
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(hashtext(${XAI_SUBSCRIPTION_ADVISORY_LOCK_KEY}))`,
+          );
+        }
+        if (kind === 'device' || kind === 'both') {
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(hashtext(${XAI_SUBSCRIPTION_DEVICE_LOCK_KEY}))`,
+          );
+        }
       }
       await body(tx);
     });
@@ -274,6 +287,33 @@ async function withDeviceAuthLock(
   }
 
   await body(executor);
+}
+
+async function withDeviceAuthLock(
+  executor: DatabaseOrTransaction,
+  body: (tx: DatabaseOrTransaction) => Promise<void>,
+): Promise<void> {
+  await withXaiSubscriptionLock(executor, 'device', body);
+}
+
+/**
+ * Terminal IdP failures should mark the subscription `error` and force
+ * reconnect. Transient failures (5xx / network) keep `connected` so a brief
+ * outage does not brick OAuth-only deploys while access may still be valid.
+ */
+function isTerminalXaiRefreshFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (/invalid_grant/i.test(message)) {
+    return true;
+  }
+  // 401/403 are auth failures; 400 with invalid_grant handled above.
+  if (/xAI token refresh failed: (401|403)\b/.test(message)) {
+    return true;
+  }
+  if (/no access_token/i.test(message)) {
+    return true;
+  }
+  return false;
 }
 
 export async function getXaiSubscription(
@@ -338,9 +378,9 @@ export async function saveXaiSubscription(
 export async function disconnectXaiSubscription(
   executor: DatabaseOrTransaction = db,
 ): Promise<void> {
-  // Same lock as poll/start so an in-flight successful poll cannot re-persist
-  // tokens after the operator explicitly disconnects.
-  await withDeviceAuthLock(executor, async (tx) => {
+  // Take both locks so neither an in-flight device poll nor a concurrent
+  // token refresh can re-persist credentials after the operator disconnects.
+  await withXaiSubscriptionLock(executor, 'both', async (tx) => {
     await deleteSecretValue(tx, XAI_SUBSCRIPTION_SECRET_NAME);
     await clearPendingDeviceFlow(tx);
   });
@@ -384,11 +424,7 @@ export async function getFreshXaiAccessToken(
 
   const result: { record: XaiSubscriptionRecord | null } = { record: null };
 
-  await executor.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${XAI_SUBSCRIPTION_ADVISORY_LOCK_KEY}))`,
-    );
-
+  await withXaiSubscriptionLock(executor, 'refresh', async (tx) => {
     const locked = await loadRecord(tx);
 
     if (!locked || locked.status !== 'connected') {
@@ -416,27 +452,66 @@ export async function getFreshXaiAccessToken(
         }).toString(),
       });
 
-      if (!response.ok) {
-        throw new Error(`xAI token refresh failed: ${response.status}`);
+      let bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch {
+        bodyText = '';
       }
 
-      const tokens = (await response.json()) as TokenResponse;
+      let tokens: Partial<TokenResponse> = {};
+      if (bodyText) {
+        try {
+          tokens = JSON.parse(bodyText) as Partial<TokenResponse>;
+        } catch {
+          tokens = {};
+        }
+      }
+
+      if (!response.ok) {
+        const detail =
+          tokens.error_description ??
+          tokens.error ??
+          `xAI token refresh failed: ${response.status}`;
+        throw new Error(
+          tokens.error
+            ? `xAI token refresh failed: ${response.status} ${tokens.error}`
+            : detail.startsWith('xAI token refresh failed:')
+              ? detail
+              : `xAI token refresh failed: ${response.status}`,
+        );
+      }
+
       if (!tokens.access_token) {
         throw new Error('xAI token refresh returned no access_token.');
       }
 
-      const next = await saveXaiSubscription(tokens, tx, locked);
+      const next = await saveXaiSubscription(
+        tokens as TokenResponse,
+        tx,
+        locked,
+      );
       result.record = next;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unknown refresh error';
-      const errored: XaiSubscriptionRecord = {
-        ...locked,
-        status: 'error',
-        error: message,
-        updatedAt: new Date().toISOString(),
-      };
-      await persistRecord(tx, errored);
+
+      if (isTerminalXaiRefreshFailure(error)) {
+        const errored: XaiSubscriptionRecord = {
+          ...locked,
+          status: 'error',
+          error: message,
+          updatedAt: new Date().toISOString(),
+        };
+        await persistRecord(tx, errored);
+        return;
+      }
+
+      // Transient failure: keep status connected. Serve remaining access if
+      // it has not expired yet so OAuth-only deploys survive brief IdP blips.
+      if (locked.expires > now) {
+        result.record = locked;
+      }
     }
   });
 

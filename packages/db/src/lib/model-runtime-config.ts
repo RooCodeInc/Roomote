@@ -459,12 +459,10 @@ async function resolveModelRuntimeEnv(
   // OpenCode's xAI provider is API-key shaped, not oauth Auth.Info. For
   // non-gateway control-plane inference (titles, summaries, routing), mint a
   // fresh access token and inject it as XAI_API_KEY. Never put the refresh
-  // token into OpenCode env. Prefer a real deployment key when one is already
-  // resolved so BYOK setups stay on their key.
+  // token into OpenCode env. Prefer a connected subscription over BYOK so
+  // control-plane and gateway dual-path use the same credential precedence.
   const xaiApiKeyFromOAuth: Record<string, string> =
-    xaiAccessToken &&
-    !routeXaiThroughGateway &&
-    !resolvedProviderKeyValues.XAI_API_KEY
+    xaiAccessToken && !routeXaiThroughGateway
       ? { XAI_API_KEY: xaiAccessToken.access }
       : {};
   const directOpenCodeAuthContent = [

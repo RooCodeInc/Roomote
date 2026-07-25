@@ -768,7 +768,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     expect(JSON.stringify(env)).not.toContain('xai-oauth-refresh-secret');
   });
 
-  it('prefers a real XAI_API_KEY over the OAuth access token on the control plane', async () => {
+  it('prefers a connected OAuth access token over BYOK XAI_API_KEY on the control plane', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'xai/grok-4.5',
@@ -785,7 +785,9 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       deploymentEnvVars: { XAI_API_KEY: 'sk-byok-key' },
     });
 
-    expect(env.XAI_API_KEY).toBe('sk-byok-key');
+    // Match gateway precedence: subscription wins when connected.
+    expect(env.XAI_API_KEY).toBe('xai-oauth-access-only');
+    expect(JSON.stringify(env)).not.toContain('xai-oauth-refresh-secret');
   });
 
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {
