@@ -50,6 +50,7 @@ import {
   persistEarlyGeneratedTaskTitle,
   resolveFreshTaskComputeProvider,
   resolveQueueScope,
+  shouldCaptureTaskCreatedEvent,
   type FreshTaskLaunch,
 } from '../task-run-queue';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
@@ -85,6 +86,17 @@ describe('resolveFreshTaskComputeProvider', () => {
         true,
       ),
     ).toBe('modal');
+  });
+});
+
+describe('shouldCaptureTaskCreatedEvent', () => {
+  it('excludes environment snapshot maintenance from task analytics', () => {
+    expect(
+      shouldCaptureTaskCreatedEvent(TaskPayloadKind.SnapshotEnvironment),
+    ).toBe(false);
+    expect(shouldCaptureTaskCreatedEvent(TaskPayloadKind.StandardTask)).toBe(
+      true,
+    );
   });
 });
 

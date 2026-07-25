@@ -1,6 +1,10 @@
 import { and, eq, inArray, notInArray } from 'drizzle-orm';
 
-import { SOURCE_CONTROL_AUTOMATION_WORKFLOWS } from '@roomote/types';
+import {
+  RunStatus,
+  SOURCE_CONTROL_AUTOMATION_WORKFLOWS,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   db,
@@ -9,6 +13,7 @@ import {
   repositoryFactory,
   taskFactory,
   taskPullRequests,
+  taskRuns,
   tasks,
   userFactory,
 } from '../../server';
@@ -446,5 +451,59 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
         report.pullRequests7d.closed +
         report.pullRequests7d.merged,
     ).toBe(report.pullRequests7d.opened);
+  });
+});
+
+describe('collectInstanceReportStats task usage isolation', () => {
+  it('excludes environment snapshots from task usage aggregates', async () => {
+    const now = new Date();
+    const baseline = await collectInstanceReportStats(now);
+    const suffix = Date.now().toString();
+    const productModel = `product-model-${suffix}`;
+    const snapshotModel = `snapshot-model-${suffix}`;
+    const productTask = await taskFactory.create({
+      workflow: 'standard',
+      model: productModel,
+    });
+    const snapshotTask = await taskFactory.create({
+      workflow: 'env_snapshot',
+      model: snapshotModel,
+    });
+
+    await db.insert(taskRuns).values({
+      taskId: productTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      kind: 'fresh',
+      status: RunStatus.Completed,
+      completedAt: now,
+      payload: { repo: 'acme/product', description: 'Product task' },
+    });
+    await db.insert(taskRuns).values({
+      taskId: snapshotTask.id,
+      payloadKind: TaskPayloadKind.SnapshotEnvironment,
+      kind: 'fresh',
+      status: RunStatus.Completed,
+      completedAt: now,
+      payload: {
+        repo: '',
+        environmentId: crypto.randomUUID(),
+      },
+    });
+
+    const report = await collectInstanceReportStats(now);
+
+    expect(report.tasks24h.created).toBe(baseline.tasks24h.created + 1);
+    expect(report.tasks24h.completed).toBe(baseline.tasks24h.completed + 1);
+    expect(report.tasks24h.byHarness['opencode-server']).toBe(
+      (baseline.tasks24h.byHarness['opencode-server'] ?? 0) + 1,
+    );
+    expect(report.tasks24h.byModel).toContainEqual({
+      provider: 'openai',
+      model: productModel,
+      count: 1,
+    });
+    expect(report.tasks24h.byModel).not.toContainEqual(
+      expect.objectContaining({ model: snapshotModel }),
+    );
   });
 });
