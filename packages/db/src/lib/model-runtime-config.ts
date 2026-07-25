@@ -24,10 +24,7 @@ import {
 import { decryptSecrets } from '../encryption';
 import { resolveOpenCodeAuthContent } from './chatgpt-subscription';
 import { resolveGitHubCopilotOpenCodeAuthContent } from './github-copilot-subscription';
-import {
-  buildXaiOpenCodeAuthContent,
-  getFreshXaiAccessToken,
-} from './xai-subscription';
+import { getFreshXaiAccessToken } from './xai-subscription';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
@@ -206,9 +203,9 @@ export async function resolveEffectiveModelRuntimeEnv(
 /**
  * Resolve model runtime env for a task sandbox: the configured provider keys
  * the inference gateway can serve stay on the control plane and their names
- * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead, and a connected
- * ChatGPT subscription is routed through the gateway rather than
- * materializing `OPENCODE_AUTH_CONTENT` in the sandbox.
+ * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead. Connected ChatGPT,
+ * GitHub Copilot, and xAI Grok subscriptions are routed through the gateway
+ * via markers rather than materializing OAuth credentials in the sandbox.
  */
 export async function resolveSandboxModelRuntimeEnv(
   options: ModelRuntimeEnvOptions = {},
@@ -459,16 +456,20 @@ async function resolveModelRuntimeEnv(
     ? await getFreshXaiAccessToken({ executor })
     : null;
   const routeXaiThroughGateway = inferenceGateway && xaiAccessToken != null;
-  // Non-gateway control-plane paths that need a bearer can still use the
-  // OAuth record as OPENCODE_AUTH_CONTENT.
-  const xaiOpenCodeAuthContent =
-    xaiAccessToken && !routeXaiThroughGateway
-      ? buildXaiOpenCodeAuthContent(xaiAccessToken)
-      : null;
+  // OpenCode's xAI provider is API-key shaped, not oauth Auth.Info. For
+  // non-gateway control-plane inference (titles, summaries, routing), mint a
+  // fresh access token and inject it as XAI_API_KEY. Never put the refresh
+  // token into OpenCode env. Prefer a real deployment key when one is already
+  // resolved so BYOK setups stay on their key.
+  const xaiApiKeyFromOAuth: Record<string, string> =
+    xaiAccessToken &&
+    !routeXaiThroughGateway &&
+    !resolvedProviderKeyValues.XAI_API_KEY
+      ? { XAI_API_KEY: xaiAccessToken.access }
+      : {};
   const directOpenCodeAuthContent = [
     injectedOpenCodeAuthContent,
     githubCopilotAuthContent,
-    xaiOpenCodeAuthContent,
   ].reduce<Record<string, unknown>>((merged, content) => {
     return content ? { ...merged, ...JSON.parse(content) } : merged;
   }, {});
@@ -525,6 +526,7 @@ async function resolveModelRuntimeEnv(
       R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),
     ...resolvedProviderKeyValues,
+    ...xaiApiKeyFromOAuth,
     ...(effectiveGatewayServedKeyNames.length > 0 && {
       [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]:
         effectiveGatewayServedKeyNames.join(','),
@@ -540,7 +542,6 @@ async function resolveModelRuntimeEnv(
       : {}),
     ...(!routeChatGptThroughGateway &&
     !routeGitHubCopilotThroughGateway &&
-    !routeXaiThroughGateway &&
     Object.keys(directOpenCodeAuthContent).length > 0
       ? { OPENCODE_AUTH_CONTENT: JSON.stringify(directOpenCodeAuthContent) }
       : {}),

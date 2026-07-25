@@ -410,6 +410,54 @@ describe('getFreshXaiAccessToken', () => {
       getFreshXaiAccessToken({ executor, fetchImpl: vi.fn() }),
     ).resolves.toBeNull();
   });
+
+  it('marks the record errored and returns null when refresh fails', async () => {
+    const now = Date.now();
+    const expires = now + 30_000; // inside the safety margin
+    const existing = {
+      refresh: 'stale-rt',
+      access: 'stale-at',
+      expires,
+      status: 'connected' as const,
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    const insert = vi.fn().mockReturnValue({ values });
+    const limit = vi
+      .fn()
+      .mockResolvedValueOnce([{ value: JSON.stringify(existing) }])
+      .mockResolvedValueOnce([{ value: JSON.stringify(existing) }]);
+    const where = vi.fn().mockReturnValue({ limit });
+    const from = vi.fn().mockReturnValue({ where });
+    const select = vi.fn().mockReturnValue({ from });
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const transaction = vi.fn(async (fn: (tx: unknown) => Promise<void>) => {
+      await fn({ select, insert, execute });
+    });
+
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('invalid_grant', { status: 401 }));
+
+    const fresh = await getFreshXaiAccessToken({
+      executor: { select, insert, transaction } as never,
+      fetchImpl,
+      now,
+    });
+
+    expect(fresh).toBeNull();
+    expect(values).toHaveBeenCalled();
+    const stored = JSON.parse(
+      (values.mock.calls[0] as [{ value: string }])[0].value,
+    ) as { status: string; error?: string; access: string };
+    expect(stored.status).toBe('error');
+    expect(stored.error).toMatch(/xAI token refresh failed: 401/);
+    // Keep the prior tokens so reconnect can be distinguished from wipe.
+    expect(stored.access).toBe('stale-at');
+  });
 });
 
 describe('XAI_SUBSCRIPTION_INTERNAL', () => {

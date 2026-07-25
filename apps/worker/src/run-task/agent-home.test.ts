@@ -282,6 +282,25 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toBeUndefined();
   });
 
+  it('rebases xAI onto the gateway when the Grok subscription marker is set', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'xai/grok-4.5',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_XAI: '1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider.xai?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/xai/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+  });
+
   it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

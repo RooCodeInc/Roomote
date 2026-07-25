@@ -5,7 +5,6 @@ const {
   mockResolveOpenCodeAuthContent,
   mockResolveGitHubCopilotOpenCodeAuthContent,
   mockGetFreshXaiAccessToken,
-  mockBuildXaiOpenCodeAuthContent,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockDeploymentSettingsFindFirst: vi.fn(),
@@ -13,7 +12,6 @@ const {
   mockResolveOpenCodeAuthContent: vi.fn(),
   mockResolveGitHubCopilotOpenCodeAuthContent: vi.fn(),
   mockGetFreshXaiAccessToken: vi.fn(),
-  mockBuildXaiOpenCodeAuthContent: vi.fn(),
 }));
 
 vi.mock('../encryption', () => ({
@@ -52,8 +50,6 @@ vi.mock('./github-copilot-subscription', () => ({
 vi.mock('./xai-subscription', () => ({
   getFreshXaiAccessToken: (...args: unknown[]) =>
     mockGetFreshXaiAccessToken(...args),
-  buildXaiOpenCodeAuthContent: (...args: unknown[]) =>
-    mockBuildXaiOpenCodeAuthContent(...args),
 }));
 
 vi.mock('../schema', () => ({
@@ -74,7 +70,6 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
     mockResolveOpenCodeAuthContent.mockResolvedValue(null);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
-    mockBuildXaiOpenCodeAuthContent.mockReturnValue(null);
   });
 
   it('prefers real runtime env values over persisted deployment config', async () => {
@@ -747,6 +742,50 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_XAI');
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+  });
+
+  it('injects a mint access token as XAI_API_KEY for non-gateway OAuth-only control plane', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+      },
+    });
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-oauth-access-only',
+      refresh: 'xai-oauth-refresh-secret',
+      expires: Date.now() + 3_600_000,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    // OpenCode's xAI provider is API-key shaped: inject the access token as
+    // XAI_API_KEY and never ship the refresh token or oauth JSON.
+    expect(env.XAI_API_KEY).toBe('xai-oauth-access-only');
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(JSON.stringify(env)).not.toContain('xai-oauth-refresh-secret');
+  });
+
+  it('prefers a real XAI_API_KEY over the OAuth access token on the control plane', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+      },
+    });
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-oauth-access-only',
+      refresh: 'xai-oauth-refresh-secret',
+      expires: Date.now() + 3_600_000,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { XAI_API_KEY: 'sk-byok-key' },
+    });
+
+    expect(env.XAI_API_KEY).toBe('sk-byok-key');
   });
 
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {
