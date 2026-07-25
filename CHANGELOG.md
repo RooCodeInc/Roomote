@@ -2,6 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.20.1 (2026-07-25)
+
+This release makes chat-driven automation more reliable, keeping Discord tasks moving and report-thread replies connected to their work.
+
+### Highlights
+
+- Keep Discord tasks responsive and recover safely from slow API processing or retries.
+- Reply to any automation report thread to continue the task behind it, not only merged pull-request reports.
+
+### Patch changes
+
+- Discord tasks keep processing reliably when API work is slow or a delivery needs to retry.
+- Replies now reach the task behind every automation report thread, not just merged-PR digests.
+
 ## 0.20.0 (2026-07-24)
 
 This release makes it easier to give Roomote context, follow work across chat, and complete setup with guidance that matches the task at hand.
