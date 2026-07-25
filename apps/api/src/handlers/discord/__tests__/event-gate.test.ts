@@ -10,6 +10,7 @@ import {
   claimDiscordApiEvent,
   completeDiscordApiEvent,
   releaseDiscordApiEvent,
+  renewDiscordApiEvent,
 } from '../event-gate.js';
 
 describe('Discord API event gate', () => {
@@ -77,6 +78,26 @@ describe('Discord API event gate', () => {
       1,
       'discord:api:event:MESSAGE_CREATE:message-1',
       'processing:owner',
+    );
+  });
+
+  it('renews only the lease owner token', async () => {
+    mocks.eval.mockResolvedValue(1);
+
+    await expect(
+      renewDiscordApiEvent({
+        eventType: 'MESSAGE_CREATE',
+        eventId: 'message-1',
+        token: 'processing:owner',
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('EXPIRE'"),
+      1,
+      'discord:api:event:MESSAGE_CREATE:message-1',
+      'processing:owner',
+      '300',
     );
   });
 });

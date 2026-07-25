@@ -6,6 +6,10 @@ const DISCORD_API_EVENT_DEDUPE_PREFIX = 'discord:api:event:';
 const DISCORD_API_EVENT_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const DISCORD_API_EVENT_PROCESSING_TTL_SECONDS = 5 * 60;
 
+export const discordApiEventLeaseRenewal = {
+  intervalMs: 60 * 1000,
+};
+
 const CLAIM_EVENT_SCRIPT = `
 local existing = redis.call('GET', KEYS[1])
 if existing == 'done' then
@@ -38,6 +42,13 @@ if redis.call('GET', KEYS[1]) ~= ARGV[1] then
   return false
 end
 return redis.call('DEL', KEYS[1])
+`;
+
+const RENEW_EVENT_SCRIPT = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return false
+end
+return redis.call('EXPIRE', KEYS[1], ARGV[2])
 `;
 
 function eventKey(eventType: string, eventId: string): string {
@@ -93,6 +104,22 @@ export async function releaseDiscordApiEvent(input: {
     1,
     eventKey(input.eventType, input.eventId),
     input.token,
+  );
+  return result === 1;
+}
+
+/** Keep an owned lease from expiring while its handler is still running. */
+export async function renewDiscordApiEvent(input: {
+  eventType: string;
+  eventId: string;
+  token: string;
+}): Promise<boolean> {
+  const result = await getRedis().eval(
+    RENEW_EVENT_SCRIPT,
+    1,
+    eventKey(input.eventType, input.eventId),
+    input.token,
+    DISCORD_API_EVENT_PROCESSING_TTL_SECONDS.toString(),
   );
   return result === 1;
 }
