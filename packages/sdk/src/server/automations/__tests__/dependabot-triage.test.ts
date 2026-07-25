@@ -116,7 +116,11 @@ describe('dependabotTriageJob buildScanTask', () => {
       'After triage reaches a final result, post exactly one concise status message',
     );
     expect(payload.description).toContain(
-      'total number of open Dependabot alerts, the per-repository counts',
+      'total number of open Dependabot alerts with a high/medium/low severity breakdown',
+    );
+    expect(payload.description).toContain('high/medium/low severity breakdown');
+    expect(payload.description).toContain(
+      'covered by newly started remediation task(s), existing related PRs, or neither',
     );
     expect(payload.description).toContain(
       'do not submit duplicate work for alerts it covers',
