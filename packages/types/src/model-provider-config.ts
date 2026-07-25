@@ -118,12 +118,15 @@ export type SetupModelProviderEnvField = {
   options?: readonly { value: string; label: string }[];
 };
 
+/**
+ * Region values must stay in step with the `region.baseUrls` keys on the
+ * matching inference gateway provider; the gateway has no base URL for a
+ * region this list offers. `inference-gateway.test.ts` asserts the pairing.
+ */
 export const ZAI_REGION_OPTIONS = [
   { value: 'global', label: 'International' },
   { value: 'china', label: 'China' },
 ] as const;
-
-export const DEFAULT_ZAI_REGION = 'global' as const;
 
 export type SetupModelProviderDescriptor = {
   id: SetupModelProviderId;
@@ -718,6 +721,30 @@ export function getSetupModelProviderAdditionalEnvFields(provider: {
   additionalEnvFields?: readonly SetupModelProviderEnvField[];
 }): readonly SetupModelProviderEnvField[] {
   return provider.additionalEnvFields ?? [];
+}
+
+/**
+ * Fills in the default for every selectable field that has no value yet. A
+ * select always shows one of its options, so connect UIs must submit that
+ * option rather than an empty string; existing values are left untouched.
+ */
+export function getDefaultAdditionalEnvValues(
+  fields: readonly SetupModelProviderEnvField[],
+  values: Record<string, string> = {},
+): Record<string, string> {
+  const seeded = { ...values };
+
+  for (const field of fields) {
+    if (
+      field.options &&
+      field.options.length > 0 &&
+      !seeded[field.envVarName]?.trim()
+    ) {
+      seeded[field.envVarName] = field.options[0]!.value;
+    }
+  }
+
+  return seeded;
 }
 
 function getSetupModelProviderRequiredEnvVarNames(

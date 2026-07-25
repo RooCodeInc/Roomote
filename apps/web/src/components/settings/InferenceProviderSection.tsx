@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  getDefaultAdditionalEnvValues,
   getModelProviderLabel,
 } from '@roomote/types';
 import type {
@@ -44,6 +45,7 @@ import {
   Trash2,
 } from '@/components/system';
 import { Section } from '@/components/settings/Section';
+import { AdditionalEnvFieldInput } from '@/components/settings/AdditionalEnvFieldInput';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
 import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
@@ -88,17 +90,10 @@ function getInitialAdditionalEnvValues(
     ),
   );
 
-  for (const field of provider.additionalEnvFields ?? []) {
-    if (
-      field.options &&
-      field.options.length > 0 &&
-      !values[field.envVarName]?.trim()
-    ) {
-      values[field.envVarName] = field.options[0]!.value;
-    }
-  }
-
-  return values;
+  return getDefaultAdditionalEnvValues(
+    provider.additionalEnvFields ?? [],
+    values,
+  );
 }
 
 function getInitialPrimaryCredential(
@@ -130,17 +125,7 @@ function getSubmitAdditionalEnvValues(
     ),
   );
 
-  for (const field of additionalEnvFields) {
-    if (
-      field.options &&
-      field.options.length > 0 &&
-      !values[field.envVarName]?.trim()
-    ) {
-      values[field.envVarName] = field.options[0]!.value;
-    }
-  }
-
-  return values;
+  return getDefaultAdditionalEnvValues(additionalEnvFields, values);
 }
 
 function ConnectedProviderRow({
@@ -509,56 +494,19 @@ function ProviderCredentialsDialog({
                         {field.label}
                         {field.required ? '' : ' (optional)'}
                       </span>
-                      {field.options && field.options.length > 0 ? (
-                        <Select
-                          value={
-                            additionalEnvValues[field.envVarName] ||
-                            field.options[0]?.value ||
-                            ''
-                          }
-                          onValueChange={(value) =>
-                            setAdditionalEnvValues((values) => ({
-                              ...values,
-                              [field.envVarName]: value,
-                            }))
-                          }
-                          disabled={isSaving}
-                        >
-                          <SelectTrigger
-                            aria-label={`${field.label} for ${selectedProvider.label}`}
-                          >
-                            <SelectValue
-                              placeholder={field.placeholder ?? field.label}
-                            />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {field.options.map((option) => (
-                              <SelectItem
-                                key={option.value}
-                                value={option.value}
-                              >
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <Input
-                          secret={field.secret}
-                          className={field.secret ? 'font-mono' : undefined}
-                          value={additionalEnvValues[field.envVarName] ?? ''}
-                          onChange={(event) =>
-                            setAdditionalEnvValues((values) => ({
-                              ...values,
-                              [field.envVarName]: event.target.value,
-                            }))
-                          }
-                          placeholder={field.placeholder}
-                          disabled={isSaving}
-                          aria-label={`${field.label} for ${selectedProvider.label}`}
-                          data-1p-ignore
-                        />
-                      )}
+                      <AdditionalEnvFieldInput
+                        field={field}
+                        value={additionalEnvValues[field.envVarName] ?? ''}
+                        onValueChange={(value) =>
+                          setAdditionalEnvValues((values) => ({
+                            ...values,
+                            [field.envVarName]: value,
+                          }))
+                        }
+                        disabled={isSaving}
+                        ariaLabel={`${field.label} for ${selectedProvider.label}`}
+                        inputClassName={field.secret ? 'font-mono' : undefined}
+                      />
                     </div>
                   ))}
                 </>

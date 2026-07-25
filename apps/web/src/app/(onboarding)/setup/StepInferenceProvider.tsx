@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  getDefaultAdditionalEnvValues,
   getSetupModelProvider,
   type SetupModelProviderId,
   type SetupModelStatus,
@@ -24,6 +25,7 @@ import {
   SelectValue,
   Spinner,
 } from '@/components/system';
+import { AdditionalEnvFieldInput } from '@/components/settings/AdditionalEnvFieldInput';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
 
@@ -134,16 +136,16 @@ export function StepInferenceProvider({
           : '',
     );
     setConnectionName('');
-    const defaults: Record<string, string> = {};
-    if (selectedProvider) {
-      for (const field of getSetupModelProvider(selectedProvider)
-        .additionalEnvFields ?? []) {
-        if (field.options && field.options.length > 0) {
-          defaults[field.envVarName] = field.options[0]!.value;
-        }
-      }
-    }
-    setAdditionalEnvValues(defaults);
+    // Seeded from the catalog rather than the fetched status so this effect
+    // stays keyed on `selectedProvider` alone; depending on the status query
+    // would reset in-progress input on every refetch.
+    setAdditionalEnvValues(
+      getDefaultAdditionalEnvValues(
+        selectedProvider
+          ? (getSetupModelProvider(selectedProvider).additionalEnvFields ?? [])
+          : [],
+      ),
+    );
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
     setIsGitHubCopilotDialogOpen(false);
@@ -462,51 +464,19 @@ export function StepInferenceProvider({
               {field.label}
               {field.required ? '' : ' (optional)'}
             </span>
-            {field.options && field.options.length > 0 ? (
-              <Select
-                value={
-                  additionalEnvValues[field.envVarName] ||
-                  field.options[0]?.value ||
-                  ''
-                }
-                onValueChange={(value) =>
-                  setAdditionalEnvValues((values) => ({
-                    ...values,
-                    [field.envVarName]: value,
-                  }))
-                }
-                disabled={saveModelConfig.isPending}
-              >
-                <SelectTrigger
-                  className="min-w-44"
-                  aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
-                >
-                  <SelectValue placeholder={field.placeholder ?? field.label} />
-                </SelectTrigger>
-                <SelectContent>
-                  {field.options.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                secret={field.secret}
-                value={additionalEnvValues[field.envVarName] ?? ''}
-                onChange={(event) =>
-                  setAdditionalEnvValues((values) => ({
-                    ...values,
-                    [field.envVarName]: event.target.value,
-                  }))
-                }
-                placeholder={field.placeholder}
-                disabled={saveModelConfig.isPending}
-                aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
-                data-1p-ignore
-              />
-            )}
+            <AdditionalEnvFieldInput
+              field={field}
+              value={additionalEnvValues[field.envVarName] ?? ''}
+              onValueChange={(value) =>
+                setAdditionalEnvValues((values) => ({
+                  ...values,
+                  [field.envVarName]: value,
+                }))
+              }
+              disabled={saveModelConfig.isPending}
+              ariaLabel={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
+              selectTriggerClassName="min-w-44"
+            />
           </div>
         ))}
 

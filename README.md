@@ -84,7 +84,7 @@ cleans up after itself.
 2. **API keys (BYOK).** Paste a key from OpenRouter, Anthropic, OpenAI, xAI,
    Google Gemini, Amazon Bedrock, Vercel AI Gateway,
    Baseten, Together AI, Moonshot AI (Kimi), Kimi for Coding, MiniMax,
-   OpenCode Zen / Go, or GitHub Copilot.
+   Z.AI (including Coding Plan), OpenCode Zen / Go, or GitHub Copilot.
 
 **Sandbox compute:** Modal, E2B, Daytona, Blaxel, and Local Docker.
 
@@ -231,8 +231,8 @@ it runs.
 Two options. Connect your ChatGPT Plus or Pro subscription directly (no API key
 needed), or paste an API key from OpenRouter, Anthropic, OpenAI, xAI, Google
 Gemini, Amazon Bedrock, Vercel AI Gateway, Baseten,
-Together AI, Moonshot AI (Kimi), Kimi for Coding, MiniMax, OpenCode Zen / Go,
-or GitHub Copilot.
+Together AI, Moonshot AI (Kimi), Kimi for Coding, MiniMax, Z.AI (including
+Coding Plan), OpenCode Zen / Go, or GitHub Copilot.
 
 **What sandboxes does it support?**
 Modal, E2B, Daytona, Blaxel, and Local Docker.

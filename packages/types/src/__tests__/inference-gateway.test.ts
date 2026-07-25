@@ -5,9 +5,11 @@ import {
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_PROVIDERS,
   isInferenceGatewayCoveredEnvVar,
   parseInferenceGatewayKeys,
 } from '../inference-gateway';
+import { getSetupModelProvider } from '../model-provider-config';
 
 describe('inference gateway URL builders', () => {
   it('appends the gateway path to a platform URL', () => {
@@ -57,9 +59,13 @@ describe('inference gateway URL builders', () => {
     expect(zai).toMatchObject({
       envVarNames: ['ZAI_API_KEY'],
       openCodeBaseUrlSuffix: '',
-      regionBaseUrls: {
-        global: 'https://api.z.ai/api/paas/v4',
-        china: 'https://open.bigmodel.cn/api/paas/v4',
+      region: {
+        envVarName: 'ZAI_REGION',
+        default: 'global',
+        baseUrls: {
+          global: 'https://api.z.ai/api/paas/v4',
+          china: 'https://open.bigmodel.cn/api/paas/v4',
+        },
       },
     });
     expect(zai?.allowedPaths).toContain('/chat/completions');
@@ -180,6 +186,29 @@ describe('inference gateway key lookups', () => {
         provider!,
       ),
     ).toBe('https://api.example.com/api/inference/github-copilot');
+  });
+
+  it('offers exactly the regions its gateway providers hold base URLs for', () => {
+    const regionProviders = INFERENCE_GATEWAY_PROVIDERS.filter(
+      (provider) => provider.region?.baseUrls,
+    );
+
+    expect(regionProviders.map((provider) => provider.id)).toEqual([
+      'zai',
+      'zai-coding-plan',
+    ]);
+
+    for (const provider of regionProviders) {
+      const regions = Object.keys(provider.region!.baseUrls!);
+
+      expect(regions).toContain(provider.region!.default);
+
+      const field = (
+        getSetupModelProvider(provider.id).additionalEnvFields ?? []
+      ).find((entry) => entry.envVarName === provider.region!.envVarName);
+
+      expect(field?.options?.map((option) => option.value)).toEqual(regions);
+    }
   });
 
   it('parses a comma-separated served-keys value', () => {

@@ -357,6 +357,33 @@ describe('inference gateway', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects a Z.AI region with no configured upstream base', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('ZAI_REGION')) {
+          return 'us-east-1';
+        }
+        if (
+          nameList.includes('AWS_REGION') ||
+          nameList.includes('ZAI_CODING_PLAN_REGION')
+        ) {
+          return undefined;
+        }
+        return 'provider-secret-key';
+      },
+    );
+
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/zai/chat/completions',
+    );
+
+    expect(response.status).toBe(500);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('proxies GitHub Copilot without a /v1 base-path suffix', async () => {
     mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
     const fetchMock = stubUpstreamFetch();

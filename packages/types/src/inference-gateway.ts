@@ -123,12 +123,18 @@ export interface InferenceGatewayProvider {
    * Region resolution for `{region}`-templated upstreams: the deployment env
    * var to read and the fallback when it is unset.
    */
-  region?: { envVarName: string; default: string };
-  /**
-   * Discrete upstream bases keyed by region env value (e.g. `global` / `china`).
-   * Not AWS-style regions; do not use `INFERENCE_GATEWAY_REGION_PATTERN`.
-   */
-  regionBaseUrls?: Readonly<Record<string, string>>;
+  region?: {
+    envVarName: string;
+    default: string;
+    /**
+     * Discrete upstream bases keyed by region env value (e.g. `global` /
+     * `china`). When set, the resolved region selects a base URL outright
+     * instead of filling `upstreamBaseUrl`'s `{region}` placeholder, and
+     * `INFERENCE_GATEWAY_REGION_PATTERN` does not apply. Keeping these under
+     * `region` is what makes "bases without a region env var" unrepresentable.
+     */
+    baseUrls?: Readonly<Record<string, string>>;
+  };
   /** How the upstream expects its API key when the gateway forwards. */
   authHeader?: InferenceGatewayAuthHeader;
   /** A configured upstream key is forwarded when present but is not required. */
@@ -173,7 +179,7 @@ const ANTHROPIC_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
 ];
 
 /** Paths relative to the models.dev v4 base (not OpenAI `/v1/...`). */
-export const ZAI_INFERENCE_PATHS: readonly string[] = [
+const ZAI_INFERENCE_PATHS: readonly string[] = [
   '/chat/completions',
   '/completions',
   '/embeddings',
@@ -334,10 +340,13 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: ZAI_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '',
-      region: { envVarName: 'ZAI_REGION', default: 'global' },
-      regionBaseUrls: {
-        global: 'https://api.z.ai/api/paas/v4',
-        china: 'https://open.bigmodel.cn/api/paas/v4',
+      region: {
+        envVarName: 'ZAI_REGION',
+        default: 'global',
+        baseUrls: {
+          global: 'https://api.z.ai/api/paas/v4',
+          china: 'https://open.bigmodel.cn/api/paas/v4',
+        },
       },
     },
     {
@@ -347,10 +356,13 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: ZAI_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '',
-      region: { envVarName: 'ZAI_CODING_PLAN_REGION', default: 'global' },
-      regionBaseUrls: {
-        global: 'https://api.z.ai/api/coding/paas/v4',
-        china: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      region: {
+        envVarName: 'ZAI_CODING_PLAN_REGION',
+        default: 'global',
+        baseUrls: {
+          global: 'https://api.z.ai/api/coding/paas/v4',
+          china: 'https://open.bigmodel.cn/api/coding/paas/v4',
+        },
       },
     },
     {
