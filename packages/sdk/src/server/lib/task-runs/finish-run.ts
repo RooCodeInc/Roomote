@@ -256,13 +256,28 @@ export const finishRun = async ({
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
-  if (status === RunStatus.Completed) {
-    void captureEvent('task_completed', {
+  if (
+    status === RunStatus.Completed ||
+    status === RunStatus.Failed ||
+    status === RunStatus.Canceled
+  ) {
+    void captureEvent('task_settled', {
       ...(run.actingUserId ? { userId: run.actingUserId } : {}),
       properties: {
         taskType: run.payloadKind,
+        workflow: run.task.workflow,
+        surface: run.task.surface,
+        trigger: run.task.trigger,
+        runKind: run.kind,
         harness: run.harness ?? null,
+        modelProvider: run.task.modelProvider ?? null,
+        model: run.task.model ?? null,
         computeProvider: run.vendor ?? null,
+        outcome: status,
+        durationMs: run.startedAt
+          ? now.getTime() - run.startedAt.getTime()
+          : null,
+        ...(status === RunStatus.Failed && errorCode ? { errorCode } : {}),
       },
     });
   }

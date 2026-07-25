@@ -15,6 +15,7 @@ import {
   type SourceControlTokenMetadata,
 } from '@roomote/types';
 import {
+  type Task,
   type TaskRun,
   db,
   taskRuns,
@@ -27,6 +28,7 @@ import {
   eq,
   sql,
 } from '@roomote/db/server';
+import { captureEvent } from '@roomote/telemetry/server';
 import { decryptSecrets } from '@roomote/db/encryption';
 import { createTaskRunWorkerGitHubToken } from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
@@ -376,6 +378,30 @@ export async function notifyCanceledTaskRunOnSettle(
         });
     const taskTitle = (taskRun as TaskRun & { task?: { title: string | null } })
       .task?.title;
+
+    const task = (taskRun as TaskRun & { task?: Task }).task;
+    if (task) {
+      // Dequeue/bootstrap cancellations bypass finishRun, so they emit their
+      // matching anonymous terminal lifecycle event here.
+      void captureEvent('task_settled', {
+        ...(taskRun.actingUserId ? { userId: taskRun.actingUserId } : {}),
+        properties: {
+          taskType: taskRun.payloadKind,
+          workflow: task.workflow,
+          surface: task.surface,
+          trigger: task.trigger,
+          runKind: taskRun.kind,
+          harness: taskRun.harness ?? null,
+          modelProvider: task.modelProvider ?? null,
+          model: task.model ?? null,
+          computeProvider: taskRun.vendor ?? null,
+          outcome: RunStatus.Canceled,
+          durationMs: taskRun.startedAt
+            ? Date.now() - taskRun.startedAt.getTime()
+            : null,
+        },
+      });
+    }
 
     await notifySourceRunOnSettle(
       {
