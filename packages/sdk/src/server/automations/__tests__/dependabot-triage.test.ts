@@ -113,13 +113,19 @@ describe('dependabotTriageJob buildScanTask', () => {
     );
     expect(payload.description).toContain('inspect its open pull requests');
     expect(payload.description).toContain(
-      'always post one concise status message',
+      'After triage reaches a final result, post exactly one concise status message',
     );
     expect(payload.description).toContain(
       'total number of open Dependabot alerts, the per-repository counts',
     );
     expect(payload.description).toContain(
       'do not submit duplicate work for alerts it covers',
+    );
+    expect(payload.description).toContain(
+      'Do not post any Slack opening acknowledgement, scan announcement, progress update, or partial finding',
+    );
+    expect(payload.description).toContain(
+      'post exactly one concise status message',
     );
   });
 
