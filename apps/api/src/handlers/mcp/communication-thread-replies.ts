@@ -11,6 +11,7 @@ import {
   db,
   and,
   eq,
+  getTaskAutomationInitiatorKey,
   sql,
   taskRuns,
   upsertBackgroundAutomationSlackThread,
@@ -185,15 +186,21 @@ async function bindLateCommunicationReportThread(params: {
   provider: 'teams' | 'telegram' | 'discord';
   messageId: string;
 }): Promise<void> {
-  const payload = params.taskRun.payload as
-    | { backgroundAutomationKey?: unknown }
-    | undefined;
-  const automationKey = payload?.backgroundAutomationKey;
   const channelId = getCommunicationChannelFromTaskPayload(
     params.taskRun.payload,
   );
 
-  if (automationKey !== 'announcer' || !channelId) {
+  if (!channelId) {
+    return;
+  }
+
+  // Every automation-launched report root gets bound, so replies to it route
+  // back to the task on any provider.
+  const automationKey = await getTaskAutomationInitiatorKey(
+    params.taskRun.taskId,
+  );
+
+  if (!automationKey) {
     return;
   }
 
@@ -222,7 +229,7 @@ async function bindLateCommunicationReportThread(params: {
     }
     await upsertBackgroundAutomationSlackThread(tx, {
       surface: params.provider,
-      automationKey: 'announcer',
+      automationKey,
       slackChannelId: channelId,
       threadTs: params.messageId,
       summaryText: '',

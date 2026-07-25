@@ -4,6 +4,7 @@ import {
   and,
   asc,
   db,
+  type DatabaseOrTransaction,
   eq,
   getAutomationRuntime,
   isNull,
@@ -68,6 +69,29 @@ export async function resolveAutomationSlackTarget(params: {
   };
 }
 
+async function resolveWorkItemAutomationKey(
+  tx: DatabaseOrTransaction,
+  automationWorkItemId: string,
+): Promise<BackgroundAutomationKey | null> {
+  const [automationWorkItem] = await tx
+    .select({
+      automationKey: workItems.automationKey,
+      sourceTaskId: workItems.sourceTaskId,
+    })
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.kind, 'auto_fix'),
+        eq(workItems.id, automationWorkItemId),
+      ),
+    )
+    .limit(1);
+
+  return automationWorkItem?.sourceTaskId
+    ? (automationWorkItem.automationKey ?? null)
+    : null;
+}
+
 export async function bindLateSlackThreadToTask(params: {
   taskId: string;
   channelId: string;
@@ -109,47 +133,21 @@ export async function bindLateSlackThreadToTask(params: {
       })
       .where(eq(taskRuns.taskId, params.taskId));
 
-    if (params.backgroundAutomationKey) {
-      await upsertBackgroundAutomationSlackThread(tx, {
-        surface: 'slack',
-        automationKey: params.backgroundAutomationKey,
-        slackChannelId: params.channelId,
-        threadTs: params.threadTs,
-        summaryText: params.summaryText,
-        postedAt: new Date(),
-        metadata: { sourceTaskId: params.taskId },
-      });
-      return;
-    }
+    // A work item names the automation that queued it, which is more specific
+    // than the launching automation, so it wins when both are available.
+    const workItemAutomationKey = params.automationWorkItemId
+      ? await resolveWorkItemAutomationKey(tx, params.automationWorkItemId)
+      : null;
+    const automationKey =
+      workItemAutomationKey ?? params.backgroundAutomationKey;
 
-    if (!params.automationWorkItemId) {
-      return;
-    }
-
-    const [automationWorkItem] = await tx
-      .select({
-        automationKey: workItems.automationKey,
-        sourceTaskId: workItems.sourceTaskId,
-      })
-      .from(workItems)
-      .where(
-        and(
-          eq(workItems.kind, 'auto_fix'),
-          eq(workItems.id, params.automationWorkItemId),
-        ),
-      )
-      .limit(1);
-
-    if (
-      !automationWorkItem?.sourceTaskId ||
-      !automationWorkItem.automationKey
-    ) {
+    if (!automationKey) {
       return;
     }
 
     await upsertBackgroundAutomationSlackThread(tx, {
       surface: 'slack',
-      automationKey: automationWorkItem.automationKey,
+      automationKey,
       slackChannelId: params.channelId,
       threadTs: params.threadTs,
       summaryText: params.summaryText,
