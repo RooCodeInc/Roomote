@@ -585,9 +585,9 @@ using Docker sandboxes. That overlay:
   and, under the default `internet` egress policy, blackholes private and
   cloud metadata ranges plus drops packets destined to the Docker bridge
   gateway (host hairpin) while still allowing public egress via that gateway
-  as next-hop. The gateway drop is installed with `iptables`, so the worker
-  image must ship an iptables binary the host kernel supports (the stock
-  image does); sandbox provisioning fails closed when it is unavailable;
+  as next-hop. The gateway drop automatically selects an nftables or legacy
+  `iptables` backend supported by the host kernel; sandbox provisioning fails
+  closed when neither backend is available;
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 

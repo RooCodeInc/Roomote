@@ -280,10 +280,17 @@ describe('attachDockerEgressPolicy', () => {
       'ip route replace blackhole "$gateway/32"',
     );
     expect(routeScript).toContain(
-      'iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
+      'for candidate in iptables-nft iptables-legacy iptables; do',
+    );
+    expect(routeScript).toContain('"$candidate" -S OUTPUT >/dev/null 2>&1');
+    expect(routeScript).toContain(
+      '"$iptables_cmd" -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A OUTPUT -d "$gateway" -j DROP',
     );
     expect(routeScript).toContain(
-      'iptables -C FORWARD -d "$gateway" -j DROP 2>/dev/null || iptables -A FORWARD -d "$gateway" -j DROP',
+      '"$iptables_cmd" -C FORWARD -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A FORWARD -d "$gateway" -j DROP',
+    );
+    expect(routeScript).toContain(
+      'no supported iptables backend (nft, legacy, or default)',
     );
     // Upgrades must heal netns state left by controllers that blackholed the
     // gateway route in retained standby workers.

@@ -975,8 +975,9 @@ export function getDockerWorkerCommand(
 
 /**
  * Docker Compose self-host/prod attaches the `api` service to each task
- * network. When a control network is configured, egress policy blackholes the
- * docker bridge gateway so sandboxes cannot hairpin through the public edge.
+ * network. When a control network is configured, egress policy blocks packets
+ * destined for the Docker bridge gateway so sandboxes cannot hairpin through
+ * the public edge.
  * Workers must call the in-network API alias directly (no `/_roomote-api`
  * prefix — that path only exists on the public reverse proxy).
  */
