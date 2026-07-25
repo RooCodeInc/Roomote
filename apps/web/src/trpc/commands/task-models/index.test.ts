@@ -15,6 +15,7 @@ const {
   mockUpsertDeploymentEnvironmentVariables,
   mockIsChatGptSubscriptionConnected,
   mockIsGitHubCopilotSubscriptionConnected,
+  mockIsXaiSubscriptionConnected,
 } = vi.hoisted(() => ({
   mockFindDeploymentSettings: vi.fn(),
   mockInsertDeploymentSettings: vi.fn(),
@@ -27,6 +28,7 @@ const {
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockIsChatGptSubscriptionConnected: vi.fn(),
   mockIsGitHubCopilotSubscriptionConnected: vi.fn(),
+  mockIsXaiSubscriptionConnected: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -56,6 +58,7 @@ vi.mock('@roomote/db/server', () => ({
   isChatGptSubscriptionConnected: mockIsChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected:
     mockIsGitHubCopilotSubscriptionConnected,
+  isXaiSubscriptionConnected: mockIsXaiSubscriptionConnected,
   isNull: vi.fn((column) => ({ isNull: column })),
 }));
 
@@ -158,6 +161,7 @@ describe('lookupTaskModelCommand', () => {
     delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
     mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
+    mockIsXaiSubscriptionConnected.mockResolvedValue(false);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
@@ -1199,6 +1203,7 @@ describe('task model provider commands', () => {
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
     mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
+    mockIsXaiSubscriptionConnected.mockResolvedValue(false);
     mockPersistedSetupNewState({});
   });
 
@@ -1620,6 +1625,7 @@ describe('task model provider commands', () => {
     // allowed because the subscription keeps the deployment usable.
     mockIsChatGptSubscriptionConnected.mockResolvedValue(true);
     mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
+    mockIsXaiSubscriptionConnected.mockResolvedValue(false);
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'ANTHROPIC_API_KEY',
     ]);

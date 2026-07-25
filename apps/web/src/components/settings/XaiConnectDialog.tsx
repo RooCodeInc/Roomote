@@ -39,7 +39,13 @@ export function XaiConnectDialog({
   const queryClient = useQueryClient();
   const [deviceAuth, setDeviceAuth] = useState<DeviceAuth | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const pollingRef = useRef(false);
+  /**
+   * Monotonic generation bumped whenever a poll loop must die (close, restart,
+   * unmount). A shared boolean is not enough: cancel + reopen can flip the
+   * flag back to true and revive a stale loop that still holds the previous
+   * device code.
+   */
+  const pollGenerationRef = useRef(0);
 
   const startMutation = useMutation(
     trpc.xaiSubscription.startDeviceAuth.mutationOptions({
@@ -54,14 +60,20 @@ export function XaiConnectDialog({
     trpc.xaiSubscription.pollDeviceAuth.mutationOptions(),
   );
 
+  function invalidatePollLoops() {
+    pollGenerationRef.current += 1;
+  }
+
   function close(next: boolean) {
-    if (!next) pollingRef.current = false;
+    if (!next) {
+      invalidatePollLoops();
+    }
     onOpenChange(next);
   }
 
   useEffect(() => {
     if (!open) {
-      pollingRef.current = false;
+      invalidatePollLoops();
       setDeviceAuth(null);
       setError(null);
       return;
@@ -72,17 +84,24 @@ export function XaiConnectDialog({
   }, [deviceAuth, open, startMutation]);
 
   useEffect(() => {
-    if (!open || !deviceAuth || pollingRef.current) return;
-    pollingRef.current = true;
+    if (!open || !deviceAuth) {
+      return;
+    }
+
+    const generation = ++pollGenerationRef.current;
+    const activeDeviceCode = deviceAuth.deviceCode;
 
     const poll = async () => {
       let intervalMs = deviceAuth.intervalMs;
-      while (pollingRef.current) {
+      while (pollGenerationRef.current === generation) {
         const result = await pollMutation.mutateAsync({
-          deviceCode: deviceAuth.deviceCode,
+          deviceCode: activeDeviceCode,
         });
+        // Another open/close/restart may have started while we awaited.
+        if (pollGenerationRef.current !== generation) {
+          return;
+        }
         if (result.status === 'success') {
-          pollingRef.current = false;
           toast.success('xAI Grok subscription connected.');
           await Promise.all([
             queryClient.invalidateQueries({
@@ -95,22 +114,31 @@ export function XaiConnectDialog({
               queryKey: trpc.xaiSubscription.status.queryKey(),
             }),
           ]);
+          if (pollGenerationRef.current !== generation) {
+            return;
+          }
           await onConnected?.();
+          if (pollGenerationRef.current !== generation) {
+            return;
+          }
           close(false);
           return;
         }
         if (result.status === 'failed') {
-          pollingRef.current = false;
           setError(result.error);
           return;
         }
-        if (result.intervalMs) intervalMs += result.intervalMs;
+        if (result.intervalMs) {
+          intervalMs += result.intervalMs;
+        }
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
       }
     };
 
     void poll().catch((pollError: unknown) => {
-      pollingRef.current = false;
+      if (pollGenerationRef.current !== generation) {
+        return;
+      }
       setError(
         pollError instanceof Error
           ? pollError.message
@@ -118,7 +146,10 @@ export function XaiConnectDialog({
       );
     });
     return () => {
-      pollingRef.current = false;
+      // Invalidate only this effect's generation when deviceAuth/open change.
+      if (pollGenerationRef.current === generation) {
+        pollGenerationRef.current += 1;
+      }
     };
     // The polling lifecycle is intentionally keyed only to the active device
     // flow; mutation/query objects are recreated by hooks between renders.
@@ -176,6 +207,7 @@ export function XaiConnectDialog({
           {error ? (
             <Button
               onClick={() => {
+                invalidatePollLoops();
                 setError(null);
                 setDeviceAuth(null);
                 startMutation.reset();
