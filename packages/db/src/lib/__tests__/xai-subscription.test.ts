@@ -607,6 +607,37 @@ describe('disconnectXaiSubscription', () => {
       status: 'disconnected',
     });
   });
+
+  it('wins over an in-flight poll that already received tokens', async () => {
+    const { executor, store } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
+
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      // Operator disconnects while the device poll is awaiting xAI.
+      await disconnectXaiSubscription(executor);
+      return new Response(
+        JSON.stringify({
+          access_token: 'should-not-persist',
+          refresh_token: 'should-not-persist',
+          expires_in: 3600,
+        }),
+        { status: 200 },
+      );
+    });
+
+    const result = await pollXaiDeviceAuth(
+      { deviceCode: 'device-1' },
+      { executor, fetchImpl },
+    );
+
+    expect(result).toEqual({
+      status: 'failed',
+      error: XAI_SUBSCRIPTION_INTERNAL.supersededDeviceFlowError,
+    });
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.secretName)).toBe(false);
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)).toBe(false);
+  });
 });
 
 describe('getFreshXaiAccessToken', () => {

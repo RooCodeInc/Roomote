@@ -338,8 +338,12 @@ export async function saveXaiSubscription(
 export async function disconnectXaiSubscription(
   executor: DatabaseOrTransaction = db,
 ): Promise<void> {
-  await deleteSecretValue(executor, XAI_SUBSCRIPTION_SECRET_NAME);
-  await clearPendingDeviceFlow(executor);
+  // Same lock as poll/start so an in-flight successful poll cannot re-persist
+  // tokens after the operator explicitly disconnects.
+  await withDeviceAuthLock(executor, async (tx) => {
+    await deleteSecretValue(tx, XAI_SUBSCRIPTION_SECRET_NAME);
+    await clearPendingDeviceFlow(tx);
+  });
 }
 
 /**
