@@ -1,7 +1,6 @@
 {
-	on_demand_tls {
-		ask http://web:3000/api/caddy/ask
-	}
+	{$ROOMOTE_CADDY_LOCAL_CERTS:}
+	{$ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET:import roomote_on_demand_tls}
 }
 
 (roomote_proxy) {
@@ -9,6 +8,18 @@
 	reverse_proxy {args[0]} {
 		lb_try_duration 10s
 		lb_try_interval 250ms
+	}
+}
+
+(roomote_on_demand_tls) {
+	on_demand_tls {
+		ask http://web:3000/api/caddy/ask
+	}
+}
+
+(roomote_on_demand_wildcard_tls) {
+	tls {
+		on_demand
 	}
 }
 
@@ -43,9 +54,7 @@
 }
 
 *.{$ROOMOTE_PREVIEW_DOMAIN} {
-	tls {
-		on_demand
-	}
+	{$ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET:import roomote_on_demand_wildcard_tls}
 
 	import roomote_proxy preview-proxy:8081
 }

@@ -35,6 +35,8 @@ usage: install.sh [options]
 Options:
   --domain <host>            Public app hostname (default: roomote.<ip>.sslip.io)
   --preview-domain <host>    Preview hostname (default: preview.<domain>)
+  --tls-mode <acme|internal> TLS certificate mode (default: acme)
+  --skip-dns-check           Skip public-DNS verification for --domain
   --version <tag>            Roomote image tag (default: latest GitHub release)
   --repo <owner/name>        GitHub repo for compose/Caddyfile fetch
                              (default: RooCodeInc/Roomote)
@@ -44,6 +46,7 @@ Options:
 
 Environment overrides:
   ROOMOTE_VERSION
+  ROOMOTE_TLS_MODE            Certificate mode: acme or internal
   ROOMOTE_FETCH_BASE           Mirror for the release lookup and deployment
                                file fetches (default https://get.roomote.dev
                                for the official repo; GitHub is the fallback)
@@ -78,6 +81,8 @@ die() {
 
 domain=''
 preview_domain=''
+tls_mode="${ROOMOTE_TLS_MODE:-}"
+skip_dns_check='false'
 roomote_version="${ROOMOTE_VERSION:-}"
 repo='RooCodeInc/Roomote'
 image_registry='ghcr.io'
@@ -94,6 +99,14 @@ while [ "$#" -gt 0 ]; do
     --preview-domain)
       preview_domain="${2:-}"
       shift 2
+      ;;
+    --tls-mode)
+      tls_mode="${2:-}"
+      shift 2
+      ;;
+    --skip-dns-check)
+      skip_dns_check='true'
+      shift
       ;;
     --version)
       roomote_version="${2:-}"
@@ -297,8 +310,6 @@ detect_public_ip() {
   return 1
 }
 
-public_ip="$(detect_public_ip)" || public_ip=''
-
 if [ -z "$domain" ] && [ -f "$install_root/.env" ]; then
   domain="$(awk -F= '/^ROOMOTE_APP_DOMAIN=/ { print $2; exit }' "$install_root/.env")"
   if [ -n "$domain" ]; then
@@ -306,12 +317,31 @@ if [ -z "$domain" ] && [ -f "$install_root/.env" ]; then
   fi
 fi
 
+if [ -z "$tls_mode" ] && [ -f "$install_root/.env" ]; then
+  tls_mode="$(awk -F= '/^ROOMOTE_TLS_MODE=/ { print $2; exit }' "$install_root/.env")"
+fi
+tls_mode="${tls_mode:-acme}"
+case "$tls_mode" in
+  acme | internal) ;;
+  *) die "--tls-mode must be acme or internal" ;;
+esac
+
+public_ip=''
 if [ -z "$domain" ]; then
+  if [ "$tls_mode" = 'internal' ]; then
+    die "--tls-mode internal requires --domain <host>"
+  fi
+  public_ip="$(detect_public_ip)" || public_ip=''
   [ -n "$public_ip" ] || die "could not detect this host's public IPv4 address; pass --domain instead"
   domain="roomote.$(printf '%s' "$public_ip" | tr '.' '-').sslip.io"
   log "No --domain given; using the zero-DNS default $domain"
   warn "sslip.io domains share Let's Encrypt rate limits and are tied to this IP. Use --domain for production."
 else
+  if [ "$skip_dns_check" = 'true' ] || [ "$tls_mode" = 'internal' ]; then
+    log "Skipping public DNS verification for $domain"
+  else
+    public_ip="$(detect_public_ip)" || public_ip=''
+  fi
   if [ -n "$public_ip" ]; then
     log "Checking that $domain resolves to $public_ip"
     resolved=''
@@ -519,6 +549,16 @@ set_env_value ROOMOTE_VERSION "$roomote_version"
 set_env_value ROOMOTE_REPO "$repo"
 set_env_value ROOMOTE_APP_DOMAIN "$domain"
 set_env_value ROOMOTE_PREVIEW_DOMAIN "$preview_domain"
+set_env_value ROOMOTE_TLS_MODE "$tls_mode"
+if [ "$tls_mode" = 'internal' ]; then
+  set_env_value ROOMOTE_CADDY_LOCAL_CERTS 'local_certs'
+  set_env_value ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET ''
+  set_env_value ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET ''
+else
+  set_env_value ROOMOTE_CADDY_LOCAL_CERTS ''
+  set_env_value ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET 'import roomote_on_demand_tls'
+  set_env_value ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET 'import roomote_on_demand_wildcard_tls'
+fi
 set_env_value TRPC_URL "https://$domain/_roomote-api"
 set_env_value IMAGE_REGISTRY "$image_registry"
 set_env_value IMAGE_NAMESPACE "$image_namespace"
@@ -588,8 +628,8 @@ Roomote is up. One step left:
 
       https://$domain/setup?token=$setup_token
 
-If the browser shows a TLS error, the certificate is still being issued --
-wait a minute and reload.
+If the browser shows a TLS error in acme mode, the certificate is still being
+issued -- wait a minute and reload.
 
 Manage later with the roomote command: roomote status | logs | upgrade | backup
 EOF
