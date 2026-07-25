@@ -541,9 +541,8 @@ export async function attachDockerEgressPolicy(
     'ALL',
     '--cap-add',
     'NET_ADMIN',
-    // iptables-legacy (forced in the worker image) opens a raw socket, which
-    // needs CAP_NET_RAW on top of CAP_NET_ADMIN; both are in Docker's default
-    // capability set.
+    // Legacy iptables needs CAP_NET_RAW on top of CAP_NET_ADMIN. Keep both
+    // capabilities because the helper selects the supported backend at runtime.
     '--cap-add',
     'NET_RAW',
     '--entrypoint',
@@ -573,18 +572,27 @@ export async function attachDockerEgressPolicy(
               // the gateway as a route; retained standby workers keep their
               // netns across controller upgrades.
               '  ip route del blackhole "$gateway/32" 2>/dev/null || true',
-              '  if ! command -v iptables >/dev/null 2>&1; then',
-              '    if command -v apk >/dev/null 2>&1; then',
-              '      apk add --no-cache iptables >/dev/null',
-              '    fi',
+              '  find_iptables() {',
+              '    for candidate in iptables-nft iptables-legacy iptables; do',
+              '      if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -S OUTPUT >/dev/null 2>&1; then',
+              '        printf "%s" "$candidate"',
+              '        return 0',
+              '      fi',
+              '    done',
+              '    return 1',
+              '  }',
+              '  iptables_cmd="$(find_iptables || true)"',
+              '  if [ -z "$iptables_cmd" ] && command -v apk >/dev/null 2>&1; then',
+              '    apk add --no-cache iptables >/dev/null',
+              '    iptables_cmd="$(find_iptables || true)"',
               '  fi',
-              '  if command -v iptables >/dev/null 2>&1; then',
-              '    iptables -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || iptables -A OUTPUT -d "$gateway" -j DROP',
+              '  if [ -n "$iptables_cmd" ]; then',
+              '    "$iptables_cmd" -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A OUTPUT -d "$gateway" -j DROP',
               // The route blackhole also covered forwarded traffic; keep that
               // property in case the worker netns ever routes packets.
-              '    iptables -C FORWARD -d "$gateway" -j DROP 2>/dev/null || iptables -A FORWARD -d "$gateway" -j DROP',
+              '    "$iptables_cmd" -C FORWARD -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A FORWARD -d "$gateway" -j DROP',
               '  else',
-              '    echo "iptables unavailable; cannot block docker gateway $gateway" >&2',
+              '    echo "no supported iptables backend (nft, legacy, or default); cannot block docker gateway $gateway" >&2',
               '    exit 1',
               '  fi',
               'fi',

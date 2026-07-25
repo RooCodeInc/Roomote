@@ -69,6 +69,26 @@ Point `<domain>`, `preview.<domain>`, and `*.preview.<domain>` A records at
 the server first; the installer waits briefly for DNS and Caddy retries
 certificates until the records are in place.
 
+### Private networks and tunnels
+
+When a reverse tunnel or private network terminates public TLS before traffic
+reaches Roomote, use Caddy's internal certificates instead of requesting
+Let's Encrypt certificates:
+
+```sh
+curl -fsSL https://get.roomote.dev | bash -s -- \
+  --domain roomote.internal \
+  --tls-mode internal
+```
+
+`--tls-mode internal` skips public-DNS verification and configures Caddy to
+issue local certificates; it requires `--domain`. Direct private-network
+clients must trust Caddy's local CA, while clients behind a tunnel use the
+tunnel's public certificate. Use `--skip-dns-check` with the default `acme`
+mode only when you know public DNS is not ready yet. The selected mode is
+retained in `/opt/roomote/.env`, so installer reruns and `roomote upgrade`
+preserve it.
+
 Useful flags and env vars: `--version <tag>` pins a release, and
 `--preview-domain <host>` overrides the preview root. Both published images
 are public, so pulls need no credentials. Re-running the installer is safe:
@@ -585,9 +605,9 @@ using Docker sandboxes. That overlay:
   and, under the default `internet` egress policy, blackholes private and
   cloud metadata ranges plus drops packets destined to the Docker bridge
   gateway (host hairpin) while still allowing public egress via that gateway
-  as next-hop. The gateway drop is installed with `iptables`, so the worker
-  image must ship an iptables binary the host kernel supports (the stock
-  image does); sandbox provisioning fails closed when it is unavailable;
+  as next-hop. The gateway drop automatically selects an nftables or legacy
+  `iptables` backend supported by the host kernel; sandbox provisioning fails
+  closed when neither backend is available;
 - points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 

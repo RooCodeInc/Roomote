@@ -62,6 +62,9 @@ const composeEnv = {
   PREVIEW_AUTH_PUBLIC_KEY: 'deployment-ci-preview-public-key',
   REDIS_URL: 'redis://redis:6379',
   ROOMOTE_APP_DOMAIN: 'roomote.localhost',
+  ROOMOTE_CADDY_LOCAL_CERTS: 'local_certs',
+  ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET: '',
+  ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET: '',
   R_APP_URL: 'http://roomote.localhost',
   ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.localhost',
   ROOMOTE_VERSION: 'deployment-ci',
@@ -140,8 +143,7 @@ function validateComposeShape(shape) {
       // Coolify uses platform magic vars that compose does not interpolate here.
       if (
         !shape.coolify &&
-        'R_DISCORD_GATEWAY_SECRET' in
-          (config.services.bullmq.environment ?? {})
+        'R_DISCORD_GATEWAY_SECRET' in (config.services.bullmq.environment ?? {})
       ) {
         assert(
           config.services.bullmq.environment?.R_DISCORD_GATEWAY_SECRET ===
@@ -149,6 +151,27 @@ function validateComposeShape(shape) {
           `${shape.name}: bullmq must receive R_DISCORD_GATEWAY_SECRET`,
         );
       }
+    }
+
+    if (
+      'ROOMOTE_CADDY_LOCAL_CERTS' in (config.services.caddy?.environment ?? {})
+    ) {
+      assert(
+        config.services.caddy.environment?.ROOMOTE_CADDY_LOCAL_CERTS ===
+          composeEnv.ROOMOTE_CADDY_LOCAL_CERTS,
+        `${shape.name}: caddy must receive ROOMOTE_CADDY_LOCAL_CERTS`,
+      );
+      assert(
+        config.services.caddy.environment?.ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET ===
+          composeEnv.ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET,
+        `${shape.name}: caddy must receive ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET`,
+      );
+      assert(
+        config.services.caddy.environment
+          ?.ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET ===
+          composeEnv.ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET,
+        `${shape.name}: caddy must receive ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET`,
+      );
     }
 
     console.log(`validated compose shape: ${shape.name}`);
@@ -238,6 +261,65 @@ assert(
 
 const productionCompose = YAML.parse(
   read('deploy/compose/docker-compose.prod.yml'),
+);
+assert(
+  read('deploy/caddy/Caddyfile').includes('{$ROOMOTE_CADDY_LOCAL_CERTS:}'),
+  'caddy: Caddyfile must support the installer-managed local certificate mode',
+);
+assert(
+  read('deploy/caddy/Caddyfile').includes(
+    '{$ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET:import roomote_on_demand_tls}',
+  ),
+  'caddy: Caddyfile must allow internal mode to remove global on-demand TLS',
+);
+assert(
+  read('deploy/caddy/Caddyfile').includes(
+    '{$ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET:import roomote_on_demand_wildcard_tls}',
+  ),
+  'caddy: Caddyfile must allow internal mode to remove wildcard on-demand TLS',
+);
+const caddyfile = read('deploy/caddy/Caddyfile');
+const renderCaddyTlsMode = (values) =>
+  caddyfile
+    .replace('{$ROOMOTE_CADDY_LOCAL_CERTS:}', values.localCertificates)
+    .replace(
+      '{$ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET:import roomote_on_demand_tls}',
+      values.globalTlsSnippet,
+    )
+    .replace(
+      '{$ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET:import roomote_on_demand_wildcard_tls}',
+      values.wildcardTlsSnippet,
+    );
+const acmeCaddyfile = renderCaddyTlsMode({
+  localCertificates: '',
+  globalTlsSnippet: 'import roomote_on_demand_tls',
+  wildcardTlsSnippet: 'import roomote_on_demand_wildcard_tls',
+});
+const internalCaddyfile = renderCaddyTlsMode({
+  localCertificates: 'local_certs',
+  globalTlsSnippet: '',
+  wildcardTlsSnippet: '',
+});
+const caddyGlobalBlock = (contents) =>
+  contents.slice(0, contents.indexOf('}\n'));
+const caddyWildcardSite = (contents) =>
+  contents.slice(contents.indexOf('*.{$ROOMOTE_PREVIEW_DOMAIN} {'));
+assert(
+  caddyGlobalBlock(acmeCaddyfile).includes('import roomote_on_demand_tls') &&
+    caddyWildcardSite(acmeCaddyfile).includes(
+      'import roomote_on_demand_wildcard_tls',
+    ),
+  'caddy: acme mode must import global and wildcard on-demand TLS',
+);
+assert(
+  caddyGlobalBlock(internalCaddyfile).includes('local_certs') &&
+    !caddyGlobalBlock(internalCaddyfile).includes(
+      'import roomote_on_demand_tls',
+    ) &&
+    !caddyWildcardSite(internalCaddyfile).includes(
+      'import roomote_on_demand_wildcard_tls',
+    ),
+  'caddy: internal mode must use local certificates without on-demand TLS',
 );
 const coolify = YAML.parse(read('deploy/coolify/docker-compose.yaml'));
 assert(

@@ -66,8 +66,6 @@ RUN apt-get update \
     libxrandr2 \
     libxss1 \
   && ln -sf "$(command -v python3)" /usr/local/bin/python \
-  && update-alternatives --set iptables /usr/sbin/iptables-legacy \
-  && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy \
   && docker compose version \
   && rm -rf /var/lib/apt/lists/*
 
