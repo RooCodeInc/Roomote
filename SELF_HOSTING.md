@@ -294,6 +294,9 @@ common provider keys into worker containers:
 - `MOONSHOT_API_KEY`
 - `KIMI_API_KEY` (Kimi for Coding, `kimi-for-coding/...` models)
 - `MINIMAX_API_KEY`
+- `ZAI_API_KEY` (with `ZAI_REGION`: `global` or `china`, defaults to `global`)
+- `ZAI_CODING_PLAN_API_KEY` (Z.AI Coding Plan, `zai-coding-plan/...` models,
+  with `ZAI_CODING_PLAN_REGION`)
 - `OPENCODE_API_KEY`
 
 If your provider uses another env var name, list it in

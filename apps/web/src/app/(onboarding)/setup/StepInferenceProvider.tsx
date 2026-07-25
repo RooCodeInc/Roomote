@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  getDefaultAdditionalEnvValues,
+  getSetupModelProvider,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
@@ -23,6 +25,7 @@ import {
   SelectValue,
   Spinner,
 } from '@/components/system';
+import { AdditionalEnvFieldInput } from '@/components/settings/AdditionalEnvFieldInput';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
 import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
@@ -141,7 +144,16 @@ export function StepInferenceProvider({
           : '',
     );
     setConnectionName('');
-    setAdditionalEnvValues({});
+    // Seeded from the catalog rather than the fetched status so this effect
+    // stays keyed on `selectedProvider` alone; depending on the status query
+    // would reset in-progress input on every refetch.
+    setAdditionalEnvValues(
+      getDefaultAdditionalEnvValues(
+        selectedProvider
+          ? (getSetupModelProvider(selectedProvider).additionalEnvFields ?? [])
+          : [],
+      ),
+    );
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
     setIsGitHubCopilotDialogOpen(false);
@@ -496,19 +508,18 @@ export function StepInferenceProvider({
               {field.label}
               {field.required ? '' : ' (optional)'}
             </span>
-            <Input
-              secret={field.secret}
+            <AdditionalEnvFieldInput
+              field={field}
               value={additionalEnvValues[field.envVarName] ?? ''}
-              onChange={(event) =>
+              onValueChange={(value) =>
                 setAdditionalEnvValues((values) => ({
                   ...values,
-                  [field.envVarName]: event.target.value,
+                  [field.envVarName]: value,
                 }))
               }
-              placeholder={field.placeholder}
               disabled={saveModelConfig.isPending}
-              aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
-              data-1p-ignore
+              ariaLabel={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
+              selectTriggerClassName="min-w-44"
             />
           </div>
         ))}

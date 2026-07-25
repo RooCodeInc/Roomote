@@ -5,9 +5,11 @@ import {
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_PROVIDERS,
   isInferenceGatewayCoveredEnvVar,
   parseInferenceGatewayKeys,
 } from '../inference-gateway';
+import { getSetupModelProvider } from '../model-provider-config';
 
 describe('inference gateway URL builders', () => {
   it('appends the gateway path to a platform URL', () => {
@@ -50,6 +52,36 @@ describe('inference gateway URL builders', () => {
     expect(getInferenceGatewayProviderByEnvVarName('KIMI_API_KEY')?.id).toBe(
       'kimi-for-coding',
     );
+  });
+
+  it('registers Z.AI providers with v4 bases and empty OpenCode suffix', () => {
+    const zai = getInferenceGatewayProvider('zai');
+    expect(zai).toMatchObject({
+      envVarNames: ['ZAI_API_KEY'],
+      openCodeBaseUrlSuffix: '',
+      region: {
+        envVarName: 'ZAI_REGION',
+        default: 'global',
+        baseUrls: {
+          global: 'https://api.z.ai/api/paas/v4',
+          china: 'https://open.bigmodel.cn/api/paas/v4',
+        },
+      },
+    });
+    expect(zai?.allowedPaths).toContain('/chat/completions');
+    expect(zai?.allowedPaths).not.toContain('/v1/chat/completions');
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        zai!,
+      ),
+    ).toBe('https://api.example.com/api/inference/zai');
+    expect(getInferenceGatewayProviderByEnvVarName('ZAI_API_KEY')?.id).toBe(
+      'zai',
+    );
+    expect(
+      getInferenceGatewayProviderByEnvVarName('ZAI_CODING_PLAN_API_KEY')?.id,
+    ).toBe('zai-coding-plan');
   });
 
   it('exposes a chatgpt-oauth provider that collapses to the Codex backend', () => {
@@ -167,6 +199,29 @@ describe('inference gateway key lookups', () => {
     expect(provider?.allowedPaths).toEqual(
       expect.arrayContaining(['/v1/chat/completions', '/v1/responses']),
     );
+  });
+
+  it('offers exactly the regions its gateway providers hold base URLs for', () => {
+    const regionProviders = INFERENCE_GATEWAY_PROVIDERS.filter(
+      (provider) => provider.region?.baseUrls,
+    );
+
+    expect(regionProviders.map((provider) => provider.id)).toEqual([
+      'zai',
+      'zai-coding-plan',
+    ]);
+
+    for (const provider of regionProviders) {
+      const regions = Object.keys(provider.region!.baseUrls!);
+
+      expect(regions).toContain(provider.region!.default);
+
+      const field = (
+        getSetupModelProvider(provider.id).additionalEnvFields ?? []
+      ).find((entry) => entry.envVarName === provider.region!.envVarName);
+
+      expect(field?.options?.map((option) => option.value)).toEqual(regions);
+    }
   });
 
   it('parses a comma-separated served-keys value', () => {

@@ -132,7 +132,18 @@ export interface InferenceGatewayProvider {
    * Region resolution for `{region}`-templated upstreams: the deployment env
    * var to read and the fallback when it is unset.
    */
-  region?: { envVarName: string; default: string };
+  region?: {
+    envVarName: string;
+    default: string;
+    /**
+     * Discrete upstream bases keyed by region env value (e.g. `global` /
+     * `china`). When set, the resolved region selects a base URL outright
+     * instead of filling `upstreamBaseUrl`'s `{region}` placeholder, and
+     * `INFERENCE_GATEWAY_REGION_PATTERN` does not apply. Keeping these under
+     * `region` is what makes "bases without a region env var" unrepresentable.
+     */
+    baseUrls?: Readonly<Record<string, string>>;
+  };
   /** How the upstream expects its API key when the gateway forwards. */
   authHeader?: InferenceGatewayAuthHeader;
   /** A configured upstream key is forwarded when present but is not required. */
@@ -174,6 +185,14 @@ const ANTHROPIC_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
   '/v1/messages',
   '/v1/messages/count_tokens',
   '/v1/models',
+];
+
+/** Paths relative to the models.dev v4 base (not OpenAI `/v1/...`). */
+const ZAI_INFERENCE_PATHS: readonly string[] = [
+  '/chat/completions',
+  '/completions',
+  '/embeddings',
+  '/models',
 ];
 
 /**
@@ -325,6 +344,38 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
         '/v1/models',
       ],
       openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'zai',
+      name: 'Z.AI',
+      envVarNames: ['ZAI_API_KEY'],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: ZAI_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '',
+      region: {
+        envVarName: 'ZAI_REGION',
+        default: 'global',
+        baseUrls: {
+          global: 'https://api.z.ai/api/paas/v4',
+          china: 'https://open.bigmodel.cn/api/paas/v4',
+        },
+      },
+    },
+    {
+      id: 'zai-coding-plan',
+      name: 'Z.AI Coding Plan',
+      envVarNames: ['ZAI_CODING_PLAN_API_KEY'],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: ZAI_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '',
+      region: {
+        envVarName: 'ZAI_CODING_PLAN_REGION',
+        default: 'global',
+        baseUrls: {
+          global: 'https://api.z.ai/api/coding/paas/v4',
+          china: 'https://open.bigmodel.cn/api/coding/paas/v4',
+        },
+      },
     },
     {
       // GitHub Copilot's OpenCode SDK hits /chat/completions and /responses
