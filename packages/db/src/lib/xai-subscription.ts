@@ -24,7 +24,24 @@ import { deploymentSecrets } from '../schema';
  */
 
 const XAI_SUBSCRIPTION_SECRET_NAME = 'XAI_SUBSCRIPTION_OAUTH';
+const XAI_SUBSCRIPTION_PENDING_SECRET_NAME = 'XAI_SUBSCRIPTION_PENDING_DEVICE';
 const XAI_SUBSCRIPTION_ADVISORY_LOCK_KEY = 'roomote-xai-subscription-refresh';
+const XAI_SUBSCRIPTION_DEVICE_LOCK_KEY = 'roomote-xai-subscription-device';
+
+/**
+ * Tracks the single deployment-wide device-code flow that is allowed to
+ * persist tokens. A newer start supersedes older codes so an in-flight poll
+ * from a cancelled/restarted dialog cannot overwrite the active connection.
+ */
+interface XaiPendingDeviceFlow {
+  deviceCode: string;
+  /** Epoch milliseconds when the device code expires. */
+  expiresAt: number;
+  startedAt: string;
+}
+
+const SUPERSEDED_DEVICE_FLOW_ERROR =
+  'This xAI device authorization is no longer active. Restart the connection.';
 
 export type XaiSubscriptionStatusValue = 'connected' | 'error' | 'disconnected';
 
@@ -118,32 +135,34 @@ function resolveAccessTokenExpires(tokens: TokenResponse, now: number): number {
   return now + ttlMs;
 }
 
-async function loadRecord(
-  executor: DatabaseOrTransaction = db,
-): Promise<XaiSubscriptionRecord | null> {
+async function loadSecretValue<T>(
+  executor: DatabaseOrTransaction,
+  secretName: string,
+): Promise<T | null> {
   const [row] = await executor
     .select({ value: deploymentSecrets.value })
     .from(deploymentSecrets)
-    .where(sql`${deploymentSecrets.name} = ${XAI_SUBSCRIPTION_SECRET_NAME}`)
+    .where(sql`${deploymentSecrets.name} = ${secretName}`)
     .limit(1);
 
   if (!row) {
     return null;
   }
 
-  return decryptSecrets<XaiSubscriptionRecord>(row.value);
+  return decryptSecrets<T>(row.value);
 }
 
-async function persistRecord(
+async function persistSecretValue(
   executor: DatabaseOrTransaction,
-  record: XaiSubscriptionRecord,
+  secretName: string,
+  value: unknown,
 ): Promise<void> {
-  const encrypted = encryptJSON(record);
+  const encrypted = encryptJSON(value);
 
   await executor
     .insert(deploymentSecrets)
     .values({
-      name: XAI_SUBSCRIPTION_SECRET_NAME,
+      name: secretName,
       value: encrypted,
     })
     .onConflictDoUpdate({
@@ -153,6 +172,97 @@ async function persistRecord(
         updatedAt: new Date(),
       },
     });
+}
+
+async function deleteSecretValue(
+  executor: DatabaseOrTransaction,
+  secretName: string,
+): Promise<void> {
+  await executor
+    .delete(deploymentSecrets)
+    .where(sql`${deploymentSecrets.name} = ${secretName}`);
+}
+
+async function loadRecord(
+  executor: DatabaseOrTransaction = db,
+): Promise<XaiSubscriptionRecord | null> {
+  return loadSecretValue<XaiSubscriptionRecord>(
+    executor,
+    XAI_SUBSCRIPTION_SECRET_NAME,
+  );
+}
+
+async function persistRecord(
+  executor: DatabaseOrTransaction,
+  record: XaiSubscriptionRecord,
+): Promise<void> {
+  await persistSecretValue(executor, XAI_SUBSCRIPTION_SECRET_NAME, record);
+}
+
+async function loadPendingDeviceFlow(
+  executor: DatabaseOrTransaction = db,
+): Promise<XaiPendingDeviceFlow | null> {
+  return loadSecretValue<XaiPendingDeviceFlow>(
+    executor,
+    XAI_SUBSCRIPTION_PENDING_SECRET_NAME,
+  );
+}
+
+async function persistPendingDeviceFlow(
+  executor: DatabaseOrTransaction,
+  pending: XaiPendingDeviceFlow,
+): Promise<void> {
+  await persistSecretValue(
+    executor,
+    XAI_SUBSCRIPTION_PENDING_SECRET_NAME,
+    pending,
+  );
+}
+
+async function clearPendingDeviceFlow(
+  executor: DatabaseOrTransaction,
+): Promise<void> {
+  await deleteSecretValue(executor, XAI_SUBSCRIPTION_PENDING_SECRET_NAME);
+}
+
+function isActivePendingDeviceFlow(
+  pending: XaiPendingDeviceFlow | null,
+  deviceCode: string,
+  now: number = Date.now(),
+): boolean {
+  return Boolean(
+    pending && pending.deviceCode === deviceCode && pending.expiresAt > now,
+  );
+}
+
+/**
+ * Serialize device-code connect mutations. Unit-test executors may omit
+ * `transaction`; fall back to running the body directly on the executor.
+ */
+async function withDeviceAuthLock(
+  executor: DatabaseOrTransaction,
+  body: (tx: DatabaseOrTransaction) => Promise<void>,
+): Promise<void> {
+  const maybeTx = executor as DatabaseOrTransaction & {
+    transaction?: (
+      fn: (tx: DatabaseOrTransaction) => Promise<void>,
+    ) => Promise<void>;
+    execute?: (query: unknown) => Promise<unknown>;
+  };
+
+  if (typeof maybeTx.transaction === 'function') {
+    await maybeTx.transaction(async (tx) => {
+      if (typeof tx.execute === 'function') {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${XAI_SUBSCRIPTION_DEVICE_LOCK_KEY}))`,
+        );
+      }
+      await body(tx);
+    });
+    return;
+  }
+
+  await body(executor);
 }
 
 export async function getXaiSubscription(
@@ -217,9 +327,8 @@ export async function saveXaiSubscription(
 export async function disconnectXaiSubscription(
   executor: DatabaseOrTransaction = db,
 ): Promise<void> {
-  await executor
-    .delete(deploymentSecrets)
-    .where(sql`${deploymentSecrets.name} = ${XAI_SUBSCRIPTION_SECRET_NAME}`);
+  await deleteSecretValue(executor, XAI_SUBSCRIPTION_SECRET_NAME);
+  await clearPendingDeviceFlow(executor);
 }
 
 /**
@@ -367,9 +476,17 @@ export async function resolveXaiOpenCodeAuthContent(
  * Initiate the xAI device-code authorization flow. Returns the user code and
  * verification URL the operator enters in a browser. The caller polls
  * {@link pollXaiDeviceAuth} with the returned `deviceCode` until it resolves.
+ *
+ * Registers this device code as the only flow allowed to persist tokens so a
+ * cancelled/restarted dialog cannot have an older in-flight poll overwrite a
+ * newer connection.
  */
 export async function startXaiDeviceAuth(
   fetchImpl: typeof fetch = fetch,
+  options: {
+    executor?: DatabaseOrTransaction;
+    now?: number;
+  } = {},
 ): Promise<{
   deviceCode: string;
   userCode: string;
@@ -377,6 +494,8 @@ export async function startXaiDeviceAuth(
   intervalMs: number;
   expiresInMs: number;
 }> {
+  const executor = options.executor ?? db;
+  const now = options.now ?? Date.now();
   const clientId = resolveXaiOAuthClientId();
   const response = await fetchImpl(XAI_OAUTH_DEVICE_CODE_ENDPOINT, {
     method: 'POST',
@@ -398,8 +517,8 @@ export async function startXaiDeviceAuth(
   }
 
   const data = (await response.json()) as DeviceCodeResponse;
-
-  return {
+  const expiresInMs = Math.max(data.expires_in ?? 900, 1) * 1000;
+  const result = {
     deviceCode: data.device_code,
     userCode: data.user_code,
     verificationUrl:
@@ -407,8 +526,19 @@ export async function startXaiDeviceAuth(
       data.verification_uri ??
       XAI_OAUTH_DEVICE_VERIFICATION_URL,
     intervalMs: Math.max(data.interval ?? 5, 1) * 1000,
-    expiresInMs: Math.max(data.expires_in ?? 900, 1) * 1000,
+    expiresInMs,
   };
+
+  // Supersede any prior in-flight device code for this deployment.
+  await withDeviceAuthLock(executor, async (tx) => {
+    await persistPendingDeviceFlow(tx, {
+      deviceCode: result.deviceCode,
+      expiresAt: now + expiresInMs,
+      startedAt: new Date(now).toISOString(),
+    });
+  });
+
+  return result;
 }
 
 export type XaiDevicePollResult =
@@ -420,17 +550,32 @@ export type XaiDevicePollResult =
  * Poll the xAI token endpoint once for a device-code grant. Returns `pending`
  * while the operator has not finished authorization, `success` with the
  * persisted record once tokens are exchanged, or `failed` on a terminal error.
+ *
+ * Token persistence is gated on the deployment's currently active pending
+ * device code (set by {@link startXaiDeviceAuth}). A poll for a superseded
+ * code never writes subscription tokens, even if xAI still returns them.
  */
 export async function pollXaiDeviceAuth(
   input: { deviceCode: string },
   options: {
     executor?: DatabaseOrTransaction;
     fetchImpl?: typeof fetch;
+    now?: number;
   } = {},
 ): Promise<XaiDevicePollResult> {
   const executor = options.executor ?? db;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const now = options.now ?? Date.now();
   const clientId = resolveXaiOAuthClientId();
+
+  // Cheap reject before talking to xAI when this code is already superseded.
+  const pendingBefore = await loadPendingDeviceFlow(executor);
+  if (!isActivePendingDeviceFlow(pendingBefore, input.deviceCode, now)) {
+    return {
+      status: 'failed',
+      error: SUPERSEDED_DEVICE_FLOW_ERROR,
+    };
+  }
 
   const response = await fetchImpl(XAI_OAUTH_TOKEN_ENDPOINT, {
     method: 'POST',
@@ -464,8 +609,35 @@ export async function pollXaiDeviceAuth(
       };
     }
 
-    const record = await saveXaiSubscription(data, executor);
-    return { status: 'success', record };
+    // Re-check under lock: cancel/reopen may have registered a newer code
+    // while this poll was awaiting xAI.
+    let result: XaiDevicePollResult = {
+      status: 'failed',
+      error: SUPERSEDED_DEVICE_FLOW_ERROR,
+    };
+
+    await withDeviceAuthLock(executor, async (tx) => {
+      const pending = await loadPendingDeviceFlow(tx);
+      if (!isActivePendingDeviceFlow(pending, input.deviceCode, now)) {
+        return;
+      }
+
+      const record = await saveXaiSubscription(data, tx);
+      await clearPendingDeviceFlow(tx);
+      result = { status: 'success', record };
+    });
+
+    return result;
+  }
+
+  // Terminal failures for a superseded code should still fail closed without
+  // clearing a newer pending flow.
+  const pendingAfter = await loadPendingDeviceFlow(executor);
+  if (!isActivePendingDeviceFlow(pendingAfter, input.deviceCode, now)) {
+    return {
+      status: 'failed',
+      error: SUPERSEDED_DEVICE_FLOW_ERROR,
+    };
   }
 
   if (data.error === 'authorization_pending') {
@@ -483,6 +655,12 @@ export async function pollXaiDeviceAuth(
   }
 
   if (data.error === 'expired_token') {
+    await withDeviceAuthLock(executor, async (tx) => {
+      const pending = await loadPendingDeviceFlow(tx);
+      if (isActivePendingDeviceFlow(pending, input.deviceCode, now)) {
+        await clearPendingDeviceFlow(tx);
+      }
+    });
     return {
       status: 'failed',
       error: 'xAI device authorization code expired. Restart the connection.',
@@ -490,6 +668,12 @@ export async function pollXaiDeviceAuth(
   }
 
   if (data.error === 'access_denied') {
+    await withDeviceAuthLock(executor, async (tx) => {
+      const pending = await loadPendingDeviceFlow(tx);
+      if (isActivePendingDeviceFlow(pending, input.deviceCode, now)) {
+        await clearPendingDeviceFlow(tx);
+      }
+    });
     return {
       status: 'failed',
       error: 'xAI device authorization was denied.',
@@ -515,6 +699,8 @@ export async function pollXaiDeviceAuth(
 
 export const XAI_SUBSCRIPTION_INTERNAL = {
   secretName: XAI_SUBSCRIPTION_SECRET_NAME,
+  pendingSecretName: XAI_SUBSCRIPTION_PENDING_SECRET_NAME,
   defaultAccessTokenTtlMs: XAI_DEFAULT_ACCESS_TOKEN_TTL_MS,
   tokenEndpoint: XAI_OAUTH_TOKEN_ENDPOINT,
+  supersededDeviceFlowError: SUPERSEDED_DEVICE_FLOW_ERROR,
 };

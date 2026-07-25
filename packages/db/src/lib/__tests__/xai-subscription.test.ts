@@ -22,26 +22,114 @@ import {
   XAI_SUBSCRIPTION_INTERNAL,
 } from '../xai-subscription';
 
-function makeExecutor(record: unknown = null) {
+function secretNameFromWhere(clause: {
+  queryChunks?: unknown[];
+}): string | null {
+  const chunks = clause.queryChunks ?? [];
+  for (const chunk of chunks) {
+    if (typeof chunk === 'string' && chunk.startsWith('XAI_')) {
+      return chunk;
+    }
+  }
+  return null;
+}
+
+function makeExecutor(
+  initial: Record<string, unknown> = {},
+  options: { withTransaction?: boolean } = {},
+) {
+  const store = new Map<string, string>(
+    Object.entries(initial).map(([name, value]) => [
+      name,
+      JSON.stringify(value),
+    ]),
+  );
+
   const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
-  const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+  const values = vi
+    .fn()
+    .mockImplementation((row: { name: string; value: string }) => {
+      store.set(row.name, row.value);
+      return { onConflictDoUpdate };
+    });
   const insert = vi.fn().mockReturnValue({ values });
+
   const limit = vi
     .fn()
-    .mockResolvedValue(record ? [{ value: JSON.stringify(record) }] : []);
-  const where = vi.fn().mockReturnValue({ limit });
-  const from = vi.fn().mockReturnValue({ where });
-  const select = vi.fn().mockReturnValue({ from });
-  const delWhere = vi.fn().mockResolvedValue(undefined);
+    .mockImplementation(
+      async function limitImpl(this: { __secretName?: string | null }) {
+        const name = this.__secretName;
+        if (!name) {
+          return [];
+        }
+        const value = store.get(name);
+        return value ? [{ value }] : [];
+      },
+    );
+
+  const where = vi
+    .fn()
+    .mockImplementation((clause: { queryChunks?: unknown[] }) => {
+      const secretName = secretNameFromWhere(clause);
+      return {
+        limit: limit.bind({ __secretName: secretName }),
+        // delete().where() resolves directly
+        then: undefined,
+      };
+    });
+
+  // delete uses where that resolves as a promise when awaited
+  const delWhere = vi
+    .fn()
+    .mockImplementation(async (clause: { queryChunks?: unknown[] }) => {
+      const secretName = secretNameFromWhere(clause);
+      if (secretName) {
+        store.delete(secretName);
+      }
+    });
   const del = vi.fn().mockReturnValue({ where: delWhere });
 
+  const from = vi.fn().mockReturnValue({ where });
+  const select = vi.fn().mockReturnValue({ from });
+  const execute = vi.fn().mockResolvedValue(undefined);
+
+  const base = { insert, select, delete: del, execute, store };
+
+  if (options.withTransaction) {
+    const transaction = vi.fn(async (fn: (tx: unknown) => Promise<void>) => {
+      await fn(base);
+    });
+    return {
+      executor: { ...base, transaction } as never,
+      values,
+      insert,
+      select,
+      del,
+      delWhere,
+      store,
+      transaction,
+    };
+  }
+
   return {
-    executor: { insert, select, delete: del } as never,
+    executor: base as never,
     values,
     insert,
     select,
     del,
     delWhere,
+    store,
+  };
+}
+
+function activePending(
+  deviceCode = 'device-1',
+  expiresAt = Date.now() + 900_000,
+) {
+  return {
+    deviceCode,
+    expiresAt,
+    startedAt: new Date().toISOString(),
   };
 }
 
@@ -68,6 +156,7 @@ describe('xAI OAuth client id', () => {
 
 describe('startXaiDeviceAuth', () => {
   it('starts the Grok CLI device-code flow with the public client id and scopes', async () => {
+    const { executor, store } = makeExecutor();
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -83,7 +172,10 @@ describe('startXaiDeviceAuth', () => {
       ),
     );
 
-    await expect(startXaiDeviceAuth(fetchImpl)).resolves.toEqual({
+    const now = 1_700_000_000_000;
+    await expect(
+      startXaiDeviceAuth(fetchImpl, { executor, now }),
+    ).resolves.toEqual({
       deviceCode: 'device-1',
       userCode: 'ABCD-EFGH',
       verificationUrl: 'https://accounts.x.ai/device?user_code=ABCD-EFGH',
@@ -101,14 +193,50 @@ describe('startXaiDeviceAuth', () => {
     const body = new URLSearchParams(String(init.body));
     expect(body.get('client_id')).toBe('b1a00492-073a-47ea-816f-4c329264a828');
     expect(body.get('scope')).toBe(XAI_OAUTH_SCOPE);
+
+    const pending = JSON.parse(
+      store.get(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)!,
+    ) as { deviceCode: string; expiresAt: number };
+    expect(pending).toEqual({
+      deviceCode: 'device-1',
+      expiresAt: now + 900_000,
+      startedAt: new Date(now).toISOString(),
+    });
+  });
+
+  it('supersedes a prior pending device code on restart', async () => {
+    const { executor, store } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]:
+        activePending('old-device'),
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          device_code: 'new-device',
+          user_code: 'WXYZ-1234',
+          verification_uri: 'https://accounts.x.ai/device',
+          interval: 5,
+          expires_in: 900,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await startXaiDeviceAuth(fetchImpl, { executor, now: Date.now() });
+
+    const pending = JSON.parse(
+      store.get(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)!,
+    ) as { deviceCode: string };
+    expect(pending.deviceCode).toBe('new-device');
   });
 
   it('fails closed when the device-code endpoint returns an error', async () => {
+    const { executor } = makeExecutor();
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(new Response('nope', { status: 503 }));
 
-    await expect(startXaiDeviceAuth(fetchImpl)).rejects.toThrow(
+    await expect(startXaiDeviceAuth(fetchImpl, { executor })).rejects.toThrow(
       'Failed to initiate xAI device authorization: 503',
     );
   });
@@ -116,7 +244,9 @@ describe('startXaiDeviceAuth', () => {
 
 describe('pollXaiDeviceAuth', () => {
   it('reports pending authorization without storing a credential', async () => {
-    const { executor, values } = makeExecutor();
+    const { executor, values, store } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
     const result = await pollXaiDeviceAuth(
       { deviceCode: 'device-1' },
       {
@@ -130,11 +260,15 @@ describe('pollXaiDeviceAuth', () => {
     );
 
     expect(result).toEqual({ status: 'pending' });
+    // values may be unused for pending; subscription secret must stay empty
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.secretName)).toBe(false);
     expect(values).not.toHaveBeenCalled();
   });
 
   it('honors slow_down with an optional interval bump', async () => {
-    const { executor, values } = makeExecutor();
+    const { executor, values } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
     const result = await pollXaiDeviceAuth(
       { deviceCode: 'device-1' },
       {
@@ -152,7 +286,9 @@ describe('pollXaiDeviceAuth', () => {
   });
 
   it('encrypts and stores tokens after approval without returning them as public status', async () => {
-    const { executor, values } = makeExecutor();
+    const { executor, values, store } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
     const idToken = makeJwt({ email: 'user@example.com' });
     const result = await pollXaiDeviceAuth(
       { deviceCode: 'device-1' },
@@ -184,16 +320,92 @@ describe('pollXaiDeviceAuth', () => {
       status: 'connected',
       email: 'user@example.com',
     });
-    expect(values).toHaveBeenCalledOnce();
+    expect(values).toHaveBeenCalled();
     const stored = JSON.parse(
-      (values.mock.calls[0] as [{ value: string }])[0].value,
+      store.get(XAI_SUBSCRIPTION_INTERNAL.secretName)!,
     ) as { access: string; refresh: string };
     expect(stored.access).toBe('access-secret');
     expect(stored.refresh).toBe('refresh-secret');
+    // Pending flow cleared after successful connect.
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)).toBe(false);
+  });
+
+  it('does not persist tokens for a superseded device code', async () => {
+    const { executor, store } = makeExecutor({
+      // Active flow is a newer restart; old poll still holds device-1.
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-2'),
+    });
+
+    const result = await pollXaiDeviceAuth(
+      { deviceCode: 'device-1' },
+      {
+        executor,
+        fetchImpl: vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              access_token: 'stale-access',
+              refresh_token: 'stale-refresh',
+              expires_in: 3600,
+            }),
+            { status: 200 },
+          ),
+        ),
+      },
+    );
+
+    expect(result).toEqual({
+      status: 'failed',
+      error: XAI_SUBSCRIPTION_INTERNAL.supersededDeviceFlowError,
+    });
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.secretName)).toBe(false);
+    // Active newer pending remains so the restart can complete.
+    expect(
+      JSON.parse(store.get(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)!)
+        .deviceCode,
+    ).toBe('device-2');
+  });
+
+  it('does not persist when a newer start wins while the token exchange is in flight', async () => {
+    const { executor, store } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
+
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      // Simulate cancel/reopen registering a newer device code mid-request.
+      store.set(
+        XAI_SUBSCRIPTION_INTERNAL.pendingSecretName,
+        JSON.stringify(activePending('device-2')),
+      );
+      return new Response(
+        JSON.stringify({
+          access_token: 'old-access',
+          refresh_token: 'old-refresh',
+          expires_in: 3600,
+        }),
+        { status: 200 },
+      );
+    });
+
+    const result = await pollXaiDeviceAuth(
+      { deviceCode: 'device-1' },
+      { executor, fetchImpl },
+    );
+
+    expect(result).toEqual({
+      status: 'failed',
+      error: XAI_SUBSCRIPTION_INTERNAL.supersededDeviceFlowError,
+    });
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.secretName)).toBe(false);
+    expect(
+      JSON.parse(store.get(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)!)
+        .deviceCode,
+    ).toBe('device-2');
   });
 
   it('fails when the grant has no refresh token', async () => {
-    const { executor } = makeExecutor();
+    const { executor } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
     const result = await pollXaiDeviceAuth(
       { deviceCode: 'device-1' },
       {
@@ -216,13 +428,15 @@ describe('pollXaiDeviceAuth', () => {
   });
 
   it('fails on access_denied and expired_token', async () => {
-    const { executor } = makeExecutor();
+    const { executor: executorDenied, store: storeDenied } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
 
     await expect(
       pollXaiDeviceAuth(
         { deviceCode: 'device-1' },
         {
-          executor,
+          executor: executorDenied,
           fetchImpl: vi.fn().mockResolvedValue(
             new Response(JSON.stringify({ error: 'access_denied' }), {
               status: 400,
@@ -231,12 +445,19 @@ describe('pollXaiDeviceAuth', () => {
         },
       ),
     ).resolves.toMatchObject({ status: 'failed' });
+    expect(storeDenied.has(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)).toBe(
+      false,
+    );
+
+    const { executor: executorExpired } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
 
     await expect(
       pollXaiDeviceAuth(
         { deviceCode: 'device-1' },
         {
-          executor,
+          executor: executorExpired,
           fetchImpl: vi.fn().mockResolvedValue(
             new Response(JSON.stringify({ error: 'expired_token' }), {
               status: 400,
@@ -253,7 +474,7 @@ describe('pollXaiDeviceAuth', () => {
 
 describe('getXaiSubscriptionStatus', () => {
   it('reports disconnected when no subscription record exists', async () => {
-    const { executor } = makeExecutor(null);
+    const { executor } = makeExecutor();
     await expect(getXaiSubscriptionStatus(executor)).resolves.toEqual({
       connected: false,
       status: 'disconnected',
@@ -262,13 +483,15 @@ describe('getXaiSubscriptionStatus', () => {
 
   it('reports connected without access or refresh tokens', async () => {
     const { executor } = makeExecutor({
-      refresh: 'rt',
-      access: 'at',
-      expires: Date.now() + 60_000,
-      status: 'connected',
-      email: 'a@b.com',
-      connectedAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
+      [XAI_SUBSCRIPTION_INTERNAL.secretName]: {
+        refresh: 'rt',
+        access: 'at',
+        expires: Date.now() + 60_000,
+        status: 'connected',
+        email: 'a@b.com',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
     });
 
     const status = await getXaiSubscriptionStatus(executor);
@@ -294,7 +517,10 @@ describe('disconnectXaiSubscription', () => {
       connectedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
-    const { executor, del, delWhere, select } = makeExecutor(connectedRecord);
+    const { executor, del, delWhere, store } = makeExecutor({
+      [XAI_SUBSCRIPTION_INTERNAL.secretName]: connectedRecord,
+      [XAI_SUBSCRIPTION_INTERNAL.pendingSecretName]: activePending('device-1'),
+    });
 
     // Before disconnect the record is still loadable.
     await expect(getXaiSubscriptionStatus(executor)).resolves.toMatchObject({
@@ -304,16 +530,10 @@ describe('disconnectXaiSubscription', () => {
 
     await disconnectXaiSubscription(executor);
 
-    expect(del).toHaveBeenCalledOnce();
-    expect(delWhere).toHaveBeenCalledOnce();
-
-    // After delete, subsequent loads see no row (simulate cleared secret).
-    const emptyLimit = vi.fn().mockResolvedValue([]);
-    const emptyWhere = vi.fn().mockReturnValue({ limit: emptyLimit });
-    const emptyFrom = vi.fn().mockReturnValue({ where: emptyWhere });
-    (select as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      from: emptyFrom,
-    });
+    expect(del).toHaveBeenCalled();
+    expect(delWhere).toHaveBeenCalled();
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.secretName)).toBe(false);
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)).toBe(false);
 
     await expect(getXaiSubscriptionStatus(executor)).resolves.toEqual({
       connected: false,
@@ -326,12 +546,14 @@ describe('getFreshXaiAccessToken', () => {
   it('returns the existing access token when it is outside the safety margin', async () => {
     const expires = Date.now() + XAI_REFRESH_SAFETY_MARGIN_MS + 60_000;
     const { executor } = makeExecutor({
-      refresh: 'rt',
-      access: 'still-valid',
-      expires,
-      status: 'connected',
-      connectedAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
+      [XAI_SUBSCRIPTION_INTERNAL.secretName]: {
+        refresh: 'rt',
+        access: 'still-valid',
+        expires,
+        status: 'connected',
+        connectedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
     });
     const fetchImpl = vi.fn();
 
@@ -357,20 +579,10 @@ describe('getFreshXaiAccessToken', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
 
-    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
-    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
-    const insert = vi.fn().mockReturnValue({ values });
-    const limit = vi
-      .fn()
-      .mockResolvedValueOnce([{ value: JSON.stringify(existing) }])
-      .mockResolvedValueOnce([{ value: JSON.stringify(existing) }]);
-    const where = vi.fn().mockReturnValue({ limit });
-    const from = vi.fn().mockReturnValue({ where });
-    const select = vi.fn().mockReturnValue({ from });
-    const execute = vi.fn().mockResolvedValue(undefined);
-    const transaction = vi.fn(async (fn: (tx: unknown) => Promise<void>) => {
-      await fn({ select, insert, execute });
-    });
+    const { executor, values } = makeExecutor(
+      { [XAI_SUBSCRIPTION_INTERNAL.secretName]: existing },
+      { withTransaction: true },
+    );
 
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
@@ -384,7 +596,7 @@ describe('getFreshXaiAccessToken', () => {
     );
 
     const fresh = await getFreshXaiAccessToken({
-      executor: { select, insert, transaction } as never,
+      executor,
       fetchImpl,
       now,
     });
@@ -405,7 +617,7 @@ describe('getFreshXaiAccessToken', () => {
   });
 
   it('returns null when no connected subscription exists', async () => {
-    const { executor } = makeExecutor(null);
+    const { executor } = makeExecutor();
     await expect(
       getFreshXaiAccessToken({ executor, fetchImpl: vi.fn() }),
     ).resolves.toBeNull();
@@ -423,27 +635,17 @@ describe('getFreshXaiAccessToken', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
     };
 
-    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
-    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
-    const insert = vi.fn().mockReturnValue({ values });
-    const limit = vi
-      .fn()
-      .mockResolvedValueOnce([{ value: JSON.stringify(existing) }])
-      .mockResolvedValueOnce([{ value: JSON.stringify(existing) }]);
-    const where = vi.fn().mockReturnValue({ limit });
-    const from = vi.fn().mockReturnValue({ where });
-    const select = vi.fn().mockReturnValue({ from });
-    const execute = vi.fn().mockResolvedValue(undefined);
-    const transaction = vi.fn(async (fn: (tx: unknown) => Promise<void>) => {
-      await fn({ select, insert, execute });
-    });
+    const { executor, values, store } = makeExecutor(
+      { [XAI_SUBSCRIPTION_INTERNAL.secretName]: existing },
+      { withTransaction: true },
+    );
 
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(new Response('invalid_grant', { status: 401 }));
 
     const fresh = await getFreshXaiAccessToken({
-      executor: { select, insert, transaction } as never,
+      executor,
       fetchImpl,
       now,
     });
@@ -451,7 +653,7 @@ describe('getFreshXaiAccessToken', () => {
     expect(fresh).toBeNull();
     expect(values).toHaveBeenCalled();
     const stored = JSON.parse(
-      (values.mock.calls[0] as [{ value: string }])[0].value,
+      store.get(XAI_SUBSCRIPTION_INTERNAL.secretName)!,
     ) as { status: string; error?: string; access: string };
     expect(stored.status).toBe('error');
     expect(stored.error).toMatch(/xAI token refresh failed: 401/);
@@ -463,5 +665,8 @@ describe('getFreshXaiAccessToken', () => {
 describe('XAI_SUBSCRIPTION_INTERNAL', () => {
   it('exposes the deployment secret name for ops tooling', () => {
     expect(XAI_SUBSCRIPTION_INTERNAL.secretName).toBe('XAI_SUBSCRIPTION_OAUTH');
+    expect(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName).toBe(
+      'XAI_SUBSCRIPTION_PENDING_DEVICE',
+    );
   });
 });
