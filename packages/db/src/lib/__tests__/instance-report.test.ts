@@ -9,6 +9,7 @@ import {
 import {
   db,
   githubInstallationFactory,
+  llmUsageEvents,
   pullRequestFacts,
   repositoryFactory,
   taskFactory,
@@ -456,7 +457,8 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
 
 describe('collectInstanceReportStats task usage isolation', () => {
   it('excludes environment snapshots from task usage aggregates', async () => {
-    const now = new Date();
+    // Keep this aggregate assertion isolated from test files sharing the database.
+    const now = new Date('2040-01-01T00:00:00.000Z');
     const baseline = await collectInstanceReportStats(now);
     const suffix = Date.now().toString();
     const productModel = `product-model-${suffix}`;
@@ -464,10 +466,12 @@ describe('collectInstanceReportStats task usage isolation', () => {
     const productTask = await taskFactory.create({
       workflow: 'standard',
       model: productModel,
+      createdAt: now,
     });
     const snapshotTask = await taskFactory.create({
       workflow: 'env_snapshot',
       model: snapshotModel,
+      createdAt: now,
     });
 
     await db.insert(taskRuns).values({
@@ -490,6 +494,29 @@ describe('collectInstanceReportStats task usage isolation', () => {
       },
     });
 
+    await db.insert(llmUsageEvents).values([
+      {
+        eventKey: `product-usage-${suffix}`,
+        taskId: productTask.id,
+        inputTokens: 10,
+        outputTokens: 20,
+        totalTokens: 30,
+        costMicroUsd: 40,
+        costSource: 'opencode_message',
+        createdAt: now,
+      },
+      {
+        eventKey: `snapshot-usage-${suffix}`,
+        taskId: snapshotTask.id,
+        inputTokens: 100,
+        outputTokens: 200,
+        totalTokens: 300,
+        costMicroUsd: 400,
+        costSource: 'opencode_message',
+        createdAt: now,
+      },
+    ]);
+
     const report = await collectInstanceReportStats(now);
 
     expect(report.tasks24h.created).toBe(baseline.tasks24h.created + 1);
@@ -505,5 +532,11 @@ describe('collectInstanceReportStats task usage isolation', () => {
     expect(report.tasks24h.byModel).not.toContainEqual(
       expect.objectContaining({ model: snapshotModel }),
     );
+    expect(report.tasks24h.tokens).toEqual({
+      input: baseline.tasks24h.tokens.input + 10,
+      output: baseline.tasks24h.tokens.output + 20,
+      total: baseline.tasks24h.tokens.total + 30,
+      costMicroUsd: baseline.tasks24h.tokens.costMicroUsd + 40,
+    });
   });
 });

@@ -680,10 +680,12 @@ export async function collectInstanceReportStats(
         costMicroUsd: sum(llmUsageEvents.costMicroUsd),
       })
       .from(llmUsageEvents)
+      .innerJoin(tasks, eq(tasks.id, llmUsageEvents.taskId))
       .where(
         and(
           gte(llmUsageEvents.createdAt, since),
           isNotNull(llmUsageEvents.taskId),
+          notInArray(tasks.workflow, ['env_snapshot']),
         ),
       ),
     db
