@@ -1346,6 +1346,8 @@ describe('task model provider commands', () => {
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
       'AWS_REGION',
+      'ZAI_REGION',
+      'ZAI_CODING_PLAN_REGION',
       'OPENAI_COMPATIBLE_BASE_URL',
       'LITELLM_BASE_URL',
       'OLLAMA_BASE_URL',
