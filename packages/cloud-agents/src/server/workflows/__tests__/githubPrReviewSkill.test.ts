@@ -71,9 +71,18 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).toContain(
       'When `pull_request_details` or current head metadata is missing, or when it must be revalidated before a side effect, call `mcp__roomote__manage_source_control` with `action: "get_pull_request"`, `repositoryFullName`, and `prNumber`.',
     );
-    expect(skillContent).toContain(
-      "For a GitHub cross-repository PR, run `git fetch origin '<targetBranch>' 'refs/pull/<PR_NUMBER>/head:refs/remotes/origin/pr-<PR_NUMBER>-head'`, then verify `git rev-parse refs/remotes/origin/pr-<PR_NUMBER>-head` exactly equals `<headSha>` from `get_pull_request`",
-    );
+    for (const appendixName of [
+      'review-github-pr',
+      'review-github-pr-with-approval',
+    ]) {
+      const appendix = readAppendix(skillContent, appendixName);
+      expect(appendix).toContain(
+        "For a GitHub cross-repository PR, run `git fetch origin '<targetBranch>' '+refs/pull/[PR_NUMBER]/head:refs/remotes/origin/pr-[PR_NUMBER]-head'`, then verify `git rev-parse refs/remotes/origin/pr-[PR_NUMBER]-head` exactly equals `<headSha>` from `get_pull_request`.",
+      );
+      expect(appendix).toContain(
+        'If it differs, call `get_pull_request` once more and proceed only when the fetched SHA matches the refreshed `<headSha>`; otherwise report the blocker.',
+      );
+    }
     for (const appendixName of [
       'review-github-pr',
       'review-github-pr-with-approval',
@@ -82,10 +91,10 @@ describe('review-code GitHub workflow paths', () => {
     ]) {
       const appendix = readAppendix(skillContent, appendixName);
       expect(appendix).toContain(
-        "For a GitHub cross-repository PR, fetch the upstream PR ref with `git fetch origin 'refs/pull/<PR_NUMBER>/head:refs/remotes/origin/pr-<PR_NUMBER>-head'`, verify its resolved SHA exactly equals `<headSha>` from `get_pull_request`, then run `git checkout --detach <headSha>`.",
+        "For a GitHub cross-repository PR, fetch the upstream PR ref with `git fetch origin '+refs/pull/[PR_NUMBER]/head:refs/remotes/origin/pr-[PR_NUMBER]-head'`, verify its resolved SHA exactly equals `<headSha>` from `get_pull_request`, and if it differs call `get_pull_request` once more and proceed only when the fetched SHA matches the refreshed `<headSha>`; otherwise report the blocker. Then run `git checkout --detach <headSha>`.",
       );
       expect(appendix).toContain(
-        'report the blocker instead of fetching the fork directly or improvising credentials.',
+        'For a cross-repository PR on another provider whose source branch cannot be fetched with task credentials, report that blocker instead of fetching the fork directly or improvising credentials.',
       );
     }
     expect(skillContent).toContain(
