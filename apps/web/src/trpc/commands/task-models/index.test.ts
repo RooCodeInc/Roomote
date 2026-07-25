@@ -1637,6 +1637,66 @@ describe('task model provider commands', () => {
     expect(mockTxDelete).toHaveBeenCalled();
   });
 
+  it('removes only the xAI API key when a Grok subscription remains connected', async () => {
+    // Dual-path xAI shares catalog id `xai`. Deleting the key must not strip
+    // xai/* models while SuperGrok is still connected.
+    mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+    mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
+    mockIsXaiSubscriptionConnected.mockResolvedValue(true);
+
+    const persistedRow = {
+      taskModelSettings: {
+        models: [
+          {
+            id: 'xai/grok-4.5',
+            displayName: 'Grok 4.5',
+            family: 'Grok',
+          },
+        ],
+        allowedModelIds: ['xai/grok-4.5'],
+        defaultModelId: 'xai/grok-4.5',
+      },
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+        roomoteSmallModel: 'xai/grok-4.5',
+        roomoteVisionModel: null,
+        roomoteCodeReviewModel: null,
+        roomoteExploreModel: null,
+        roomotePlanningModel: null,
+        roomoteModelReasoningEffort: null,
+        roomoteSmallModelReasoningEffort: null,
+        roomoteVisionModelReasoningEffort: null,
+        roomoteCodeReviewModelReasoningEffort: null,
+        roomoteExploreModelReasoningEffort: null,
+        roomotePlanningModelReasoningEffort: null,
+      },
+    };
+    mockFindDeploymentSettings.mockImplementation(async (options) => {
+      const columns = (options as { columns?: Record<string, boolean> })
+        ?.columns;
+      return {
+        ...(columns?.taskModelSettings
+          ? { taskModelSettings: persistedRow.taskModelSettings }
+          : {}),
+        ...(columns?.runtimeModelConfig
+          ? { runtimeModelConfig: persistedRow.runtimeModelConfig }
+          : {}),
+      };
+    });
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue(['XAI_API_KEY']);
+    mockPersistedSetupNewState({ modelProvider: 'xai' });
+
+    await deleteTaskModelProviderCommand(buildMockAuth(), {
+      provider: 'xai',
+    });
+
+    const { inArray } = await import('@roomote/db/server');
+    expect(mockTxDelete).toHaveBeenCalled();
+    expect(inArray).toHaveBeenCalledWith('env.name', ['XAI_API_KEY']);
+    // Models and runtime stay; only the key was removed.
+    expect(txOnConflictDoUpdate).not.toHaveBeenCalled();
+  });
+
   it('rejects deleting the last connected provider', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'ANTHROPIC_API_KEY',

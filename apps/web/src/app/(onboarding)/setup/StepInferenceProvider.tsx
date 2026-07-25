@@ -157,6 +157,7 @@ export function StepInferenceProvider({
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
     setIsGitHubCopilotDialogOpen(false);
+    setIsXaiDialogOpen(false);
   }, [selectedProvider]);
 
   useEffect(() => {

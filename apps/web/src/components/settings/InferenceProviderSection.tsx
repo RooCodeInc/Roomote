@@ -1189,11 +1189,13 @@ export function InferenceProviderSection({
     githubCopilotHasRecord ||
     xaiHasRecord;
   const canAddProvider = sortedAddableProviders.length > 0;
+  // Count key rows and subscription rows independently so dual-path xAI
+  // (API key + SuperGrok) can delete the key while the subscription remains.
   const connectedProviderCount =
     sortedApiKeyConnectedProviders.length +
     (chatgptHasRecord ? 1 : 0) +
     (githubCopilotHasRecord ? 1 : 0) +
-    (xaiHasRecord && !xaiHasApiKey ? 1 : 0);
+    (xaiHasRecord ? 1 : 0);
 
   return (
     <Section icon={KeyRound} title="Inference Providers">
@@ -1209,6 +1211,14 @@ export function InferenceProviderSection({
           Both an OpenAI API key and a ChatGPT subscription are configured. The
           subscription is used at runtime when an <code>openai/</code> model is
           selected.
+        </p>
+      ) : null}
+
+      {xaiHasRecord && xaiHasApiKey ? (
+        <p className="text-sm text-muted-foreground">
+          Both an xAI API key and a Grok subscription are configured. The
+          subscription is preferred at runtime when an <code>xai/</code> model
+          is selected.
         </p>
       ) : null}
 
@@ -1244,10 +1254,14 @@ export function InferenceProviderSection({
               setIsChatGptDialogOpen(true);
             }
           }}
-          onConnectXaiSubscription={() => {
-            setProviderDialog(null);
-            setIsXaiDialogOpen(true);
-          }}
+          onConnectXaiSubscription={
+            xaiHasRecord
+              ? undefined
+              : () => {
+                  setProviderDialog(null);
+                  setIsXaiDialogOpen(true);
+                }
+          }
         />
       ) : null}
       <DeleteProviderDialog

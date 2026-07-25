@@ -871,11 +871,24 @@ export async function deleteTaskModelProviderCommand(
       (candidate) => candidate.id === provider.id,
     );
 
+    // xAI dual-path: API key and SuperGrok share the `xai` catalog id. When
+    // deleting the key while a subscription remains, only strip env vars and
+    // leave models/runtime intact.
+    const xaiKeyOnlyDelete =
+      provider.id === 'xai' &&
+      xaiSubscriptionConnected &&
+      Boolean(providerSetup.xaiApiKeyConnected);
+
     if (!providerStatus?.savedApiKeySatisfied) {
       throw new Error(`${provider.label} does not have saved credentials.`);
     }
 
-    if (getConnectedModelProviderCount(providerSetup) <= 1) {
+    // Key-only xAI delete is allowed even when the catalog shows a single
+    // connected `xai` entry, because the subscription remains as a provider.
+    if (
+      !xaiKeyOnlyDelete &&
+      getConnectedModelProviderCount(providerSetup) <= 1
+    ) {
       throw new Error('Keep at least one inference provider connected.');
     }
 
@@ -890,6 +903,11 @@ export async function deleteTaskModelProviderCommand(
             inArray(environmentVariables.name, providerEnvVarNames),
           ),
         );
+    }
+
+    if (xaiKeyOnlyDelete) {
+      // Subscription still covers xai/* models; do not cascade model removal.
+      return;
     }
 
     const nextModelState = removeTaskModelsForProvider({

@@ -512,6 +512,13 @@ describe('InferenceProviderSection', () => {
     expect(screen.getByText('xAI (Grok subscription)')).toBeInTheDocument();
     expect(screen.getByText('xAI')).toBeInTheDocument();
     expect(screen.getByLabelText('API key for xAI')).toBeInTheDocument();
+    expect(
+      screen.getByText(/subscription is preferred at runtime/i),
+    ).toBeInTheDocument();
+    // Dual path counts as two credentials so the key can be deleted.
+    expect(
+      screen.getByRole('button', { name: /Delete xAI API key|Delete/i }),
+    ).not.toBeDisabled();
   });
 
   it('renders Reconnect and Disconnect for an errored xAI Grok subscription', () => {
