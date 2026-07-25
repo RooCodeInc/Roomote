@@ -704,6 +704,51 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
   });
 
+  it('emits the xAI gateway marker for OAuth-only setups without shipping tokens or a real key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+      },
+    });
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-oauth-access',
+      refresh: 'xai-oauth-refresh',
+      expires: Date.now() + 3_600_000,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      // No XAI_API_KEY: subscription alone must cover the gateway path.
+      deploymentEnvVars: {},
+    });
+
+    expect(mockGetFreshXaiAccessToken).toHaveBeenCalled();
+    // OAuth record stays on the control plane; marker drives worker rebase.
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(env).not.toHaveProperty('XAI_API_KEY');
+    expect(env.R_INFERENCE_GATEWAY_XAI).toBe('1');
+    // Advertise XAI_API_KEY in served keys so the worker rebases xai even
+    // when only the subscription is connected.
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain('XAI_API_KEY');
+  });
+
+  it('does not emit the xAI gateway marker when no subscription is connected', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+      },
+    });
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_XAI');
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+  });
+
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },

@@ -13,6 +13,7 @@ import {
 } from '@roomote/types';
 
 import {
+  disconnectXaiSubscription,
   getFreshXaiAccessToken,
   getXaiSubscriptionStatus,
   pollXaiDeviceAuth,
@@ -39,6 +40,8 @@ function makeExecutor(record: unknown = null) {
     values,
     insert,
     select,
+    del,
+    delWhere,
   };
 }
 
@@ -278,6 +281,44 @@ describe('getXaiSubscriptionStatus', () => {
     });
     expect(status).not.toHaveProperty('access');
     expect(status).not.toHaveProperty('refresh');
+  });
+});
+
+describe('disconnectXaiSubscription', () => {
+  it('deletes the encrypted deployment secret so status becomes disconnected', async () => {
+    const connectedRecord = {
+      refresh: 'rt',
+      access: 'at',
+      expires: Date.now() + 60_000,
+      status: 'connected' as const,
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const { executor, del, delWhere, select } = makeExecutor(connectedRecord);
+
+    // Before disconnect the record is still loadable.
+    await expect(getXaiSubscriptionStatus(executor)).resolves.toMatchObject({
+      connected: true,
+      status: 'connected',
+    });
+
+    await disconnectXaiSubscription(executor);
+
+    expect(del).toHaveBeenCalledOnce();
+    expect(delWhere).toHaveBeenCalledOnce();
+
+    // After delete, subsequent loads see no row (simulate cleared secret).
+    const emptyLimit = vi.fn().mockResolvedValue([]);
+    const emptyWhere = vi.fn().mockReturnValue({ limit: emptyLimit });
+    const emptyFrom = vi.fn().mockReturnValue({ where: emptyWhere });
+    (select as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      from: emptyFrom,
+    });
+
+    await expect(getXaiSubscriptionStatus(executor)).resolves.toEqual({
+      connected: false,
+      status: 'disconnected',
+    });
   });
 });
 
