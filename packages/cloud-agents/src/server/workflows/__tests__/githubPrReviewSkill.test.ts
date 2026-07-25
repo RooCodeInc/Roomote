@@ -72,8 +72,22 @@ describe('review-code GitHub workflow paths', () => {
       'When `pull_request_details` or current head metadata is missing, or when it must be revalidated before a side effect, call `mcp__roomote__manage_source_control` with `action: "get_pull_request"`, `repositoryFullName`, and `prNumber`.',
     );
     expect(skillContent).toContain(
-      "When `pull_request_diff` is missing, or when the current diff must be revalidated before a side effect, compute it locally: `git fetch origin '<sourceBranch>' '<targetBranch>'`, then `git diff <baseSha>...<headSha>` using the SHAs from `get_pull_request`. Use this local git diff for every provider instead of a provider CLI.",
+      "For a GitHub cross-repository PR, run `git fetch origin '<targetBranch>' 'refs/pull/<PR_NUMBER>/head:refs/remotes/origin/pr-<PR_NUMBER>-head'`, then verify `git rev-parse refs/remotes/origin/pr-<PR_NUMBER>-head` exactly equals `<headSha>` from `get_pull_request`",
     );
+    for (const appendixName of [
+      'review-github-pr',
+      'review-github-pr-with-approval',
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+    ]) {
+      const appendix = readAppendix(skillContent, appendixName);
+      expect(appendix).toContain(
+        "For a GitHub cross-repository PR, fetch the upstream PR ref with `git fetch origin 'refs/pull/<PR_NUMBER>/head:refs/remotes/origin/pr-<PR_NUMBER>-head'`, verify its resolved SHA exactly equals `<headSha>` from `get_pull_request`, then run `git checkout --detach <headSha>`.",
+      );
+      expect(appendix).toContain(
+        'report the blocker instead of fetching the fork directly or improvising credentials.',
+      );
+    }
     expect(skillContent).toContain(
       'When `existing_review_comments` or `issue_comments` are missing, or when current thread or top-level discussion state must be revalidated before a side effect, call `mcp__roomote__manage_source_control` with `action: "list_pull_request_comments"`.',
     );
