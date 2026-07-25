@@ -92,6 +92,7 @@ describe('processDiscordGatewayEventJob', () => {
     await expect(
       processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
     ).rejects.toThrow('TRPC_URL is required to process Discord gateway events');
+    expect(resolveSecretMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

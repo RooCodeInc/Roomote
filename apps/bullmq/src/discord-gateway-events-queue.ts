@@ -24,12 +24,13 @@ function processUrl(): string {
 export async function processDiscordGatewayEventJob(
   job: Job<DiscordGatewayEvent>,
 ): Promise<void> {
+  const url = processUrl();
   const secret = await resolveDiscordGatewaySecret();
   if (!secret) {
     throw new Error('Discord Gateway secret is not configured');
   }
 
-  const response = await fetch(processUrl(), {
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
