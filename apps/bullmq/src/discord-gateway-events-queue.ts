@@ -11,9 +11,13 @@ const DISCORD_GATEWAY_SECRET_HEADER = 'x-roomote-discord-gateway-secret';
 const DISCORD_GATEWAY_EVENT_WORKER_TIMEOUT_MS = 4 * 60 * 1000 + 15_000;
 
 function processUrl(): string {
+  if (!Env.TRPC_URL) {
+    throw new Error('TRPC_URL is required to process Discord gateway events');
+  }
+
   return new URL(
     '/api/internal/discord/events/process',
-    Env.TRPC_URL ?? 'http://127.0.0.1:13001',
+    Env.TRPC_URL,
   ).toString();
 }
 

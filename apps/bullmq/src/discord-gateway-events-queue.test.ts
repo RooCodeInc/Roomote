@@ -1,13 +1,14 @@
 import type { Job } from 'bullmq';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { fetchMock, resolveSecretMock } = vi.hoisted(() => ({
+const { envMock, fetchMock, resolveSecretMock } = vi.hoisted(() => ({
+  envMock: { TRPC_URL: 'http://api:13001' as string | undefined },
   fetchMock: vi.fn(),
   resolveSecretMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
-  Env: { TRPC_URL: 'http://api:13001' },
+  Env: envMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -37,6 +38,7 @@ const event = {
 describe('processDiscordGatewayEventJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    envMock.TRPC_URL = 'http://api:13001';
     vi.stubGlobal('fetch', fetchMock);
     resolveSecretMock.mockResolvedValue('gateway-secret');
   });
@@ -82,5 +84,14 @@ describe('processDiscordGatewayEventJob', () => {
     await expect(
       processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
     ).rejects.toThrow('HTTP 425');
+  });
+
+  it('fails fast when the worker API URL is missing', async () => {
+    envMock.TRPC_URL = undefined;
+
+    await expect(
+      processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
+    ).rejects.toThrow('TRPC_URL is required to process Discord gateway events');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

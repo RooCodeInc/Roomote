@@ -4,6 +4,7 @@ import type { DiscordGatewayEvent } from '@roomote/communication/discord-event';
 import { getRedis } from '@roomote/redis';
 
 export const DISCORD_GATEWAY_EVENTS_QUEUE_NAME = 'discord-gateway-events';
+const MAX_DISCORD_GATEWAY_EVENT_REDELIVERY_GENERATIONS = 100;
 
 let discordGatewayEventsQueue: Queue<DiscordGatewayEvent> | null = null;
 
@@ -49,13 +50,21 @@ async function discordGatewayEventRedeliveryJobId(
 
   // Keep each exhausted generation for diagnosis, but do not let it prevent a
   // later gateway delivery from being queued.
-  for (let generation = 1; ; generation += 1) {
+  for (
+    let generation = 1;
+    generation <= MAX_DISCORD_GATEWAY_EVENT_REDELIVERY_GENERATIONS;
+    generation += 1
+  ) {
     const redeliveryJobId = `${jobId}-redelivery-${generation}`;
     const redeliveryJob = await queue.getJob(redeliveryJobId);
     if (!redeliveryJob || (await redeliveryJob.getState()) !== 'failed') {
       return redeliveryJobId;
     }
   }
+
+  throw new Error(
+    `Discord gateway event ${jobId} exceeded ${MAX_DISCORD_GATEWAY_EVENT_REDELIVERY_GENERATIONS} retained redelivery generations`,
+  );
 }
 
 /** Persist a validated Gateway event before acknowledging the Gateway. */

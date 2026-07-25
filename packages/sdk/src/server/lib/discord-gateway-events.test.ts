@@ -122,4 +122,28 @@ describe('enqueueDiscordGatewayEvent', () => {
       },
     );
   });
+
+  it('fails with a diagnostic when every retained redelivery generation is exhausted', async () => {
+    getJobMock.mockImplementation(async () => ({
+      getState: async () => 'failed',
+    }));
+    const event = {
+      eventId: 'message-4',
+      eventType: 'MESSAGE_CREATE' as const,
+      payload: {
+        id: 'message-4',
+        channel_id: 'channel-1',
+        content: 'hello',
+        author: { id: 'user-1', username: 'user' },
+        mentions: [],
+        attachments: [],
+      },
+      receivedAt: '2026-07-24T00:00:00.000Z',
+    };
+
+    await expect(enqueueDiscordGatewayEvent(event)).rejects.toThrow(
+      'Discord gateway event discord-gateway-event-MESSAGE_CREATE-message-4 exceeded 100 retained redelivery generations',
+    );
+    expect(addMock).not.toHaveBeenCalled();
+  });
 });
