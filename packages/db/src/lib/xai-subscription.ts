@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { sql } from 'drizzle-orm';
 
 import {
@@ -32,9 +34,15 @@ const XAI_SUBSCRIPTION_DEVICE_LOCK_KEY = 'roomote-xai-subscription-device';
  * Tracks the single deployment-wide device-code flow that is allowed to
  * persist tokens. A newer start supersedes older codes so an in-flight poll
  * from a cancelled/restarted dialog cannot overwrite the active connection.
+ *
+ * `claimId` is reserved before the device-code HTTP call so a slower earlier
+ * start cannot register after a newer start. `deviceCode` is set only after
+ * that HTTP call completes while the claim is still current.
  */
 interface XaiPendingDeviceFlow {
-  deviceCode: string;
+  claimId: string;
+  /** Set after the device-code endpoint returns for the active claim. */
+  deviceCode?: string;
   /** Epoch milliseconds when the device code expires. */
   expiresAt: number;
   startedAt: string;
@@ -231,7 +239,10 @@ function isActivePendingDeviceFlow(
   now: number = Date.now(),
 ): boolean {
   return Boolean(
-    pending && pending.deviceCode === deviceCode && pending.expiresAt > now,
+    pending &&
+    pending.deviceCode &&
+    pending.deviceCode === deviceCode &&
+    pending.expiresAt > now,
   );
 }
 
@@ -477,9 +488,9 @@ export async function resolveXaiOpenCodeAuthContent(
  * verification URL the operator enters in a browser. The caller polls
  * {@link pollXaiDeviceAuth} with the returned `deviceCode` until it resolves.
  *
- * Registers this device code as the only flow allowed to persist tokens so a
- * cancelled/restarted dialog cannot have an older in-flight poll overwrite a
- * newer connection.
+ * Reserves a claim before the device-code HTTP request, then registers the
+ * returned code only if that claim is still current. A slower earlier start
+ * cannot overwrite a newer dialog's pending flow.
  */
 export async function startXaiDeviceAuth(
   fetchImpl: typeof fetch = fetch,
@@ -497,6 +508,20 @@ export async function startXaiDeviceAuth(
   const executor = options.executor ?? db;
   const now = options.now ?? Date.now();
   const clientId = resolveXaiOAuthClientId();
+  const claimId = randomUUID();
+  // Provisional window until the device-code endpoint returns real expiry.
+  const provisionalExpiresAt = now + 15 * 60 * 1000;
+
+  // Reserve the active claim before any network I/O so concurrent starts order
+  // by claim time, not by which HTTP response finishes first.
+  await withDeviceAuthLock(executor, async (tx) => {
+    await persistPendingDeviceFlow(tx, {
+      claimId,
+      expiresAt: provisionalExpiresAt,
+      startedAt: new Date(now).toISOString(),
+    });
+  });
+
   const response = await fetchImpl(XAI_OAUTH_DEVICE_CODE_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -511,6 +536,14 @@ export async function startXaiDeviceAuth(
   });
 
   if (!response.ok) {
+    // Drop this claim if it is still active so a failed start does not block
+    // a later retry indefinitely under the provisional expiry.
+    await withDeviceAuthLock(executor, async (tx) => {
+      const pending = await loadPendingDeviceFlow(tx);
+      if (pending?.claimId === claimId) {
+        await clearPendingDeviceFlow(tx);
+      }
+    });
     throw new Error(
       `Failed to initiate xAI device authorization: ${response.status}`,
     );
@@ -529,14 +562,25 @@ export async function startXaiDeviceAuth(
     expiresInMs,
   };
 
-  // Supersede any prior in-flight device code for this deployment.
+  let registered = false;
   await withDeviceAuthLock(executor, async (tx) => {
+    const pending = await loadPendingDeviceFlow(tx);
+    if (!pending || pending.claimId !== claimId) {
+      // A newer start claimed the flow while we awaited xAI.
+      return;
+    }
     await persistPendingDeviceFlow(tx, {
+      claimId,
       deviceCode: result.deviceCode,
       expiresAt: now + expiresInMs,
-      startedAt: new Date(now).toISOString(),
+      startedAt: pending.startedAt,
     });
+    registered = true;
   });
+
+  if (!registered) {
+    throw new Error(SUPERSEDED_DEVICE_FLOW_ERROR);
+  }
 
   return result;
 }

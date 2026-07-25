@@ -125,8 +125,10 @@ function makeExecutor(
 function activePending(
   deviceCode = 'device-1',
   expiresAt = Date.now() + 900_000,
+  claimId = 'claim-1',
 ) {
   return {
+    claimId,
     deviceCode,
     expiresAt,
     startedAt: new Date().toISOString(),
@@ -196,12 +198,16 @@ describe('startXaiDeviceAuth', () => {
 
     const pending = JSON.parse(
       store.get(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)!,
-    ) as { deviceCode: string; expiresAt: number };
-    expect(pending).toEqual({
-      deviceCode: 'device-1',
-      expiresAt: now + 900_000,
-      startedAt: new Date(now).toISOString(),
-    });
+    ) as {
+      claimId: string;
+      deviceCode: string;
+      expiresAt: number;
+      startedAt: string;
+    };
+    expect(pending.deviceCode).toBe('device-1');
+    expect(pending.expiresAt).toBe(now + 900_000);
+    expect(pending.startedAt).toBe(new Date(now).toISOString());
+    expect(pending.claimId).toEqual(expect.any(String));
   });
 
   it('supersedes a prior pending device code on restart', async () => {
@@ -230,8 +236,67 @@ describe('startXaiDeviceAuth', () => {
     expect(pending.deviceCode).toBe('new-device');
   });
 
+  it('does not let a slower earlier start overwrite a newer claim', async () => {
+    const { executor, store } = makeExecutor();
+    let releaseEarlyHttp: (() => void) | undefined;
+    const earlyHttpGate = new Promise<void>((resolve) => {
+      releaseEarlyHttp = resolve;
+    });
+
+    const earlyFetch = vi.fn().mockImplementation(async () => {
+      await earlyHttpGate;
+      return new Response(
+        JSON.stringify({
+          device_code: 'stale-device',
+          user_code: 'STALE-CODE',
+          verification_uri: 'https://accounts.x.ai/device',
+          interval: 5,
+          expires_in: 900,
+        }),
+        { status: 200 },
+      );
+    });
+
+    const lateFetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          device_code: 'fresh-device',
+          user_code: 'FRESH-CODE',
+          verification_uri: 'https://accounts.x.ai/device',
+          interval: 5,
+          expires_in: 900,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const earlyStart = startXaiDeviceAuth(earlyFetch, {
+      executor,
+      now: Date.now(),
+    });
+    // Allow the early start to reserve its claim before the later start.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const lateResult = await startXaiDeviceAuth(lateFetch, {
+      executor,
+      now: Date.now() + 1,
+    });
+    expect(lateResult.deviceCode).toBe('fresh-device');
+
+    releaseEarlyHttp?.();
+    await expect(earlyStart).rejects.toThrow(
+      XAI_SUBSCRIPTION_INTERNAL.supersededDeviceFlowError,
+    );
+
+    const pending = JSON.parse(
+      store.get(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)!,
+    ) as { deviceCode: string };
+    expect(pending.deviceCode).toBe('fresh-device');
+  });
+
   it('fails closed when the device-code endpoint returns an error', async () => {
-    const { executor } = makeExecutor();
+    const { executor, store } = makeExecutor();
     const fetchImpl = vi
       .fn()
       .mockResolvedValue(new Response('nope', { status: 503 }));
@@ -239,6 +304,8 @@ describe('startXaiDeviceAuth', () => {
     await expect(startXaiDeviceAuth(fetchImpl, { executor })).rejects.toThrow(
       'Failed to initiate xAI device authorization: 503',
     );
+    // Failed start clears its provisional claim.
+    expect(store.has(XAI_SUBSCRIPTION_INTERNAL.pendingSecretName)).toBe(false);
   });
 });
 
