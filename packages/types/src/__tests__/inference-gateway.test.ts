@@ -52,6 +52,32 @@ describe('inference gateway URL builders', () => {
     );
   });
 
+  it('registers Z.AI providers with v4 bases and empty OpenCode suffix', () => {
+    const zai = getInferenceGatewayProvider('zai');
+    expect(zai).toMatchObject({
+      envVarNames: ['ZAI_API_KEY'],
+      openCodeBaseUrlSuffix: '',
+      regionBaseUrls: {
+        global: 'https://api.z.ai/api/paas/v4',
+        china: 'https://open.bigmodel.cn/api/paas/v4',
+      },
+    });
+    expect(zai?.allowedPaths).toContain('/chat/completions');
+    expect(zai?.allowedPaths).not.toContain('/v1/chat/completions');
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        zai!,
+      ),
+    ).toBe('https://api.example.com/api/inference/zai');
+    expect(getInferenceGatewayProviderByEnvVarName('ZAI_API_KEY')?.id).toBe(
+      'zai',
+    );
+    expect(
+      getInferenceGatewayProviderByEnvVarName('ZAI_CODING_PLAN_API_KEY')?.id,
+    ).toBe('zai-coding-plan');
+  });
+
   it('exposes a chatgpt-oauth provider that collapses to the Codex backend', () => {
     const provider = getInferenceGatewayProvider(CHATGPT_GATEWAY_PROVIDER_ID);
     expect(provider?.authStrategy).toBe('chatgpt-oauth');

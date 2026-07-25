@@ -230,6 +230,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'amazon-bedrock',
         'google',
         'xai',
+        'zai',
+        'zai-coding-plan',
         'github-copilot',
         'openai-compatible',
         'litellm',
@@ -805,6 +807,18 @@ describe('getModelProviderEnvKeyCandidates', () => {
     );
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('MISTRAL_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GEMINI_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('ZAI_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('ZAI_REGION');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+      'ZAI_CODING_PLAN_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('ZAI_CODING_PLAN_REGION');
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'ZAI_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'ZAI_REGION',
+    );
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('GITHUB_TOKEN');
     // Ambient AWS access keys are intentionally NOT forwarded by default so a
     // controller's own infrastructure credentials never leak into sandboxes;
@@ -1272,5 +1286,43 @@ describe('collectSetupModelProviderCredentialValues', () => {
         action: 'save it',
       }),
     ).toThrow('Anthropic does not accept a ANTHROPIC_API_KEY value.');
+  });
+
+  it('accepts a listed option value for selectable fields', () => {
+    const zaiProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+      (provider) => provider.id === 'zai',
+    )!;
+
+    expect(
+      collectSetupModelProviderCredentialValues({
+        provider: zaiProvider,
+        apiKey: 'zai-key',
+        additionalEnvValues: { ZAI_REGION: 'china' },
+        isEnvVarSatisfied: () => false,
+        action: 'save it',
+      }),
+    ).toEqual({
+      values: [
+        { name: 'ZAI_API_KEY', value: 'zai-key' },
+        { name: 'ZAI_REGION', value: 'china' },
+      ],
+      clearedEnvVarNames: [],
+    });
+  });
+
+  it('rejects a value not in options for selectable fields', () => {
+    const zaiProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+      (provider) => provider.id === 'zai',
+    )!;
+
+    expect(() =>
+      collectSetupModelProviderCredentialValues({
+        provider: zaiProvider,
+        apiKey: 'zai-key',
+        additionalEnvValues: { ZAI_REGION: 'us-east-1' },
+        isEnvVarSatisfied: () => false,
+        action: 'save it',
+      }),
+    ).toThrow('Enter a valid Region for Z.AI to save it.');
   });
 });

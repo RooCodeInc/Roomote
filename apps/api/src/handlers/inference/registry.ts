@@ -204,6 +204,21 @@ async function resolveProviderUpstreamBaseUrl(
     );
   }
 
+  if (provider.regionBaseUrls && provider.region) {
+    const region =
+      (await resolveModelProviderEnvValue([provider.region.envVarName])) ??
+      provider.region.default;
+
+    const baseUrl = provider.regionBaseUrls[region];
+    if (!baseUrl) {
+      throw new Error(
+        `${provider.region.envVarName} must be one of ${Object.keys(provider.regionBaseUrls).join(', ')} for ${provider.name}. Received "${region}".`,
+      );
+    }
+
+    return baseUrl;
+  }
+
   if (!provider.region) {
     return provider.upstreamBaseUrl!;
   }

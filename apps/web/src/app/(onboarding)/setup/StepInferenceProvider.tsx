@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  getSetupModelProvider,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
@@ -133,7 +134,16 @@ export function StepInferenceProvider({
           : '',
     );
     setConnectionName('');
-    setAdditionalEnvValues({});
+    const defaults: Record<string, string> = {};
+    if (selectedProvider) {
+      for (const field of getSetupModelProvider(selectedProvider)
+        .additionalEnvFields ?? []) {
+        if (field.options && field.options.length > 0) {
+          defaults[field.envVarName] = field.options[0]!.value;
+        }
+      }
+    }
+    setAdditionalEnvValues(defaults);
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
     setIsGitHubCopilotDialogOpen(false);
@@ -452,20 +462,51 @@ export function StepInferenceProvider({
               {field.label}
               {field.required ? '' : ' (optional)'}
             </span>
-            <Input
-              secret={field.secret}
-              value={additionalEnvValues[field.envVarName] ?? ''}
-              onChange={(event) =>
-                setAdditionalEnvValues((values) => ({
-                  ...values,
-                  [field.envVarName]: event.target.value,
-                }))
-              }
-              placeholder={field.placeholder}
-              disabled={saveModelConfig.isPending}
-              aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
-              data-1p-ignore
-            />
+            {field.options && field.options.length > 0 ? (
+              <Select
+                value={
+                  additionalEnvValues[field.envVarName] ||
+                  field.options[0]?.value ||
+                  ''
+                }
+                onValueChange={(value) =>
+                  setAdditionalEnvValues((values) => ({
+                    ...values,
+                    [field.envVarName]: value,
+                  }))
+                }
+                disabled={saveModelConfig.isPending}
+              >
+                <SelectTrigger
+                  className="min-w-44"
+                  aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
+                >
+                  <SelectValue placeholder={field.placeholder ?? field.label} />
+                </SelectTrigger>
+                <SelectContent>
+                  {field.options.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                secret={field.secret}
+                value={additionalEnvValues[field.envVarName] ?? ''}
+                onChange={(event) =>
+                  setAdditionalEnvValues((values) => ({
+                    ...values,
+                    [field.envVarName]: event.target.value,
+                  }))
+                }
+                placeholder={field.placeholder}
+                disabled={saveModelConfig.isPending}
+                aria-label={`${field.label} for ${selectedProviderStatus?.label ?? 'provider'}`}
+                data-1p-ignore
+              />
+            )}
           </div>
         ))}
 

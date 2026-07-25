@@ -119,9 +119,15 @@ describe('inference gateway', () => {
         const nameList = typeof names === 'string' ? [names] : names;
 
         // Region lookups resolve separately from API keys.
-        return nameList.includes('AWS_REGION')
-          ? undefined
-          : 'provider-secret-key';
+        if (
+          nameList.includes('AWS_REGION') ||
+          nameList.includes('ZAI_REGION') ||
+          nameList.includes('ZAI_CODING_PLAN_REGION')
+        ) {
+          return undefined;
+        }
+
+        return 'provider-secret-key';
       },
     );
   });
@@ -279,6 +285,76 @@ describe('inference gateway', () => {
     expect(new Headers(init.headers).get('x-api-key')).toBe(
       'provider-secret-key',
     );
+  });
+
+  it('proxies Z.AI to the international v4 chat completions endpoint by default', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/zai/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.z.ai/api/paas/v4/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+  });
+
+  it('proxies Z.AI to the China host when ZAI_REGION is china', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('ZAI_REGION')) {
+          return 'china';
+        }
+        if (
+          nameList.includes('AWS_REGION') ||
+          nameList.includes('ZAI_CODING_PLAN_REGION')
+        ) {
+          return undefined;
+        }
+        return 'provider-secret-key';
+      },
+    );
+
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/zai/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions');
+  });
+
+  it('proxies Z.AI Coding Plan to its international coding endpoint', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/zai-coding-plan/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.z.ai/api/coding/paas/v4/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+  });
+
+  it('rejects OpenAI-style /v1 paths on Z.AI', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/zai/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('proxies GitHub Copilot without a /v1 base-path suffix', async () => {

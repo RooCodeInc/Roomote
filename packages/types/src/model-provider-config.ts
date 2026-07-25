@@ -114,7 +114,16 @@ export type SetupModelProviderEnvField = {
   secret: boolean;
   required: boolean;
   placeholder?: string;
+  /** When set, connect UIs render a select; values must match an option. */
+  options?: readonly { value: string; label: string }[];
 };
+
+export const ZAI_REGION_OPTIONS = [
+  { value: 'global', label: 'International' },
+  { value: 'china', label: 'China' },
+] as const;
+
+export const DEFAULT_ZAI_REGION = 'global' as const;
 
 export type SetupModelProviderDescriptor = {
   id: SetupModelProviderId;
@@ -507,6 +516,61 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'grok-4-5': 'xai/grok-4.5',
     }),
+  },
+  {
+    id: 'zai',
+    label: 'Z.AI',
+    envVarName: 'ZAI_API_KEY',
+    defaultRoomoteModel: 'zai/glm-5.2',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Paste a platform API key for the selected region. International keys come from the Z.AI API console; China keys come from the Zhipu / BigModel console. Coding Plan membership keys belong on Z.AI Coding Plan, not here.',
+      href: 'https://z.ai/manage-apikey/apikey-list',
+      linkLabel: 'Open Z.AI API keys',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'ZAI_REGION',
+        label: 'Region',
+        secret: false,
+        required: true,
+        options: ZAI_REGION_OPTIONS,
+      },
+    ],
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'glm-5-2': 'zai/glm-5.2',
+    }),
+    recommendedRoleModels: {
+      vision: 'zai/glm-5v-turbo',
+    },
+  },
+  {
+    id: 'zai-coding-plan',
+    label: 'Z.AI Coding Plan',
+    envVarName: 'ZAI_CODING_PLAN_API_KEY',
+    envVarLabel: 'Z.AI Coding Plan API key',
+    defaultRoomoteModel: 'zai-coding-plan/glm-5.2',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Paste a Coding Plan API key for the selected region. Do not use a general platform API key here.',
+      href: 'https://docs.z.ai/devpack/overview',
+      linkLabel: 'Open Z.AI Coding Plan docs',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'ZAI_CODING_PLAN_REGION',
+        label: 'Region',
+        secret: false,
+        required: true,
+        options: ZAI_REGION_OPTIONS,
+      },
+    ],
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'glm-5-2': 'zai-coding-plan/glm-5.2',
+    }),
+    recommendedRoleModels: {
+      vision: 'zai-coding-plan/glm-5v-turbo',
+    },
   },
   {
     // Provider id matches models.dev / OpenCode (`github-copilot`).
@@ -1334,6 +1398,14 @@ export function collectSetupModelProviderCredentialValues(options: {
     const value = submittedValue?.trim() ?? '';
 
     if (value) {
+      if (field.options && field.options.length > 0) {
+        const allowed = new Set(field.options.map((option) => option.value));
+        if (!allowed.has(value)) {
+          throw new Error(
+            `Enter a valid ${field.label} for ${provider.label} to ${options.action}.`,
+          );
+        }
+      }
       values.push({ name: field.envVarName, value });
     } else if (field.required) {
       if (!options.isEnvVarSatisfied(field.envVarName)) {
