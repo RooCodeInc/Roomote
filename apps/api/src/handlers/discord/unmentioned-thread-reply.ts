@@ -96,7 +96,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   isRoomoteThread: boolean;
   /** Roomote user id of the thread task owner when known. */
   ownedThreadUserId: string | null | undefined;
-  /** True when the reply targets an announcer report root. */
+  /** True when the reply targets an automation report root. */
   isAutomationReportThread?: boolean;
   fetchThreadMessages: () => Promise<DiscordThreadHistoryMessage[] | null>;
 }): Promise<boolean> {

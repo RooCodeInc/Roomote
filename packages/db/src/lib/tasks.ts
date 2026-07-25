@@ -1,5 +1,7 @@
 import { and, eq, isNull, type SQL } from 'drizzle-orm';
 
+import type { BackgroundAutomationKey } from '@roomote/types';
+
 import { type DatabaseOrTransaction, db } from '../db';
 import { tasks } from '../schema';
 import type { CreateTask, Task } from '../types';
@@ -116,4 +118,28 @@ function isTaskIdCollisionError(error: unknown): boolean {
     typeof e.message === 'string' &&
     e.message.includes(TASK_PRIMARY_KEY_CONSTRAINT)
   );
+}
+
+/**
+ * Resolves the automation that launched a task, or null for user-initiated
+ * tasks. The initiator columns are the single source of truth here: only some
+ * automations stamp an automation key into the run payload, so payload reads
+ * silently miss most automation launches.
+ */
+export async function getTaskAutomationInitiatorKey(
+  taskId: string,
+  database: DatabaseOrTransaction = db,
+): Promise<BackgroundAutomationKey | null> {
+  const [task] = await database
+    .select({
+      initiatorKind: tasks.initiatorKind,
+      initiatorAutomation: tasks.initiatorAutomation,
+    })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1);
+
+  return task?.initiatorKind === 'automation'
+    ? (task.initiatorAutomation ?? null)
+    : null;
 }

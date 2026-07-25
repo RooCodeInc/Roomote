@@ -2,7 +2,6 @@ import {
   stripLeadingRawSlackMention,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
-import { isTaskBackedReportAutomationKey } from '@roomote/types';
 import { recordSlackConversationMessageBestEffort } from '@roomote/sdk/server';
 import {
   getLatestSlackBotReply,
@@ -135,11 +134,12 @@ export async function findRoomoteOwnedSlackThread(params: {
     threadTs: params.threadTs,
   });
 
+  // Any automation thread carrying a sourceTaskId is task-backed by
+  // construction: the binding is written only when a task owns the root. The
+  // automation key itself is irrelevant, so every automation's report thread
+  // accepts unmentioned replies, not just the ones that predate this.
   const sourceTaskId =
-    trackedAutomationThread &&
-    trackedAutomationThread.automationKey != null &&
-    isTaskBackedReportAutomationKey(trackedAutomationThread.automationKey) &&
-    typeof trackedAutomationThread.metadata?.sourceTaskId === 'string' &&
+    typeof trackedAutomationThread?.metadata?.sourceTaskId === 'string' &&
     trackedAutomationThread.metadata.sourceTaskId.trim().length > 0
       ? trackedAutomationThread.metadata.sourceTaskId
       : null;

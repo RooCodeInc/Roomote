@@ -320,21 +320,6 @@ export function supportsHistoricalThreadFeedback(
   return AUTOMATION_KEYS_WITH_HISTORICAL_THREAD_FEEDBACK_SET.has(automationKey);
 }
 
-const TASK_BACKED_REPORT_AUTOMATION_KEYS = [
-  'announcer',
-] as const satisfies readonly BackgroundAutomationKey[];
-
-export type TaskBackedReportAutomationKey =
-  (typeof TASK_BACKED_REPORT_AUTOMATION_KEYS)[number];
-
-export function isTaskBackedReportAutomationKey(
-  automationKey: BackgroundAutomationKey,
-): automationKey is TaskBackedReportAutomationKey {
-  return (TASK_BACKED_REPORT_AUTOMATION_KEYS as readonly string[]).includes(
-    automationKey,
-  );
-}
-
 export type BackgroundAgentSettingsLike = Record<string, unknown>;
 
 export function getBackgroundAgentFrequencyValues(

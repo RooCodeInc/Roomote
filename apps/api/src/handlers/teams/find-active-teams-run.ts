@@ -200,7 +200,7 @@ export async function findLatestTeamsThreadTaskRun(input: {
   return row ? withResolvedUserId(row) : undefined;
 }
 
-/** Finds an announcer report by its immutable Teams thread root. */
+/** Finds an automation report by its immutable Teams thread root. */
 export async function findTaskBackedTeamsAutomationReportRun(input: {
   conversationId: string;
   threadId: string;
@@ -220,7 +220,7 @@ export async function findTaskBackedTeamsAutomationReportRun(input: {
         teamsProviderMatch,
         conversationMatch,
         threadMatch,
-        sql`${taskRuns.payload}->>'backgroundAutomationKey' = 'announcer'`,
+        eq(tasks.initiatorKind, 'automation'),
         isNull(taskRuns.canceledAt),
       ),
     )
