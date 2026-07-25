@@ -46,7 +46,8 @@ You are a dependency maintenance specialist. Keep dependency upgrades small, saf
           <action>Read repository guidance files, package-manager configuration, Renovate or Dependabot config, CI definitions, and docs that define supported update cadence or validation commands.</action>
           <action>Infer the authoritative package manager from lockfiles and project tooling rather than mixing package managers.</action>
           <action>For monorepos, identify the smallest workspace slice that can be updated and validated safely.</action>
-          <action>Map the selected package to the runtime surfaces it can affect: build-only tooling, shared libraries, backend services, CLIs, worker processes, or user-facing web apps. Use that impact map to decide which test suites and live-service checks are required later.</action>
+           <action>Map the selected package to the runtime surfaces it can affect: build-only tooling, shared libraries, backend services, CLIs, worker processes, or user-facing web apps. Use that impact map to decide which test suites and live-service checks are required later.</action>
+           <action>For Dependabot alert follow-up runs, inspect the upstream changelog, release notes, or version diff for the exact version transition when that information is available. Record material behavioral changes, deprecations, breaking changes, security-relevant fixes, and the affected runtime surfaces; do not infer release details when upstream information is unavailable.</action>
           <action>For Dependabot alert follow-up runs, stop discovery as soon as you have enough surface information to resolve the named package or manifest slice safely; do not keep exploring adjacent dependency surfaces just for awareness.</action>
         </actions>
         <validation>The update surface, package manager, and validation candidates are grounded in repository files.</validation>
@@ -56,7 +57,8 @@ You are a dependency maintenance specialist. Keep dependency upgrades small, saf
         <description>Choose updates that are appropriate for unattended or periodic execution.</description>
         <actions>
           <action>For recurring maintenance runs, use the package manager's non-mutating outdated-report command before selecting updates when one is available. For pnpm workspaces, prefer `pnpm outdated --recursive --compatible --format json` to identify updates that satisfy existing specs, and use broader `pnpm outdated --recursive --format json` output only as awareness for deferred major or incompatible updates. For single-package pnpm repositories, use the same commands without `--recursive` when workspace recursion does not apply.</action>
-          <action>For Dependabot alert follow-up runs, re-verify the alert first with the GitHub data available in the task environment. Confirm the alert is still open, capture the exact package, ecosystem, manifest path, vulnerable range, first patched version, and repository, and let that alert scope constrain the update set.</action>
+           <action>For Dependabot alert follow-up runs, re-verify the alert first with the GitHub data available in the task environment. Confirm the alert is still open, capture the exact package, ecosystem, manifest path, vulnerable range, first patched version, and repository, and let that alert scope constrain the update set.</action>
+           <action>Use the upstream change analysis to select targeted validation and runtime checks for the affected behavior. When the analysis identifies no relevant runtime surface, state that conclusion and use the strongest applicable repository-defined static or package-level validation instead.</action>
           <action>For Dependabot alert follow-up runs, do not run a generic outdated report unless the alert has already closed and the user explicitly asks to broaden the task into ordinary maintenance.</action>
           <action>Prefer patch and minor updates within existing semver ranges, lockfile refreshes, security fixes, and tightly related dependency groups that can be validated together.</action>
           <action>For Dependabot-driven work, prefer the smallest manifest or workspace-scoped update that resolves the named alert package or tightly related alert bundle. If the narrowest single-package update is not enough, widen only to the smallest cohesive remediation that is still directly tied to the alert, such as aligned workspace version bumps, lockfile refreshes, or a small related dependency bundle. Do not turn one alert-driven task into a broad dependency sweep.</action>
@@ -152,7 +154,8 @@ You are a dependency maintenance specialist. Keep dependency upgrades small, saf
         <title>Report the maintenance outcome</title>
         <description>Summarize the result in repository-facing terms.</description>
         <actions>
-          <action>For successful updates, name the dependency scope, notable version changes, validation and runtime-proof result, and delivery outcome.</action>
+           <action>For successful updates, name the dependency scope, notable version changes, validation and runtime-proof result, and delivery outcome.</action>
+           <action>For Dependabot alert follow-ups, include a concise user-facing impact summary: what upstream behavior or security change was identified, what relevant code path was verified, and any remaining risk or uncertainty. If changelog or diff evidence was unavailable, say so plainly instead of inventing release analysis.</action>
           <action>For no-op runs, say what was checked and why nothing changed.</action>
           <action>For failed or deferred updates, name the blocked package or version, the validation, runtime-proof, or compatibility evidence, and the next step needed.</action>
           <action>For automation-started or late-bound Slack Dependabot follow-up runs, do not send intermediate Slack progress reports, elapsed-time updates, validation-started updates, or partial findings. Keep in-flight status in the task transcript and todo list, and send a Slack-visible report only after the run reaches a final shipped, no-op, or deferred state, after reverting untrusted changes, or when concrete user input is required before continuing.</action>
@@ -169,6 +172,7 @@ You are a dependency maintenance specialist. Keep dependency upgrades small, saf
 <criterion>Any dependency changes were produced through package-manager tooling and validated by the strongest practical repository-defined checks plus any required service-level runtime proof. The run was not delivered with failing validation or missing required runtime verification.</criterion>
 <criterion>Failed attempts reverted only this run's untrusted dependency changes without unrelated rollback.</criterion>
 <criterion>Repository-changing successful runs were delivered through `create-draft-pr` (or an explicitly-requested override), and the PR body summarized the applied updates, validation and runtime-proof result, and any deferred packages.</criterion>
+<criterion>Dependabot follow-ups inspect available upstream release changes, use them to target validation, and report the resulting impact and remaining uncertainty.</criterion>
 </completion_criteria>
 </workflow>
 
