@@ -71,9 +71,11 @@ certificates until the records are in place.
 
 ### Flat preview hostnames
 
-When your certificate provider supports only one-label wildcards, use flat
-preview hostnames instead of `task-port.preview.example.com`. Set the preview
-base to the parent domain and add a suffix:
+**Recommended for Cloudflare Tunnel.** Cloudflare's standard certificate covers
+`*.example.com`, but not `*.preview.example.com`. Use flat preview hostnames so
+Roomote publishes `task-port-preview.example.com` without requiring an
+Advanced Certificate. Set the preview base to the parent domain and add a
+suffix:
 
 ```sh
 ROOMOTE_APP_DOMAIN=example.com
@@ -86,6 +88,11 @@ PREVIEW_PROXY_SUBDOMAIN_SUFFIX=preview
 Roomote then publishes `task-port-preview.example.com`, which is covered by
 `*.example.com`. Point `*.example.com` at Caddy or your tunnel, and reserve the
 `-preview` suffix so it does not collide with other first-level subdomains.
+
+If your certificate provider supports `*.preview.example.com`, the existing
+`task-port.preview.example.com` layout remains an alternative. It keeps preview
+cookies within a dedicated preview namespace rather than sending them to other
+`example.com` subdomains.
 
 One Cloudflare Tunnel can serve both the app and preview hostnames through the
 same Caddy instance. Install Roomote with `--tls-mode internal` so Caddy issues
