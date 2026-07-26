@@ -133,6 +133,7 @@ function buildProviderSetup(
     openaiSavedKey?: boolean;
     anthropicSavedKey?: boolean;
     chatgptConnected?: boolean;
+    zaiSavedKey?: boolean;
     includeMultiCredentialProviders?: boolean;
     bedrockSavedKey?: boolean;
     bedrockRegion?: string;
@@ -178,6 +179,17 @@ function buildProviderSetup(
           suggestedTaskModels: [],
           runtimeApiKeySatisfied: false,
           savedApiKeySatisfied: overrides.anthropicSavedKey ?? false,
+          additionalEnvValues: {} satisfies Record<string, string>,
+        },
+        {
+          id: 'zai' as SetupModelProviderId,
+          label: 'Z.AI',
+          envVarName: 'ZAI_API_KEY',
+          defaultRoomoteModel: 'zai/glm-5.2',
+          authKind: 'api-key' as const,
+          suggestedTaskModels: [],
+          runtimeApiKeySatisfied: false,
+          savedApiKeySatisfied: overrides.zaiSavedKey ?? false,
           additionalEnvValues: {} satisfies Record<string, string>,
         },
         ...(overrides.includeMultiCredentialProviders
@@ -400,6 +412,42 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.getByRole('progressbar', { name: 'Credit balance' }),
     ).toBeInTheDocument();
+  });
+
+  it('shows a usage line under a connected Z.AI row', () => {
+    providerSetupData.current = buildProviderSetup({ zaiSavedKey: true });
+    subscriptionUsageData.current = [
+      {
+        providerId: 'zai',
+        planType: 'lite',
+        windows: [
+          {
+            label: '5h limit',
+            usedPercent: 16,
+            resetsAt: new Date(Date.now() + 2 * 3_600_000).toISOString(),
+          },
+          {
+            label: 'Weekly limit',
+            usedPercent: 4,
+          },
+        ],
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(screen.getByText('Z.AI')).toBeInTheDocument();
+    expect(
+      screen.getByText('5h limit: 16% used (resets in 2h)'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Weekly limit: 4% used')).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', { name: '5h limit usage' }),
+    ).toHaveAttribute('aria-valuenow', '16');
+    expect(
+      screen.getByRole('progressbar', { name: 'Weekly limit usage' }),
+    ).toHaveAttribute('aria-valuenow', '4');
   });
 
   it('omits the usage line when no usage data is available or the row errored', () => {
