@@ -540,6 +540,68 @@ describe('fetchZaiUsage', () => {
     expect(fetchImpl).toHaveBeenCalled();
   });
 
+  it('returns null on HTTP 200 business auth failures', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 1000,
+        msg: 'Authentication Failed',
+        success: false,
+      }),
+    );
+
+    await expect(
+      fetchZaiUsage({ runtimeEnv: { ZAI_API_KEY: 'bad-key' }, fetchImpl }),
+    ).resolves.toBeNull();
+  });
+
+  it('parses live coding-plan TIME_LIMIT rows with currentValue/usage', () => {
+    const parsed = parseZaiQuotaUsage({
+      code: 200,
+      success: true,
+      data: {
+        level: 'max',
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 0 },
+          {
+            type: 'TOKENS_LIMIT',
+            unit: 6,
+            number: 1,
+            percentage: 30,
+            nextResetTime: 1_785_560_352_998,
+          },
+          {
+            type: 'TIME_LIMIT',
+            unit: 5,
+            number: 1,
+            usage: 4000,
+            currentValue: 24,
+            remaining: 3976,
+            percentage: 1,
+            nextResetTime: 1_785_819_552_997,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.planType).toBe('max');
+    expect(parsed.windows).toEqual([
+      { label: '5h limit', usedPercent: 0 },
+      {
+        label: 'Weekly limit',
+        usedPercent: 30,
+        resetsAt: new Date(1_785_560_352_998).toISOString(),
+      },
+      {
+        label: 'Monthly tools',
+        usedPercent: 1,
+        used: 24,
+        remaining: 3976,
+        limit: 4000,
+        resetsAt: new Date(1_785_819_552_997).toISOString(),
+      },
+    ]);
+  });
+
   it('uses the China host when ZAI_REGION is china', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse({

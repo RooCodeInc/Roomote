@@ -577,8 +577,14 @@ function parseZaiQuotaLimitEntry(
     'usedPercent',
   ]);
   const remaining = firstNumber(entry, ['remaining', 'remain']);
-  const limit = firstNumber(entry, ['limit', 'total', 'quota']);
-  const used = firstNumber(entry, ['used', 'consumed']);
+  // Live TIME_LIMIT rows use `usage` as the cap and `currentValue` as spent.
+  const limit = firstNumber(entry, ['limit', 'total', 'quota', 'usage']);
+  const used = firstNumber(entry, [
+    'used',
+    'consumed',
+    'currentValue',
+    'current_value',
+  ]);
   const resetsAt = toResetIso(
     entry.nextResetTime ??
       entry.next_reset_time ??
@@ -695,6 +701,17 @@ async function fetchZaiFamilyUsage(
   });
 
   if (status !== 200) {
+    return null;
+  }
+
+  // The monitor API often returns HTTP 200 with a business error envelope
+  // (`code: 1000`, `success: false`) for bad keys — treat as no usage.
+  const root = asRecord(payload);
+  const businessCode = firstNumber(root, ['code']);
+  if (
+    root?.success === false ||
+    (businessCode !== undefined && businessCode !== 200)
+  ) {
     return null;
   }
 
