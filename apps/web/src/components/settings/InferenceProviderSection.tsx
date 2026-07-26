@@ -351,7 +351,21 @@ function ProviderCredentialsDialog({
   const isChatGptProvider =
     selectedProvider?.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   const isGitHubCopilotProvider = selectedProvider?.id === 'github-copilot';
+  const isXaiSubscriptionProvider =
+    selectedProvider?.id === XAI_SUBSCRIPTION_PROVIDER_ID;
   const isOAuthProvider = selectedProvider?.authKind === 'oauth';
+  const oauthAccountDescription = isChatGptProvider
+    ? 'Connect a ChatGPT Plus or Pro account to run tasks on your subscription.'
+    : isGitHubCopilotProvider
+      ? 'Connect a GitHub account with an active Copilot plan.'
+      : isXaiSubscriptionProvider
+        ? 'Connect a SuperGrok or eligible X Premium+ account to run Grok models on your subscription.'
+        : 'Connect your subscription account.';
+  const oauthConnectButtonLabel = isGitHubCopilotProvider
+    ? 'Connect GitHub Copilot'
+    : isXaiSubscriptionProvider
+      ? 'Connect Grok subscription'
+      : 'Connect ChatGPT';
   const title =
     mode === 'add'
       ? 'Add Provider'
@@ -413,9 +427,7 @@ function ProviderCredentialsDialog({
                 <div className={PROVIDER_GRID_ROW_CLASS}>
                   <span className="text-sm font-medium">Account</span>
                   <p className="min-w-0 text-sm text-muted-foreground">
-                    {isChatGptProvider
-                      ? 'Connect a ChatGPT Plus or Pro account to run tasks on your subscription.'
-                      : 'Connect a GitHub account with an active Copilot plan.'}
+                    {oauthAccountDescription}
                   </p>
                 </div>
               ) : (
@@ -534,9 +546,7 @@ function ProviderCredentialsDialog({
               }
               disabled={isSaving || !selectedProvider}
             >
-              {isGitHubCopilotProvider
-                ? 'Connect GitHub Copilot'
-                : 'Connect ChatGPT'}
+              {oauthConnectButtonLabel}
             </Button>
           ) : (
             <Button

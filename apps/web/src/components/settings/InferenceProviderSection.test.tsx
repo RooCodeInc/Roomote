@@ -369,6 +369,34 @@ describe('InferenceProviderSection', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('offers xAI Grok subscription with a Connect Grok button, not Connect ChatGPT', () => {
+    // Leave only the SuperGrok OAuth provider addable so it is preselected.
+    providerSetupData.current = buildProviderSetup({
+      openrouterSavedKey: true,
+      openaiSavedKey: true,
+      anthropicSavedKey: true,
+      xaiApiKeyConnected: true,
+      chatgptConnected: true,
+    });
+
+    renderInferenceProviderSection();
+
+    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+
+    expect(
+      screen.getByRole('combobox', { name: 'Provider to add' }),
+    ).toHaveTextContent('xAI (Grok subscription)');
+    expect(
+      screen.getByRole('button', { name: /Connect Grok subscription/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/SuperGrok or eligible X Premium\+/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Connect ChatGPT/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders a connected ChatGPT subscription as a provider row', () => {
     providerSetupData.current = buildProviderSetup({ chatgptConnected: true });
     chatgptStatusData.current = {
