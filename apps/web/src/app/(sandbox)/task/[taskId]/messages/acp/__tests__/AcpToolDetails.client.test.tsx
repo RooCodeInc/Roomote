@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import { AcpToolDetails } from '../AcpToolDetails';
@@ -21,6 +21,9 @@ vi.mock('@/components/ai-elements', () => ({
     toolInputSpy(props);
     return <div>tool input</div>;
   },
+  MessageResponse: (props: { children?: ReactNode }) => (
+    <div>{props.children}</div>
+  ),
 }));
 
 function buildMessage(
@@ -58,7 +61,7 @@ describe('AcpToolDetails', () => {
     toolInputSpy.mockClear();
   });
 
-  it('shows the subagent launch prompt and most recent message without debug mode', () => {
+  it('leads with the most recent message and collapses the launch prompt', () => {
     render(
       <AcpToolDetails
         msg={buildMessage({
@@ -72,12 +75,16 @@ describe('AcpToolDetails', () => {
     );
 
     expect(
-      screen.getByText('Review the current branch and summarize the state.'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Initial prompt')).toBeInTheDocument();
-    expect(screen.getByText('Last message')).toBeInTheDocument();
-    expect(
       screen.getByText('The branch is clean and the relevant tests pass.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Review the current branch and summarize the state.'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Prompt'));
+
+    expect(
+      screen.getByText('Review the current branch and summarize the state.'),
     ).toBeInTheDocument();
     expect(toolInputSpy).not.toHaveBeenCalled();
     expect(codeBlockSpy).not.toHaveBeenCalled();
@@ -96,10 +103,10 @@ describe('AcpToolDetails', () => {
       />,
     );
 
-    expect(screen.getByText('Last message')).toBeInTheDocument();
     expect(
       screen.getByText('Found the requested implementation detail.'),
     ).toBeInTheDocument();
+    expect(screen.queryByText('Prompt')).not.toBeInTheDocument();
     expect(toolInputSpy).not.toHaveBeenCalled();
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });
@@ -119,10 +126,26 @@ describe('AcpToolDetails', () => {
       />,
     );
 
-    expect(screen.getByText('Initial prompt')).toBeInTheDocument();
-    expect(screen.getByText('Last message')).toBeInTheDocument();
     expect(
       screen.getByText('The child agent is reviewing the render path.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Prompt')).toBeInTheDocument();
+  });
+
+  it('leaves the launch prompt open when the subagent has no message yet', () => {
+    render(
+      <AcpToolDetails
+        msg={buildMessage({
+          prompt: 'Inspect the task transcript implementation.',
+          output: '',
+          status: 'in_progress',
+          isSubagentSpawn: true,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText('Inspect the task transcript implementation.'),
     ).toBeInTheDocument();
   });
 
