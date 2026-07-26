@@ -127,6 +127,9 @@ vi.mock('@roomote/db/server', () => ({
   sql: vi.fn(),
   users: {},
   workItems: {},
+  isChatGptSubscriptionConnected: vi.fn(async () => false),
+  isGitHubCopilotSubscriptionConnected: vi.fn(async () => false),
+  isXaiSubscriptionConnected: vi.fn(async () => false),
 }));
 
 vi.mock('@/lib/server', () => ({

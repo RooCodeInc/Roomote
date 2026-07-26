@@ -14,6 +14,9 @@ const chatgptStatusData = vi.hoisted(() => ({
 const githubCopilotStatusData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
+const xaiStatusData = vi.hoisted(() => ({
+  current: null as Record<string, unknown> | null,
+}));
 const subscriptionUsageData = vi.hoisted(() => ({
   current: null as Array<Record<string, unknown>> | null,
 }));
@@ -24,15 +27,19 @@ const mutateAsyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutateAsync: mutateAsyncMock }),
-  useQuery: (options: { queryKey?: string[] }) => ({
-    data: options.queryKey?.[0]?.includes('subscriptionUsage')
+  useQuery: (options: { queryKey?: unknown }) => {
+    const key = JSON.stringify(options.queryKey ?? []);
+    const data = key.includes('subscriptionUsage')
       ? subscriptionUsageData.current
-      : options.queryKey?.[0]?.includes('providerCredits')
+      : key.includes('providerCredits')
         ? providerCreditsData.current
-        : options.queryKey?.[0]?.includes('githubCopilot')
+        : key.includes('githubCopilot')
           ? githubCopilotStatusData.current
-          : chatgptStatusData.current,
-  }),
+          : key.includes('xaiSubscription')
+            ? xaiStatusData.current
+            : chatgptStatusData.current;
+    return { data, isPending: false };
+  },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
@@ -89,6 +96,23 @@ vi.mock('@/trpc/client', () => ({
         mutationOptions: () => ({ mutationKey: ['disconnectCopilot'] }),
       },
     },
+    xaiSubscription: {
+      status: {
+        queryOptions: () => ({
+          queryKey: ['xaiSubscription', 'status'],
+        }),
+        queryKey: () => ['xaiSubscription', 'status'],
+      },
+      disconnect: {
+        mutationOptions: () => ({ mutationKey: ['disconnectXai'] }),
+      },
+      startDeviceAuth: {
+        mutationOptions: () => ({ mutationKey: ['startXaiDeviceAuth'] }),
+      },
+      pollDeviceAuth: {
+        mutationOptions: () => ({ mutationKey: ['pollXaiDeviceAuth'] }),
+      },
+    },
     subscriptionUsage: {
       list: {
         queryOptions: () => ({ queryKey: ['subscriptionUsage', 'list'] }),
@@ -112,6 +136,10 @@ vi.mock('@/components/settings/GitHubCopilotConnectDialog', () => ({
   GitHubCopilotConnectDialog: () => null,
 }));
 
+vi.mock('@/components/settings/XaiConnectDialog', () => ({
+  XaiConnectDialog: () => null,
+}));
+
 vi.mock('@/components/settings/Section', () => ({
   Section: ({
     children,
@@ -133,12 +161,16 @@ function buildProviderSetup(
     openaiSavedKey?: boolean;
     anthropicSavedKey?: boolean;
     chatgptConnected?: boolean;
+    xaiSubscriptionConnected?: boolean;
+    xaiApiKeyConnected?: boolean;
     zaiSavedKey?: boolean;
     includeMultiCredentialProviders?: boolean;
     bedrockSavedKey?: boolean;
     bedrockRegion?: string;
   } = {},
 ): { providerSetup: SetupModelStatus } {
+  const xaiSubscriptionConnected = overrides.xaiSubscriptionConnected ?? false;
+  const xaiApiKeyConnected = overrides.xaiApiKeyConnected ?? false;
   return {
     providerSetup: {
       runtimeRoomoteModel: null,
@@ -179,6 +211,28 @@ function buildProviderSetup(
           suggestedTaskModels: [],
           runtimeApiKeySatisfied: false,
           savedApiKeySatisfied: overrides.anthropicSavedKey ?? false,
+          additionalEnvValues: {} satisfies Record<string, string>,
+        },
+        {
+          id: 'xai' as SetupModelProviderId,
+          label: 'xAI',
+          envVarName: 'XAI_API_KEY',
+          defaultRoomoteModel: 'xai/grok-4.5',
+          authKind: 'api-key' as const,
+          suggestedTaskModels: [],
+          runtimeApiKeySatisfied: false,
+          savedApiKeySatisfied: xaiApiKeyConnected,
+          additionalEnvValues: {} satisfies Record<string, string>,
+        },
+        {
+          id: 'xai-subscription' as SetupModelProviderId,
+          label: 'xAI (Grok subscription)',
+          envVarName: undefined,
+          defaultRoomoteModel: 'xai/grok-4.5',
+          authKind: 'oauth' as const,
+          suggestedTaskModels: [],
+          runtimeApiKeySatisfied: false,
+          savedApiKeySatisfied: xaiSubscriptionConnected,
           additionalEnvValues: {} satisfies Record<string, string>,
         },
         {
@@ -242,6 +296,8 @@ function buildProviderSetup(
       setupSatisfied: false,
       setupSatisfiedByRuntimeEnv: false,
       chatgptConnected: overrides.chatgptConnected ?? false,
+      xaiSubscriptionConnected,
+      xaiApiKeyConnected,
       openaiAndChatGptBothConfigured: false,
     },
   };
@@ -254,6 +310,7 @@ describe('InferenceProviderSection', () => {
     providerSetupData.current = null;
     chatgptStatusData.current = null;
     githubCopilotStatusData.current = null;
+    xaiStatusData.current = null;
     subscriptionUsageData.current = null;
     providerCreditsData.current = null;
   });
@@ -321,6 +378,34 @@ describe('InferenceProviderSection', () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Save' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('offers xAI Grok subscription with a Connect Grok button, not Connect ChatGPT', () => {
+    // Leave only the SuperGrok OAuth provider addable so it is preselected.
+    providerSetupData.current = buildProviderSetup({
+      openrouterSavedKey: true,
+      openaiSavedKey: true,
+      anthropicSavedKey: true,
+      xaiApiKeyConnected: true,
+      chatgptConnected: true,
+    });
+
+    renderInferenceProviderSection();
+
+    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+
+    expect(
+      screen.getByRole('combobox', { name: 'Provider to add' }),
+    ).toHaveTextContent('xAI (Grok subscription)');
+    expect(
+      screen.getByRole('button', { name: /Connect Grok subscription/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/SuperGrok or eligible X Premium\+/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Connect ChatGPT/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -406,9 +491,8 @@ describe('InferenceProviderSection', () => {
 
     renderInferenceProviderSection();
 
-    expect(
-      screen.getByText(/Credits:.*12\.50.*of.*50\.00.*left/i),
-    ).toBeInTheDocument();
+    // Locale-independent: currency separators and symbols vary by environment.
+    expect(screen.getByText(/Credits:.*left/i)).toBeInTheDocument();
     expect(
       screen.getByRole('progressbar', { name: 'Credit balance' }),
     ).toBeInTheDocument();
@@ -472,6 +556,78 @@ describe('InferenceProviderSection', () => {
     // usage entry at all, so neither renders a usage line.
     expect(screen.queryByText(/Weekly limit/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Premium requests/)).not.toBeInTheDocument();
+  });
+
+  it('renders a connected xAI Grok subscription without an API key row', () => {
+    providerSetupData.current = buildProviderSetup({
+      xaiSubscriptionConnected: true,
+      xaiApiKeyConnected: false,
+    });
+    xaiStatusData.current = {
+      connected: true,
+      status: 'connected',
+      email: 'grok@example.com',
+    };
+
+    renderInferenceProviderSection();
+
+    expect(screen.getByText('xAI (Grok subscription)')).toBeInTheDocument();
+    expect(
+      screen.getByText('Connected as grok@example.com'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Disconnect/ }),
+    ).toBeInTheDocument();
+    // OAuth-only: no masked API-key row for xAI.
+    expect(screen.queryByLabelText('API key for xAI')).not.toBeInTheDocument();
+  });
+
+  it('shows both the Grok subscription row and the xAI API key row when dual-connected', () => {
+    providerSetupData.current = buildProviderSetup({
+      xaiSubscriptionConnected: true,
+      xaiApiKeyConnected: true,
+    });
+    xaiStatusData.current = {
+      connected: true,
+      status: 'connected',
+      email: 'grok@example.com',
+    };
+
+    renderInferenceProviderSection();
+
+    expect(screen.getByText('xAI (Grok subscription)')).toBeInTheDocument();
+    expect(screen.getByText('xAI')).toBeInTheDocument();
+    expect(screen.getByLabelText('API key for xAI')).toBeInTheDocument();
+    expect(
+      screen.getByText(/subscription is preferred at runtime/i),
+    ).toBeInTheDocument();
+    // Dual path counts as two credentials so the key can be deleted.
+    expect(
+      screen.getByRole('button', { name: /Delete xAI API key|Delete/i }),
+    ).not.toBeDisabled();
+  });
+
+  it('renders Reconnect and Disconnect for an errored xAI Grok subscription', () => {
+    providerSetupData.current = buildProviderSetup({
+      xaiSubscriptionConnected: true,
+    });
+    xaiStatusData.current = {
+      connected: false,
+      status: 'error',
+      error: 'xAI token refresh failed: 401',
+    };
+
+    renderInferenceProviderSection();
+
+    expect(
+      screen.getByText('xAI token refresh failed: 401'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Reconnect/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Disconnect/ }),
+    ).toBeInTheDocument();
   });
 
   it('renders Reconnect and Disconnect for an errored ChatGPT subscription', () => {

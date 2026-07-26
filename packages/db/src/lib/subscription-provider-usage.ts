@@ -3,6 +3,8 @@ import {
   CHATGPT_USAGE_ENDPOINT,
   GITHUB_COPILOT_USAGE_ENDPOINT,
   KIMI_FOR_CODING_USAGE_ENDPOINTS,
+  XAI_USAGE_BILLING_ENDPOINT,
+  XAI_USAGE_USER_ENDPOINT,
   ZAI_USAGE_HOSTS,
   ZAI_USAGE_QUOTA_PATH,
   type SubscriptionProviderUsage,
@@ -14,13 +16,14 @@ import { type DatabaseOrTransaction } from '../db';
 import { getFreshChatGptAccessToken } from './chatgpt-subscription';
 import { getGitHubCopilotAccessToken } from './github-copilot-subscription';
 import { resolveModelProviderEnvValue } from './model-runtime-config';
+import { getFreshXaiAccessToken } from './xai-subscription';
 
 /**
  * Server-side usage/quota lookups for subscription-style inference providers,
- * using the same credentials the inference gateway already holds. Upstream
- * endpoints are undocumented (each is what the provider's own CLI polls), so
- * every fetcher parses defensively and resolves to `null` on any failure —
- * the settings UI omits the usage line rather than erroring.
+ * using the same credentials the inference gateway already holds. All three
+ * upstream endpoints are undocumented (each is what the provider's own CLI
+ * polls), so every fetcher parses defensively and resolves to `null` on any
+ * failure — the settings UI omits the usage line rather than erroring.
  */
 
 const USAGE_FETCH_TIMEOUT_MS = 10_000;
@@ -37,21 +40,35 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/** Kimi's usage payload serializes numbers as strings, so coerce both. */
+/**
+ * Coerce a bare number/string, or Grok's `{ val: N }` credit wrappers, into a
+ * finite number. Kimi also serializes numbers as strings.
+ */
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  const record = asRecord(value);
+  if (record && 'val' in record) {
+    return asFiniteNumber(record.val);
+  }
+  return undefined;
+}
+
 function firstNumber(
   source: Record<string, unknown> | undefined,
   keys: readonly string[],
 ): number | undefined {
   for (const key of keys) {
-    const value = source?.[key];
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === 'string' && value.trim().length > 0) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
+    const parsed = asFiniteNumber(source?.[key]);
+    if (parsed !== undefined) {
+      return parsed;
     }
   }
   return undefined;
@@ -532,6 +549,280 @@ export async function fetchKimiForCodingUsage(
   return null;
 }
 
+// --- xAI Grok subscription ------------------------------------------------
+
+/**
+ * Live `GET /v1/billing?format=credits` nests usage under `config` with
+ * `{ val }` wrappers and product-level percents. Older/synthetic shapes put
+ * fields at the root. Accept both so the settings bar keeps working.
+ */
+function resolveXaiBillingConfig(
+  payload: unknown,
+): Record<string, unknown> | undefined {
+  const root = asRecord(payload);
+  if (!root) {
+    return undefined;
+  }
+  return asRecord(root.config) ?? root;
+}
+
+function resolveXaiResetsAt(
+  config: Record<string, unknown>,
+  now: number,
+): string | undefined {
+  const period = asRecord(config.currentPeriod ?? config.current_period);
+  return (
+    toResetIso(
+      period?.end ??
+        period?.ends_at ??
+        period?.endsAt ??
+        config.billingPeriodEnd ??
+        config.billing_period_end ??
+        config.resets_at ??
+        config.reset_at,
+    ) ??
+    resetFromRelativeSeconds(
+      firstNumber(config, ['reset_in', 'resets_in_seconds']),
+      now,
+    )
+  );
+}
+
+/**
+ * Parse the unofficial Grok billing payload. Shape is not documented; accept
+ * the live cli-chat-proxy `config` form plus earlier included-usage/credits
+ * guesses. Exported for unit tests.
+ */
+export function parseXaiSubscriptionUsage(
+  payload: unknown,
+  now: number = Date.now(),
+): SubscriptionUsageWindow[] {
+  const root = asRecord(payload);
+  if (!root) {
+    return [];
+  }
+
+  const config = resolveXaiBillingConfig(payload);
+  if (!config) {
+    return [];
+  }
+
+  const windows: SubscriptionUsageWindow[] = [];
+  const resetsAt = resolveXaiResetsAt(config, now);
+
+  // Live format=credits: paid Grok plans share one weekly pool across all
+  // Grok products, so only the aggregate percent is shown. The payload's
+  // per-product breakdown slices the same pool and would render as duplicate
+  // bars whenever one product dominates (an API-only deployment shows
+  // "Api: N%" identical to the aggregate); the breakdown stays on grok.com's
+  // own usage page.
+  const creditUsagePercent = firstNumber(config, [
+    'creditUsagePercent',
+    'credit_usage_percent',
+    'used_percent',
+    'usedPercent',
+    'included_used_percent',
+    'includedUsedPercent',
+  ]);
+
+  if (creditUsagePercent !== undefined) {
+    windows.push({
+      label: 'Included usage',
+      usedPercent: clampPercent(creditUsagePercent),
+      ...(resetsAt && { resetsAt }),
+    });
+  }
+
+  // Live monthly billing (`/v1/billing` without format=credits).
+  const monthlyLimit = firstNumber(config, [
+    'monthlyLimit',
+    'monthly_limit',
+    'limit',
+    'allowance',
+    'total',
+    'entitlement',
+  ]);
+  const monthlyUsed = firstNumber(config, ['used', 'consumed', 'includedUsed']);
+  if (
+    windows.length === 0 &&
+    (monthlyLimit !== undefined || monthlyUsed !== undefined)
+  ) {
+    windows.push({
+      label: 'Included usage',
+      ...(monthlyUsed !== undefined && { used: monthlyUsed }),
+      ...(monthlyLimit !== undefined && { limit: monthlyLimit }),
+      ...(monthlyUsed !== undefined &&
+        monthlyLimit !== undefined &&
+        monthlyLimit > 0 && {
+          usedPercent: clampPercent((monthlyUsed / monthlyLimit) * 100),
+        }),
+      ...(resetsAt && { resetsAt }),
+    });
+  }
+
+  // Legacy / synthetic nested shapes (kept for unit tests and older proxies).
+  const included = asRecord(
+    config.included_usage ??
+      config.includedUsage ??
+      config.included ??
+      root.included_usage ??
+      root.includedUsage ??
+      root.included,
+  );
+  if (windows.length === 0 && included) {
+    const includedPercent = firstNumber(included, [
+      'used_percent',
+      'usedPercent',
+      'percent_used',
+      'percentUsed',
+    ]);
+    const includedLimit = firstNumber(included, [
+      'limit',
+      'allowance',
+      'total',
+      'entitlement',
+    ]);
+    const includedRemaining = firstNumber(included, [
+      'remaining',
+      'remaining_credits',
+      'remainingCredits',
+    ]);
+    const includedUsed = firstNumber(included, ['used', 'consumed']);
+    const includedResetsAt =
+      toResetIso(
+        included['resets_at'] ?? included['reset_at'] ?? included['resetTime'],
+      ) ?? resetsAt;
+
+    if (
+      includedPercent !== undefined ||
+      includedLimit !== undefined ||
+      includedRemaining !== undefined ||
+      includedUsed !== undefined
+    ) {
+      windows.push({
+        label: 'Included usage',
+        ...(includedPercent !== undefined && {
+          usedPercent: clampPercent(includedPercent),
+        }),
+        ...(includedUsed !== undefined && { used: includedUsed }),
+        ...(includedRemaining !== undefined && {
+          remaining: includedRemaining,
+        }),
+        ...(includedLimit !== undefined && { limit: includedLimit }),
+        ...(includedResetsAt && { resetsAt: includedResetsAt }),
+      });
+    }
+  }
+
+  const credits = asRecord(config.credits ?? config.credit ?? root.credits);
+  const creditBalance =
+    firstNumber(credits, [
+      'balance',
+      'remaining',
+      'available',
+      'prepaid_balance',
+      'prepaidBalance',
+    ]) ??
+    firstNumber(config, ['prepaidBalance', 'prepaid_balance', 'creditBalance']);
+  // On-demand credits are the overflow path once the included pool is
+  // exhausted: a positive balance means tasks keep running on metered spend,
+  // which operators need to see. A zero balance is the common idle state and
+  // reads as an error ("Credits: 0 left"), so omit it like On-demand below.
+  if (creditBalance !== undefined && creditBalance > 0) {
+    windows.push({
+      label: 'Credits',
+      remaining: creditBalance,
+    });
+  }
+
+  const onDemand = asRecord(
+    config.on_demand ??
+      config.onDemand ??
+      config.ondemand ??
+      root.on_demand ??
+      root.onDemand,
+  );
+  const onDemandUsed =
+    firstNumber(onDemand, ['used', 'consumed']) ??
+    firstNumber(config, ['onDemandUsed', 'on_demand_used']);
+  const onDemandLimit =
+    firstNumber(onDemand, ['limit', 'cap', 'allowance']) ??
+    firstNumber(config, ['onDemandCap', 'on_demand_cap']);
+  if (
+    (onDemandUsed !== undefined && onDemandUsed > 0) ||
+    (onDemandLimit !== undefined && onDemandLimit > 0)
+  ) {
+    windows.push({
+      label: 'On-demand',
+      ...(onDemandUsed !== undefined && { used: onDemandUsed }),
+      ...(onDemandLimit !== undefined && { limit: onDemandLimit }),
+      ...(onDemandUsed !== undefined &&
+        onDemandLimit !== undefined &&
+        onDemandLimit > 0 && {
+          usedPercent: clampPercent((onDemandUsed / onDemandLimit) * 100),
+        }),
+    });
+  }
+
+  return windows;
+}
+
+export async function fetchXaiSubscriptionUsage(
+  options: UsageFetchOptions = {},
+): Promise<SubscriptionProviderUsage | null> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const token = await getFreshXaiAccessToken({
+    ...(options.executor && { executor: options.executor }),
+    fetchImpl,
+  });
+
+  if (!token) {
+    return null;
+  }
+
+  const authHeaders = {
+    authorization: `Bearer ${token.access}`,
+    accept: 'application/json',
+    'user-agent': 'roomote',
+  };
+
+  // Identity-first: resolve user, then request billing for that session.
+  // Fail closed without surfacing identity or raw bodies to callers.
+  const userResult = await fetchJson(
+    fetchImpl,
+    XAI_USAGE_USER_ENDPOINT,
+    authHeaders,
+  );
+  if (userResult.status !== 200 || !asRecord(userResult.payload)?.userId) {
+    // Some deployments return `id` instead of `userId`.
+    const user = asRecord(userResult.payload);
+    if (
+      userResult.status !== 200 ||
+      (!firstString(user, ['userId', 'user_id', 'id']) &&
+        !firstNumber(user, ['userId', 'id']))
+    ) {
+      return null;
+    }
+  }
+
+  const billingResult = await fetchJson(
+    fetchImpl,
+    XAI_USAGE_BILLING_ENDPOINT,
+    authHeaders,
+  );
+  const windows = parseXaiSubscriptionUsage(billingResult.payload, Date.now());
+
+  if (windows.length === 0) {
+    return null;
+  }
+
+  return {
+    providerId: 'xai-subscription',
+    windows,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 // --- Z.AI / Z.AI Coding Plan ----------------------------------------------
 
 /**
@@ -762,6 +1053,7 @@ export async function getSubscriptionProviderUsage(
     fetchChatGptUsage(options),
     fetchGitHubCopilotUsage(options),
     fetchKimiForCodingUsage(options),
+    fetchXaiSubscriptionUsage(options),
     fetchZaiUsage(options),
     fetchZaiCodingPlanUsage(options),
   ]);

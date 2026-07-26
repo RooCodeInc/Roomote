@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getModelProviderLabel,
   isApiKeySubscriptionUsageProviderId,
@@ -49,6 +50,7 @@ import { Section } from '@/components/settings/Section';
 import { AdditionalEnvFieldInput } from '@/components/settings/AdditionalEnvFieldInput';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
+import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
 import { ProviderCreditBalanceLine } from '@/components/settings/ProviderCreditBalanceLine';
 import { SubscriptionUsageLine } from '@/components/settings/SubscriptionUsageLine';
 
@@ -350,7 +352,21 @@ function ProviderCredentialsDialog({
   const isChatGptProvider =
     selectedProvider?.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   const isGitHubCopilotProvider = selectedProvider?.id === 'github-copilot';
+  const isXaiSubscriptionProvider =
+    selectedProvider?.id === XAI_SUBSCRIPTION_PROVIDER_ID;
   const isOAuthProvider = selectedProvider?.authKind === 'oauth';
+  const oauthAccountDescription = isChatGptProvider
+    ? 'Connect a ChatGPT Plus or Pro account to run tasks on your subscription.'
+    : isGitHubCopilotProvider
+      ? 'Connect a GitHub account with an active Copilot plan.'
+      : isXaiSubscriptionProvider
+        ? 'Connect a SuperGrok or eligible X Premium+ account to run Grok models on your subscription.'
+        : 'Connect your subscription account.';
+  const oauthConnectButtonLabel = isGitHubCopilotProvider
+    ? 'Connect GitHub Copilot'
+    : isXaiSubscriptionProvider
+      ? 'Connect Grok subscription'
+      : 'Connect ChatGPT';
   const title =
     mode === 'add'
       ? 'Add Provider'
@@ -412,9 +428,7 @@ function ProviderCredentialsDialog({
                 <div className={PROVIDER_GRID_ROW_CLASS}>
                   <span className="text-sm font-medium">Account</span>
                   <p className="min-w-0 text-sm text-muted-foreground">
-                    {isChatGptProvider
-                      ? 'Connect a ChatGPT Plus or Pro account to run tasks on your subscription.'
-                      : 'Connect a GitHub account with an active Copilot plan.'}
+                    {oauthAccountDescription}
                   </p>
                 </div>
               ) : (
@@ -533,9 +547,7 @@ function ProviderCredentialsDialog({
               }
               disabled={isSaving || !selectedProvider}
             >
-              {isGitHubCopilotProvider
-                ? 'Connect GitHub Copilot'
-                : 'Connect ChatGPT'}
+              {oauthConnectButtonLabel}
             </Button>
           ) : (
             <Button
@@ -622,6 +634,62 @@ function ChatGptSubscriptionRow({
           size="sm"
           variant="outline"
           className="shrink-0"
+          onClick={() => void onDisconnect()}
+          disabled={isDisconnecting}
+        >
+          {isDisconnecting ? <Spinner /> : 'Disconnect'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function XaiSubscriptionRow({
+  errored,
+  accountEmail,
+  errorMessage,
+  usage,
+  onReconnect,
+  onDisconnect,
+  isDisconnecting,
+}: {
+  errored: boolean;
+  accountEmail?: string;
+  errorMessage?: string;
+  usage?: SubscriptionProviderUsage;
+  onReconnect: () => void;
+  onDisconnect: () => Promise<void>;
+  isDisconnecting: boolean;
+}) {
+  return (
+    <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
+      <span className="min-w-0 truncate text-sm font-medium">
+        {getModelProviderLabel(XAI_SUBSCRIPTION_PROVIDER_ID)}
+      </span>
+      <div className="flex min-w-0 items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <p
+            className={`min-w-0 truncate text-sm ${errored ? 'text-destructive' : 'text-muted-foreground'}`}
+          >
+            {errored
+              ? (errorMessage ??
+                'xAI Grok subscription needs to be reconnected.')
+              : accountEmail
+                ? `Connected as ${accountEmail}`
+                : 'Connected to a SuperGrok / X Premium+ account.'}
+          </p>
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
+        </div>
+        {errored ? (
+          <Button size="sm" variant="outline" onClick={onReconnect}>
+            Reconnect
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => void onDisconnect()}
           disabled={isDisconnecting}
         >
@@ -749,6 +817,7 @@ export function InferenceProviderSection({
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
   const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
     useState(false);
+  const [isXaiDialogOpen, setIsXaiDialogOpen] = useState(false);
 
   const chatgptStatusQuery = useQuery(
     trpc.chatgptSubscription.status.queryOptions(),
@@ -758,6 +827,8 @@ export function InferenceProviderSection({
     trpc.githubCopilotSubscription.status.queryOptions(),
   );
   const githubCopilotStatus = githubCopilotStatusQuery.data ?? null;
+  const xaiStatusQuery = useQuery(trpc.xaiSubscription.status.queryOptions());
+  const xaiStatus = xaiStatusQuery.data ?? null;
 
   // Usage endpoints are unofficial upstream surfaces; a provider missing from
   // the result just means no usage line is rendered for it.
@@ -893,6 +964,25 @@ export function InferenceProviderSection({
       onError: (error) => toast.error(error.message),
     }),
   );
+  const disconnectXai = useMutation(
+    trpc.xaiSubscription.disconnect.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Disconnected xAI Grok subscription.');
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.providerSetup.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.launchOptions.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.xaiSubscription.status.queryKey(),
+          }),
+        ]);
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
 
   const deleteProvider = useMutation(
     trpc.taskModels.deleteProvider.mutationOptions({
@@ -946,6 +1036,9 @@ export function InferenceProviderSection({
   const handleDisconnectGitHubCopilot = async () => {
     await disconnectGitHubCopilot.mutateAsync();
   };
+  const handleDisconnectXai = async () => {
+    await disconnectXai.mutateAsync();
+  };
 
   const handleDeleteProvider = async () => {
     if (!deleteProviderId) {
@@ -974,23 +1067,41 @@ export function InferenceProviderSection({
     (githubCopilotStatusQuery.isPending &&
       Boolean(providerSetup?.githubCopilotConnected));
   const githubCopilotErrored = githubCopilotStatus?.status === 'error';
+  const xaiHasRecord =
+    xaiStatus?.status === 'connected' ||
+    xaiStatus?.status === 'error' ||
+    (xaiStatusQuery.isPending &&
+      Boolean(providerSetup?.xaiSubscriptionConnected));
+  const xaiErrored = xaiStatus?.status === 'error';
+  const xaiHasApiKey = Boolean(providerSetup?.xaiApiKeyConnected);
 
-  // The ChatGPT provider is OAuth-backed: it renders as a connected row with
-  // Disconnect/Reconnect when a subscription record exists, and otherwise
-  // joins the add-provider dropdown with a Connect button instead of an API
-  // key field. Exclude it from the API-key connected rows either way.
-  const apiKeyConnectedProviders = connectedProviders.filter(
-    (provider) =>
-      provider.id !== CHATGPT_SUBSCRIPTION_PROVIDER_ID &&
-      provider.id !== 'github-copilot',
-  );
-  const addableProviders = availableProviders.filter((provider) =>
-    provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
-      ? !chatgptHasRecord
-      : provider.id === 'github-copilot'
-        ? !githubCopilotHasRecord
-        : provider.authKind === 'api-key' || provider.authKind === 'endpoint',
-  );
+  // Subscription oauth rows are rendered separately; API-key xAI stays in the
+  // key list and can coexist with the SuperGrok subscription provider.
+  const apiKeyConnectedProviders = connectedProviders.filter((provider) => {
+    if (
+      provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID ||
+      provider.id === 'github-copilot' ||
+      provider.id === XAI_SUBSCRIPTION_PROVIDER_ID
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const addableProviders = availableProviders.filter((provider) => {
+    if (provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID) {
+      return !chatgptHasRecord;
+    }
+    if (provider.id === 'github-copilot') {
+      return !githubCopilotHasRecord;
+    }
+    if (provider.id === XAI_SUBSCRIPTION_PROVIDER_ID) {
+      return !xaiHasRecord;
+    }
+    if (provider.id === 'xai') {
+      return !xaiHasApiKey;
+    }
+    return provider.authKind === 'api-key' || provider.authKind === 'endpoint';
+  });
   const sortedApiKeyConnectedProviders = useMemo(
     () =>
       [...apiKeyConnectedProviders].sort((left, right) =>
@@ -1070,12 +1181,18 @@ export function InferenceProviderSection({
 
   const hasConnectedApiKeys = sortedApiKeyConnectedProviders.length > 0;
   const hasConnectedProviders =
-    hasConnectedApiKeys || chatgptHasRecord || githubCopilotHasRecord;
+    hasConnectedApiKeys ||
+    chatgptHasRecord ||
+    githubCopilotHasRecord ||
+    xaiHasRecord;
   const canAddProvider = sortedAddableProviders.length > 0;
+  // Count key rows and subscription rows independently so dual-path xAI
+  // (API key + SuperGrok) can delete the key while the subscription remains.
   const connectedProviderCount =
     sortedApiKeyConnectedProviders.length +
     (chatgptHasRecord ? 1 : 0) +
-    (githubCopilotHasRecord ? 1 : 0);
+    (githubCopilotHasRecord ? 1 : 0) +
+    (xaiHasRecord ? 1 : 0);
 
   return (
     <Section icon={KeyRound} title="Inference Providers">
@@ -1094,6 +1211,14 @@ export function InferenceProviderSection({
         </p>
       ) : null}
 
+      {xaiHasRecord && xaiHasApiKey ? (
+        <p className="text-sm text-muted-foreground">
+          Both an xAI API key and a Grok subscription are configured. The
+          subscription is preferred at runtime when an <code>xai/</code> model
+          is selected.
+        </p>
+      ) : null}
+
       <ChatGptConnectDialog
         open={isChatGptDialogOpen}
         onOpenChange={setIsChatGptDialogOpen}
@@ -1101,6 +1226,10 @@ export function InferenceProviderSection({
       <GitHubCopilotConnectDialog
         open={isGitHubCopilotDialogOpen}
         onOpenChange={setIsGitHubCopilotDialogOpen}
+      />
+      <XaiConnectDialog
+        open={isXaiDialogOpen}
+        onOpenChange={setIsXaiDialogOpen}
       />
       {providerDialog ? (
         <ProviderCredentialsDialog
@@ -1118,6 +1247,8 @@ export function InferenceProviderSection({
             setProviderDialog(null);
             if (providerId === 'github-copilot') {
               setIsGitHubCopilotDialogOpen(true);
+            } else if (providerId === XAI_SUBSCRIPTION_PROVIDER_ID) {
+              setIsXaiDialogOpen(true);
             } else {
               setIsChatGptDialogOpen(true);
             }
@@ -1158,6 +1289,17 @@ export function InferenceProviderSection({
                 onReconnect={() => setIsGitHubCopilotDialogOpen(true)}
                 onDisconnect={handleDisconnectGitHubCopilot}
                 isDisconnecting={disconnectGitHubCopilot.isPending}
+              />
+            ) : null}
+            {xaiHasRecord ? (
+              <XaiSubscriptionRow
+                errored={xaiErrored}
+                accountEmail={xaiStatus?.email}
+                errorMessage={xaiStatus?.error}
+                usage={usageByProvider.get(XAI_SUBSCRIPTION_PROVIDER_ID)}
+                onReconnect={() => setIsXaiDialogOpen(true)}
+                onDisconnect={handleDisconnectXai}
+                isDisconnecting={disconnectXai.isPending}
               />
             ) : null}
             {sortedApiKeyConnectedProviders.map((provider) => (

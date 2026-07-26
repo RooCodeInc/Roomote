@@ -1,17 +1,31 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockGetFreshXaiAccessToken } = vi.hoisted(() => ({
+  mockGetFreshXaiAccessToken: vi.fn(),
+}));
 
 vi.mock('../../encryption', () => ({
   encryptJSON: (value: unknown) => JSON.stringify(value),
   decryptSecrets: async (value: string) => JSON.parse(value) as unknown,
 }));
 
+vi.mock('../xai-subscription', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../xai-subscription')>();
+  return {
+    ...actual,
+    getFreshXaiAccessToken: mockGetFreshXaiAccessToken,
+  };
+});
+
 import {
   fetchChatGptUsage,
   fetchGitHubCopilotUsage,
   fetchKimiForCodingUsage,
+  fetchXaiSubscriptionUsage,
   fetchZaiCodingPlanUsage,
   fetchZaiUsage,
   getSubscriptionProviderUsage,
+  parseXaiSubscriptionUsage,
   parseZaiQuotaUsage,
 } from '../subscription-provider-usage';
 
@@ -409,6 +423,216 @@ describe('getSubscriptionProviderUsage', () => {
 
     expect(usage).toHaveLength(1);
     expect(usage[0]).toMatchObject({ providerId: 'kimi-for-coding' });
+  });
+});
+
+describe('parseXaiSubscriptionUsage', () => {
+  it('normalizes included usage, credits, and on-demand windows', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        included_usage: {
+          used_percent: 42.5,
+          used: 425,
+          remaining: 575,
+          limit: 1000,
+          resets_at: '2026-08-01T00:00:00.000Z',
+        },
+        credits: { balance: 12.5 },
+        on_demand: { used: 3, limit: 10 },
+      },
+      Date.parse('2026-07-01T00:00:00.000Z'),
+    );
+
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        usedPercent: 42.5,
+        used: 425,
+        remaining: 575,
+        limit: 1000,
+        resetsAt: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        label: 'Credits',
+        remaining: 12.5,
+      },
+      {
+        label: 'On-demand',
+        used: 3,
+        limit: 10,
+        usedPercent: 30,
+      },
+    ]);
+  });
+
+  it('parses the live cli-chat-proxy format=credits payload', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        config: {
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: '2026-07-24T01:21:57.505552+00:00',
+            end: '2026-07-31T01:21:57.505552+00:00',
+          },
+          creditUsagePercent: 27,
+          onDemandCap: { val: 0 },
+          onDemandUsed: { val: 0 },
+          productUsage: [
+            { product: 'GrokBuild', usagePercent: 26 },
+            { product: 'Api', usagePercent: 1 },
+            { product: 'GrokChat' },
+            { product: 'GrokVoice' },
+          ],
+          prepaidBalance: { val: 0 },
+          billingPeriodEnd: '2026-07-31T01:21:57.505552+00:00',
+        },
+      },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    // Only the aggregate pool renders: the per-product entries slice the
+    // same shared pool (duplicate-looking bars), and a zero on-demand
+    // credit balance is the idle state, not a warning.
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        usedPercent: 27,
+        resetsAt: '2026-07-31T01:21:57.505Z',
+      },
+    ]);
+  });
+
+  it('shows the credit balance only when on-demand credits exist', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        config: {
+          creditUsagePercent: 100,
+          prepaidBalance: { val: 12.5 },
+          billingPeriodEnd: '2026-07-31T01:21:57.505552+00:00',
+        },
+      },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    // Pool exhausted with a positive balance: tasks continue on metered
+    // spend, which is exactly when the operator needs to see the number.
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        usedPercent: 100,
+        resetsAt: '2026-07-31T01:21:57.505Z',
+      },
+      {
+        label: 'Credits',
+        remaining: 12.5,
+      },
+    ]);
+  });
+
+  it('parses the live monthly billing payload', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        config: {
+          monthlyLimit: { val: 150_000 },
+          used: { val: 73_743 },
+          billingPeriodEnd: '2026-08-01T00:00:00+00:00',
+        },
+      },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        used: 73_743,
+        limit: 150_000,
+        usedPercent: 49.162,
+        resetsAt: '2026-08-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('returns an empty list for unusable payloads', () => {
+    expect(parseXaiSubscriptionUsage(null)).toEqual([]);
+    expect(parseXaiSubscriptionUsage({})).toEqual([]);
+    expect(parseXaiSubscriptionUsage({ plan: 'pro' })).toEqual([]);
+  });
+});
+
+describe('fetchXaiSubscriptionUsage', () => {
+  beforeEach(() => {
+    mockGetFreshXaiAccessToken.mockReset();
+  });
+
+  it('fetches user then billing and returns normalized windows', async () => {
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-access',
+      expires: Date.now() + 3_600_000,
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ userId: 'user-1' }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          includedUsage: {
+            usedPercent: 10,
+            limit: 100,
+            remaining: 90,
+          },
+        }),
+      );
+
+    const usage = await fetchXaiSubscriptionUsage({ fetchImpl });
+
+    expect(usage).toMatchObject({
+      providerId: 'xai-subscription',
+      windows: [
+        {
+          label: 'Included usage',
+          usedPercent: 10,
+          limit: 100,
+          remaining: 90,
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://cli-chat-proxy.grok.com/v1/user',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer xai-access',
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer xai-access',
+        }),
+      }),
+    );
+  });
+
+  it('returns null when no subscription is connected', async () => {
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+    const fetchImpl = vi.fn();
+    await expect(fetchXaiSubscriptionUsage({ fetchImpl })).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the billing payload cannot be parsed', async () => {
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-access',
+      expires: Date.now() + 3_600_000,
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'user-1' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'ok' }));
+
+    await expect(fetchXaiSubscriptionUsage({ fetchImpl })).resolves.toBeNull();
   });
 });
 

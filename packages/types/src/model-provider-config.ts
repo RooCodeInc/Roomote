@@ -35,10 +35,18 @@ import {
  */
 export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
 
+/**
+ * Setup-catalog id for SuperGrok / eligible X Premium+ OAuth. Models keep the
+ * `xai/` id prefix (opencode's xAI provider), so this id is a
+ * configuration/connect surface only — not a model-id prefix.
+ */
+export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
+
 export const SETUP_MODEL_PROVIDER_IDS = [
   'openrouter',
   ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
 ] as const;
 
 /**
@@ -510,12 +518,18 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
   },
   {
     // Provider id matches the models.dev/opencode `xai` provider so
-    // `xai/<model>` slugs resolve at runtime.
+    // `xai/<model>` slugs resolve at runtime. API-key path only; SuperGrok
+    // OAuth is a separate catalog entry (`xai-subscription`).
     id: 'xai',
     label: 'xAI',
     envVarName: 'XAI_API_KEY',
     defaultRoomoteModel: 'xai/grok-4.5',
     authKind: 'api-key',
+    credentialHelp: {
+      text: 'Paste an xAI API key from the console.',
+      href: 'https://console.x.ai',
+      linkLabel: 'xAI console',
+    },
     suggestedTaskModels: mapRecommendedTaskModels({
       'grok-4-5': 'xai/grok-4.5',
     }),
@@ -688,6 +702,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       explore: 'openai/gpt-5.6-luna',
       planning: 'openai/gpt-5.6-sol',
     },
+  },
+  {
+    id: XAI_SUBSCRIPTION_PROVIDER_ID,
+    label: 'xAI (Grok subscription)',
+    envVarName: undefined,
+    defaultRoomoteModel: 'xai/grok-4.5',
+    authKind: 'oauth',
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'grok-4-5': 'xai/grok-4.5',
+    }),
   },
 ] as const satisfies readonly SetupModelProviderDescriptor[];
 
@@ -967,6 +991,19 @@ export type SetupModelStatus = {
   /** Whether a GitHub Copilot subscription OAuth record is connected. */
   githubCopilotConnected?: boolean;
   /**
+   * Whether an xAI Grok subscription OAuth record is connected. The `xai`
+   * catalog entry still accepts `XAI_API_KEY`; this flag marks the provider
+   * connected when only the subscription is present (and lets the gateway
+   * prefer the OAuth bearer when both exist).
+   */
+  xaiSubscriptionConnected?: boolean;
+  /**
+   * Whether an `XAI_API_KEY` is configured (runtime or saved), independent of
+   * the SuperGrok subscription. Used by Settings to show both paths without
+   * double-counting an OAuth-only connection as an API-key row.
+   */
+  xaiApiKeyConnected?: boolean;
+  /**
    * True when both `OPENAI_API_KEY` and a ChatGPT subscription are
    * configured. opencode's Codex plugin prefers OAuth auth when both are
    * present, so the subscription wins at runtime; this flag lets the UI
@@ -1145,6 +1182,8 @@ export function getDisplayModelProviderId(
   options?: {
     chatgptConnected?: boolean;
     openaiConnected?: boolean;
+    xaiSubscriptionConnected?: boolean;
+    xaiConnected?: boolean;
   },
 ): string | null {
   const normalizedModelId = normalizeOptionalString(modelId);
@@ -1161,6 +1200,17 @@ export function getDisplayModelProviderId(
     !options?.openaiConnected
   ) {
     return CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  }
+
+  // Mirror the ChatGPT/OpenAI relationship: `xai/` models group under the
+  // Grok subscription when it is the only xAI-facing connection, and stay
+  // under the native xAI group when an API key is also present.
+  if (
+    runtimeProviderId === 'xai' &&
+    options?.xaiSubscriptionConnected &&
+    !options?.xaiConnected
+  ) {
+    return XAI_SUBSCRIPTION_PROVIDER_ID;
   }
 
   return runtimeProviderId;
@@ -1185,16 +1235,14 @@ export function groupModelsByDisplayProvider<T extends { id: string }>(
   options?: {
     chatgptConnected?: boolean;
     openaiConnected?: boolean;
+    xaiSubscriptionConnected?: boolean;
+    xaiConnected?: boolean;
   },
 ): DisplayModelProviderGroup<T>[] {
   const groups = new Map<string, T[]>();
 
   for (const item of items) {
-    const providerId =
-      getDisplayModelProviderId(item.id, {
-        chatgptConnected: options?.chatgptConnected,
-        openaiConnected: options?.openaiConnected,
-      }) ?? 'other';
+    const providerId = getDisplayModelProviderId(item.id, options) ?? 'other';
     const groupItems = groups.get(providerId) ?? [];
     groupItems.push(item);
     groups.set(providerId, groupItems);
@@ -1463,10 +1511,12 @@ export function buildSetupModelStatus(input: {
    */
   chatgptConnected?: boolean;
   githubCopilotConnected?: boolean;
+  xaiSubscriptionConnected?: boolean;
 }): SetupModelStatus {
   const runtimeEnv = input.runtimeEnv ?? {};
   const chatgptConnected = Boolean(input.chatgptConnected);
   const githubCopilotConnected = Boolean(input.githubCopilotConnected);
+  const xaiSubscriptionConnected = Boolean(input.xaiSubscriptionConnected);
   const persistedModelConfig = normalizeDeploymentModelConfig(
     input.persistedModelConfig,
   );
@@ -1517,7 +1567,9 @@ export function buildSetupModelStatus(input: {
           ? chatgptConnected
           : provider.id === 'github-copilot'
             ? githubCopilotConnected
-            : false;
+            : provider.id === XAI_SUBSCRIPTION_PROVIDER_ID
+              ? xaiSubscriptionConnected
+              : false;
       return {
         ...provider,
         additionalEnvValues: {},
@@ -1563,17 +1615,20 @@ export function buildSetupModelStatus(input: {
         .filter((entry): entry is [string, string] => entry[1] !== null),
     );
 
+    const runtimeApiKeySatisfied =
+      hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured);
+    const savedApiKeySatisfied =
+      hasRequiredEnvVars &&
+      requiredEnvVarNames.every(
+        (name) => isPersisted(name) || isRuntimeConfigured(name),
+      ) &&
+      requiredEnvVarNames.some(isPersisted);
+
     return {
       ...provider,
       additionalEnvValues,
-      runtimeApiKeySatisfied:
-        hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured),
-      savedApiKeySatisfied:
-        hasRequiredEnvVars &&
-        requiredEnvVarNames.every(
-          (name) => isPersisted(name) || isRuntimeConfigured(name),
-        ) &&
-        requiredEnvVarNames.some(isPersisted),
+      runtimeApiKeySatisfied,
+      savedApiKeySatisfied,
     };
   };
 
@@ -1655,27 +1710,36 @@ export function buildSetupModelStatus(input: {
 
   // A ChatGPT subscription covers `openai/` models, so it can satisfy the
   // runtime/persisted provider status for the OpenAI API-key provider even
-  // without OPENAI_API_KEY.
+  // without OPENAI_API_KEY. SuperGrok covers `xai/` the same way.
   const chatgptCoversOpenAi = chatgptConnected;
+  const xaiSubscriptionCoversXai = xaiSubscriptionConnected;
   const openaiRuntimeSatisfied =
     runtimeProviderStatus?.id === 'openai'
       ? runtimeProviderStatus.runtimeApiKeySatisfied || chatgptCoversOpenAi
-      : (runtimeProviderStatus?.runtimeApiKeySatisfied ?? false);
+      : runtimeProviderStatus?.id === 'xai'
+        ? runtimeProviderStatus.runtimeApiKeySatisfied ||
+          xaiSubscriptionCoversXai
+        : (runtimeProviderStatus?.runtimeApiKeySatisfied ?? false);
   const openaiPersistedSatisfied =
     persistedProviderStatus?.id === 'openai'
       ? persistedProviderStatus.savedApiKeySatisfied ||
         persistedProviderStatus.runtimeApiKeySatisfied ||
         chatgptCoversOpenAi
-      : (persistedProviderStatus?.savedApiKeySatisfied ??
-        persistedProviderStatus?.runtimeApiKeySatisfied ??
-        false);
+      : persistedProviderStatus?.id === 'xai'
+        ? persistedProviderStatus.savedApiKeySatisfied ||
+          persistedProviderStatus.runtimeApiKeySatisfied ||
+          xaiSubscriptionCoversXai
+        : (persistedProviderStatus?.savedApiKeySatisfied ??
+          persistedProviderStatus?.runtimeApiKeySatisfied ??
+          false);
 
   const setupSatisfiedByRuntimeEnv =
     runtimeRoomoteModelSatisfied && openaiRuntimeSatisfied;
   // The persisted model works with a key from either source: the effective
   // model runtime env resolves keys runtime-first with a DB fallback, so a
   // saved model choice plus a runtime-env key is a complete setup. A
-  // ChatGPT subscription also satisfies persisted openai/ models.
+  // ChatGPT subscription also satisfies persisted openai/ models; SuperGrok
+  // does the same for xai/.
   // Symmetric: a runtime env model plus a saved provider key is also complete,
   // because task runtime resolution layer loads keys the same way.
   const setupSatisfiedByRuntimeModelAndSavedKey =
@@ -1684,7 +1748,10 @@ export function buildSetupModelStatus(input: {
       runtimeProviderStatus &&
       (runtimeProviderStatus.id === 'openai'
         ? runtimeProviderStatus.savedApiKeySatisfied || chatgptCoversOpenAi
-        : runtimeProviderStatus.savedApiKeySatisfied),
+        : runtimeProviderStatus.id === 'xai'
+          ? runtimeProviderStatus.savedApiKeySatisfied ||
+            xaiSubscriptionCoversXai
+          : runtimeProviderStatus.savedApiKeySatisfied),
     );
   const setupSatisfied =
     setupSatisfiedByRuntimeEnv ||
@@ -1693,6 +1760,7 @@ export function buildSetupModelStatus(input: {
       persistedRoomoteModel &&
       (openaiPersistedSatisfied ||
         (persistedProviderStatus?.id !== 'openai' &&
+          persistedProviderStatus?.id !== 'xai' &&
           (persistedProviderStatus?.savedApiKeySatisfied ||
             persistedProviderStatus?.runtimeApiKeySatisfied))),
     );
@@ -1706,6 +1774,26 @@ export function buildSetupModelStatus(input: {
         openaiProvider.savedApiKeySatisfied),
     );
 
+  // Key presence for xAI is computed from env only so the UI can show the
+  // API-key path separately from SuperGrok OAuth.
+  const xaiApiKeyConnected = (() => {
+    const required = getSetupModelProviderRequiredEnvVarNames(
+      getSetupModelProvider('xai'),
+    );
+    if (required.length === 0) {
+      return false;
+    }
+    const isRuntimeConfigured = (name: string) =>
+      isConfiguredEnvValue(runtimeEnv[name]);
+    const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
+    return (
+      required.every(
+        (name) => isPersisted(name) || isRuntimeConfigured(name),
+      ) &&
+      required.some((name) => isPersisted(name) || isRuntimeConfigured(name))
+    );
+  })();
+
   return {
     runtimeRoomoteModel,
     runtimeRoomoteModelSatisfied,
@@ -1718,6 +1806,8 @@ export function buildSetupModelStatus(input: {
     setupSatisfiedByRuntimeEnv,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
+    xaiApiKeyConnected,
     openaiAndChatGptBothConfigured,
   };
 }

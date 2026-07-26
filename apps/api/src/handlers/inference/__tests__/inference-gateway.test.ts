@@ -8,12 +8,14 @@ const {
   mockResolveModelProviderEnvValue,
   mockGetFreshChatGptAccessToken,
   mockGetGitHubCopilotAccessToken,
+  mockGetFreshXaiAccessToken,
   mockRecordLlmUsage,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetFreshChatGptAccessToken: vi.fn(),
   mockGetGitHubCopilotAccessToken: vi.fn(),
+  mockGetFreshXaiAccessToken: vi.fn(),
   mockRecordLlmUsage: vi.fn(),
 }));
 
@@ -28,6 +30,7 @@ vi.mock('@roomote/db/server', () => ({
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
   getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
   getGitHubCopilotAccessToken: mockGetGitHubCopilotAccessToken,
+  getFreshXaiAccessToken: mockGetFreshXaiAccessToken,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -114,6 +117,7 @@ describe('inference gateway', () => {
     vi.unstubAllGlobals();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
     mockResolveModelProviderEnvValue.mockImplementation(
       async (names: string | readonly string[]) => {
         const nameList = typeof names === 'string' ? [names] : names;
@@ -772,6 +776,74 @@ describe('inference gateway', () => {
       );
 
       expect(response.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('xAI Grok subscription (xai-oauth strategy)', () => {
+    async function postXai(
+      app: Hono<{ Variables: Variables }>,
+      path = '/api/inference/xai/v1/chat/completions',
+    ) {
+      return app.request(path, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer run-token-value',
+        },
+        body: JSON.stringify({ model: 'grok-4.5', messages: [] }),
+      });
+    }
+
+    it('prefers a connected OAuth access token over XAI_API_KEY', async () => {
+      const fetchMock = stubUpstreamFetch();
+      mockGetFreshXaiAccessToken.mockResolvedValue({
+        access: 'xai-oauth-access',
+        refresh: 'xai-oauth-refresh',
+        expires: Date.now() + 3_600_000,
+      });
+
+      const response = await postXai(createApp(createRunToken()));
+
+      expect(response.status).toBe(200);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://api.x.ai/v1/chat/completions');
+      const headers = new Headers(init.headers);
+      expect(headers.get('authorization')).toBe('Bearer xai-oauth-access');
+    });
+
+    it('falls back to XAI_API_KEY when no subscription is connected', async () => {
+      const fetchMock = stubUpstreamFetch();
+      mockGetFreshXaiAccessToken.mockResolvedValue(null);
+      mockResolveModelProviderEnvValue.mockImplementation(
+        async (names: string | readonly string[]) => {
+          const nameList = typeof names === 'string' ? [names] : names;
+          if (nameList.includes('XAI_API_KEY')) {
+            return 'xai-api-key-value';
+          }
+          return undefined;
+        },
+      );
+
+      const response = await postXai(createApp(createRunToken()));
+
+      expect(response.status).toBe(200);
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const headers = new Headers(init.headers);
+      expect(headers.get('authorization')).toBe('Bearer xai-api-key-value');
+    });
+
+    it('returns 404 when disconnected with no API key', async () => {
+      const fetchMock = stubUpstreamFetch();
+      mockGetFreshXaiAccessToken.mockResolvedValue(null);
+      mockResolveModelProviderEnvValue.mockResolvedValue(undefined);
+
+      const response = await postXai(createApp(createRunToken()));
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({
+        error: expect.stringMatching(/xAI|subscription|XAI_API_KEY/i),
+      });
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });

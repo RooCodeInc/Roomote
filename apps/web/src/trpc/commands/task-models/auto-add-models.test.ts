@@ -337,4 +337,17 @@ describe('collectConnectedTaskModelProviderIds', () => {
     expect(connected.has('openai')).toBe(true);
     expect(connected.has('google')).toBe(false);
   });
+
+  it('includes xai when SuperGrok is connected without an xAI API key', () => {
+    const connected = collectConnectedTaskModelProviderIds({
+      runtimeEnv: {},
+      persistedEnvVarNames: [],
+      chatgptConnected: false,
+      xaiSubscriptionConnected: true,
+    });
+
+    expect(connected.has('xai-subscription')).toBe(true);
+    // SuperGrok serves xai/ model ids, same alias pattern as ChatGPT→openai.
+    expect(connected.has('xai')).toBe(true);
+  });
 });

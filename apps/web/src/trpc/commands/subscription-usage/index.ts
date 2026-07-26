@@ -9,7 +9,8 @@ function assertAdmin(auth: UserAuthSuccess): void {
 
 /**
  * Usage/quota for connected subscription providers (ChatGPT, GitHub Copilot,
- * Kimi for Coding, Z.AI / Z.AI Coding Plan). Providers without a configured
+ * Kimi for Coding, xAI Grok subscription, Z.AI / Z.AI Coding Plan).
+ * Providers without a configured
  * credential or whose usage endpoint is unavailable are simply absent from
  * the result.
  */

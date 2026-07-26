@@ -15,6 +15,7 @@ export type SubscriptionUsageProviderId =
   | 'chatgpt'
   | 'github-copilot'
   | 'kimi-for-coding'
+  | 'xai-subscription'
   | 'zai'
   | 'zai-coding-plan';
 
@@ -87,6 +88,15 @@ export const KIMI_FOR_CODING_USAGE_ENDPOINTS = [
   'https://api.kimi.com/coding/v1/usages',
   'https://api.kimi.com/coding/v1/usage',
 ] as const;
+
+/**
+ * Unofficial Grok CLI session proxy used for SuperGrok / Premium+ billing
+ * lookups (same surface Grok Build and peer OAuth tools poll). Not a stable
+ * public API; parse defensively and omit usage on failure.
+ */
+export const XAI_CLI_CHAT_PROXY_BASE_URL = 'https://cli-chat-proxy.grok.com';
+export const XAI_USAGE_USER_ENDPOINT = `${XAI_CLI_CHAT_PROXY_BASE_URL}/v1/user`;
+export const XAI_USAGE_BILLING_ENDPOINT = `${XAI_CLI_CHAT_PROXY_BASE_URL}/v1/billing?format=credits`;
 
 /**
  * Undocumented Z.AI / BigModel monitor quota endpoint polled by Coding Plan

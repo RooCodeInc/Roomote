@@ -6,6 +6,7 @@ import {
 } from '@roomote/types';
 import {
   getFreshChatGptAccessToken,
+  getFreshXaiAccessToken,
   getGitHubCopilotAccessToken,
   resolveModelProviderEnvValue,
 } from '@roomote/db/server';
@@ -32,6 +33,8 @@ export type GatewayUpstreamResolution =
  * - `api-key`: inject the deployment's static key at the request path.
  * - `chatgpt-oauth`: mint a fresh subscription access token, add the
  *   account-id header, and collapse the request onto the Codex backend.
+ * - `xai-oauth`: prefer a connected Grok subscription access token, then
+ *   fall back to `XAI_API_KEY`.
  */
 export async function resolveGatewayUpstream(
   provider: InferenceGatewayProvider,
@@ -44,6 +47,10 @@ export async function resolveGatewayUpstream(
 
   if (provider.authStrategy === 'github-copilot-oauth') {
     return resolveGitHubCopilotUpstream(provider, upstreamPath, search);
+  }
+
+  if (provider.authStrategy === 'xai-oauth') {
+    return resolveXaiUpstream(provider, upstreamPath, search);
   }
 
   const [apiKey, upstreamBaseUrl] = await Promise.all([
@@ -72,6 +79,49 @@ export async function resolveGatewayUpstream(
               ),
             }
           : {},
+    },
+  };
+}
+
+/**
+ * xAI supports both SuperGrok OAuth and a BYOK API key. Prefer a connected
+ * subscription (fresh access token) so subscription users never need a key;
+ * fall back to the deployment key when only that is configured.
+ */
+async function resolveXaiUpstream(
+  provider: InferenceGatewayProvider,
+  upstreamPath: string,
+  search: string,
+): Promise<GatewayUpstreamResolution> {
+  const [oauthToken, apiKey, upstreamBaseUrl] = await Promise.all([
+    getFreshXaiAccessToken(),
+    resolveModelProviderEnvValue(provider.envVarNames),
+    resolveProviderUpstreamBaseUrl(provider),
+  ]);
+
+  const bearer = oauthToken?.access ?? apiKey;
+
+  if (!bearer) {
+    return {
+      ok: false,
+      status: 404,
+      error:
+        'No connected xAI Grok subscription or XAI_API_KEY is available for this deployment',
+    };
+  }
+
+  return {
+    ok: true,
+    resolved: {
+      upstreamUrl: `${upstreamBaseUrl}${upstreamPath}${search}`,
+      headers: provider.authHeader
+        ? {
+            [provider.authHeader.name]: formatProviderAuthHeaderValue(
+              provider,
+              bearer,
+            ),
+          }
+        : {},
     },
   };
 }

@@ -35,6 +35,11 @@ vi.mock('@/trpc/client', () => ({
         queryOptions: () => ({ queryKey: ['chatgptSubscription.status'] }),
       },
     },
+    xaiSubscription: {
+      status: {
+        queryOptions: () => ({ queryKey: ['xaiSubscription.status'] }),
+      },
+    },
     taskModels: {
       discoverProviderModels: {
         mutationOptions: (options: Record<string, unknown>) => options,
@@ -76,6 +81,23 @@ vi.mock('@/components/settings/ChatGptConnectDialog', () => ({
 
 vi.mock('@/components/settings/GitHubCopilotConnectDialog', () => ({
   GitHubCopilotConnectDialog: () => null,
+}));
+
+vi.mock('@/components/settings/XaiConnectDialog', () => ({
+  XaiConnectDialog: ({
+    open,
+    onOpenChange,
+  }: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) =>
+    open ? (
+      <div data-testid="xai-connect-dialog">
+        <button type="button" onClick={() => onOpenChange(false)}>
+          Close dialog
+        </button>
+      </div>
+    ) : null,
 }));
 
 vi.mock('@/components/system', () => ({
@@ -171,6 +193,31 @@ function githubCopilotProviderStatus(
   };
 }
 
+function xaiProviderStatus(options: {
+  keyConnected?: boolean;
+  subscriptionConnected?: boolean;
+}): SetupModelStatus['providers'][number] {
+  const keyConnected = options.keyConnected ?? false;
+  const subscriptionConnected = options.subscriptionConnected ?? false;
+  return {
+    id: 'xai',
+    label: 'xAI',
+    envVarName: 'XAI_API_KEY',
+    defaultRoomoteModel: 'xai/grok-4.5',
+    authKind: 'api-key',
+    suggestedTaskModels: [],
+    additionalEnvFields: [],
+    additionalEnvValues: {},
+    runtimeApiKeySatisfied: false,
+    savedApiKeySatisfied: keyConnected || subscriptionConnected,
+    credentialHelp: {
+      text: 'Use an API key, or connect a SuperGrok / eligible X Premium+ subscription.',
+      href: 'https://console.x.ai',
+      linkLabel: 'xAI console',
+    },
+  };
+}
+
 function openrouterProviderStatus(): SetupModelStatus['providers'][number] {
   return {
     id: 'openrouter',
@@ -234,16 +281,36 @@ function setupMutationMock() {
 function setupQueryMocks(options: {
   chatgptConnected: boolean;
   chatgptEmail?: string;
+  xaiConnected?: boolean;
+  xaiEmail?: string;
 }) {
-  mockUseQuery.mockReturnValue({
-    data: options.chatgptConnected
-      ? {
-          connected: true,
-          status: 'connected',
-          email: options.chatgptEmail ?? 'owner@example.com',
-        }
-      : { connected: false, status: 'disconnected' },
-  } as unknown as ReturnType<typeof mockUseQuery>);
+  mockUseQuery.mockImplementation((queryOptions) => {
+    const key = JSON.stringify(
+      (queryOptions as { queryKey?: unknown }).queryKey ?? [],
+    );
+    if (key.includes('xaiSubscription')) {
+      return {
+        data: options.xaiConnected
+          ? {
+              connected: true,
+              status: 'connected',
+              email: options.xaiEmail,
+            }
+          : { connected: false, status: 'disconnected' },
+        isPending: false,
+      } as never;
+    }
+    return {
+      data: options.chatgptConnected
+        ? {
+            connected: true,
+            status: 'connected',
+            email: options.chatgptEmail,
+          }
+        : { connected: false, status: 'disconnected' },
+      isPending: false,
+    } as never;
+  });
 }
 
 function selectProvider(provider: SetupModelProviderId) {
@@ -579,6 +646,74 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
         'Connect a GitHub account with an active Copilot plan:',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it('offers SuperGrok subscription connect alongside the xAI API key field', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            openrouterProviderStatus(),
+            xaiProviderStatus({ keyConnected: false }),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('xai');
+
+    expect(screen.getByPlaceholderText(/API key for xAI/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Connect Grok subscription/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
+  });
+
+  it('enables Continue when only an xAI Grok subscription is connected', () => {
+    setupQueryMocks({ chatgptConnected: false, xaiConnected: true });
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          xaiSubscriptionConnected: true,
+          providers: [
+            openrouterProviderStatus(),
+            xaiProviderStatus({ subscriptionConnected: true }),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('xai');
+
+    expect(screen.getByText(/Connected to a SuperGrok/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: /Connect Grok subscription/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens the xAI connect dialog from the subscription button', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            openrouterProviderStatus(),
+            xaiProviderStatus({ keyConnected: false }),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    selectProvider('xai');
+
+    expect(screen.queryByTestId('xai-connect-dialog')).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: /Connect Grok subscription/i }),
+    );
+    expect(screen.getByTestId('xai-connect-dialog')).toBeInTheDocument();
   });
 
   it('opens the ChatGPT connect dialog from the connect button', () => {

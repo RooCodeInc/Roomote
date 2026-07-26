@@ -10,18 +10,21 @@ import {
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
   resolveSetupModelProviderIdFromModel,
+  XAI_OPENCODE_PROVIDER_ID,
   type TaskModelOption,
 } from '@roomote/types';
 
 import { decryptSecrets } from '../encryption';
 import { resolveOpenCodeAuthContent } from './chatgpt-subscription';
 import { resolveGitHubCopilotOpenCodeAuthContent } from './github-copilot-subscription';
+import { getFreshXaiAccessToken } from './xai-subscription';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
@@ -200,9 +203,9 @@ export async function resolveEffectiveModelRuntimeEnv(
 /**
  * Resolve model runtime env for a task sandbox: the configured provider keys
  * the inference gateway can serve stay on the control plane and their names
- * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead, and a connected
- * ChatGPT subscription is routed through the gateway rather than
- * materializing `OPENCODE_AUTH_CONTENT` in the sandbox.
+ * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead. Connected ChatGPT,
+ * GitHub Copilot, and xAI Grok subscriptions are routed through the gateway
+ * via markers rather than materializing OAuth credentials in the sandbox.
  */
 export async function resolveSandboxModelRuntimeEnv(
   options: ModelRuntimeEnvOptions = {},
@@ -438,12 +441,45 @@ async function resolveModelRuntimeEnv(
     : null;
   const routeGitHubCopilotThroughGateway =
     inferenceGateway && githubCopilotAuthContent != null;
+  // xAI Grok subscription: when a connected OAuth record exists and any role
+  // or switchable model uses `xai/`, route through the gateway (marker only)
+  // or mint a fresh access token for non-gateway control-plane use.
+  const usesXaiModel = [
+    ...resolvedRoleModels,
+    ...gatewaySwitchableModelIds,
+  ].some(
+    (modelId) =>
+      typeof modelId === 'string' &&
+      modelId.startsWith(`${XAI_OPENCODE_PROVIDER_ID}/`),
+  );
+  const xaiAccessToken = usesXaiModel
+    ? await getFreshXaiAccessToken({ executor })
+    : null;
+  const routeXaiThroughGateway = inferenceGateway && xaiAccessToken != null;
+  // OpenCode's xAI provider is API-key shaped, not oauth Auth.Info. For
+  // non-gateway control-plane inference (titles, summaries, routing), mint a
+  // fresh access token and inject it as XAI_API_KEY. Never put the refresh
+  // token into OpenCode env. Prefer a connected subscription over BYOK so
+  // control-plane and gateway dual-path use the same credential precedence.
+  const xaiApiKeyFromOAuth: Record<string, string> =
+    xaiAccessToken && !routeXaiThroughGateway
+      ? { XAI_API_KEY: xaiAccessToken.access }
+      : {};
   const directOpenCodeAuthContent = [
     injectedOpenCodeAuthContent,
     githubCopilotAuthContent,
   ].reduce<Record<string, unknown>>((merged, content) => {
     return content ? { ...merged, ...JSON.parse(content) } : merged;
   }, {});
+
+  // When only the subscription is connected (no XAI_API_KEY), still advertise
+  // the provider key name so the worker knows xai models are gateway-covered.
+  // The marker alone drives rebase; R_INFERENCE_GATEWAY_KEYS stays key-based.
+  const xaiKeyAlreadyServed = gatewayServedKeyNameSet.has('XAI_API_KEY');
+  const effectiveGatewayServedKeyNames =
+    routeXaiThroughGateway && !xaiKeyAlreadyServed
+      ? [...gatewayServedKeyNames, 'XAI_API_KEY']
+      : gatewayServedKeyNames;
 
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
@@ -488,14 +524,19 @@ async function resolveModelRuntimeEnv(
       R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),
     ...resolvedProviderKeyValues,
-    ...(gatewayServedKeyNames.length > 0 && {
-      [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),
+    ...xaiApiKeyFromOAuth,
+    ...(effectiveGatewayServedKeyNames.length > 0 && {
+      [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]:
+        effectiveGatewayServedKeyNames.join(','),
     }),
     ...(routeChatGptThroughGateway
       ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }
       : {}),
     ...(routeGitHubCopilotThroughGateway
       ? { [INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME]: '1' }
+      : {}),
+    ...(routeXaiThroughGateway
+      ? { [INFERENCE_GATEWAY_XAI_ENV_VAR_NAME]: '1' }
       : {}),
     ...(!routeChatGptThroughGateway &&
     !routeGitHubCopilotThroughGateway &&
