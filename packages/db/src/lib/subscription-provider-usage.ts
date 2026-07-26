@@ -610,7 +610,12 @@ export function parseXaiSubscriptionUsage(
   const windows: SubscriptionUsageWindow[] = [];
   const resetsAt = resolveXaiResetsAt(config, now);
 
-  // Live format=credits: overall weekly percent + per-product breakdown.
+  // Live format=credits: paid Grok plans share one weekly pool across all
+  // Grok products, so only the aggregate percent is shown. The payload's
+  // per-product breakdown slices the same pool and would render as duplicate
+  // bars whenever one product dominates (an API-only deployment shows
+  // "Api: N%" identical to the aggregate); the breakdown stays on grok.com's
+  // own usage page.
   const creditUsagePercent = firstNumber(config, [
     'creditUsagePercent',
     'credit_usage_percent',
@@ -620,44 +625,12 @@ export function parseXaiSubscriptionUsage(
     'includedUsedPercent',
   ]);
 
-  const productUsage = config.productUsage ?? config.product_usage;
-  if (Array.isArray(productUsage)) {
-    for (const entry of productUsage) {
-      const product = asRecord(entry);
-      if (!product) {
-        continue;
-      }
-      const label = firstString(product, ['product', 'name', 'label']);
-      const usedPercent = firstNumber(product, [
-        'usagePercent',
-        'usage_percent',
-        'usedPercent',
-        'used_percent',
-      ]);
-      if (!label || usedPercent === undefined) {
-        continue;
-      }
-      windows.push({
-        label,
-        usedPercent: clampPercent(usedPercent),
-        ...(resetsAt && { resetsAt }),
-      });
-    }
-  }
-
   if (creditUsagePercent !== undefined) {
-    // Prefer a single overall bar when products did not yield windows; when
-    // products did, still surface the aggregate so operators see total burn.
-    const alreadyHasOverall = windows.some(
-      (window) => window.label === 'Included usage',
-    );
-    if (!alreadyHasOverall) {
-      windows.unshift({
-        label: 'Included usage',
-        usedPercent: clampPercent(creditUsagePercent),
-        ...(resetsAt && { resetsAt }),
-      });
-    }
+    windows.push({
+      label: 'Included usage',
+      usedPercent: clampPercent(creditUsagePercent),
+      ...(resetsAt && { resetsAt }),
+    });
   }
 
   // Live monthly billing (`/v1/billing` without format=credits).
@@ -751,7 +724,11 @@ export function parseXaiSubscriptionUsage(
       'prepaidBalance',
     ]) ??
     firstNumber(config, ['prepaidBalance', 'prepaid_balance', 'creditBalance']);
-  if (creditBalance !== undefined) {
+  // On-demand credits are the overflow path once the included pool is
+  // exhausted: a positive balance means tasks keep running on metered spend,
+  // which operators need to see. A zero balance is the common idle state and
+  // reads as an error ("Credits: 0 left"), so omit it like On-demand below.
+  if (creditBalance !== undefined && creditBalance > 0) {
     windows.push({
       label: 'Credits',
       remaining: creditBalance,

@@ -490,25 +490,41 @@ describe('parseXaiSubscriptionUsage', () => {
       Date.parse('2026-07-26T00:00:00.000Z'),
     );
 
+    // Only the aggregate pool renders: the per-product entries slice the
+    // same shared pool (duplicate-looking bars), and a zero on-demand
+    // credit balance is the idle state, not a warning.
     expect(windows).toEqual([
       {
         label: 'Included usage',
         usedPercent: 27,
         resetsAt: '2026-07-31T01:21:57.505Z',
       },
+    ]);
+  });
+
+  it('shows the credit balance only when on-demand credits exist', () => {
+    const windows = parseXaiSubscriptionUsage(
       {
-        label: 'GrokBuild',
-        usedPercent: 26,
-        resetsAt: '2026-07-31T01:21:57.505Z',
+        config: {
+          creditUsagePercent: 100,
+          prepaidBalance: { val: 12.5 },
+          billingPeriodEnd: '2026-07-31T01:21:57.505552+00:00',
+        },
       },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    // Pool exhausted with a positive balance: tasks continue on metered
+    // spend, which is exactly when the operator needs to see the number.
+    expect(windows).toEqual([
       {
-        label: 'Api',
-        usedPercent: 1,
+        label: 'Included usage',
+        usedPercent: 100,
         resetsAt: '2026-07-31T01:21:57.505Z',
       },
       {
         label: 'Credits',
-        remaining: 0,
+        remaining: 12.5,
       },
     ]);
   });
