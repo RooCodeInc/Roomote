@@ -458,6 +458,29 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ).toBe('openai');
   });
 
+  it('groups xai/ models under the Grok subscription when it is the only xAI connection', () => {
+    expect(
+      getDisplayModelProviderId('xai/grok-4.5', {
+        xaiSubscriptionConnected: true,
+      }),
+    ).toBe('xai-subscription');
+    expect(getDisplayModelProviderId('xai/grok-4.5', {})).toBe('xai');
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        xaiSubscriptionConnected: true,
+      }),
+    ).toBe('openai');
+  });
+
+  it('keeps xai/ models under xAI when an API key is also connected', () => {
+    expect(
+      getDisplayModelProviderId('xai/grok-4.5', {
+        xaiSubscriptionConnected: true,
+        xaiConnected: true,
+      }),
+    ).toBe('xai');
+  });
+
   it('groups model chooser options by display provider and catalog order', () => {
     const groups = groupModelsByDisplayProvider(
       [

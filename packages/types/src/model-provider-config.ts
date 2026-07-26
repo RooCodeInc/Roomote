@@ -1182,6 +1182,8 @@ export function getDisplayModelProviderId(
   options?: {
     chatgptConnected?: boolean;
     openaiConnected?: boolean;
+    xaiSubscriptionConnected?: boolean;
+    xaiConnected?: boolean;
   },
 ): string | null {
   const normalizedModelId = normalizeOptionalString(modelId);
@@ -1198,6 +1200,17 @@ export function getDisplayModelProviderId(
     !options?.openaiConnected
   ) {
     return CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  }
+
+  // Mirror the ChatGPT/OpenAI relationship: `xai/` models group under the
+  // Grok subscription when it is the only xAI-facing connection, and stay
+  // under the native xAI group when an API key is also present.
+  if (
+    runtimeProviderId === 'xai' &&
+    options?.xaiSubscriptionConnected &&
+    !options?.xaiConnected
+  ) {
+    return XAI_SUBSCRIPTION_PROVIDER_ID;
   }
 
   return runtimeProviderId;
@@ -1222,16 +1235,14 @@ export function groupModelsByDisplayProvider<T extends { id: string }>(
   options?: {
     chatgptConnected?: boolean;
     openaiConnected?: boolean;
+    xaiSubscriptionConnected?: boolean;
+    xaiConnected?: boolean;
   },
 ): DisplayModelProviderGroup<T>[] {
   const groups = new Map<string, T[]>();
 
   for (const item of items) {
-    const providerId =
-      getDisplayModelProviderId(item.id, {
-        chatgptConnected: options?.chatgptConnected,
-        openaiConnected: options?.openaiConnected,
-      }) ?? 'other';
+    const providerId = getDisplayModelProviderId(item.id, options) ?? 'other';
     const groupItems = groups.get(providerId) ?? [];
     groupItems.push(item);
     groups.set(providerId, groupItems);
