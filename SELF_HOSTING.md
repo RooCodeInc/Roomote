@@ -69,6 +69,47 @@ Point `<domain>`, `preview.<domain>`, and `*.preview.<domain>` A records at
 the server first; the installer waits briefly for DNS and Caddy retries
 certificates until the records are in place.
 
+### Flat preview hostnames
+
+When your certificate provider supports only one-label wildcards, use flat
+preview hostnames instead of `task-port.preview.example.com`. Set the preview
+base to the parent domain and add a suffix:
+
+```sh
+ROOMOTE_APP_DOMAIN=example.com
+ROOMOTE_PREVIEW_DOMAIN=example.com
+PREVIEW_PROXY_BASE_URL=https://example.com
+PREVIEW_DOMAINS=example.com
+PREVIEW_PROXY_SUBDOMAIN_SUFFIX=preview
+```
+
+Roomote then publishes `task-port-preview.example.com`, which is covered by
+`*.example.com`. Point `*.example.com` at Caddy or your tunnel, and reserve the
+`-preview` suffix so it does not collide with other first-level subdomains.
+
+One Cloudflare Tunnel can serve both the app and preview hostnames through the
+same Caddy instance. Install Roomote with `--tls-mode internal` so Caddy issues
+local certificates for the private tunnel-to-Caddy hop, then configure both
+ingress rules with the matching origin TLS setting:
+
+```yaml
+ingress:
+  - hostname: example.com
+    service: https://localhost:443
+    originRequest:
+      noTLSVerify: true
+  - hostname: '*.example.com'
+    service: https://localhost:443
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404
+```
+
+Replace `noTLSVerify: true` by configuring cloudflared to trust Caddy's local
+CA when you manage that trust chain yourself. The option applies only to the
+private tunnel-to-Caddy hop; Cloudflare still serves a publicly trusted
+certificate to browsers.
+
 ### Private networks and tunnels
 
 When a reverse tunnel or private network terminates public TLS before traffic

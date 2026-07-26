@@ -57,6 +57,7 @@ function readPersistedFields(
 
   return {
     previewProxyBaseUrl,
+    previewProxySubdomainSuffix: null,
     previewDomains: derivePreviewDomains(previewProxyBaseUrl),
     roomotePreviewDomain: deriveRoomotePreviewDomain(previewProxyBaseUrl),
   };
@@ -171,6 +172,9 @@ export async function resolveEffectivePreviewRuntimeConfig(
   });
   const effective: PreviewRuntimeConfigFields = {
     previewProxyBaseUrl: effectivePreviewProxyBaseUrl,
+    previewProxySubdomainSuffix: normalizeConfiguredValue(
+      runtimeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
+    ),
     previewDomains:
       normalizeConfiguredValue(runtimeEnv.PREVIEW_DOMAINS) ??
       derivePreviewDomains(effectivePreviewProxyBaseUrl) ??

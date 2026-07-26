@@ -726,6 +726,8 @@ export async function getSandboxSessionByTaskIdCommand(
       actingUser,
       previewProxyBaseUrl:
         resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl,
+      previewProxySubdomainSuffix:
+        resolvedPreviewRuntimeConfig.effective.previewProxySubdomainSuffix,
     },
     prompt,
     artifacts,

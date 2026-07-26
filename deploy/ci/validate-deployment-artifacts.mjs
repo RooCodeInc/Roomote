@@ -262,6 +262,13 @@ assert(
 const productionCompose = YAML.parse(
   read('deploy/compose/docker-compose.prod.yml'),
 );
+for (const serviceName of ['web', 'api', 'controller', 'preview-proxy']) {
+  assert(
+    productionCompose[`x-roomote-${serviceName}-env`]?.PREVIEW_PROXY_SUBDOMAIN_SUFFIX !==
+      undefined,
+    `production compose: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
+  );
+}
 assert(
   read('deploy/caddy/Caddyfile').includes('{$ROOMOTE_CADDY_LOCAL_CERTS:}'),
   'caddy: Caddyfile must support the installer-managed local certificate mode',
