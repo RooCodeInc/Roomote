@@ -2781,10 +2781,23 @@ export class OpenCodeServerHarness
 
     if (partType === 'text') {
       const messageId = asString(part.messageID);
+      const messageRole =
+        parseOpenCodeMessageRole(part.role) ??
+        extractOpenCodePartMessageRole(
+          asRecord(payload.properties),
+          part as OpenCodePart,
+          messageId ?? undefined,
+        );
 
-      if (!messageId || !watchdog.childAssistantMessageIds.has(messageId)) {
+      if (
+        !messageId ||
+        (messageRole !== 'assistant' &&
+          !watchdog.childAssistantMessageIds.has(messageId))
+      ) {
         return;
       }
+
+      watchdog.childAssistantMessageIds.add(messageId);
 
       const message = asString(part.text)?.trim();
 

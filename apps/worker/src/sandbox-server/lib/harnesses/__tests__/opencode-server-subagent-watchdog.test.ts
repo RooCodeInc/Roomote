@@ -166,13 +166,14 @@ function createChildToolPart(options: {
   };
 }
 
-function createChildTextPart(text: string) {
+function createChildTextPart(text: string, role?: 'assistant') {
   return {
     id: 'prt_child_text_1',
     sessionID: 'ses_child_1',
     messageID: 'msg_child_1',
     type: 'text',
     text,
+    ...(role ? { role } : {}),
   };
 }
 
@@ -890,7 +891,7 @@ describe('OpenCode subagent live activity', () => {
     }
   });
 
-  it('folds child assistant text into the subagent activity update', async () => {
+  it('folds child assistant text into the subagent activity update before message metadata arrives', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
     harness.on('runtimeOutput', (event) => {
@@ -901,26 +902,15 @@ describe('OpenCode subagent live activity', () => {
       await connectHarness(harness, client);
       await armSpawn(client, harness);
       await client.emit({
-        type: 'message.updated',
+        type: 'message.part.updated',
         properties: {
-          info: {
-            id: 'msg_child_1',
-            sessionID: 'ses_child_1',
-            role: 'assistant',
-            time: { created: 1 },
-          },
+          part: createChildTextPart('The latest child response.', 'assistant'),
         },
       });
       await client.emit({
         type: 'message.part.updated',
         properties: {
-          part: createChildTextPart('The latest child response.'),
-        },
-      });
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createChildTextPart('The final child response.'),
+          part: createChildTextPart('The final child response.', 'assistant'),
         },
       });
 
