@@ -50,6 +50,7 @@ export function usePreviewUrls({
   initialPaths,
   primaryPortName,
   previewProxyBaseUrl,
+  previewProxySubdomainSuffix,
 }: Partial<
   Pick<
     TaskRun,
@@ -61,6 +62,7 @@ export function usePreviewUrls({
   >
 > & {
   previewProxyBaseUrl?: string | null;
+  previewProxySubdomainSuffix?: string | null;
 }): {
   previewUrls: Record<string, string> | null;
   previewUrl: string | null;
@@ -70,9 +72,14 @@ export function usePreviewUrls({
   const previewUrls = useMemo(
     () =>
       taskId
-        ? buildTaskPreviewUrls(taskId, machineDomains, previewProxyBaseUrl)
+        ? buildTaskPreviewUrls(
+            taskId,
+            machineDomains,
+            previewProxyBaseUrl,
+            previewProxySubdomainSuffix,
+          )
         : null,
-    [taskId, machineDomains, previewProxyBaseUrl],
+    [taskId, machineDomains, previewProxyBaseUrl, previewProxySubdomainSuffix],
   );
 
   const previewUrl = useMemo(

@@ -73,6 +73,19 @@ describe('preview-urls utilities', () => {
         DOCS: 'http://task-123-docs.roomotepreview.localhost:18081',
       });
     });
+
+    it('uses the server-provided suffix for flat preview hostnames', () => {
+      expect(
+        buildTaskPreviewUrls(
+          'task-123',
+          { WEB: 'https://web.vercel.run' },
+          'https://example.com',
+          'preview',
+        ),
+      ).toEqual({
+        WEB: 'https://task-123-web-preview.example.com',
+      });
+    });
   });
 
   describe('getPrimaryPreviewUrlWithPath', () => {
