@@ -44,6 +44,9 @@ function formatUsageWindow(window: SubscriptionUsageWindow): string | null {
     value = `${window.used.toLocaleString()} of ${window.limit.toLocaleString()} used`;
   } else if (window.usedPercent !== undefined) {
     value = `${Math.round(window.usedPercent)}% used`;
+  } else if (window.remaining !== undefined) {
+    // Prepaid credit balance with no hard cap (e.g. Grok prepaidBalance).
+    value = `${window.remaining.toLocaleString()} left`;
   } else {
     return null;
   }

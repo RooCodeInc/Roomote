@@ -462,6 +462,77 @@ describe('parseXaiSubscriptionUsage', () => {
     ]);
   });
 
+  it('parses the live cli-chat-proxy format=credits payload', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        config: {
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: '2026-07-24T01:21:57.505552+00:00',
+            end: '2026-07-31T01:21:57.505552+00:00',
+          },
+          creditUsagePercent: 27,
+          onDemandCap: { val: 0 },
+          onDemandUsed: { val: 0 },
+          productUsage: [
+            { product: 'GrokBuild', usagePercent: 26 },
+            { product: 'Api', usagePercent: 1 },
+            { product: 'GrokChat' },
+            { product: 'GrokVoice' },
+          ],
+          prepaidBalance: { val: 0 },
+          billingPeriodEnd: '2026-07-31T01:21:57.505552+00:00',
+        },
+      },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        usedPercent: 27,
+        resetsAt: '2026-07-31T01:21:57.505Z',
+      },
+      {
+        label: 'GrokBuild',
+        usedPercent: 26,
+        resetsAt: '2026-07-31T01:21:57.505Z',
+      },
+      {
+        label: 'Api',
+        usedPercent: 1,
+        resetsAt: '2026-07-31T01:21:57.505Z',
+      },
+      {
+        label: 'Credits',
+        remaining: 0,
+      },
+    ]);
+  });
+
+  it('parses the live monthly billing payload', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        config: {
+          monthlyLimit: { val: 150_000 },
+          used: { val: 73_743 },
+          billingPeriodEnd: '2026-08-01T00:00:00+00:00',
+        },
+      },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        used: 73_743,
+        limit: 150_000,
+        usedPercent: 49.162,
+        resetsAt: '2026-08-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
   it('returns an empty list for unusable payloads', () => {
     expect(parseXaiSubscriptionUsage(null)).toEqual([]);
     expect(parseXaiSubscriptionUsage({})).toEqual([]);
