@@ -104,6 +104,28 @@ describe('AcpToolDetails', () => {
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });
 
+  it('shows the latest live child message while a subagent is running', () => {
+    render(
+      <AcpToolDetails
+        msg={buildMessage({
+          prompt: 'Inspect the task transcript implementation.',
+          output: '',
+          status: 'in_progress',
+          subagentActivity: {
+            lastMessage: 'The child agent is reviewing the render path.',
+          },
+          isSubagentSpawn: true,
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(screen.getByText('Initial prompt')).toBeInTheDocument();
+    expect(screen.getByText('Last message')).toBeInTheDocument();
+    expect(
+      screen.getByText('The child agent is reviewing the render path.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows the launch prompt from rawInput for OpenCode task rows', () => {
     render(
       <AcpToolDetails

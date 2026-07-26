@@ -166,6 +166,16 @@ function createChildToolPart(options: {
   };
 }
 
+function createChildTextPart(text: string) {
+  return {
+    id: 'prt_child_text_1',
+    sessionID: 'ses_child_1',
+    messageID: 'msg_child_1',
+    type: 'text',
+    text,
+  };
+}
+
 async function armSpawn(
   client: FakeOpenCodeServerClient,
   harness: OpenCodeServerHarness,
@@ -875,6 +885,50 @@ describe('OpenCode subagent live activity', () => {
       expect(details.agentType).toBe('proof-runner');
       expect(details.lastAction).toContain('agent-browser screenshot');
       expect(details.toolCallCount).toBe(1);
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('folds child assistant text into the subagent activity update', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_child_1',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart('The latest child response.'),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart('The final child response.'),
+        },
+      });
+
+      const activity = subagentActivityEvents(outputs);
+      expect(activity).toHaveLength(2);
+      const details = (activity[1]!.payload as Record<string, unknown>)
+        .subagentActivity as Record<string, unknown>;
+      expect(details.lastMessage).toBe('The final child response.');
     } finally {
       await harness.dispose();
     }

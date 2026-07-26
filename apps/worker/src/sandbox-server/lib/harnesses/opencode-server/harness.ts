@@ -264,6 +264,8 @@ interface ActiveOpenCodeSubagentWatchdog {
   updatePayload: Record<string, unknown>;
   activitySeenChildToolCallIds: Set<string>;
   activityLastAction: string | null;
+  activityLastMessage: string | null;
+  childAssistantMessageIds: Set<string>;
   activityLastEmitAtMs: number;
 }
 
@@ -2484,6 +2486,8 @@ export class OpenCodeServerHarness
       updatePayload: input.updatePayload,
       activitySeenChildToolCallIds: new Set(),
       activityLastAction: null,
+      activityLastMessage: null,
+      childAssistantMessageIds: new Set(),
       activityLastEmitAtMs: 0,
     };
     this.activeSubagentWatchdogs.set(eventKey, watchdog);
@@ -2768,7 +2772,31 @@ export class OpenCodeServerHarness
 
     const part = asRecord(asRecord(payload.properties)?.part);
 
-    if (!part || asString(part.type) !== 'tool') {
+    if (!part) {
+      return;
+    }
+
+    const partType = asString(part.type);
+
+    if (partType === 'text') {
+      const messageId = asString(part.messageID);
+
+      if (!messageId || !watchdog.childAssistantMessageIds.has(messageId)) {
+        return;
+      }
+
+      const message = asString(part.text)?.trim();
+
+      if (!message || message === watchdog.activityLastMessage) {
+        return;
+      }
+
+      watchdog.activityLastMessage = message;
+      this.emitSubagentActivityUpdate(watchdog, { force: true });
+      return;
+    }
+
+    if (partType !== 'tool') {
       return;
     }
 
@@ -2796,11 +2824,18 @@ export class OpenCodeServerHarness
       watchdog.activityLastAction = action;
     }
 
+    this.emitSubagentActivityUpdate(watchdog);
+  }
+
+  private emitSubagentActivityUpdate(
+    watchdog: ActiveOpenCodeSubagentWatchdog,
+    options?: { force?: boolean },
+  ): void {
     const nowMs = Date.now();
 
     if (
-      nowMs - watchdog.activityLastEmitAtMs <
-      SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS
+      options?.force !== true &&
+      nowMs - watchdog.activityLastEmitAtMs < SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS
     ) {
       return;
     }
@@ -2820,6 +2855,7 @@ export class OpenCodeServerHarness
         subagentActivity: {
           agentType: watchdog.agentType,
           lastAction: watchdog.activityLastAction,
+          lastMessage: watchdog.activityLastMessage,
           toolCallCount: watchdog.activitySeenChildToolCallIds.size,
           startedAtMs: watchdog.startedAtMs,
           elapsedMs: nowMs - watchdog.startedAtMs,
@@ -2854,6 +2890,13 @@ export class OpenCodeServerHarness
     if (parseOpenCodeMessageRole(info.role) !== 'assistant') {
       return;
     }
+
+    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
+    const watchdog = eventKey
+      ? this.activeSubagentWatchdogs.get(eventKey)
+      : undefined;
+
+    watchdog?.childAssistantMessageIds.add(info.id);
 
     if (!info.time?.completed) {
       return;
