@@ -615,6 +615,9 @@ function mergeToolResultPayload(
   incoming: AcpToolResultUiMessage,
 ): AcpToolResultPayload {
   const existingData = existing.data;
+  const existingRawInput = asRecord(
+    (existingData as unknown as Record<string, unknown>).rawInput,
+  );
   const mergedPayload: AcpToolResultPayload = {
     ...incoming.data,
     kind: incoming.data.kind ?? existingData.kind,
@@ -630,7 +633,10 @@ function mergeToolResultPayload(
     receiverThreadIds:
       incoming.data.receiverThreadIds ?? existingData.receiverThreadIds,
     agentsStates: incoming.data.agentsStates ?? existingData.agentsStates,
-    prompt: incoming.data.prompt ?? existingData.prompt,
+    prompt:
+      incoming.data.prompt ??
+      existingData.prompt ??
+      asString(existingRawInput?.prompt),
     agentType: incoming.data.agentType ?? existingData.agentType,
     model: incoming.data.model ?? existingData.model,
     reasoningEffort:
