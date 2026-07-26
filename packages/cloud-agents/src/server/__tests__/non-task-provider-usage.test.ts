@@ -347,7 +347,14 @@ describe('resolveOpenCodeSmallModel', () => {
       {
         directory: expect.stringContaining('roomote-non-task-'),
         title: `Roomote ${NON_TASK_INFERENCE_SURFACES.routerTaskRouting}`,
-        permission: [{ permission: '*', pattern: '*', action: 'deny' }],
+        // Enumerated denials, never a `*` wildcard: a wildcard also strips
+        // the internal structured-output mechanism `format: json_schema`
+        // relies on.
+        permission: expect.arrayContaining([
+          { permission: 'edit', pattern: '*', action: 'deny' },
+          { permission: 'bash', pattern: '*', action: 'deny' },
+          { permission: 'read', pattern: '*', action: 'deny' },
+        ]),
       },
       expect.objectContaining({
         signal: expect.any(AbortSignal),
@@ -356,6 +363,11 @@ describe('resolveOpenCodeSmallModel', () => {
     const sessionDirectory = sessionCreateMock.mock.calls[0]?.[0]
       ?.directory as string;
     expect(sessionDirectory).not.toBe(process.cwd());
+    const sessionPermissions = sessionCreateMock.mock.calls[0]?.[0]
+      ?.permission as Array<{ permission: string }>;
+    expect(sessionPermissions.every((rule) => rule.permission !== '*')).toBe(
+      true,
+    );
     expect(sessionPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionID: 'session-1',

@@ -92,8 +92,36 @@ function buildModelBackedOpenCodeConfigContent(
 }
 
 /**
- * Force OpenCode's blanket tool-permission denial into a config content
- * string, preserving any other operator-supplied settings.
+ * Per-tool permission denials for the non-task helper servers, covering
+ * every tool OpenCode's permission config enumerates.
+ *
+ * Deliberately the enumerated object form, NOT the blanket `"deny"` string:
+ * OpenCode fulfils `format: json_schema` structured output through an
+ * internal mechanism that a blanket denial (or a wildcard session rule)
+ * strips along with the real tools, which silently breaks every structured
+ * routing call while plain-text calls keep working. The object form denies
+ * only the listed tools and leaves that mechanism available.
+ */
+export const NON_TASK_TOOL_PERMISSION_DENIALS = {
+  read: 'deny',
+  edit: 'deny',
+  glob: 'deny',
+  grep: 'deny',
+  list: 'deny',
+  bash: 'deny',
+  task: 'deny',
+  external_directory: 'deny',
+  todowrite: 'deny',
+  question: 'deny',
+  webfetch: 'deny',
+  websearch: 'deny',
+  lsp: 'deny',
+  skill: 'deny',
+} as const;
+
+/**
+ * Force the non-task tool denials into a config content string, preserving
+ * any other operator-supplied settings.
  *
  * The servers this module spawns exist only for non-task inference — task
  * titles, routing, fast-agent answers — which is plain text or structured
@@ -108,7 +136,9 @@ function buildModelBackedOpenCodeConfigContent(
  * tools enabled.
  */
 function withDeniedToolPermissions(configContent: string | undefined): string {
-  const permissionOnly = JSON.stringify({ permission: 'deny' });
+  const permissionOnly = JSON.stringify({
+    permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+  });
 
   if (!configContent?.trim()) {
     return permissionOnly;
@@ -125,7 +155,24 @@ function withDeniedToolPermissions(configContent: string | undefined): string {
       return permissionOnly;
     }
 
-    return JSON.stringify({ ...parsed, permission: 'deny' });
+    const config = parsed as Record<string, unknown>;
+    // Keep operator per-tool entries for tools we do not enumerate, but our
+    // denials win on overlap. A non-object operator `permission` (e.g. a
+    // blanket "allow") is discarded entirely.
+    const operatorPermission =
+      typeof config.permission === 'object' &&
+      config.permission !== null &&
+      !Array.isArray(config.permission)
+        ? (config.permission as Record<string, unknown>)
+        : {};
+
+    return JSON.stringify({
+      ...config,
+      permission: {
+        ...operatorPermission,
+        ...NON_TASK_TOOL_PERMISSION_DENIALS,
+      },
+    });
   } catch {
     return permissionOnly;
   }

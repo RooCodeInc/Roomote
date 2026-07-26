@@ -13,6 +13,7 @@ import zodToJsonSchema from 'zod-to-json-schema';
 import {
   DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
   leaseOpenCodeSdkServer,
+  NON_TASK_TOOL_PERMISSION_DENIALS,
   readOpenCodeDebugConfig,
 } from './opencode-runtime';
 
@@ -24,10 +25,14 @@ const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
  * (`withDeniedToolPermissions` in opencode-runtime), and this per-session
  * ruleset keeps a stale or externally configured server
  * (`OPENCODE_SDK_SERVER_URL`) equally locked down.
+ *
+ * Enumerated per tool rather than a `*` wildcard: a wildcard rule also
+ * strips the internal mechanism OpenCode uses for `format: json_schema`
+ * structured output, breaking every structured routing call.
  */
-const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = [
-  { permission: '*', pattern: '*', action: 'deny' },
-];
+const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
+  NON_TASK_TOOL_PERMISSION_DENIALS,
+).map((permission) => ({ permission, pattern: '*', action: 'deny' }));
 
 let nonTaskSessionDirectory: string | undefined;
 

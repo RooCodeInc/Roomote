@@ -8,6 +8,7 @@ import {
   buildOpenCodeCliEnv,
   killOpenCodeSdkServerProcessesForShutdown,
   leaseOpenCodeSdkServer,
+  NON_TASK_TOOL_PERMISSION_DENIALS,
   readOpenCodeDebugConfig,
 } from '../opencode-runtime';
 
@@ -52,7 +53,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/openai/gpt-5.4',
-      permission: 'deny',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
 
@@ -67,7 +68,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/z-ai/glm-5.2',
-      permission: 'deny',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
       provider: {
         openrouter: {
           models: {
@@ -92,7 +93,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/z-ai/glm-5.2',
       small_model: 'openrouter/z-ai/glm-5.2',
-      permission: 'deny',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
       provider: {
         openrouter: {
           models: {
@@ -117,7 +118,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/z-ai/glm-5.2',
       small_model: 'openrouter/z-ai/glm-5.2',
-      permission: 'deny',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
       provider: {
         openrouter: {
           models: {
@@ -139,7 +140,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/openai/gpt-5.4',
-      permission: 'deny',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
       provider: {
         openrouter: {
           models: {
@@ -181,7 +182,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(env.MISTRAL_API_KEY).toBeUndefined();
     // No model-backed config remains, but the tool lockdown still applies.
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
-      permission: 'deny',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
 
@@ -189,7 +190,7 @@ describe('buildOpenCodeCliEnv', () => {
     const env = buildOpenCodeCliEnv();
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
-      permission: 'deny',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
 
@@ -207,8 +208,38 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
       theme: 'dark',
-      permission: 'deny',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
+  });
+
+  it('keeps operator per-tool entries we do not enumerate while denying the rest', () => {
+    const env = buildOpenCodeCliEnv({
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        permission: {
+          some_future_tool: 'ask',
+          bash: 'allow',
+        },
+      }),
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      permission: {
+        some_future_tool: 'ask',
+        ...NON_TASK_TOOL_PERMISSION_DENIALS,
+      },
+    });
+  });
+
+  it('never uses a blanket permission denial', () => {
+    // Regression guard: OpenCode fulfils `format: json_schema` structured
+    // output through an internal mechanism that a blanket "deny" (or a
+    // wildcard rule) strips, silently breaking every structured routing
+    // call. The denial must stay in enumerated object form.
+    expect(typeof NON_TASK_TOOL_PERMISSION_DENIALS).toBe('object');
+    expect(Object.keys(NON_TASK_TOOL_PERMISSION_DENIALS)).not.toContain('*');
+    expect(Object.values(NON_TASK_TOOL_PERMISSION_DENIALS)).toEqual(
+      Object.keys(NON_TASK_TOOL_PERMISSION_DENIALS).map(() => 'deny'),
+    );
   });
 
   it('fails closed to a permission-only config on malformed content', () => {
@@ -218,7 +249,7 @@ describe('buildOpenCodeCliEnv', () => {
       });
 
       expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
-        permission: 'deny',
+        permission: NON_TASK_TOOL_PERMISSION_DENIALS,
       });
     }
   });
