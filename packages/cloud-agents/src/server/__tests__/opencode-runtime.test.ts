@@ -52,6 +52,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/openai/gpt-5.4',
+      permission: 'deny',
     });
   });
 
@@ -66,6 +67,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/z-ai/glm-5.2',
+      permission: 'deny',
       provider: {
         openrouter: {
           models: {
@@ -90,6 +92,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/z-ai/glm-5.2',
       small_model: 'openrouter/z-ai/glm-5.2',
+      permission: 'deny',
       provider: {
         openrouter: {
           models: {
@@ -114,6 +117,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/z-ai/glm-5.2',
       small_model: 'openrouter/z-ai/glm-5.2',
+      permission: 'deny',
       provider: {
         openrouter: {
           models: {
@@ -135,6 +139,7 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/openai/gpt-5.4',
+      permission: 'deny',
       provider: {
         openrouter: {
           models: {
@@ -174,7 +179,48 @@ describe('buildOpenCodeCliEnv', () => {
     expect(env.R_SMALL_MODEL).toBeUndefined();
     expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
     expect(env.MISTRAL_API_KEY).toBeUndefined();
-    expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+    // No model-backed config remains, but the tool lockdown still applies.
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      permission: 'deny',
+    });
+  });
+
+  it('denies tools without any model config', () => {
+    const env = buildOpenCodeCliEnv();
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      permission: 'deny',
+    });
+  });
+
+  it('merges the tool denial into operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv({
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'openrouter/openai/gpt-5.4',
+        theme: 'dark',
+        // An operator-supplied allow must not survive: these servers only
+        // serve non-task calls, which never run tools.
+        permission: 'allow',
+      }),
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'openrouter/openai/gpt-5.4',
+      theme: 'dark',
+      permission: 'deny',
+    });
+  });
+
+  it('fails closed to a permission-only config on malformed content', () => {
+    for (const malformed of ['{not json', '"just a string"', '[1,2]']) {
+      const env = buildOpenCodeCliEnv({
+        OPENCODE_CONFIG_CONTENT: malformed,
+      });
+
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+        permission: 'deny',
+      });
+    }
   });
 
   it('prevents inherited BASH_ENV from restoring disabled credentials through a shell wrapper', () => {
