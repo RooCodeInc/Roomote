@@ -714,6 +714,64 @@ describe('getFreshXaiAccessToken', () => {
     expect(values).toHaveBeenCalled();
   });
 
+  it('does not clobber a newer subscription when refresh HTTP is still in flight', async () => {
+    const now = Date.now();
+    const expires = now + 30_000;
+    const existing = {
+      refresh: 'old-rt',
+      access: 'old-at',
+      expires,
+      status: 'connected' as const,
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const reconnected = {
+      refresh: 'fresh-rt',
+      access: 'fresh-at',
+      expires: now + 3_600_000,
+      status: 'connected' as const,
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    };
+
+    const { executor, store } = makeExecutor(
+      { [XAI_SUBSCRIPTION_INTERNAL.secretName]: existing },
+      { withTransaction: true },
+    );
+
+    const fetchImpl = vi.fn().mockImplementation(async () => {
+      // A concurrent device-code connect replaces the secret mid-refresh.
+      store.set(
+        XAI_SUBSCRIPTION_INTERNAL.secretName,
+        JSON.stringify(reconnected),
+      );
+      return new Response(
+        JSON.stringify({
+          access_token: 'stale-refresh-at',
+          refresh_token: 'stale-refresh-rt',
+          expires_in: 7200,
+        }),
+        { status: 200 },
+      );
+    });
+
+    const fresh = await getFreshXaiAccessToken({
+      executor,
+      fetchImpl,
+      now,
+    });
+
+    expect(fresh).toMatchObject({
+      access: 'fresh-at',
+      refresh: 'fresh-rt',
+    });
+    const stored = JSON.parse(
+      store.get(XAI_SUBSCRIPTION_INTERNAL.secretName)!,
+    ) as { access: string; refresh: string };
+    expect(stored.access).toBe('fresh-at');
+    expect(stored.refresh).toBe('fresh-rt');
+  });
+
   it('returns null when no connected subscription exists', async () => {
     const { executor } = makeExecutor();
     await expect(

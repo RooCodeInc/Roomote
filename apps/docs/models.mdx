@@ -17,9 +17,9 @@ Configure models from **Settings > Models**.
 An inference provider is the service that hosts or routes model calls. Roomote
 supports providers such as OpenRouter, Vercel AI Gateway, Baseten,
 Together AI, OpenAI, Anthropic, Moonshot AI, Kimi for Coding, MiniMax, Z.AI,
-Z.AI Coding Plan, OpenCode, Amazon Bedrock, Google Gemini, xAI, GitHub Copilot,
-ChatGPT subscriptions, and OpenAI-compatible endpoints such as LiteLLM, Ollama,
-and vLLM.
+Z.AI Coding Plan, OpenCode, Amazon Bedrock, Google Gemini, xAI (API key or
+Grok subscription), GitHub Copilot, ChatGPT subscriptions, and
+OpenAI-compatible endpoints such as LiteLLM, Ollama, and vLLM.
 
 You can connect more than one inference provider in the same deployment. That
 lets you mix and match models by provider instead of betting the whole
@@ -138,12 +138,16 @@ list.
 - **Models** controls the provider/model pairs that are available, the default
   model, and specialized model roles.
 
-For subscription-based providers (ChatGPT, GitHub Copilot, and Kimi for
-Coding), the provider row also shows current plan usage when the provider
-reports it, such as remaining Copilot premium requests or the percent used of
-the ChatGPT 5-hour and weekly limits. These numbers come from unofficial
-provider endpoints, so the usage line is hidden whenever the provider does not
-return usable data.
+For subscription-based providers (ChatGPT, GitHub Copilot, Kimi for Coding, and
+xAI Grok / SuperGrok), the provider row also shows current plan usage when the
+provider reports it, such as remaining Copilot premium requests, the percent
+used of the ChatGPT 5-hour and weekly limits, or Grok included-usage windows.
+These numbers come from unofficial provider endpoints, so the usage line is
+hidden whenever the provider does not return usable data.
+
+xAI can be connected with an API key, a SuperGrok or eligible X Premium+
+subscription, or both. When both are configured, the subscription is preferred
+at runtime for `xai/` models.
 
 Admins can enable or disable models from the task model list. The default model
 must stay enabled, because Roomote uses it when a task does not request a

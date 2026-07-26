@@ -111,7 +111,7 @@ export function StepInferenceProvider({
   const chatgptStatus = chatgptStatusQuery.data ?? null;
   const xaiStatusQuery = useQuery(
     trpc.xaiSubscription.status.queryOptions(undefined, {
-      enabled: selectedProvider === 'xai',
+      enabled: selectedProvider === 'xai-subscription',
     }),
   );
   const xaiStatus = xaiStatusQuery.data ?? null;

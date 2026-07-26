@@ -561,7 +561,7 @@ export async function saveTaskModelProviderCommand(
 
   if (provider.authKind === 'oauth') {
     throw new Error(
-      `${provider.label} is connected with a ChatGPT account from the Models settings page and does not use an API key.`,
+      `${provider.label} is connected with a subscription account from the Models settings page and does not use an API key.`,
     );
   }
 
@@ -838,7 +838,7 @@ export async function deleteTaskModelProviderCommand(
 
   if (provider.authKind === 'oauth') {
     throw new Error(
-      `${provider.label} is connected with a ChatGPT account and cannot be deleted here.`,
+      `${provider.label} is connected with a subscription account and cannot be deleted here.`,
     );
   }
 
