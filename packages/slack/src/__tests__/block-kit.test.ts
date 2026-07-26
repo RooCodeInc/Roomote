@@ -48,6 +48,20 @@ function getFirstContextText(
   return element.text;
 }
 
+function getContextTexts(
+  blocks: ReturnType<typeof buildRoutingConfirmBlocks>,
+): string[] {
+  return blocks.flatMap((block) => {
+    if (block.type !== 'context' || !('elements' in block)) {
+      return [];
+    }
+
+    return (block.elements ?? []).flatMap((element) =>
+      typeof element.text === 'string' ? [element.text] : [],
+    );
+  });
+}
+
 describe('Slack routing blocks', () => {
   it('keeps the routing confirmation copy neutral about environments', () => {
     const blocks = buildRoutingConfirmBlocks('App', undefined, {
@@ -205,6 +219,74 @@ describe('Slack routing blocks', () => {
     expect(getFirstContextText(blocks)).toBe(
       '_2 other tasks currently running_',
     );
+  });
+
+  it('omits environment diagnostics unless explicitly enabled', () => {
+    const originalDebugValue = process.env.ROOMOTE_DEBUG_KICKOFF_ENV;
+    process.env.ROOMOTE_DEBUG_KICKOFF_ENV = 'false';
+
+    try {
+      const blocks = buildStartedBlocks({ workspaceDisplayName: 'App' });
+
+      expect(
+        getContextTexts(blocks).some((text) =>
+          text.startsWith('_Environment: '),
+        ),
+      ).toBe(false);
+    } finally {
+      if (originalDebugValue === undefined) {
+        delete process.env.ROOMOTE_DEBUG_KICKOFF_ENV;
+      } else {
+        process.env.ROOMOTE_DEBUG_KICKOFF_ENV = originalDebugValue;
+      }
+    }
+  });
+
+  it('includes safe environment diagnostics when explicitly enabled', () => {
+    const originalDebugValue = process.env.ROOMOTE_DEBUG_KICKOFF_ENV;
+    const originalAppEnv = process.env.R_APP_ENV;
+    const originalPort = process.env.PORT;
+    const originalSecret = process.env.TEST_KICKOFF_SECRET;
+    process.env.ROOMOTE_DEBUG_KICKOFF_ENV = 'true';
+    process.env.R_APP_ENV = 'test';
+    process.env.PORT = '3000';
+    process.env.TEST_KICKOFF_SECRET = 'should-not-appear';
+
+    try {
+      const blocks = buildStartedBlocks({ workspaceDisplayName: 'App' });
+
+      const environmentText = getContextTexts(blocks).find((text) =>
+        text.startsWith('_Environment: '),
+      );
+      expect(environmentText).toContain('R_APP_ENV=test');
+      expect(environmentText).toContain('PORT=3000');
+      expect(environmentText).not.toContain('DATABASE_URL=');
+      expect(environmentText).not.toContain('should-not-appear');
+    } finally {
+      if (originalDebugValue === undefined) {
+        delete process.env.ROOMOTE_DEBUG_KICKOFF_ENV;
+      } else {
+        process.env.ROOMOTE_DEBUG_KICKOFF_ENV = originalDebugValue;
+      }
+
+      if (originalAppEnv === undefined) {
+        delete process.env.R_APP_ENV;
+      } else {
+        process.env.R_APP_ENV = originalAppEnv;
+      }
+
+      if (originalPort === undefined) {
+        delete process.env.PORT;
+      } else {
+        process.env.PORT = originalPort;
+      }
+
+      if (originalSecret === undefined) {
+        delete process.env.TEST_KICKOFF_SECRET;
+      } else {
+        process.env.TEST_KICKOFF_SECRET = originalSecret;
+      }
+    }
   });
 
   it('embeds the task id and initiating Slack user id in cancel buttons', () => {

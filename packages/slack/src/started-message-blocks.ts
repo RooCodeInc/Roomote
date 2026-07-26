@@ -26,6 +26,28 @@ interface BuildTaskFailedBlocksOptions {
 export const SLACK_STARTUP_FAILURE_TEXT = TASK_STARTUP_FAILURE_TEXT;
 export const SLACK_RUNTIME_FAILURE_TEXT = TASK_RUNTIME_FAILURE_TEXT;
 
+// Keep kickoff diagnostics safe to post in public Slack threads.
+const KICKOFF_ENVIRONMENT_VARIABLES = [
+  'NODE_ENV',
+  'R_APP_ENV',
+  'APP_ENV',
+  'ROOMOTE_APP_ENV',
+  'PORT',
+] as const;
+
+function buildKickoffEnvironmentText(): string | undefined {
+  if (process.env.ROOMOTE_DEBUG_KICKOFF_ENV !== 'true') {
+    return undefined;
+  }
+
+  const values = KICKOFF_ENVIRONMENT_VARIABLES.flatMap((name) => {
+    const value = process.env[name];
+    return value ? [`${name}=${value}`] : [];
+  });
+
+  return values.length > 0 ? `_Environment: ${values.join(', ')}_` : undefined;
+}
+
 /**
  * Block Kit blocks shown after a routing confirmation is accepted.
  * Used by both OK-button and auto-confirm paths.
@@ -87,6 +109,14 @@ export function buildStartedBlocks(
     blocks.push({
       type: 'context',
       elements: [{ type: 'mrkdwn', text: `_${otherRunningTasksText}_` }],
+    });
+  }
+
+  const kickoffEnvironmentText = buildKickoffEnvironmentText();
+  if (kickoffEnvironmentText) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: kickoffEnvironmentText }],
     });
   }
 
