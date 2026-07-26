@@ -28,7 +28,11 @@ const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
  *
  * Enumerated per tool rather than a `*` wildcard: a wildcard rule also
  * strips the internal mechanism OpenCode uses for `format: json_schema`
- * structured output, breaking every structured routing call.
+ * structured output, breaking every structured routing call. On managed
+ * servers the config allowlist guarantees no tools exist beyond the
+ * enumerated built-ins; an externally configured server
+ * (`OPENCODE_SDK_SERVER_URL`) owns its own config, so any custom tools it
+ * defines are the operator's responsibility.
  */
 const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
   NON_TASK_TOOL_PERMISSION_DENIALS,

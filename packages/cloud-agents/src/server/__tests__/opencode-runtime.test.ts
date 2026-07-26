@@ -194,11 +194,11 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('merges the tool denial into operator-supplied config content', () => {
+  it('keeps model and provider config from operator-supplied content', () => {
     const env = buildOpenCodeCliEnv({
       OPENCODE_CONFIG_CONTENT: JSON.stringify({
         model: 'openrouter/openai/gpt-5.4',
-        theme: 'dark',
+        provider: { openrouter: { options: { baseURL: 'https://example' } } },
         // An operator-supplied allow must not survive: these servers only
         // serve non-task calls, which never run tools.
         permission: 'allow',
@@ -207,26 +207,32 @@ describe('buildOpenCodeCliEnv', () => {
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
-      theme: 'dark',
+      provider: { openrouter: { options: { baseURL: 'https://example' } } },
       permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
 
-  it('keeps operator per-tool entries we do not enumerate while denying the rest', () => {
+  it('strips config keys that can introduce or re-enable tools', () => {
     const env = buildOpenCodeCliEnv({
       OPENCODE_CONFIG_CONTENT: JSON.stringify({
-        permission: {
-          some_future_tool: 'ask',
-          bash: 'allow',
-        },
+        model: 'openrouter/openai/gpt-5.4',
+        // Each of these can add tools outside the enumerated denial list
+        // (or re-enable built-ins), so none may reach a helper server.
+        mcp: { docs: { type: 'remote', url: 'https://example/mcp' } },
+        plugin: ['some-plugin'],
+        agent: { build: { tools: { bash: true } } },
+        mode: { build: { tools: { edit: true } } },
+        tools: { bash: true },
+        default_agent: 'build',
+        // Operator permission entries never survive, including entries for
+        // tools we do not enumerate.
+        permission: { docs_search: 'allow', bash: 'allow' },
       }),
     });
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
-      permission: {
-        some_future_tool: 'ask',
-        ...NON_TASK_TOOL_PERMISSION_DENIALS,
-      },
+      model: 'openrouter/openai/gpt-5.4',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
 
