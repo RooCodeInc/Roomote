@@ -110,9 +110,14 @@ export function StepInferenceProvider({
     }),
   );
   const chatgptStatus = chatgptStatusQuery.data ?? null;
+  // SuperGrok is dual-path with the xAI API key: onboarding offers both on the
+  // shared `xai` surface (and on the separate `xai-subscription` catalog id).
+  const isXaiSurface =
+    selectedProvider === 'xai' ||
+    selectedProvider === XAI_SUBSCRIPTION_PROVIDER_ID;
   const xaiStatusQuery = useQuery(
     trpc.xaiSubscription.status.queryOptions(undefined, {
-      enabled: selectedProvider === XAI_SUBSCRIPTION_PROVIDER_ID,
+      enabled: isXaiSurface,
     }),
   );
   const xaiStatus = xaiStatusQuery.data ?? null;
@@ -185,8 +190,6 @@ export function StepInferenceProvider({
     selectedProviderStatus?.authKind === 'oauth' &&
     selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   const isGitHubCopilotProvider = selectedProvider === 'github-copilot';
-  const isXaiSubscriptionProvider =
-    selectedProvider === XAI_SUBSCRIPTION_PROVIDER_ID;
   const isOAuthProvider = selectedProviderStatus?.authKind === 'oauth';
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
@@ -218,7 +221,14 @@ export function StepInferenceProvider({
     !editingSavedValue;
   const shouldShowConfiguredMask =
     hasRuntimeProviderKey || shouldShowSavedValueMask;
-  const canContinueWithoutApiKey = hasRuntimeProviderKey || hasSavedProviderKey;
+  // SuperGrok covers the `xai` surface without an API key, same pattern as
+  // ChatGPT covering openai/. Continue when either path is satisfied.
+  const canContinueWithoutApiKey =
+    hasRuntimeProviderKey ||
+    hasSavedProviderKey ||
+    (isXaiSurface && xaiSubscriptionConnected) ||
+    (isChatGptProvider && chatgptConnected) ||
+    (isGitHubCopilotProvider && githubCopilotConnected);
   const hasMissingRequiredFields =
     !canContinueWithoutApiKey &&
     additionalEnvFields.some(
@@ -403,9 +413,7 @@ export function StepInferenceProvider({
           </Button>
         ) : null}
 
-        {isXaiSubscriptionProvider &&
-        !hasRuntimeProviderKey &&
-        !xaiSubscriptionConnected ? (
+        {isXaiSurface && !hasRuntimeProviderKey && !xaiSubscriptionConnected ? (
           <Button
             type="button"
             variant="default"
@@ -417,12 +425,12 @@ export function StepInferenceProvider({
           </Button>
         ) : null}
 
-        {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
+        {(hasRuntimeProviderKey ||
+          hasSavedProviderKey ||
+          (isXaiSurface && xaiSubscriptionConnected)) && <Check />}
       </div>
 
-      {isXaiSubscriptionProvider &&
-      !hasRuntimeProviderKey &&
-      xaiSubscriptionConnected ? (
+      {isXaiSurface && !hasRuntimeProviderKey && xaiSubscriptionConnected ? (
         <span className="text-sm text-muted-foreground">
           {xaiStatus?.email
             ? `Connected as ${xaiStatus.email}`
