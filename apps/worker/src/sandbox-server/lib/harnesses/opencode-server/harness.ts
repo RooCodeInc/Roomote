@@ -2570,6 +2570,7 @@ export class OpenCodeServerHarness
     return {
       agentType: watchdog.agentType,
       lastAction: watchdog.activityLastAction,
+      lastMessage: watchdog.activityLastMessage,
       toolCallCount: watchdog.activitySeenChildToolCallIds.size,
       startedAtMs: watchdog.startedAtMs,
       elapsedMs: Date.now() - watchdog.startedAtMs,

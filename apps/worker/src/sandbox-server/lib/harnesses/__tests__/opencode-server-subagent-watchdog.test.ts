@@ -934,6 +934,56 @@ describe('OpenCode subagent live activity', () => {
     }
   });
 
+  it('keeps the last child message in terminal activity when task output is empty', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_child_1',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart('The child response to preserve.'),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            metadata: { sessionId: 'ses_child_1' },
+          }),
+        },
+      });
+
+      const terminal = outputs.find((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        return payload.status === 'completed';
+      });
+      const activity = (terminal?.payload as Record<string, unknown>)
+        .subagentActivity as Record<string, unknown>;
+
+      expect(activity.lastMessage).toBe('The child response to preserve.');
+    } finally {
+      await harness.dispose();
+    }
+  });
+
   it('throttles activity emissions and keeps counting child tool calls', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
