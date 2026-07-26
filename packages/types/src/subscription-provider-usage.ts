@@ -19,6 +19,28 @@ export type SubscriptionUsageProviderId =
   | 'zai-coding-plan';
 
 /**
+ * Subscription-usage providers that share the generic API-key connected row
+ * (not dedicated OAuth rows like ChatGPT / Copilot). Keep the Settings
+ * allowlist in sync with this set.
+ */
+export const API_KEY_SUBSCRIPTION_USAGE_PROVIDER_IDS = [
+  'kimi-for-coding',
+  'zai',
+  'zai-coding-plan',
+] as const satisfies readonly SubscriptionUsageProviderId[];
+
+export type ApiKeySubscriptionUsageProviderId =
+  (typeof API_KEY_SUBSCRIPTION_USAGE_PROVIDER_IDS)[number];
+
+export function isApiKeySubscriptionUsageProviderId(
+  providerId: string,
+): providerId is ApiKeySubscriptionUsageProviderId {
+  return (
+    API_KEY_SUBSCRIPTION_USAGE_PROVIDER_IDS as readonly string[]
+  ).includes(providerId);
+}
+
+/**
  * One quota window, e.g. Copilot's monthly premium requests or the Codex
  * 5-hour/weekly rate-limit windows. Providers report different subsets of
  * these fields; the UI renders whatever is present.

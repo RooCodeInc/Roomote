@@ -444,7 +444,7 @@ describe('parseZaiQuotaUsage', () => {
     expect(parsed.planType).toBe('lite');
     expect(parsed.windows).toEqual([
       {
-        label: '5-hour limit',
+        label: '5h limit',
         usedPercent: 16,
         resetsAt: new Date(1_777_819_631_597).toISOString(),
       },
@@ -473,7 +473,7 @@ describe('parseZaiQuotaUsage', () => {
 
     expect(parsed.windows).toEqual([
       {
-        label: '5-hour limit',
+        label: '5h limit',
         usedPercent: 25,
         remaining: 75,
         limit: 100,
@@ -527,8 +527,17 @@ describe('fetchZaiUsage', () => {
     expect(usage).toMatchObject({
       providerId: 'zai',
       planType: 'pro',
-      windows: [{ label: '5-hour limit', usedPercent: 12 }],
+      windows: [{ label: '5h limit', usedPercent: 12 }],
     });
+  });
+
+  it('returns null on non-OK responses without throwing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, 401));
+
+    await expect(
+      fetchZaiUsage({ runtimeEnv: { ZAI_API_KEY: 'zai-key' }, fetchImpl }),
+    ).resolves.toBeNull();
+    expect(fetchImpl).toHaveBeenCalled();
   });
 
   it('uses the China host when ZAI_REGION is china', async () => {

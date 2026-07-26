@@ -543,7 +543,8 @@ function zaiQuotaWindowLabel(
   unit: number | undefined,
 ): string {
   if (unit === 3) {
-    return '5-hour limit';
+    // Match ChatGPT's compact window label convention (`5h limit`).
+    return '5h limit';
   }
   if (unit === 6) {
     return 'Weekly limit';
