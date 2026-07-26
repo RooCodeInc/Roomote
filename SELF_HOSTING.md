@@ -87,8 +87,9 @@ Roomote then publishes `task-port-preview.example.com`, which is covered by
 `-preview` suffix so it does not collide with other first-level subdomains.
 
 One Cloudflare Tunnel can serve both the app and preview hostnames through the
-same Caddy instance. Configure both ingress rules with the tunnel-to-Caddy TLS
-setting required for Caddy's internal certificate:
+same Caddy instance. Install Roomote with `--tls-mode internal` so Caddy issues
+local certificates for the private tunnel-to-Caddy hop, then configure both
+ingress rules with the matching origin TLS setting:
 
 ```yaml
 ingress:
