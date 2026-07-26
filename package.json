@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -96,7 +96,7 @@
       "@vercel/routing-utils>ajv": "6.14.0",
       "@vercel/routing-utils>path-to-regexp": "6.3.0",
       "unicorn-magic": "0.2.0",
-      "dompurify": "3.4.11",
+      "dompurify": "3.4.12",
       "esbuild": "^0.28.1",
       "linkify-it": "5.0.2",
       "engine.io>ws": "8.21.0",
@@ -111,16 +111,16 @@
       "better-auth>zod": "^4.3.6",
       "@better-auth/core>zod": "^4.3.6",
       "js-cookie": "3.0.7",
-      "js-yaml": "4.2.0",
+      "js-yaml": "4.3.0",
       "gray-matter>js-yaml": "3.15.0",
       "read-yaml-file@1>js-yaml": "3.15.0",
       "nise>path-to-regexp": "8.4.0",
-      "protobufjs": "7.6.3",
+      "protobufjs": "7.6.5",
       "qs": "6.15.2",
       "router>path-to-regexp": "8.4.0",
       "socket.io>socket.io-adapter": "2.5.8",
       "socket.io-adapter>ws": "8.21.0",
-      "tar": "7.5.20",
+      "tar": "7.5.21",
       "zod": "^3.25.76",
       "astro>zod": "^4.3.6",
       "knip>zod": "^4.1.11",
@@ -136,7 +136,16 @@
       "@protobufjs/utf8": "1.1.1",
       "tsx": "4.20.4",
       "webpack": "5.104.1",
-      "yaml-language-server>yaml": "2.8.3"
+      "yaml-language-server>yaml": "2.8.3",
+      "@opentelemetry/propagator-jaeger": "2.9.0",
+      "body-parser": "2.3.0",
+      "brace-expansion@<1.1.16": "1.1.16",
+      "brace-expansion@>=2.0.0 <2.1.2": "2.1.2",
+      "brace-expansion@>=3.0.0 <5.0.8": "5.0.8",
+      "fast-uri": "3.1.4",
+      "immutable": "5.1.8",
+      "postcss": "8.5.18",
+      "sharp": "0.35.0"
     }
   }
 }

@@ -631,20 +631,32 @@ export async function collectInstanceReportStats(
     db
       .select({ total: count() })
       .from(tasks)
-      .where(gte(tasks.createdAt, since)),
+      .where(
+        and(
+          gte(tasks.createdAt, since),
+          notInArray(tasks.workflow, ['env_snapshot']),
+        ),
+      ),
     db
       .select({ total: count() })
       .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
       .where(
         and(
           eq(taskRuns.status, RunStatus.Completed),
           gte(taskRuns.completedAt, since),
+          notInArray(tasks.workflow, ['env_snapshot']),
         ),
       ),
     db
       .select({ harness: tasks.harness, total: count() })
       .from(tasks)
-      .where(gte(tasks.createdAt, since))
+      .where(
+        and(
+          gte(tasks.createdAt, since),
+          notInArray(tasks.workflow, ['env_snapshot']),
+        ),
+      )
       .groupBy(tasks.harness),
     db
       .select({
@@ -653,7 +665,12 @@ export async function collectInstanceReportStats(
         total: count(),
       })
       .from(tasks)
-      .where(gte(tasks.createdAt, since))
+      .where(
+        and(
+          gte(tasks.createdAt, since),
+          notInArray(tasks.workflow, ['env_snapshot']),
+        ),
+      )
       .groupBy(tasks.modelProvider, tasks.model),
     db
       .select({
@@ -663,10 +680,12 @@ export async function collectInstanceReportStats(
         costMicroUsd: sum(llmUsageEvents.costMicroUsd),
       })
       .from(llmUsageEvents)
+      .innerJoin(tasks, eq(tasks.id, llmUsageEvents.taskId))
       .where(
         and(
           gte(llmUsageEvents.createdAt, since),
           isNotNull(llmUsageEvents.taskId),
+          notInArray(tasks.workflow, ['env_snapshot']),
         ),
       ),
     db

@@ -1,14 +1,20 @@
 import { and, eq, inArray, notInArray } from 'drizzle-orm';
 
-import { SOURCE_CONTROL_AUTOMATION_WORKFLOWS } from '@roomote/types';
+import {
+  RunStatus,
+  SOURCE_CONTROL_AUTOMATION_WORKFLOWS,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   db,
   githubInstallationFactory,
+  llmUsageEvents,
   pullRequestFacts,
   repositoryFactory,
   taskFactory,
   taskPullRequests,
+  taskRuns,
   tasks,
   userFactory,
 } from '../../server';
@@ -446,5 +452,91 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
         report.pullRequests7d.closed +
         report.pullRequests7d.merged,
     ).toBe(report.pullRequests7d.opened);
+  });
+});
+
+describe('collectInstanceReportStats task usage isolation', () => {
+  it('excludes environment snapshots from task usage aggregates', async () => {
+    // Keep this aggregate assertion isolated from test files sharing the database.
+    const now = new Date('2040-01-01T00:00:00.000Z');
+    const baseline = await collectInstanceReportStats(now);
+    const suffix = Date.now().toString();
+    const productModel = `product-model-${suffix}`;
+    const snapshotModel = `snapshot-model-${suffix}`;
+    const productTask = await taskFactory.create({
+      workflow: 'standard',
+      model: productModel,
+      createdAt: now,
+    });
+    const snapshotTask = await taskFactory.create({
+      workflow: 'env_snapshot',
+      model: snapshotModel,
+      createdAt: now,
+    });
+
+    await db.insert(taskRuns).values({
+      taskId: productTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      kind: 'fresh',
+      status: RunStatus.Completed,
+      completedAt: now,
+      payload: { repo: 'acme/product', description: 'Product task' },
+    });
+    await db.insert(taskRuns).values({
+      taskId: snapshotTask.id,
+      payloadKind: TaskPayloadKind.SnapshotEnvironment,
+      kind: 'fresh',
+      status: RunStatus.Completed,
+      completedAt: now,
+      payload: {
+        repo: '',
+        environmentId: crypto.randomUUID(),
+      },
+    });
+
+    await db.insert(llmUsageEvents).values([
+      {
+        eventKey: `product-usage-${suffix}`,
+        taskId: productTask.id,
+        inputTokens: 10,
+        outputTokens: 20,
+        totalTokens: 30,
+        costMicroUsd: 40,
+        costSource: 'opencode_message',
+        createdAt: now,
+      },
+      {
+        eventKey: `snapshot-usage-${suffix}`,
+        taskId: snapshotTask.id,
+        inputTokens: 100,
+        outputTokens: 200,
+        totalTokens: 300,
+        costMicroUsd: 400,
+        costSource: 'opencode_message',
+        createdAt: now,
+      },
+    ]);
+
+    const report = await collectInstanceReportStats(now);
+
+    expect(report.tasks24h.created).toBe(baseline.tasks24h.created + 1);
+    expect(report.tasks24h.completed).toBe(baseline.tasks24h.completed + 1);
+    expect(report.tasks24h.byHarness['opencode-server']).toBe(
+      (baseline.tasks24h.byHarness['opencode-server'] ?? 0) + 1,
+    );
+    expect(report.tasks24h.byModel).toContainEqual({
+      provider: 'openai',
+      model: productModel,
+      count: 1,
+    });
+    expect(report.tasks24h.byModel).not.toContainEqual(
+      expect.objectContaining({ model: snapshotModel }),
+    );
+    expect(report.tasks24h.tokens).toEqual({
+      input: baseline.tasks24h.tokens.input + 10,
+      output: baseline.tasks24h.tokens.output + 20,
+      total: baseline.tasks24h.tokens.total + 30,
+      costMicroUsd: baseline.tasks24h.tokens.costMicroUsd + 40,
+    });
   });
 });

@@ -91,6 +91,46 @@ function buildModelBackedOpenCodeConfigContent(
   });
 }
 
+/**
+ * Force OpenCode's blanket tool-permission denial into a config content
+ * string, preserving any other operator-supplied settings.
+ *
+ * The servers this module spawns exist only for non-task inference — task
+ * titles, routing, fast-agent answers — which is plain text or structured
+ * output and must never run tools. Without this, OpenCode's default `build`
+ * agent auto-approves edit/bash in server mode, and an instruction-shaped
+ * prompt (a task description saying "add some dinosaurs") can cause the
+ * control plane to edit its own working directory.
+ *
+ * Malformed operator config fails closed to a permission-only config: every
+ * non-task call passes its model explicitly, so dropping model-backed
+ * defaults keeps text generation working while never booting a server with
+ * tools enabled.
+ */
+function withDeniedToolPermissions(configContent: string | undefined): string {
+  const permissionOnly = JSON.stringify({ permission: 'deny' });
+
+  if (!configContent?.trim()) {
+    return permissionOnly;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(configContent);
+
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return permissionOnly;
+    }
+
+    return JSON.stringify({ ...parsed, permission: 'deny' });
+  } catch {
+    return permissionOnly;
+  }
+}
+
 export function buildOpenCodeCliEnv(
   extraEnv?: Partial<Record<string, string>>,
 ): NodeJS.ProcessEnv {
@@ -115,6 +155,12 @@ export function buildOpenCodeCliEnv(
       env.OPENCODE_CONFIG_CONTENT = modelBackedConfigContent;
     }
   }
+
+  // Applied unconditionally, after any operator-supplied config content is
+  // selected, so custom OPENCODE_CONFIG_CONTENT cannot re-enable tools.
+  env.OPENCODE_CONFIG_CONTENT = withDeniedToolPermissions(
+    env.OPENCODE_CONFIG_CONTENT,
+  );
 
   // Do not inherit or accept disabled-provider credentials in helper model
   // processes, including callers that bypass the task dequeue path.

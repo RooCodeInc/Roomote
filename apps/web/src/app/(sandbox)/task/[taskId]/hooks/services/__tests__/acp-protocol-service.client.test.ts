@@ -47,6 +47,30 @@ function toolCallUpdate(sequence: number): AcpMessage {
   };
 }
 
+function subagentActivityUpdate(
+  sequence: number,
+  lastMessage: string,
+): AcpMessage {
+  return {
+    id: `opencode-server:${sequence}`,
+    ts: 1000 + sequence,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate,
+    role: 'tool',
+    kind: 'tool_result',
+    contentBlocks: [],
+    metadata: {
+      sessionId: 'session-opencode',
+      turnId: 'message-opencode',
+    },
+    payload: {
+      toolCallId: 'subagent-call-1',
+      kind: 'subagent',
+      status: 'in_progress',
+      subagentActivity: { lastMessage },
+    },
+  };
+}
+
 describe('AcpProtocolService', () => {
   it('continues a partial assistant stream after active stream state is rebuilt', () => {
     const service = new AcpProtocolService();
@@ -112,6 +136,108 @@ describe('AcpProtocolService', () => {
     expect(messages[1]).toMatchObject({
       kind: 'tool_result',
       partial: true,
+    });
+  });
+
+  it('keeps an OpenCode subagent prompt from rawInput when its result arrives', () => {
+    const service = new AcpProtocolService();
+    const metadata = {
+      sessionId: 'session-opencode',
+      turnId: 'message-opencode',
+    };
+    const toolCall: AcpMessage = {
+      id: 'opencode-server:1',
+      ts: 1001,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      role: 'tool',
+      kind: 'tool_call',
+      contentBlocks: [],
+      metadata,
+      payload: {
+        toolCallId: 'subagent-call-1',
+        kind: 'subagent',
+        title: 'Launch explorer',
+        status: 'in_progress',
+        rawInput: {
+          prompt: 'Inspect the task transcript implementation.',
+          subagent_type: 'explore',
+        },
+      },
+    };
+    const toolResult: AcpMessage = {
+      id: 'opencode-server:2',
+      ts: 1002,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      kind: 'tool_result',
+      contentBlocks: [],
+      metadata,
+      payload: {
+        toolCallId: 'subagent-call-1',
+        kind: 'subagent',
+        title: 'Launch explorer',
+        status: 'completed',
+        output: 'The transcript renderer owns nested subagent rows.',
+      },
+    };
+
+    const initial = service.applyOutputEvent([], toolCall)!.acpMessages;
+    const completed = service.applyOutputEvent(
+      initial,
+      toolResult,
+    )!.acpMessages;
+
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({
+      kind: 'tool_result',
+      data: {
+        prompt: 'Inspect the task transcript implementation.',
+        output: 'The transcript renderer owns nested subagent rows.',
+      },
+    });
+  });
+
+  it('merges live child activity into an in-progress subagent row', () => {
+    const service = new AcpProtocolService();
+    const toolCall: AcpMessage = {
+      id: 'opencode-server:1',
+      ts: 1001,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      role: 'tool',
+      kind: 'tool_call',
+      contentBlocks: [],
+      metadata: {
+        sessionId: 'session-opencode',
+        turnId: 'message-opencode',
+      },
+      payload: {
+        toolCallId: 'subagent-call-1',
+        kind: 'subagent',
+        title: 'Launch explorer',
+        status: 'in_progress',
+        prompt: 'Inspect the task transcript implementation.',
+      },
+    };
+
+    const initial = service.applyOutputEvent([], toolCall)!.acpMessages;
+    const updated = service.applyOutputEvent(
+      initial,
+      subagentActivityUpdate(
+        2,
+        'The child agent is reviewing the render path.',
+      ),
+    )!.acpMessages;
+
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({
+      kind: 'tool_result',
+      partial: true,
+      data: {
+        prompt: 'Inspect the task transcript implementation.',
+        subagentActivity: {
+          lastMessage: 'The child agent is reviewing the render path.',
+        },
+      },
     });
   });
 });

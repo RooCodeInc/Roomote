@@ -2,6 +2,28 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.21.0 (2026-07-26)
+
+This release expands self-hosted deployment options and inference-provider choice, while making agent activity and automation more reliable and secure.
+
+### Highlights
+
+- Deploy self-hosted Roomote behind private networks and reverse tunnels with supported internal TLS.
+- Add Z.AI and Z.AI Coding Plan as inference providers, with International and China region selection. Thanks to @pridemusvaire for this contribution.
+- Keep task titles, routing, and summaries safely text-only when they process externally supplied input.
+- Inspect the latest response from a subagent while it runs and after it completes.
+
+### Minor changes
+
+- Support internal TLS for self-hosted deployments behind reverse tunnels and private networks, without requiring public DNS or a custom Caddyfile.
+- Add Z.AI and Z.AI Coding Plan as inference providers with International or China region on connect.
+
+### Patch changes
+
+- Restrict non-task OpenCode sessions to text-only output so task titles, routing, and summaries cannot act on instruction-like input.
+- Keep Discord event handling and public-fork pull-request reviews reliable, while allowing self-hosted Docker environments to start on nftables-only hosts.
+- Show the latest response from running and completed subagents, and give Dependabot automation clearer impact analysis and completion reporting.
+
 ## 0.20.1 (2026-07-25)
 
 This release makes chat-driven automation more reliable, keeping Discord tasks moving and report-thread replies connected to their work.

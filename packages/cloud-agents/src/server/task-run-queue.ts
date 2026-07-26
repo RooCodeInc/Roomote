@@ -109,6 +109,13 @@ export function resolveFreshTaskComputeProvider(
     : resolveComputeProviderTarget(provider, fallback);
 }
 
+export function shouldCaptureTaskCreatedEvent(
+  taskType: TaskPayloadKind,
+): boolean {
+  // Environment snapshots are maintenance work, not product task activity.
+  return taskType !== TaskPayloadKind.SnapshotEnvironment;
+}
+
 const ATOMIC_ENQUEUE_SCRIPT = `
 local incomingId = ARGV[1]
 local incomingScope = ARGV[2]
@@ -1518,20 +1525,22 @@ async function enqueueFreshLaunch(
     return insertedRun;
   });
 
-  // Anonymous analytics (no-op unless enabled): task creation with
-  // non-identifying routing facts only.
-  void captureEvent('task_created', {
-    ...(linkedUserId ? { userId: linkedUserId } : {}),
-    properties: {
-      taskType: taskRun.payloadKind,
-      workflow,
-      surface,
-      trigger,
-      harness: taskRun.harness ?? null,
-      model: effectiveTaskModel,
-      computeProvider: taskRun.vendor ?? null,
-    },
-  });
+  if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {
+    // Anonymous analytics (no-op unless enabled): task creation with
+    // non-identifying routing facts only.
+    void captureEvent('task_created', {
+      ...(linkedUserId ? { userId: linkedUserId } : {}),
+      properties: {
+        taskType: taskRun.payloadKind,
+        workflow,
+        surface,
+        trigger,
+        harness: taskRun.harness ?? null,
+        model: effectiveTaskModel,
+        computeProvider: taskRun.vendor ?? null,
+      },
+    });
+  }
 
   await pushRunOntoQueue({
     taskRun,

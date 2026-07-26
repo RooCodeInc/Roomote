@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   claimEvent: vi.fn(),
   completeEvent: vi.fn(),
   releaseEvent: vi.fn(),
+  renewEvent: vi.fn(),
   resolveProvider: vi.fn(),
   findMappedUserId: vi.fn(),
   findInstallation: vi.fn(),
@@ -67,7 +68,9 @@ vi.mock('@roomote/redis', async (importOriginal) => {
 vi.mock('../event-gate.js', () => ({
   claimDiscordApiEvent: mocks.claimEvent,
   completeDiscordApiEvent: mocks.completeEvent,
+  discordApiEventLeaseRenewal: { intervalMs: 60 * 1000 },
   releaseDiscordApiEvent: mocks.releaseEvent,
+  renewDiscordApiEvent: mocks.renewEvent,
 }));
 
 vi.mock('../provider.js', () => {
@@ -148,6 +151,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
+import { discordApiEventLeaseRenewal } from '../event-gate.js';
 
 const app = new Hono();
 app.route('/api/internal/discord', discord);
@@ -219,6 +223,7 @@ describe('Discord Gateway event handler', () => {
     });
     mocks.completeEvent.mockResolvedValue(true);
     mocks.releaseEvent.mockResolvedValue(undefined);
+    mocks.renewEvent.mockResolvedValue(true);
     mocks.resolveProvider.mockResolvedValue({
       applicationId: 'app-1',
       botToken: 'never-exposed-token',
@@ -477,11 +482,23 @@ describe('Discord Gateway event handler', () => {
     },
   );
 
-  it('times out slow processing and releases the event lease for a retry', async () => {
+  it('keeps a timed-out event lease until slow processing finishes', async () => {
     const originalTimeout = discordGatewayEventProcessingTimeout.timeoutMs;
+    const originalLeaseRenewalInterval = discordApiEventLeaseRenewal.intervalMs;
     vi.useFakeTimers();
     discordGatewayEventProcessingTimeout.timeoutMs = 10;
-    mocks.getChannel.mockImplementation(() => new Promise(() => undefined));
+    discordApiEventLeaseRenewal.intervalMs = 15;
+    let resolveChannel: (value: {
+      id: string;
+      name: string;
+      type: number;
+    }) => void;
+    mocks.getChannel.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveChannel = resolve;
+        }),
+    );
 
     try {
       const responsePromise = postEvent(envelope(message()));
@@ -493,13 +510,27 @@ describe('Discord Gateway event handler', () => {
         ok: false,
         error: 'discord_api_unavailable',
       });
-      expect(mocks.releaseEvent).toHaveBeenCalledWith({
+      expect(mocks.releaseEvent).not.toHaveBeenCalled();
+      expect(mocks.completeEvent).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(15);
+      expect(mocks.renewEvent).toHaveBeenCalledWith({
+        eventType: 'MESSAGE_CREATE',
+        eventId: 'message-1',
+        token: 'claim-token',
+      });
+
+      resolveChannel!({ id: 'dm-1', name: 'Direct message', type: 1 });
+      await vi.runAllTimersAsync();
+
+      expect(mocks.completeEvent).toHaveBeenCalledWith({
         eventType: 'MESSAGE_CREATE',
         eventId: 'message-1',
         token: 'claim-token',
       });
     } finally {
       discordGatewayEventProcessingTimeout.timeoutMs = originalTimeout;
+      discordApiEventLeaseRenewal.intervalMs = originalLeaseRenewalInterval;
       vi.useRealTimers();
     }
   });

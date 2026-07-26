@@ -85,6 +85,10 @@ const PROVIDER_ENV_VAR_NAMES = [
   'MOONSHOT_API_KEY',
   'KIMI_API_KEY',
   'MINIMAX_API_KEY',
+  'ZAI_API_KEY',
+  'ZAI_REGION',
+  'ZAI_CODING_PLAN_API_KEY',
+  'ZAI_CODING_PLAN_REGION',
   'OPENCODE_API_KEY',
   'AWS_BEARER_TOKEN_BEDROCK',
   'AWS_REGION',
@@ -1342,6 +1346,8 @@ describe('task model provider commands', () => {
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
       'AWS_REGION',
+      'ZAI_REGION',
+      'ZAI_CODING_PLAN_REGION',
       'OPENAI_COMPATIBLE_BASE_URL',
       'LITELLM_BASE_URL',
       'OLLAMA_BASE_URL',
