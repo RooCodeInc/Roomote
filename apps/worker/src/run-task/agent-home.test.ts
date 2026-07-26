@@ -390,6 +390,33 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(models?.['text-model']).not.toHaveProperty('modalities');
   });
 
+  it('falls back to the OpenAI-compatible coding model when no vision model is configured', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/vision-model',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'compat-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, Record<string, unknown>> }
+      >;
+    };
+
+    expect(
+      config.provider['openai-compatible']?.models['vision-model'],
+    ).toMatchObject({
+      attachment: true,
+      modalities: {
+        input: ['text', 'image'],
+        output: ['text'],
+      },
+    });
+  });
+
   it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is set', () => {
     const homeDir = createHomeDir();
     const result = generateOpenCodeConfig({

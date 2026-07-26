@@ -1619,7 +1619,7 @@ function resolveModelBackedOpenCodeConfig(
         ),
         runtimeEnv,
         configuredModelIds,
-        visionModel,
+        visionModel ?? effectiveCodingModel,
       ),
       runtimeEnv,
       configuredModelIds,
