@@ -31,6 +31,12 @@ export const MAX_THREAD_MESSAGES = 5;
 
 export const PLATFORM_WORKSPACE_VALUE = '__platform__';
 
+export interface RoutingEnvironmentPreference {
+  environmentId: string;
+  correctionCount: number;
+  lastCorrectedAt: Date;
+}
+
 /**
  * Context provided to the router for making routing decisions.
  */
@@ -53,6 +59,11 @@ export interface RoutingContext {
     userId: string;
     apiBaseUrl?: string;
   };
+  /**
+   * A persisted signal from explicit corrections. It is deliberately excluded
+   * from prompt assembly and considered only after an uncertain LLM decision.
+   */
+  environmentPreference?: RoutingEnvironmentPreference | null;
   previousSuggestion?: {
     workspaceValue: string | null;
     workspaceDisplayName: string;
@@ -173,6 +184,8 @@ export interface RoutingDebugInfo {
   needsExternalLookup: boolean | null;
   confidence?: number | null;
   workspaceRemapped?: boolean;
+  environmentSource?: 'router' | 'memory';
+  environmentPreferenceWeight?: number;
   selectedTaskModel?: RoutingTaskModelSelection;
 }
 
@@ -255,4 +268,6 @@ export type FollowUpIntent = 'confirm' | 'cancel' | 'correct';
 export interface FollowUpClassification {
   intent: FollowUpIntent;
   reasoning: string;
+  /** True when intent was selected by the error fallback rather than the LLM. */
+  isFallback?: boolean;
 }

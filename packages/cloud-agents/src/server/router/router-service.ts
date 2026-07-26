@@ -122,6 +122,96 @@ function isPlatformWorkspaceSelection(value: string): boolean {
 const MODEL_PREFERENCE_MIN_CONFIDENCE = 0.9;
 
 /**
+ * Preference memory is intentionally weaker than a normal router decision. It
+ * can resolve genuinely uncertain requests, but never replace a confident or
+ * explicit user choice.
+ */
+const ENVIRONMENT_PREFERENCE_MAX_ROUTER_CONFIDENCE = 0.8;
+const ENVIRONMENT_PREFERENCE_HALF_LIFE_DAYS = 30;
+const ENVIRONMENT_PREFERENCE_MIN_WEIGHT = 0.5;
+const ENVIRONMENT_PREFERENCE_MAX_CORRECTIONS = 3;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hasExplicitEnvironmentMention(context: RoutingContext): boolean {
+  return context.availableEnvironments.some((environment) => {
+    const name = environment.name.trim();
+    if (!name) {
+      return false;
+    }
+
+    return new RegExp(
+      `(^|[^a-z0-9])${escapeRegExp(name)}($|[^a-z0-9])`,
+      'i',
+    ).test(context.taskDescription);
+  });
+}
+
+function getEnvironmentPreferenceWeight(
+  correctionCount: number,
+  lastCorrectedAt: Date,
+  now = new Date(),
+): number {
+  const ageDays =
+    Math.max(0, now.getTime() - lastCorrectedAt.getTime()) /
+    (24 * 60 * 60 * 1000);
+  const recencyWeight = 2 ** (-ageDays / ENVIRONMENT_PREFERENCE_HALF_LIFE_DAYS);
+  return (
+    Math.min(correctionCount, ENVIRONMENT_PREFERENCE_MAX_CORRECTIONS) *
+    recencyWeight
+  );
+}
+
+function applyEnvironmentPreference(
+  context: RoutingContext,
+  result: RoutingResult,
+  confidence: number | null,
+): { result: RoutingResult; weight?: number } {
+  const preference = context.environmentPreference;
+
+  if (
+    !preference ||
+    context.previousSuggestion ||
+    confidence === null ||
+    confidence >= ENVIRONMENT_PREFERENCE_MAX_ROUTER_CONFIDENCE ||
+    result.workspace.type !== 'environment' ||
+    result.workspace.id === preference.environmentId ||
+    hasExplicitEnvironmentMention(context)
+  ) {
+    return { result };
+  }
+
+  const preferredEnvironment = context.availableEnvironments.find(
+    (environment) => environment.id === preference.environmentId,
+  );
+  const weight = getEnvironmentPreferenceWeight(
+    preference.correctionCount,
+    preference.lastCorrectedAt,
+  );
+
+  if (!preferredEnvironment || weight < ENVIRONMENT_PREFERENCE_MIN_WEIGHT) {
+    return { result };
+  }
+
+  return {
+    result: {
+      ...result,
+      workspace: {
+        type: 'environment',
+        id: preferredEnvironment.id,
+        name: preferredEnvironment.name,
+      },
+      // A generated kickoff may name the original environment, so allow the
+      // surface to use its generic acknowledgement after memory breaks a tie.
+      kickoffMessage: undefined,
+    },
+    weight,
+  };
+}
+
+/**
  * Resolves the routed task model from the LLM's `requestedModelId` pick, the
  * previous correction suggestion, and the deployment default. The LLM must
  * answer with either a model id (when the user expressed a model preference)
@@ -524,12 +614,33 @@ export async function routeTask(
     return fallbackDecision;
   }
 
+  const preferenceResolution =
+    decision.status === 'routed'
+      ? applyEnvironmentPreference(context, decision.result, confidence)
+      : undefined;
+
+  if (
+    decision.status === 'routed' &&
+    preferenceResolution?.weight !== undefined
+  ) {
+    decision.result = preferenceResolution.result;
+  }
+
   const debug: RoutingDebugInfo = {
     phase,
     toolsUsed,
     needsExternalLookup,
     confidence: decision.status === 'routed' ? confidence : null,
     workspaceRemapped,
+    ...(decision.status === 'routed' &&
+    preferenceResolution?.weight !== undefined
+      ? {
+          environmentSource: 'memory' as const,
+          environmentPreferenceWeight: preferenceResolution.weight,
+        }
+      : decision.status === 'routed'
+        ? { environmentSource: 'router' as const }
+        : {}),
   };
 
   switch (decision.status) {
@@ -715,6 +826,7 @@ export async function classifyFollowUp(params: {
     return {
       intent: 'correct',
       reasoning: `Classification failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      isFallback: true,
     };
   }
 }

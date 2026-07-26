@@ -19,6 +19,7 @@ import type {
 
 import type {
   users,
+  userRoutingPreferences,
   deploymentSettings,
   tasks,
   taskPins,
@@ -68,6 +69,12 @@ type Generated = 'id' | Timestamp;
 export type User = typeof users.$inferSelect;
 
 export type CreateUser = Omit<typeof users.$inferInsert, Timestamp>;
+
+/**
+ * userRoutingPreferences
+ */
+
+export type UserRoutingPreference = typeof userRoutingPreferences.$inferSelect;
 
 /**
  * deploymentSettings

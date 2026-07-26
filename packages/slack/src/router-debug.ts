@@ -173,6 +173,13 @@ export async function postRouterDebugMessage(
           text: formatSummaryFields([
             { label: 'Environment', value: environmentValue },
             {
+              label: 'Environment source',
+              value:
+                params.routingDebug?.environmentSource === 'memory'
+                  ? `memory (weight ${params.routingDebug.environmentPreferenceWeight?.toFixed(2) ?? 'unknown'})`
+                  : undefined,
+            },
+            {
               label: 'User override',
               value: params.userRoute,
             },

@@ -1,11 +1,16 @@
 const mocks = vi.hoisted(() => ({
   classifyFollowUp: vi.fn(),
+  recordUserRoutingPreference: vi.fn(),
   routeTask: vi.fn(),
 }));
 
 vi.mock('../router-service', () => ({
   classifyFollowUp: mocks.classifyFollowUp,
   routeTask: mocks.routeTask,
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  recordUserRoutingPreference: mocks.recordUserRoutingPreference,
 }));
 
 import { resolveRoutingFollowUp } from '../follow-up-service';
@@ -112,6 +117,10 @@ describe('resolveRoutingFollowUp', () => {
         workspaceDisplayName: 'Web App',
       },
     });
+    expect(mocks.recordUserRoutingPreference).toHaveBeenCalledWith({
+      userId: 'user-1',
+      environmentId: 'api',
+    });
   });
 
   it('does not confirm when the card is a picker with no suggestion', async () => {
@@ -133,5 +142,58 @@ describe('resolveRoutingFollowUp', () => {
 
     expect(result.intent).toBe('correct');
     expect(mocks.routeTask).toHaveBeenCalledOnce();
+  });
+
+  it('does not persist memory when follow-up classification falls back', async () => {
+    mocks.classifyFollowUp.mockResolvedValueOnce({
+      intent: 'correct',
+      reasoning: 'Classification failed',
+      isFallback: true,
+    });
+    mocks.routeTask.mockResolvedValueOnce({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'api', name: 'API' },
+        reasoning: 'fallback reroute',
+      },
+    });
+
+    await resolveRoutingFollowUp({
+      suggestion: {
+        workspaceValue: 'web',
+        workspaceDisplayName: 'Web App',
+      },
+      userResponse: 'yes',
+      userId: 'user-1',
+      buildCorrectionContext: async () => routingContext,
+    });
+
+    expect(mocks.recordUserRoutingPreference).not.toHaveBeenCalled();
+  });
+
+  it('does not persist a Slack-prefixed suggestion when the environment is unchanged', async () => {
+    mocks.classifyFollowUp.mockResolvedValueOnce({
+      intent: 'correct',
+      reasoning: 'clarified task details',
+    });
+    mocks.routeTask.mockResolvedValueOnce({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'api', name: 'API' },
+        reasoning: 'same environment',
+      },
+    });
+
+    await resolveRoutingFollowUp({
+      suggestion: {
+        workspaceValue: 'env:api',
+        workspaceDisplayName: 'API',
+      },
+      userResponse: 'also check the API logs',
+      userId: 'user-1',
+      buildCorrectionContext: async () => routingContext,
+    });
+
+    expect(mocks.recordUserRoutingPreference).not.toHaveBeenCalled();
   });
 });

@@ -121,9 +121,50 @@ export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
   slackQuickAnswers: many(slackQuickAnswers),
+  routingPreferences: many(userRoutingPreferences),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
+
+/**
+ * Explicit routing corrections are retained as a small, user-controlled
+ * preference signal. They are intentionally separate from task history so
+ * routing can use a bounded, explainable input instead of replaying messages.
+ */
+export const userRoutingPreferences = pgTable(
+  'user_routing_preferences',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    environmentId: uuid('environment_id')
+      .notNull()
+      .references(() => environments.id, { onDelete: 'cascade' }),
+    correctionCount: integer('correction_count').notNull().default(1),
+    lastCorrectedAt: timestamp('last_corrected_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('user_routing_preferences_user_unique').on(table.userId),
+    index('user_routing_preferences_environment_idx').on(table.environmentId),
+  ],
+);
+
+export const userRoutingPreferencesRelations = relations(
+  userRoutingPreferences,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userRoutingPreferences.userId],
+      references: [users.id],
+    }),
+    environment: one(environments, {
+      fields: [userRoutingPreferences.environmentId],
+      references: [environments.id],
+    }),
+  }),
+);
 
 /**
  * deployment_settings
