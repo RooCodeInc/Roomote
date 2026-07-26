@@ -1,9 +1,21 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockGetFreshXaiAccessToken } = vi.hoisted(() => ({
+  mockGetFreshXaiAccessToken: vi.fn(),
+}));
 
 vi.mock('../../encryption', () => ({
   encryptJSON: (value: unknown) => JSON.stringify(value),
   decryptSecrets: async (value: string) => JSON.parse(value) as unknown,
 }));
+
+vi.mock('../xai-subscription', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../xai-subscription')>();
+  return {
+    ...actual,
+    getFreshXaiAccessToken: mockGetFreshXaiAccessToken,
+  };
+});
 
 import {
   fetchChatGptUsage,
@@ -458,18 +470,15 @@ describe('parseXaiSubscriptionUsage', () => {
 });
 
 describe('fetchXaiSubscriptionUsage', () => {
-  const xaiRecord = {
-    refresh: 'xai-rt',
-    access: 'xai-access',
-    expires: Date.now() + 3_600_000,
-    status: 'connected' as const,
-    connectedAt: '2026-07-01T00:00:00.000Z',
-    updatedAt: '2026-07-01T00:00:00.000Z',
-  };
+  beforeEach(() => {
+    mockGetFreshXaiAccessToken.mockReset();
+  });
 
   it('fetches user then billing and returns normalized windows', async () => {
-    // getFreshXaiAccessToken does one secret read when the token is still fresh.
-    const { executor } = makeSecretExecutor([xaiRecord]);
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-access',
+      expires: Date.now() + 3_600_000,
+    });
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ userId: 'user-1' }))
@@ -483,7 +492,7 @@ describe('fetchXaiSubscriptionUsage', () => {
         }),
       );
 
-    const usage = await fetchXaiSubscriptionUsage({ executor, fetchImpl });
+    const usage = await fetchXaiSubscriptionUsage({ fetchImpl });
 
     expect(usage).toMatchObject({
       providerId: 'xai-subscription',
@@ -517,23 +526,22 @@ describe('fetchXaiSubscriptionUsage', () => {
   });
 
   it('returns null when no subscription is connected', async () => {
-    const { executor } = makeSecretExecutor([null]);
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
     const fetchImpl = vi.fn();
-    await expect(
-      fetchXaiSubscriptionUsage({ executor, fetchImpl }),
-    ).resolves.toBeNull();
+    await expect(fetchXaiSubscriptionUsage({ fetchImpl })).resolves.toBeNull();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('returns null when the billing payload cannot be parsed', async () => {
-    const { executor } = makeSecretExecutor([xaiRecord]);
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-access',
+      expires: Date.now() + 3_600_000,
+    });
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ id: 'user-1' }))
       .mockResolvedValueOnce(jsonResponse({ status: 'ok' }));
 
-    await expect(
-      fetchXaiSubscriptionUsage({ executor, fetchImpl }),
-    ).resolves.toBeNull();
+    await expect(fetchXaiSubscriptionUsage({ fetchImpl })).resolves.toBeNull();
   });
 });
