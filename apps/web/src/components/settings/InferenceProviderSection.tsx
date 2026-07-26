@@ -1164,8 +1164,10 @@ export function InferenceProviderSection({
                 key={provider.id}
                 provider={provider}
                 usage={
-                  provider.id === 'kimi-for-coding'
-                    ? usageByProvider.get('kimi-for-coding')
+                  provider.id === 'kimi-for-coding' ||
+                  provider.id === 'zai' ||
+                  provider.id === 'zai-coding-plan'
+                    ? usageByProvider.get(provider.id)
                     : undefined
                 }
                 creditBalance={

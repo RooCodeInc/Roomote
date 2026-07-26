@@ -1,7 +1,7 @@
 /**
  * Normalized usage/quota data for subscription-style inference providers
- * (ChatGPT subscription, GitHub Copilot, Kimi for Coding), displayed in the
- * Models settings page.
+ * (ChatGPT subscription, GitHub Copilot, Kimi for Coding, Z.AI quotas),
+ * displayed in the Models settings page.
  *
  * None of the upstream usage endpoints below are officially documented; each
  * is the endpoint the provider's own CLI or editor plugin polls for its usage
@@ -14,7 +14,9 @@
 export type SubscriptionUsageProviderId =
   | 'chatgpt'
   | 'github-copilot'
-  | 'kimi-for-coding';
+  | 'kimi-for-coding'
+  | 'zai'
+  | 'zai-coding-plan';
 
 /**
  * One quota window, e.g. Copilot's monthly premium requests or the Codex
@@ -63,3 +65,14 @@ export const KIMI_FOR_CODING_USAGE_ENDPOINTS = [
   'https://api.kimi.com/coding/v1/usages',
   'https://api.kimi.com/coding/v1/usage',
 ] as const;
+
+/**
+ * Undocumented Z.AI / BigModel monitor quota endpoint polled by Coding Plan
+ * tools and community usage bars. Host is region-specific; path is shared.
+ * Global → api.z.ai; China → open.bigmodel.cn.
+ */
+export const ZAI_USAGE_QUOTA_PATH = '/api/monitor/usage/quota/limit' as const;
+export const ZAI_USAGE_HOSTS = {
+  global: 'https://api.z.ai',
+  china: 'https://open.bigmodel.cn',
+} as const;

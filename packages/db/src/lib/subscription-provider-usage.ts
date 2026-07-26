@@ -3,7 +3,10 @@ import {
   CHATGPT_USAGE_ENDPOINT,
   GITHUB_COPILOT_USAGE_ENDPOINT,
   KIMI_FOR_CODING_USAGE_ENDPOINTS,
+  ZAI_USAGE_HOSTS,
+  ZAI_USAGE_QUOTA_PATH,
   type SubscriptionProviderUsage,
+  type SubscriptionUsageProviderId,
   type SubscriptionUsageWindow,
 } from '@roomote/types';
 
@@ -14,10 +17,10 @@ import { resolveModelProviderEnvValue } from './model-runtime-config';
 
 /**
  * Server-side usage/quota lookups for subscription-style inference providers,
- * using the same credentials the inference gateway already holds. All three
- * upstream endpoints are undocumented (each is what the provider's own CLI
- * polls), so every fetcher parses defensively and resolves to `null` on any
- * failure — the settings UI omits the usage line rather than erroring.
+ * using the same credentials the inference gateway already holds. Upstream
+ * endpoints are undocumented (each is what the provider's own CLI polls), so
+ * every fetcher parses defensively and resolves to `null` on any failure —
+ * the settings UI omits the usage line rather than erroring.
  */
 
 const USAGE_FETCH_TIMEOUT_MS = 10_000;
@@ -529,6 +532,204 @@ export async function fetchKimiForCodingUsage(
   return null;
 }
 
+// --- Z.AI / Z.AI Coding Plan ----------------------------------------------
+
+/**
+ * Unit values observed in the Z.AI monitor quota UI / Coding Plan tools:
+ * 3 = 5-hour token window, 6 = weekly token window, 5 = monthly tool quota.
+ */
+function zaiQuotaWindowLabel(
+  type: string | undefined,
+  unit: number | undefined,
+): string {
+  if (unit === 3) {
+    return '5-hour limit';
+  }
+  if (unit === 6) {
+    return 'Weekly limit';
+  }
+  if (unit === 5) {
+    return type === 'TIME_LIMIT' ? 'Monthly tools' : 'Monthly limit';
+  }
+  if (type === 'TOKENS_LIMIT') {
+    return 'Token limit';
+  }
+  if (type === 'TIME_LIMIT') {
+    return 'Time limit';
+  }
+  return 'Usage';
+}
+
+function parseZaiQuotaLimitEntry(
+  entry: Record<string, unknown> | undefined,
+): SubscriptionUsageWindow | undefined {
+  if (!entry) {
+    return undefined;
+  }
+
+  const type = firstString(entry, ['type']);
+  const unit = firstNumber(entry, ['unit']);
+  const usedPercent = firstNumber(entry, [
+    'percentage',
+    'percent',
+    'used_percent',
+    'usedPercent',
+  ]);
+  const remaining = firstNumber(entry, ['remaining', 'remain']);
+  const limit = firstNumber(entry, ['limit', 'total', 'quota']);
+  const used = firstNumber(entry, ['used', 'consumed']);
+  const resetsAt = toResetIso(
+    entry.nextResetTime ??
+      entry.next_reset_time ??
+      entry.resetTime ??
+      entry.resets_at,
+  );
+
+  if (
+    usedPercent === undefined &&
+    remaining === undefined &&
+    limit === undefined &&
+    used === undefined
+  ) {
+    return undefined;
+  }
+
+  const derivedPercent =
+    usedPercent ??
+    (limit !== undefined &&
+    limit > 0 &&
+    remaining !== undefined &&
+    Number.isFinite(remaining)
+      ? clampPercent(((limit - remaining) / limit) * 100)
+      : used !== undefined && limit !== undefined && limit > 0
+        ? clampPercent((used / limit) * 100)
+        : undefined);
+
+  return {
+    label: zaiQuotaWindowLabel(type, unit),
+    ...(derivedPercent !== undefined && {
+      usedPercent: clampPercent(derivedPercent),
+    }),
+    ...(used !== undefined && { used }),
+    ...(remaining !== undefined && { remaining }),
+    ...(limit !== undefined && { limit }),
+    ...(resetsAt && { resetsAt }),
+  };
+}
+
+/**
+ * Parse Z.AI monitor quota payloads. Live shape:
+ * `{ code: 200, data: { level, limits: [{ type, unit, percentage, nextResetTime }] } }`.
+ * Older tools also report a bare array of limit rows. Exported for tests.
+ */
+export function parseZaiQuotaUsage(payload: unknown): {
+  planType?: string;
+  windows: SubscriptionUsageWindow[];
+} {
+  const root = asRecord(payload);
+  const data = asRecord(root?.data) ?? root;
+
+  const planType = firstString(data, [
+    'level',
+    'plan',
+    'planType',
+    'plan_type',
+  ]);
+
+  const rawLimits =
+    (data && (data.limits ?? data.limit)) ??
+    (Array.isArray(payload) ? payload : undefined) ??
+    (Array.isArray(root?.limits) ? root.limits : undefined);
+
+  const windows: SubscriptionUsageWindow[] = [];
+  if (Array.isArray(rawLimits)) {
+    for (const raw of rawLimits) {
+      const window = parseZaiQuotaLimitEntry(asRecord(raw));
+      if (window) {
+        windows.push(window);
+      }
+    }
+  }
+
+  return {
+    ...(planType && { planType }),
+    windows,
+  };
+}
+
+function resolveZaiUsageHost(
+  region: string | null | undefined,
+): (typeof ZAI_USAGE_HOSTS)[keyof typeof ZAI_USAGE_HOSTS] {
+  return region === 'china' ? ZAI_USAGE_HOSTS.china : ZAI_USAGE_HOSTS.global;
+}
+
+async function fetchZaiFamilyUsage(
+  options: UsageFetchOptions,
+  config: {
+    providerId: Extract<SubscriptionUsageProviderId, 'zai' | 'zai-coding-plan'>;
+    apiKeyEnvNames: readonly string[];
+    regionEnvNames: readonly string[];
+  },
+): Promise<SubscriptionProviderUsage | null> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const apiKey = await resolveModelProviderEnvValue(config.apiKeyEnvNames, {
+    ...(options.runtimeEnv && { runtimeEnv: options.runtimeEnv }),
+    ...(options.executor && { executor: options.executor }),
+  });
+
+  if (!apiKey) {
+    return null;
+  }
+
+  const region = await resolveModelProviderEnvValue(config.regionEnvNames, {
+    ...(options.runtimeEnv && { runtimeEnv: options.runtimeEnv }),
+    ...(options.executor && { executor: options.executor }),
+  });
+
+  const endpoint = `${resolveZaiUsageHost(region)}${ZAI_USAGE_QUOTA_PATH}`;
+  const { status, payload } = await fetchJson(fetchImpl, endpoint, {
+    authorization: `Bearer ${apiKey}`,
+    accept: 'application/json',
+    'user-agent': 'roomote',
+  });
+
+  if (status !== 200) {
+    return null;
+  }
+
+  const parsed = parseZaiQuotaUsage(payload);
+  if (parsed.windows.length === 0) {
+    return null;
+  }
+
+  return {
+    providerId: config.providerId,
+    ...(parsed.planType && { planType: parsed.planType }),
+    windows: parsed.windows,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+export async function fetchZaiUsage(
+  options: UsageFetchOptions = {},
+): Promise<SubscriptionProviderUsage | null> {
+  return fetchZaiFamilyUsage(options, {
+    providerId: 'zai',
+    apiKeyEnvNames: ['ZAI_API_KEY'],
+    regionEnvNames: ['ZAI_REGION'],
+  });
+}
+
+export async function fetchZaiCodingPlanUsage(
+  options: UsageFetchOptions = {},
+): Promise<SubscriptionProviderUsage | null> {
+  return fetchZaiFamilyUsage(options, {
+    providerId: 'zai-coding-plan',
+    apiKeyEnvNames: ['ZAI_CODING_PLAN_API_KEY'],
+    regionEnvNames: ['ZAI_CODING_PLAN_REGION'],
+  });
+}
+
 // --- Aggregate ------------------------------------------------------------
 
 /**
@@ -543,6 +744,8 @@ export async function getSubscriptionProviderUsage(
     fetchChatGptUsage(options),
     fetchGitHubCopilotUsage(options),
     fetchKimiForCodingUsage(options),
+    fetchZaiUsage(options),
+    fetchZaiCodingPlanUsage(options),
   ]);
 
   return results.flatMap((result) =>
