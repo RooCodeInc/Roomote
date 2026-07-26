@@ -915,10 +915,56 @@ describe('OpenCode subagent live activity', () => {
       });
 
       const activity = subagentActivityEvents(outputs);
+      expect(activity).toHaveLength(1);
+      const details = (activity[0]!.payload as Record<string, unknown>)
+        .subagentActivity as Record<string, unknown>;
+      expect(details.lastMessage).toBe('The latest child response.');
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('throttles streamed child text instead of emitting once per token', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      // Text parts carry the full accumulated message, so a streamed response
+      // arrives as a growing prefix on every token.
+      for (const text of ['The', 'The final', 'The final child response.']) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: createChildTextPart(text, 'assistant'),
+          },
+        });
+      }
+
+      expect(subagentActivityEvents(outputs)).toHaveLength(1);
+
+      vi.advanceTimersByTime(6_000);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart(
+            'The final child response. Done.',
+            'assistant',
+          ),
+        },
+      });
+
+      const activity = subagentActivityEvents(outputs);
       expect(activity).toHaveLength(2);
       const details = (activity[1]!.payload as Record<string, unknown>)
         .subagentActivity as Record<string, unknown>;
-      expect(details.lastMessage).toBe('The final child response.');
+      expect(details.lastMessage).toBe('The final child response. Done.');
     } finally {
       await harness.dispose();
     }

@@ -2805,8 +2805,12 @@ export class OpenCodeServerHarness
         return;
       }
 
+      // Text parts carry the whole accumulated message, not a delta, so this
+      // fires once per streamed token. Record every one but let the shared
+      // throttle decide when it reaches the transcript; the terminal snapshot
+      // reads the stored value, so nothing is lost by waiting.
       watchdog.activityLastMessage = message;
-      this.emitSubagentActivityUpdate(watchdog, { force: true });
+      this.emitSubagentActivityUpdate(watchdog);
       return;
     }
 
@@ -2843,13 +2847,12 @@ export class OpenCodeServerHarness
 
   private emitSubagentActivityUpdate(
     watchdog: ActiveOpenCodeSubagentWatchdog,
-    options?: { force?: boolean },
   ): void {
     const nowMs = Date.now();
 
     if (
-      options?.force !== true &&
-      nowMs - watchdog.activityLastEmitAtMs < SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS
+      nowMs - watchdog.activityLastEmitAtMs <
+      SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS
     ) {
       return;
     }
