@@ -9,7 +9,9 @@ import {
   fetchChatGptUsage,
   fetchGitHubCopilotUsage,
   fetchKimiForCodingUsage,
+  fetchXaiSubscriptionUsage,
   getSubscriptionProviderUsage,
+  parseXaiSubscriptionUsage,
 } from '../subscription-provider-usage';
 
 /** Executor whose deployment-secret reads resolve the given rows per call. */
@@ -406,5 +408,132 @@ describe('getSubscriptionProviderUsage', () => {
 
     expect(usage).toHaveLength(1);
     expect(usage[0]).toMatchObject({ providerId: 'kimi-for-coding' });
+  });
+});
+
+describe('parseXaiSubscriptionUsage', () => {
+  it('normalizes included usage, credits, and on-demand windows', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        included_usage: {
+          used_percent: 42.5,
+          used: 425,
+          remaining: 575,
+          limit: 1000,
+          resets_at: '2026-08-01T00:00:00.000Z',
+        },
+        credits: { balance: 12.5 },
+        on_demand: { used: 3, limit: 10 },
+      },
+      Date.parse('2026-07-01T00:00:00.000Z'),
+    );
+
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        usedPercent: 42.5,
+        used: 425,
+        remaining: 575,
+        limit: 1000,
+        resetsAt: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        label: 'Credits',
+        remaining: 12.5,
+      },
+      {
+        label: 'On-demand',
+        used: 3,
+        limit: 10,
+        usedPercent: 30,
+      },
+    ]);
+  });
+
+  it('returns an empty list for unusable payloads', () => {
+    expect(parseXaiSubscriptionUsage(null)).toEqual([]);
+    expect(parseXaiSubscriptionUsage({})).toEqual([]);
+    expect(parseXaiSubscriptionUsage({ plan: 'pro' })).toEqual([]);
+  });
+});
+
+describe('fetchXaiSubscriptionUsage', () => {
+  const xaiRecord = {
+    refresh: 'xai-rt',
+    access: 'xai-access',
+    expires: Date.now() + 3_600_000,
+    status: 'connected' as const,
+    connectedAt: '2026-07-01T00:00:00.000Z',
+    updatedAt: '2026-07-01T00:00:00.000Z',
+  };
+
+  it('fetches user then billing and returns normalized windows', async () => {
+    // getFreshXaiAccessToken does one secret read when the token is still fresh.
+    const { executor } = makeSecretExecutor([xaiRecord]);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ userId: 'user-1' }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          includedUsage: {
+            usedPercent: 10,
+            limit: 100,
+            remaining: 90,
+          },
+        }),
+      );
+
+    const usage = await fetchXaiSubscriptionUsage({ executor, fetchImpl });
+
+    expect(usage).toMatchObject({
+      providerId: 'xai-subscription',
+      windows: [
+        {
+          label: 'Included usage',
+          usedPercent: 10,
+          limit: 100,
+          remaining: 90,
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://cli-chat-proxy.grok.com/v1/user',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer xai-access',
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer xai-access',
+        }),
+      }),
+    );
+  });
+
+  it('returns null when no subscription is connected', async () => {
+    const { executor } = makeSecretExecutor([null]);
+    const fetchImpl = vi.fn();
+    await expect(
+      fetchXaiSubscriptionUsage({ executor, fetchImpl }),
+    ).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the billing payload cannot be parsed', async () => {
+    const { executor } = makeSecretExecutor([xaiRecord]);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'user-1' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'ok' }));
+
+    await expect(
+      fetchXaiSubscriptionUsage({ executor, fetchImpl }),
+    ).resolves.toBeNull();
   });
 });

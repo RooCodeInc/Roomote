@@ -661,7 +661,11 @@ describe('getFreshXaiAccessToken', () => {
       now: Date.now(),
     });
 
-    expect(fresh).toMatchObject({ access: 'still-valid', refresh: 'rt' });
+    expect(fresh).toEqual({
+      access: 'still-valid',
+      expires,
+    });
+    expect(fresh).not.toHaveProperty('refresh');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -701,8 +705,8 @@ describe('getFreshXaiAccessToken', () => {
 
     expect(fresh).toMatchObject({
       access: 'new-at',
-      refresh: 'new-rt',
     });
+    expect(fresh).not.toHaveProperty('refresh');
     expect(fetchImpl).toHaveBeenCalledWith(
       XAI_OAUTH_TOKEN_ENDPOINT,
       expect.objectContaining({ method: 'POST' }),
@@ -763,8 +767,8 @@ describe('getFreshXaiAccessToken', () => {
 
     expect(fresh).toMatchObject({
       access: 'fresh-at',
-      refresh: 'fresh-rt',
     });
+    expect(fresh).not.toHaveProperty('refresh');
     const stored = JSON.parse(
       store.get(XAI_SUBSCRIPTION_INTERNAL.secretName)!,
     ) as { access: string; refresh: string };
@@ -846,8 +850,8 @@ describe('getFreshXaiAccessToken', () => {
 
     expect(fresh).toMatchObject({
       access: 'still-usable',
-      refresh: 'rt',
     });
+    expect(fresh).not.toHaveProperty('refresh');
     const stored = JSON.parse(
       store.get(XAI_SUBSCRIPTION_INTERNAL.secretName)!,
     ) as { status: string; access: string };

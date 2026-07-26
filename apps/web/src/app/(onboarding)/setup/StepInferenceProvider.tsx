@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getSetupModelProvider,
@@ -111,7 +112,7 @@ export function StepInferenceProvider({
   const chatgptStatus = chatgptStatusQuery.data ?? null;
   const xaiStatusQuery = useQuery(
     trpc.xaiSubscription.status.queryOptions(undefined, {
-      enabled: selectedProvider === 'xai-subscription',
+      enabled: selectedProvider === XAI_SUBSCRIPTION_PROVIDER_ID,
     }),
   );
   const xaiStatus = xaiStatusQuery.data ?? null;
@@ -184,7 +185,8 @@ export function StepInferenceProvider({
     selectedProviderStatus?.authKind === 'oauth' &&
     selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   const isGitHubCopilotProvider = selectedProvider === 'github-copilot';
-  const isXaiSubscriptionProvider = selectedProvider === 'xai-subscription';
+  const isXaiSubscriptionProvider =
+    selectedProvider === XAI_SUBSCRIPTION_PROVIDER_ID;
   const isOAuthProvider = selectedProviderStatus?.authKind === 'oauth';
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);

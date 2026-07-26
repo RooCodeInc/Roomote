@@ -385,11 +385,31 @@ export async function disconnectXaiSubscription(
   });
 }
 
+export type FreshXaiAccessToken = {
+  access: string;
+  expires: number;
+  email?: string;
+};
+
+function toPublicAccessToken(
+  record: XaiSubscriptionRecord,
+): FreshXaiAccessToken {
+  return {
+    access: record.access,
+    expires: record.expires,
+    ...(record.email && { email: record.email }),
+  };
+}
+
 /**
  * Refresh the access token when it is expiring within
- * `XAI_REFRESH_SAFETY_MARGIN_MS`. Serialized with a Postgres advisory lock so
- * concurrent gateway requests share one refreshed record. On failure, marks
+ * `XAI_REFRESH_SAFETY_MARGIN_MS`. Lock critical sections only around reads and
+ * writes; IdP HTTP runs outside the lock. CAS on the original refresh token
+ * so a concurrent reconnect cannot be overwritten. On terminal failure, marks
  * the record `status: 'error'` instead of deleting it.
+ *
+ * Returns access credentials only (never the refresh token) so callers cannot
+ * accidentally log or forward refresh material.
  */
 export async function getFreshXaiAccessToken(
   options: {
@@ -397,12 +417,7 @@ export async function getFreshXaiAccessToken(
     fetchImpl?: typeof fetch;
     now?: number;
   } = {},
-): Promise<{
-  access: string;
-  refresh: string;
-  expires: number;
-  email?: string;
-} | null> {
+): Promise<FreshXaiAccessToken | null> {
   const executor = options.executor ?? db;
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now();
@@ -413,18 +428,27 @@ export async function getFreshXaiAccessToken(
   }
 
   if (existing.expires > now + XAI_REFRESH_SAFETY_MARGIN_MS) {
-    return {
-      access: existing.access,
-      refresh: existing.refresh,
-      expires: existing.expires,
-      ...(existing.email && { email: existing.email }),
-    };
+    return toPublicAccessToken(existing);
   }
 
-  const result: { record: XaiSubscriptionRecord | null } = { record: null };
+  // Snapshot under lock, then refresh outside so disconnect/device-start are
+  // not blocked on IdP latency. Box the mutable state so TypeScript does not
+  // treat closure assignments as non-narrowing dead state.
+  type RefreshSnapshot = {
+    refresh: string;
+    access: string;
+    expires: number;
+    email?: string;
+    connectedAt: string;
+  };
+  const lockPhase: {
+    refreshSnapshot: RefreshSnapshot | null;
+    alreadyFresh: XaiSubscriptionRecord | null;
+  } = {
+    refreshSnapshot: null,
+    alreadyFresh: null,
+  };
 
-  // Take both locks so a concurrent device-code connect cannot land a new
-  // credential while this refresh still holds only the refresh lock.
   await withXaiSubscriptionLock(executor, 'both', async (tx) => {
     const locked = await loadRecord(tx);
 
@@ -433,126 +457,142 @@ export async function getFreshXaiAccessToken(
     }
 
     if (locked.expires > now + XAI_REFRESH_SAFETY_MARGIN_MS) {
-      result.record = locked;
+      lockPhase.alreadyFresh = locked;
       return;
     }
 
-    // Fence later writes to this specific refresh token so a reconnect that
-    // replaced the record while we awaited xAI cannot be clobbered.
-    const refreshTokenSnapshot = locked.refresh;
-
-    try {
-      const clientId = resolveXaiOAuthClientId();
-      const response = await fetchImpl(XAI_OAUTH_TOKEN_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Accept: 'application/json',
-          'User-Agent': 'roomote',
-        },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: locked.refresh,
-          client_id: clientId,
-        }).toString(),
-      });
-
-      let bodyText = '';
-      try {
-        bodyText = await response.text();
-      } catch {
-        bodyText = '';
-      }
-
-      let tokens: Partial<TokenResponse> = {};
-      if (bodyText) {
-        try {
-          tokens = JSON.parse(bodyText) as Partial<TokenResponse>;
-        } catch {
-          tokens = {};
-        }
-      }
-
-      if (!response.ok) {
-        const detail =
-          tokens.error_description ??
-          tokens.error ??
-          `xAI token refresh failed: ${response.status}`;
-        throw new Error(
-          tokens.error
-            ? `xAI token refresh failed: ${response.status} ${tokens.error}`
-            : detail.startsWith('xAI token refresh failed:')
-              ? detail
-              : `xAI token refresh failed: ${response.status}`,
-        );
-      }
-
-      if (!tokens.access_token) {
-        throw new Error('xAI token refresh returned no access_token.');
-      }
-
-      const current = await loadRecord(tx);
-      if (
-        !current ||
-        current.status !== 'connected' ||
-        current.refresh !== refreshTokenSnapshot
-      ) {
-        // Replaced by a newer connect/disconnect while we awaited xAI.
-        result.record = current?.status === 'connected' ? current : null;
-        return;
-      }
-
-      const next = await saveXaiSubscription(
-        tokens as TokenResponse,
-        tx,
-        current,
-      );
-      result.record = next;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unknown refresh error';
-
-      const current = await loadRecord(tx);
-      if (
-        !current ||
-        current.status !== 'connected' ||
-        current.refresh !== refreshTokenSnapshot
-      ) {
-        result.record = current?.status === 'connected' ? current : null;
-        return;
-      }
-
-      if (isTerminalXaiRefreshFailure(error)) {
-        const errored: XaiSubscriptionRecord = {
-          ...current,
-          status: 'error',
-          error: message,
-          updatedAt: new Date().toISOString(),
-        };
-        await persistRecord(tx, errored);
-        return;
-      }
-
-      // Transient failure: keep status connected. Serve remaining access if
-      // it has not expired yet so OAuth-only deploys survive brief IdP blips.
-      if (current.expires > now) {
-        result.record = current;
-      }
-    }
+    lockPhase.refreshSnapshot = {
+      refresh: locked.refresh,
+      access: locked.access,
+      expires: locked.expires,
+      ...(locked.email && { email: locked.email }),
+      connectedAt: locked.connectedAt,
+    };
   });
 
-  const refreshed = result.record;
+  if (lockPhase.alreadyFresh) {
+    return toPublicAccessToken(lockPhase.alreadyFresh);
+  }
 
-  if (!refreshed || refreshed.status !== 'connected') {
+  const snapshot = lockPhase.refreshSnapshot;
+  if (!snapshot) {
     return null;
   }
 
-  return {
-    access: refreshed.access,
-    refresh: refreshed.refresh,
-    expires: refreshed.expires,
-    ...(refreshed.email && { email: refreshed.email }),
+  type RefreshHttpResult =
+    | { ok: true; tokens: TokenResponse }
+    | { ok: false; error: Error };
+
+  let httpResult: RefreshHttpResult;
+  try {
+    const clientId = resolveXaiOAuthClientId();
+    const response = await fetchImpl(XAI_OAUTH_TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+        'User-Agent': 'roomote',
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: snapshot.refresh,
+        client_id: clientId,
+      }).toString(),
+    });
+
+    let bodyText = '';
+    try {
+      bodyText = await response.text();
+    } catch {
+      bodyText = '';
+    }
+
+    let tokens: Partial<TokenResponse> = {};
+    if (bodyText) {
+      try {
+        tokens = JSON.parse(bodyText) as Partial<TokenResponse>;
+      } catch {
+        tokens = {};
+      }
+    }
+
+    if (!response.ok) {
+      const detail =
+        tokens.error_description ??
+        tokens.error ??
+        `xAI token refresh failed: ${response.status}`;
+      throw new Error(
+        tokens.error
+          ? `xAI token refresh failed: ${response.status} ${tokens.error}`
+          : detail.startsWith('xAI token refresh failed:')
+            ? detail
+            : `xAI token refresh failed: ${response.status}`,
+      );
+    }
+
+    if (!tokens.access_token) {
+      throw new Error('xAI token refresh returned no access_token.');
+    }
+
+    httpResult = { ok: true, tokens: tokens as TokenResponse };
+  } catch (error) {
+    httpResult = {
+      ok: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+
+  const writePhase: { record: XaiSubscriptionRecord | null } = {
+    record: null,
   };
+
+  await withXaiSubscriptionLock(executor, 'both', async (tx) => {
+    const current = await loadRecord(tx);
+
+    if (
+      !current ||
+      current.status !== 'connected' ||
+      current.refresh !== snapshot.refresh
+    ) {
+      // Replaced by a newer connect/disconnect while we awaited xAI.
+      writePhase.record = current?.status === 'connected' ? current : null;
+      return;
+    }
+
+    if (httpResult.ok) {
+      writePhase.record = await saveXaiSubscription(
+        httpResult.tokens,
+        tx,
+        current,
+      );
+      return;
+    }
+
+    const message = httpResult.error.message;
+
+    if (isTerminalXaiRefreshFailure(httpResult.error)) {
+      const errored: XaiSubscriptionRecord = {
+        ...current,
+        status: 'error',
+        error: message,
+        updatedAt: new Date().toISOString(),
+      };
+      await persistRecord(tx, errored);
+      return;
+    }
+
+    // Transient failure: keep status connected. Serve remaining access if
+    // it has not expired yet so OAuth-only deploys survive brief IdP blips.
+    if (current.expires > now) {
+      writePhase.record = current;
+    }
+  });
+
+  if (!writePhase.record || writePhase.record.status !== 'connected') {
+    return null;
+  }
+
+  return toPublicAccessToken(writePhase.record);
 }
 
 /**

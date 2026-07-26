@@ -537,10 +537,11 @@ export async function fetchKimiForCodingUsage(
 /**
  * Parse the unofficial Grok billing payload. Shape is not documented; accept
  * included-usage percent, credit totals, and reset times when present.
+ * Exported for unit tests.
  */
-function parseXaiSubscriptionUsage(
+export function parseXaiSubscriptionUsage(
   payload: unknown,
-  now: number,
+  now: number = Date.now(),
 ): SubscriptionUsageWindow[] {
   const root = asRecord(payload);
   if (!root) {

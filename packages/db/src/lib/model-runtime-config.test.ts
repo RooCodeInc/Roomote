@@ -707,7 +707,6 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
     mockGetFreshXaiAccessToken.mockResolvedValue({
       access: 'xai-oauth-access',
-      refresh: 'xai-oauth-refresh',
       expires: Date.now() + 3_600_000,
     });
 
@@ -752,7 +751,6 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
     mockGetFreshXaiAccessToken.mockResolvedValue({
       access: 'xai-oauth-access-only',
-      refresh: 'xai-oauth-refresh-secret',
       expires: Date.now() + 3_600_000,
     });
 
@@ -765,7 +763,6 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     // XAI_API_KEY and never ship the refresh token or oauth JSON.
     expect(env.XAI_API_KEY).toBe('xai-oauth-access-only');
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
-    expect(JSON.stringify(env)).not.toContain('xai-oauth-refresh-secret');
   });
 
   it('prefers a connected OAuth access token over BYOK XAI_API_KEY on the control plane', async () => {
@@ -776,7 +773,6 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
     mockGetFreshXaiAccessToken.mockResolvedValue({
       access: 'xai-oauth-access-only',
-      refresh: 'xai-oauth-refresh-secret',
       expires: Date.now() + 3_600_000,
     });
 
@@ -787,7 +783,6 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     // Match gateway precedence: subscription wins when connected.
     expect(env.XAI_API_KEY).toBe('xai-oauth-access-only');
-    expect(JSON.stringify(env)).not.toContain('xai-oauth-refresh-secret');
   });
 
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {
