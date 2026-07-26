@@ -94,7 +94,7 @@ ingress rules with the matching origin TLS setting:
 
 ```yaml
 ingress:
-  - hostname: roomote.example.com
+  - hostname: example.com
     service: https://localhost:443
     originRequest:
       noTLSVerify: true
