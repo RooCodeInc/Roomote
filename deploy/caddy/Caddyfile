@@ -51,10 +51,6 @@
 	}
 }
 
-{$ROOMOTE_PREVIEW_DOMAIN} {
-	import roomote_proxy preview-proxy:8081
-}
-
 *.{$ROOMOTE_PREVIEW_DOMAIN} {
 	{$ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET:import roomote_on_demand_wildcard_tls}
 

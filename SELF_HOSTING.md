@@ -76,6 +76,7 @@ preview hostnames instead of `task-port.preview.example.com`. Set the preview
 base to the parent domain and add a suffix:
 
 ```sh
+ROOMOTE_APP_DOMAIN=example.com
 ROOMOTE_PREVIEW_DOMAIN=example.com
 PREVIEW_PROXY_BASE_URL=https://example.com
 PREVIEW_DOMAINS=example.com
