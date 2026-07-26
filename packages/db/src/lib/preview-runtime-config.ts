@@ -187,16 +187,10 @@ export async function resolveEffectivePreviewRuntimeConfig(
   });
   const effective: PreviewRuntimeConfigFields = {
     previewProxyBaseUrl: effectivePreviewProxyBaseUrl,
-<<<<<<< HEAD
     previewProxySubdomainSuffix: resolveEffectiveValue({
       runtimeValue: runtimeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
       persistedValue: persisted.previewProxySubdomainSuffix,
     }),
-=======
-    previewProxySubdomainSuffix: normalizeConfiguredValue(
-      runtimeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
-    ),
->>>>>>> fddbff60 (feat: support runtime flat preview hostnames)
     previewDomains:
       normalizeConfiguredValue(runtimeEnv.PREVIEW_DOMAINS) ??
       derivePreviewDomains(effectivePreviewProxyBaseUrl) ??
