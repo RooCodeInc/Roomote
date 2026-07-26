@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.21.1 (2026-07-26)
+
+This release restores reliable structured routing while preserving tool restrictions for non-task agent sessions.
+
+### Highlights
+
+- Keep routing and other structured agent responses working without granting non-task sessions tool access.
+
+### Patch changes
+
+- Restore structured routing output while keeping non-task agent sessions unable to use tools.
+
 ## 0.21.0 (2026-07-26)
 
 This release expands self-hosted deployment options and inference-provider choice, while making agent activity and automation more reliable and secure.
