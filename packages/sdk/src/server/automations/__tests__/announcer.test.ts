@@ -12,7 +12,6 @@ const {
   mockGetCommunicationProviderAdapter,
   mockLoadAutomationThreadFeedbackContext,
   mockEnqueueTask,
-  mockGenerateTrackedNonTaskText,
   mockSlackNotifier,
   mockAdapterPostMessage,
 } = vi.hoisted(() => ({
@@ -41,7 +40,6 @@ const {
   mockGetCommunicationProviderAdapter: vi.fn(),
   mockLoadAutomationThreadFeedbackContext: vi.fn(),
   mockEnqueueTask: vi.fn(),
-  mockGenerateTrackedNonTaskText: vi.fn(),
   mockSlackNotifier: vi.fn(),
   mockAdapterPostMessage: vi.fn(),
 }));
@@ -82,11 +80,6 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildManagerAutomationRootSummaryPromptContract: vi.fn(() => 'contract'),
   enqueueTask: mockEnqueueTask,
-}));
-
-vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
-  generateTrackedNonTaskText: mockGenerateTrackedNonTaskText,
-  NON_TASK_INFERENCE_SURFACES: { backgroundAnnouncer: 'background_announcer' },
 }));
 
 vi.mock('@roomote/slack', () => ({
