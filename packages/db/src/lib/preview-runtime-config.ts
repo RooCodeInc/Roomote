@@ -11,6 +11,7 @@ import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
 
 export type PreviewRuntimeOverrideField =
   | 'previewProxyBaseUrl'
+  | 'previewProxySubdomainSuffix'
   | 'previewDomains'
   | 'roomotePreviewDomain';
 
@@ -57,7 +58,9 @@ function readPersistedFields(
 
   return {
     previewProxyBaseUrl,
-    previewProxySubdomainSuffix: null,
+    previewProxySubdomainSuffix: normalizeConfiguredValue(
+      deploymentEnvVars.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
+    ),
     previewDomains: derivePreviewDomains(previewProxyBaseUrl),
     roomotePreviewDomain: deriveRoomotePreviewDomain(previewProxyBaseUrl),
   };
@@ -112,6 +115,18 @@ function buildOverrideState(params: {
     runtimeBaseUrl === params.effective.previewProxyBaseUrl
   ) {
     overriddenFields.push('previewProxyBaseUrl');
+  }
+
+  const runtimeSubdomainSuffix = normalizeConfiguredValue(
+    params.runtimeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
+  );
+  if (
+    runtimeSubdomainSuffix &&
+    params.persisted.previewProxySubdomainSuffix &&
+    runtimeSubdomainSuffix !== params.persisted.previewProxySubdomainSuffix &&
+    runtimeSubdomainSuffix === params.effective.previewProxySubdomainSuffix
+  ) {
+    overriddenFields.push('previewProxySubdomainSuffix');
   }
 
   const runtimeDomains = normalizeConfiguredValue(
@@ -172,9 +187,10 @@ export async function resolveEffectivePreviewRuntimeConfig(
   });
   const effective: PreviewRuntimeConfigFields = {
     previewProxyBaseUrl: effectivePreviewProxyBaseUrl,
-    previewProxySubdomainSuffix: normalizeConfiguredValue(
-      runtimeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
-    ),
+    previewProxySubdomainSuffix: resolveEffectiveValue({
+      runtimeValue: runtimeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
+      persistedValue: persisted.previewProxySubdomainSuffix,
+    }),
     previewDomains:
       normalizeConfiguredValue(runtimeEnv.PREVIEW_DOMAINS) ??
       derivePreviewDomains(effectivePreviewProxyBaseUrl) ??
