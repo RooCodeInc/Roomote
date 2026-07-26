@@ -69,6 +69,23 @@ Point `<domain>`, `preview.<domain>`, and `*.preview.<domain>` A records at
 the server first; the installer waits briefly for DNS and Caddy retries
 certificates until the records are in place.
 
+### Flat preview hostnames
+
+When your certificate provider supports only one-label wildcards, use flat
+preview hostnames instead of `task-port.preview.example.com`. Set the preview
+base to the parent domain and add a suffix:
+
+```sh
+ROOMOTE_PREVIEW_DOMAIN=example.com
+PREVIEW_PROXY_BASE_URL=https://example.com
+PREVIEW_DOMAINS=example.com
+PREVIEW_PROXY_SUBDOMAIN_SUFFIX=preview
+```
+
+Roomote then publishes `task-port-preview.example.com`, which is covered by
+`*.example.com`. Point `*.example.com` at Caddy or your tunnel, and reserve the
+`-preview` suffix so it does not collide with other first-level subdomains.
+
 ### Private networks and tunnels
 
 When a reverse tunnel or private network terminates public TLS before traffic
