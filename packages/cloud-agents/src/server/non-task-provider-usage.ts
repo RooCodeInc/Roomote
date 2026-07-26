@@ -28,15 +28,29 @@ const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
  *
  * Enumerated per tool rather than a `*` wildcard: a wildcard rule also
  * strips the internal mechanism OpenCode uses for `format: json_schema`
- * structured output, breaking every structured routing call. On managed
- * servers the config allowlist guarantees no tools exist beyond the
- * enumerated built-ins; an externally configured server
- * (`OPENCODE_SDK_SERVER_URL`) owns its own config, so any custom tools it
- * defines are the operator's responsibility.
+ * structured output, breaking every structured routing call.
  */
 const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
   NON_TASK_TOOL_PERMISSION_DENIALS,
 ).map((permission) => ({ permission, pattern: '*', action: 'deny' }));
+
+/**
+ * Per-prompt tool filter: disable every registered tool — including MCP or
+ * plugin tools an externally configured server (`OPENCODE_SDK_SERVER_URL`)
+ * may define, which the enumerated permission denials cannot name — except
+ * OpenCode's internal `StructuredOutput` tool, which fulfils
+ * `format: json_schema`.
+ *
+ * The exact-name exception is deliberate: the `*` glob alone also removes
+ * `StructuredOutput` and breaks structured calls. If a future OpenCode
+ * release renames that internal tool, structured calls fail loudly ("Model
+ * did not produce structured output") rather than any tool becoming
+ * executable — this filter fails closed.
+ */
+const NON_TASK_SESSION_TOOL_DISABLES: Record<string, boolean> = {
+  '*': false,
+  StructuredOutput: true,
+};
 
 let nonTaskSessionDirectory: string | undefined;
 
@@ -334,6 +348,7 @@ async function runNonTaskSdkPrompt(
         sessionID: sessionResult.data.id,
         directory: sessionDirectory,
         model: splitOpenCodeModelId(model),
+        tools: NON_TASK_SESSION_TOOL_DISABLES,
         ...promptOptions,
       },
       { signal: abortController.signal },

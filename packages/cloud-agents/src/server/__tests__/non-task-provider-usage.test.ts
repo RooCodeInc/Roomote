@@ -368,6 +368,18 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPermissions.every((rule) => rule.permission !== '*')).toBe(
       true,
     );
+    // The per-prompt tool filter is the fail-closed layer for tools the
+    // enumerated denials cannot name (MCP/plugin tools on external servers):
+    // everything off, with OpenCode's internal StructuredOutput tool as the
+    // only exception so `format: json_schema` keeps working.
+    const promptTools = sessionPromptMock.mock.calls[0]?.[0]?.tools as Record<
+      string,
+      boolean
+    >;
+    expect(promptTools).toEqual({ '*': false, StructuredOutput: true });
+    expect(
+      Object.entries(promptTools).filter(([, enabled]) => enabled),
+    ).toEqual([['StructuredOutput', true]]);
     expect(sessionPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionID: 'session-1',
