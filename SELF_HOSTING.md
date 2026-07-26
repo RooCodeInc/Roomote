@@ -130,6 +130,27 @@ mode only when you know public DNS is not ready yet. The selected mode is
 retained in `/opt/roomote/.env`, so installer reruns and `roomote upgrade`
 preserve it.
 
+### Cloudflare Tunnel
+
+Cloudflare Tunnel works with the supported `internal` TLS mode: Cloudflare
+serves the public certificate and forwards encrypted traffic to Caddy on the
+private host. Configure the tunnel to send the app domain and wildcard preview
+traffic to Caddy, rather than directly to individual Roomote services, so
+artifact and API routes keep their normal behavior.
+
+Cloudflare's standard certificate for `example.com` and `*.example.com` does
+not cover Roomote's default `task-port.preview.example.com` preview shape.
+Provision a certificate that covers `preview.example.com` and
+`*.preview.example.com`, and configure the tunnel's wildcard hostname to reach
+Caddy.
+
+Task sandboxes reject private, link-local, and Tailscale ranges to protect the
+host network. If a self-hosted Gitea or GitLab hostname resolves differently
+inside Docker than it does on the host, tasks can fail to clone even though the
+service is reachable from the local PC. Give sandboxes a public,
+worker-reachable source-control hostname instead of disabling those network
+guards or overriding Docker DNS globally.
+
 Useful flags and env vars: `--version <tag>` pins a release, and
 `--preview-domain <host>` overrides the preview root. Both published images
 are public, so pulls need no credentials. Re-running the installer is safe:

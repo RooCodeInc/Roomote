@@ -145,6 +145,10 @@ routes `/$S3_BUCKET_ARTIFACTS/*` to MinIO without stripping the bucket path.
 This keeps presigned artifact URLs reachable from Modal, Sandbox, Docker
 workers, and browsers without requiring a separate object-storage hostname.
 
+For a Cloudflare Tunnel deployment, including one-label preview hostnames that
+work with standard wildcard certificates, follow the [Cloudflare Tunnel
+guidance](../SELF_HOSTING.md#cloudflare-tunnel).
+
 Use a separate preview env file for the `develop` soak. It should have its own
 customer slug, domains, database, object storage bucket, auth keys, GitHub App
 callback/webhook settings, and Terraform state. Keep the production env file for
