@@ -97,6 +97,18 @@ private host. Configure the tunnel to send the app domain and wildcard preview
 traffic to Caddy, rather than directly to individual Roomote services, so
 artifact and API routes keep their normal behavior.
 
+Because Caddy issues a local certificate in this mode, configure the tunnel's
+HTTPS origin either to trust Caddy's local CA or to skip origin certificate
+verification:
+
+```yaml
+originRequest:
+  noTLSVerify: true
+```
+
+Use `noTLSVerify` only for the private tunnel-to-Caddy hop; Cloudflare still
+serves a publicly trusted certificate to browsers.
+
 Cloudflare's standard certificate for `example.com` and `*.example.com` does
 not cover Roomote's default `task-port.preview.example.com` preview shape.
 Provision a certificate that covers `preview.example.com` and
