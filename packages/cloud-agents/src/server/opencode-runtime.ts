@@ -92,8 +92,53 @@ function buildModelBackedOpenCodeConfigContent(
 }
 
 /**
- * Force OpenCode's blanket tool-permission denial into a config content
- * string, preserving any other operator-supplied settings.
+ * Per-tool permission denials for the non-task helper servers, covering
+ * every tool OpenCode's permission config enumerates.
+ *
+ * Deliberately the enumerated object form, NOT the blanket `"deny"` string:
+ * OpenCode fulfils `format: json_schema` structured output through an
+ * internal mechanism that a blanket denial (or a wildcard session rule)
+ * strips along with the real tools, which silently breaks every structured
+ * routing call while plain-text calls keep working. The object form denies
+ * only the listed tools and leaves that mechanism available.
+ */
+export const NON_TASK_TOOL_PERMISSION_DENIALS = {
+  read: 'deny',
+  edit: 'deny',
+  glob: 'deny',
+  grep: 'deny',
+  list: 'deny',
+  bash: 'deny',
+  task: 'deny',
+  external_directory: 'deny',
+  todowrite: 'deny',
+  question: 'deny',
+  webfetch: 'deny',
+  websearch: 'deny',
+  lsp: 'deny',
+  skill: 'deny',
+} as const;
+
+/**
+ * Config keys forwarded to non-task helper servers. Everything else is
+ * dropped: OpenCode config can introduce or re-enable tools through several
+ * other keys (`mcp` servers, `plugin`, `agent`/`mode` overrides, global
+ * `tools` toggles), and any tool from those sources would fall outside
+ * {@link NON_TASK_TOOL_PERMISSION_DENIALS}. Allowlisting model/provider
+ * selection keeps the server's toolset exactly the built-in one, which the
+ * enumerated denials fully cover.
+ */
+const NON_TASK_CONFIG_ALLOWED_KEYS = [
+  'model',
+  'small_model',
+  'provider',
+  'disabled_providers',
+  'enabled_providers',
+] as const;
+
+/**
+ * Reduce a config content string to the model/provider allowlist plus the
+ * non-task tool denials.
  *
  * The servers this module spawns exist only for non-task inference — task
  * titles, routing, fast-agent answers — which is plain text or structured
@@ -102,13 +147,19 @@ function buildModelBackedOpenCodeConfigContent(
  * prompt (a task description saying "add some dinosaurs") can cause the
  * control plane to edit its own working directory.
  *
- * Malformed operator config fails closed to a permission-only config: every
- * non-task call passes its model explicitly, so dropping model-backed
- * defaults keeps text generation working while never booting a server with
- * tools enabled.
+ * Operator-supplied `permission` entries never survive, not even for tools
+ * outside the enumerated list: unknown entries imply tool sources the
+ * allowlist already strips, and allows for built-in tools must not win.
+ * Malformed config fails closed to a permission-only config: every non-task
+ * call passes its model explicitly, so dropping model-backed defaults keeps
+ * text generation working while never booting a server with tools enabled.
  */
-function withDeniedToolPermissions(configContent: string | undefined): string {
-  const permissionOnly = JSON.stringify({ permission: 'deny' });
+function toRestrictedNonTaskConfigContent(
+  configContent: string | undefined,
+): string {
+  const permissionOnly = JSON.stringify({
+    permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+  });
 
   if (!configContent?.trim()) {
     return permissionOnly;
@@ -125,7 +176,18 @@ function withDeniedToolPermissions(configContent: string | undefined): string {
       return permissionOnly;
     }
 
-    return JSON.stringify({ ...parsed, permission: 'deny' });
+    const config = parsed as Record<string, unknown>;
+    const restricted: Record<string, unknown> = {};
+
+    for (const key of NON_TASK_CONFIG_ALLOWED_KEYS) {
+      if (config[key] !== undefined) {
+        restricted[key] = config[key];
+      }
+    }
+
+    restricted.permission = NON_TASK_TOOL_PERMISSION_DENIALS;
+
+    return JSON.stringify(restricted);
   } catch {
     return permissionOnly;
   }
@@ -157,8 +219,9 @@ export function buildOpenCodeCliEnv(
   }
 
   // Applied unconditionally, after any operator-supplied config content is
-  // selected, so custom OPENCODE_CONFIG_CONTENT cannot re-enable tools.
-  env.OPENCODE_CONFIG_CONTENT = withDeniedToolPermissions(
+  // selected, so custom OPENCODE_CONFIG_CONTENT cannot introduce tools
+  // (mcp/plugin/agent config) or re-enable built-in ones.
+  env.OPENCODE_CONFIG_CONTENT = toRestrictedNonTaskConfigContent(
     env.OPENCODE_CONFIG_CONTENT,
   );
 
