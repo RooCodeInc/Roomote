@@ -1,4 +1,11 @@
-import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  createOpencodeClient,
+  type PermissionRuleset,
+} from '@opencode-ai/sdk/v2/client';
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
@@ -11,6 +18,30 @@ import {
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 
+/**
+ * Non-task sessions produce text or structured output only; no tool may ever
+ * run. The leased servers already deny tools via their config
+ * (`withDeniedToolPermissions` in opencode-runtime), and this per-session
+ * ruleset keeps a stale or externally configured server
+ * (`OPENCODE_SDK_SERVER_URL`) equally locked down.
+ */
+const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = [
+  { permission: '*', pattern: '*', action: 'deny' },
+];
+
+let nonTaskSessionDirectory: string | undefined;
+
+/**
+ * Sessions run in an empty scratch directory instead of the service's own
+ * working directory (the deployment's application code), so even a tool that
+ * slips past the permission layers has nothing to read or write, and OpenCode
+ * skips indexing the whole repository for a title-generation call.
+ */
+function resolveNonTaskSessionDirectory(): string {
+  nonTaskSessionDirectory ??= mkdtempSync(join(tmpdir(), 'roomote-non-task-'));
+  return nonTaskSessionDirectory;
+}
+
 export type NonTaskInferenceTrackingInput = {
   surface: string;
   userId?: string | null;
@@ -19,7 +50,6 @@ export type NonTaskInferenceTrackingInput = {
 };
 
 export const NON_TASK_INFERENCE_SURFACES = {
-  backgroundAnnouncer: 'background_announcer',
   fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent_question_answering',
   prReviewNotificationTriage: 'pr_review_notification_triage',
@@ -34,7 +64,6 @@ export const NON_TASK_INFERENCE_SURFACES = {
   suggestionRoutingValidation: 'suggestion_routing_validation',
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
-  videoDescription: 'video_description',
 } as const;
 
 export interface GenerateTrackedNonTaskTextParams extends NonTaskInferenceTrackingInput {
@@ -275,10 +304,12 @@ async function runNonTaskSdkPrompt(
       baseUrl: server.url,
       fetch: openCodeSdkFetch,
     });
+    const sessionDirectory = resolveNonTaskSessionDirectory();
     const sessionResult = await client.session.create(
       {
-        directory: process.cwd(),
+        directory: sessionDirectory,
         title: `Roomote ${params.surface}`,
+        permission: NON_TASK_SESSION_PERMISSIONS,
       },
       { signal: abortController.signal },
     );
@@ -292,7 +323,7 @@ async function runNonTaskSdkPrompt(
     const promptResult = await client.session.prompt(
       {
         sessionID: sessionResult.data.id,
-        directory: process.cwd(),
+        directory: sessionDirectory,
         model: splitOpenCodeModelId(model),
         ...promptOptions,
       },

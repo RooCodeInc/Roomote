@@ -341,19 +341,25 @@ describe('resolveOpenCodeSmallModel', () => {
       baseUrl: 'http://127.0.0.1:4096',
       fetch: expect.any(Function),
     });
+    // Sessions are locked down: an empty scratch directory (never the
+    // service's own working directory) and a deny-all permission ruleset.
     expect(sessionCreateMock).toHaveBeenCalledWith(
       {
-        directory: process.cwd(),
+        directory: expect.stringContaining('roomote-non-task-'),
         title: `Roomote ${NON_TASK_INFERENCE_SURFACES.routerTaskRouting}`,
+        permission: [{ permission: '*', pattern: '*', action: 'deny' }],
       },
       expect.objectContaining({
         signal: expect.any(AbortSignal),
       }),
     );
+    const sessionDirectory = sessionCreateMock.mock.calls[0]?.[0]
+      ?.directory as string;
+    expect(sessionDirectory).not.toBe(process.cwd());
     expect(sessionPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionID: 'session-1',
-        directory: process.cwd(),
+        directory: sessionDirectory,
         model: {
           providerID: 'openrouter',
           modelID: 'openai/gpt-5.4',
@@ -481,7 +487,7 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionID: 'session-1',
-        directory: process.cwd(),
+        directory: expect.stringContaining('roomote-non-task-'),
         model: {
           providerID: 'openrouter',
           modelID: 'openai/gpt-5.4',
