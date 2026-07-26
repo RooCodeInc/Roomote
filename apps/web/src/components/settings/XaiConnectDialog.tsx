@@ -121,6 +121,9 @@ export function XaiConnectDialog({
             queryClient.invalidateQueries({
               queryKey: trpc.xaiSubscription.status.queryKey(),
             }),
+            queryClient.invalidateQueries({
+              queryKey: trpc.subscriptionUsage.list.queryKey(),
+            }),
           ]);
           if (pollGenerationRef.current !== generation) {
             return;

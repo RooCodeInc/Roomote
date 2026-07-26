@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getModelProviderLabel,
 } from '@roomote/types';
@@ -236,7 +237,6 @@ function ProviderCredentialsDialog({
   onSave,
   onOpenChange,
   onConnectOAuth,
-  onConnectXaiSubscription,
 }: {
   open: boolean;
   mode: 'add' | 'edit';
@@ -250,7 +250,6 @@ function ProviderCredentialsDialog({
   ) => Promise<void>;
   onOpenChange: (open: boolean) => void;
   onConnectOAuth: (providerId: SetupModelProviderId) => void;
-  onConnectXaiSubscription?: () => void;
 }) {
   const [selectedProviderId, setSelectedProviderId] =
     useState<SetupModelProviderId | null>(providers[0]?.id ?? null);
@@ -352,7 +351,6 @@ function ProviderCredentialsDialog({
   const isChatGptProvider =
     selectedProvider?.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   const isGitHubCopilotProvider = selectedProvider?.id === 'github-copilot';
-  const isXaiProvider = selectedProvider?.id === 'xai';
   const isOAuthProvider = selectedProvider?.authKind === 'oauth';
   const title =
     mode === 'add'
@@ -513,22 +511,6 @@ function ProviderCredentialsDialog({
                       />
                     </div>
                   ))}
-                  {isXaiProvider && onConnectXaiSubscription ? (
-                    <div className="flex flex-wrap items-center gap-3 pt-1">
-                      <span className="text-sm text-muted-foreground">
-                        or, if you have SuperGrok / eligible X Premium+:
-                      </span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={isSaving}
-                        onClick={() => onConnectXaiSubscription()}
-                      >
-                        Connect Grok subscription
-                      </Button>
-                    </div>
-                  ) : null}
                 </>
               )}
             </>
@@ -655,6 +637,7 @@ function XaiSubscriptionRow({
   errored,
   accountEmail,
   errorMessage,
+  usage,
   onReconnect,
   onDisconnect,
   isDisconnecting,
@@ -662,6 +645,7 @@ function XaiSubscriptionRow({
   errored: boolean;
   accountEmail?: string;
   errorMessage?: string;
+  usage?: SubscriptionProviderUsage;
   onReconnect: () => void;
   onDisconnect: () => Promise<void>;
   isDisconnecting: boolean;
@@ -669,7 +653,7 @@ function XaiSubscriptionRow({
   return (
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
       <span className="min-w-0 truncate text-sm font-medium">
-        xAI (Grok subscription)
+        {getModelProviderLabel(XAI_SUBSCRIPTION_PROVIDER_ID)}
       </span>
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0 flex-1">
@@ -683,6 +667,9 @@ function XaiSubscriptionRow({
                 ? `Connected as ${accountEmail}`
                 : 'Connected to a SuperGrok / X Premium+ account.'}
           </p>
+          {!errored ? (
+            <SubscriptionUsageLine usage={usage} className="mt-1" />
+          ) : null}
         </div>
         {errored ? (
           <Button size="sm" variant="outline" onClick={onReconnect}>
@@ -1077,16 +1064,14 @@ export function InferenceProviderSection({
   const xaiErrored = xaiStatus?.status === 'error';
   const xaiHasApiKey = Boolean(providerSetup?.xaiApiKeyConnected);
 
-  // ChatGPT / Copilot / OAuth-only xAI are subscription rows; API-key xAI
-  // stays in the key list (and can coexist with the subscription row).
+  // Subscription oauth rows are rendered separately; API-key xAI stays in the
+  // key list and can coexist with the SuperGrok subscription provider.
   const apiKeyConnectedProviders = connectedProviders.filter((provider) => {
     if (
       provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID ||
-      provider.id === 'github-copilot'
+      provider.id === 'github-copilot' ||
+      provider.id === XAI_SUBSCRIPTION_PROVIDER_ID
     ) {
-      return false;
-    }
-    if (provider.id === 'xai' && xaiHasRecord && !xaiHasApiKey) {
       return false;
     }
     return true;
@@ -1098,9 +1083,10 @@ export function InferenceProviderSection({
     if (provider.id === 'github-copilot') {
       return !githubCopilotHasRecord;
     }
+    if (provider.id === XAI_SUBSCRIPTION_PROVIDER_ID) {
+      return !xaiHasRecord;
+    }
     if (provider.id === 'xai') {
-      // Still addable when only a subscription is connected so operators can
-      // also attach an API key; hide only when the key path is already live.
       return !xaiHasApiKey;
     }
     return provider.authKind === 'api-key' || provider.authKind === 'endpoint';
@@ -1250,18 +1236,12 @@ export function InferenceProviderSection({
             setProviderDialog(null);
             if (providerId === 'github-copilot') {
               setIsGitHubCopilotDialogOpen(true);
+            } else if (providerId === XAI_SUBSCRIPTION_PROVIDER_ID) {
+              setIsXaiDialogOpen(true);
             } else {
               setIsChatGptDialogOpen(true);
             }
           }}
-          onConnectXaiSubscription={
-            xaiHasRecord
-              ? undefined
-              : () => {
-                  setProviderDialog(null);
-                  setIsXaiDialogOpen(true);
-                }
-          }
         />
       ) : null}
       <DeleteProviderDialog
@@ -1305,6 +1285,7 @@ export function InferenceProviderSection({
                 errored={xaiErrored}
                 accountEmail={xaiStatus?.email}
                 errorMessage={xaiStatus?.error}
+                usage={usageByProvider.get(XAI_SUBSCRIPTION_PROVIDER_ID)}
                 onReconnect={() => setIsXaiDialogOpen(true)}
                 onDisconnect={handleDisconnectXai}
                 isDisconnecting={disconnectXai.isPending}

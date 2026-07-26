@@ -3,6 +3,8 @@ import {
   CHATGPT_USAGE_ENDPOINT,
   GITHUB_COPILOT_USAGE_ENDPOINT,
   KIMI_FOR_CODING_USAGE_ENDPOINTS,
+  XAI_USAGE_BILLING_ENDPOINT,
+  XAI_USAGE_USER_ENDPOINT,
   type SubscriptionProviderUsage,
   type SubscriptionUsageWindow,
 } from '@roomote/types';
@@ -11,6 +13,7 @@ import { type DatabaseOrTransaction } from '../db';
 import { getFreshChatGptAccessToken } from './chatgpt-subscription';
 import { getGitHubCopilotAccessToken } from './github-copilot-subscription';
 import { resolveModelProviderEnvValue } from './model-runtime-config';
+import { getFreshXaiAccessToken } from './xai-subscription';
 
 /**
  * Server-side usage/quota lookups for subscription-style inference providers,
@@ -529,6 +532,175 @@ export async function fetchKimiForCodingUsage(
   return null;
 }
 
+// --- xAI Grok subscription ------------------------------------------------
+
+/**
+ * Parse the unofficial Grok billing payload. Shape is not documented; accept
+ * included-usage percent, credit totals, and reset times when present.
+ */
+function parseXaiSubscriptionUsage(
+  payload: unknown,
+  now: number,
+): SubscriptionUsageWindow[] {
+  const root = asRecord(payload);
+  if (!root) {
+    return [];
+  }
+
+  const included = asRecord(
+    root.included_usage ?? root.includedUsage ?? root.included,
+  );
+  const credits = asRecord(root.credits ?? root.credit);
+  const onDemand = asRecord(root.on_demand ?? root.onDemand ?? root.ondemand);
+
+  const windows: SubscriptionUsageWindow[] = [];
+
+  const includedPercent =
+    firstNumber(included, [
+      'used_percent',
+      'usedPercent',
+      'percent_used',
+      'percentUsed',
+    ]) ??
+    firstNumber(root, [
+      'used_percent',
+      'usedPercent',
+      'included_used_percent',
+      'includedUsedPercent',
+    ]);
+
+  const includedLimit = firstNumber(included, [
+    'limit',
+    'allowance',
+    'total',
+    'entitlement',
+  ]);
+  const includedRemaining = firstNumber(included, [
+    'remaining',
+    'remaining_credits',
+    'remainingCredits',
+  ]);
+  const includedUsed = firstNumber(included, ['used', 'consumed']);
+  const includedResetsAt =
+    toResetIso(
+      included?.['resets_at'] ??
+        included?.['reset_at'] ??
+        included?.['resetTime'] ??
+        root['resets_at'] ??
+        root['reset_at'],
+    ) ??
+    resetFromRelativeSeconds(
+      firstNumber(included, ['reset_in', 'resets_in_seconds']) ??
+        firstNumber(root, ['reset_in', 'resets_in_seconds']),
+      now,
+    );
+
+  if (
+    includedPercent !== undefined ||
+    includedLimit !== undefined ||
+    includedRemaining !== undefined ||
+    includedUsed !== undefined
+  ) {
+    windows.push({
+      label: 'Included usage',
+      ...(includedPercent !== undefined && {
+        usedPercent: clampPercent(includedPercent),
+      }),
+      ...(includedUsed !== undefined && { used: includedUsed }),
+      ...(includedRemaining !== undefined && { remaining: includedRemaining }),
+      ...(includedLimit !== undefined && { limit: includedLimit }),
+      ...(includedResetsAt && { resetsAt: includedResetsAt }),
+    });
+  }
+
+  const creditBalance = firstNumber(credits, [
+    'balance',
+    'remaining',
+    'available',
+    'prepaid_balance',
+    'prepaidBalance',
+  ]);
+  if (creditBalance !== undefined) {
+    windows.push({
+      label: 'Credits',
+      remaining: creditBalance,
+    });
+  }
+
+  const onDemandUsed = firstNumber(onDemand, ['used', 'consumed']);
+  const onDemandLimit = firstNumber(onDemand, ['limit', 'cap', 'allowance']);
+  if (onDemandUsed !== undefined || onDemandLimit !== undefined) {
+    windows.push({
+      label: 'On-demand',
+      ...(onDemandUsed !== undefined && { used: onDemandUsed }),
+      ...(onDemandLimit !== undefined && { limit: onDemandLimit }),
+      ...(onDemandUsed !== undefined &&
+        onDemandLimit !== undefined &&
+        onDemandLimit > 0 && {
+          usedPercent: clampPercent((onDemandUsed / onDemandLimit) * 100),
+        }),
+    });
+  }
+
+  return windows;
+}
+
+export async function fetchXaiSubscriptionUsage(
+  options: UsageFetchOptions = {},
+): Promise<SubscriptionProviderUsage | null> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const token = await getFreshXaiAccessToken({
+    ...(options.executor && { executor: options.executor }),
+    fetchImpl,
+  });
+
+  if (!token) {
+    return null;
+  }
+
+  const authHeaders = {
+    authorization: `Bearer ${token.access}`,
+    accept: 'application/json',
+    'user-agent': 'roomote',
+  };
+
+  // Identity-first: resolve user, then request billing for that session.
+  // Fail closed without surfacing identity or raw bodies to callers.
+  const userResult = await fetchJson(
+    fetchImpl,
+    XAI_USAGE_USER_ENDPOINT,
+    authHeaders,
+  );
+  if (userResult.status !== 200 || !asRecord(userResult.payload)?.userId) {
+    // Some deployments return `id` instead of `userId`.
+    const user = asRecord(userResult.payload);
+    if (
+      userResult.status !== 200 ||
+      (!firstString(user, ['userId', 'user_id', 'id']) &&
+        !firstNumber(user, ['userId', 'id']))
+    ) {
+      return null;
+    }
+  }
+
+  const billingResult = await fetchJson(
+    fetchImpl,
+    XAI_USAGE_BILLING_ENDPOINT,
+    authHeaders,
+  );
+  const windows = parseXaiSubscriptionUsage(billingResult.payload, Date.now());
+
+  if (windows.length === 0) {
+    return null;
+  }
+
+  return {
+    providerId: 'xai-subscription',
+    windows,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 // --- Aggregate ------------------------------------------------------------
 
 /**
@@ -543,6 +715,7 @@ export async function getSubscriptionProviderUsage(
     fetchChatGptUsage(options),
     fetchGitHubCopilotUsage(options),
     fetchKimiForCodingUsage(options),
+    fetchXaiSubscriptionUsage(options),
   ]);
 
   return results.flatMap((result) =>

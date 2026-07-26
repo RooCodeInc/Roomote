@@ -423,7 +423,9 @@ export async function getFreshXaiAccessToken(
 
   const result: { record: XaiSubscriptionRecord | null } = { record: null };
 
-  await withXaiSubscriptionLock(executor, 'refresh', async (tx) => {
+  // Take both locks so a concurrent device-code connect cannot land a new
+  // credential while this refresh still holds only the refresh lock.
+  await withXaiSubscriptionLock(executor, 'both', async (tx) => {
     const locked = await loadRecord(tx);
 
     if (!locked || locked.status !== 'connected') {
@@ -434,6 +436,10 @@ export async function getFreshXaiAccessToken(
       result.record = locked;
       return;
     }
+
+    // Fence later writes to this specific refresh token so a reconnect that
+    // replaced the record while we awaited xAI cannot be clobbered.
+    const refreshTokenSnapshot = locked.refresh;
 
     try {
       const clientId = resolveXaiOAuthClientId();
@@ -485,19 +491,40 @@ export async function getFreshXaiAccessToken(
         throw new Error('xAI token refresh returned no access_token.');
       }
 
+      const current = await loadRecord(tx);
+      if (
+        !current ||
+        current.status !== 'connected' ||
+        current.refresh !== refreshTokenSnapshot
+      ) {
+        // Replaced by a newer connect/disconnect while we awaited xAI.
+        result.record = current?.status === 'connected' ? current : null;
+        return;
+      }
+
       const next = await saveXaiSubscription(
         tokens as TokenResponse,
         tx,
-        locked,
+        current,
       );
       result.record = next;
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unknown refresh error';
 
+      const current = await loadRecord(tx);
+      if (
+        !current ||
+        current.status !== 'connected' ||
+        current.refresh !== refreshTokenSnapshot
+      ) {
+        result.record = current?.status === 'connected' ? current : null;
+        return;
+      }
+
       if (isTerminalXaiRefreshFailure(error)) {
         const errored: XaiSubscriptionRecord = {
-          ...locked,
+          ...current,
           status: 'error',
           error: message,
           updatedAt: new Date().toISOString(),
@@ -508,8 +535,8 @@ export async function getFreshXaiAccessToken(
 
       // Transient failure: keep status connected. Serve remaining access if
       // it has not expired yet so OAuth-only deploys survive brief IdP blips.
-      if (locked.expires > now) {
-        result.record = locked;
+      if (current.expires > now) {
+        result.record = current;
       }
     }
   });
@@ -698,14 +725,15 @@ export async function pollXaiDeviceAuth(
       };
     }
 
-    // Re-check under lock: cancel/reopen may have registered a newer code
-    // while this poll was awaiting xAI.
+    // Re-check under both locks: cancel/reopen may have registered a newer
+    // code, and a concurrent refresh of the prior credential must not write
+    // after this persist without seeing the new record.
     let result: XaiDevicePollResult = {
       status: 'failed',
       error: SUPERSEDED_DEVICE_FLOW_ERROR,
     };
 
-    await withDeviceAuthLock(executor, async (tx) => {
+    await withXaiSubscriptionLock(executor, 'both', async (tx) => {
       const pending = await loadPendingDeviceFlow(tx);
       if (!isActivePendingDeviceFlow(pending, input.deviceCode, now)) {
         return;

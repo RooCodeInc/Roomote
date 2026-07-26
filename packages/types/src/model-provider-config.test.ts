@@ -238,6 +238,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'ollama',
         'vllm',
         'chatgpt',
+        'xai-subscription',
       ],
     );
   });
@@ -249,14 +250,16 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         expect(provider.suggestedTaskModels).toEqual([]);
         continue;
       }
-      // ChatGPT serves openai/ models; the Bedrock setup surface serves the
-      // worker's custom bedrock-mantle/ OpenCode provider.
+      // ChatGPT serves openai/ models; SuperGrok serves xai/; Bedrock uses
+      // the worker's custom bedrock-mantle/ OpenCode provider.
       const expectedPrefix =
         provider.id === 'chatgpt'
           ? 'openai/'
-          : provider.id === 'amazon-bedrock'
-            ? 'bedrock-mantle/'
-            : `${provider.id}/`;
+          : provider.id === 'xai-subscription'
+            ? 'xai/'
+            : provider.id === 'amazon-bedrock'
+              ? 'bedrock-mantle/'
+              : `${provider.id}/`;
 
       expect(provider.defaultRoomoteModel.startsWith(expectedPrefix)).toBe(
         true,
@@ -282,9 +285,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       const expectedPrefix =
         provider.id === 'chatgpt'
           ? 'openai/'
-          : provider.id === 'amazon-bedrock'
-            ? 'bedrock-mantle/'
-            : `${provider.id}/`;
+          : provider.id === 'xai-subscription'
+            ? 'xai/'
+            : provider.id === 'amazon-bedrock'
+              ? 'bedrock-mantle/'
+              : `${provider.id}/`;
       const suggestedModelIds = new Set(
         provider.suggestedTaskModels.map((suggestion) => suggestion.id),
       );
@@ -573,12 +578,16 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(disconnected?.savedApiKeySatisfied).toBe(false);
   });
 
-  it('marks xAI connected from SuperGrok OAuth without an API key', () => {
+  it('marks xAI Grok subscription connected as its own OAuth provider without an API key', () => {
     const status = buildSetupModelStatus({
       xaiSubscriptionConnected: true,
     });
-    const xai = status.providers.find((provider) => provider.id === 'xai');
-    expect(xai?.savedApiKeySatisfied).toBe(true);
+    const subscription = status.providers.find(
+      (provider) => provider.id === 'xai-subscription',
+    );
+    const xaiKey = status.providers.find((provider) => provider.id === 'xai');
+    expect(subscription?.savedApiKeySatisfied).toBe(true);
+    expect(xaiKey?.savedApiKeySatisfied).toBe(false);
     expect(status.xaiSubscriptionConnected).toBe(true);
     expect(status.xaiApiKeyConnected).toBe(false);
   });

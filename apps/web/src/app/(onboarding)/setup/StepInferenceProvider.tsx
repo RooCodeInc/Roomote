@@ -184,7 +184,7 @@ export function StepInferenceProvider({
     selectedProviderStatus?.authKind === 'oauth' &&
     selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   const isGitHubCopilotProvider = selectedProvider === 'github-copilot';
-  const isXaiProvider = selectedProvider === 'xai';
+  const isXaiSubscriptionProvider = selectedProvider === 'xai-subscription';
   const isOAuthProvider = selectedProviderStatus?.authKind === 'oauth';
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
@@ -195,8 +195,7 @@ export function StepInferenceProvider({
   const hasRuntimeProviderKey =
     selectedProviderStatus?.runtimeApiKeySatisfied === true;
   const hasSavedProviderKey =
-    selectedProviderStatus?.savedApiKeySatisfied === true ||
-    (isXaiProvider && xaiSubscriptionConnected);
+    selectedProviderStatus?.savedApiKeySatisfied === true;
   const primaryCredentialLabel =
     selectedProviderStatus?.envVarLabel ?? 'API key';
   const additionalEnvFields = selectedProviderStatus?.additionalEnvFields ?? [];
@@ -213,12 +212,6 @@ export function StepInferenceProvider({
     !isEndpointProvider &&
     !hasRuntimeProviderKey &&
     hasSavedProviderKey &&
-    // OAuth-only xAI has no API key to mask.
-    !(
-      isXaiProvider &&
-      xaiSubscriptionConnected &&
-      !modelSetup.xaiApiKeyConnected
-    ) &&
     apiKey.length === 0 &&
     !editingSavedValue;
   const shouldShowConfiguredMask =
@@ -408,27 +401,26 @@ export function StepInferenceProvider({
           </Button>
         ) : null}
 
-        {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
-      </div>
-
-      {isXaiProvider && !hasRuntimeProviderKey && !xaiSubscriptionConnected ? (
-        <div className="flex max-w-lg flex-wrap items-center gap-3">
-          <span className="text-sm text-muted-foreground">
-            or connect a SuperGrok / eligible X Premium+ subscription:
-          </span>
+        {isXaiSubscriptionProvider &&
+        !hasRuntimeProviderKey &&
+        !xaiSubscriptionConnected ? (
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             size="sm"
             disabled={saveModelConfig.isPending}
             onClick={() => setIsXaiDialogOpen(true)}
           >
             Connect Grok subscription
           </Button>
-        </div>
-      ) : null}
+        ) : null}
 
-      {isXaiProvider && !hasRuntimeProviderKey && xaiSubscriptionConnected ? (
+        {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
+      </div>
+
+      {isXaiSubscriptionProvider &&
+      !hasRuntimeProviderKey &&
+      xaiSubscriptionConnected ? (
         <span className="text-sm text-muted-foreground">
           {xaiStatus?.email
             ? `Connected as ${xaiStatus.email}`

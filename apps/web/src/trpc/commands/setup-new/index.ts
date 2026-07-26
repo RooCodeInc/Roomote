@@ -55,6 +55,7 @@ import {
   buildSetupModelStatus,
   buildSetupSourceControlStatus,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
@@ -1525,7 +1526,9 @@ export async function saveSetupNewModelConfigCommand(
       ? chatgptConnected
       : provider.id === 'github-copilot'
         ? githubCopilotConnected
-        : false;
+        : provider.id === XAI_SUBSCRIPTION_PROVIDER_ID
+          ? xaiSubscriptionConnected
+          : false;
 
   // OAuth providers are connected through their
   // device-code flow rather than an API key. The setup wizard's Continue
@@ -1538,10 +1541,6 @@ export async function saveSetupNewModelConfigCommand(
     );
   }
 
-  // xAI can continue with either an API key or a Grok subscription.
-  const xaiSatisfiedBySubscription =
-    provider.id === 'xai' && xaiSubscriptionConnected;
-
   return db.transaction(async (tx) => {
     const [currentState, persistedEnvVarNames, persistedTaskModelSettings] =
       await Promise.all([
@@ -1552,50 +1551,39 @@ export async function saveSetupNewModelConfigCommand(
     const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
 
     if (!isOauthProvider) {
-      // When xAI is already covered by a Grok subscription and the operator
-      // did not submit a key, skip the API-key collector so Continue works
-      // without a key. If they did submit a key, still save it (dual path).
-      const skipCredentialCollection =
-        xaiSatisfiedBySubscription && !apiKey?.trim();
+      const { values: credentialValues, clearedEnvVarNames } =
+        collectSetupModelProviderCredentialValues({
+          provider,
+          apiKey,
+          additionalEnvValues,
+          isEnvVarSatisfied: (envVarName) =>
+            persistedEnvVarNameSet.has(envVarName) ||
+            isConfiguredEnvValue(process.env[envVarName]),
+          action: 'continue',
+        });
 
-      if (!skipCredentialCollection) {
-        const { values: credentialValues, clearedEnvVarNames } =
-          collectSetupModelProviderCredentialValues({
-            provider,
-            apiKey,
-            additionalEnvValues,
-            isEnvVarSatisfied: (envVarName) =>
-              persistedEnvVarNameSet.has(envVarName) ||
-              isConfiguredEnvValue(process.env[envVarName]) ||
-              (provider.id === 'xai' &&
-                envVarName === 'XAI_API_KEY' &&
-                xaiSatisfiedBySubscription),
-            action: 'continue',
-          });
+      if (credentialValues.length > 0) {
+        await upsertDeploymentEnvironmentVariables(tx, {
+          userId,
+          values: credentialValues,
+        });
+      }
 
-        if (credentialValues.length > 0) {
-          await upsertDeploymentEnvironmentVariables(tx, {
-            userId,
-            values: credentialValues,
-          });
-        }
+      // Optional fields submitted as blank clear their previously saved value
+      // (deployment-level rows only, mirroring how they are stored).
+      const clearedPersistedEnvVarNames = clearedEnvVarNames.filter((name) =>
+        persistedEnvVarNameSet.has(name),
+      );
 
-        // Optional fields submitted as blank clear their previously saved value
-        // (deployment-level rows only, mirroring how they are stored).
-        const clearedPersistedEnvVarNames = clearedEnvVarNames.filter((name) =>
-          persistedEnvVarNameSet.has(name),
-        );
-
-        if (clearedPersistedEnvVarNames.length > 0) {
-          await tx
-            .delete(environmentVariables)
-            .where(
-              and(
-                isNull(environmentVariables.userId),
-                inArray(environmentVariables.name, clearedPersistedEnvVarNames),
-              ),
-            );
-        }
+      if (clearedPersistedEnvVarNames.length > 0) {
+        await tx
+          .delete(environmentVariables)
+          .where(
+            and(
+              isNull(environmentVariables.userId),
+              inArray(environmentVariables.name, clearedPersistedEnvVarNames),
+            ),
+          );
       }
     }
 

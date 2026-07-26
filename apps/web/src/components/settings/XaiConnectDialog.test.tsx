@@ -63,6 +63,9 @@ vi.mock('@/trpc/client', () => ({
         mutationOptions: () => ({}),
       },
     },
+    subscriptionUsage: {
+      list: { queryKey: () => ['subscriptionUsage', 'list'] },
+    },
   }),
 }));
 

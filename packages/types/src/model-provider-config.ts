@@ -35,10 +35,18 @@ import {
  */
 export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
 
+/**
+ * Setup-catalog id for SuperGrok / eligible X Premium+ OAuth. Models keep the
+ * `xai/` id prefix (opencode's xAI provider), so this id is a
+ * configuration/connect surface only — not a model-id prefix.
+ */
+export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
+
 export const SETUP_MODEL_PROVIDER_IDS = [
   'openrouter',
   ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
 ] as const;
 
 /**
@@ -510,16 +518,15 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
   },
   {
     // Provider id matches the models.dev/opencode `xai` provider so
-    // `xai/<model>` slugs resolve at runtime. Operators can connect via
-    // XAI_API_KEY and/or a SuperGrok / eligible X Premium+ OAuth subscription;
-    // both share the `xai/` model-id prefix.
+    // `xai/<model>` slugs resolve at runtime. API-key path only; SuperGrok
+    // OAuth is a separate catalog entry (`xai-subscription`).
     id: 'xai',
     label: 'xAI',
     envVarName: 'XAI_API_KEY',
     defaultRoomoteModel: 'xai/grok-4.5',
     authKind: 'api-key',
     credentialHelp: {
-      text: 'Use an API key, or connect a SuperGrok / eligible X Premium+ subscription.',
+      text: 'Paste an xAI API key from the console.',
       href: 'https://console.x.ai',
       linkLabel: 'xAI console',
     },
@@ -695,6 +702,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       explore: 'openai/gpt-5.6-luna',
       planning: 'openai/gpt-5.6-sol',
     },
+  },
+  {
+    id: XAI_SUBSCRIPTION_PROVIDER_ID,
+    label: 'xAI (Grok subscription)',
+    envVarName: undefined,
+    defaultRoomoteModel: 'xai/grok-4.5',
+    authKind: 'oauth',
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'grok-4-5': 'xai/grok-4.5',
+    }),
   },
 ] as const satisfies readonly SetupModelProviderDescriptor[];
 
@@ -1539,7 +1556,9 @@ export function buildSetupModelStatus(input: {
           ? chatgptConnected
           : provider.id === 'github-copilot'
             ? githubCopilotConnected
-            : false;
+            : provider.id === XAI_SUBSCRIPTION_PROVIDER_ID
+              ? xaiSubscriptionConnected
+              : false;
       return {
         ...provider,
         additionalEnvValues: {},
@@ -1587,18 +1606,12 @@ export function buildSetupModelStatus(input: {
 
     const runtimeApiKeySatisfied =
       hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured);
-    let savedApiKeySatisfied =
+    const savedApiKeySatisfied =
       hasRequiredEnvVars &&
       requiredEnvVarNames.every(
         (name) => isPersisted(name) || isRuntimeConfigured(name),
       ) &&
       requiredEnvVarNames.some(isPersisted);
-
-    // xAI can also be connected via SuperGrok / Premium+ OAuth without an
-    // API key; the subscription covers the same `xai/` model-id prefix.
-    if (provider.id === 'xai' && xaiSubscriptionConnected) {
-      savedApiKeySatisfied = true;
-    }
 
     return {
       ...provider,
@@ -1686,27 +1699,36 @@ export function buildSetupModelStatus(input: {
 
   // A ChatGPT subscription covers `openai/` models, so it can satisfy the
   // runtime/persisted provider status for the OpenAI API-key provider even
-  // without OPENAI_API_KEY.
+  // without OPENAI_API_KEY. SuperGrok covers `xai/` the same way.
   const chatgptCoversOpenAi = chatgptConnected;
+  const xaiSubscriptionCoversXai = xaiSubscriptionConnected;
   const openaiRuntimeSatisfied =
     runtimeProviderStatus?.id === 'openai'
       ? runtimeProviderStatus.runtimeApiKeySatisfied || chatgptCoversOpenAi
-      : (runtimeProviderStatus?.runtimeApiKeySatisfied ?? false);
+      : runtimeProviderStatus?.id === 'xai'
+        ? runtimeProviderStatus.runtimeApiKeySatisfied ||
+          xaiSubscriptionCoversXai
+        : (runtimeProviderStatus?.runtimeApiKeySatisfied ?? false);
   const openaiPersistedSatisfied =
     persistedProviderStatus?.id === 'openai'
       ? persistedProviderStatus.savedApiKeySatisfied ||
         persistedProviderStatus.runtimeApiKeySatisfied ||
         chatgptCoversOpenAi
-      : (persistedProviderStatus?.savedApiKeySatisfied ??
-        persistedProviderStatus?.runtimeApiKeySatisfied ??
-        false);
+      : persistedProviderStatus?.id === 'xai'
+        ? persistedProviderStatus.savedApiKeySatisfied ||
+          persistedProviderStatus.runtimeApiKeySatisfied ||
+          xaiSubscriptionCoversXai
+        : (persistedProviderStatus?.savedApiKeySatisfied ??
+          persistedProviderStatus?.runtimeApiKeySatisfied ??
+          false);
 
   const setupSatisfiedByRuntimeEnv =
     runtimeRoomoteModelSatisfied && openaiRuntimeSatisfied;
   // The persisted model works with a key from either source: the effective
   // model runtime env resolves keys runtime-first with a DB fallback, so a
   // saved model choice plus a runtime-env key is a complete setup. A
-  // ChatGPT subscription also satisfies persisted openai/ models.
+  // ChatGPT subscription also satisfies persisted openai/ models; SuperGrok
+  // does the same for xai/.
   // Symmetric: a runtime env model plus a saved provider key is also complete,
   // because task runtime resolution layer loads keys the same way.
   const setupSatisfiedByRuntimeModelAndSavedKey =
@@ -1715,7 +1737,10 @@ export function buildSetupModelStatus(input: {
       runtimeProviderStatus &&
       (runtimeProviderStatus.id === 'openai'
         ? runtimeProviderStatus.savedApiKeySatisfied || chatgptCoversOpenAi
-        : runtimeProviderStatus.savedApiKeySatisfied),
+        : runtimeProviderStatus.id === 'xai'
+          ? runtimeProviderStatus.savedApiKeySatisfied ||
+            xaiSubscriptionCoversXai
+          : runtimeProviderStatus.savedApiKeySatisfied),
     );
   const setupSatisfied =
     setupSatisfiedByRuntimeEnv ||
@@ -1724,6 +1749,7 @@ export function buildSetupModelStatus(input: {
       persistedRoomoteModel &&
       (openaiPersistedSatisfied ||
         (persistedProviderStatus?.id !== 'openai' &&
+          persistedProviderStatus?.id !== 'xai' &&
           (persistedProviderStatus?.savedApiKeySatisfied ||
             persistedProviderStatus?.runtimeApiKeySatisfied))),
     );

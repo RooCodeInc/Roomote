@@ -220,8 +220,18 @@ function buildProviderSetup(
           authKind: 'api-key' as const,
           suggestedTaskModels: [],
           runtimeApiKeySatisfied: false,
-          // OAuth alone marks saved satisfied (mirrors buildSetupModelStatus).
-          savedApiKeySatisfied: xaiApiKeyConnected || xaiSubscriptionConnected,
+          savedApiKeySatisfied: xaiApiKeyConnected,
+          additionalEnvValues: {} satisfies Record<string, string>,
+        },
+        {
+          id: 'xai-subscription' as SetupModelProviderId,
+          label: 'xAI (Grok subscription)',
+          envVarName: undefined,
+          defaultRoomoteModel: 'xai/grok-4.5',
+          authKind: 'oauth' as const,
+          suggestedTaskModels: [],
+          runtimeApiKeySatisfied: false,
+          savedApiKeySatisfied: xaiSubscriptionConnected,
           additionalEnvValues: {} satisfies Record<string, string>,
         },
         ...(overrides.includeMultiCredentialProviders
