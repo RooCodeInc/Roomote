@@ -807,6 +807,7 @@ function mergeOpenAiCompatibleProviderConfig(
   providerConfig: Record<string, unknown>,
   runtimeEnv: Record<string, string>,
   modelIds: Array<string | undefined>,
+  visionModel?: string,
 ): Record<string, unknown> {
   let merged = providerConfig;
   const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
@@ -872,6 +873,15 @@ function mergeOpenAiCompatibleProviderConfig(
               modelId,
               {
                 name: modelId,
+                ...(visionModel === `${providerId}/${modelId}`
+                  ? {
+                      attachment: true,
+                      modalities: {
+                        input: ['text', 'image'],
+                        output: ['text'],
+                      },
+                    }
+                  : {}),
                 ...asRecord(existingModels[modelId]),
               },
             ]),
@@ -1628,6 +1638,7 @@ function resolveModelBackedOpenCodeConfig(
         ),
         runtimeEnv,
         configuredModelIds,
+        visionModel ?? effectiveCodingModel,
       ),
       runtimeEnv,
       configuredModelIds,

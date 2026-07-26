@@ -36,6 +36,7 @@ export interface PreviewRuntimeConfigAnalysis {
 
 export interface PreviewRuntimeConfigFields {
   previewProxyBaseUrl: string | null;
+  previewProxySubdomainSuffix: string | null;
   previewDomains: string | null;
   roomotePreviewDomain: string | null;
 }

@@ -240,13 +240,37 @@ function hasCustomAutomationId(taskRun: { payload: unknown }): boolean {
   );
 }
 
+function hasScheduledAutomationSource(taskRun: { payload: unknown }): boolean {
+  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
+    return false;
+  }
+
+  const payload = taskRun.payload as {
+    suggestionSource?: unknown;
+  };
+
+  return (
+    typeof payload.suggestionSource === 'string' &&
+    payload.suggestionSource.trim().length > 0
+  );
+}
+
 /**
- * Channel-only automation launches (work-item execution tasks and custom
- * automation runs) stay silent until they have a final result or blocker;
- * their first chat message late-binds the report thread, so an opening ack
- * would hijack the thread root.
+ * Channel-only automation launches stay silent until they have a result or
+ * blocker. Scheduled scan tasks have no inbound message to acknowledge, and
+ * execution tasks late-bind their report thread on the first chat message.
  */
 function isSilentChannelAutomationLaunch(taskRun: {
+  payload: unknown;
+}): boolean {
+  return (
+    hasAutomationWorkItemId(taskRun) ||
+    hasCustomAutomationId(taskRun) ||
+    hasScheduledAutomationSource(taskRun)
+  );
+}
+
+function requiresLateBoundAutomationCloseout(taskRun: {
   payload: unknown;
 }): boolean {
   return hasAutomationWorkItemId(taskRun) || hasCustomAutomationId(taskRun);
@@ -908,7 +932,8 @@ export const runTask = async ({
           // custom automation runs) have no inbound Slack turn, but must
           // still end with one agent-written closeout; the Stop hook blocks
           // silent completion when this flag is set.
-          ...(!initialTurnMessageTs && isSilentChannelAutomationLaunch(taskRun)
+          ...(!initialTurnMessageTs &&
+          requiresLateBoundAutomationCloseout(taskRun)
             ? { requiresTerminalCloseoutWithoutTurn: true }
             : {}),
         }),

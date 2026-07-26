@@ -1,7 +1,7 @@
 /**
  * Normalized usage/quota data for subscription-style inference providers
- * (ChatGPT subscription, GitHub Copilot, Kimi for Coding), displayed in the
- * Models settings page.
+ * (ChatGPT subscription, GitHub Copilot, Kimi for Coding, Z.AI quotas),
+ * displayed in the Models settings page.
  *
  * None of the upstream usage endpoints below are officially documented; each
  * is the endpoint the provider's own CLI or editor plugin polls for its usage
@@ -15,7 +15,31 @@ export type SubscriptionUsageProviderId =
   | 'chatgpt'
   | 'github-copilot'
   | 'kimi-for-coding'
-  | 'xai-subscription';
+  | 'xai-subscription'
+  | 'zai'
+  | 'zai-coding-plan';
+
+/**
+ * Subscription-usage providers that share the generic API-key connected row
+ * (not dedicated OAuth rows like ChatGPT / Copilot). Keep the Settings
+ * allowlist in sync with this set.
+ */
+export const API_KEY_SUBSCRIPTION_USAGE_PROVIDER_IDS = [
+  'kimi-for-coding',
+  'zai',
+  'zai-coding-plan',
+] as const satisfies readonly SubscriptionUsageProviderId[];
+
+export type ApiKeySubscriptionUsageProviderId =
+  (typeof API_KEY_SUBSCRIPTION_USAGE_PROVIDER_IDS)[number];
+
+export function isApiKeySubscriptionUsageProviderId(
+  providerId: string,
+): providerId is ApiKeySubscriptionUsageProviderId {
+  return (
+    API_KEY_SUBSCRIPTION_USAGE_PROVIDER_IDS as readonly string[]
+  ).includes(providerId);
+}
 
 /**
  * One quota window, e.g. Copilot's monthly premium requests or the Codex
@@ -73,3 +97,14 @@ export const KIMI_FOR_CODING_USAGE_ENDPOINTS = [
 export const XAI_CLI_CHAT_PROXY_BASE_URL = 'https://cli-chat-proxy.grok.com';
 export const XAI_USAGE_USER_ENDPOINT = `${XAI_CLI_CHAT_PROXY_BASE_URL}/v1/user`;
 export const XAI_USAGE_BILLING_ENDPOINT = `${XAI_CLI_CHAT_PROXY_BASE_URL}/v1/billing?format=credits`;
+
+/**
+ * Undocumented Z.AI / BigModel monitor quota endpoint polled by Coding Plan
+ * tools and community usage bars. Host is region-specific; path is shared.
+ * Global → api.z.ai; China → open.bigmodel.cn.
+ */
+export const ZAI_USAGE_QUOTA_PATH = '/api/monitor/usage/quota/limit' as const;
+export const ZAI_USAGE_HOSTS = {
+  global: 'https://api.z.ai',
+  china: 'https://open.bigmodel.cn',
+} as const;

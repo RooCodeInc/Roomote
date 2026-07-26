@@ -264,7 +264,12 @@ interface ActiveOpenCodeSubagentWatchdog {
   updatePayload: Record<string, unknown>;
   activitySeenChildToolCallIds: Set<string>;
   activityLastAction: string | null;
+  activityLastMessage: string | null;
+  childAssistantMessageIds: Set<string>;
   activityLastEmitAtMs: number;
+  // Armed when an activity change lands inside the throttle window, so the
+  // newest action and message still reach the transcript once it closes.
+  activityFlushTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
@@ -2484,7 +2489,10 @@ export class OpenCodeServerHarness
       updatePayload: input.updatePayload,
       activitySeenChildToolCallIds: new Set(),
       activityLastAction: null,
+      activityLastMessage: null,
+      childAssistantMessageIds: new Set(),
       activityLastEmitAtMs: 0,
+      activityFlushTimer: null,
     };
     this.activeSubagentWatchdogs.set(eventKey, watchdog);
     if (input.childSessionId) {
@@ -2566,6 +2574,7 @@ export class OpenCodeServerHarness
     return {
       agentType: watchdog.agentType,
       lastAction: watchdog.activityLastAction,
+      lastMessage: watchdog.activityLastMessage,
       toolCallCount: watchdog.activitySeenChildToolCallIds.size,
       startedAtMs: watchdog.startedAtMs,
       elapsedMs: Date.now() - watchdog.startedAtMs,
@@ -2583,10 +2592,25 @@ export class OpenCodeServerHarness
     if (watchdog.settlementTimer) {
       clearTimeout(watchdog.settlementTimer);
     }
+    this.clearSubagentActivityFlush(watchdog);
     if (watchdog.childSessionId) {
       this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
     }
     this.activeSubagentWatchdogs.delete(eventKey);
+  }
+
+  /**
+   * A pending flush must never outlive its watchdog: it emits an in_progress
+   * update, so firing after the spawn settles would flip the transcript row
+   * back to running.
+   */
+  private clearSubagentActivityFlush(
+    watchdog: ActiveOpenCodeSubagentWatchdog,
+  ): void {
+    if (watchdog.activityFlushTimer) {
+      clearTimeout(watchdog.activityFlushTimer);
+      watchdog.activityFlushTimer = null;
+    }
   }
 
   private clearAllSubagentWatchdogs(options?: {
@@ -2600,6 +2624,7 @@ export class OpenCodeServerHarness
       if (watchdog.settlementTimer) {
         clearTimeout(watchdog.settlementTimer);
       }
+      this.clearSubagentActivityFlush(watchdog);
       this.activeSubagentWatchdogs.delete(eventKey);
       if (watchdog.childSessionId) {
         this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
@@ -2768,7 +2793,48 @@ export class OpenCodeServerHarness
 
     const part = asRecord(asRecord(payload.properties)?.part);
 
-    if (!part || asString(part.type) !== 'tool') {
+    if (!part) {
+      return;
+    }
+
+    const partType = asString(part.type);
+
+    if (partType === 'text') {
+      const messageId = asString(part.messageID);
+      const messageRole =
+        parseOpenCodeMessageRole(part.role) ??
+        extractOpenCodePartMessageRole(
+          asRecord(payload.properties),
+          part as OpenCodePart,
+          messageId ?? undefined,
+        );
+
+      if (
+        !messageId ||
+        (messageRole !== 'assistant' &&
+          !watchdog.childAssistantMessageIds.has(messageId))
+      ) {
+        return;
+      }
+
+      watchdog.childAssistantMessageIds.add(messageId);
+
+      const message = asString(part.text)?.trim();
+
+      if (!message || message === watchdog.activityLastMessage) {
+        return;
+      }
+
+      // Text parts carry the whole accumulated message, not a delta, so this
+      // fires once per streamed token. Record every one but let the shared
+      // throttle decide when it reaches the transcript; the terminal snapshot
+      // reads the stored value, so nothing is lost by waiting.
+      watchdog.activityLastMessage = message;
+      this.emitSubagentActivityUpdate(watchdog);
+      return;
+    }
+
+    if (partType !== 'tool') {
       return;
     }
 
@@ -2796,15 +2862,38 @@ export class OpenCodeServerHarness
       watchdog.activityLastAction = action;
     }
 
-    const nowMs = Date.now();
+    this.emitSubagentActivityUpdate(watchdog);
+  }
 
-    if (
-      nowMs - watchdog.activityLastEmitAtMs <
-      SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS
-    ) {
+  private emitSubagentActivityUpdate(
+    watchdog: ActiveOpenCodeSubagentWatchdog,
+  ): void {
+    const sinceLastEmitMs = Date.now() - watchdog.activityLastEmitAtMs;
+
+    if (sinceLastEmitMs < SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS) {
+      // A change the throttle swallowed would otherwise never surface if it is
+      // the last one before the child goes quiet, so arm the trailing edge.
+      if (!watchdog.activityFlushTimer) {
+        const timer = setTimeout(() => {
+          watchdog.activityFlushTimer = null;
+          this.publishSubagentActivityUpdate(watchdog);
+        }, SUBAGENT_ACTIVITY_EMIT_INTERVAL_MS - sinceLastEmitMs);
+        timer.unref?.();
+        watchdog.activityFlushTimer = timer;
+      }
+
       return;
     }
 
+    this.publishSubagentActivityUpdate(watchdog);
+  }
+
+  private publishSubagentActivityUpdate(
+    watchdog: ActiveOpenCodeSubagentWatchdog,
+  ): void {
+    this.clearSubagentActivityFlush(watchdog);
+
+    const nowMs = Date.now();
     watchdog.activityLastEmitAtMs = nowMs;
     this.runtimeEvents.toolUpdate({
       sessionId: watchdog.sessionId,
@@ -2820,6 +2909,7 @@ export class OpenCodeServerHarness
         subagentActivity: {
           agentType: watchdog.agentType,
           lastAction: watchdog.activityLastAction,
+          lastMessage: watchdog.activityLastMessage,
           toolCallCount: watchdog.activitySeenChildToolCallIds.size,
           startedAtMs: watchdog.startedAtMs,
           elapsedMs: nowMs - watchdog.startedAtMs,
@@ -2854,6 +2944,13 @@ export class OpenCodeServerHarness
     if (parseOpenCodeMessageRole(info.role) !== 'assistant') {
       return;
     }
+
+    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
+    const watchdog = eventKey
+      ? this.activeSubagentWatchdogs.get(eventKey)
+      : undefined;
+
+    watchdog?.childAssistantMessageIds.add(info.id);
 
     if (!info.time?.completed) {
       return;

@@ -29,21 +29,18 @@ function resolvePreviewProxyBaseUrl(
  * When set, URLs are constructed with the outer suffix appended so they
  * route through the outer preview-proxy.
  */
-function getSubdomainSuffix(): string | undefined {
-  return process.env.NEXT_PUBLIC_PREVIEW_PROXY_SUBDOMAIN_SUFFIX || undefined;
-}
-
 export function buildTaskPreviewUrls(
   taskId: string,
   machineDomains: Record<string, string> | undefined | null,
   previewProxyBaseUrl?: string | null,
+  previewProxySubdomainSuffix?: string | null,
 ): Record<string, string> | null {
   if (!machineDomains) {
     return null;
   }
 
   const baseUrl = resolvePreviewProxyBaseUrl(previewProxyBaseUrl);
-  const suffix = getSubdomainSuffix();
+  const suffix = previewProxySubdomainSuffix || undefined;
   const result: Record<string, string> = {};
 
   for (const portName of Object.keys(machineDomains)) {

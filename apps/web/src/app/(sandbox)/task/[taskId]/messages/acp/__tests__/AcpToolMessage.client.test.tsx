@@ -233,7 +233,7 @@ describe('AcpToolMessage', () => {
     expect(toolDetailsSpy).toHaveBeenCalled();
   });
 
-  it('does not render returned child text for completed subagent rows', () => {
+  it('expands completed subagent rows when a returned message is available', () => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('subagent', {
@@ -245,10 +245,12 @@ describe('AcpToolMessage', () => {
       />,
     );
 
-    expect(
-      screen.queryByText('Found the issue and confirmed the failing path.'),
-    ).not.toBeInTheDocument();
-    expect(toolDetailsSpy).not.toHaveBeenCalled();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
   });
 
   it('shows subagent payload details when debug visibility is enabled', () => {
@@ -601,7 +603,7 @@ describe('AcpToolMessage', () => {
     });
   });
 
-  it('keeps subagent results without session artifacts as plain rows', () => {
+  it('expands subagent results without session artifacts to show their last message', () => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('subagent', {
@@ -620,9 +622,10 @@ describe('AcpToolMessage', () => {
     ).not.toBeInTheDocument();
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        collapsible: false,
+        collapsible: true,
       }),
     );
+    expect(toolDetailsSpy).toHaveBeenCalled();
   });
 
   it('opens the artifact detail from the upload viewUrl when session path is missing', () => {

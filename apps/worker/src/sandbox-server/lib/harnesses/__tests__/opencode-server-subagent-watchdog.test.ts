@@ -166,6 +166,17 @@ function createChildToolPart(options: {
   };
 }
 
+function createChildTextPart(text: string, role?: 'assistant') {
+  return {
+    id: 'prt_child_text_1',
+    sessionID: 'ses_child_1',
+    messageID: 'msg_child_1',
+    type: 'text',
+    text,
+    ...(role ? { role } : {}),
+  };
+}
+
 async function armSpawn(
   client: FakeOpenCodeServerClient,
   harness: OpenCodeServerHarness,
@@ -880,6 +891,206 @@ describe('OpenCode subagent live activity', () => {
     }
   });
 
+  it('folds child assistant text into the subagent activity update before message metadata arrives', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart('The latest child response.', 'assistant'),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart('The final child response.', 'assistant'),
+        },
+      });
+
+      const activity = subagentActivityEvents(outputs);
+      expect(activity).toHaveLength(1);
+      const details = (activity[0]!.payload as Record<string, unknown>)
+        .subagentActivity as Record<string, unknown>;
+      expect(details.lastMessage).toBe('The latest child response.');
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('throttles streamed child text instead of emitting once per token', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      // Text parts carry the full accumulated message, so a streamed response
+      // arrives as a growing prefix on every token.
+      for (const text of ['The', 'The final', 'The final child response.']) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: createChildTextPart(text, 'assistant'),
+          },
+        });
+      }
+
+      const activity = subagentActivityEvents(outputs);
+      expect(activity).toHaveLength(1);
+      const details = (activity[0]!.payload as Record<string, unknown>)
+        .subagentActivity as Record<string, unknown>;
+      expect(details.lastMessage).toBe('The');
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('flushes the newest child text once the throttle window closes', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      for (const text of ['The', 'The final', 'The final child response.']) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: createChildTextPart(text, 'assistant'),
+          },
+        });
+      }
+
+      expect(subagentActivityEvents(outputs)).toHaveLength(1);
+
+      // Nothing further arrives from the child, so only the trailing edge can
+      // carry the newest text to the transcript.
+      await vi.advanceTimersByTimeAsync(6_000);
+
+      const activity = subagentActivityEvents(outputs);
+      expect(activity).toHaveLength(2);
+      const details = (activity[1]!.payload as Record<string, unknown>)
+        .subagentActivity as Record<string, unknown>;
+      expect(details.lastMessage).toBe('The final child response.');
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('drops a pending activity flush when the spawn settles', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart('Working on it.', 'assistant'),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart('Working on it still.', 'assistant'),
+        },
+      });
+
+      expect(subagentActivityEvents(outputs)).toHaveLength(1);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            metadata: { sessionId: 'ses_child_1' },
+          }),
+        },
+      });
+
+      // A flush firing after settlement would emit `running: true` and flip the
+      // settled row back to in progress.
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(subagentActivityEvents(outputs)).toHaveLength(1);
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('keeps the last child message in terminal activity when task output is empty', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_child_1',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildTextPart('The child response to preserve.'),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            metadata: { sessionId: 'ses_child_1' },
+          }),
+        },
+      });
+
+      const terminal = outputs.find((event) => {
+        const payload = event.payload as Record<string, unknown>;
+        return payload.status === 'completed';
+      });
+      const activity = (terminal?.payload as Record<string, unknown>)
+        .subagentActivity as Record<string, unknown>;
+
+      expect(activity.lastMessage).toBe('The child response to preserve.');
+    } finally {
+      await harness.dispose();
+    }
+  });
+
   it('throttles activity emissions and keeps counting child tool calls', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
@@ -906,17 +1117,21 @@ describe('OpenCode subagent live activity', () => {
 
       expect(subagentActivityEvents(outputs)).toHaveLength(1);
 
-      vi.advanceTimersByTime(6_000);
+      // The trailing edge delivers the call the throttle swallowed.
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(subagentActivityEvents(outputs)).toHaveLength(2);
+
       await client.emit({
         type: 'message.part.updated',
         properties: {
           part: createChildToolPart({ callId: 'c3', command: 'date' }),
         },
       });
+      await vi.advanceTimersByTimeAsync(6_000);
 
       const activity = subagentActivityEvents(outputs);
-      expect(activity).toHaveLength(2);
-      const details = (activity[1]!.payload as Record<string, unknown>)
+      expect(activity).toHaveLength(3);
+      const details = (activity[2]!.payload as Record<string, unknown>)
         .subagentActivity as Record<string, unknown>;
       expect(details.toolCallCount).toBe(3);
     } finally {

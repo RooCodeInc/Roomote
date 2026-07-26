@@ -1383,6 +1383,63 @@ describe('runTask', () => {
     );
   });
 
+  it('keeps scheduled automation scans silent without requiring a closeout', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_000);
+
+    try {
+      await runTask({
+        taskRun: {
+          id: 108,
+          taskId: 'task-108',
+          payloadKind: TaskPayloadKind.Scan,
+          harness: 'opencode-server',
+          payload: {
+            repo: '__all_repositories__',
+            slackChannel: 'C123',
+            channel: 'C123',
+            suggestionSource: 'codeql_triage',
+          },
+          result: null,
+        } as never,
+        envVars: {},
+        workspacePath: '/tmp/workspace',
+        prompt: '',
+        harnessInstructions: undefined,
+        agentInstructions: undefined,
+        environmentConfig: undefined,
+        callbacks: {},
+        context: {},
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          log: vi.fn(),
+        } as never,
+        harnessSessionId: 'session-108',
+        workerEnv: {
+          authToken: 'cloud-token',
+          roomoteAppUrl: 'https://api.example.test',
+          trpcUrl: 'https://web.example.test',
+          buildUserFacingEnv: vi.fn(() => ({
+            HOME: '/tmp/home',
+            PATH: '/usr/bin',
+          })),
+        } as never,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      '/tmp/workspace/.roomote-runtime-home/.config/opencode/roomote-slack-reply-satisfaction.json',
+      JSON.stringify({
+        startedAtMs: 456_000,
+        currentTurnRequiresInitialAck: false,
+      }),
+      'utf8',
+    );
+  });
+
   it('marks Slack custom automation runs as silent with a required terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_789);
 

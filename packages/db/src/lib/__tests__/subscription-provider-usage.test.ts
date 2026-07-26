@@ -22,8 +22,11 @@ import {
   fetchGitHubCopilotUsage,
   fetchKimiForCodingUsage,
   fetchXaiSubscriptionUsage,
+  fetchZaiCodingPlanUsage,
+  fetchZaiUsage,
   getSubscriptionProviderUsage,
   parseXaiSubscriptionUsage,
+  parseZaiQuotaUsage,
 } from '../subscription-provider-usage';
 
 /** Executor whose deployment-secret reads resolve the given rows per call. */
@@ -614,5 +617,263 @@ describe('fetchXaiSubscriptionUsage', () => {
       .mockResolvedValueOnce(jsonResponse({ status: 'ok' }));
 
     await expect(fetchXaiSubscriptionUsage({ fetchImpl })).resolves.toBeNull();
+  });
+});
+
+describe('parseZaiQuotaUsage', () => {
+  it('normalizes live monitor quota windows and plan level', () => {
+    const parsed = parseZaiQuotaUsage({
+      code: 200,
+      data: {
+        level: 'lite',
+        limits: [
+          {
+            type: 'TOKENS_LIMIT',
+            unit: 3,
+            percentage: 16,
+            nextResetTime: 1_777_819_631_597,
+          },
+          {
+            type: 'TOKENS_LIMIT',
+            unit: 6,
+            percentage: 4,
+            nextResetTime: 1_778_262_784_969,
+          },
+          {
+            type: 'TIME_LIMIT',
+            unit: 5,
+            percentage: 0,
+            nextResetTime: 1_780_336_384_978,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.planType).toBe('lite');
+    expect(parsed.windows).toEqual([
+      {
+        label: '5h limit',
+        usedPercent: 16,
+        resetsAt: new Date(1_777_819_631_597).toISOString(),
+      },
+      {
+        label: 'Weekly limit',
+        usedPercent: 4,
+        resetsAt: new Date(1_778_262_784_969).toISOString(),
+      },
+      {
+        label: 'Monthly tools',
+        usedPercent: 0,
+        resetsAt: new Date(1_780_336_384_978).toISOString(),
+      },
+    ]);
+  });
+
+  it('derives usedPercent from remaining/limit when percentage is absent', () => {
+    const parsed = parseZaiQuotaUsage([
+      {
+        type: 'TOKENS_LIMIT',
+        unit: 3,
+        remaining: 75,
+        limit: 100,
+      },
+    ]);
+
+    expect(parsed.windows).toEqual([
+      {
+        label: '5h limit',
+        usedPercent: 25,
+        remaining: 75,
+        limit: 100,
+      },
+    ]);
+  });
+
+  it('returns empty windows for unusable payloads', () => {
+    expect(parseZaiQuotaUsage(null)).toEqual({ windows: [] });
+    expect(parseZaiQuotaUsage({})).toEqual({ windows: [] });
+    expect(parseZaiQuotaUsage({ code: 200, data: { level: 'pro' } })).toEqual({
+      planType: 'pro',
+      windows: [],
+    });
+  });
+});
+
+describe('fetchZaiUsage', () => {
+  it('returns null when no API key is configured', async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      fetchZaiUsage({ runtimeEnv: {}, fetchImpl }),
+    ).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('fetches the international quota endpoint by default', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 200,
+        data: {
+          level: 'pro',
+          limits: [{ type: 'TOKENS_LIMIT', unit: 3, percentage: 12 }],
+        },
+      }),
+    );
+
+    const usage = await fetchZaiUsage({
+      runtimeEnv: { ZAI_API_KEY: 'zai-key' },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.z.ai/api/monitor/usage/quota/limit',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer zai-key',
+        }),
+      }),
+    );
+    expect(usage).toMatchObject({
+      providerId: 'zai',
+      planType: 'pro',
+      windows: [{ label: '5h limit', usedPercent: 12 }],
+    });
+  });
+
+  it('returns null on non-OK responses without throwing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, 401));
+
+    await expect(
+      fetchZaiUsage({ runtimeEnv: { ZAI_API_KEY: 'zai-key' }, fetchImpl }),
+    ).resolves.toBeNull();
+    expect(fetchImpl).toHaveBeenCalled();
+  });
+
+  it('returns null on HTTP 200 business auth failures', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 1000,
+        msg: 'Authentication Failed',
+        success: false,
+      }),
+    );
+
+    await expect(
+      fetchZaiUsage({ runtimeEnv: { ZAI_API_KEY: 'bad-key' }, fetchImpl }),
+    ).resolves.toBeNull();
+  });
+
+  it('parses live coding-plan TIME_LIMIT rows with currentValue/usage', () => {
+    const parsed = parseZaiQuotaUsage({
+      code: 200,
+      success: true,
+      data: {
+        level: 'max',
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 0 },
+          {
+            type: 'TOKENS_LIMIT',
+            unit: 6,
+            number: 1,
+            percentage: 30,
+            nextResetTime: 1_785_560_352_998,
+          },
+          {
+            type: 'TIME_LIMIT',
+            unit: 5,
+            number: 1,
+            usage: 4000,
+            currentValue: 24,
+            remaining: 3976,
+            percentage: 1,
+            nextResetTime: 1_785_819_552_997,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.planType).toBe('max');
+    expect(parsed.windows).toEqual([
+      { label: '5h limit', usedPercent: 0 },
+      {
+        label: 'Weekly limit',
+        usedPercent: 30,
+        resetsAt: new Date(1_785_560_352_998).toISOString(),
+      },
+      {
+        label: 'Monthly tools',
+        usedPercent: 1,
+        used: 24,
+        remaining: 3976,
+        limit: 4000,
+        resetsAt: new Date(1_785_819_552_997).toISOString(),
+      },
+    ]);
+  });
+
+  it('uses the China host when ZAI_REGION is china', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 200,
+        data: {
+          limits: [{ type: 'TOKENS_LIMIT', unit: 6, percentage: 8 }],
+        },
+      }),
+    );
+
+    await fetchZaiUsage({
+      runtimeEnv: { ZAI_API_KEY: 'zai-key', ZAI_REGION: 'china' },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://open.bigmodel.cn/api/monitor/usage/quota/limit',
+      expect.anything(),
+    );
+  });
+
+  it('returns null when the payload has no displayable windows', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ code: 200, data: { level: 'lite' } }));
+
+    await expect(
+      fetchZaiUsage({ runtimeEnv: { ZAI_API_KEY: 'zai-key' }, fetchImpl }),
+    ).resolves.toBeNull();
+  });
+});
+
+describe('fetchZaiCodingPlanUsage', () => {
+  it('fetches coding-plan keys against the same monitor path', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 200,
+        data: {
+          level: 'max',
+          limits: [{ type: 'TOKENS_LIMIT', unit: 6, percentage: 33 }],
+        },
+      }),
+    );
+
+    const usage = await fetchZaiCodingPlanUsage({
+      runtimeEnv: {
+        ZAI_CODING_PLAN_API_KEY: 'coding-key',
+        ZAI_CODING_PLAN_REGION: 'global',
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.z.ai/api/monitor/usage/quota/limit',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer coding-key',
+        }),
+      }),
+    );
+    expect(usage).toMatchObject({
+      providerId: 'zai-coding-plan',
+      planType: 'max',
+      windows: [{ label: 'Weekly limit', usedPercent: 33 }],
+    });
   });
 });

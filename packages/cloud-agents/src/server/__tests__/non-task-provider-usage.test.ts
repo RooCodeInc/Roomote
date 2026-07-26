@@ -341,19 +341,49 @@ describe('resolveOpenCodeSmallModel', () => {
       baseUrl: 'http://127.0.0.1:4096',
       fetch: expect.any(Function),
     });
+    // Sessions are locked down: an empty scratch directory (never the
+    // service's own working directory) and a deny-all permission ruleset.
     expect(sessionCreateMock).toHaveBeenCalledWith(
       {
-        directory: process.cwd(),
+        directory: expect.stringContaining('roomote-non-task-'),
         title: `Roomote ${NON_TASK_INFERENCE_SURFACES.routerTaskRouting}`,
+        // Enumerated denials, never a `*` wildcard: a wildcard also strips
+        // the internal structured-output mechanism `format: json_schema`
+        // relies on.
+        permission: expect.arrayContaining([
+          { permission: 'edit', pattern: '*', action: 'deny' },
+          { permission: 'bash', pattern: '*', action: 'deny' },
+          { permission: 'read', pattern: '*', action: 'deny' },
+        ]),
       },
       expect.objectContaining({
         signal: expect.any(AbortSignal),
       }),
     );
+    const sessionDirectory = sessionCreateMock.mock.calls[0]?.[0]
+      ?.directory as string;
+    expect(sessionDirectory).not.toBe(process.cwd());
+    const sessionPermissions = sessionCreateMock.mock.calls[0]?.[0]
+      ?.permission as Array<{ permission: string }>;
+    expect(sessionPermissions.every((rule) => rule.permission !== '*')).toBe(
+      true,
+    );
+    // The per-prompt tool filter is the fail-closed layer for tools the
+    // enumerated denials cannot name (MCP/plugin tools on external servers):
+    // everything off, with OpenCode's internal StructuredOutput tool as the
+    // only exception so `format: json_schema` keeps working.
+    const promptTools = sessionPromptMock.mock.calls[0]?.[0]?.tools as Record<
+      string,
+      boolean
+    >;
+    expect(promptTools).toEqual({ '*': false, StructuredOutput: true });
+    expect(
+      Object.entries(promptTools).filter(([, enabled]) => enabled),
+    ).toEqual([['StructuredOutput', true]]);
     expect(sessionPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionID: 'session-1',
-        directory: process.cwd(),
+        directory: sessionDirectory,
         model: {
           providerID: 'openrouter',
           modelID: 'openai/gpt-5.4',
@@ -481,7 +511,7 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPromptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionID: 'session-1',
-        directory: process.cwd(),
+        directory: expect.stringContaining('roomote-non-task-'),
         model: {
           providerID: 'openrouter',
           modelID: 'openai/gpt-5.4',

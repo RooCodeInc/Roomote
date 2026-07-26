@@ -9,6 +9,7 @@ import {
   XAI_SUBSCRIPTION_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getModelProviderLabel,
+  isApiKeySubscriptionUsageProviderId,
 } from '@roomote/types';
 import type {
   ProviderCreditBalance,
@@ -1306,8 +1307,8 @@ export function InferenceProviderSection({
                 key={provider.id}
                 provider={provider}
                 usage={
-                  provider.id === 'kimi-for-coding'
-                    ? usageByProvider.get('kimi-for-coding')
+                  isApiKeySubscriptionUsageProviderId(provider.id)
+                    ? usageByProvider.get(provider.id)
                     : undefined
                 }
                 creditBalance={
