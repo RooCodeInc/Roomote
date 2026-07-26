@@ -39,6 +39,10 @@ import {
   Info,
   X,
 } from '@/components/system';
+import {
+  CreateGitHubRepoButton,
+  type DetectedRepository,
+} from '@/components/github/CreateGitHubRepoDialog';
 import { EnvironmentRepositorySelector } from '@/components/settings/environments/EnvironmentRepositorySelector';
 import { ModelSelect } from '@/components/tasks';
 import { SetupFooter } from './SetupFooter';
@@ -205,6 +209,17 @@ export function StepRepoSelection({
     );
   }, []);
 
+  const selectDetectedRepository = useCallback(
+    (repository: DetectedRepository) => {
+      setSelectedRepositoryIds((currentSelection) =>
+        currentSelection.includes(repository.id)
+          ? currentSelection
+          : [...currentSelection, repository.id],
+      );
+    },
+    [],
+  );
+
   const handleManageGitHubAccess = useCallback(() => {
     connectGitHub.mutate(`${pathname}?step=repo-selection`);
   }, [connectGitHub, pathname]);
@@ -321,6 +336,11 @@ export function StepRepoSelection({
               )}
               Edit GitHub Access
             </Button>
+            <CreateGitHubRepoButton
+              size="default"
+              className="w-full md:w-auto"
+              onRepositoryDetected={selectDetectedRepository}
+            />
             <Button
               type="button"
               variant="outline"
@@ -465,12 +485,13 @@ export function StepRepoSelection({
             )}
           </div>
           {allSelectedRepositoriesAreEmpty ? (
-            <Alert variant="warning">
-              <AlertTriangle className="size-4" />
+            <Alert>
+              <Info className="size-4" />
               <AlertDescription className="flex-col items-start gap-1">
                 <p>
-                  {emptyRepositoryWarningCopy} Push an initial commit before
-                  continuing, or choose different repositories.
+                  {emptyRepositoryWarningCopy} {PRODUCT_NAME} will push an
+                  initial commit and set up a basic environment — then you can
+                  start building with your first task.
                 </p>
                 <p className="font-medium text-foreground">
                   {selectedEmptyRepositoryNames}
@@ -527,7 +548,7 @@ export function StepRepoSelection({
                   type="button"
                   size="sm"
                   onClick={() => void handleContinue()}
-                  disabled={isBusy || allSelectedRepositoriesAreEmpty}
+                  disabled={isBusy}
                 >
                   {isBusy && <Loader2 className="animate-spin" />}
                   Continue
@@ -580,6 +601,10 @@ export function StepRepoSelection({
             )}
             Edit GitHub Access
           </Button>
+          <CreateGitHubRepoButton
+            size="sm"
+            onRepositoryDetected={selectDetectedRepository}
+          />
           <Button type="button" variant="outline" size="sm" onClick={onSkip}>
             Skip
           </Button>

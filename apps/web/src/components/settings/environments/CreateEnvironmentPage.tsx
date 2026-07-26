@@ -16,6 +16,10 @@ import {
 } from '@/hooks/environments';
 import { useRepositories } from '@/hooks/source-control';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import {
+  areAllRepositoriesEmpty,
+  getEmptyRepositories,
+} from '@/lib/repositories';
 import { useTRPC } from '@/trpc/client';
 import { ModelSelect } from '@/components/tasks';
 
@@ -28,10 +32,16 @@ import {
   Card,
   CardContent,
   HandMetal,
+  Info,
   Loader2,
+  Plus,
   Textarea,
 } from '@/components/system';
 
+import {
+  CreateGitHubRepoDialog,
+  type DetectedRepository,
+} from '@/components/github/CreateGitHubRepoDialog';
 import { EnvironmentRepositorySelector } from './EnvironmentRepositorySelector';
 import { UpdateGitHubReposHint } from './UpdateGitHubReposHint';
 import {
@@ -61,10 +71,13 @@ export function CreateEnvironmentPage({
   const trpc = useTRPC();
   const editorRef = useRef<YamlEnvironmentEditorHandle>(null);
 
-  const repositories = useRepositories();
+  const repositories = useRepositories({ includeEmptyState: true });
   const createEnvironment = useCreateEnvironment();
   const validateConfig = useValidateEnvironmentConfig();
   const launchTaskModels = useLaunchTaskModels();
+  const [createRepoDialogOpen, setCreateRepoDialogOpen] = useState(
+    searchParams.get('create-repo') === '1',
+  );
 
   const [activeView, setActiveView] = useState<MasterView>(
     suggestedMcpId ? 'yaml' : 'agent',
@@ -186,8 +199,15 @@ export function CreateEnvironmentPage({
             ) : null}
             {activeView === 'agent' ? (
               <AgentMasterView
-                repositories={repositories.data ?? []}
+                repositories={(repositories.data ?? []).map((repository) => ({
+                  id: repository.id,
+                  fullName: repository.fullName,
+                  // includeEmptyState is set on the query, but the router
+                  // output type does not narrow on that flag.
+                  isEmpty: (repository as { isEmpty?: boolean }).isEmpty,
+                }))}
                 repositoriesLoading={repositories.isPending}
+                onOpenCreateRepo={() => setCreateRepoDialogOpen(true)}
                 selectedRepositoryIds={selectedRepositoryIds}
                 onToggleRepository={(repositoryId) => {
                   setSelectedRepositoryIds((currentSelection) =>
@@ -224,9 +244,27 @@ export function CreateEnvironmentPage({
           </div>
         </div>
       </div>
+      <CreateGitHubRepoDialog
+        open={createRepoDialogOpen}
+        onOpenChange={setCreateRepoDialogOpen}
+        onRepositoryDetected={(repository: DetectedRepository) => {
+          setCreateRepoDialogOpen(false);
+          setSelectedRepositoryIds((currentSelection) =>
+            currentSelection.includes(repository.id)
+              ? currentSelection
+              : [...currentSelection, repository.id],
+          );
+        }}
+      />
     </>
   );
 }
+
+type AgentViewRepository = {
+  id: string;
+  fullName: string;
+  isEmpty?: boolean | null;
+};
 
 function AgentMasterView({
   repositories,
@@ -239,10 +277,11 @@ function AgentMasterView({
   selectedModelId,
   onSelectedModelIdChange,
   onSwitchToYaml,
+  onOpenCreateRepo,
   isStartAgentPending,
   isBusy,
 }: {
-  repositories: Array<{ id: string; fullName: string }>;
+  repositories: AgentViewRepository[];
   repositoriesLoading: boolean;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
@@ -252,6 +291,7 @@ function AgentMasterView({
   selectedModelId?: string;
   onSelectedModelIdChange: (value: string) => void;
   onSwitchToYaml: () => void;
+  onOpenCreateRepo: () => void;
   isStartAgentPending: boolean;
   isBusy: boolean;
 }) {
@@ -267,6 +307,7 @@ function AgentMasterView({
       selectedModelId={selectedModelId}
       onSelectedModelIdChange={onSelectedModelIdChange}
       onSwitchToYaml={onSwitchToYaml}
+      onOpenCreateRepo={onOpenCreateRepo}
       isStartAgentPending={isStartAgentPending}
       isBusy={isBusy}
     />
@@ -284,10 +325,11 @@ function AgentRepositorySelectionSubview({
   selectedModelId,
   onSelectedModelIdChange,
   onSwitchToYaml,
+  onOpenCreateRepo,
   isStartAgentPending,
   isBusy,
 }: {
-  repositories: Array<{ id: string; fullName: string }>;
+  repositories: AgentViewRepository[];
   repositoriesLoading: boolean;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
@@ -297,9 +339,23 @@ function AgentRepositorySelectionSubview({
   selectedModelId?: string;
   onSelectedModelIdChange: (value: string) => void;
   onSwitchToYaml: () => void;
+  onOpenCreateRepo: () => void;
   isStartAgentPending: boolean;
   isBusy: boolean;
 }) {
+  const selectedEmptyRepositories = getEmptyRepositories(
+    repositories.filter((repository) =>
+      selectedRepositoryIds.includes(repository.id),
+    ),
+  );
+  const allSelectedRepositoriesAreEmpty =
+    selectedRepositoryIds.length > 0 &&
+    areAllRepositoriesEmpty(
+      repositories.filter((repository) =>
+        selectedRepositoryIds.includes(repository.id),
+      ),
+    );
+
   return (
     <>
       <p className="text-sm text-muted-foreground">
@@ -321,6 +377,15 @@ function AgentRepositorySelectionSubview({
                 </AlertDescription>
               </Alert>
               <UpdateGitHubReposHint />
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                onClick={onOpenCreateRepo}
+              >
+                <Plus className="size-3" />
+                Create a new repository
+              </Button>
             </div>
           ) : (
             <div className="space-y-4">
@@ -332,7 +397,39 @@ function AgentRepositorySelectionSubview({
                 heightClassName="max-h-[calc(var(--effective-viewport-height)-17rem)] overflow-auto"
               />
 
-              <UpdateGitHubReposHint />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <UpdateGitHubReposHint />
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={onOpenCreateRepo}
+                >
+                  <Plus className="size-3" />
+                  Create a new repository
+                </Button>
+              </div>
+
+              {allSelectedRepositoriesAreEmpty ? (
+                <Alert>
+                  <Info className="size-4" />
+                  <AlertDescription className="flex-col items-start gap-1">
+                    <p>
+                      {selectedEmptyRepositories.length === 1
+                        ? 'The selected repository has no commits yet.'
+                        : 'All selected repositories have no commits yet.'}{' '}
+                      Roomote will push an initial commit and set up a basic
+                      environment — then you can start building with your first
+                      task.
+                    </p>
+                    <p className="font-medium text-foreground">
+                      {selectedEmptyRepositories
+                        .map((repository) => repository.fullName)
+                        .join(', ')}
+                    </p>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
 
               <div>
                 <Textarea

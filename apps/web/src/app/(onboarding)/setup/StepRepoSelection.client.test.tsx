@@ -112,6 +112,31 @@ vi.mock('@/hooks/source-control', () => ({
   useRepositories: mockUseRepositories,
 }));
 
+vi.mock('@/components/github/CreateGitHubRepoDialog', () => ({
+  CreateGitHubRepoButton: ({
+    onRepositoryDetected,
+  }: {
+    onRepositoryDetected?: (repository: {
+      id: string;
+      fullName: string;
+      isEmpty?: boolean;
+    }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onRepositoryDetected?.({
+          id: 'repo-created',
+          fullName: 'acme/created',
+          isEmpty: true,
+        })
+      }
+    >
+      Create a new repository
+    </button>
+  ),
+}));
+
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: () => ({
     data: {
@@ -633,7 +658,7 @@ describe('StepRepoSelection', () => {
     expect(onReviewComputeProvider).toHaveBeenCalled();
   });
 
-  it('shows a warning and disables Continue only when all selected repositories are empty', async () => {
+  it('explains the bootstrap and keeps Continue enabled when all selected repositories are empty', async () => {
     mockRepositories.splice(
       0,
       mockRepositories.length,
@@ -661,9 +686,11 @@ describe('StepRepoSelection', () => {
       screen.getByText(/all selected repositories have no commits yet/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/push an initial commit before continuing/i),
+      screen.getByText(
+        /will push an initial commit and set up a basic environment/i,
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
   });
 
   it('keeps Continue enabled and hides the warning for mixed empty and non-empty selections', async () => {
@@ -692,9 +719,29 @@ describe('StepRepoSelection', () => {
     fireEvent.click(screen.getByLabelText(/acme\/empty/i));
 
     expect(
-      screen.queryByText(/push an initial commit before continuing/i),
+      screen.queryByText(
+        /will push an initial commit and set up a basic environment/i,
+      ),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
+  });
+
+  it('offers the create-repo affordance and selects the repository it detects', async () => {
+    mockRepositories.splice(0, mockRepositories.length, {
+      id: 'repo-created',
+      fullName: 'acme/created',
+      private: true,
+      defaultBranch: 'main',
+      isEmpty: true,
+    });
+
+    await renderStepRepoSelection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create a new repository' }),
+    );
+
+    expect(screen.getByLabelText('acme/created')).toBeChecked();
   });
 
   it('renders the empty-repository warning below the repository list', async () => {

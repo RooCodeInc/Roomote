@@ -1131,6 +1131,36 @@ describe('setup-new onboarding task start command', () => {
     );
   });
 
+  it('launches with bootstrap instructions instead of blocking when every selected repo is empty', async () => {
+    const { getRepositoryEmptyStates } = await import('@roomote/github');
+    vi.mocked(getRepositoryEmptyStates).mockResolvedValue(
+      new Map([['repo-1', true]]),
+    );
+    mockOnboardingTransaction({ slackInstallation: null });
+
+    const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(result.taskId).toBe('task-onboarding-1');
+    expect(buildSetupNewKickoffPrompt).toHaveBeenCalledWith(['acme/api'], {
+      emptyRepositoryFullNames: ['acme/api'],
+    });
+  });
+
+  it('omits the empty-repository flag when selected repos have commits', async () => {
+    const { getRepositoryEmptyStates } = await import('@roomote/github');
+    vi.mocked(getRepositoryEmptyStates).mockResolvedValue(
+      new Map([['repo-1', false]]),
+    );
+    mockOnboardingTransaction({ slackInstallation: null });
+
+    await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(buildSetupNewKickoffPrompt).toHaveBeenCalledWith(
+      ['acme/api'],
+      undefined,
+    );
+  });
+
   it('rejects a stale excluded compute provider before launch', async () => {
     vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'docker');
     mockOnboardingTransaction({
