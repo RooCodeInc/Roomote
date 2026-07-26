@@ -6,6 +6,8 @@
 (roomote_proxy) {
 	encode zstd gzip
 	reverse_proxy {args[0]} {
+		header_up -X-Roomote-Forwarded-Host
+		header_up -X-Roomote-Public-Host
 		lb_try_duration 10s
 		lb_try_interval 250ms
 	}
