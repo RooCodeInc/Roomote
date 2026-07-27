@@ -370,6 +370,7 @@ describe('platform-managed draft state', () => {
         issues: {
           addLabels: vi.fn().mockResolvedValue({}),
           addAssignees: vi.fn().mockResolvedValue({}),
+          removeAssignees: vi.fn().mockResolvedValue({}),
         },
       },
       graphql: vi.fn().mockResolvedValue({}),
@@ -717,6 +718,7 @@ describe('optional targetBranch', () => {
         issues: {
           addLabels: vi.fn().mockResolvedValue({}),
           addAssignees: vi.fn().mockResolvedValue({}),
+          removeAssignees: vi.fn().mockResolvedValue({}),
         },
       },
       graphql: vi.fn().mockResolvedValue({}),
@@ -941,6 +943,42 @@ describe('optional targetBranch', () => {
       expect.objectContaining({
         body: '> Opened on behalf of Launch Owner. Follow up by mentioning @roomote.',
       }),
+    );
+  });
+
+  it('removes the stale launch-owner assignment when updating a pull request', async () => {
+    const existing = {
+      number: 11,
+      node_id: 'node-11',
+      html_url: 'https://github.com/acme/web/pull/11',
+      title: 'Old title',
+      draft: false,
+      base: { ref: 'develop' },
+      assignees: [{ login: 'launch-owner' }],
+    };
+    const octokit = makeOctokit({
+      list: [existing],
+      updated: { ...existing, title: '[Feature] X' },
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Participant',
+      prAssigneeLogin: 'participant',
+    });
+    mockResolveLaunchTaskCommitAuthor.mockResolvedValue({
+      displayName: 'Launch Owner',
+      prAssigneeLogin: 'launch-owner',
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...baseInput },
+    });
+
+    expect(octokit.rest.issues.removeAssignees).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ['launch-owner'] }),
+    );
+    expect(octokit.rest.issues.addAssignees).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ['participant'] }),
     );
   });
 

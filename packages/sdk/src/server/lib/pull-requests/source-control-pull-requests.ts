@@ -168,6 +168,7 @@ type GitHubPullRequestResult = {
   draft?: boolean;
   base?: { ref: string };
   body?: string | null;
+  assignees?: Array<{ login?: string | null }> | null;
 };
 
 export async function createOrUpdateSourceControlPullRequestForTaskRun({
@@ -227,14 +228,17 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     provider === 'github'
       ? await resolveRunCommitAuthor(db, taskRun)
       : undefined;
-  const inputWithLiveGitHubAssignee = liveGitHubAttribution
+  const liveGitHubAssigneePlan = liveGitHubAttribution
+    ? await resolveLiveGitHubAssigneePlan({
+        taskRun,
+        assignees: inputWithNormalizedAttribution.assignees,
+        attribution: liveGitHubAttribution,
+      })
+    : undefined;
+  const inputWithLiveGitHubAssignee = liveGitHubAssigneePlan
     ? {
         ...inputWithNormalizedAttribution,
-        assignees: await resolveLiveGitHubAssignees({
-          taskRun,
-          assignees: inputWithNormalizedAttribution.assignees,
-          attribution: liveGitHubAttribution,
-        }),
+        assignees: liveGitHubAssigneePlan.assignees,
       }
     : inputWithNormalizedAttribution;
 
@@ -247,6 +251,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
           provider,
           createDraft,
           attribution: liveGitHubAttribution,
+          staleLaunchAssignee: liveGitHubAssigneePlan?.staleLaunchAssignee,
         });
       case 'gitlab':
         return createOrUpdateGitLabMergeRequest({
@@ -292,7 +297,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   return result;
 }
 
-async function resolveLiveGitHubAssignees({
+async function resolveLiveGitHubAssigneePlan({
   taskRun,
   assignees,
   attribution,
@@ -300,7 +305,7 @@ async function resolveLiveGitHubAssignees({
   taskRun: TaskRun;
   assignees: string[];
   attribution: ResolvedTaskCommitAuthor;
-}): Promise<string[]> {
+}): Promise<{ assignees: string[]; staleLaunchAssignee?: string }> {
   // Delivery prompts may still contain the launch owner's assignee. Remove
   // that stale value, then add only the current linked participant.
   const launchAssignee = (
@@ -310,9 +315,14 @@ async function resolveLiveGitHubAssignees({
     (assignee) => assignee !== launchAssignee,
   );
 
-  return attribution.prAssigneeLogin
-    ? [...new Set([...liveAssignees, attribution.prAssigneeLogin])]
-    : liveAssignees;
+  return {
+    assignees: attribution.prAssigneeLogin
+      ? [...new Set([...liveAssignees, attribution.prAssigneeLogin])]
+      : liveAssignees,
+    ...(launchAssignee && launchAssignee !== attribution.prAssigneeLogin
+      ? { staleLaunchAssignee: launchAssignee }
+      : {}),
+  };
 }
 
 /**
@@ -400,12 +410,14 @@ async function createOrUpdateGitHubPullRequest({
   provider,
   createDraft,
   attribution,
+  staleLaunchAssignee,
 }: {
   input: SourceControlPullRequestMutationInput;
   repository: RepositoryRow;
   provider: 'github';
   createDraft: boolean;
   attribution?: ResolvedTaskCommitAuthor;
+  staleLaunchAssignee?: string;
 }): Promise<SourceControlPullRequestMutationResult> {
   if (!repository.installationId) {
     throw new Error(
@@ -437,6 +449,7 @@ async function createOrUpdateGitHubPullRequest({
   let action: SourceControlPullRequestMutationResult['action'];
   let pullRequest: GitHubPullRequestResult | undefined =
     existingPullRequests[0];
+  const existingAssignees = pullRequest?.assignees ?? [];
   let targetBranch: string;
 
   if (pullRequest) {
@@ -483,6 +496,19 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       issue_number: pullRequest.number,
       labels: input.labels,
+    });
+  }
+
+  if (
+    action === 'updated' &&
+    staleLaunchAssignee &&
+    existingAssignees.some((assignee) => assignee.login === staleLaunchAssignee)
+  ) {
+    await octokit.rest.issues.removeAssignees({
+      owner,
+      repo,
+      issue_number: pullRequest.number,
+      assignees: [staleLaunchAssignee],
     });
   }
 
