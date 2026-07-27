@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
+  TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
   getProviderRetryNoticeFromMessageData,
+  getTerminalProviderErrorFromMessageData,
   parseProviderRetryNotice,
+  parseTerminalProviderError,
 } from '../provider-retry-notice';
 
 describe('parseProviderRetryNotice', () => {
@@ -54,5 +57,23 @@ describe('getProviderRetryNoticeFromMessageData', () => {
       maxAttempts: 1,
       errorSummary: 'Upstream reset',
     });
+  });
+});
+
+describe('terminal provider errors', () => {
+  it('reads a structured terminal provider error from message data', () => {
+    expect(
+      getTerminalProviderErrorFromMessageData({
+        [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: {
+          errorSummary: 'The provider returned an error: API key is invalid.',
+        },
+      }),
+    ).toEqual({
+      errorSummary: 'The provider returned an error: API key is invalid.',
+    });
+  });
+
+  it('rejects terminal errors without a usable summary', () => {
+    expect(parseTerminalProviderError({ errorSummary: ' ' })).toBeNull();
   });
 });
