@@ -276,7 +276,7 @@ const serverSchema = {
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
   // scheduled job (apps/bullmq) deletes them.
-  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(3),
   API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()
