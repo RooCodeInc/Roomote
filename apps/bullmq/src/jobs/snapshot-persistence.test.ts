@@ -104,47 +104,69 @@ async function readRun(runId: number) {
   return row;
 }
 
+/**
+ * Reproduces the incident faithfully: the provider yields an id, and then the
+ * attempt never progresses again because its process stopped renewing the
+ * BullMQ lock. Nothing further in that attempt runs -- so this cannot be
+ * modelled with a thrown error, which would still run the catch block.
+ */
+function startStalledAttempt(runId: number, snapshotId: string) {
+  mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+    await onSnapshotCreated?.(snapshotId);
+    // Modal terminates the sandbox here. This attempt hangs instead.
+    return new Promise(() => {});
+  });
+
+  // Deliberately not awaited: the attempt is stalled, exactly as in the
+  // incident. Swallow any late rejection so it cannot fail an unrelated test.
+  void snapshotJob(buildJob(runId, 0)).catch(() => {});
+}
+
+async function waitForSnapshotId(runId: number, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const row = await readRun(runId);
+
+    if (row.snapshotId) {
+      return row;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  throw new Error(`Snapshot id was never persisted for task run #${runId}`);
+}
+
 describe('snapshot id persistence (real database)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('keeps the snapshot id when the attempt dies after the provider produced it', async () => {
+  it('records the snapshot id while the attempt is still in flight', async () => {
     const run = await createIdleRunAwaitingSnapshot();
 
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
-    mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
-      await onSnapshotCreated?.('im-incident-replay');
-      // Modal terminates the sandbox here. This is the exact window where the
-      // original incident lost the id: the process stopped renewing its lock
-      // and the job was redelivered before it could record anything.
-      throw new Error('worker died during post-snapshot teardown');
-    });
+    startStalledAttempt(run.id, 'im-incident-replay');
 
-    await expect(snapshotJob(buildJob(run.id, 0))).rejects.toThrow();
+    // Nothing in attempt 1 will ever run again -- not its teardown, not its
+    // catch block, not its finalizing transaction. The id has to already be
+    // durable at this point or it is gone for good.
+    const inFlight = await waitForSnapshotId(run.id);
 
-    const afterCrash = await readRun(run.id);
-
-    // The snapshot survived the crash -- this is the entire fix.
-    expect(afterCrash.snapshotId).toBe('im-incident-replay');
-    expect(afterCrash.snapshotCreatedAt).toBeInstanceOf(Date);
-    expect(afterCrash.snapshotFailedAt).toBeNull();
-    // The failure path must not have cleared the id it found on the row.
-    expect(afterCrash.status).toBe(RunStatus.Idle);
+    expect(inFlight.snapshotId).toBe('im-incident-replay');
+    expect(inFlight.snapshotCreatedAt).toBeInstanceOf(Date);
+    expect(inFlight.snapshotFailedAt).toBeNull();
+    expect(inFlight.status).toBe(RunStatus.Idle);
   });
 
   it('finalizes a redelivered attempt from the persisted id instead of failing on the stopped sandbox', async () => {
     const run = await createIdleRunAwaitingSnapshot();
 
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
-    mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
-      await onSnapshotCreated?.('im-incident-replay');
-      throw new Error('worker died during post-snapshot teardown');
-    });
+    startStalledAttempt(run.id, 'im-incident-replay');
 
-    await expect(snapshotJob(buildJob(run.id, 0))).rejects.toThrow();
-
-    const persisted = await readRun(run.id);
+    const persisted = await waitForSnapshotId(run.id);
     const originalCreatedAt = persisted.snapshotCreatedAt;
 
     // BullMQ redelivers the stalled job. The sandbox is now stopped, because
@@ -179,16 +201,45 @@ describe('snapshot id persistence (real database)', () => {
     expect(decisions).toContain('reuse_persisted_snapshot');
   });
 
-  it('does not let a losing concurrent attempt overwrite the recorded snapshot', async () => {
+  it('finalizes in place when the attempt fails after the id was recorded', async () => {
     const run = await createIdleRunAwaitingSnapshot();
 
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
-      await onSnapshotCreated?.('im-first-writer');
-      throw new Error('worker died during post-snapshot teardown');
+      await onSnapshotCreated?.('im-teardown-failure');
+      throw new Error('teardown exploded');
     });
 
-    await expect(snapshotJob(buildJob(run.id, 0))).rejects.toThrow();
+    // Final attempt, so the job would raise UnrecoverableError and BullMQ
+    // would never redeliver it.
+    await snapshotJob(buildJob(run.id, 2));
+
+    const finalized = await readRun(run.id);
+
+    // Nothing else can rescue this run: sleep-check's candidate query skips
+    // rows that carry a snapshot id or a pending snapshot request, and there
+    // is no redelivery to short-circuit. Leaving it Idle would strand the
+    // task forever while holding a perfectly good snapshot.
+    expect(finalized.status).toBe(RunStatus.Completed);
+    expect(finalized.snapshotId).toBe('im-teardown-failure');
+    expect(finalized.snapshotFailedAt).toBeNull();
+
+    const events = await db.query.taskRunEvents.findMany({
+      where: eq(taskRunEvents.runId, run.id),
+    });
+
+    expect(events.map((event) => event.details?.decision)).toContain(
+      'recover_persisted_snapshot_after_failure',
+    );
+  });
+
+  it('does not let a losing concurrent attempt overwrite the recorded snapshot', async () => {
+    const run = await createIdleRunAwaitingSnapshot();
+
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    startStalledAttempt(run.id, 'im-first-writer');
+
+    await waitForSnapshotId(run.id);
 
     // A second attempt somehow produces a different image. The guarded update
     // must leave the already-recorded id alone rather than pointing the run at

@@ -207,6 +207,10 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   // the snapshot was taken rather than from whenever this job finishes.
   let persistedSnapshotCreatedAt: Date | null =
     taskRun.snapshotCreatedAt ?? null;
+  // Set once `onSnapshotCreated` has recorded an id for this attempt. If the
+  // attempt then fails, the failure was in teardown rather than in the
+  // snapshot, and the recorded id must be finalized rather than abandoned.
+  let persistedSnapshotId: string | null = null;
   const snapshotAttemptStartedAt = new Date();
   let reconciledSnapshot: SourceInstanceSnapshot | null = null;
   const shouldCompleteTask = shouldCompleteTaskOnSnapshot(taskRun.payload);
@@ -392,6 +396,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
             snapshotIntentId,
             triggerPath,
           });
+          persistedSnapshotId = createdSnapshotId;
         },
       });
 
@@ -453,21 +458,50 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         },
       });
 
-      reconciledSnapshot = await reconcileSnapshottingFailure({
-        taskRun,
-        client,
-        errorDetails,
-        instanceId,
-        postFailureInstanceStatus,
-        preSnapshotInstanceStatus: status,
-        queueAttempt,
-        queueJobId,
-        snapshotAttemptStartedAt,
-        snapshotIntentId,
-        triggerPath,
-      });
+      // The provider handed over an id before this attempt threw, so the
+      // snapshot itself succeeded and only the teardown that follows it
+      // failed. Finalize from the recorded id rather than abandoning it:
+      // sleep-check skips runs that already carry a snapshot id, and the
+      // abandon path ends in an UnrecoverableError that stops BullMQ from
+      // redelivering, so nothing downstream would ever finish this run.
+      if (persistedSnapshotId) {
+        await recordSnapshotQueueEvent(taskRun, {
+          eventType: 'decision',
+          message: `Recovered snapshot ${persistedSnapshotId} for sandbox ${instanceId} after the attempt failed during teardown.`,
+          details: {
+            queueJobId,
+            queueAttempt,
+            snapshotIntentId,
+            triggerPath,
+            decision: 'recover_persisted_snapshot_after_failure',
+            sandboxId: instanceId,
+            snapshotId: persistedSnapshotId,
+            error: errorMessage,
+            preSnapshotInstanceStatus: status,
+            postFailureInstanceStatus,
+          },
+        });
 
-      if (!reconciledSnapshot) {
+        snapshotResult = { snapshotId: persistedSnapshotId };
+      }
+
+      reconciledSnapshot = snapshotResult
+        ? null
+        : await reconcileSnapshottingFailure({
+            taskRun,
+            client,
+            errorDetails,
+            instanceId,
+            postFailureInstanceStatus,
+            preSnapshotInstanceStatus: status,
+            queueAttempt,
+            queueJobId,
+            snapshotAttemptStartedAt,
+            snapshotIntentId,
+            triggerPath,
+          });
+
+      if (!snapshotResult && !reconciledSnapshot) {
         if (
           !isFinalAttempt &&
           isRetryableSnapshotCreateFailure({
@@ -607,7 +641,9 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         throw new UnrecoverableError(errorMessage);
       }
 
-      snapshotResult = { snapshotId: reconciledSnapshot.snapshotId };
+      if (reconciledSnapshot) {
+        snapshotResult = { snapshotId: reconciledSnapshot.snapshotId };
+      }
     }
   }
 
