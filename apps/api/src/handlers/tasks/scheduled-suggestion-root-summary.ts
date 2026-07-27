@@ -75,13 +75,11 @@ function buildScheduledSuggestionSummaryPrompt(params: {
 
   return `You are writing the top-level Slack summary for ${params.slackConfig.summaryPrompt.automationDescription}.
 
-The individual launchable actions will be posted in the thread. Write a concise parent message that helps a manager understand what happened in this run and what deserves attention first.
+The individual launchable actions will be posted in the thread. Write a concise parent message that leads with what deserves attention first.
 
 ${buildManagerAutomationRootSummaryPromptContract({
   detailLabel: 'actions',
   highlightLabel: params.slackConfig.summaryPrompt.highlightLabel,
-  openerSignal: params.slackConfig.summaryPrompt.openerSignal,
-  openerExamples: params.slackConfig.summaryPrompt.openerExamples,
 })}
 
 Additional guidance:

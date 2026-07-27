@@ -146,11 +146,6 @@ The full merged pull request breakdown will be posted in the thread. Write a con
 ${buildManagerAutomationRootSummaryPromptContract({
   detailLabel: 'merged pull requests',
   highlightLabel: 'shipped items or themes',
-  openerSignal: 'a quick roundup of recently merged pull requests',
-  openerExamples: [
-    'I just did a quick pass through the latest merged PRs',
-    'I took a quick roundup pass on what shipped recently',
-  ],
 })}
 
 Additional guidance:
