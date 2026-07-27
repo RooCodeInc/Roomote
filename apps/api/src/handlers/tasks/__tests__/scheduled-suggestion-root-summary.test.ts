@@ -67,7 +67,7 @@ describe('buildDeterministicScheduledSuggestionSummary', () => {
 
     expect(summary).toBe(
       [
-        'Suggested follow-up work:',
+        'I went looking for follow-up work worth picking up next, and a few ideas stood out as worth doing now.',
         '- Suggestion 1\n- Suggestion 2\n- Suggestion 3\n- 2 more suggestions in the thread',
       ].join('\n\n'),
     );
