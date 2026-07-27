@@ -67,7 +67,11 @@ const sendPromptInputSchema = z
       });
     }
 
-    if (data.source === 'web' && typeof data.quoteText !== 'string') {
+    if (
+      data.source === 'web' &&
+      !data.taskTool &&
+      typeof data.quoteText !== 'string'
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Web prompts must include the original text for reply quotes',
