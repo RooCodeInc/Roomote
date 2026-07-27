@@ -19,6 +19,7 @@
 export const SLACK_POSTING_TOOL_BASENAMES = [
   'send_chat_reply',
   'send_chat_reaction_emoji',
+  'add_reaction_to_slack_message',
   'post_to_slack_channel',
   'post_to_channel',
   'reply_to_slack_thread',

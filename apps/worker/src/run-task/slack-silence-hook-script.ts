@@ -162,6 +162,37 @@ function isSendChatReplyTool(input) {
   return matchesToolBasename(input, 'send_chat_reply');
 }
 
+function getSendChatReplyPurpose(input) {
+  if (!input || typeof input !== 'object') {
+    return '';
+  }
+
+  const toolArgs = input.tool_args;
+  if (!toolArgs || typeof toolArgs !== 'object') {
+    return '';
+  }
+
+  return trimString(toolArgs.purpose);
+}
+
+function isPrematureAutomationReply(input, state) {
+  if (
+    state?.requiresTerminalCloseoutWithoutTurn !== true ||
+    trimString(state.currentTurnMessageTs)
+  ) {
+    return false;
+  }
+
+  if (!isSendChatReplyTool(input)) {
+    return SUBAGENT_RESTRICTED_SLACK_POSTING_TOOLS.some((basename) =>
+      matchesToolBasename(input, basename),
+    );
+  }
+
+  const purpose = getSendChatReplyPurpose(input);
+  return purpose !== 'closeout' && purpose !== 'clarification';
+}
+
 // Slack-posting tools that only the parent session may use. Subagent (child)
 // sessions must return their report to the parent instead of posting.
 function isSubagentRestrictedSlackPostingTool(input) {
@@ -513,6 +544,28 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
       tool: getToolName(hookInput),
       hookThreadId,
     });
+    process.exit(0);
+  }
+
+  if (
+    hookEventName === 'PreToolUse' &&
+    isPrematureAutomationReply(hookInput, state)
+  ) {
+    logDecision('INFO', {
+      trigger: hookEventName,
+      decision: 'deny',
+      tool: getToolName(hookInput),
+      reason: 'automation_premature_slack_reply',
+      hookThreadId,
+    });
+    process.stdout.write(
+      JSON.stringify({
+        decision: 'block',
+        permissionDecision: 'deny',
+        reason:
+          'Automation-started tasks must stay silent until they have a final result, durable blocker, or required user input. Do not send an opening acknowledgement or progress update; use a closeout or clarification only when that outcome is ready.',
+      }),
+    );
     process.exit(0);
   }
 

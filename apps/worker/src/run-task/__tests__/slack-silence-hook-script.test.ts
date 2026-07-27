@@ -108,6 +108,7 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     'mcp__roomote__send_chat_reply',
     'roomote_send_chat_reply',
     'mcp__roomote__send_chat_reaction_emoji',
+    'roomote_add_reaction_to_slack_message',
     'roomote_post_to_slack_channel',
     'roomote_reply_to_slack_thread',
   ])('denies %s from non-parent subagent threads', (toolName) => {
@@ -326,6 +327,105 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('decision="allow"');
     expect(result.stderr).toContain('reason="missing_activity_timestamp"');
+  });
+
+  it.each(['ack', 'progress'])(
+    'rejects %s replies from late-bound automation tasks',
+    (purpose) => {
+      const stateFilePath = writeState({
+        startedAtMs: Date.now(),
+        currentTurnRequiresInitialAck: false,
+        requiresTerminalCloseoutWithoutTurn: true,
+      });
+
+      const result = runHook({
+        input: {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'roomote_send_chat_reply',
+          tool_args: { purpose },
+        },
+        env: {
+          ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        decision: 'block',
+        permissionDecision: 'deny',
+      });
+    },
+  );
+
+  it('allows a terminal reply from a late-bound automation task', () => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now(),
+      currentTurnRequiresInitialAck: false,
+      requiresTerminalCloseoutWithoutTurn: true,
+    });
+
+    const result = runHook({
+      input: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'roomote_send_chat_reply',
+        tool_args: { purpose: 'closeout' },
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it('allows a clarification from a late-bound automation task', () => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now(),
+      currentTurnRequiresInitialAck: false,
+      requiresTerminalCloseoutWithoutTurn: true,
+    });
+
+    const result = runHook({
+      input: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'roomote_send_chat_reply',
+        tool_args: { purpose: 'clarification' },
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
+  it.each([
+    'roomote_post_to_slack_channel',
+    'roomote_add_reaction_to_slack_message',
+  ])('rejects %s from late-bound automation tasks', (toolName) => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now(),
+      currentTurnRequiresInitialAck: false,
+      requiresTerminalCloseoutWithoutTurn: true,
+    });
+
+    const result = runHook({
+      input: {
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      decision: 'block',
+      permissionDecision: 'deny',
+    });
   });
 
   it('allows tool_search before the current Slack turn has been acknowledged', () => {
