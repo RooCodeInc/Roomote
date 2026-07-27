@@ -340,6 +340,27 @@ function requestedModelIdIsNull(output: string): AssertionResult {
   };
 }
 
+/**
+ * Asserts that routing used the task's supplied context without requesting a
+ * follow-up external lookup.
+ */
+function doesNotRequestExternalLookup(output: string): AssertionResult {
+  const json = extractJson(output);
+  if (!json) {
+    return { pass: false, score: 0, reason: 'Invalid JSON response' };
+  }
+
+  const doesNotRequestLookup =
+    json.needsExternalLookup === false && json.externalReference == null;
+  return {
+    pass: doesNotRequestLookup,
+    score: doesNotRequestLookup ? 1 : 0,
+    reason: doesNotRequestLookup
+      ? 'routing did not request external context'
+      : `expected no external lookup, got needsExternalLookup=${String(json.needsExternalLookup)}, externalReference=${String(json.externalReference)}`,
+  };
+}
+
 export {
   isValidRoutingJson,
   hasValidWorkspaceValue,
@@ -350,6 +371,7 @@ export {
   requestedModelIdMatchesExpected,
   hasValidKickoffMessage,
   requestedModelIdIsNull,
+  doesNotRequestExternalLookup,
   extractJson,
 };
 

@@ -27,9 +27,10 @@ const ENVIRONMENT_SELECTION_RULES_BODY = `- Prefer a specific environment whenev
 a) **"environment"** - Default choice whenever one environment is a credible place to start:
    - The task relates to a specific product area, feature, workflow, or user-visible behavior.
    - One environment is a better fit than the others, even if the match is not perfect.
-   - The task names multiple repos/services that belong to the same environment.
-   - The user explicitly mentions the environment by name.
-   - Team Guidance or Session Instructions recommend a specific environment.`;
+    - The task names multiple repos/services that belong to the same environment.
+    - The user explicitly mentions the environment by name.
+    - The task explicitly references an environment repository by its owner/repository name or a GitHub URL. Treat this as an explicit environment signal unless the user names a different environment.
+    - Team Guidance or Session Instructions recommend a specific environment.`;
 
 const WORKSPACE_NARROWING_RULES_BODY = `- Default to the single most relevant environment
 - If multiple environments could work, pick the best single environment
@@ -38,7 +39,7 @@ const WORKSPACE_NARROWING_RULES_BODY = `- Default to the single most relevant en
 const EXTERNAL_LOOKUP_RULES = `**External lookup rules:**
 - Set needsExternalLookup to true only when the task message contains an explicit external reference to a specific entity in an external system and the rest of the message is too underspecified to route without fetching it first.
 - Valid external references include specific issue or ticket IDs like LIN-123 or ENG-456 or GitHub issue or pull request numbers like #123.
-- Do not treat general URLs, file paths, code snippets, feature names, or other descriptive context as external references.
+- Do not treat general URLs, file paths, code snippets, feature names, or other descriptive context as external references. A URL that identifies an owner/repository listed by an environment is still routing context, even when no lookup is needed.
 - When needsExternalLookup is true, set externalReference to the exact identifier or URL to fetch. Otherwise set externalReference to null.`;
 
 const KICKOFF_MESSAGE_SECTION = `## Kickoff Message

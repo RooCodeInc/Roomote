@@ -1086,6 +1086,29 @@
 # an environment is the right answer. The model should use the
 # environment's name and description to determine fit.
 
+- description: "GitHub issue URL identifies the matching environment"
+  vars:
+    context: |
+      **Task Description**:
+      How could we automatically catch a mistake like this? https://github.com/RooCodeInc/Roomote/issues/817
+
+      **Source**: Slack
+      **Channel**: #engineering
+
+      **Available Environments**:
+      - Roomote (repositories: RooCodeInc/Roomote)
+        Main Roomote product and services.
+      - Roomote-Ops (repositories: RooCodeInc/Roomote-Ops)
+        Operational tooling and infrastructure.
+    expectedWorkspaceValue: "Roomote"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:doesNotRequestExternalLookup
+
 - description: "Env deprioritization - task matches environment name directly"
   vars:
     context: |
