@@ -183,6 +183,17 @@ export function useTaskSession(
     ),
   );
 
+  const artifactsQuery = useQuery(
+    trpc.artifacts.forTask.queryOptions(
+      { taskId: sessionQuery.data?.taskId ?? taskId },
+      {
+        enabled:
+          sessionQuery.isSuccess &&
+          sessionQuery.data?.sessionState !== 'not-found',
+      },
+    ),
+  );
+
   const task: SessionTask | null | undefined = sessionQuery.data?.task;
   // The session command returns the run row joined with its user and the
   // task-level pull-request fallback; cast once here so the rest of the task
@@ -191,7 +202,7 @@ export function useTaskSession(
     | SessionTaskRun
     | null
     | undefined;
-  const artifacts = sessionQuery.data?.artifacts ?? EMPTY_ARTIFACTS;
+  const artifacts = artifactsQuery.data ?? EMPTY_ARTIFACTS;
 
   const payloadBlank =
     taskRun && 'blank' in taskRun.payload ? taskRun.payload.blank : undefined;

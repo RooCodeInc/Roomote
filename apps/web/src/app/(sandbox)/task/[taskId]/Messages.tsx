@@ -26,11 +26,12 @@ import {
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
-import { Lightbulb } from '@/components/system';
+import { Lightbulb, Skeleton } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import {
   useSandboxMessages,
+  useSandboxHistoryReady,
   useSandboxTaskPhase,
   type TaskSession,
 } from './hooks';
@@ -102,6 +103,21 @@ function NarrationWorkingReasoningMessage() {
         </div>
       </MessageContent>
     </Message>
+  );
+}
+
+function TranscriptSkeleton() {
+  return (
+    <div aria-label="Loading conversation" className="space-y-6 py-2">
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-20 w-4/5 rounded-2xl" />
+      </div>
+      <div className="ml-auto space-y-2">
+        <Skeleton className="ml-auto h-4 w-16" />
+        <Skeleton className="ml-auto h-16 w-3/4 rounded-2xl" />
+      </div>
+    </div>
   );
 }
 
@@ -181,6 +197,7 @@ const MessagesBase = ({
   messageUiOptions,
 }: MessagesProps) => {
   const { messages } = useSandboxMessages();
+  const historyReady = useSandboxHistoryReady();
   const taskPhase = useSandboxTaskPhase();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const [suppressedMessageIds, setSuppressedMessageIds] = useState<Set<string>>(
@@ -401,6 +418,7 @@ const MessagesBase = ({
           {shouldRenderSessionPrompt && sessionPrompt && (
             <AcpTextMessage msg={sessionPrompt} />
           )}
+          {!historyReady && <TranscriptSkeleton />}
           {renderBlocks.map((block) => renderRenderBlock(block, false))}
           {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
           {shouldShowNarrationWorkingReasoning && (

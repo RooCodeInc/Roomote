@@ -45,6 +45,7 @@ import {
 } from './use-sandbox-live-connection';
 
 const SandboxReconnectContext = createContext<SandboxReconnect>(() => {});
+export const SandboxHistoryReadyContext = createContext(false);
 
 type SandboxTaskPhase = TaskStatus['phase'];
 
@@ -61,7 +62,8 @@ interface SandboxProviderProps {
   >;
   initialTaskStatus?: RunStatus | null;
   initialTaskPhase?: TaskPhase | null;
-  fallback: ReactNode;
+  /** @deprecated Workspace content now renders while transcript history hydrates. */
+  fallback?: ReactNode;
   children: ReactNode;
 }
 
@@ -73,7 +75,6 @@ export function SandboxProvider({
   history,
   initialTaskStatus,
   initialTaskPhase,
-  fallback,
   children,
 }: SandboxProviderProps) {
   const { user } = useUser();
@@ -202,9 +203,11 @@ export function SandboxProvider({
 
   return (
     <SandboxReconnectContext.Provider value={reconnect}>
-      <SandboxStoreContext.Provider value={store}>
-        {historyReady ? children : fallback}
-      </SandboxStoreContext.Provider>
+      <SandboxHistoryReadyContext.Provider value={historyReady}>
+        <SandboxStoreContext.Provider value={store}>
+          {children}
+        </SandboxStoreContext.Provider>
+      </SandboxHistoryReadyContext.Provider>
     </SandboxReconnectContext.Provider>
   );
 }
@@ -246,6 +249,10 @@ export function useSandboxMessages(): {
       protocol: s.protocol,
     })),
   );
+}
+
+export function useSandboxHistoryReady(): boolean {
+  return useContext(SandboxHistoryReadyContext);
 }
 
 export function useSandboxClient(): SandboxClient | null {
