@@ -428,6 +428,7 @@
     --viewport-height: 100dvh;
   }
   --effective-viewport-height: var(--viewport-height);
+  --status-banner-height: 3rem;
 
   /* Computed Heights */
   --below-header: calc(var(--effective-viewport-height) - var(--header-height));
@@ -436,6 +437,12 @@
   --sidebar-width: 280px;
   --sidebar-collapsed-width: 64px;
   color-scheme: light;
+}
+
+html[data-status-banner-visible='true'] {
+  --effective-viewport-height: calc(
+    var(--viewport-height) - var(--status-banner-height)
+  );
 }
 
 .dark {

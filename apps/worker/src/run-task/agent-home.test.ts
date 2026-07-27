@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import {
   generateOpenCodeConfig,
   rematerializeOpenCodeCredentialFiles,
+  seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 
 describe('generateOpenCodeConfig provider support', () => {
@@ -782,5 +783,77 @@ describe('rematerializeOpenCodeCredentialFiles', () => {
 
     expect(failedSteps).toEqual(['rewrite OpenCode auth file']);
     expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('seedRuntimeHomeMiseGlobalConfig', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const tempDir of tempDirs.splice(0)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  function createDir(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  function writeMiseConfig(homeDir: string, content: string): string {
+    const configDir = join(homeDir, '.config', 'mise');
+    mkdirSync(configDir, { recursive: true });
+    const configPath = join(configDir, 'config.toml');
+    writeFileSync(configPath, content, 'utf8');
+    return configPath;
+  }
+
+  it('copies the worker home global config into the runtime home', () => {
+    const sourceHomeDir = createDir('roomote-mise-source-');
+    const homeDir = createDir('roomote-mise-runtime-');
+    writeMiseConfig(sourceHomeDir, '[tools]\nnodejs = "22"\n');
+
+    expect(seedRuntimeHomeMiseGlobalConfig({ homeDir, sourceHomeDir })).toBe(
+      true,
+    );
+    expect(
+      readFileSync(join(homeDir, '.config', 'mise', 'config.toml'), 'utf8'),
+    ).toBe('[tools]\nnodejs = "22"\n');
+  });
+
+  it('leaves an existing runtime home config untouched', () => {
+    const sourceHomeDir = createDir('roomote-mise-source-');
+    const homeDir = createDir('roomote-mise-runtime-');
+    writeMiseConfig(sourceHomeDir, '[tools]\nnodejs = "22"\n');
+    writeMiseConfig(homeDir, '[tools]\nnodejs = "20"\n');
+
+    expect(seedRuntimeHomeMiseGlobalConfig({ homeDir, sourceHomeDir })).toBe(
+      false,
+    );
+    expect(
+      readFileSync(join(homeDir, '.config', 'mise', 'config.toml'), 'utf8'),
+    ).toBe('[tools]\nnodejs = "20"\n');
+  });
+
+  it('does nothing when the worker home has no global config', () => {
+    const sourceHomeDir = createDir('roomote-mise-source-');
+    const homeDir = createDir('roomote-mise-runtime-');
+
+    expect(seedRuntimeHomeMiseGlobalConfig({ homeDir, sourceHomeDir })).toBe(
+      false,
+    );
+    expect(existsSync(join(homeDir, '.config', 'mise', 'config.toml'))).toBe(
+      false,
+    );
+  });
+
+  it('does nothing when the runtime home is the worker home', () => {
+    const homeDir = createDir('roomote-mise-source-');
+    writeMiseConfig(homeDir, '[tools]\nnodejs = "22"\n');
+
+    expect(
+      seedRuntimeHomeMiseGlobalConfig({ homeDir, sourceHomeDir: homeDir }),
+    ).toBe(false);
   });
 });

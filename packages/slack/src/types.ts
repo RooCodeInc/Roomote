@@ -96,6 +96,8 @@ export interface SlackEvent {
   processedAttachmentTexts?: string[];
   processedVideoDescriptions?: string[];
   channel_type?: string;
+  /** Captured once at routing time so Slack interactions do not refetch it. */
+  statuspageWarningText?: string;
 }
 
 export type SlackFunctionExecutionInput =

@@ -281,6 +281,7 @@ import {
 import {
   createCustomAutomationCommand,
   deleteCustomAutomationCommand,
+  getAutomationOnboardingStatusCommand,
   getBackgroundAgentSettingsCommand,
   listAutomationDiscordChannelsCommand,
   listCustomAutomationsCommand,
@@ -371,6 +372,7 @@ import {
   getReleaseNotesCommand,
   getReleaseStatusCommand,
 } from '../commands/product-releases';
+import { getStatuspageIncident } from '@roomote/slack';
 
 const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
@@ -425,6 +427,11 @@ const conflictResolverMaxPrAgeDaysSchema = z.union([
 const automationsRouter = createRouter({
   getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
     getBackgroundAgentSettingsCommand(auth),
+  ),
+
+  // Slack-free subset of getSettings for the dashboard onboarding nudge.
+  onboardingStatus: protectedProcedure.query(({ ctx: { auth } }) =>
+    getAutomationOnboardingStatusCommand(auth),
   ),
 
   listSlackChannels: protectedProcedure.query(({ ctx: { auth } }) =>
@@ -708,6 +715,9 @@ const automationsRouter = createRouter({
 });
 
 export const appRouter = createRouter({
+  statuspage: createRouter({
+    incident: publicProcedure.query(() => getStatuspageIncident()),
+  }),
   analytics: createRouter({
     overview: protectedProcedure
       .input(analyticsOverviewInputSchema)

@@ -594,6 +594,55 @@ export function activateSkillsFolder({
   return true;
 }
 
+const MISE_GLOBAL_CONFIG_RELATIVE_PATH = ['.config', 'mise', 'config.toml'];
+
+/**
+ * Seeds the task runtime HOME with the worker home's global mise config.
+ *
+ * Mise shims (node, npx, ...) resolve tool versions from the global config at
+ * `$HOME/.config/mise/config.toml` when no repo-level mise config applies to
+ * the process cwd. The task runtime HOME starts empty, so without this seed
+ * any process spawned with the runtime HOME outside a version-pinned
+ * repository — including environment-defined stdio MCP servers
+ * (`npx -y ...`) — fails with "mise ERROR No version is set for shim: node".
+ *
+ * An existing runtime-home config (restored from a snapshot, or written by
+ * the agent via `mise use -g`) is left untouched. Best-effort: returns
+ * whether the config was seeded.
+ */
+export function seedRuntimeHomeMiseGlobalConfig({
+  homeDir,
+  sourceHomeDir,
+}: {
+  homeDir: string;
+  sourceHomeDir: string;
+}): boolean {
+  if (!homeDir || !sourceHomeDir || homeDir === sourceHomeDir) {
+    return false;
+  }
+
+  const sourceConfigPath = path.join(
+    sourceHomeDir,
+    ...MISE_GLOBAL_CONFIG_RELATIVE_PATH,
+  );
+  const targetConfigPath = path.join(
+    homeDir,
+    ...MISE_GLOBAL_CONFIG_RELATIVE_PATH,
+  );
+
+  try {
+    if (!fs.existsSync(sourceConfigPath) || fs.existsSync(targetConfigPath)) {
+      return false;
+    }
+
+    fs.mkdirSync(path.dirname(targetConfigPath), { recursive: true });
+    fs.copyFileSync(sourceConfigPath, targetConfigPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface GenerateOpenCodeConfigOptions {
   homeDir: string;
   runtimeEnv: Record<string, string>;

@@ -9,7 +9,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/env', () => ({
-  Env: { WEBHOOK_RETENTION_DAYS: 30 },
+  Env: { WEBHOOK_RETENTION_DAYS: 3 },
 }));
 
 import { webhookCleanupJob } from '../webhook-cleanup';
@@ -32,8 +32,8 @@ describe('webhookCleanupJob', () => {
 
     expect(database).toBe(mockDb);
     const cutoffMs = (options as { olderThan: Date }).olderThan.getTime();
-    expect(cutoffMs).toBeGreaterThanOrEqual(before - 30 * DAY_MS);
-    expect(cutoffMs).toBeLessThanOrEqual(after - 30 * DAY_MS);
+    expect(cutoffMs).toBeGreaterThanOrEqual(before - 3 * DAY_MS);
+    expect(cutoffMs).toBeLessThanOrEqual(after - 3 * DAY_MS);
   });
 
   it('propagates delete failures so BullMQ retries', async () => {

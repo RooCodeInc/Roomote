@@ -2,6 +2,27 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.23.0 (2026-07-27)
+
+This release surfaces active service issues sooner and improves task, automation, self-hosted, and MCP reliability.
+
+### Highlights
+
+- See active Roomote service incidents in the dashboard and task-start messages.
+- Understand unrecoverable provider authentication failures directly in task conversations.
+- Open the dashboard faster without repeated Slack channel lookups delaying other content.
+- Run self-hosted ACME installations and environment-configured MCP servers more reliably.
+
+### Minor changes
+
+- Show active Roomote service incidents in the dashboard and task-start messages so users can understand when a platform issue may affect their work.
+
+### Patch changes
+
+- Keep self-hosted ACME installations starting reliably and let configured MCP servers use operator-provided environment variables and Node tooling in task sandboxes.
+- Load the dashboard without waiting for repeated Slack channel lookups, while keeping automation configuration more resilient to slow Slack responses.
+- Make task failures easier to understand by showing unrecoverable provider authentication errors clearly, and keep automation channels quiet until work reaches an outcome.
+
 ## 0.22.0 (2026-07-27)
 
 This release gives self-hosted operators more flexible preview hosting and expands managed inference subscription support.

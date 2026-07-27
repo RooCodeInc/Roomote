@@ -13,6 +13,7 @@ import {
   workItems,
 } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { resolveSuggestionLaunchWorkspace } from './launch-resolution';
@@ -142,6 +143,9 @@ export async function implementTaskSuggestionCommand(
           error:
             'Canceled: work-item launch finalize lost the claim fencing guard',
         });
+        if (canceled) {
+          void captureTaskSettled(launchResult.id, 'canceled');
+        }
         cancelNote = canceled
           ? 'orphaned run canceled'
           : 'orphaned run cancel did not apply (already started or terminal)';

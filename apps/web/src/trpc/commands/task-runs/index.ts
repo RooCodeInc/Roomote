@@ -18,6 +18,7 @@ import {
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 import {
   and,
   db,
@@ -467,17 +468,33 @@ export async function cancelTaskRunCommand(
     if (!isExitedRunStatus(job.status)) {
       const endedAt = new Date();
 
-      await db.transaction(async (tx) => {
-        await tx
+      const canceledRun = await db.transaction(async (tx) => {
+        const [canceled] = await tx
           .update(taskRuns)
           .set({ status: RunStatus.Canceled, canceledAt: endedAt })
-          .where(eq(taskRuns.id, job.id));
+          .where(
+            and(
+              eq(taskRuns.id, job.id),
+              inArray(taskRuns.status, [...activeRunStatuses]),
+            ),
+          )
+          .returning({ id: taskRuns.id });
+
+        if (!canceled) {
+          return null;
+        }
 
         await markTaskStartParallelCountEndedAt(tx, {
           runId: job.id,
           endedAt,
         });
+
+        return canceled;
       });
+
+      if (canceledRun) {
+        void captureTaskSettled(canceledRun.id, 'canceled');
+      }
     }
 
     return { success: true };

@@ -113,6 +113,8 @@ const serverSchema = {
     .max(128)
     .regex(/^[A-Za-z0-9._:-]+$/)
     .optional(),
+  // Explicitly enables public Statuspage incident checks for Roomote Cloud.
+  STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID: z.string().min(1).optional(),
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
@@ -276,7 +278,7 @@ const serverSchema = {
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
   // scheduled job (apps/bullmq) deletes them.
-  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(3),
   API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -412,6 +414,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'RELEASE_PRODUCT_VERSION',
   'R_PING_BASE_URL',
   'R_INSTANCE_ID',
+  'STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

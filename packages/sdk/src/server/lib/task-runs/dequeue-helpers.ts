@@ -27,6 +27,7 @@ import {
   eq,
   sql,
 } from '@roomote/db/server';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 import { decryptSecrets } from '@roomote/db/encryption';
 import { createTaskRunWorkerGitHubToken } from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
@@ -376,6 +377,8 @@ export async function notifyCanceledTaskRunOnSettle(
         });
     const taskTitle = (taskRun as TaskRun & { task?: { title: string | null } })
       .task?.title;
+
+    void captureTaskSettled(taskRun.id, RunStatus.Canceled);
 
     await notifySourceRunOnSettle(
       {

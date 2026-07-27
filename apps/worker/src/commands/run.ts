@@ -49,6 +49,7 @@ export async function run({
       }),
     runFn: async ({
       jobContext,
+      userEnvVars,
       workspace,
       workspacePath,
       usesSharedWorkspaceRoot,
@@ -65,6 +66,7 @@ export async function run({
       return runTask({
         ...jobContext,
         envVars: jobContext.envVars,
+        userEnvVars,
         workspacePath,
         prompt: jobContext.prompt,
         harnessInstructions: jobContext.harnessInstructions,

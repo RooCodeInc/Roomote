@@ -84,13 +84,17 @@ describe('AuthenticatedLayoutClient', () => {
   });
 
   it('renders authenticated pages when setup is complete', () => {
-    render(
+    const { container } = render(
       <AuthenticatedLayoutClient>
         <div>Home content</div>
       </AuthenticatedLayoutClient>,
     );
 
     expect(screen.getByText('Home content')).toBeVisible();
+    expect(
+      container.querySelector('.h-effective-viewport'),
+    ).toBeInTheDocument();
+    expect(container.querySelector('.h-viewport')).not.toBeInTheDocument();
     expect(replaceMock).not.toHaveBeenCalled();
   });
 

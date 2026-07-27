@@ -70,7 +70,7 @@ import {
 import type { MetadataRecord } from '@roomote/feature-flags/server';
 
 import { type Redis, getRedis } from '@roomote/redis';
-import { captureEvent } from '@roomote/telemetry/server';
+import { captureEvent, captureTaskSettled } from '@roomote/telemetry/server';
 import { generateTaskRunTitle, hasDeterministicTaskRunTitle } from '../utils';
 import { DEFAULT_STANDARD_TASK_MODEL_PROVIDER } from '../task-runtime-defaults';
 import {
@@ -223,21 +223,36 @@ async function cancelTaskRunBeforeQueue(
 ): Promise<void> {
   const endedAt = new Date();
 
-  await db.transaction(async (tx) => {
-    await tx
+  const canceled = await db.transaction(async (tx) => {
+    const [canceledRun] = await tx
       .update(taskRuns)
       .set({
         status: RunStatus.Canceled,
         canceledAt: endedAt,
         error: message,
       })
-      .where(eq(taskRuns.id, taskRun.id));
+      .where(
+        and(
+          eq(taskRuns.id, taskRun.id),
+          eq(taskRuns.status, RunStatus.Pending),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (!canceledRun) {
+      return false;
+    }
 
     // Derive the task state from all its runs. Enqueue-failure cancels bypass
     // finishRun entirely, so this transaction must either commit both state
     // changes or surface the cancellation failure to the producer.
     await syncTaskStateFromRuns(tx, taskRun.taskId);
+    return true;
   });
+
+  if (canceled) {
+    void captureTaskSettled(taskRun.id, RunStatus.Canceled);
+  }
 }
 
 async function resolveMatchedHumanActor(
@@ -1154,7 +1169,7 @@ async function pushRunOntoQueue(params: {
     });
 
     if (evictedEntries.length > 0) {
-      await db.transaction(async (tx) => {
+      const canceledRuns = await db.transaction(async (tx) => {
         const endedAt = new Date();
         const evictedIds = evictedEntries.map((entry) => entry.id);
         const canceledRuns = await tx
@@ -1181,7 +1196,12 @@ async function pushRunOntoQueue(params: {
 
           console.log(`[TaskRunQueue] evicted ${canceledRun.id} (${scope})`);
         }
+        return canceledRuns;
       });
+
+      for (const canceledRun of canceledRuns) {
+        void captureTaskSettled(canceledRun.id, RunStatus.Canceled);
+      }
     }
   } catch (error) {
     let originalError = error;

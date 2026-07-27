@@ -178,6 +178,8 @@ describe('slackMentionCallbacks', () => {
       otherRunningTasksCount: 2,
       workspaceDisplayName: 'App',
       workspaceOnly: false,
+      warningText:
+        '> :warning: Heads up: my humans are working on an issue that may affect me.',
     });
     mockSlackInstallationsFindFirst.mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -237,6 +239,8 @@ describe('slackMentionCallbacks', () => {
         runId: 123,
         initiatingSlackUserId: 'U123',
         otherRunningTasksCount: 2,
+        warningText:
+          '> :warning: Heads up: my humans are working on an issue that may affect me.',
         taskUrl: expect.stringContaining(
           '/task/task_row_123?utm_source=slack&utm_medium=link&utm_campaign=slack.app.mention',
         ),

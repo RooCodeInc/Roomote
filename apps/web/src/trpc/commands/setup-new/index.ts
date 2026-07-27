@@ -9,6 +9,7 @@ import { DiscordCommunicationProvider } from '@roomote/communication/discord-pro
 import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { SlackNotifier } from '@roomote/slack';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 import {
   db,
   deploymentSettings,
@@ -1196,6 +1197,9 @@ export async function launchQueuedSetupTasksIfReady({
             error:
               'Canceled: setup-new queued task launch finalize lost the claim fencing guard',
           });
+          if (canceled) {
+            void captureTaskSettled(launchResult.id, 'canceled');
+          }
           cancelNote = canceled
             ? 'orphaned run canceled'
             : 'orphaned run cancel did not apply (already started or terminal)';
@@ -2917,24 +2921,31 @@ export async function cancelSetupNewOnboardingTaskCommand(
   if (activeRunIds.length > 0) {
     const endedAt = new Date();
 
-    await db.transaction(async (tx) => {
-      await tx
+    const canceledRuns = await db.transaction(async (tx) => {
+      const canceled = await tx
         .update(taskRuns)
         .set({
           status: RunStatus.Canceled,
           canceledAt: endedAt,
         })
-        .where(inArray(taskRuns.id, activeRunIds));
+        .where(inArray(taskRuns.id, activeRunIds))
+        .returning({ id: taskRuns.id });
 
       await Promise.all(
-        activeRunIds.map((runId) =>
+        canceled.map((run) =>
           markTaskStartParallelCountEndedAt(tx, {
-            runId,
+            runId: run.id,
             endedAt,
           }),
         ),
       );
+
+      return canceled;
     });
+
+    for (const run of canceledRuns) {
+      void captureTaskSettled(run.id, 'canceled');
+    }
   }
 
   return { success: true as const };

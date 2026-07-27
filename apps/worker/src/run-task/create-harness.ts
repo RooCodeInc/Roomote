@@ -32,6 +32,11 @@ interface CreateHarnessOptions {
   integrations: IntegrationMcpOptions;
   mcpTaskEnv: Record<string, string>;
   environmentMcpServers?: EnvironmentMcpServers;
+  /**
+   * Operator-defined deployment env vars. Always eligible for ${...}
+   * substitution in custom MCP config, regardless of variable name.
+   */
+  operatorEnvVars?: Record<string, string>;
   taskRun: DequeuedTaskRun['taskRun'];
   developerInstructionsContent?: string;
   callbacks: RunTaskCallbacks;
@@ -61,6 +66,7 @@ export async function createHarness({
   integrations,
   mcpTaskEnv,
   environmentMcpServers,
+  operatorEnvVars,
   taskRun,
   developerInstructionsContent,
   callbacks,
@@ -91,6 +97,7 @@ export async function createHarness({
       mcpTaskEnv,
       integrations,
       environmentMcpServers,
+      operatorEnvVars,
     );
     const modelOverride = taskRun.payload?.harnessModelOverrides
       ? getHarnessModelOverride(

@@ -16,7 +16,16 @@ import { convertSlackLinksToMarkdown } from './markdown-converter';
 import { logSlackError, slackDebug } from './logging';
 import { SlackChannelDiscovery } from './slack-channel-discovery';
 import { buildSlackApiUrl } from './slack-api-base-url';
-import { fetchSlackGetJson, getSlackRetryAfterMs } from './slack-api-fetch';
+import {
+  fetchSlackGetJson,
+  getSlackRetryAfterMs,
+  slackFetch,
+  SLACK_DOWNLOAD_TIMEOUT_MS,
+} from './slack-api-fetch';
+import type {
+  SlackChannelInfo,
+  SlackChannelInfoCache,
+} from './slack-channel-info-cache';
 import { isSlackImageFile } from './thread-image-utils';
 import { createSlackWebClient } from './web-client';
 import {
@@ -153,8 +162,15 @@ function normalizeOutboundMessage<T extends object & SlackMessage>(
   };
 }
 
+type SlackChannelInfoContext = {
+  /** Log prefix, kept per public method so log lines stay recognizable. */
+  name: string;
+  transportFailureLabel: string;
+};
+
 export class SlackNotifier {
   private readonly token: string;
+  private readonly channelInfoCache: SlackChannelInfoCache | null;
   private client?: WebClient;
   private channelDiscovery?: SlackChannelDiscovery;
   private ownBotIdentityPromise?: Promise<{
@@ -162,8 +178,12 @@ export class SlackNotifier {
     botId?: string;
   } | null>;
 
-  constructor(token: string) {
+  constructor(
+    token: string,
+    options: { channelInfoCache?: SlackChannelInfoCache } = {},
+  ) {
     this.token = token;
+    this.channelInfoCache = options.channelInfoCache ?? null;
   }
 
   private getClient(): WebClient {
@@ -189,7 +209,7 @@ export class SlackNotifier {
     if (!this.ownBotIdentityPromise) {
       this.ownBotIdentityPromise = (async () => {
         try {
-          const response = await fetch(buildSlackApiUrl('auth.test'), {
+          const response = await slackFetch(buildSlackApiUrl('auth.test'), {
             method: 'POST',
             headers: {
               Authorization: `Bearer ${this.token}`,
@@ -357,6 +377,94 @@ export class SlackNotifier {
   }
 
   /**
+   * Fetches the `conversations.info` projection for a channel once, going
+   * through the caller-supplied cache when there is one.
+   */
+  private async getChannelInfo(
+    channelId: string,
+    context: SlackChannelInfoContext,
+  ): Promise<SlackChannelInfo | null> {
+    const load = () => this.loadChannelInfo(channelId, context);
+
+    return this.channelInfoCache
+      ? this.channelInfoCache.resolve(channelId, load)
+      : load();
+  }
+
+  private async loadChannelInfo(
+    channelId: string,
+    context: SlackChannelInfoContext,
+  ): Promise<SlackChannelInfo | null> {
+    try {
+      const params = new URLSearchParams({ channel: channelId });
+      const response = await slackFetch(
+        `${buildSlackApiUrl('conversations.info')}?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        },
+      );
+
+      if (!response.ok) {
+        console.error(
+          `[${context.name}] Slack conversations.info failed: ${response.status} ${response.statusText}`,
+        );
+        return null;
+      }
+
+      const result = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        channel?: {
+          name?: string | null;
+          is_member?: boolean;
+          is_private?: boolean;
+        };
+      };
+
+      if (!result.ok) {
+        if (
+          result.error === 'channel_not_found' ||
+          result.error === 'not_in_channel'
+        ) {
+          return {
+            name: null,
+            isMember: false,
+            isPrivate: null,
+            notFound: true,
+          };
+        }
+
+        console.error(
+          `[${context.name}] Slack conversations.info error: ${result.error ?? 'unknown_error'}`,
+        );
+        return null;
+      }
+
+      return {
+        name: result.channel?.name?.trim() || null,
+        isMember:
+          typeof result.channel?.is_member === 'boolean'
+            ? result.channel.is_member
+            : null,
+        isPrivate:
+          typeof result.channel?.is_private === 'boolean'
+            ? result.channel.is_private
+            : null,
+        notFound: false,
+      };
+    } catch (error) {
+      console.error(
+        `[${context.name}] ${context.transportFailureLabel}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Returns whether the Slack app is a member of the given channel.
    *
    * - `true` when the app is already in the channel
@@ -370,57 +478,16 @@ export class SlackNotifier {
       return null;
     }
 
-    try {
-      const params = new URLSearchParams({ channel: trimmed });
-      const response = await fetch(
-        `${buildSlackApiUrl('conversations.info')}?${params.toString()}`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
-      );
+    const info = await this.getChannelInfo(trimmed, {
+      name: 'isAppInChannel',
+      transportFailureLabel: 'Failed to inspect channel membership',
+    });
 
-      if (!response.ok) {
-        console.error(
-          `[isAppInChannel] Slack conversations.info failed: ${response.status} ${response.statusText}`,
-        );
-        return null;
-      }
-
-      const result = (await response.json()) as {
-        ok: boolean;
-        error?: string;
-        channel?: { is_member?: boolean };
-      };
-
-      if (!result.ok) {
-        if (
-          result.error === 'channel_not_found' ||
-          result.error === 'not_in_channel'
-        ) {
-          return false;
-        }
-
-        console.error(
-          `[isAppInChannel] Slack conversations.info error: ${result.error ?? 'unknown_error'}`,
-        );
-        return null;
-      }
-
-      if (typeof result.channel?.is_member === 'boolean') {
-        return result.channel.is_member;
-      }
-
-      return null;
-    } catch (error) {
-      console.error(
-        `[isAppInChannel] Failed to inspect channel membership: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    if (!info) {
       return null;
     }
+
+    return info.notFound ? false : info.isMember;
   }
 
   /**
@@ -437,50 +504,16 @@ export class SlackNotifier {
       return null;
     }
 
-    try {
-      const params = new URLSearchParams({ channel: trimmed });
-      const response = await fetch(
-        `${buildSlackApiUrl('conversations.info')}?${params.toString()}`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
-      );
+    const info = await this.getChannelInfo(trimmed, {
+      name: 'isPublicChannel',
+      transportFailureLabel: 'Failed to inspect channel visibility',
+    });
 
-      if (!response.ok) {
-        console.error(
-          `[isPublicChannel] Slack conversations.info failed: ${response.status} ${response.statusText}`,
-        );
-        return null;
-      }
-
-      const result = (await response.json()) as {
-        ok: boolean;
-        error?: string;
-        channel?: { is_private?: boolean };
-      };
-
-      if (!result.ok) {
-        console.error(
-          `[isPublicChannel] Slack conversations.info error: ${result.error ?? 'unknown_error'}`,
-        );
-        return null;
-      }
-
-      if (typeof result.channel?.is_private === 'boolean') {
-        return !result.channel.is_private;
-      }
-
-      return null;
-    } catch (error) {
-      console.error(
-        `[isPublicChannel] Failed to inspect channel visibility: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    if (!info || info.isPrivate === null) {
       return null;
     }
+
+    return !info.isPrivate;
   }
 
   /**
@@ -493,46 +526,12 @@ export class SlackNotifier {
       return null;
     }
 
-    try {
-      const params = new URLSearchParams({ channel: trimmed });
-      const response = await fetch(
-        `${buildSlackApiUrl('conversations.info')}?${params.toString()}`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-        },
-      );
+    const info = await this.getChannelInfo(trimmed, {
+      name: 'getChannelName',
+      transportFailureLabel: 'Failed to inspect channel name',
+    });
 
-      if (!response.ok) {
-        console.error(
-          `[getChannelName] Slack conversations.info failed: ${response.status} ${response.statusText}`,
-        );
-        return null;
-      }
-
-      const result = (await response.json()) as {
-        ok: boolean;
-        error?: string;
-        channel?: { name?: string | null };
-      };
-
-      if (!result.ok) {
-        console.error(
-          `[getChannelName] Slack conversations.info error: ${result.error ?? 'unknown_error'}`,
-        );
-        return null;
-      }
-
-      return result.channel?.name?.trim() || null;
-    } catch (error) {
-      console.error(
-        `[getChannelName] Failed to inspect channel name: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return null;
-    }
+    return info?.name ?? null;
   }
 
   public async getMessagePermalink(params: {
@@ -551,7 +550,7 @@ export class SlackNotifier {
         channel,
         message_ts: messageTs,
       });
-      const response = await fetch(
+      const response = await slackFetch(
         `${buildSlackApiUrl('chat.getPermalink')}?${searchParams.toString()}`,
         {
           method: 'GET',
@@ -628,7 +627,7 @@ export class SlackNotifier {
           params.set('cursor', cursor);
         }
 
-        const response = await fetch(
+        const response = await slackFetch(
           `${buildSlackApiUrl('conversations.members')}?${params.toString()}`,
           {
             method: 'GET',
@@ -688,7 +687,7 @@ export class SlackNotifier {
    */
   public async getWorkspaceTimezone(): Promise<string | null> {
     try {
-      const response = await fetch(buildSlackApiUrl('team.info'), {
+      const response = await slackFetch(buildSlackApiUrl('team.info'), {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${this.token}`,
@@ -778,14 +777,17 @@ export class SlackNotifier {
    */
   public async openConversation(userId: string): Promise<string | null> {
     try {
-      const response = await fetch(buildSlackApiUrl('conversations.open'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.token}`,
+      const response = await slackFetch(
+        buildSlackApiUrl('conversations.open'),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.token}`,
+          },
+          body: JSON.stringify({ users: userId }),
         },
-        body: JSON.stringify({ users: userId }),
-      });
+      );
 
       if (!response.ok) {
         console.error(
@@ -824,7 +826,7 @@ export class SlackNotifier {
     const normalizedMessage = normalizeOutboundMessage(message);
 
     try {
-      const response = await fetch(buildSlackApiUrl(endpoint), {
+      const response = await slackFetch(buildSlackApiUrl(endpoint), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -906,7 +908,7 @@ export class SlackNotifier {
     try {
       const message = normalizeOutboundMessage({ channel, ts, ...rest });
 
-      const response = await fetch(buildSlackApiUrl('chat.update'), {
+      const response = await slackFetch(buildSlackApiUrl('chat.update'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -968,7 +970,7 @@ export class SlackNotifier {
       };
 
       while (true) {
-        const response = await fetch(
+        const response = await slackFetch(
           `${buildSlackApiUrl('conversations.replies')}?${query.toString()}`,
           {
             method: 'GET',
@@ -1055,7 +1057,7 @@ export class SlackNotifier {
     threadTs: string;
   }): Promise<unknown[] | null> {
     try {
-      const response = await fetch(
+      const response = await slackFetch(
         `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true`,
         {
           method: 'GET',
@@ -1183,7 +1185,7 @@ export class SlackNotifier {
         };
       };
 
-      const historyResponse = await fetch(
+      const historyResponse = await slackFetch(
         `${buildSlackApiUrl('conversations.history')}?channel=${encodeURIComponent(channel)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true&limit=1&include_all_metadata=true`,
         {
           method: 'GET',
@@ -1221,7 +1223,7 @@ export class SlackNotifier {
         return null;
       }
 
-      const repliesResponse = await fetch(
+      const repliesResponse = await slackFetch(
         `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true&include_all_metadata=true`,
         {
           method: 'GET',
@@ -1351,7 +1353,7 @@ export class SlackNotifier {
         return parseMessage(result.messages);
       };
 
-      const historyResponse = await fetch(
+      const historyResponse = await slackFetch(
         `${buildSlackApiUrl('conversations.history')}?channel=${encodeURIComponent(channel)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true&limit=1`,
         {
           method: 'GET',
@@ -1396,7 +1398,7 @@ export class SlackNotifier {
         return messageFromHistory;
       }
 
-      const repliesResponse = await fetch(
+      const repliesResponse = await slackFetch(
         `${buildSlackApiUrl('conversations.replies')}?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(messageTs)}&oldest=${encodeURIComponent(messageTs)}&latest=${encodeURIComponent(messageTs)}&inclusive=true`,
         {
           method: 'GET',
@@ -1517,7 +1519,7 @@ export class SlackNotifier {
 
   public async deleteMessage(payload: { channel: string; ts: string }) {
     try {
-      const response = await fetch(buildSlackApiUrl('chat.delete'), {
+      const response = await slackFetch(buildSlackApiUrl('chat.delete'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1698,7 +1700,7 @@ export class SlackNotifier {
     name: string;
   }): Promise<boolean> {
     try {
-      const response = await fetch(buildSlackApiUrl('reactions.add'), {
+      const response = await slackFetch(buildSlackApiUrl('reactions.add'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1757,7 +1759,7 @@ export class SlackNotifier {
     name: string;
   }): Promise<boolean> {
     try {
-      const response = await fetch(buildSlackApiUrl('reactions.remove'), {
+      const response = await slackFetch(buildSlackApiUrl('reactions.remove'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1830,11 +1832,17 @@ export class SlackNotifier {
 
   public async downloadSlackFile(file: SlackFile): Promise<Buffer | null> {
     try {
-      const response = await fetch(file.url_private_download, {
-        headers: {
-          Authorization: `Bearer ${this.token}`,
+      const response = await slackFetch(
+        file.url_private_download,
+        {
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+          },
         },
-      });
+        // File bodies stream, so they get the download ceiling rather than the
+        // short API-call ceiling.
+        { timeoutMs: SLACK_DOWNLOAD_TIMEOUT_MS },
+      );
 
       if (!response.ok) {
         console.error(
@@ -1872,7 +1880,7 @@ export class SlackNotifier {
     await Promise.all(
       uniqueUserIds.map(async (userId) => {
         try {
-          const response = await fetch(
+          const response = await slackFetch(
             `${buildSlackApiUrl('users.info')}?user=${encodeURIComponent(userId)}`,
             {
               method: 'GET',
@@ -1964,7 +1972,7 @@ export class SlackNotifier {
         params.set('inclusive', 'true');
       }
 
-      const response = await fetch(
+      const response = await slackFetch(
         `${buildSlackApiUrl('conversations.replies')}?${params.toString()}`,
         {
           method: 'GET',
@@ -2044,7 +2052,7 @@ export class SlackNotifier {
           params.set('cursor', cursor);
         }
 
-        const response = await fetch(
+        const response = await slackFetch(
           `${buildSlackApiUrl('conversations.history')}?${params.toString()}`,
           {
             method: 'GET',

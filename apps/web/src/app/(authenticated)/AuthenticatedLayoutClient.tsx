@@ -92,7 +92,7 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
 
   return (
     <CommandPaletteProvider>
-      <div className="flex h-viewport min-h-0 flex-col bg-card">
+      <div className="flex h-effective-viewport min-h-0 flex-col bg-card">
         <div className="mx-2 rounded-b-2xl overflow-clip">
           <ManagedAccessBanner />
         </div>

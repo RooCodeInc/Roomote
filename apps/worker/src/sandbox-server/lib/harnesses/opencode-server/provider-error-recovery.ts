@@ -148,6 +148,7 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
       if (
         lower.includes('api key is missing') ||
         lower.includes('invalid api key') ||
+        lower.includes('api key is invalid') ||
         lower.includes('authentication failed') ||
         lower.includes('model is not available') ||
         lower.includes('model not found') ||

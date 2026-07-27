@@ -13,6 +13,7 @@ import { featureFlagsRouter } from './feature-flags';
 import { mcpConnectionsRouter } from './mcp-connections';
 import { userApiKeysRouter } from './user-api-keys';
 import { llmUsageRouter } from './llm-usage';
+import { statuspageRouter } from './statuspage';
 
 export const appRouter = router({
   auth: authRouter,
@@ -26,6 +27,7 @@ export const appRouter = router({
   mcpConnections: mcpConnectionsRouter,
   userApiKeys: userApiKeysRouter,
   llmUsage: llmUsageRouter,
+  statuspage: statuspageRouter,
 });
 
 export type AppRouter = typeof appRouter;

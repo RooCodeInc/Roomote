@@ -66,6 +66,19 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     ).toBeNull();
   });
 
+  it('classifies API key is invalid wording as terminal without metadata', () => {
+    expect(
+      isOpenCodeTerminalProviderError({
+        message: 'The provider returned an error: API key is invalid.',
+      }),
+    ).toBe(true);
+    expect(
+      getOpenCodeProviderErrorRecovery({
+        message: 'The provider returned an error: API key is invalid.',
+      }),
+    ).toBeNull();
+  });
+
   it.each([
     'Your account org-redacted is suspended due to insufficient balance, please recharge your account or check your plan and billing details',
     JSON.stringify({

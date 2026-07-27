@@ -42,6 +42,10 @@ vi.mock('./CloudAnalyticsProvider', () => ({
   },
 }));
 
+vi.mock('./StatusBanner', () => ({
+  StatusBanner: () => null,
+}));
+
 import { RootProviders } from './RootProviders';
 
 describe('RootProviders', () => {

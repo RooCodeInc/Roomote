@@ -69,6 +69,7 @@ import { TaskCancellationController } from './task-cancellation-controller';
 import {
   activateSkillsFolder,
   resolvePackagedSkillsFolder,
+  seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
 
@@ -572,6 +573,7 @@ const CODE_MODE_FLAG = FeatureFlag.CodeMode;
 export const runTask = async ({
   taskRun,
   envVars,
+  userEnvVars,
   workspacePath,
   usesSharedWorkspaceRoot,
   repoPaths,
@@ -766,6 +768,17 @@ export const runTask = async ({
 
     if (workerHomeDir) {
       runtimeEnv.HOME = resolveTaskRuntimeHomeDir(workspacePath);
+
+      if (
+        seedRuntimeHomeMiseGlobalConfig({
+          homeDir: runtimeEnv.HOME,
+          sourceHomeDir: workerHomeDir,
+        })
+      ) {
+        logger.info(
+          `[runTask] Seeded runtime home mise global config from ${workerHomeDir}`,
+        );
+      }
     }
 
     delete runtimeEnv.ROOMOTE_TASK_TERMINAL;
@@ -1143,6 +1156,15 @@ export const runTask = async ({
       integrations,
       mcpTaskEnv,
       environmentMcpServers: environmentConfig?.mcpServers,
+      // The pre-injection snapshot, NOT deploymentEnvVars: by harness start,
+      // `envVars` has been mutated with runtime-internal entries (auth bypass
+      // values, BASH_ENV, ...) that must not ride the operator overlay past
+      // the reserved-name guard.
+      operatorEnvVars: Object.fromEntries(
+        Object.entries(userEnvVars ?? {}).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
       taskRun,
       developerInstructionsContent: harnessDeveloperInstructions,
       callbacks,
