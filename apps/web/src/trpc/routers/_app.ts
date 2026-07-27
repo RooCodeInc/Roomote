@@ -2126,6 +2126,7 @@ export const appRouter = createRouter({
         z
           .object({
             anonymousAnalyticsEnabled: z.boolean().optional(),
+            productUpdatesEnabled: z.boolean().optional(),
           })
           .optional(),
       )
@@ -2328,9 +2329,17 @@ export const appRouter = createRouter({
       getOnboardingStatusCommand(auth),
     ),
 
-    complete: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      completeOnboardingCommand(auth),
-    ),
+    complete: protectedProcedure
+      .input(
+        z
+          .object({
+            productUpdatesEnabled: z.boolean().optional(),
+          })
+          .optional(),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        completeOnboardingCommand(auth, input),
+      ),
   }),
 
   taskSuggestions: createRouter({

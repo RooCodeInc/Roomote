@@ -13,6 +13,8 @@ import {
   Alert,
   AlertCircle,
   AlertDescription,
+  Card,
+  CardContent,
   Loader2,
   ArrowRight,
   Checkbox,
@@ -64,6 +66,8 @@ export function StepInvoke({
   ];
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);
+  const [productUpdatesEnabled, setProductUpdatesEnabled] = useState(true);
+  const isCloudAdmin = user?.cloudEnabled && user.isAdmin;
   const methods = buildInvokeMethods({
     communicationProviders: effectiveCommunicationProviders,
     sourceControlProviders,
@@ -209,36 +213,60 @@ export function StepInvoke({
         ))}
       </div>
 
-      {!user?.cloudEnabled && (
-        <div className="mt-4 flex items-start gap-2 border-t border-foreground/20 pt-4">
-          <Checkbox
-            aria-label="Toggle anonymous analytics"
-            className="mt-0.5"
-            checked={anonymousAnalyticsEnabled}
-            onCheckedChange={(checked) =>
-              setAnonymousAnalyticsEnabled(checked === true)
-            }
-          />
-          <div className="space-y-0.5">
-            <p className="text-sm font-semibold">Anonymous analytics</p>
-            <p className="text-sm text-muted-foreground">
-              Share usage stats with the {PRODUCT_NAME} team for product
-              improvements.
-              <br />
-              No PII, code or conversation content is ever shared. Accrues good
-              karma.
-            </p>
-          </div>
-        </div>
+      {(!user?.cloudEnabled || !isCloudAdmin) && (
+        <Card className="mt-4">
+          <CardContent className="space-y-4">
+            <p className="text-sm font-semibold">Optional preferences</p>
+            {!user?.cloudEnabled && (
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  aria-label="Toggle anonymous analytics"
+                  className="mt-0.5"
+                  checked={anonymousAnalyticsEnabled}
+                  onCheckedChange={(checked) =>
+                    setAnonymousAnalyticsEnabled(checked === true)
+                  }
+                />
+                <div className="space-y-0.5">
+                  <p className="text-sm font-semibold">Anonymous analytics</p>
+                  <p className="text-sm text-muted-foreground">
+                    Share usage stats with the {PRODUCT_NAME} team for product
+                    improvements. No PII, code, or conversation content is ever
+                    shared.
+                  </p>
+                </div>
+              </div>
+            )}
+            {!isCloudAdmin && (
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  aria-label="Toggle product updates"
+                  className="mt-0.5"
+                  checked={productUpdatesEnabled}
+                  onCheckedChange={(checked) =>
+                    setProductUpdatesEnabled(checked === true)
+                  }
+                />
+                <div className="space-y-0.5">
+                  <p className="text-sm font-semibold">Product updates</p>
+                  <p className="text-sm text-muted-foreground">
+                    Get occasional Roomote product news and updates.
+                  </p>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       <div className="mt-3 flex">
         <Button
           onClick={() => {
             onTryItOut?.();
-            completeSetup.mutate(
-              user?.cloudEnabled ? {} : { anonymousAnalyticsEnabled },
-            );
+            completeSetup.mutate({
+              ...(user?.cloudEnabled ? {} : { anonymousAnalyticsEnabled }),
+              ...(!isCloudAdmin ? { productUpdatesEnabled } : {}),
+            });
           }}
           disabled={completeSetup.isPending}
         >

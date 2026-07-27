@@ -24,6 +24,7 @@ import {
 } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { subscribeToProductUpdates } from '@/lib/server/product-updates';
 import type { OnboardingLinkableProvider } from '@/app/(onboarding)/onboarding/types';
 import {
   getLinkedAdoAccountCommand,
@@ -257,13 +258,23 @@ export async function getOnboardingStatusCommand(auth: UserAuthSuccess) {
   };
 }
 
-export async function completeOnboardingCommand(auth: UserAuthSuccess) {
+export async function completeOnboardingCommand(
+  auth: UserAuthSuccess,
+  input?: { productUpdatesEnabled?: boolean },
+) {
   const { userId } = auth;
 
   await db
     .update(users)
     .set({ onboardingCompletedAt: new Date() })
     .where(eq(users.id, userId));
+
+  if (
+    (input?.productUpdatesEnabled ?? true) &&
+    !(auth.cloudEnabled && auth.isAdmin)
+  ) {
+    void subscribeToProductUpdates(auth.primaryEmail, 'onboarding');
+  }
 
   return { success: true as const };
 }
