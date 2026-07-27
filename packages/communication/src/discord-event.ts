@@ -96,6 +96,8 @@ export const discordInteractionSchema = z
       })
       .passthrough()
       .optional(),
+    // Component interactions include the message whose button was pressed.
+    message: discordMessageSchema.optional(),
     data: z
       .object({
         // Slash commands carry the command's snowflake here (a string);

@@ -39,6 +39,12 @@ export async function handleDiscordPrReviewActionCallback(input: {
       },
       text,
     });
+  const replyToOffer = (resolution: string) =>
+    reply(
+      input.interaction.message?.content
+        ? `${input.interaction.message.content}\n\n${resolution}`
+        : resolution,
+    );
   const user = input.interaction.member?.user ?? input.interaction.user;
   const mappedUserId = await findDiscordMappedUserId(user?.id);
 
@@ -53,12 +59,12 @@ export async function handleDiscordPrReviewActionCallback(input: {
   const pending = await claimPendingPrReviewAction(input.nonce);
 
   if (!pending) {
-    await reply('This offer was already handled or has expired.');
+    await replyToOffer('This offer was already handled or has expired.');
     return;
   }
 
   if (input.choice === 'dismiss') {
-    await reply('Dismissed.');
+    await replyToOffer('Dismissed.');
     return;
   }
 
@@ -82,7 +88,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
     });
 
     if (dispatched.outcome === 'unavailable') {
-      await reply(
+      await replyToOffer(
         input.choice === 'auto'
           ? "I'll resolve future feedback on this PR, but this task can no longer be resumed for the current feedback. Reply here to start fresh."
           : 'This task can no longer be resumed. Reply here to start fresh.',
@@ -90,7 +96,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
       return;
     }
 
-    await reply(
+    await replyToOffer(
       input.choice === 'auto'
         ? "I'll resolve these and any future feedback on this PR automatically. Starting on the current feedback now."
         : 'On it — resolving the review feedback.',
@@ -101,7 +107,9 @@ export async function handleDiscordPrReviewActionCallback(input: {
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    await reply('Failed to start the follow-up. Reply here to ask again.');
+    await replyToOffer(
+      'Failed to start the follow-up. Reply here to ask again.',
+    );
   }
 }
 
