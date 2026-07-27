@@ -3,7 +3,7 @@ import {
   addReactionToSlackMessage,
   clearSlackReplyQuote,
   getChatMessageContext,
-  postToSlackChannel,
+  postToChannel,
   replyToSlackThread,
   trackSlackReplyQuote,
 } from '../slack-api-client.js';
@@ -175,7 +175,7 @@ describe('replyToSlackThread', () => {
   });
 });
 
-describe('postToSlackChannel', () => {
+describe('postToChannel', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -187,7 +187,7 @@ describe('postToSlackChannel', () => {
       json: async () => ({ messageTs: '777.888', channelId: 'C123' }),
     });
 
-    const result = await postToSlackChannel(config, {
+    const result = await postToChannel(config, {
       channel: '#eng',
       threadTs: '111.222',
       text: 'hello channel',
@@ -221,12 +221,12 @@ describe('postToSlackChannel', () => {
     });
 
     await expect(
-      postToSlackChannel(config, {
+      postToChannel(config, {
         channel: '#eng',
         text: 'blocked',
       }),
     ).rejects.toThrow(
-      'Failed to post to Slack channel: 403 Slack app is not a member of channel #eng.',
+      'Failed to post to channel: 403 Slack app is not a member of channel #eng.',
     );
   });
 });

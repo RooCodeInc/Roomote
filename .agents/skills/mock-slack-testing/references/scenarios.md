@@ -71,7 +71,7 @@ Use this file to choose the closest scenario before creating a custom one.
   - the expected reply appears in `/mock/state`
   - message ordering and `thread_ts` placement are correct
 
-## `post-to-slack-channel`
+## `post-to-channel`
 
 - Use for: explicit outbound channel posts, including Roomote MCP-powered Slack posting.
 - Minimum setup:

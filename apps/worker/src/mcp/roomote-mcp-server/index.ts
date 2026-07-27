@@ -49,7 +49,7 @@ import {
   type ChatReplyPurpose,
   recordChatReplySatisfaction,
 } from './chat-reply-satisfaction.js';
-import { handlePostToChannel } from './post-to-slack-channel.js';
+import { handlePostToChannel } from './post-to-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
@@ -447,7 +447,7 @@ function shouldIncludeLegacySlackArtifactCompositionGuidance(): boolean {
   return false;
 }
 
-function shouldRegisterSlackChannelPostTool(): boolean {
+function shouldRegisterChannelPostTool(): boolean {
   return Boolean(process.env.ROOMOTE_TASK_ID?.trim());
 }
 
@@ -1350,7 +1350,7 @@ function recordSuccessfulSlackTurnSatisfactionResult(
   }
 }
 
-if (shouldRegisterSlackChannelPostTool()) {
+if (shouldRegisterChannelPostTool()) {
   const postSurface = getChatReplySurfaceLabel();
 
   roomoteMcpServer.registerTool(

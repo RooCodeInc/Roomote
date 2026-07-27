@@ -20,7 +20,6 @@ const INTERNAL_DEBUG_TOOL_CALLS_BY_SOURCE = new Map([
     'roomote',
     new Set([
       'add_reaction_to_slack_message',
-      'post_to_slack_channel',
       'post_to_channel',
       'send_chat_reaction_emoji',
       'send_chat_reply',

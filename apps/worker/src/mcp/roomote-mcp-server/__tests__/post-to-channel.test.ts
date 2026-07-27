@@ -4,18 +4,15 @@ vi.mock('../local-file-upload.js', () => ({
 }));
 
 vi.mock('../slack-api-client.js', () => ({
-  postToSlackChannel: vi.fn(),
+  postToChannel: vi.fn(),
 }));
 
 import {
   prepareLocalArtifactUpload,
   uploadPreparedArtifact,
 } from '../local-file-upload.js';
-import { postToSlackChannel } from '../slack-api-client.js';
-import {
-  handlePostToChannel,
-  handlePostToSlackChannel,
-} from '../post-to-slack-channel.js';
+import { postToChannel } from '../slack-api-client.js';
+import { handlePostToChannel } from '../post-to-channel.js';
 import type { ArtifactConfig, RoomoteConfig } from '../types.js';
 
 const artifactConfig: ArtifactConfig = {
@@ -29,13 +26,13 @@ const roomoteConfig: RoomoteConfig = {
   platformApiUrl: 'https://platform.example.com',
 };
 
-describe('handlePostToSlackChannel', () => {
+describe('handlePostToChannel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('requires a channel', async () => {
-    const result = await handlePostToSlackChannel(
+    const result = await handlePostToChannel(
       { taskId: 'task-1', channel: '   ', text: 'hello' },
       artifactConfig,
       roomoteConfig,
@@ -48,17 +45,17 @@ describe('handlePostToSlackChannel', () => {
   });
 
   it('accepts channel IDs and Slack channel mentions', async () => {
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: '111.222',
       channelId: 'C123ABC456',
     });
 
-    const channelIdResult = await handlePostToSlackChannel(
+    const channelIdResult = await handlePostToChannel(
       { taskId: 'task-1', channel: 'C123ABC456', text: 'hello' },
       artifactConfig,
       roomoteConfig,
     );
-    const mentionResult = await handlePostToSlackChannel(
+    const mentionResult = await handlePostToChannel(
       {
         taskId: 'task-1',
         channel: '<#C123ABC456|eng>',
@@ -68,11 +65,11 @@ describe('handlePostToSlackChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenNthCalledWith(1, roomoteConfig, {
+    expect(postToChannel).toHaveBeenNthCalledWith(1, roomoteConfig, {
       channel: 'C123ABC456',
       text: 'hello',
     });
-    expect(postToSlackChannel).toHaveBeenNthCalledWith(2, roomoteConfig, {
+    expect(postToChannel).toHaveBeenNthCalledWith(2, roomoteConfig, {
       channel: 'C123ABC456',
       text: 'hello',
     });
@@ -89,17 +86,17 @@ describe('handlePostToSlackChannel', () => {
   });
 
   it('normalizes lowercase channel IDs and mentions', async () => {
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: '111.222',
       channelId: 'C123ABC456',
     });
 
-    await handlePostToSlackChannel(
+    await handlePostToChannel(
       { taskId: 'task-1', channel: 'c123abc456', text: 'hello' },
       artifactConfig,
       roomoteConfig,
     );
-    await handlePostToSlackChannel(
+    await handlePostToChannel(
       {
         taskId: 'task-1',
         channel: '<#c123abc456|eng>',
@@ -109,18 +106,18 @@ describe('handlePostToSlackChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenNthCalledWith(1, roomoteConfig, {
+    expect(postToChannel).toHaveBeenNthCalledWith(1, roomoteConfig, {
       channel: 'C123ABC456',
       text: 'hello',
     });
-    expect(postToSlackChannel).toHaveBeenNthCalledWith(2, roomoteConfig, {
+    expect(postToChannel).toHaveBeenNthCalledWith(2, roomoteConfig, {
       channel: 'C123ABC456',
       text: 'hello',
     });
   });
 
   it('rejects direct-message IDs', async () => {
-    const dmResult = await handlePostToSlackChannel(
+    const dmResult = await handlePostToChannel(
       { taskId: 'task-1', channel: 'D123ABC456', text: 'hello' },
       artifactConfig,
       roomoteConfig,
@@ -134,7 +131,7 @@ describe('handlePostToSlackChannel', () => {
   });
 
   it('rejects lowercase direct-message IDs', async () => {
-    const dmResult = await handlePostToSlackChannel(
+    const dmResult = await handlePostToChannel(
       { taskId: 'task-1', channel: 'd123abc456', text: 'hello' },
       artifactConfig,
       roomoteConfig,
@@ -148,7 +145,7 @@ describe('handlePostToSlackChannel', () => {
   });
 
   it('rejects calls without text or images', async () => {
-    const result = await handlePostToSlackChannel(
+    const result = await handlePostToChannel(
       { taskId: 'task-1', channel: '#eng' },
       artifactConfig,
       roomoteConfig,
@@ -162,12 +159,12 @@ describe('handlePostToSlackChannel', () => {
   });
 
   it('posts text-only messages', async () => {
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: '111.222',
       channelId: 'C123',
     });
 
-    const result = await handlePostToSlackChannel(
+    const result = await handlePostToChannel(
       {
         taskId: 'task-1',
         channel: 'eng',
@@ -178,7 +175,7 @@ describe('handlePostToSlackChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
       channel: '#eng',
       threadTs: '999.000',
       text: 'share this update',
@@ -191,12 +188,12 @@ describe('handlePostToSlackChannel', () => {
   });
 
   it('strips citation artifacts from Slack channel posts', async () => {
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: '777.888',
       channelId: 'C123',
     });
 
-    await handlePostToSlackChannel(
+    await handlePostToChannel(
       {
         taskId: 'task-1',
         channel: 'eng',
@@ -206,7 +203,7 @@ describe('handlePostToSlackChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
       channel: '#eng',
       text: 'Current status is available.',
     });
@@ -227,12 +224,12 @@ describe('handlePostToSlackChannel', () => {
         'https://app.example.com/task/task-1/artifacts/screenshots/after.png?v=1',
       rawUrl: 'https://app.example.com/api/artifacts/art-1/raw',
     });
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: '111.222',
       channelId: 'C123',
     });
 
-    const result = await handlePostToSlackChannel(
+    const result = await handlePostToChannel(
       {
         taskId: 'task-1',
         channel: 'eng',
@@ -247,7 +244,7 @@ describe('handlePostToSlackChannel', () => {
       '/workspace',
     );
     expect(uploadPreparedArtifact).toHaveBeenCalledTimes(1);
-    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
       channel: '#eng',
       images: [{ artifactId: 'art-1' }],
     });
@@ -260,12 +257,12 @@ describe('handlePostToSlackChannel', () => {
   });
 
   it('passes through existing image artifact ids', async () => {
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: '333.444',
       channelId: 'C999',
     });
 
-    const result = await handlePostToSlackChannel(
+    const result = await handlePostToChannel(
       {
         taskId: 'task-1',
         channel: 'eng',
@@ -275,7 +272,7 @@ describe('handlePostToSlackChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
       channel: '#eng',
       images: [{ artifactId: 'art-1' }, { artifactId: 'art-2' }],
     });
@@ -300,11 +297,11 @@ describe('handlePostToSlackChannel', () => {
       artifactType: 'general',
       viewUrl: 'https://app.example.com/view',
     });
-    vi.mocked(postToSlackChannel).mockRejectedValue(
+    vi.mocked(postToChannel).mockRejectedValue(
       new Error('Slack API unavailable'),
     );
 
-    const result = await handlePostToSlackChannel(
+    const result = await handlePostToChannel(
       {
         taskId: 'task-1',
         channel: 'eng',
@@ -339,7 +336,7 @@ describe('handlePostToChannel', () => {
 
   it('passes opaque conversation ids through untouched on Teams', async () => {
     process.env.ROOMOTE_COMMUNICATION_PROVIDER = 'teams';
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: 'activity-1',
       channelId: '19:conversation@thread.v2',
     });
@@ -354,7 +351,7 @@ describe('handlePostToChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
       channel: '19:conversation@thread.v2',
       text: 'update',
     });
@@ -366,7 +363,7 @@ describe('handlePostToChannel', () => {
 
   it('passes Telegram chat ids through untouched', async () => {
     process.env.ROOMOTE_COMMUNICATION_PROVIDER = 'telegram';
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: '901',
       channelId: '-1002233445566',
     });
@@ -377,7 +374,7 @@ describe('handlePostToChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
       channel: '-1002233445566',
       text: 'update',
     });
@@ -385,7 +382,7 @@ describe('handlePostToChannel', () => {
 
   it('passes Discord channel ids through untouched', async () => {
     process.env.ROOMOTE_COMMUNICATION_PROVIDER = 'discord';
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: 'message-1',
       channelId: '1527713580311642272',
     });
@@ -396,7 +393,7 @@ describe('handlePostToChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
       channel: '1527713580311642272',
       text: 'update',
     });
@@ -404,7 +401,7 @@ describe('handlePostToChannel', () => {
 
   it('falls back to Slack channel normalization without a chat provider', async () => {
     delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
-    vi.mocked(postToSlackChannel).mockResolvedValue({
+    vi.mocked(postToChannel).mockResolvedValue({
       messageTs: '111.222',
       channelId: 'C123ABC456',
     });
@@ -415,7 +412,7 @@ describe('handlePostToChannel', () => {
       roomoteConfig,
     );
 
-    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
       channel: '#eng',
       text: 'update',
     });
