@@ -98,7 +98,7 @@ Prefer a specific environment when one is a plausible home for the work.
 
   prompt += `\n**Available Environments**:\n`;
   for (const env of context.availableEnvironments) {
-    prompt += `- ${env.name}${env.description ? `: ${env.description}` : ''} (repos: ${env.repositoryNames.join(', ')})\n`;
+    prompt += `- ${env.name} (repositories: ${env.repositoryNames.join(', ')})${env.description ? `\n  ${env.description}` : ''}\n`;
   }
   if (options?.includePlatformWorkspace !== false) {
     prompt += `- ${PLATFORM_WORKSPACE_VALUE}: ${PLATFORM_WORKSPACE_DESCRIPTION}\n`;
