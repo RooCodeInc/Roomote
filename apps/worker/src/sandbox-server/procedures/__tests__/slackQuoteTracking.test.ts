@@ -228,6 +228,41 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     );
   });
 
+  it('strips idle-session context before tracking a Slack reply quote', async () => {
+    const wrappedMessage = [
+      '<out_of_band_context>',
+      'While this session was idle, the following message(s) were sent to the user on your behalf.',
+      '',
+      '<out_of_band_message>',
+      'A review update was posted.',
+      '</out_of_band_message>',
+      '</out_of_band_context>',
+      '',
+      '<slack_message>',
+      'Please fix that issue.',
+      '</slack_message>',
+    ].join('\n');
+
+    await trackLatestUserMessageForSlackThreadQuote({
+      runId: 1,
+      text: wrappedMessage,
+      userName: 'Ada Lovelace',
+      logPrefix: 'testProcedure',
+    });
+
+    expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      {
+        runId: 1,
+        text: 'Please fix that issue.',
+        userName: 'Ada Lovelace',
+      },
+    );
+  });
+
   it('strips the leading marker even when the envelope is malformed so it never leaks into the quote', async () => {
     const malformedMessage = [
       '<github-pr-follow-up>',
