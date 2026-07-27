@@ -167,6 +167,18 @@ describe('Env', () => {
     ).toBe(true);
   });
 
+  it('defaults webhook retention to three days and accepts an override', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    delete runtimeEnv.WEBHOOK_RETENTION_DAYS;
+
+    expect(createRoomoteEnv(runtimeEnv).WEBHOOK_RETENTION_DAYS).toBe(3);
+    expect(
+      createRoomoteEnv({ ...runtimeEnv, WEBHOOK_RETENTION_DAYS: '7' })
+        .WEBHOOK_RETENTION_DAYS,
+    ).toBe(7);
+  });
+
   it('parses Roomote Cloud analytics configuration', () => {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
