@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -12,18 +13,122 @@ import {
   EarOff,
   Mail,
   MessageSquarePlus,
+  Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
   Skeleton,
   Stethoscope,
   Switch,
 } from '@/components/system';
 import { Section } from '@/components/settings';
 import type { MiscSettings as MiscSettingsData } from '@/trpc/commands/misc-settings';
+import {
+  buildRouterDebugSettingsInput,
+  getRouterDebugDestinationSelection,
+  ROUTER_DEBUG_ENV_FALLBACK,
+  ROUTER_DEBUG_NONE,
+  type RouterDebugDestinationSelection,
+} from './router-diagnostics-destination';
 
 function getBugReportUrl(diagnostics: string): string {
   const url = new URL('https://github.com/RooCodeInc/Roomote/issues/new');
   url.searchParams.set('template', 'bug.yml');
   url.searchParams.set('diagnostics', diagnostics);
   return url.toString();
+}
+
+function RouterDiagnosticsDestination() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const queryKey = trpc.routerDebug.getSettings.queryKey();
+  const settings = useQuery(trpc.routerDebug.getSettings.queryOptions());
+  const [provider, setProvider] =
+    useState<RouterDebugDestinationSelection>(ROUTER_DEBUG_NONE);
+  const [channelId, setChannelId] = useState('');
+  const update = useMutation(
+    trpc.routerDebug.updateSettings.mutationOptions({
+      onSuccess: (next) => {
+        queryClient.setQueryData(queryKey, next);
+        setProvider(getRouterDebugDestinationSelection(next));
+        setChannelId(next.destination?.channelId ?? '');
+        toast.success('Router diagnostics destination updated.');
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+
+  useEffect(() => {
+    if (settings.data) {
+      setProvider(getRouterDebugDestinationSelection(settings.data));
+      setChannelId(settings.data.destination?.channelId ?? '');
+    }
+  }, [settings.data]);
+
+  return (
+    <Section icon={Stethoscope} title="Router diagnostics">
+      <div className="space-y-3 max-w-xl">
+        <p className="text-sm text-muted-foreground">
+          Send router decisions to a channel or conversation on any connected
+          communications provider.
+        </p>
+        <Select
+          value={provider}
+          onValueChange={(value) =>
+            setProvider(value as RouterDebugDestinationSelection)
+          }
+          disabled={settings.isPending || update.isPending}
+        >
+          <SelectTrigger aria-label="Router diagnostics provider">
+            {provider === ROUTER_DEBUG_NONE
+              ? 'No diagnostics destination'
+              : provider === ROUTER_DEBUG_ENV_FALLBACK
+                ? 'Use environment fallback'
+                : provider}
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ROUTER_DEBUG_NONE}>
+              No diagnostics destination
+            </SelectItem>
+            {settings.data?.envFallbackSlackChannelId ? (
+              <SelectItem value={ROUTER_DEBUG_ENV_FALLBACK}>
+                Use environment fallback (
+                {settings.data.envFallbackSlackChannelId})
+              </SelectItem>
+            ) : null}
+            <SelectItem value="slack">Slack</SelectItem>
+            <SelectItem value="discord">Discord</SelectItem>
+            <SelectItem value="teams">Microsoft Teams</SelectItem>
+            <SelectItem value="telegram">Telegram</SelectItem>
+          </SelectContent>
+        </Select>
+        {provider !== ROUTER_DEBUG_NONE &&
+        provider !== ROUTER_DEBUG_ENV_FALLBACK ? (
+          <Input
+            aria-label="Router diagnostics destination"
+            value={channelId}
+            onChange={(event) => setChannelId(event.target.value)}
+            placeholder="Channel or conversation ID"
+            disabled={update.isPending}
+          />
+        ) : null}
+        <Button
+          disabled={
+            update.isPending ||
+            (provider !== ROUTER_DEBUG_NONE &&
+              provider !== ROUTER_DEBUG_ENV_FALLBACK &&
+              !channelId.trim())
+          }
+          onClick={() =>
+            update.mutate(buildRouterDebugSettingsInput(provider, channelId))
+          }
+        >
+          Save
+        </Button>
+      </div>
+    </Section>
+  );
 }
 
 export function MiscSettings() {
@@ -75,6 +180,7 @@ export function MiscSettings() {
 
   return (
     <div className="space-y-4">
+      <RouterDiagnosticsDestination />
       <Section title="Feedback" icon={Mail}>
         <p className="text-muted-foreground">Help us make Roomote better!</p>
         <div className="flex flex-wrap gap-2">

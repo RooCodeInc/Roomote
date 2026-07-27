@@ -25,6 +25,7 @@ import {
   getConfiguredRouterDebugSlackChannelId,
   getRouterDebugSettings,
   normalizeRouterDebugSlackChannelId,
+  updateRouterDebugSettings,
 } from './router-debug-settings';
 
 describe('router debug settings', () => {
@@ -70,5 +71,51 @@ describe('router debug settings', () => {
         },
       }),
     ).resolves.toBe('CENV123456');
+  });
+
+  it('suppresses the env fallback when router diagnostics are disabled', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      routerDebugDisabled: true,
+      routerDebugSlackChannelId: null,
+    });
+
+    await expect(
+      getRouterDebugSettings({
+        runtimeEnv: {
+          ROUTER_DEBUG_CHANNEL_ID: 'CENV123456',
+        },
+      }),
+    ).resolves.toMatchObject({
+      destination: null,
+      disabled: true,
+      envFallbackSlackChannelId: 'CENV123456',
+      effectiveRouterDebugSlackChannelId: null,
+      source: 'disabled',
+    });
+  });
+
+  it('persists an explicit disabled state', async () => {
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const insert = vi.fn(() => ({ values }));
+
+    await updateRouterDebugSettings(
+      { destination: null, disabled: true },
+      { executor: { insert } as never },
+    );
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routerDebugProvider: null,
+        routerDebugChannelId: null,
+        routerDebugDisabled: true,
+        routerDebugSlackChannelId: null,
+      }),
+    );
+    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({ routerDebugDisabled: true }),
+      }),
+    );
   });
 });

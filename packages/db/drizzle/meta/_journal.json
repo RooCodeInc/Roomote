@@ -155,6 +155,13 @@
       "when": 1785243790000,
       "tag": "0021_activation_pr_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785243790001,
+      "tag": "0022_router_debug_destinations",
+      "breakpoints": true
     }
   ]
 }

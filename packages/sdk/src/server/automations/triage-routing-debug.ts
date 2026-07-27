@@ -1,5 +1,4 @@
-import { getConfiguredRouterDebugSlackChannelId } from '@roomote/db/server';
-import { SlackNotifier } from '@roomote/slack';
+import { postRouterDebugText } from '@roomote/slack';
 
 export async function postScheduledTriageRoutingDebug(params: {
   automationKey: string;
@@ -9,12 +8,6 @@ export async function postScheduledTriageRoutingDebug(params: {
   taskSlackChannelId?: string | null;
   details?: string;
 }): Promise<void> {
-  const debugChannelId = await getConfiguredRouterDebugSlackChannelId();
-
-  if (!debugChannelId) {
-    return;
-  }
-
   const taskSlackChannelId = params.taskSlackChannelId?.trim() || '(none)';
   const details =
     params.details?.trim() ||
@@ -28,23 +21,5 @@ export async function postScheduledTriageRoutingDebug(params: {
     `details: ${details}`,
   ].join('\n');
 
-  try {
-    const slack = new SlackNotifier(params.slackBotToken);
-    const hasDebugChannelAccess = await slack.isAppInChannel(debugChannelId);
-
-    if (hasDebugChannelAccess !== true) {
-      return;
-    }
-
-    await slack.postMessage({
-      channel: debugChannelId,
-      text,
-      unfurl_links: false,
-      unfurl_media: false,
-    });
-  } catch (error) {
-    console.error(
-      `[ScheduledTriageDebug] Failed to post routing debug message: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  await postRouterDebugText(text);
 }

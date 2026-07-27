@@ -1,10 +1,20 @@
 import {
+  and,
   db,
+  desc,
   eq,
-  getConfiguredRouterDebugSlackChannelId,
+  getConfiguredRouterDebugDestination,
+  isNotNull,
+  resolveDiscordRuntimeCredentials,
+  resolveTeamsBotRuntimeCredentials,
+  resolveTelegramRuntimeCredentials,
   slackInstallations,
+  teamsInstallations,
 } from '@roomote/db/server';
 import type { RoutingDebugInfo } from '@roomote/cloud-agents/server';
+import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
+import { createTeamsCommunicationProviderFromEnv } from '@roomote/communication/teams-provider';
 import type { ChatPostMessageArguments } from '@slack/web-api';
 
 import { createSlackWebClient } from './web-client';
@@ -88,28 +98,234 @@ function formatSummaryFields(
     .join('\n');
 }
 
+function formatSelectedTaskModel(
+  selectedTaskModel: NonNullable<RoutingDebugInfo['selectedTaskModel']>,
+): string {
+  let routerChoiceText: string | null = null;
+
+  if (selectedTaskModel.source !== 'preference') {
+    if (selectedTaskModel.noModelChoice) {
+      const noModelConfidence = selectedTaskModel.noModelChoice.confidence;
+      routerChoiceText =
+        noModelConfidence != null
+          ? `(router choice: no model mentioned, confidence: ${String(noModelConfidence)})`
+          : '(router choice: no model mentioned)';
+    } else if (!selectedTaskModel.rejectedPick) {
+      routerChoiceText = '(router model choice: not reported)';
+    }
+  }
+
+  const modelDetails = [formatModelSource(selectedTaskModel.source)];
+
+  if (selectedTaskModel.confidence != null) {
+    modelDetails.push(`confidence ${String(selectedTaskModel.confidence)}`);
+  }
+
+  const modelValue = `${selectedTaskModel.displayName} \`${selectedTaskModel.id}\` — ${modelDetails.join(', ')}`;
+  return routerChoiceText ? `${modelValue} ${routerChoiceText}` : modelValue;
+}
+
+function formatRejectedModelPick(
+  rejectedPick: NonNullable<
+    NonNullable<RoutingDebugInfo['selectedTaskModel']>['rejectedPick']
+  >,
+): string {
+  const confidenceText =
+    rejectedPick.confidence != null
+      ? String(rejectedPick.confidence)
+      : 'not provided';
+  const reasonText =
+    rejectedPick.reason === 'not_allowed'
+      ? 'not in allow-list'
+      : 'below threshold';
+
+  return `${truncate(rejectedPick.displayName, 80)} \`${truncate(rejectedPick.id, 80)}\` — confidence ${confidenceText} (${reasonText})`;
+}
+
+function formatPlainRouterDebugMessage(params: RouterDebugParams): string {
+  const selectedTaskModel = params.routingDebug?.selectedTaskModel;
+  const rejectedPick = selectedTaskModel?.rejectedPick;
+  const visibleToolsUsed = params.routingDebug
+    ? getVisibleToolsUsed(params.routingDebug.toolsUsed)
+    : [];
+  const source = params.sourceLink
+    ? `[${params.source}](${params.sourceLink})`
+    : params.source;
+  const environment =
+    params.routingDebug?.confidence != null
+      ? `${params.selectedWorkspace.name} — confidence ${String(params.routingDebug.confidence)}`
+      : params.selectedWorkspace.name;
+  const fields = [
+    `Source: ${source}`,
+    `Environment: ${environment}`,
+    params.userRoute ? `User override: ${params.userRoute}` : null,
+    selectedTaskModel
+      ? `Model: ${formatSelectedTaskModel(selectedTaskModel)}`
+      : null,
+    `Message:\n${truncate(params.taskDescription, 500) || '(empty)'}`,
+    `Why this route:\n${truncate(params.reasoning, 2500) || '(none)'}`,
+    rejectedPick
+      ? `Rejected model pick: ${formatRejectedModelPick(rejectedPick)}`
+      : null,
+    params.routingDebug?.workspaceRemapped
+      ? 'Environment remapped: Suggested environment was unavailable, so the final route fell back to the resolved selection above.'
+      : null,
+    params.routingDurationMs != null
+      ? `Duration: ${params.routingDurationMs}ms`
+      : null,
+    visibleToolsUsed.length > 0
+      ? `Tools: ${formatToolsUsed(visibleToolsUsed)}`
+      : null,
+  ];
+
+  return ['Router diagnostics', ...fields.filter(Boolean)].join('\n\n');
+}
+
+async function getActiveSlackBotToken(): Promise<string | null> {
+  const installation = await db.query.slackInstallations.findFirst({
+    where: eq(slackInstallations.isActive, true),
+    orderBy: [desc(slackInstallations.updatedAt)],
+    columns: { botAccessToken: true },
+  });
+
+  return installation?.botAccessToken ?? null;
+}
+
+async function postNonSlackRouterDebugMessage(params: {
+  provider: 'discord' | 'teams' | 'telegram';
+  channelId: string;
+  text: string;
+}): Promise<void> {
+  if (params.provider === 'discord') {
+    const credentials = await resolveDiscordRuntimeCredentials();
+    if (!credentials.botToken) return;
+    await new DiscordCommunicationProvider({
+      botToken: credentials.botToken,
+      ...(credentials.applicationId
+        ? { applicationId: credentials.applicationId }
+        : {}),
+    }).postMessage({
+      channelId: params.channelId,
+      text: params.text,
+      textFormat: 'markdown',
+    });
+    return;
+  }
+
+  if (params.provider === 'telegram') {
+    const credentials = await resolveTelegramRuntimeCredentials();
+    if (!credentials.botToken) return;
+    await new TelegramCommunicationProvider({
+      botToken: credentials.botToken,
+    }).postMessage({
+      channelId: params.channelId,
+      text: params.text,
+      textFormat: 'markdown',
+    });
+    return;
+  }
+
+  const credentials = await resolveTeamsBotRuntimeCredentials();
+  const [installation] = await db
+    .select({ serviceUrl: teamsInstallations.serviceUrl })
+    .from(teamsInstallations)
+    .where(
+      and(
+        eq(teamsInstallations.conversationId, params.channelId),
+        eq(teamsInstallations.isActive, true),
+        isNotNull(teamsInstallations.serviceUrl),
+      ),
+    )
+    .limit(1);
+  if (!installation?.serviceUrl) return;
+  const provider = createTeamsCommunicationProviderFromEnv({
+    ...(credentials.botAppId
+      ? { R_TEAMS_BOT_APP_ID: credentials.botAppId }
+      : {}),
+    ...(credentials.botAppPassword
+      ? { R_TEAMS_BOT_APP_PASSWORD: credentials.botAppPassword }
+      : {}),
+    ...(credentials.botTenantId
+      ? { R_TEAMS_BOT_TENANT_ID: credentials.botTenantId }
+      : {}),
+    ...(credentials.botTokenEndpoint
+      ? { R_TEAMS_BOT_TOKEN_ENDPOINT: credentials.botTokenEndpoint }
+      : {}),
+    ...(credentials.botOauthScope
+      ? { R_TEAMS_BOT_OAUTH_SCOPE: credentials.botOauthScope }
+      : {}),
+  });
+  await provider?.postMessage({
+    channelId: params.channelId,
+    serviceUrl: installation.serviceUrl,
+    text: params.text,
+    textFormat: 'markdown',
+  });
+}
+
+export async function postRouterDebugText(text: string): Promise<void> {
+  const destination = await getConfiguredRouterDebugDestination();
+  if (!destination) return;
+
+  try {
+    if (destination.provider !== 'slack') {
+      await postNonSlackRouterDebugMessage({
+        provider: destination.provider,
+        channelId: destination.channelId,
+        text,
+      });
+      return;
+    }
+
+    const botAccessToken = await getActiveSlackBotToken();
+    if (!botAccessToken) return;
+    await createSlackWebClient(botAccessToken).chat.postMessage({
+      channel: destination.channelId,
+      text,
+      unfurl_links: false,
+      unfurl_media: false,
+    });
+  } catch (error) {
+    console.error(
+      `[RouterDebug] Failed to post router debug message: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export async function postRouterDebugMessage(
   params: RouterDebugParams,
 ): Promise<void> {
-  const debugChannelId = await getConfiguredRouterDebugSlackChannelId();
+  const destination = await getConfiguredRouterDebugDestination();
 
-  if (!debugChannelId) {
+  if (!destination) {
     return;
   }
+
+  if (destination.provider !== 'slack') {
+    try {
+      await postNonSlackRouterDebugMessage({
+        provider: destination.provider,
+        channelId: destination.channelId,
+        text: formatPlainRouterDebugMessage(params),
+      });
+    } catch (error) {
+      console.error(
+        `[RouterDebug] Failed to post router debug message: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return;
+  }
+
+  const debugChannelId = destination.channelId;
 
   console.log(
     `[RouterDebug] Called: channelId=${debugChannelId}, source=${params.source}`,
   );
 
   try {
-    const installation = await db.query.slackInstallations.findFirst({
-      where: eq(slackInstallations.isActive, true),
-      columns: {
-        botAccessToken: true,
-      },
-    });
+    const botAccessToken = await getActiveSlackBotToken();
 
-    if (!installation?.botAccessToken) {
+    if (!botAccessToken) {
       console.warn('[RouterDebug] No active Slack installation found');
       return;
     }
@@ -127,36 +343,9 @@ export async function postRouterDebugMessage(
         ? `${environmentName} — confidence ${String(params.routingDebug.confidence)}`
         : environmentName;
 
-    let modelValue: string | undefined;
-
-    if (params.routingDebug?.selectedTaskModel) {
-      const selectedTaskModel = params.routingDebug.selectedTaskModel;
-
-      let routerChoiceText: string | null = null;
-      if (selectedTaskModel.source !== 'preference') {
-        if (selectedTaskModel.noModelChoice) {
-          const noModelConfidence = selectedTaskModel.noModelChoice.confidence;
-          routerChoiceText =
-            noModelConfidence != null
-              ? `(router choice: no model mentioned, confidence: ${String(noModelConfidence)})`
-              : '(router choice: no model mentioned)';
-        } else if (!selectedTaskModel.rejectedPick) {
-          routerChoiceText = '(router model choice: not reported)';
-        }
-      }
-
-      const modelDetails = [formatModelSource(selectedTaskModel.source)];
-
-      if (selectedTaskModel.confidence != null) {
-        modelDetails.push(`confidence ${String(selectedTaskModel.confidence)}`);
-      }
-
-      modelValue = `${selectedTaskModel.displayName} \`${selectedTaskModel.id}\` — ${modelDetails.join(', ')}`;
-
-      if (routerChoiceText) {
-        modelValue += ` ${routerChoiceText}`;
-      }
-    }
+    const modelValue = params.routingDebug?.selectedTaskModel
+      ? formatSelectedTaskModel(params.routingDebug.selectedTaskModel)
+      : undefined;
 
     const blocks: RouterDebugBlocks = [
       {
@@ -201,20 +390,11 @@ export async function postRouterDebugMessage(
     const rejectedPick = params.routingDebug?.selectedTaskModel?.rejectedPick;
 
     if (rejectedPick) {
-      const rejectedConfidenceText =
-        rejectedPick.confidence != null
-          ? String(rejectedPick.confidence)
-          : 'not provided';
-      const rejectedReasonText =
-        rejectedPick.reason === 'not_allowed'
-          ? 'not in allow-list'
-          : 'below threshold';
-
       blocks.push({
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*Rejected model pick:* ${truncate(rejectedPick.displayName, 80)} \`${truncate(rejectedPick.id, 80)}\` — confidence ${rejectedConfidenceText} (${rejectedReasonText})`,
+          text: `*Rejected model pick:* ${formatRejectedModelPick(rejectedPick)}`,
         },
       });
     }
@@ -255,7 +435,7 @@ export async function postRouterDebugMessage(
       });
     }
 
-    const client = createSlackWebClient(installation.botAccessToken);
+    const client = createSlackWebClient(botAccessToken);
 
     console.log(`[RouterDebug] Posting to channel ${debugChannelId}`);
 

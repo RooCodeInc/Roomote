@@ -1,5 +1,4 @@
-import { getConfiguredRouterDebugSlackChannelId } from '@roomote/db/server';
-import type { SlackNotifier } from '@roomote/slack';
+import { postRouterDebugText, type SlackNotifier } from '@roomote/slack';
 
 const MAX_MESSAGE_PREVIEW_LENGTH = 300;
 
@@ -29,12 +28,6 @@ export async function postChannelAutoStartRoutingDebug(params: {
     | 'not_started';
   taskOutcomeDetails?: string;
 }): Promise<void> {
-  const debugChannelId = await getConfiguredRouterDebugSlackChannelId();
-
-  if (!debugChannelId) {
-    return;
-  }
-
   const sourceChannelName = params.sourceChannelName?.trim();
   const messagePreview =
     truncate(params.messageText, MAX_MESSAGE_PREVIEW_LENGTH) || '(empty)';
@@ -54,23 +47,5 @@ export async function postChannelAutoStartRoutingDebug(params: {
     .filter(Boolean)
     .join('\n');
 
-  try {
-    const hasDebugChannelAccess =
-      await params.slack.isAppInChannel(debugChannelId);
-
-    if (hasDebugChannelAccess !== true) {
-      return;
-    }
-
-    await params.slack.postMessage({
-      channel: debugChannelId,
-      text,
-      unfurl_links: false,
-      unfurl_media: false,
-    });
-  } catch (error) {
-    console.error(
-      `[SlackChannelAutoStartDebug] Failed to post routing debug message: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+  await postRouterDebugText(text);
 }
