@@ -180,7 +180,7 @@ describe('GET /api/mcp-oauth/callback', () => {
     );
   });
 
-  it('records callback host context when the Roomote session is unavailable', async () => {
+  it('signs in on the configured host and resumes the unconsumed callback', async () => {
     authorizeMock.mockResolvedValueOnce({ success: false });
     const request = new NextRequest(
       'https://legacy.example/api/mcp-oauth/callback?code=auth-code&state=state-1',
@@ -189,19 +189,30 @@ describe('GET /api/mcp-oauth/callback', () => {
     const response = await GET(request);
 
     expect(response.headers.get('location')).toBe(
-      'https://customer.example/settings?mcp=error&reason=unauthorized',
+      'https://customer.example/sign-in?redirect_url=%2Fapi%2Fmcp-oauth%2Fcallback%3Fcode%3Dauth-code%26state%3Dstate-1',
     );
     expect(consumeOAuthStateMock).not.toHaveBeenCalled();
     expect(loggerWarnMock).toHaveBeenCalledWith(
       {
-        event: 'mcp_oauth_callback_rejected',
-        reason: 'unauthorized',
+        event: 'mcp_oauth_callback_auth_required',
         requestHost: 'legacy.example',
         configuredCallbackHost: 'customer.example',
         callbackHostMatchesRequest: false,
       },
-      'MCP OAuth callback was rejected',
+      'MCP OAuth callback requires sign-in before it can continue',
     );
+
+    const resumedResponse = await GET(
+      buildRequest('?code=auth-code&state=state-1'),
+    );
+    expect(resumedResponse.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=connected',
+    );
+    expect(consumeOAuthStateMock).toHaveBeenCalledTimes(1);
+    expect(storeTokensMock).toHaveBeenCalledWith(CONNECTION_ID, {
+      access_token: 'access-token',
+      refresh_token: 'refresh-token',
+    });
   });
 
   it('redirects oauth errors to the public settings host', async () => {

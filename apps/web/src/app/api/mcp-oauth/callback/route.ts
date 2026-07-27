@@ -178,18 +178,19 @@ export async function GET(request: NextRequest) {
     const configuredCallbackHost = new URL(webUrl).host;
     logger.warn(
       {
-        event: 'mcp_oauth_callback_rejected',
-        reason: 'unauthorized',
+        event: 'mcp_oauth_callback_auth_required',
         requestHost: request.nextUrl.host,
         configuredCallbackHost,
         callbackHostMatchesRequest:
           request.nextUrl.host === configuredCallbackHost,
       },
-      'MCP OAuth callback was rejected',
+      'MCP OAuth callback requires sign-in before it can continue',
     );
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'error', 'unauthorized'),
-    );
+
+    const callbackReturnPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+    const signInUrl = new URL('/sign-in', webUrl);
+    signInUrl.searchParams.set('redirect_url', callbackReturnPath);
+    return NextResponse.redirect(signInUrl);
   }
   const { userId } = authResult;
 
