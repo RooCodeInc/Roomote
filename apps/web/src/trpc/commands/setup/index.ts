@@ -18,7 +18,11 @@ import {
 } from '@roomote/types';
 import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@roomote/feature-flags';
 import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
-import { captureEvent } from '@roomote/telemetry/server';
+import {
+  captureActivationEnvironmentSaved,
+  captureActivationSetupCompleted,
+  captureEvent,
+} from '@roomote/telemetry/server';
 import {
   AVAILABLE_SETUP_MCP_INTEGRATIONS,
   enqueueTask,
@@ -88,7 +92,7 @@ export async function batchCreateEnvironmentsCommand(
     return { environmentIds: existingEnvs.map((e) => e.id) };
   }
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const createdIds: string[] = [];
 
     for (const environmentSpec of input.environments) {
@@ -153,6 +157,12 @@ export async function batchCreateEnvironmentsCommand(
 
     return { environmentIds: createdIds };
   });
+
+  for (const _environmentId of result.environmentIds) {
+    void captureActivationEnvironmentSaved('setup');
+  }
+
+  return result;
 }
 
 export async function autoCreateAgentsCommand(auth: UserAuthSuccess) {
@@ -461,6 +471,7 @@ export async function completeSetupCommand(
   });
 
   void captureEvent('setup_completed', { userId });
+  void captureActivationSetupCompleted();
 
   // Refresh the anonymous instance report now that setup is complete, so the
   // Ping service sees the founding admin within minutes instead of at the

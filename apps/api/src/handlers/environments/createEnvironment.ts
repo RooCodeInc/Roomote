@@ -17,6 +17,7 @@ import {
   getMissingEnvironmentRepositoryError,
   getEnvironmentRepositoryInstallationError,
 } from '@roomote/types';
+import { captureActivationEnvironmentSaved } from '@roomote/telemetry/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -343,6 +344,7 @@ export async function createEnvironment(
     });
 
     await attachEnvironmentIdToTaskRun(auth, created.id);
+    void captureActivationEnvironmentSaved('mcp');
 
     return c.json({
       success: true,

@@ -50,6 +50,7 @@ import {
   persistEarlyGeneratedTaskTitle,
   resolveFreshTaskComputeProvider,
   resolveQueueScope,
+  shouldCaptureActivationTaskCreatedEvent,
   shouldCaptureTaskCreatedEvent,
   type FreshTaskLaunch,
 } from '../task-run-queue';
@@ -97,6 +98,40 @@ describe('shouldCaptureTaskCreatedEvent', () => {
     expect(shouldCaptureTaskCreatedEvent(TaskPayloadKind.StandardTask)).toBe(
       true,
     );
+  });
+});
+
+describe('shouldCaptureActivationTaskCreatedEvent', () => {
+  const userInitiator = { kind: 'user', userId: 'user-1' } as const;
+
+  it('includes only fresh, human-initiated standard tasks', () => {
+    expect(
+      shouldCaptureActivationTaskCreatedEvent({
+        taskType: TaskPayloadKind.StandardTask,
+        workflow: 'standard',
+        initiator: userInitiator,
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    {
+      taskType: TaskPayloadKind.StandardTask,
+      workflow: 'pr_review' as const,
+      initiator: userInitiator,
+    },
+    {
+      taskType: TaskPayloadKind.SnapshotEnvironment,
+      workflow: 'env_snapshot' as const,
+      initiator: userInitiator,
+    },
+    {
+      taskType: TaskPayloadKind.StandardTask,
+      workflow: 'standard' as const,
+      initiator: { kind: 'automation', key: 'dependabot_triage' } as const,
+    },
+  ])('excludes non-activation task launches', (input) => {
+    expect(shouldCaptureActivationTaskCreatedEvent(input)).toBe(false);
   });
 });
 
