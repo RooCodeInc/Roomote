@@ -5,6 +5,7 @@ const invalidateQueriesMock = vi.fn().mockResolvedValue(undefined);
 const removeQueriesMock = vi.fn();
 const fetchQueryMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
+const mutateMock = vi.fn();
 const environmentState = vi.hoisted(() => ({
   environments: [{ id: 'env-1' }],
   commsProviders: [] as Array<{
@@ -13,7 +14,7 @@ const environmentState = vi.hoisted(() => ({
   }>,
 }));
 const userState = vi.hoisted(() => ({
-  user: null as { cloudEnabled: boolean } | null,
+  user: null as { cloudEnabled: boolean; isAdmin: boolean } | null,
 }));
 const queryKeys = {
   setupStatus: ['setup.status'],
@@ -33,7 +34,8 @@ vi.mock('@tanstack/react-query', async () => {
   return {
     ...actual,
     useMutation: (options: { onSuccess?: () => Promise<void> | void }) => ({
-      mutate: async () => {
+      mutate: async (input?: unknown) => {
+        mutateMock(input);
         await options.onSuccess?.();
       },
       isPending: false,
@@ -115,6 +117,10 @@ vi.mock('@/components/system', () => ({
   Alert: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   AlertCircle: () => <span>AlertCircle</span>,
   AlertDescription: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  Card: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CardContent: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),
   Button: ({
@@ -289,13 +295,45 @@ describe('Setup StepInvoke', () => {
   });
 
   it('hides the anonymous analytics opt-out for Roomote Cloud', () => {
-    userState.user = { cloudEnabled: true };
+    userState.user = { cloudEnabled: true, isAdmin: true };
 
     render(<StepInvoke />);
 
     expect(
       screen.queryByRole('checkbox', { name: 'Toggle anonymous analytics' }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('checkbox', { name: 'Toggle product updates' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('sends independent enabled preferences by default', async () => {
+    render(<StepInvoke />);
+
+    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+
+    await waitFor(() => {
+      expect(mutateMock).toHaveBeenCalledWith({
+        anonymousAnalyticsEnabled: true,
+        productUpdatesEnabled: true,
+      });
+    });
+  });
+
+  it('lets users opt out of product updates without changing analytics', async () => {
+    render(<StepInvoke />);
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Toggle product updates' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+
+    await waitFor(() => {
+      expect(mutateMock).toHaveBeenCalledWith({
+        anonymousAnalyticsEnabled: true,
+        productUpdatesEnabled: false,
+      });
+    });
   });
 
   it('routes to the first environment when multiple environments exist', async () => {

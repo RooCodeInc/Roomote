@@ -39,6 +39,7 @@ import {
 } from './shared';
 import { ensureManagedReviewerEnabledByDefaultInTx } from '../automations';
 import { Env, isRoomoteCloudEnabled } from '@/lib/server/env';
+import { subscribeToProductUpdates } from '@/lib/server/product-updates';
 
 // --- Mutations ---
 
@@ -402,7 +403,10 @@ async function sendSetupCompletionMcpRecommendations(
 
 export async function completeSetupCommand(
   auth: UserAuthSuccess,
-  input?: { anonymousAnalyticsEnabled?: boolean },
+  input?: {
+    anonymousAnalyticsEnabled?: boolean;
+    productUpdatesEnabled?: boolean;
+  },
 ) {
   assertAdmin(auth);
   const { userId } = auth;
@@ -477,6 +481,13 @@ export async function completeSetupCommand(
   // Ping service sees the founding admin within minutes instead of at the
   // next daily tick.
   void requestInstancePing('setup-completed');
+
+  if (
+    (input?.productUpdatesEnabled ?? true) &&
+    !(auth.cloudEnabled && auth.isAdmin)
+  ) {
+    void subscribeToProductUpdates(auth.primaryEmail, 'setup');
+  }
 
   return { success: true as const };
 }
