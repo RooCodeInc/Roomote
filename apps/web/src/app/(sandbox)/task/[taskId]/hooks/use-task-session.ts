@@ -126,24 +126,17 @@ export function useTaskSession(
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [isSnapshotting, setIsSnapshotting] = useState(false);
+  const effectiveRefetchInterval = (query?: {
+    state?: { data?: { refetchInterval?: number } };
+  }) =>
+    query?.state?.data?.refetchInterval ??
+    (isSnapshotting ? 2_000 : (refetchInterval ?? false));
 
   const sessionQuery = useQuery(
     trpc.sandboxSession.byTaskId.queryOptions(
       { taskId },
       {
-        refetchInterval: (query) => {
-          const serverInterval = query.state.data?.refetchInterval;
-
-          if (serverInterval) {
-            return serverInterval;
-          }
-
-          if (isSnapshotting) {
-            return 2_000;
-          }
-
-          return refetchInterval ?? false;
-        },
+        refetchInterval: effectiveRefetchInterval,
       },
     ),
   );
@@ -190,7 +183,7 @@ export function useTaskSession(
         enabled:
           sessionQuery.isSuccess &&
           sessionQuery.data?.sessionState !== 'not-found',
-        refetchInterval: sessionQuery.data?.refetchInterval ?? false,
+        refetchInterval: effectiveRefetchInterval(sessionQuery),
       },
     ),
   );

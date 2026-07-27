@@ -158,11 +158,11 @@ describe('useTaskSession', () => {
       .mockReturnValueOnce({ data: [], isLoading: false })
       .mockReturnValueOnce({ data: undefined, isLoading: false });
 
-    renderHook(() => useTaskSession('task-alias'));
+    renderHook(() => useTaskSession('task-alias', { refetchInterval: 30_000 }));
 
     expect(artifactsQueryOptionsMock).toHaveBeenCalledWith(
       { taskId: 'canonical-task' },
-      expect.objectContaining({ enabled: true, refetchInterval: false }),
+      expect.objectContaining({ enabled: true, refetchInterval: 30_000 }),
     );
   });
 
