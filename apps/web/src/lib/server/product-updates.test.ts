@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockEnv = vi.hoisted(() => ({
+  APP_ENV: 'production',
   R_PING_BASE_URL: 'https://ping.example.com/',
 }));
 
@@ -13,7 +14,16 @@ describe('subscribeToProductUpdates', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnv.APP_ENV = 'production';
     vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it('does not send subscriptions outside production', async () => {
+    mockEnv.APP_ENV = 'development';
+
+    await subscribeToProductUpdates('user@example.com', 'setup');
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('posts the account email and source to Ping', async () => {

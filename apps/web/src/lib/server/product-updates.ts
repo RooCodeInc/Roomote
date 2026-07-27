@@ -9,7 +9,7 @@ export async function subscribeToProductUpdates(
   email: string | null,
   source: ProductUpdatesSource,
 ): Promise<void> {
-  if (!email) {
+  if (!email || Env.APP_ENV !== 'production') {
     return;
   }
 
