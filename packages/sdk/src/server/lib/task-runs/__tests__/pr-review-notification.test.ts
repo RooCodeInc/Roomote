@@ -368,28 +368,6 @@ describe('resolvePrReviewNotificationRoute', () => {
 
     expect(route).toBeNull();
   });
-
-  it('routes GitHub review tasks back to their pull request', async () => {
-    mockResolveSlackTaskRunRouting.mockResolvedValue({
-      channel: null,
-      threadTs: null,
-      route: { kind: 'task', webPath: null },
-    });
-
-    const route = await resolvePrReviewNotificationRoute({
-      id: 1,
-      payloadKind: 'github_pr_review',
-      payload: { repo: 'owner/repo', prNumber: 42 },
-      taskId: 'task-1',
-    } as never);
-
-    expect(route).toEqual({
-      provider: 'source_control',
-      sourceControlProvider: 'github',
-      repository: 'owner/repo',
-      prNumber: 42,
-    });
-  });
 });
 
 describe('consumePendingPrReviewActivity', () => {

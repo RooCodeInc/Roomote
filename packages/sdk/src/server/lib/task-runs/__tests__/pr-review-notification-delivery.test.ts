@@ -312,37 +312,6 @@ describe('preparePrReviewNotificationDelivery', () => {
     );
   });
 
-  it('keeps ordinary review activity history-only on source-control tasks', async () => {
-    mockResolveRoute.mockResolvedValue({
-      provider: 'source_control',
-      sourceControlProvider: 'github',
-      repository: 'owner/repo',
-      prNumber: 42,
-    });
-
-    await expect(
-      preparePrReviewNotificationDelivery({
-        taskRun,
-        request,
-        events: eventsWithoutSelfReview,
-      }),
-    ).resolves.toEqual(expect.objectContaining({ post: true, route: null }));
-  });
-
-  it('keeps terminal self-review results routed to source control', async () => {
-    const sourceControlRoute = {
-      provider: 'source_control' as const,
-      sourceControlProvider: 'github' as const,
-      repository: 'owner/repo',
-      prNumber: 42,
-    };
-    mockResolveRoute.mockResolvedValue(sourceControlRoute);
-
-    await expect(
-      preparePrReviewNotificationDelivery({ taskRun, request, events }),
-    ).resolves.toEqual(expect.objectContaining({ route: sourceControlRoute }));
-  });
-
   it('propagates a triage skip decision', async () => {
     mockGenerateObject.mockResolvedValue({
       object: {

@@ -27,7 +27,6 @@ import {
   requeuePendingPrReviewActivity,
   schedulePrReviewNotificationJob,
   setPendingPrReviewAction,
-  writeSourceControlPullRequestForTaskRun,
 } from '@roomote/sdk/server';
 import {
   buildSlackPrReviewActionBlocks,
@@ -75,8 +74,6 @@ function buildPrReviewNotificationPostInput(
         text,
         textFormat: 'markdown',
       };
-    case 'source_control':
-      throw new Error('Source-control notifications do not use chat adapters.');
   }
 }
 
@@ -99,26 +96,13 @@ function isButtonRouteProvider(
   return (BUTTON_ROUTE_PROVIDERS as readonly string[]).includes(provider);
 }
 
-function isButtonRoute(
-  route: PrReviewNotificationRoute,
-): route is Extract<
-  PrReviewNotificationRoute,
-  { provider: ButtonRouteProvider }
-> {
-  return isButtonRouteProvider(route.provider);
-}
-
 async function postPrReviewNotification({
   taskId,
-  taskRun,
   route,
   text,
   action,
 }: {
   taskId: string;
-  taskRun: Parameters<
-    typeof writeSourceControlPullRequestForTaskRun
-  >[0]['taskRun'];
   route: PrReviewNotificationRoute;
   text: string;
   /** When set (button-capable routes only), post the action buttons. */
@@ -128,22 +112,7 @@ async function postPrReviewNotification({
   // message without a record would leave dead buttons.
   const nonce = action ? randomUUID() : null;
 
-  if (route.provider === 'source_control') {
-    const result = await writeSourceControlPullRequestForTaskRun({
-      taskRun,
-      input: {
-        action: 'create_pull_request_comment',
-        repositoryFullName: route.repository,
-        prNumber: route.prNumber,
-        body: text,
-        sourceControlProvider: route.sourceControlProvider,
-      },
-    });
-
-    return result.url;
-  }
-
-  if (action && nonce && isButtonRoute(route)) {
+  if (action && nonce && isButtonRouteProvider(route.provider)) {
     await setPendingPrReviewAction({
       nonce,
       provider: route.provider,
@@ -360,7 +329,7 @@ export const prReviewNotificationJob = async (
       followUp &&
       prLink?.autoHandleFeedbackByUserId &&
       delivery.route &&
-      isButtonRoute(delivery.route)
+      isButtonRouteProvider(delivery.route.provider)
     ) {
       const dispatched = await dispatchPrReviewFollowUp({
         provider: delivery.route.provider,
@@ -375,7 +344,6 @@ export const prReviewNotificationJob = async (
 ${delivery.text}`;
         const messageTs = await postPrReviewNotification({
           taskId: data.taskId,
-          taskRun: latestJob,
           route: delivery.route,
           text: autoText,
         });
@@ -404,10 +372,9 @@ ${delivery.text}`;
     if (delivery.route) {
       messageTs = await postPrReviewNotification({
         taskId: data.taskId,
-        taskRun: latestJob,
         route: delivery.route,
         text: textWithQuestion,
-        ...(followUp && isButtonRoute(delivery.route)
+        ...(followUp && isButtonRouteProvider(delivery.route.provider)
           ? {
               action: {
                 summaryText: delivery.text,
@@ -435,12 +402,8 @@ ${delivery.text}`;
     });
 
     if (delivery.route) {
-      const destination =
-        delivery.route.provider === 'source_control'
-          ? `${delivery.route.repository}#${delivery.route.prNumber}`
-          : delivery.route.channelId;
       console.log(
-        `[PrReviewNotification] Posted review-feedback notification for ${data.repository}#${data.prNumber} to ${delivery.route.provider} ${destination}`,
+        `[PrReviewNotification] Posted review-feedback notification for ${data.repository}#${data.prNumber} to ${delivery.route.provider} conversation ${delivery.route.channelId}`,
       );
     } else {
       console.log(
