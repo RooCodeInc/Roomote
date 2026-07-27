@@ -1,30 +1,30 @@
 const {
-  createDiscordProviderMock,
-  createTeamsProviderMock,
-  createTelegramProviderMock,
+  getCommunicationProviderAdapterMock,
+  findTeamsConversationServiceUrlMock,
   discordPostMessageMock,
   assertDiscordChannelAccessMock,
   getReplyImagesMock,
+  slackPostMessageMock,
+  slackResolveChannelIdMock,
+  slackIsAppInChannelMock,
   teamsPostMessageMock,
   telegramPostMessageMock,
 } = vi.hoisted(() => ({
-  createDiscordProviderMock: vi.fn(),
-  createTeamsProviderMock: vi.fn(),
-  createTelegramProviderMock: vi.fn(),
+  getCommunicationProviderAdapterMock: vi.fn(),
+  findTeamsConversationServiceUrlMock: vi.fn(),
   discordPostMessageMock: vi.fn(),
   assertDiscordChannelAccessMock: vi.fn(),
   getReplyImagesMock: vi.fn(),
+  slackPostMessageMock: vi.fn(),
+  slackResolveChannelIdMock: vi.fn(),
+  slackIsAppInChannelMock: vi.fn(),
   teamsPostMessageMock: vi.fn(),
   telegramPostMessageMock: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  createDiscordCommunicationProviderFromRuntimeCredentials:
-    createDiscordProviderMock,
-  createTeamsCommunicationProviderFromRuntimeCredentials:
-    createTeamsProviderMock,
-  createTelegramCommunicationProviderFromRuntimeCredentials:
-    createTelegramProviderMock,
+  getCommunicationProviderAdapter: getCommunicationProviderAdapterMock,
+  findTeamsConversationServiceUrl: findTeamsConversationServiceUrlMock,
 }));
 
 vi.mock('../communication-thread-reply-shared', () => ({
@@ -35,7 +35,7 @@ vi.mock('../discord-thread-lookup', () => ({
   assertDiscordChannelAccess: assertDiscordChannelAccessMock,
 }));
 
-import { maybeSendCommunicationChannelPost } from '../communication-channel-posts';
+import { sendCommunicationChannelPost } from '../communication-channel-posts';
 
 const telegramTaskRun = {
   id: 42,
@@ -71,15 +71,46 @@ async function jsonBody(response: Response): Promise<unknown> {
   return JSON.parse(await response.text());
 }
 
-describe('maybeSendCommunicationChannelPost', () => {
+describe('sendCommunicationChannelPost', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getReplyImagesMock.mockResolvedValue({ images: [], errorResponse: null });
-    createTelegramProviderMock.mockResolvedValue({
-      postMessage: telegramPostMessageMock,
-    });
-    createTeamsProviderMock.mockResolvedValue({
-      postMessage: teamsPostMessageMock,
+    findTeamsConversationServiceUrlMock.mockResolvedValue(
+      'https://smba.trafficmanager.net/target/',
+    );
+    getCommunicationProviderAdapterMock.mockImplementation(
+      async (provider: string) => {
+        switch (provider) {
+          case 'slack':
+            return {
+              provider: 'slack',
+              postMessage: slackPostMessageMock,
+              resolveChannelId: slackResolveChannelIdMock,
+              isAppInChannel: slackIsAppInChannelMock,
+            };
+          case 'teams':
+            return { provider: 'teams', postMessage: teamsPostMessageMock };
+          case 'telegram':
+            return {
+              provider: 'telegram',
+              postMessage: telegramPostMessageMock,
+            };
+          case 'discord':
+            return {
+              provider: 'discord',
+              postMessage: discordPostMessageMock,
+            };
+          default:
+            return null;
+        }
+      },
+    );
+    slackResolveChannelIdMock.mockResolvedValue('C123');
+    slackIsAppInChannelMock.mockResolvedValue(true);
+    slackPostMessageMock.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123',
+      messageId: '111.222',
     });
     telegramPostMessageMock.mockResolvedValue({
       provider: 'telegram',
@@ -90,9 +121,6 @@ describe('maybeSendCommunicationChannelPost', () => {
       provider: 'teams',
       channelId: '19:MEETING_MjJkYWJj@thread.v2',
       messageId: 'activity-1',
-    });
-    createDiscordProviderMock.mockResolvedValue({
-      postMessage: discordPostMessageMock,
     });
     assertDiscordChannelAccessMock.mockResolvedValue({
       guildId: 'guild-1',
@@ -105,17 +133,28 @@ describe('maybeSendCommunicationChannelPost', () => {
     });
   });
 
-  it('returns null for non-communication tasks so the Slack path runs', async () => {
-    await expect(
-      maybeSendCommunicationChannelPost({
-        taskRun: { id: 1, taskId: 'task-0', payload: {} },
-        parsedBody: { channel: 'C123', text: 'hello', images: [] },
-      }),
-    ).resolves.toBeNull();
+  it('uses the centralized Slack adapter for tasks without another provider', async () => {
+    const response = await sendCommunicationChannelPost({
+      taskRun: { id: 1, taskId: 'task-0', payload: {} },
+      parsedBody: { channel: '#eng', text: 'hello', images: [] },
+    });
+
+    expect(getCommunicationProviderAdapterMock).toHaveBeenCalledWith('slack');
+    expect(slackResolveChannelIdMock).toHaveBeenCalledWith('#eng');
+    expect(slackPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'C123',
+      text: 'hello',
+      blocks: [{ type: 'markdown', text: 'hello' }],
+      images: [],
+    });
+    await expect(jsonBody(response)).resolves.toEqual({
+      messageTs: '111.222',
+      channelId: 'C123',
+    });
   });
 
   it('posts to the Telegram chat the task was launched from, defaulting to its topic', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: telegramTaskRun,
       parsedBody: { channel: '-1002233445566', text: 'update', images: [] },
     });
@@ -134,7 +173,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it('posts to another Telegram chat without reusing the origin topic', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: telegramTaskRun,
       parsedBody: { channel: '-1009999999999', text: 'update', images: [] },
     });
@@ -152,9 +191,9 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it('returns 503 when the Telegram bot token is not configured', async () => {
-    createTelegramProviderMock.mockResolvedValue(null);
+    getCommunicationProviderAdapterMock.mockResolvedValueOnce(null);
 
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: telegramTaskRun,
       parsedBody: { channel: '-1002233445566', text: 'update', images: [] },
     });
@@ -163,7 +202,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it('posts to the Teams conversation with its serviceUrl', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: teamsTaskRun,
       parsedBody: {
         channel: '19:MEETING_MjJkYWJj@thread.v2',
@@ -185,15 +224,15 @@ describe('maybeSendCommunicationChannelPost', () => {
     });
   });
 
-  it('posts to another Teams conversation with the task serviceUrl', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+  it('posts to another Teams conversation with its resolved serviceUrl', async () => {
+    const response = await sendCommunicationChannelPost({
       taskRun: teamsTaskRun,
       parsedBody: { channel: '19:other@thread.v2', text: 'update', images: [] },
     });
 
     expect(teamsPostMessageMock).toHaveBeenCalledWith({
       channelId: '19:other@thread.v2',
-      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      serviceUrl: 'https://smba.trafficmanager.net/target/',
       text: 'update',
       textFormat: 'markdown',
       images: [],
@@ -202,10 +241,33 @@ describe('maybeSendCommunicationChannelPost', () => {
       messageTs: 'activity-1',
       channelId: '19:other@thread.v2',
     });
+    expect(findTeamsConversationServiceUrlMock).toHaveBeenCalledWith(
+      '19:other@thread.v2',
+    );
+  });
+
+  it('rejects a Teams target without an active installation', async () => {
+    findTeamsConversationServiceUrlMock.mockResolvedValueOnce(null);
+
+    const response = await sendCommunicationChannelPost({
+      taskRun: teamsTaskRun,
+      parsedBody: {
+        channel: '19:unknown@thread.v2',
+        text: 'update',
+        images: [],
+      },
+    });
+
+    expect(response.status).toBe(404);
+    await expect(jsonBody(response)).resolves.toEqual({
+      error:
+        'No active Teams installation found for conversation 19:unknown@thread.v2',
+    });
+    expect(teamsPostMessageMock).not.toHaveBeenCalled();
   });
 
   it('returns 503 when the task payload has no serviceUrl', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: {
         ...teamsTaskRun,
         payload: {
@@ -224,7 +286,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it('requires text or images', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: telegramTaskRun,
       parsedBody: { channel: '-1002233445566', text: '   ', images: [] },
     });
@@ -234,7 +296,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it('posts to the Discord channel the task was launched from, in its own thread', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: discordTaskRun,
       parsedBody: { channel: 'channel-1', text: 'update', images: [] },
     });
@@ -253,7 +315,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it('posts to another Discord channel after linked-user access is verified', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
       parsedBody: { channel: 'channel-other', text: 'update', images: [] },
     });
@@ -283,7 +345,7 @@ describe('maybeSendCommunicationChannelPost', () => {
       new McpProxyError(403, 'Linked Discord user cannot access this channel'),
     );
 
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
       parsedBody: { channel: 'channel-other', text: 'update', images: [] },
     });
@@ -296,7 +358,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it('rejects cross-channel Discord posts that target a thread', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
       parsedBody: {
         channel: 'channel-other',
@@ -316,7 +378,7 @@ describe('maybeSendCommunicationChannelPost', () => {
       type: 11,
     });
 
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
       parsedBody: { channel: 'thread-other', text: 'update', images: [] },
     });
@@ -334,7 +396,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   ])('rejects a cross-channel Discord %s target', async (_label, type) => {
     assertDiscordChannelAccessMock.mockResolvedValueOnce({ type });
 
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
       parsedBody: { channel: 'dm-other', text: 'update', images: [] },
     });
@@ -356,7 +418,7 @@ describe('maybeSendCommunicationChannelPost', () => {
       type,
     });
 
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
       parsedBody: { channel: 'forum-other', text: 'update', images: [] },
     });
@@ -370,7 +432,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it('rejects Discord posts targeting a thread the task does not own', async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: discordTaskRun,
       parsedBody: {
         channel: 'channel-1',
@@ -385,7 +447,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it("accepts a Discord threadTs that names the task's own thread", async () => {
-    const response = await maybeSendCommunicationChannelPost({
+    const response = await sendCommunicationChannelPost({
       taskRun: discordTaskRun,
       parsedBody: {
         channel: 'channel-1',

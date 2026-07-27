@@ -119,3 +119,19 @@ describe('SlackCommunicationProvider.postMessage', () => {
     ).rejects.toThrow('Slack chat.postMessage returned no message timestamp');
   });
 });
+
+describe('SlackCommunicationProvider channel targets', () => {
+  it('delegates channel resolution and app-membership checks', async () => {
+    const resolveChannelId = vi.fn().mockResolvedValue('C123');
+    const isAppInChannel = vi.fn().mockResolvedValue(true);
+    const provider = new SlackCommunicationProvider({
+      resolveChannelId,
+      isAppInChannel,
+    } as unknown as SlackNotifier);
+
+    await expect(provider.resolveChannelId('#eng')).resolves.toBe('C123');
+    await expect(provider.isAppInChannel('C123')).resolves.toBe(true);
+    expect(resolveChannelId).toHaveBeenCalledWith('#eng');
+    expect(isAppInChannel).toHaveBeenCalledWith('C123');
+  });
+});

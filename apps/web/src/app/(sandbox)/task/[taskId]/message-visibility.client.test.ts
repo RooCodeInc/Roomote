@@ -179,16 +179,17 @@ describe('message visibility helpers', () => {
     ).toBe(false);
   });
 
-  it('hides internal channel-post tool calls from the Roomote server', () => {
-    expect(
-      isInternalDebugToolCallMessage(
-        mcpToolCallMessage('post_to_channel', 'roomote'),
-      ),
-    ).toBe(true);
-    expect(
-      isInternalDebugToolCallMessage(
-        mcpToolResultMessage('post_to_channel', 'roomote'),
-      ),
-    ).toBe(true);
-  });
+  it.each(['post_to_channel', 'post_to_slack_channel'])(
+    'hides internal %s tool calls from the Roomote server',
+    (toolName) => {
+      expect(
+        isInternalDebugToolCallMessage(mcpToolCallMessage(toolName, 'roomote')),
+      ).toBe(true);
+      expect(
+        isInternalDebugToolCallMessage(
+          mcpToolResultMessage(toolName, 'roomote'),
+        ),
+      ).toBe(true);
+    },
+  );
 });

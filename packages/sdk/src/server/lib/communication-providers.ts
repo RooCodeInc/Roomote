@@ -1,4 +1,9 @@
-import type { CommunicationProviderAdapter } from '@roomote/communication';
+import type {
+  CommunicationProviderAdapter,
+  DiscordCommunicationProvider,
+  TeamsCommunicationProvider,
+  TelegramCommunicationProvider,
+} from '@roomote/communication';
 import { db, eq, slackInstallations } from '@roomote/db/server';
 import { SlackCommunicationProvider, SlackNotifier } from '@roomote/slack';
 import type { CommunicationProvider } from '@roomote/types';
@@ -6,6 +11,14 @@ import type { CommunicationProvider } from '@roomote/types';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
+
+export type RuntimeCommunicationProviderAdapter = CommunicationProviderAdapter &
+  (
+    | SlackCommunicationProvider
+    | TeamsCommunicationProvider
+    | TelegramCommunicationProvider
+    | DiscordCommunicationProvider
+  );
 
 /**
  * Builds a `SlackCommunicationProvider` from the deployment's active Slack
@@ -33,7 +46,7 @@ async function createSlackCommunicationProviderFromInstallation(): Promise<Slack
  */
 export async function getCommunicationProviderAdapter(
   provider: CommunicationProvider,
-): Promise<CommunicationProviderAdapter | null> {
+): Promise<RuntimeCommunicationProviderAdapter | null> {
   switch (provider) {
     case 'slack':
       return createSlackCommunicationProviderFromInstallation();
