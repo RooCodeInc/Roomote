@@ -183,6 +183,9 @@ importers:
       '@roomote/slack':
         specifier: workspace:^
         version: link:../../packages/slack
+      '@roomote/telemetry':
+        specifier: workspace:^
+        version: link:../../packages/telemetry
       '@roomote/types':
         specifier: workspace:^
         version: link:../../packages/types
@@ -1482,6 +1485,9 @@ importers:
       '@roomote/redis':
         specifier: workspace:^
         version: link:../redis
+      '@roomote/telemetry':
+        specifier: workspace:^
+        version: link:../telemetry
       '@roomote/types':
         specifier: workspace:^
         version: link:../types

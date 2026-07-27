@@ -9,6 +9,7 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { type RunStatus, isExitedRunStatus } from '@roomote/types';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 
 interface StopTaskRun {
   id: number;
@@ -69,7 +70,11 @@ async function cancelTaskRunBeforeSandbox(runId: number): Promise<boolean> {
   // Shared @roomote/db helper (also used by the work-item launch surfaces to
   // clean up an orphaned run after a lost fenced finalize): guarded
   // pre-sandbox cancel + task-state re-derive + parallel-count close.
-  return cancelTaskRunDirect({ runId });
+  const canceled = await cancelTaskRunDirect({ runId });
+  if (canceled) {
+    void captureTaskSettled(runId, 'canceled');
+  }
+  return canceled;
 }
 
 function createTaskNotFoundResult(): StopTaskRunResult {

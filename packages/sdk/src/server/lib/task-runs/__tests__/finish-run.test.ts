@@ -23,7 +23,7 @@ const mockResolveDiscordRuntimeCredentials = vi.fn();
 const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
-const mockCaptureEvent = vi.fn();
+const mockCaptureTaskSettled = vi.fn();
 
 /**
  * Rows resolved by db.select() chains that join tasks with task_runs (the
@@ -177,7 +177,7 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
-  captureEvent: (...args: unknown[]) => mockCaptureEvent(...args),
+  captureTaskSettled: (...args: unknown[]) => mockCaptureTaskSettled(...args),
 }));
 
 const mockCreateIssueComment = vi.fn().mockResolvedValue(undefined);
@@ -434,23 +434,11 @@ describe('finishRun', () => {
 
       await finishRun({ id: 1, status, errorCode });
 
-      expect(mockCaptureEvent).toHaveBeenCalledWith('task_settled', {
-        userId: 'user-1',
-        properties: {
-          taskType: TaskPayloadKind.StandardTask,
-          workflow: 'standard',
-          surface: 'web',
-          trigger: 'manual',
-          runKind: 'fresh',
-          harness: 'opencode-server',
-          modelProvider: 'openai',
-          model: 'gpt-5.4',
-          computeProvider: null,
-          outcome,
-          durationMs: expect.any(Number),
-          ...(errorCode ? { errorCode } : {}),
-        },
-      });
+      expect(mockCaptureTaskSettled).toHaveBeenCalledWith(
+        1,
+        outcome,
+        errorCode,
+      );
     },
   );
 
@@ -459,7 +447,7 @@ describe('finishRun', () => {
 
     await finishRun({ id: 1, status: RunStatus.Idle });
 
-    expect(mockCaptureEvent).not.toHaveBeenCalled();
+    expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
   });
 
   it('derives tasks.state completed via the shared sync when the job completes', async () => {

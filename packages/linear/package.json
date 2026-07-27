@@ -21,6 +21,7 @@
     "@roomote/cloud-agents": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/redis": "workspace:^",
+    "@roomote/telemetry": "workspace:^",
     "@roomote/types": "workspace:^",
     "zod": "^3.25.76"
   },

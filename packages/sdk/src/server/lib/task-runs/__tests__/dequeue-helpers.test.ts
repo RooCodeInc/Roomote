@@ -11,7 +11,7 @@ const {
   mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
-  mockCaptureEvent,
+  mockCaptureTaskSettled,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -22,7 +22,7 @@ const {
   mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
-  mockCaptureEvent: vi.fn(),
+  mockCaptureTaskSettled: vi.fn(),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -91,7 +91,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/telemetry/server', () => ({
-  captureEvent: (...args: unknown[]) => mockCaptureEvent(...args),
+  captureTaskSettled: (...args: unknown[]) => mockCaptureTaskSettled(...args),
 }));
 
 vi.mock('../notify-source-run-on-settle', () => ({
@@ -459,22 +459,10 @@ describe('notifyCanceledTaskRunOnSettle', () => {
       RunStatus.Canceled,
       'Verify environment',
     );
-    expect(mockCaptureEvent).toHaveBeenCalledWith('task_settled', {
-      userId: 'user-123',
-      properties: {
-        taskType: TaskPayloadKind.StandardTask,
-        workflow: 'standard',
-        surface: 'web',
-        trigger: 'manual',
-        runKind: 'fresh',
-        harness: null,
-        modelProvider: 'openai',
-        model: 'gpt-5.4',
-        computeProvider: null,
-        outcome: RunStatus.Canceled,
-        durationMs: null,
-      },
-    });
+    expect(mockCaptureTaskSettled).toHaveBeenCalledWith(
+      taskRun.id,
+      RunStatus.Canceled,
+    );
   });
 });
 
