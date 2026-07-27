@@ -5,14 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
-import {
-  Button,
-  Loader2,
-  ArrowRight,
-  Card,
-  CardContent,
-  Checkbox,
-} from '@/components/system';
+import { Button, Loader2, ArrowRight, Checkbox } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useUser } from '@/hooks/useUser';
 import { StepTitle } from '../setup/StepTitle';
@@ -89,27 +82,21 @@ export function StepInvoke({
       </div>
 
       {!isCloudAdmin && (
-        <Card>
-          <CardContent className="space-y-4">
-            <p className="text-sm font-semibold">Optional preferences</p>
-            <div className="flex items-start gap-2">
-              <Checkbox
-                aria-label="Toggle product updates"
-                className="mt-0.5"
-                checked={productUpdatesEnabled}
-                onCheckedChange={(checked) =>
-                  setProductUpdatesEnabled(checked === true)
-                }
-              />
-              <div className="space-y-0.5">
-                <p className="text-sm font-semibold">Product updates</p>
-                <p className="text-sm text-muted-foreground">
-                  Get occasional Roomote product news and updates.
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="space-y-2 text-sm mt-8 pl-0.5 text-foreground/80">
+          <label className="flex gap-2 item-start cursor-pointer">
+            <Checkbox
+              aria-label="Toggle product updates"
+              className="mt-0.5"
+              checked={productUpdatesEnabled}
+              onCheckedChange={(checked) =>
+                setProductUpdatesEnabled(checked === true)
+              }
+            />
+            <span>
+              Get occasional emails from Roomote with product updates.
+            </span>
+          </label>
+        </div>
       )}
 
       <div className="flex mt-3">
