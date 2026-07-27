@@ -246,6 +246,7 @@ describe('maybeSendCommunicationChannelPost', () => {
       channelId: 'channel-other',
       isExplicitChannel: true,
       actingUserId: 'user-1',
+      requireSendPermission: true,
     });
     expect(discordPostMessageMock).toHaveBeenCalledWith({
       channelId: 'channel-other',

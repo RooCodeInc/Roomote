@@ -1291,13 +1291,15 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
   }
 
   /**
-   * Returns whether a guild member can view and send to a specific channel.
-   * `null` means the membership or permission state could not be verified.
+   * Returns whether a guild member can access a specific channel, optionally
+   * requiring message-send permission for write operations. `null` means the
+   * membership or permission state could not be verified.
    */
   async canUserAccessChannel(input: {
     guildId: string;
     channelId: string;
     userId: string;
+    requireSendPermission?: boolean;
   }): Promise<boolean | null> {
     try {
       const [member, roles, channel] = await Promise.all([
@@ -1361,7 +1363,8 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       );
       return (
         (value & DISCORD_PERMISSION_BITS.view_channel) !== 0n &&
-        (value & DISCORD_PERMISSION_BITS.send_messages) !== 0n
+        (!input.requireSendPermission ||
+          (value & DISCORD_PERMISSION_BITS.send_messages) !== 0n)
       );
     } catch (error) {
       if (error instanceof DiscordApiError) {

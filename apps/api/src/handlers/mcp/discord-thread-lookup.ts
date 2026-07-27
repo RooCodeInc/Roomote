@@ -151,6 +151,7 @@ export async function assertDiscordChannelAccess(options: {
   isExplicitChannel: boolean;
   actingUserId?: string | null;
   requireHistoryPermission?: boolean;
+  requireSendPermission?: boolean;
 }): Promise<DiscordChannel> {
   let channel;
   try {
@@ -221,6 +222,7 @@ export async function assertDiscordChannelAccess(options: {
     guildId: channel.guildId,
     channelId: options.channelId,
     userId: linkedDiscordUserId,
+    ...(options.requireSendPermission ? { requireSendPermission: true } : {}),
   });
   if (hasChannelAccess === false) {
     throw new McpProxyError(

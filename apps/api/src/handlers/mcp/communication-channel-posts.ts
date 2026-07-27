@@ -211,6 +211,7 @@ async function sendDiscordChannelPost(params: {
         channelId: params.parsedBody.channel.replace(/^#/, ''),
         isExplicitChannel: true,
         actingUserId: params.taskRun.actingUserId,
+        requireSendPermission: true,
       });
       if (!targetChannel.guildId) {
         return jsonResponse(
