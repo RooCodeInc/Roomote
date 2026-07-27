@@ -4,6 +4,7 @@ const {
   mockSubscribe,
   mockRequestInstancePing,
   mockCaptureEvent,
+  mockCaptureActivationSetupCompleted,
   mockEnsureManagedReviewer,
   mockTransaction,
   mockGetSetupBaseStatus,
@@ -11,6 +12,7 @@ const {
   mockSubscribe: vi.fn(),
   mockRequestInstancePing: vi.fn(),
   mockCaptureEvent: vi.fn(),
+  mockCaptureActivationSetupCompleted: vi.fn(),
   mockEnsureManagedReviewer: vi.fn(),
   mockGetSetupBaseStatus: vi.fn().mockResolvedValue({ setupNewState: null }),
   mockTransaction: vi.fn(async (callback: (tx: unknown) => Promise<void>) =>
@@ -63,6 +65,8 @@ vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
 
 vi.mock('@roomote/telemetry/server', () => ({
   captureEvent: (...args: unknown[]) => mockCaptureEvent(...args),
+  captureActivationSetupCompleted: (...args: unknown[]) =>
+    mockCaptureActivationSetupCompleted(...args),
 }));
 
 vi.mock('@/lib/server/env', () => ({
