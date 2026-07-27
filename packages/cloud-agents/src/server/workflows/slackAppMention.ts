@@ -65,7 +65,7 @@ export function buildSlackMessageInstructions({
     <rule>Task UI commentary, todo updates, internal reasoning, and ordinary tool results are not visible in Slack. Slack-visible actions for the current turn are \`send_chat_reply\`, \`send_chat_reaction_emoji\`, \`post_to_channel\`, and Slack-rendered \`request_user_input\` prompts.</rule>
     <rule>Intermediary updates belong in the \`commentary\` channel. They do not satisfy Slack turns and they are not Slack-visible replies.</rule>
     <rule>Before calling a Slack-visible reply tool, choose the current lifecycle purpose for the latest Slack user turn: \`ack\`, \`progress\`, \`closeout\`, or \`clarification\`. The message content should match that purpose.</rule>
-    <rule>\`ack\`, \`progress\`, and \`clarification\` replies keep the Slack turn open. Obey the prompt-provided \`<slack_turn_policy>\` block for whether the current Slack message can receive emoji reactions. Before finalizing the task, use \`send_chat_reply\` with \`purpose\` set to \`closeout\`. When structured or private input is needed, use \`request_user_input\` only to collect that input; it does not replace the closeout.</rule>
+    <rule>\`ack\` and \`progress\` replies keep the Slack turn open, as does a \`clarification\` you can keep working past; a \`clarification\` whose answer the next step genuinely depends on ends the turn. Obey the prompt-provided \`<slack_turn_policy>\` block for whether the current Slack message can receive emoji reactions. Before finalizing the task, use \`send_chat_reply\` with \`purpose\` set to \`closeout\`. When structured or private input is needed, use \`request_user_input\` only to collect that input; it does not replace the closeout.</rule>
   </slack_visibility_contract>
 
   <slack_turn_lifecycle>
@@ -205,7 +205,7 @@ export function buildChatProviderMessageInstructions(
     <rule>Task UI commentary, todo updates, internal reasoning, and ordinary tool results are not visible in ${label}. ${label}-visible lifecycle replies use \`send_chat_reply\`. Lightweight emoji acks use \`send_chat_reaction_emoji\` when reactions are allowed for the current turn.</rule>
     <rule>Intermediary updates belong in the \`commentary\` channel. They do not satisfy ${label} turns and they are not ${label}-visible replies.</rule>
     <rule>Before calling \`send_chat_reply\`, choose the current lifecycle purpose: \`ack\`, \`progress\`, \`closeout\`, or \`clarification\`. The message content should match that purpose.</rule>
-    <rule>\`ack\`, \`progress\`, and \`clarification\` replies keep the ${label} turn open. Before finalizing the task, use \`send_chat_reply\` with \`purpose\` set to \`closeout\`. When structured or private input is needed, use \`request_user_input\` only to collect that input; it does not replace the closeout.</rule>
+    <rule>\`ack\` and \`progress\` replies keep the ${label} turn open, as does a \`clarification\` you can keep working past; a \`clarification\` whose answer the next step genuinely depends on ends the turn. Before finalizing the task, use \`send_chat_reply\` with \`purpose\` set to \`closeout\`. When structured or private input is needed, use \`request_user_input\` only to collect that input; it does not replace the closeout.</rule>
   </${tag}_visibility_contract>
 
   <${tag}_turn_lifecycle>

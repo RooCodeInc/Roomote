@@ -95,7 +95,7 @@ describe('slackAppMention', () => {
       'Before calling a Slack-visible reply tool, choose the current lifecycle purpose for the latest Slack user turn: `ack`, `progress`, `closeout`, or `clarification`. The message content should match that purpose.',
     );
     expect(result.harnessInstructions).toContain(
-      '`ack`, `progress`, and `clarification` replies keep the Slack turn open. Obey the prompt-provided `<slack_turn_policy>` block for whether the current Slack message can receive emoji reactions.',
+      '`ack` and `progress` replies keep the Slack turn open, as does a `clarification` you can keep working past; a `clarification` whose answer the next step genuinely depends on ends the turn. Obey the prompt-provided `<slack_turn_policy>` block for whether the current Slack message can receive emoji reactions.',
     );
     expect(result.harnessInstructions).toContain('<slack_turn_lifecycle>');
     expect(result.harnessInstructions).toContain(
