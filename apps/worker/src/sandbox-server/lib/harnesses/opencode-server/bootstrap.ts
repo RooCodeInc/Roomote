@@ -149,15 +149,18 @@ function normalizeOpenCodeMcpServers(
   mcpServers: Record<string, DirectMcpConfig>,
   runtimeEnv: Record<string, string>,
 ): OpenCodeConfigMcpServer[] {
-  return Object.entries(mcpServers).map(([name, config]) => {
+  return Object.entries(mcpServers).map(([rawName, config]) => {
     // Every operator-supplied string below is serialized verbatim into the
     // OpenCode config file, and OpenCode resolves `{env:VAR}` anywhere in that
     // text -- not only in header values. Redact reserved references in all of
-    // them, including the fields that need no other conversion.
+    // them, including the fields that need no other conversion and the map
+    // keys, which are serialized just as literally as the values they key.
+    const name = redactReservedOpenCodeEnvReferences(rawName);
+
     if (config.type === 'stdio') {
       const environment = Object.fromEntries(
         Object.entries(config.env).map(([envName, envValue]) => [
-          envName,
+          redactReservedOpenCodeEnvReferences(envName),
           redactReservedOpenCodeEnvReferences(envValue),
         ]),
       );
@@ -174,15 +177,19 @@ function normalizeOpenCodeMcpServers(
     }
 
     const headers = Object.fromEntries(
-      Object.entries(config.headers).map(([headerName, headerValue]) => [
-        headerName,
-        convertHeaderEnvSubstitutions({
-          serverName: name,
+      Object.entries(config.headers).map(([rawHeaderName, headerValue]) => {
+        const headerName = redactReservedOpenCodeEnvReferences(rawHeaderName);
+
+        return [
           headerName,
-          value: headerValue,
-          runtimeEnv,
-        }),
-      ]),
+          convertHeaderEnvSubstitutions({
+            serverName: name,
+            headerName,
+            value: headerValue,
+            runtimeEnv,
+          }),
+        ];
+      }),
     );
 
     return {

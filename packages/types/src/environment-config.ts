@@ -435,18 +435,23 @@ export const environmentMcpServerConfigSchema = z.union([
 /**
  * Every operator-supplied string in an MCP entry is serialized verbatim into
  * the harness config, where both substitution engines resolve references
- * against the sandbox environment. Collect them all, not just header values.
+ * against the sandbox environment.
+ *
+ * Map *keys* are serialized just as literally as their values, and OpenCode
+ * substitutes over the whole config text, so a reference in a header name or
+ * an environment variable name leaks exactly as readily as one in a value.
+ * Collect keys and values alike.
  */
 function collectMcpConfigStrings(config: EnvironmentMcpServerConfig): string[] {
   if ('command' in config) {
     return [
       config.command,
       ...(config.args ?? []),
-      ...Object.values(config.env ?? {}),
+      ...Object.entries(config.env ?? {}).flat(),
     ];
   }
 
-  return [config.url, ...Object.values(config.headers ?? {})];
+  return [config.url, ...Object.entries(config.headers ?? {}).flat()];
 }
 
 export const environmentMcpServersSchema = z
@@ -455,7 +460,9 @@ export const environmentMcpServersSchema = z
     for (const [serverName, config] of Object.entries(servers)) {
       const reserved = Array.from(
         new Set(
-          collectMcpConfigStrings(config).flatMap(collectReservedEnvReferences),
+          [serverName, ...collectMcpConfigStrings(config)].flatMap(
+            collectReservedEnvReferences,
+          ),
         ),
       );
 
