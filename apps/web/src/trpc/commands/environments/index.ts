@@ -41,6 +41,7 @@ import {
   getMissingEnvironmentRepositoryError,
   isExitedRunStatus,
   normalizeRepositorySelection,
+  resolveEvalHarnessSelection,
 } from '@roomote/types';
 import * as GitHub from '@roomote/github';
 import {
@@ -797,6 +798,7 @@ export async function startEnvironmentDefinitionTaskCommand(
     repositoryIds: string[];
     environmentId?: string;
     changeRequest?: string;
+    selectedModelId?: string;
   },
 ) {
   assertAdmin(auth);
@@ -818,6 +820,13 @@ export async function startEnvironmentDefinitionTaskCommand(
   const workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
     selectedRepositoryFullNames,
   );
+  const modelSelection = resolveEvalHarnessSelection({
+    model: input.selectedModelId,
+  });
+
+  if (!modelSelection.ok) {
+    throw new Error(modelSelection.error);
+  }
 
   let prompt = buildCreateEnvironmentDefinitionPrompt(
     selectedRepositoryFullNames,
@@ -860,6 +869,7 @@ export async function startEnvironmentDefinitionTaskCommand(
   const launchResult = await enqueueTask({
     title,
     task: {
+      ...(modelSelection.harness ? { harness: modelSelection.harness } : {}),
       type: TaskPayloadKind.StandardTask,
       payload: {
         ...workspacePayload,
@@ -867,6 +877,9 @@ export async function startEnvironmentDefinitionTaskCommand(
           ? { environmentDefinitionId: input.environmentId }
           : {}),
         description: prompt,
+        ...(modelSelection.harnessModelOverrides
+          ? { harnessModelOverrides: modelSelection.harnessModelOverrides }
+          : {}),
       },
     },
     initiator: { kind: 'user', userId },

@@ -12,7 +12,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/system';
-import { cn } from '@/lib/utils';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 
 type ModelSelectProps = {
@@ -64,11 +63,7 @@ export function ModelSelect({
       onValueChange={onValueChange}
       disabled={disabled || isPending || !data}
     >
-      <SelectTrigger
-        size="sm"
-        className={cn('w-40', className)}
-        aria-label={ariaLabel}
-      >
+      <SelectTrigger size="sm" className={className} aria-label={ariaLabel}>
         <SelectValue placeholder="Model" />
       </SelectTrigger>
       <SelectContent>
