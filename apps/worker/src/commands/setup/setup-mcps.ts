@@ -6,7 +6,7 @@ import {
   type EnvironmentMcpServers,
 } from '@roomote/types';
 
-import { substituteEnvVars } from '../../env';
+import { collectEnvVarReferences, substituteEnvVars } from '../../env';
 
 // The Roomote MCP server is compiled into the worker's dist directory.
 // Resolve its path relative to the running worker script (process.argv[1]).
@@ -90,13 +90,62 @@ function filterMcpEnvLookup(
   );
 }
 
+/**
+ * Warn about `${VAR}` references that will not be substituted, so a refused
+ * or misspelled reference fails loudly instead of reaching the MCP server as
+ * a literal `${VAR}` string with no trace anywhere.
+ */
+function warnUnresolvableConfigReferences(options: {
+  serverName: string;
+  field: 'env' | 'headers';
+  values: Record<string, string>;
+  lookup: Record<string, string> | undefined;
+}): void {
+  const warnedNames = new Set<string>();
+
+  for (const value of Object.values(options.values)) {
+    for (const name of collectEnvVarReferences(value)) {
+      if (warnedNames.has(name)) {
+        continue;
+      }
+
+      warnedNames.add(name);
+
+      if (isRestrictedMcpEnvVarName(name)) {
+        console.warn(
+          `[resolveBuiltInMcpServers] Custom MCP '${options.serverName}' ${options.field}: ` +
+            `\${${name}} was NOT substituted because the name is restricted ` +
+            `(names ending in _SECRET or _PRIVATE_KEY, and reserved runtime names, ` +
+            `are never injectable into MCP config). Rename the deployment ` +
+            `variable (for example ${name.replace(/_(SECRET|PRIVATE_KEY)$/i, '_KEY')}) ` +
+            `and update the reference; the literal text was passed through instead.`,
+        );
+      } else if (!options.lookup || !(name in options.lookup)) {
+        console.warn(
+          `[resolveBuiltInMcpServers] Custom MCP '${options.serverName}' ${options.field}: ` +
+            `\${${name}} is not defined in the task environment; the literal ` +
+            `reference was passed through unchanged.`,
+        );
+      }
+    }
+  }
+}
+
 function resolveConfigValues(
   values: Record<string, string> | undefined,
   lookup: Record<string, string> | undefined,
+  context: { serverName: string; field: 'env' | 'headers' },
 ): Record<string, string> | undefined {
   if (!values) {
     return undefined;
   }
+
+  warnUnresolvableConfigReferences({
+    serverName: context.serverName,
+    field: context.field,
+    values,
+    lookup,
+  });
 
   const safeLookup = filterMcpEnvLookup(lookup);
 
@@ -374,14 +423,20 @@ export function resolveBuiltInMcpServers(
           args: config.args,
           env: {
             ...stdioEnvExtras,
-            ...resolveConfigValues(config.env, taskEnv),
+            ...resolveConfigValues(config.env, taskEnv, {
+              serverName: name,
+              field: 'env',
+            }),
           },
         };
       } else {
         resolvedMcps[name] = {
           type: 'streamable-http',
           url: config.url,
-          headers: resolveConfigValues(config.headers, taskEnv),
+          headers: resolveConfigValues(config.headers, taskEnv, {
+            serverName: name,
+            field: 'headers',
+          }),
         };
       }
     }

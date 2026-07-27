@@ -128,6 +128,76 @@ describe('resolveBuiltInMcpServers', () => {
     expect(docsConfig.headers['X-MCP-Region']).toBe('us-east-1');
   });
 
+  it('warns when a custom MCP env reference uses a restricted variable name', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const parsed = {
+      mcpServers: resolveBuiltInMcpServers(
+        {
+          REDDIT_CLIENT_SECRET: 'super-secret',
+        },
+        undefined,
+        {
+          reddit: {
+            command: 'npx',
+            args: ['-y', 'reddit-mcp-buddy'],
+            env: {
+              REDDIT_CLIENT_SECRET: '${REDDIT_CLIENT_SECRET}',
+            },
+          },
+        },
+      ),
+    };
+
+    const redditConfig = parsed.mcpServers.reddit as {
+      env: Record<string, string>;
+    };
+    expect(redditConfig.env.REDDIT_CLIENT_SECRET).toBe(
+      '${REDDIT_CLIENT_SECRET}',
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Custom MCP 'reddit' env: ${REDDIT_CLIENT_SECRET} was NOT substituted",
+      ),
+    );
+  });
+
+  it('warns when a custom MCP env reference is not defined in the task env', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    resolveBuiltInMcpServers({ MCP_REGION: 'us-east-1' }, undefined, {
+      internal: {
+        command: 'npx',
+        args: ['-y', '@acme/internal-mcp'],
+        env: {
+          API_KEY: '${MCP_API_KYE}',
+        },
+      },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Custom MCP 'internal' env: ${MCP_API_KYE} is not defined in the task environment",
+      ),
+    );
+  });
+
+  it('does not warn when custom MCP references all resolve', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    resolveBuiltInMcpServers({ MCP_API_KEY: 'secret123' }, undefined, {
+      internal: {
+        command: 'npx',
+        args: ['-y', '@acme/internal-mcp'],
+        env: {
+          API_KEY: '${MCP_API_KEY}',
+        },
+      },
+    });
+
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
   it('leaves unresolved custom streamable HTTP MCP headers intact', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
