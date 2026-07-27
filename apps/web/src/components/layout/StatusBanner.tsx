@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import {
   ArrowRight,
+  Button,
   CircleAlert,
   Info,
   OctagonAlert,
@@ -67,13 +68,13 @@ export function StatusBanner() {
 
   return (
     <div
-      className="bg-card h-(--status-banner-height) px-1"
+      className="bg-card h-(--status-banner-height) px-2"
       role="alert"
       aria-live="polite"
     >
       <div
         className={cn(
-          'flex h-full items-center gap-2 rounded-b-xl px-3 text-sm',
+          'flex h-full items-center gap-2 rounded-b-3xl px-6 text-sm cursor-default',
           className,
         )}
       >
@@ -95,9 +96,11 @@ export function StatusBanner() {
             Details <ArrowRight aria-hidden="true" className="size-3" />
           </a>
         ) : null}
-        <button
+        <Button
           type="button"
-          className="ml-auto shrink-0"
+          size="icon"
+          variant="ghost"
+          className="hover:bg-foreground/20 ml-auto"
           aria-label="Dismiss notification"
           onClick={() => {
             localStorage.setItem(DISMISSED_INCIDENTS_KEY, incident.id);
@@ -105,7 +108,7 @@ export function StatusBanner() {
           }}
         >
           <X aria-hidden="true" className="size-4" />
-        </button>
+        </Button>
       </div>
     </div>
   );

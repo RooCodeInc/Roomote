@@ -428,7 +428,7 @@
     --viewport-height: 100dvh;
   }
   --effective-viewport-height: var(--viewport-height);
-  --status-banner-height: 2rem;
+  --status-banner-height: 3rem;
 
   /* Computed Heights */
   --below-header: calc(var(--effective-viewport-height) - var(--header-height));
