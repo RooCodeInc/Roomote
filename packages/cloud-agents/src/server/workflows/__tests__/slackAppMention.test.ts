@@ -202,6 +202,15 @@ describe('slackAppMention', () => {
       'Use `send_chat_reply` for lifecycle replies in the originating Slack thread when the reply needs words: early acknowledgements, useful progress, closeouts, and lightweight clarifications. Set its `purpose` to match the lifecycle purpose.',
     );
     expect(result.harnessInstructions).toContain(
+      'When a lifecycle reply is due, send it before running further tools. The only non-reply exception is `tool_search` when the needed Slack reply/post tool is not visible. This orders the reply ahead of more work; it does not cap the work you may do afterward in the same turn.',
+    );
+    expect(result.harnessInstructions).toContain(
+      'Sending an `ack`, `progress`, or `clarification` reply does not end your turn. Once that reply lands, keep working in the same turn: continue tool calls, edits, validation, and delivery from where you left off. Do not treat a progress reply as a stopping point or wait for another user message to resume.',
+    );
+    expect(result.harnessInstructions).toContain(
+      'Only a `closeout` reply, or an explicit user instruction to pause or stop, ends the turn. If the run still owes implementation, validation, proof, or delivery work, a reply that describes what you are about to do next is a `progress` reply and must be followed by actually doing it in the same turn.',
+    );
+    expect(result.harnessInstructions).not.toContain(
       'Do not run more tools first. The only non-reply exception is `tool_search` when the needed Slack reply/post tool is not visible.',
     );
     expect(result.harnessInstructions).toContain(
