@@ -134,6 +134,7 @@ export interface SandboxSendPromptInput {
 
 export interface SandboxSteerTaskInput {
   prompt: string;
+  quoteText: string;
   images?: string[];
   userName?: string;
 }

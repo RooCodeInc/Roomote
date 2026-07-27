@@ -66,6 +66,14 @@ const sendPromptInputSchema = z
         path: ['prompt'],
       });
     }
+
+    if (data.source === 'web' && typeof data.quoteText !== 'string') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Web prompts must include the original text for reply quotes',
+        path: ['quoteText'],
+      });
+    }
   });
 
 /**

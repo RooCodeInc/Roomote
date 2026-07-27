@@ -1,7 +1,4 @@
-import {
-  getSlackThreadTsFromTaskPayload,
-  normalizeTranscriptUserText,
-} from '@roomote/types';
+import { getSlackThreadTsFromTaskPayload } from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
 import { hasSlackThreadReplyContext } from '@roomote/slack/client';
 import { getRoomoteConfig } from '../../mcp/roomote-mcp-server/config';
@@ -9,14 +6,6 @@ import {
   clearSlackReplyQuote,
   trackSlackReplyQuote,
 } from '../../mcp/roomote-mcp-server/slack-api-client';
-
-/**
- * Extract the user-visible user turn so routing and idle-session context never
- * leak into the stored Slack reply quote.
- */
-function normalizeSlackQuoteText(text: string): string {
-  return normalizeTranscriptUserText(text) ?? text;
-}
 
 async function getSlackQuoteTrackingConfig(params: {
   runId: number;
@@ -77,7 +66,7 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
 
     await trackSlackReplyQuote(roomoteConfig, {
       runId,
-      text: normalizeSlackQuoteText(text),
+      text,
       userName: userName?.trim() || 'Someone',
     });
     return true;
