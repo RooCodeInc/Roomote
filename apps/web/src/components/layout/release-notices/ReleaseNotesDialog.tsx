@@ -177,16 +177,26 @@ export function ReleaseNotesDialog({
           mode={mode}
         />
 
-        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
-          <Button variant="outline" asChild>
-            <a href={htmlUrl} target="_blank" rel="noreferrer">
-              Go to the release
-              <SquareArrowOutUpRight />
-            </a>
-          </Button>
-          <Button type="button" onClick={() => onOpenChange(false)}>
-            Close
-          </Button>
+        <DialogFooter className="flex-col gap-2 md:flex-row md:justify-end">
+          <a
+            href="https://discord.gg/KNw7Sz75UK"
+            target="_blank"
+            className="order-2 text-sm underline md:order-1 md:mr-auto"
+            rel="noreferrer"
+          >
+            Join us on Discord
+          </a>
+          <div className="order-1 flex justify-end gap-2 md:order-2">
+            <Button variant="outline" asChild>
+              <a href={htmlUrl} target="_blank" rel="noreferrer">
+                Go to the release
+                <SquareArrowOutUpRight />
+              </a>
+            </Button>
+            <Button type="button" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
