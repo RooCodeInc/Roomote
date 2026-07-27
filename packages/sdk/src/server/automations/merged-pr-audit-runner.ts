@@ -112,6 +112,7 @@ type PromptBuilderParams = {
 type MergedPullRequestAuditConfig = {
   automationKey: MergedPullRequestAuditAutomationKey;
   buildPrompt: (params: PromptBuilderParams) => string;
+  notifySlack?: boolean;
   suggestionSource?: Extract<
     TaskSuggestionSource,
     'security_auditor' | 'code_quality_auditor'
@@ -626,7 +627,10 @@ async function processDeployment(
             }),
             trigger: 'scheduled',
             ...(destination.provider === 'slack'
-              ? { notifySlack: true, slackChannel: channelId }
+              ? {
+                  notifySlack: config.notifySlack ?? true,
+                  slackChannel: channelId,
+                }
               : {}),
             ...buildDestinationTaskPayloadFields(destination),
             suggestionSource: config.suggestionSource ?? config.automationKey,

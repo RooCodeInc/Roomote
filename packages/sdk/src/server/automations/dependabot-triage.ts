@@ -122,7 +122,7 @@ export const dependabotTriageJob = createScheduledTriageJob({
           }),
           trigger: 'scheduled',
           ...(destination.provider === 'slack'
-            ? { notifySlack: true, slackChannel: channelId }
+            ? { notifySlack: false, slackChannel: channelId }
             : {}),
           suggestionSource: 'dependabot_triage',
           visibleInTranscript: false,

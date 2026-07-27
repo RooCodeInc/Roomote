@@ -41,4 +41,5 @@ ${params.recentThreadFeedback?.trim() ? `Recent feedback from earlier Security A
 export const securityAuditorJob = createMergedPullRequestAuditJob({
   automationKey: 'security_auditor',
   buildPrompt: buildSecurityAuditorPrompt,
+  notifySlack: false,
 });
