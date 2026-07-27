@@ -123,7 +123,7 @@ export const codeqlTriageJob = createScheduledTriageJob({
           }),
           trigger: 'scheduled',
           ...(destination.provider === 'slack'
-            ? { notifySlack: true, slackChannel: channelId }
+            ? { notifySlack: false, slackChannel: channelId }
             : {}),
           suggestionSource: 'codeql_triage',
           visibleInTranscript: false,

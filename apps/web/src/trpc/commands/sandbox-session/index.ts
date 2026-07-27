@@ -40,7 +40,6 @@ import {
 } from '@/lib/server/out-of-band-context';
 import { getUserDisplayName } from '@/lib/user-display-name';
 
-import { getArtifactsForTaskCommand } from '../artifacts';
 import { restoreSnapshotResumeVisiblePromptFields } from '../snapshot-visible-prompt';
 import {
   resolveTaskByIdAccessCommand,
@@ -555,7 +554,6 @@ export async function getSandboxSessionByTaskIdCommand(
       task: null,
       taskRun: null,
       prompt: null,
-      artifacts: [],
       sessionState: 'not-found' as const,
       refetchInterval: undefined,
     };
@@ -597,23 +595,20 @@ export async function getSandboxSessionByTaskIdCommand(
     ? getEnvironmentDefinitionIdFromPayload(taskRun.payload)
     : null;
 
-  const [artifacts, onboardingEnvironment] = await Promise.all([
-    getArtifactsForTaskCommand(auth, {
-      taskId: task.id,
-    }).catch(() => []),
-    onboardingEnvironmentId
-      ? db.query.environments.findFirst({
-          where: eq(environments.id, onboardingEnvironmentId),
-          columns: {
-            name: true,
-            isVerified: true,
-            verificationTaskId: true,
-            verifiedAt: true,
-            verificationError: true,
-          },
-        })
-      : Promise.resolve(null),
-  ]);
+  // Artifacts are fetched by the client after the shell is visible. They can
+  // be numerous and are only needed by optional transcript links and panels.
+  const onboardingEnvironment = onboardingEnvironmentId
+    ? await db.query.environments.findFirst({
+        where: eq(environments.id, onboardingEnvironmentId),
+        columns: {
+          name: true,
+          isVerified: true,
+          verificationTaskId: true,
+          verifiedAt: true,
+          verificationError: true,
+        },
+      })
+    : null;
 
   const activeVerificationTaskRun = onboardingEnvironment?.verificationTaskId
     ? await db.query.taskRuns.findFirst({
@@ -730,7 +725,6 @@ export async function getSandboxSessionByTaskIdCommand(
         resolvedPreviewRuntimeConfig.effective.previewProxySubdomainSuffix,
     },
     prompt,
-    artifacts,
     onboardingEnvironment: onboardingEnvironmentWithVerification,
     sessionState,
     refetchInterval,

@@ -307,6 +307,51 @@ describe('DiscordCommunicationProvider', () => {
     });
   });
 
+  it('reuses effective channel permissions for linked-user access checks', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+
+    await expect(
+      provider.canUserAccessChannel({
+        guildId: server.guildId,
+        channelId,
+        userId: server.bot.id,
+        requireSendPermission: true,
+      }),
+    ).resolves.toBe(true);
+
+    server.addChannel({
+      id: channelId,
+      guild_id: server.guildId,
+      name: 'read-only',
+      type: 0,
+      permission_overwrites: [
+        {
+          id: server.bot.id,
+          type: 1,
+          allow: '0',
+          deny: String(1n << 11n),
+        },
+      ],
+    });
+
+    await expect(
+      provider.canUserAccessChannel({
+        guildId: server.guildId,
+        channelId,
+        userId: server.bot.id,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      provider.canUserAccessChannel({
+        guildId: server.guildId,
+        channelId,
+        userId: server.bot.id,
+        requireSendPermission: true,
+      }),
+    ).resolves.toBe(false);
+  });
+
   it('applies the everyone overwrite separately from member role overwrites', async () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000001';

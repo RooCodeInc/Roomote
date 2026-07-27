@@ -5,6 +5,10 @@ const setQueryDataMock = vi.fn();
 const invalidateQueriesMock = vi.fn().mockResolvedValue(undefined);
 const removeQueriesMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
+const mutateMock = vi.fn();
+const userState = vi.hoisted(() => ({
+  user: null as { cloudEnabled: boolean; isAdmin: boolean } | null,
+}));
 
 const queryKeys = {
   onboardingStatus: ['onboarding.status'],
@@ -33,7 +37,8 @@ vi.mock('@tanstack/react-query', async () => {
       },
     }),
     useMutation: (options: { onSuccess?: () => Promise<void> | void }) => ({
-      mutate: async () => {
+      mutate: async (input?: unknown) => {
+        mutateMock(input);
         await options.onSuccess?.();
       },
       isPending: false,
@@ -73,6 +78,10 @@ vi.mock('../setup/StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => userState,
+}));
+
 vi.mock('@/components/system', () => ({
   Button: ({
     children,
@@ -86,6 +95,25 @@ vi.mock('@/components/system', () => ({
     <button disabled={disabled} onClick={onClick} type="button">
       {children}
     </button>
+  ),
+  Card: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  CardContent: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  Checkbox: ({
+    checked,
+    onCheckedChange,
+    ...props
+  }: {
+    checked?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+  } & Record<string, unknown>) => (
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(event) => onCheckedChange?.(event.target.checked)}
+      aria-label={String(props['aria-label'] ?? 'checkbox')}
+    />
   ),
   AppWindow: () => <span>AppWindow</span>,
   BrandIcon: ({ name }: { name: string }) => (
@@ -103,6 +131,7 @@ describe('Onboarding StepInvoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateQueriesMock.mockResolvedValue(undefined);
+    userState.user = null;
   });
 
   it('optimistically completes onboarding before routing away', async () => {
@@ -144,6 +173,41 @@ describe('Onboarding StepInvoke', () => {
     });
 
     expect(replaceMock).toHaveBeenCalledWith('/');
+  });
+
+  it('submits product updates as enabled by default', async () => {
+    render(<StepInvoke />);
+
+    fireEvent.click(screen.getByRole('button', { name: /try it out/i }));
+
+    await waitFor(() => {
+      expect(mutateMock).toHaveBeenCalledWith({ productUpdatesEnabled: true });
+    });
+  });
+
+  it('keeps the preference independent when users opt out', async () => {
+    render(<StepInvoke />);
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Toggle product updates' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: /try it out/i }));
+
+    await waitFor(() => {
+      expect(mutateMock).toHaveBeenCalledWith({
+        productUpdatesEnabled: false,
+      });
+    });
+  });
+
+  it('hides product updates for Roomote Cloud admins', () => {
+    userState.user = { cloudEnabled: true, isAdmin: true };
+
+    render(<StepInvoke />);
+
+    expect(
+      screen.queryByRole('checkbox', { name: 'Toggle product updates' }),
+    ).not.toBeInTheDocument();
   });
 
   it('uses the configured GitHub app identity in its invocation example', () => {

@@ -41,9 +41,13 @@ import {
   getMissingEnvironmentRepositoryError,
   isExitedRunStatus,
   normalizeRepositorySelection,
+  resolveEvalHarnessSelection,
 } from '@roomote/types';
 import * as GitHub from '@roomote/github';
-import { captureTaskSettled } from '@roomote/telemetry/server';
+import {
+  captureActivationEnvironmentSaved,
+  captureTaskSettled,
+} from '@roomote/telemetry/server';
 
 import { checkRepoAccess } from '@/lib/server';
 import type { UserAuthSuccess } from '@/types';
@@ -484,49 +488,57 @@ export async function createEnvironmentCommand(
 
   const repoMap = new Map(repositoryRows.map((r) => [r.fullName, r.id]));
 
-  return db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(environments)
-      .values({
-        userId: undefined,
-        name: input.name,
-        description: input.description,
-        config: parseResult.data,
-        createdByUserId: userId,
-        // New environments start configured but not yet verified.
-        isVerified: false,
-        verificationError: null,
-      })
-      .returning({ id: environments.id });
+  const result: EnvironmentResult<{ id: string }> = await db.transaction(
+    async (tx) => {
+      const [created] = await tx
+        .insert(environments)
+        .values({
+          userId: undefined,
+          name: input.name,
+          description: input.description,
+          config: parseResult.data,
+          createdByUserId: userId,
+          // New environments start configured but not yet verified.
+          isVerified: false,
+          verificationError: null,
+        })
+        .returning({ id: environments.id });
 
-    if (!created) {
-      return { success: false, error: 'Failed to create environment' };
-    }
-
-    await createEnvironmentConfigVersionSnapshot(tx, {
-      environmentId: created.id,
-      config: parseResult.data,
-      name: input.name,
-      description: input.description ?? null,
-      source: 'user',
-      createdByUserId: userId,
-    });
-
-    if (configRepos.length > 0) {
-      const mappings = configRepos
-        .filter((configRepo) => repoMap.has(configRepo.repository))
-        .map((configRepo) => ({
-          environmentId: created.id,
-          repositoryId: repoMap.get(configRepo.repository)!,
-        }));
-
-      if (mappings.length > 0) {
-        await tx.insert(environmentRepositoryMappings).values(mappings);
+      if (!created) {
+        return { success: false, error: 'Failed to create environment' };
       }
-    }
 
-    return { success: true, data: { id: created.id } };
-  });
+      await createEnvironmentConfigVersionSnapshot(tx, {
+        environmentId: created.id,
+        config: parseResult.data,
+        name: input.name,
+        description: input.description ?? null,
+        source: 'user',
+        createdByUserId: userId,
+      });
+
+      if (configRepos.length > 0) {
+        const mappings = configRepos
+          .filter((configRepo) => repoMap.has(configRepo.repository))
+          .map((configRepo) => ({
+            environmentId: created.id,
+            repositoryId: repoMap.get(configRepo.repository)!,
+          }));
+
+        if (mappings.length > 0) {
+          await tx.insert(environmentRepositoryMappings).values(mappings);
+        }
+      }
+
+      return { success: true, data: { id: created.id } };
+    },
+  );
+
+  if (result.success) {
+    void captureActivationEnvironmentSaved('settings');
+  }
+
+  return result;
 }
 
 export async function updateEnvironmentCommand(
@@ -786,6 +798,7 @@ export async function startEnvironmentDefinitionTaskCommand(
     repositoryIds: string[];
     environmentId?: string;
     changeRequest?: string;
+    selectedModelId?: string;
   },
 ) {
   assertAdmin(auth);
@@ -807,6 +820,13 @@ export async function startEnvironmentDefinitionTaskCommand(
   const workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
     selectedRepositoryFullNames,
   );
+  const modelSelection = resolveEvalHarnessSelection({
+    model: input.selectedModelId,
+  });
+
+  if (!modelSelection.ok) {
+    throw new Error(modelSelection.error);
+  }
 
   let prompt = buildCreateEnvironmentDefinitionPrompt(
     selectedRepositoryFullNames,
@@ -849,6 +869,7 @@ export async function startEnvironmentDefinitionTaskCommand(
   const launchResult = await enqueueTask({
     title,
     task: {
+      ...(modelSelection.harness ? { harness: modelSelection.harness } : {}),
       type: TaskPayloadKind.StandardTask,
       payload: {
         ...workspacePayload,
@@ -856,6 +877,9 @@ export async function startEnvironmentDefinitionTaskCommand(
           ? { environmentDefinitionId: input.environmentId }
           : {}),
         description: prompt,
+        ...(modelSelection.harnessModelOverrides
+          ? { harnessModelOverrides: modelSelection.harnessModelOverrides }
+          : {}),
       },
     },
     initiator: { kind: 'user', userId },

@@ -868,6 +868,7 @@ export async function recordTaskMessageEnvelope(
 
   const showWidgetFallbackDelivery = extractShowWidgetFallbackDelivery(
     input.envelope,
+    taskId,
   );
 
   await db

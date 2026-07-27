@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { PRODUCT_NAME } from './constants';
 import { gitBranchNameSchema } from './git-ref';
+import { collectReservedEnvReferences } from './reserved-mcp-env-vars';
 
 /**
  * Command
@@ -431,10 +432,56 @@ export const environmentMcpServerConfigSchema = z.union([
   environmentMcpServerStdioSchema,
 ]);
 
-export const environmentMcpServersSchema = z.record(
-  z.string().min(1),
-  environmentMcpServerConfigSchema,
-);
+/**
+ * Every operator-supplied string in an MCP entry is serialized verbatim into
+ * the harness config, where both substitution engines resolve references
+ * against the sandbox environment.
+ *
+ * Map *keys* are serialized just as literally as their values, and OpenCode
+ * substitutes over the whole config text, so a reference in a header name or
+ * an environment variable name leaks exactly as readily as one in a value.
+ * Collect keys and values alike.
+ */
+function collectMcpConfigStrings(config: EnvironmentMcpServerConfig): string[] {
+  if ('command' in config) {
+    return [
+      config.command,
+      ...(config.args ?? []),
+      ...Object.entries(config.env ?? {}).flat(),
+    ];
+  }
+
+  return [config.url, ...Object.entries(config.headers ?? {}).flat()];
+}
+
+export const environmentMcpServersSchema = z
+  .record(z.string().min(1), environmentMcpServerConfigSchema)
+  .superRefine((servers, ctx) => {
+    for (const [serverName, config] of Object.entries(servers)) {
+      const reserved = Array.from(
+        new Set(
+          [serverName, ...collectMcpConfigStrings(config)].flatMap(
+            collectReservedEnvReferences,
+          ),
+        ),
+      );
+
+      if (reserved.length === 0) {
+        continue;
+      }
+
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [serverName],
+        message:
+          `MCP server '${serverName}' references reserved ${PRODUCT_NAME} ` +
+          `runtime environment variables (${reserved.join(', ')}). These name ` +
+          `runtime credentials and cannot be interpolated into MCP server ` +
+          `config. Define your own deployment environment variable under a ` +
+          `different name and reference that instead.`,
+      });
+    }
+  });
 
 export type EnvironmentMcpServerConfig = z.infer<
   typeof environmentMcpServerConfigSchema

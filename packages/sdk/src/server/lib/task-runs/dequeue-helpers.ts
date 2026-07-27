@@ -18,7 +18,6 @@ import {
   type TaskRun,
   db,
   taskRuns,
-  tasks,
   markTaskStartParallelCountEndedAt,
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
@@ -36,7 +35,7 @@ import { createTaskRunGiteaCredentials } from '@roomote/gitea';
 import { createTaskRunAdoCredentials } from '@roomote/ado';
 import {
   releaseTaskRun,
-  resolveTaskCommitAuthor,
+  resolveRunCommitAuthor,
 } from '@roomote/cloud-agents/server';
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
@@ -656,27 +655,9 @@ export function reportBootstrapFailure({
 
 export async function resolveGitAuthor(
   tx: DbTx,
-  taskRun: Pick<TaskRun, 'id' | 'taskId'>,
+  taskRun: Pick<TaskRun, 'id' | 'taskId' | 'actingUserId'>,
 ): Promise<GitAuthor> {
-  const task = await tx.query.tasks.findFirst({
-    where: eq(tasks.id, taskRun.taskId),
-    columns: {
-      commitAuthorKind: true,
-      commitAuthorUserId: true,
-      commitAuthorLogin: true,
-      commitAuthorExternalId: true,
-      prAssigneeLogin: true,
-      actorDisplayName: true,
-    },
-  });
-
-  if (!task) {
-    throw new Error(
-      `Task ${taskRun.taskId} not found while resolving the git author for run ${taskRun.id}.`,
-    );
-  }
-
-  const commitAuthor = await resolveTaskCommitAuthor(tx, task);
+  const commitAuthor = await resolveRunCommitAuthor(tx, taskRun);
 
   return commitAuthor.gitAuthor;
 }

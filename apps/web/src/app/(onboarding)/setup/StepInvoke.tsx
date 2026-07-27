@@ -64,6 +64,8 @@ export function StepInvoke({
   ];
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);
+  const [productUpdatesEnabled, setProductUpdatesEnabled] = useState(true);
+  const isCloudAdmin = user?.cloudEnabled && user.isAdmin;
   const methods = buildInvokeMethods({
     communicationProviders: effectiveCommunicationProviders,
     sourceControlProviders,
@@ -209,26 +211,41 @@ export function StepInvoke({
         ))}
       </div>
 
-      {!user?.cloudEnabled && (
-        <div className="mt-4 flex items-start gap-2 border-t border-foreground/20 pt-4">
-          <Checkbox
-            aria-label="Toggle anonymous analytics"
-            className="mt-0.5"
-            checked={anonymousAnalyticsEnabled}
-            onCheckedChange={(checked) =>
-              setAnonymousAnalyticsEnabled(checked === true)
-            }
-          />
-          <div className="space-y-0.5">
-            <p className="text-sm font-semibold">Anonymous analytics</p>
-            <p className="text-sm text-muted-foreground">
-              Share usage stats with the {PRODUCT_NAME} team for product
-              improvements.
-              <br />
-              No PII, code or conversation content is ever shared. Accrues good
-              karma.
-            </p>
-          </div>
+      {(!user?.cloudEnabled || !isCloudAdmin) && (
+        <div className="space-y-2 text-sm mt-8 pl-0.5 text-foreground/80">
+          {!user?.cloudEnabled && (
+            <label className="flex gap-2 item-start cursor-pointer">
+              <Checkbox
+                aria-label="Toggle anonymous analytics"
+                className="relative top-1"
+                checked={anonymousAnalyticsEnabled}
+                onCheckedChange={(checked) =>
+                  setAnonymousAnalyticsEnabled(checked === true)
+                }
+              />
+              <span>
+                Share anonymous stats with the {PRODUCT_NAME} team for product
+                improvements.
+                <br />
+                No PII, code, or conversation content is ever shared.
+              </span>
+            </label>
+          )}
+          {!isCloudAdmin && (
+            <label className="flex gap-2 item-start cursor-pointer">
+              <Checkbox
+                aria-label="Toggle product updates"
+                className="mt-0.5"
+                checked={productUpdatesEnabled}
+                onCheckedChange={(checked) =>
+                  setProductUpdatesEnabled(checked === true)
+                }
+              />
+              <span>
+                Get occasional emails from Roomote with product updates.
+              </span>
+            </label>
+          )}
         </div>
       )}
 
@@ -236,9 +253,10 @@ export function StepInvoke({
         <Button
           onClick={() => {
             onTryItOut?.();
-            completeSetup.mutate(
-              user?.cloudEnabled ? {} : { anonymousAnalyticsEnabled },
-            );
+            completeSetup.mutate({
+              ...(user?.cloudEnabled ? {} : { anonymousAnalyticsEnabled }),
+              ...(!isCloudAdmin ? { productUpdatesEnabled } : {}),
+            });
           }}
           disabled={completeSetup.isPending}
         >

@@ -61,6 +61,10 @@ vi.mock('@/components/layout/CommandPalette', () => ({
   CommandPalette: () => <div>Command palette</div>,
 }));
 
+vi.mock('@/components/layout/McpOAuthResultFeedback', () => ({
+  McpOAuthResultFeedback: () => null,
+}));
+
 import AuthenticatedLayoutClient from './AuthenticatedLayoutClient';
 
 describe('AuthenticatedLayoutClient', () => {

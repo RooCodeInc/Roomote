@@ -92,7 +92,7 @@ vi.mock('../automation-thread-feedback', () => ({
 vi.mock('../destination', () => ({
   buildDestinationPromptContext: vi.fn(() => ({
     channelTag: 'slack_channel',
-    postToolName: 'post_to_slack_channel',
+    postToolName: 'post_to_channel',
     surfaceLabel: 'Slack',
   })),
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),
@@ -325,6 +325,28 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     expect('sourceControlProvider' in payload!).toBe(false);
     expect(payload!.selectedRepositories).toEqual(['acme/a', 'acme/b']);
     expect(mockUpdateAutomationScanCursor).not.toHaveBeenCalled();
+  });
+
+  it('can silence scan completion while retaining the Slack destination', async () => {
+    const silentJob = createMergedPullRequestAuditJob({
+      automationKey: 'security_auditor',
+      buildPrompt,
+      notifySlack: false,
+    });
+    mockSlackInstallationRows.mockResolvedValueOnce([
+      factRow({ index: 0, provider: 'github', repositoryFullName: 'acme/a' }),
+    ]);
+
+    await silentJob();
+
+    const [payload] = enqueuedPayloads();
+    expect(payload).toMatchObject({
+      notifySlack: false,
+      slackChannel: 'C123',
+    });
+    expect(mockEnqueueTask.mock.calls[0]?.[0]).toMatchObject({
+      channels: { slackChannelId: 'C123' },
+    });
   });
 
   it('advances the page cursor once, after every partition has launched', async () => {

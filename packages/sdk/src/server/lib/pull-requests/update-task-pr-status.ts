@@ -1,4 +1,14 @@
-import { db, taskPullRequests, and, eq } from '@roomote/db/server';
+import {
+  db,
+  taskPullRequests,
+  tasks,
+  and,
+  eq,
+  isNull,
+  ne,
+  or,
+} from '@roomote/db/server';
+import { captureActivationPrMerged } from '@roomote/telemetry/server';
 import type { PullRequestStatus, SourceControlProvider } from '@roomote/types';
 
 /**
@@ -12,14 +22,56 @@ export async function updateTaskPrStatus(
   prNumber: number,
   status: PullRequestStatus,
 ): Promise<void> {
-  await db
+  const matchingStatus = and(
+    eq(taskPullRequests.sourceControlProvider, provider),
+    eq(taskPullRequests.repository, repository),
+    eq(taskPullRequests.prNumber, prNumber),
+    ...(status === 'merged'
+      ? [
+          or(
+            isNull(taskPullRequests.status),
+            ne(taskPullRequests.status, 'merged'),
+          ),
+        ]
+      : []),
+  );
+
+  const updated = await db
     .update(taskPullRequests)
     .set({ status, updatedAt: new Date() })
-    .where(
-      and(
-        eq(taskPullRequests.sourceControlProvider, provider),
-        eq(taskPullRequests.repository, repository),
-        eq(taskPullRequests.prNumber, prNumber),
-      ),
-    );
+    .where(matchingStatus)
+    .returning({
+      taskId: taskPullRequests.taskId,
+      createdByRoomote: taskPullRequests.createdByRoomote,
+    });
+
+  if (status !== 'merged' || updated.length === 0) {
+    return;
+  }
+
+  const originatingAssociation = updated.find(
+    ({ createdByRoomote }) => createdByRoomote,
+  );
+  if (!originatingAssociation) {
+    return;
+  }
+
+  const [originatingTask] = await db
+    .select({ workflow: tasks.workflow, surface: tasks.surface })
+    .from(tasks)
+    .where(eq(tasks.id, originatingAssociation.taskId));
+
+  if (
+    !originatingTask ||
+    originatingTask.workflow === 'pr_review' ||
+    originatingTask.workflow === 'pr_conflict_resolve'
+  ) {
+    return;
+  }
+
+  void captureActivationPrMerged({
+    provider,
+    workflow: originatingTask.workflow,
+    surface: originatingTask.surface,
+  });
 }

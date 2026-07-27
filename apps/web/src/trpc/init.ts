@@ -8,6 +8,7 @@ import {
   reportTrpcProcedureError,
   shouldReportTrpcProcedureError,
 } from './error-logging';
+import { withProcedureTiming } from './request-timing';
 
 // See:
 // - https://trpc.io/docs/server/context
@@ -60,7 +61,15 @@ const reportProcedureErrors = t.middleware(async (opts) => {
     throw error;
   }
 });
-const procedure = t.procedure.use(reportProcedureErrors);
+// Outermost middleware, so a procedure's reported duration covers everything
+// that runs on its behalf (input parsing, error reporting, the auth check on
+// protected procedures and the resolver itself). Both `publicProcedure` and
+// `protectedProcedure` are built from this, so every procedure is timed.
+const timeProcedures = t.middleware((opts) =>
+  withProcedureTiming(opts.path, () => opts.next()),
+);
+
+const procedure = t.procedure.use(timeProcedures).use(reportProcedureErrors);
 
 export const createRouter = t.router;
 export const publicProcedure = procedure;

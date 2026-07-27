@@ -68,6 +68,14 @@ export class SlackCommunicationProvider implements CommunicationProviderAdapter 
 
   constructor(private readonly slack: SlackNotifier) {}
 
+  resolveChannelId(channel: string): Promise<string | null> {
+    return this.slack.resolveChannelId(channel);
+  }
+
+  isAppInChannel(channelId: string): Promise<boolean | null> {
+    return this.slack.isAppInChannel(channelId);
+  }
+
   async postMessage(
     input: CommunicationPostMessageInput,
   ): Promise<CommunicationPostMessageResult> {

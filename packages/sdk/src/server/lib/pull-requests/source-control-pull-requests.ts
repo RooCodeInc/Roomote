@@ -1,5 +1,10 @@
 import { createGitHubToken } from '@roomote/auth';
 import {
+  type ResolvedTaskCommitAuthor,
+  resolveLaunchTaskCommitAuthor,
+  resolveRunCommitAuthor,
+} from '@roomote/cloud-agents/server';
+import {
   getOctokit,
   resolveConfiguredGitHubAppSlugIfConfigured,
 } from '@roomote/github';
@@ -162,6 +167,8 @@ type GitHubPullRequestResult = {
   title: string;
   draft?: boolean;
   base?: { ref: string };
+  body?: string | null;
+  assignees?: Array<{ login?: string | null }> | null;
 };
 
 export async function createOrUpdateSourceControlPullRequestForTaskRun({
@@ -217,14 +224,34 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
         }
       : input;
 
+  const liveGitHubAttribution =
+    provider === 'github'
+      ? await resolveRunCommitAuthor(db, taskRun)
+      : undefined;
+  const liveGitHubAssigneePlan = liveGitHubAttribution
+    ? await resolveLiveGitHubAssigneePlan({
+        taskRun,
+        assignees: inputWithNormalizedAttribution.assignees,
+        attribution: liveGitHubAttribution,
+      })
+    : undefined;
+  const inputWithLiveGitHubAssignee = liveGitHubAssigneePlan
+    ? {
+        ...inputWithNormalizedAttribution,
+        assignees: liveGitHubAssigneePlan.assignees,
+      }
+    : inputWithNormalizedAttribution;
+
   const result = await (() => {
     switch (provider) {
       case 'github':
         return createOrUpdateGitHubPullRequest({
-          input: inputWithNormalizedAttribution,
+          input: inputWithLiveGitHubAssignee,
           repository,
           provider,
           createDraft,
+          attribution: liveGitHubAttribution,
+          staleLaunchAssignee: liveGitHubAssigneePlan?.staleLaunchAssignee,
         });
       case 'gitlab':
         return createOrUpdateGitLabMergeRequest({
@@ -268,6 +295,34 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   });
 
   return result;
+}
+
+async function resolveLiveGitHubAssigneePlan({
+  taskRun,
+  assignees,
+  attribution,
+}: {
+  taskRun: TaskRun;
+  assignees: string[];
+  attribution: ResolvedTaskCommitAuthor;
+}): Promise<{ assignees: string[]; staleLaunchAssignee?: string }> {
+  // Delivery prompts may still contain the launch owner's assignee. Remove
+  // that stale value, then add only the current linked participant.
+  const launchAssignee = (
+    await resolveLaunchTaskCommitAuthor(db, taskRun.taskId)
+  ).prAssigneeLogin;
+  const liveAssignees = assignees.filter(
+    (assignee) => assignee !== launchAssignee,
+  );
+
+  return {
+    assignees: attribution.prAssigneeLogin
+      ? [...new Set([...liveAssignees, attribution.prAssigneeLogin])]
+      : liveAssignees,
+    ...(launchAssignee && launchAssignee !== attribution.prAssigneeLogin
+      ? { staleLaunchAssignee: launchAssignee }
+      : {}),
+  };
 }
 
 /**
@@ -325,6 +380,7 @@ async function persistSourceControlPullRequestAssociation({
         prTitle: result.title,
         repository: result.repositoryFullName,
         status,
+        createdByRoomote: result.action === 'created',
         prBaseRef: result.targetBranch,
       })
       .onConflictDoUpdate({
@@ -353,11 +409,15 @@ async function createOrUpdateGitHubPullRequest({
   repository,
   provider,
   createDraft,
+  attribution,
+  staleLaunchAssignee,
 }: {
   input: SourceControlPullRequestMutationInput;
   repository: RepositoryRow;
   provider: 'github';
   createDraft: boolean;
+  attribution?: ResolvedTaskCommitAuthor;
+  staleLaunchAssignee?: string;
 }): Promise<SourceControlPullRequestMutationResult> {
   if (!repository.installationId) {
     throw new Error(
@@ -389,6 +449,7 @@ async function createOrUpdateGitHubPullRequest({
   let action: SourceControlPullRequestMutationResult['action'];
   let pullRequest: GitHubPullRequestResult | undefined =
     existingPullRequests[0];
+  const existingAssignees = pullRequest?.assignees ?? [];
   let targetBranch: string;
 
   if (pullRequest) {
@@ -404,7 +465,10 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       pull_number: pullRequest.number,
       title: input.title,
-      body: input.body,
+      body: preserveExistingPullRequestAttribution(
+        input.body,
+        pullRequest.body,
+      ),
     });
     pullRequest = data;
   } else {
@@ -414,7 +478,7 @@ async function createOrUpdateGitHubPullRequest({
       owner,
       repo,
       title: input.title,
-      body: input.body,
+      body: replaceCreatedPullRequestAttribution(input.body, attribution),
       head: input.sourceBranch,
       base: targetBranch,
       draft: createDraft,
@@ -432,6 +496,19 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       issue_number: pullRequest.number,
       labels: input.labels,
+    });
+  }
+
+  if (
+    action === 'updated' &&
+    staleLaunchAssignee &&
+    existingAssignees.some((assignee) => assignee.login === staleLaunchAssignee)
+  ) {
+    await octokit.rest.issues.removeAssignees({
+      owner,
+      repo,
+      issue_number: pullRequest.number,
+      assignees: [staleLaunchAssignee],
     });
   }
 
@@ -456,6 +533,30 @@ async function createOrUpdateGitHubPullRequest({
     draft: Boolean(pullRequest.draft),
     warnings: [],
   };
+}
+
+function replaceCreatedPullRequestAttribution(
+  body: string,
+  attribution: ResolvedTaskCommitAuthor | undefined,
+): string {
+  if (!attribution) {
+    return body;
+  }
+
+  return body.replace(
+    /^(> Opened on behalf of ).+?(\. (?:Follow up by|\[View the task\]))/mu,
+    `$1${attribution.displayName}$2`,
+  );
+}
+
+function preserveExistingPullRequestAttribution(
+  body: string,
+  existingBody: string | null | undefined,
+): string {
+  const openerLine = existingBody?.match(/^> Opened on behalf of .+$/mu)?.[0];
+  return openerLine
+    ? body.replace(/^> Opened on behalf of .+$/mu, openerLine)
+    : body;
 }
 
 async function createOrUpdateGitLabMergeRequest({

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import {
@@ -22,7 +23,12 @@ import {
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
+import { logger } from '@/lib/server/logger';
 import { hydrateLinearMcpConnectionAfterOauth } from '@/lib/server/mcp-linear';
+import type {
+  McpOAuthErrorReason,
+  McpOAuthResult,
+} from '@/lib/mcp-oauth-result';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +36,42 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_REDIRECT_PATH = '/settings';
 const REDIRECT_STATE_DELIMITER = '~';
+const CALLBACK_PATH = '/api/mcp-oauth/callback';
+const CONTINUATION_COOKIE_PREFIX = 'roomote-mcp-oauth-continuation-';
+const CONTINUATION_MAX_AGE_SECONDS = 10 * 60;
+
+type McpOAuthCallbackStage =
+  | 'state_validation'
+  | 'connection_lookup'
+  | 'client_lookup'
+  | 'provider_discovery'
+  | 'token_exchange'
+  | 'token_storage'
+  | 'linear_metadata'
+  | 'deployment_enablement';
+
+function getCallbackFailureReason(
+  stage: McpOAuthCallbackStage,
+): McpOAuthErrorReason {
+  switch (stage) {
+    case 'provider_discovery':
+      return 'provider_metadata_failed';
+    case 'token_exchange':
+      return 'token_exchange_failed';
+    case 'token_storage':
+      return 'token_storage_failed';
+    case 'linear_metadata':
+      return 'linear_metadata_failed';
+    case 'deployment_enablement':
+      return 'deployment_enablement_failed';
+    default:
+      return 'callback_failed';
+  }
+}
+
+function getErrorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
 
 function sanitizeRedirectPath(redirectTo: string | null): string | null {
   if (!redirectTo) {
@@ -62,103 +104,182 @@ function readRedirectPathFromState(state: string | null): string {
   }
 }
 
-function withMcpQuery(
+function getContinuationCookieName(state: string): string {
+  const stateHash = createHash('sha256')
+    .update(state)
+    .digest('hex')
+    .slice(0, 16);
+  return `${CONTINUATION_COOKIE_PREFIX}${stateHash}`;
+}
+
+function getContinuationCookieOptions(webUrl: string) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: new URL(webUrl).protocol === 'https:',
+    path: CALLBACK_PATH,
+  };
+}
+
+function redirectWithMcpResult(
   webUrl: string,
   redirectPath: string,
-  mcpStatus: 'error' | 'connected',
-  reason?: string,
-) {
+  result: McpOAuthResult,
+  state: string | null,
+): NextResponse {
   const url = new URL(redirectPath, webUrl);
-  url.searchParams.set('mcp', mcpStatus);
-  if (reason) {
-    url.searchParams.set('reason', reason);
+  url.searchParams.set('mcp', result.status);
+  if (result.status === 'error' && result.reason) {
+    url.searchParams.set('reason', result.reason);
   }
-  return url;
+
+  const response = NextResponse.redirect(url);
+  if (state) {
+    response.cookies.set(getContinuationCookieName(state), '', {
+      ...getContinuationCookieOptions(webUrl),
+      maxAge: 0,
+    });
+  }
+  return response;
 }
 
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
-  const code = request.nextUrl.searchParams.get('code');
   const state = request.nextUrl.searchParams.get('state');
+  const queryCode = request.nextUrl.searchParams.get('code');
+  const isResume = request.nextUrl.searchParams.get('resume') === '1';
+  const code =
+    queryCode ??
+    (state && isResume
+      ? (request.cookies.get(getContinuationCookieName(state))?.value ?? null)
+      : null);
   const error = request.nextUrl.searchParams.get('error');
   const errorDescription =
     request.nextUrl.searchParams.get('error_description');
 
   const webUrl = getPublicAppUrl(webEnv);
   const redirectPath = readRedirectPathFromState(state);
+  const redirectToResult = (result: McpOAuthResult) =>
+    redirectWithMcpResult(webUrl, redirectPath, result, state);
 
   // Handle OAuth errors
   if (error) {
-    console.error('[MCP OAuth] OAuth error:', error, errorDescription);
+    const reason: McpOAuthErrorReason =
+      error === 'access_denied' ? 'access_denied' : 'provider_error';
+    logger.warn(
+      {
+        event: 'mcp_oauth_provider_error',
+        providerError: reason,
+        hasErrorDescription: Boolean(errorDescription),
+      },
+      'MCP OAuth provider returned an error',
+    );
 
     if (state) {
       try {
         const oauthState = await consumeOAuthState(state);
         if (oauthState) {
           await updateAuthStatus(oauthState.connectionId, 'error');
-          return NextResponse.redirect(
-            withMcpQuery(webUrl, redirectPath, 'error'),
-          );
+          return redirectToResult({ status: 'error', reason });
         }
       } catch (e) {
-        console.error(
-          '[MCP OAuth] Error consuming state during error handling:',
-          e,
+        logger.error(
+          {
+            event: 'mcp_oauth_provider_error_state_update_failed',
+            errorName: getErrorName(e),
+          },
+          'Failed to mark an MCP OAuth provider error',
         );
       }
     }
 
-    return NextResponse.redirect(withMcpQuery(webUrl, redirectPath, 'error'));
+    return redirectToResult({ status: 'error', reason });
   }
 
   // Validate required parameters
   if (!code || !state) {
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'error', 'missing_params'),
+    logger.warn(
+      {
+        event: 'mcp_oauth_callback_rejected',
+        reason: 'missing_params',
+        hasCode: Boolean(code),
+        hasState: Boolean(state),
+      },
+      'MCP OAuth callback was rejected',
     );
+    return redirectToResult({ status: 'error', reason: 'missing_params' });
   }
 
   const authResult = await authorize();
   if (!authResult.success) {
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'error', 'unauthorized'),
+    const configuredCallbackHost = new URL(webUrl).host;
+    logger.warn(
+      {
+        event: 'mcp_oauth_callback_auth_required',
+        requestHost: request.nextUrl.host,
+        configuredCallbackHost,
+        callbackHostMatchesRequest:
+          request.nextUrl.host === configuredCallbackHost,
+      },
+      'MCP OAuth callback requires sign-in before it can continue',
     );
+
+    const callbackReturnUrl = new URL(CALLBACK_PATH, webUrl);
+    callbackReturnUrl.searchParams.set('state', state);
+    callbackReturnUrl.searchParams.set('resume', '1');
+    const signInUrl = new URL('/sign-in', webUrl);
+    signInUrl.searchParams.set(
+      'redirect_url',
+      `${callbackReturnUrl.pathname}${callbackReturnUrl.search}`,
+    );
+    const response = NextResponse.redirect(signInUrl);
+    response.headers.set('Cache-Control', 'no-store');
+    response.cookies.set(getContinuationCookieName(state), code, {
+      ...getContinuationCookieOptions(webUrl),
+      maxAge: CONTINUATION_MAX_AGE_SECONDS,
+    });
+    return response;
   }
   const { userId } = authResult;
 
   let connectionId: string | undefined;
+  let integrationId: string | undefined;
+  let connectionRole: string | undefined;
+  let failureStage: McpOAuthCallbackStage = 'state_validation';
 
   try {
     const oauthState = await consumeOAuthState(state);
     if (!oauthState) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'invalid_state'),
+      logger.warn(
+        {
+          event: 'mcp_oauth_callback_rejected',
+          reason: 'invalid_state',
+        },
+        'MCP OAuth callback was rejected',
       );
+      return redirectToResult({ status: 'error', reason: 'invalid_state' });
     }
 
     const resolvedConnectionId = oauthState.connectionId;
     connectionId = resolvedConnectionId;
 
+    failureStage = 'connection_lookup';
     const connection = await db.query.mcpConnections.findFirst({
       where: eq(mcpConnections.id, resolvedConnectionId),
     });
     if (!connection) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_found' });
     }
+    integrationId = connection.mcpId;
+    connectionRole = connection.connectionRole;
 
     const integration = getMcpIntegration(connection.mcpId);
     if (!integration) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_found' });
     }
 
     if (!isSelfServeMcpIntegration(integration) || !integration.url) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_found' });
     }
 
     const requiresOrgAdmin = isDeploymentScopedMcpIntegration(
@@ -171,21 +292,20 @@ export async function GET(request: NextRequest) {
       (requiresOrgAdmin && !isAdmin) ||
       (!requiresOrgAdmin && connection.userId !== userId)
     ) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_found' });
     }
 
+    failureStage = 'client_lookup';
     const clientInfo = await getClientInformation(resolvedConnectionId);
     if (!clientInfo) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_registered'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_registered' });
     }
 
+    failureStage = 'provider_discovery';
     const serverMetadata = await discoverOAuthEndpoints(integration.url);
-    const redirectUri = new URL('/api/mcp-oauth/callback', webUrl).toString();
+    const redirectUri = new URL(CALLBACK_PATH, webUrl).toString();
 
+    failureStage = 'token_exchange';
     const tokens = await exchangeCodeForTokens(
       serverMetadata.token_endpoint,
       code,
@@ -194,9 +314,11 @@ export async function GET(request: NextRequest) {
       redirectUri,
     );
 
+    failureStage = 'token_storage';
     await storeTokens(resolvedConnectionId, tokens);
 
     if (integration.id === 'linear') {
+      failureStage = 'linear_metadata';
       await hydrateLinearMcpConnectionAfterOauth({
         connection,
         accessToken: tokens.access_token,
@@ -206,6 +328,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (requiresOrgAdmin) {
+      failureStage = 'deployment_enablement';
       await db
         .insert(deploymentMcpEnablements)
         .values({
@@ -223,23 +346,38 @@ export async function GET(request: NextRequest) {
         });
     }
 
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'connected'),
-    );
+    return redirectToResult({ status: 'connected' });
   } catch (error) {
-    console.error('[MCP OAuth] Error in callback:', error);
+    const reason = getCallbackFailureReason(failureStage);
+    logger.error(
+      {
+        event: 'mcp_oauth_callback_failed',
+        failureStage,
+        reason,
+        integrationId,
+        connectionRole,
+        connectionId,
+        errorName: getErrorName(error),
+      },
+      'MCP OAuth callback failed',
+    );
 
     if (connectionId) {
       try {
         await updateAuthStatus(connectionId, 'error');
-        return NextResponse.redirect(
-          withMcpQuery(webUrl, redirectPath, 'error'),
+      } catch (statusError) {
+        logger.error(
+          {
+            event: 'mcp_oauth_error_status_update_failed',
+            connectionId,
+            integrationId,
+            errorName: getErrorName(statusError),
+          },
+          'Failed to mark an MCP OAuth connection as errored',
         );
-      } catch {
-        // Ignore errors during error handling
       }
     }
 
-    return NextResponse.redirect(withMcpQuery(webUrl, redirectPath, 'error'));
+    return redirectToResult({ status: 'error', reason });
   }
 }

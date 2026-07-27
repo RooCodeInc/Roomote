@@ -45,4 +45,5 @@ ${params.recentThreadFeedback?.trim() ? `Recent feedback from earlier Code Quali
 export const codeQualityAuditorJob = createMergedPullRequestAuditJob({
   automationKey: 'code_quality_auditor',
   buildPrompt: buildCodeQualityAuditorPrompt,
+  notifySlack: false,
 });

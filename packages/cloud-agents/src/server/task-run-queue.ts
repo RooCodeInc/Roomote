@@ -70,7 +70,11 @@ import {
 import type { MetadataRecord } from '@roomote/feature-flags/server';
 
 import { type Redis, getRedis } from '@roomote/redis';
-import { captureEvent, captureTaskSettled } from '@roomote/telemetry/server';
+import {
+  captureActivationTaskCreated,
+  captureEvent,
+  captureTaskSettled,
+} from '@roomote/telemetry/server';
 import { generateTaskRunTitle, hasDeterministicTaskRunTitle } from '../utils';
 import { DEFAULT_STANDARD_TASK_MODEL_PROVIDER } from '../task-runtime-defaults';
 import {
@@ -114,6 +118,19 @@ export function shouldCaptureTaskCreatedEvent(
 ): boolean {
   // Environment snapshots are maintenance work, not product task activity.
   return taskType !== TaskPayloadKind.SnapshotEnvironment;
+}
+
+/** Activation counts only fresh, human-initiated product tasks. */
+export function shouldCaptureActivationTaskCreatedEvent(input: {
+  taskType: TaskPayloadKind;
+  workflow: TaskWorkflow;
+  initiator: TaskInitiator;
+}): boolean {
+  return (
+    input.initiator.kind === 'user' &&
+    input.workflow === 'standard' &&
+    input.taskType !== TaskPayloadKind.SnapshotEnvironment
+  );
 }
 
 const ATOMIC_ENQUEUE_SCRIPT = `
@@ -1559,6 +1576,23 @@ async function enqueueFreshLaunch(
         model: effectiveTaskModel,
         computeProvider: taskRun.vendor ?? null,
       },
+    });
+  }
+
+  if (
+    shouldCaptureActivationTaskCreatedEvent({
+      taskType: taskRun.payloadKind,
+      workflow,
+      initiator,
+    })
+  ) {
+    void captureActivationTaskCreated({
+      workflow,
+      surface,
+      trigger,
+      harness: taskRun.harness ?? null,
+      model: effectiveTaskModel,
+      computeProvider: taskRun.vendor ?? null,
     });
   }
 

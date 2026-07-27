@@ -10,9 +10,10 @@ import {
   type TaskStatusEvent,
 } from '@roomote/types';
 
-import { Loading } from '@/components/layout';
-
-import { SandboxStoreContext } from './SandboxProvider';
+import {
+  SandboxHistoryReadyContext,
+  SandboxStoreContext,
+} from './SandboxProvider';
 import { createSandboxStore } from './use-sandbox-store';
 import type { TaskMessageEnvelopesQueryState } from './use-task-message-envelopes';
 import { shouldMarkTrailingAssistantCompletion } from './trailing-assistant-completion';
@@ -55,11 +56,6 @@ interface HistoricalSandboxProviderProps {
   taskPhase?: TaskPhase | null;
 
   /**
-   * Content to render when messages are loading.
-   */
-  fallback?: ReactNode;
-
-  /**
    * The main content to render once messages are loaded.
    */
   children: ReactNode;
@@ -77,7 +73,6 @@ export function HistoricalSandboxProvider({
   harness,
   taskStatus,
   taskPhase,
-  fallback,
   children,
 }: HistoricalSandboxProviderProps) {
   const storeRef = useRef<ReturnType<typeof createSandboxStore>>(undefined);
@@ -117,13 +112,11 @@ export function HistoricalSandboxProvider({
 
   const isPending = history.isPending;
 
-  return isPending && !!taskId ? (
-    <SandboxStoreContext.Provider value={store}>
-      {fallback ?? <Loading layout="centered" className="flex-1" />}
-    </SandboxStoreContext.Provider>
-  ) : (
-    <SandboxStoreContext.Provider value={store}>
-      {children}
-    </SandboxStoreContext.Provider>
+  return (
+    <SandboxHistoryReadyContext.Provider value={!isPending || !taskId}>
+      <SandboxStoreContext.Provider value={store}>
+        {children}
+      </SandboxStoreContext.Provider>
+    </SandboxHistoryReadyContext.Provider>
   );
 }

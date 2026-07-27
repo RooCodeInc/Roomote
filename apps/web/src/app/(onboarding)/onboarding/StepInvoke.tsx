@@ -1,11 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
-import { Button, Loader2, ArrowRight } from '@/components/system';
+import { Button, Loader2, ArrowRight, Checkbox } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
+import { useUser } from '@/hooks/useUser';
 import { StepTitle } from '../setup/StepTitle';
 import { buildInvokeMethods } from '../invokeMethods';
 
@@ -27,6 +29,9 @@ export function StepInvoke({
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const { user } = useUser();
+  const [productUpdatesEnabled, setProductUpdatesEnabled] = useState(true);
+  const isCloudAdmin = user?.cloudEnabled && user.isAdmin;
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const methods = buildInvokeMethods({
     communicationProviders,
@@ -76,9 +81,31 @@ export function StepInvoke({
         ))}
       </div>
 
+      {!isCloudAdmin && (
+        <div className="space-y-2 text-sm mt-8 pl-0.5 text-foreground/80">
+          <label className="flex gap-2 item-start cursor-pointer">
+            <Checkbox
+              aria-label="Toggle product updates"
+              className="mt-0.5"
+              checked={productUpdatesEnabled}
+              onCheckedChange={(checked) =>
+                setProductUpdatesEnabled(checked === true)
+              }
+            />
+            <span>
+              Get occasional emails from Roomote with product updates.
+            </span>
+          </label>
+        </div>
+      )}
+
       <div className="flex mt-3">
         <Button
-          onClick={() => completeOnboarding.mutate()}
+          onClick={() =>
+            completeOnboarding.mutate(
+              isCloudAdmin ? {} : { productUpdatesEnabled },
+            )
+          }
           disabled={completeOnboarding.isPending}
         >
           {completeOnboarding.isPending && (

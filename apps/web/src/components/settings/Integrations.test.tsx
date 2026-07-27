@@ -53,6 +53,7 @@ const state = vi.hoisted(() => ({
   linearInstallation: {
     linearOrganizationName: 'Roomote',
   } as null | { linearOrganizationName?: string },
+  linearRedirectPath: '',
   searchParams: '',
 }));
 
@@ -140,10 +141,13 @@ vi.mock('@/hooks/linear', () => ({
     data: state.linearInstallation,
     isPending: false,
   }),
-  useConnectLinear: () => ({
-    isPending: false,
-    mutate: mutations.connectLinear,
-  }),
+  useConnectLinear: (redirectPath: string) => {
+    state.linearRedirectPath = redirectPath;
+    return {
+      isPending: false,
+      mutate: mutations.connectLinear,
+    };
+  },
   useDisconnectLinear: () => ({
     isPending: false,
     mutate: mutations.disconnectLinear,
@@ -377,6 +381,7 @@ describe('Integrations settings', () => {
     state.linearInstallation = {
       linearOrganizationName: 'Roomote',
     };
+    state.linearRedirectPath = '';
     state.asanaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
@@ -384,6 +389,14 @@ describe('Integrations settings', () => {
     state.featureFlags = {};
     state.snowflakeConnection = null;
     state.searchParams = '';
+  });
+
+  it('returns Linear OAuth to a service-specific integrations URL', () => {
+    render(<Integrations />);
+
+    expect(state.linearRedirectPath).toBe(
+      '/settings/integrations?service=linear',
+    );
   });
 
   it('sorts integrations alphabetically and splits installed vs available', () => {
@@ -769,6 +782,22 @@ describe('Integrations settings', () => {
       null,
       '',
       '/settings/integrations?source=slack-manager-integration-setup',
+    );
+  });
+
+  it('does not restore cleared OAuth result parameters when dismissing Linear', () => {
+    state.searchParams = 'service=linear&mcp=error&reason=access_denied';
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+    state.linearInstallation = null;
+
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+
+    expect(replaceState).toHaveBeenLastCalledWith(
+      null,
+      '',
+      '/settings/integrations',
     );
   });
 

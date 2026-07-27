@@ -258,8 +258,8 @@ const productionCompose = YAML.parse(
 );
 for (const serviceName of ['web', 'api', 'controller', 'preview-proxy']) {
   assert(
-    productionCompose[`x-roomote-${serviceName}-env`]?.PREVIEW_PROXY_SUBDOMAIN_SUFFIX !==
-      undefined,
+    productionCompose[`x-roomote-${serviceName}-env`]
+      ?.PREVIEW_PROXY_SUBDOMAIN_SUFFIX !== undefined,
     `production compose: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
   );
 }
@@ -294,6 +294,56 @@ const acmeCaddyfile = renderCaddyTlsMode({
 const internalCaddyfile = renderCaddyTlsMode({
   localCertificates: 'local_certs',
   wildcardTlsSnippet: '',
+});
+function validateCaddyfile(mode, contents, environment) {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'roomote-caddy-'));
+  const configPath = join(temporaryDirectory, 'Caddyfile');
+
+  try {
+    writeFileSync(configPath, contents);
+    execFileSync(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '--volume',
+        `${configPath}:/etc/caddy/Caddyfile:ro`,
+        ...Object.entries(environment).flatMap(([key, value]) => [
+          '--env',
+          `${key}=${value}`,
+        ]),
+        productionCompose.services.caddy.image,
+        'caddy',
+        'adapt',
+        '--config',
+        '/etc/caddy/Caddyfile',
+        '--adapter',
+        'caddyfile',
+      ],
+      { stdio: 'pipe' },
+    );
+    console.log(`validated Caddyfile: ${mode}`);
+  } catch (error) {
+    fail(`caddy: ${mode} configuration cannot be adapted: ${error.stderr}`);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+const caddyEnvironment = {
+  ROOMOTE_APP_DOMAIN: 'roomote.example.test',
+  ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.example.test',
+  S3_BUCKET_ARTIFACTS: 'roomote-artifacts',
+};
+validateCaddyfile('acme', acmeCaddyfile, {
+  ...caddyEnvironment,
+  ROOMOTE_CADDY_LOCAL_CERTS: '',
+  ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET: 'import roomote_on_demand_wildcard_tls',
+});
+validateCaddyfile('internal', internalCaddyfile, {
+  ...caddyEnvironment,
+  ROOMOTE_CADDY_LOCAL_CERTS: 'local_certs',
+  ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET: '',
 });
 const caddyGlobalBlock = (contents) =>
   contents.slice(0, contents.indexOf('}\n'));

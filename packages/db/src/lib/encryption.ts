@@ -28,11 +28,47 @@ function describeEncryptionKey(): string {
   return `ENCRYPTION_KEY(length=${key.length}, fingerprint=${fingerprint})`;
 }
 
+// scrypt is deliberately expensive and scryptSync blocks the event loop.
+// Stored ciphertexts keep a fixed per-row salt, so re-reading the same rows
+// re-derives the same keys: without this cache, every request that decrypts
+// N rows pays N derivations, serially, ahead of any real work. Keyed by
+// encryption key fingerprint as well as salt so a key rotation cannot serve
+// a stale derivation.
+const derivedKeyCache = new Map<string, Buffer>();
+const DERIVED_KEY_CACHE_MAX_ENTRIES = 500;
+
 /**
  * Derives a key from the encryption key using scrypt.
  */
 function deriveKey(salt: Buffer): Buffer {
-  return scryptSync(getEncryptionKey(), salt, KEY_LENGTH);
+  const encryptionKey = getEncryptionKey();
+  const cacheKey = `${createHash('sha256')
+    .update(encryptionKey)
+    .digest('hex')
+    .slice(0, 16)}:${salt.toString('base64')}`;
+
+  const cached = derivedKeyCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const derived = scryptSync(encryptionKey, salt, KEY_LENGTH);
+
+  // Bounded so a process that decrypts unboundedly many distinct rows keeps
+  // the working set rather than growing forever; insertion order makes the
+  // oldest entry the eviction candidate.
+  if (derivedKeyCache.size >= DERIVED_KEY_CACHE_MAX_ENTRIES) {
+    const oldest = derivedKeyCache.keys().next().value;
+
+    if (oldest !== undefined) {
+      derivedKeyCache.delete(oldest);
+    }
+  }
+
+  derivedKeyCache.set(cacheKey, derived);
+
+  return derived;
 }
 
 export function encrypt(text: string): string {

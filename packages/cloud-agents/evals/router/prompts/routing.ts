@@ -71,10 +71,10 @@ function formatEnvironments(envs?: Environment[]): string {
   if (!envs || envs.length === 0) return '';
   const lines = envs.map((e) => {
     const repoList = e.repositoryNames
-      ? ` (repos: ${e.repositoryNames.join(', ')})`
+      ? ` (repositories: ${e.repositoryNames.join(', ')})`
       : '';
     return e.description
-      ? `- ${e.name}: ${e.description}${repoList}`
+      ? `- ${e.name}${repoList}\n  ${e.description}`
       : `- ${e.name}${repoList}`;
   });
   return `**Available Environments**:\n${lines.join('\n')}`;

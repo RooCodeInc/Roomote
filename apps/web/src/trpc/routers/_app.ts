@@ -1344,6 +1344,7 @@ export const appRouter = createRouter({
           repositoryIds: z.array(z.string().uuid()).min(1),
           environmentId: z.string().optional(),
           changeRequest: z.string().trim().min(1).max(8_000).optional(),
+          selectedModelId: z.string().trim().min(1).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -2126,6 +2127,7 @@ export const appRouter = createRouter({
         z
           .object({
             anonymousAnalyticsEnabled: z.boolean().optional(),
+            productUpdatesEnabled: z.boolean().optional(),
           })
           .optional(),
       )
@@ -2328,9 +2330,17 @@ export const appRouter = createRouter({
       getOnboardingStatusCommand(auth),
     ),
 
-    complete: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      completeOnboardingCommand(auth),
-    ),
+    complete: protectedProcedure
+      .input(
+        z
+          .object({
+            productUpdatesEnabled: z.boolean().optional(),
+          })
+          .optional(),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        completeOnboardingCommand(auth, input),
+      ),
   }),
 
   taskSuggestions: createRouter({

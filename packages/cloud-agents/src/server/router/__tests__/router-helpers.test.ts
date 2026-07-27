@@ -55,6 +55,9 @@ describe('router helpers', () => {
     expect(prompt).toContain(
       `- ${PLATFORM_WORKSPACE_VALUE}: Generic Roomote platform questions about identity, capabilities, or getting started.`,
     );
+    expect(prompt).toContain(
+      '- Full Stack (repositories: acme/frontend, acme/backend)\n  Complete development environment',
+    );
   });
 
   it('can omit the platform workspace from the available environments list', () => {
@@ -77,6 +80,12 @@ describe('router helpers', () => {
       `"Who are you and what's your purpose?" → ${PLATFORM_WORKSPACE_VALUE}`,
     );
     expect(prompt).toContain('"List all features" → App');
+    expect(prompt).toContain(
+      'The task explicitly references an environment repository by its owner/repository name or a GitHub URL.',
+    );
+    expect(prompt).toContain(
+      'A URL that identifies an owner/repository listed by an environment is still routing context',
+    );
   });
 
   it('includes model selection rules in the routing prompt', () => {

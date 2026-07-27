@@ -53,6 +53,7 @@ vi.mock('./hooks', () => ({
   useSandboxMessages: () => ({
     messages: sandboxMessagesState.messages,
   }),
+  useSandboxHistoryReady: () => true,
   useSandboxTaskPhase: () => taskPhaseState.phase,
 }));
 

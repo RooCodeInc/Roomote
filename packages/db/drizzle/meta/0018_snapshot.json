@@ -1,6 +1,6 @@
 {
   "id": "0018_custom_automations",
-  "prevId": "0018_custom_automations",
+  "prevId": "50f000bb-cdd7-41a7-8353-588a83fa9090",
   "version": "7",
   "dialect": "postgresql",
   "tables": {

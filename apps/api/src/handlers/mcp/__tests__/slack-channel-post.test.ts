@@ -7,12 +7,16 @@ const {
   postMessageMock,
   resolveChannelIdMock,
   isAppInChannelMock,
+  getCommunicationProviderAdapterMock,
+  slackAdapterPostMessageMock,
   buildSignedArtifactRawUrlMock,
   currentEpochSecondsMock,
 } = vi.hoisted(() => ({
   postMessageMock: vi.fn(),
   resolveChannelIdMock: vi.fn(),
   isAppInChannelMock: vi.fn(),
+  getCommunicationProviderAdapterMock: vi.fn(),
+  slackAdapterPostMessageMock: vi.fn(),
   buildSignedArtifactRawUrlMock: vi.fn(),
   currentEpochSecondsMock: vi.fn(),
 }));
@@ -53,6 +57,8 @@ vi.mock('@roomote/slack', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   buildSignedArtifactRawUrl: buildSignedArtifactRawUrlMock,
   currentEpochSeconds: currentEpochSecondsMock,
+  getCommunicationProviderAdapter: getCommunicationProviderAdapterMock,
+  findTeamsConversationServiceUrl: vi.fn(),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -149,6 +155,49 @@ describe('slack channel post MCP endpoint', () => {
     postMessageMock.mockResolvedValue('999.888');
     resolveChannelIdMock.mockResolvedValue('C123');
     isAppInChannelMock.mockResolvedValue(true);
+    slackAdapterPostMessageMock.mockImplementation(
+      async (input: {
+        channelId: string;
+        threadId?: string;
+        text?: string;
+        blocks?: unknown[];
+        images?: Array<{ url: string; altText: string }>;
+      }) => {
+        const blocks = [
+          ...(input.blocks ?? []),
+          ...(input.images ?? []).map((image) => ({
+            type: 'image',
+            image_url: image.url,
+            alt_text: image.altText,
+          })),
+        ];
+        const messageId = await postMessageMock({
+          channel: input.channelId,
+          ...(input.threadId ? { thread_ts: input.threadId } : {}),
+          ...(input.text ? { text: input.text } : {}),
+          unfurl_links: false,
+          unfurl_media: false,
+          ...(blocks.length > 0 ? { blocks } : {}),
+        });
+        if (!messageId) {
+          throw new Error(
+            'Slack chat.postMessage returned no message timestamp',
+          );
+        }
+        return {
+          provider: 'slack',
+          channelId: input.channelId,
+          messageId,
+          ...(input.threadId ? { threadId: input.threadId } : {}),
+        };
+      },
+    );
+    getCommunicationProviderAdapterMock.mockResolvedValue({
+      provider: 'slack',
+      resolveChannelId: resolveChannelIdMock,
+      isAppInChannel: isAppInChannelMock,
+      postMessage: slackAdapterPostMessageMock,
+    });
   });
 
   it('rejects non-run tokens', async () => {
@@ -166,7 +215,7 @@ describe('slack channel post MCP endpoint', () => {
 
     expect(response.status).toBe(403);
     expect(body.error).toBe(
-      'Slack channel post MCP is only available for task run tokens',
+      'Channel post MCP is only available for task run tokens',
     );
   });
 

@@ -104,3 +104,7 @@ I have read the CLA Document and I hereby sign the CLA
 
 Your signature is recorded once and applies to all your future contributions
 to the Project.
+
+---
+
+Copyright 2026 Roo Code, Inc.
