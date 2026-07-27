@@ -442,6 +442,11 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     return { hasTopicsEnabled: result.has_topics_enabled === true };
   }
 
+  /** Verifies that the bot can access a configured destination chat. */
+  async getChat(channelId: string): Promise<void> {
+    await this.callBotApi('getChat', { chat_id: channelId });
+  }
+
   /**
    * Create a task-owned topic in a forum supergroup or a private chat whose
    * bot has Threaded Mode enabled in BotFather.

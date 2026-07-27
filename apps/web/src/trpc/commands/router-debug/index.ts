@@ -9,6 +9,7 @@ import {
   updateRouterDebugSettings,
 } from '@roomote/db/server';
 import type { CommunicationProvider } from '@roomote/types';
+import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { getCommunicationProviderAdapter } from '@roomote/sdk/server';
 import { SlackNotifier } from '@roomote/slack';
 
@@ -67,7 +68,11 @@ export async function updateRouterDebugSettingsCommand(
       );
     }
 
-    if (destination.provider === 'teams') {
+    if (destination.provider === 'telegram') {
+      await (adapter as TelegramCommunicationProvider).getChat(
+        destination.channelId,
+      );
+    } else if (destination.provider === 'teams') {
       const [installation] = await db
         .select({ id: teamsInstallations.id })
         .from(teamsInstallations)
