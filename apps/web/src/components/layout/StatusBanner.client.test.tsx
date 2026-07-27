@@ -10,6 +10,9 @@ vi.mock('@/trpc/client', () => ({ useTRPC: useTRPCMock }));
 
 vi.mock('@/components/system', () => ({
   ArrowRight: () => <svg />,
+  Button: ({ children, ...props }: React.ComponentProps<'button'>) => (
+    <button {...props}>{children}</button>
+  ),
   CircleAlert: () => <svg />,
   Info: () => <svg />,
   OctagonAlert: () => <svg />,
