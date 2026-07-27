@@ -95,7 +95,7 @@ describe('slackAppMention', () => {
       'Before calling a Slack-visible reply tool, choose the current lifecycle purpose for the latest Slack user turn: `ack`, `progress`, `closeout`, or `clarification`. The message content should match that purpose.',
     );
     expect(result.harnessInstructions).toContain(
-      '`ack`, `progress`, and `clarification` replies keep the Slack turn open. Obey the prompt-provided `<slack_turn_policy>` block for whether the current Slack message can receive emoji reactions.',
+      '`ack` and `progress` replies keep the Slack turn open, as does a `clarification` you can keep working past; a `clarification` whose answer the next step genuinely depends on ends the turn. Obey the prompt-provided `<slack_turn_policy>` block for whether the current Slack message can receive emoji reactions.',
     );
     expect(result.harnessInstructions).toContain('<slack_turn_lifecycle>');
     expect(result.harnessInstructions).toContain(
@@ -202,6 +202,18 @@ describe('slackAppMention', () => {
       'Use `send_chat_reply` for lifecycle replies in the originating Slack thread when the reply needs words: early acknowledgements, useful progress, closeouts, and lightweight clarifications. Set its `purpose` to match the lifecycle purpose.',
     );
     expect(result.harnessInstructions).toContain(
+      'When a lifecycle reply is due, send it before running further tools. The only non-reply exception is `tool_search` when the needed Slack reply/post tool is not visible. This orders the reply ahead of more work; it does not cap the work you may do afterward in the same turn.',
+    );
+    expect(result.harnessInstructions).toContain(
+      'Sending an `ack` or `progress` reply does not end your turn. Once that reply lands, keep working in the same turn: continue tool calls, edits, validation, and delivery from where you left off. Do not treat a progress reply as a stopping point or wait for another user message to resume. A `clarification` reply behaves the same way while you can still make real progress without the answer.',
+    );
+    expect(result.harnessInstructions).toContain(
+      'The turn ends on a `closeout` reply, on a `clarification` whose answer the next step genuinely depends on, or on an explicit user instruction to pause or stop. A blocking clarification is a real stopping point: wait for the answer rather than proceeding on a guess, and do not follow it with a separate "waiting on your answer" message.',
+    );
+    expect(result.harnessInstructions).toContain(
+      'Outside those cases, a reply that describes what you are about to do next is a `progress` reply, and you must actually do it in the same turn instead of stopping there. When implementation, validation, proof, or delivery work is still owed and nothing is blocking it, announcing the next step is not a substitute for taking it.',
+    );
+    expect(result.harnessInstructions).not.toContain(
       'Do not run more tools first. The only non-reply exception is `tool_search` when the needed Slack reply/post tool is not visible.',
     );
     expect(result.harnessInstructions).toContain(
