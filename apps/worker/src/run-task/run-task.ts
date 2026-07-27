@@ -1155,6 +1155,7 @@ export const runTask = async ({
       integrations,
       mcpTaskEnv,
       environmentMcpServers: environmentConfig?.mcpServers,
+      operatorEnvVars: deploymentEnvVars,
       taskRun,
       developerInstructionsContent: harnessDeveloperInstructions,
       callbacks,
