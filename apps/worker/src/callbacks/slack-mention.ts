@@ -190,6 +190,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
         taskId: taskRun.taskId,
         initiatingSlackUserId,
         taskUrl,
+        warningText: startedData.warningText,
       });
 
       const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);

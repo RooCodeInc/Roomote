@@ -16,6 +16,7 @@ import { DebugUiAttributeController } from './DebugUiAttributeController';
 import { UserAnalyticsContext } from './UserAnalyticsContext';
 import { TelemetryProvider } from './TelemetryProvider';
 import { CloudAnalyticsProvider } from './CloudAnalyticsProvider';
+import { StatusBanner } from './StatusBanner';
 
 export function RootProviders({
   authStatus,
@@ -62,6 +63,7 @@ export function RootProviders({
           ) : null}
           <PersonalThemeSync />
           <DebugUiAttributeController />
+          <StatusBanner />
           {children}
           <Toaster />
         </TRPCReactProvider>

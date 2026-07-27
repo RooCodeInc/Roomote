@@ -22,6 +22,7 @@ export async function persistPostedSlackKickoff(input: {
   initiatingSlackUserId?: string;
   workspaceOnly?: boolean;
   otherRunningTasksCount?: number;
+  warningText?: string;
 }): Promise<void> {
   const startedMetadata: Omit<SlackStartedMessageData, 'ts'> = {
     agentName: input.agentName,
@@ -39,6 +40,7 @@ export async function persistPostedSlackKickoff(input: {
     ...(input.initiatingSlackUserId
       ? { initiatingSlackUserId: input.initiatingSlackUserId }
       : {}),
+    ...(input.warningText ? { warningText: input.warningText } : {}),
   };
 
   await setSlackStartedMessageTs(input.runId, input.messageTs, startedMetadata);

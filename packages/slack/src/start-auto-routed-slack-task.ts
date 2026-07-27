@@ -38,6 +38,10 @@ import { finishRoutedStart } from './started-message';
 import { SlackNotifier } from './slack-notifier';
 import { getPromptReadyThreadMessages } from './prompt-ready-thread-messages';
 import { startSlackAppMentionTask } from './start-slack-app-mention';
+import {
+  buildStatuspageSlackWarning,
+  getStatuspageIncident,
+} from './statuspage-incidents';
 import { SlackThreadDeliveryTracker } from './slack-thread-delivery-tracker';
 import {
   collectAndExtractThreadAttachmentTexts,
@@ -238,6 +242,9 @@ export async function startAutoRoutedSlackTask({
 
     const taskDescription = stripLeadingSlackProductMention(
       await slack.normalizeIncomingText(stripLeadingRawSlackMention(prompt)),
+    );
+    const warningText = buildStatuspageSlackWarning(
+      await getStatuspageIncident(),
     );
 
     // Missing MCP setup never blocks the launch; when the message links to a
@@ -496,6 +503,7 @@ export async function startAutoRoutedSlackTask({
                   ? { kickoffMessage: decision.result.kickoffMessage }
                   : {}),
                 workspaceOnly: decision.result.workspaceOnly,
+                ...(warningText ? { warningText } : {}),
               },
             }
           : {}),
@@ -557,6 +565,7 @@ export async function startAutoRoutedSlackTask({
       existingMessageTs,
       reasoning: decision.result.reasoning,
       routingDebug: decision.result.debug,
+      warningText,
       slack,
     });
 
