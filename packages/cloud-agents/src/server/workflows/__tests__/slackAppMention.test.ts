@@ -205,10 +205,13 @@ describe('slackAppMention', () => {
       'When a lifecycle reply is due, send it before running further tools. The only non-reply exception is `tool_search` when the needed Slack reply/post tool is not visible. This orders the reply ahead of more work; it does not cap the work you may do afterward in the same turn.',
     );
     expect(result.harnessInstructions).toContain(
-      'Sending an `ack`, `progress`, or `clarification` reply does not end your turn. Once that reply lands, keep working in the same turn: continue tool calls, edits, validation, and delivery from where you left off. Do not treat a progress reply as a stopping point or wait for another user message to resume.',
+      'Sending an `ack` or `progress` reply does not end your turn. Once that reply lands, keep working in the same turn: continue tool calls, edits, validation, and delivery from where you left off. Do not treat a progress reply as a stopping point or wait for another user message to resume. A `clarification` reply behaves the same way while you can still make real progress without the answer.',
     );
     expect(result.harnessInstructions).toContain(
-      'Only a `closeout` reply, or an explicit user instruction to pause or stop, ends the turn. If the run still owes implementation, validation, proof, or delivery work, a reply that describes what you are about to do next is a `progress` reply and must be followed by actually doing it in the same turn.',
+      'The turn ends on a `closeout` reply, on a `clarification` whose answer the next step genuinely depends on, or on an explicit user instruction to pause or stop. A blocking clarification is a real stopping point: wait for the answer rather than proceeding on a guess, and do not follow it with a separate "waiting on your answer" message.',
+    );
+    expect(result.harnessInstructions).toContain(
+      'Outside those cases, a reply that describes what you are about to do next is a `progress` reply, and you must actually do it in the same turn instead of stopping there. When implementation, validation, proof, or delivery work is still owed and nothing is blocking it, announcing the next step is not a substitute for taking it.',
     );
     expect(result.harnessInstructions).not.toContain(
       'Do not run more tools first. The only non-reply exception is `tool_search` when the needed Slack reply/post tool is not visible.',
