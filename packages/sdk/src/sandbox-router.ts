@@ -119,6 +119,8 @@ export interface SandboxSetupStatusResult {
 
 export interface SandboxSendPromptInput {
   prompt?: string;
+  /** Original user text before trusted platform context is prepended. */
+  quoteText?: string;
   taskTool?: TaskToolDispatchPayload;
   images?: string[];
   source?: string;

@@ -301,6 +301,7 @@ export async function sendSandboxPromptCommand(
         outOfBandContext && typeof parsed.prompt === 'string'
           ? withOutOfBandContext(outOfBandContext, parsed.prompt)
           : parsed.prompt,
+      quoteText: parsed.prompt,
       taskTool: parsed.taskTool,
       images: parsed.images,
       source: parsed.source,

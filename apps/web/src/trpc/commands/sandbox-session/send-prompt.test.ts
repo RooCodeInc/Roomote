@@ -1,7 +1,9 @@
-const { mockCreateRunToken, mockSendPromptMutate } = vi.hoisted(() => ({
-  mockCreateRunToken: vi.fn(),
-  mockSendPromptMutate: vi.fn(),
-}));
+const { mockCreateRunToken, mockSendPromptMutate, mockClaimOutOfBandContext } =
+  vi.hoisted(() => ({
+    mockCreateRunToken: vi.fn(),
+    mockSendPromptMutate: vi.fn(),
+    mockClaimOutOfBandContext: vi.fn(),
+  }));
 
 vi.mock('@roomote/auth', async () => {
   const actual =
@@ -26,6 +28,17 @@ vi.mock('@trpc/client', async () => {
         },
       },
     })),
+  };
+});
+
+vi.mock('@/lib/server/out-of-band-context', async () => {
+  const actual = await vi.importActual<
+    typeof import('@/lib/server/out-of-band-context')
+  >('@/lib/server/out-of-band-context');
+
+  return {
+    ...actual,
+    claimOutOfBandContextForPrompt: mockClaimOutOfBandContext,
   };
 });
 
@@ -87,6 +100,7 @@ describe('sendSandboxPromptCommand', () => {
     );
     mockCreateRunToken.mockResolvedValue('run-token');
     mockSendPromptMutate.mockResolvedValue({ success: true });
+    mockClaimOutOfBandContext.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -137,8 +151,40 @@ describe('sendSandboxPromptCommand', () => {
     expect(mockSendPromptMutate).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: 'keep going',
+        quoteText: 'keep going',
         source: 'web',
         userName: 'Auth Fallback Name',
+      }),
+    );
+  });
+
+  it('keeps the original user text separate from injected out-of-band context', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+    mockClaimOutOfBandContext.mockResolvedValue({
+      contextBlock: '<out_of_band_context>\nnotice\n</out_of_band_context>',
+      messageIds: ['out-of-band-message'],
+    });
+
+    await sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
+      taskId: task.id,
+      prompt: 'Please fix it.',
+      source: 'web',
+    });
+
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt:
+          '<out_of_band_context>\nnotice\n</out_of_band_context>\n\nPlease fix it.',
+        quoteText: 'Please fix it.',
       }),
     );
   });
