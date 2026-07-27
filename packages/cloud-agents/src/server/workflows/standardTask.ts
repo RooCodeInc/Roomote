@@ -206,6 +206,12 @@ export function standardTask({
   const sourceControlPlatformLabel = sourceControlProvider
     ? getSourceControlProviderLabel(sourceControlProvider)
     : 'GitHub/GitLab';
+  const sourceControlTaskSurface =
+    taskSurface === 'github' ||
+    taskSurface === 'gitlab' ||
+    taskSurface === 'gitea' ||
+    taskSurface === 'bitbucket' ||
+    taskSurface === 'ado';
   // When automatic Code Reviewer open/push hooks can fire for this deployment,
   // give the agent decision rules for the user-facing expectation note.
   // Do not key the final note solely on configured prAction: explicit `$create-pr`
@@ -216,7 +222,7 @@ export function standardTask({
     codeReviewsEnabled &&
     codeReviewReviewOnCommit &&
     deliverySkill !== 'push' &&
-    taskSurface !== 'github';
+    !sourceControlTaskSurface;
   // Hard-append the note into background-proof closeout wording only when every
   // PR shape this run can still deliver is auto-review eligible. Explicit
   // `$create-pr` / `$create-draft-pr` can flip draft vs ready after the prompt

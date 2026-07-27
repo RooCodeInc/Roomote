@@ -75,23 +75,28 @@ describe('Standard Task code-review self-review closeout', () => {
     );
   });
 
-  it('omits self-review follow-up guidance for GitHub task comments', () => {
-    const { harnessInstructions } = standardTask({
-      description: 'Implement behavior change',
-      repo: 'Roomote/example-app',
-      taskRunUrl: 'https://example.com/task/123',
-      codeReviewsEnabled: true,
-      codeReviewReviewOnCommit: true,
-      sourceControlProvider: 'github',
-      taskSurface: 'github',
-    });
+  it('omits self-review follow-up guidance for source-control task comments', () => {
+    for (const taskSurface of [
+      'github',
+      'gitlab',
+      'gitea',
+      'bitbucket',
+      'ado',
+    ] as const) {
+      const { harnessInstructions } = standardTask({
+        description: 'Implement behavior change',
+        repo: 'Roomote/example-app',
+        taskRunUrl: 'https://example.com/task/123',
+        codeReviewsEnabled: true,
+        codeReviewReviewOnCommit: true,
+        taskSurface,
+      });
 
-    expect(harnessInstructions).not.toContain(
-      '<code_review_self_review_closeout>',
-    );
-    expect(harnessInstructions).not.toContain(
-      'are doing a self-review on GitHub',
-    );
+      expect(harnessInstructions).not.toContain(
+        '<code_review_self_review_closeout>',
+      );
+      expect(harnessInstructions).not.toContain('will follow up here with');
+    }
   });
 
   it('falls back to GitHub/GitLab when no source-control provider is set', () => {
