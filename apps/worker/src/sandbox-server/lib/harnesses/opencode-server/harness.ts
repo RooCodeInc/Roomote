@@ -15,6 +15,7 @@ import {
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
+  TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
   TaskEventName,
 } from '@roomote/types';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
@@ -1053,6 +1054,39 @@ function isOpenCodeMessageAbortedError(error: unknown): boolean {
 }
 
 const MAX_RESOLVED_USER_INPUT_REQUEST_IDS = 256;
+const MAX_PROVIDER_ERROR_SUMMARY_CHARS = 500;
+const UNSAFE_PROVIDER_ERROR_SUMMARY_PATTERN =
+  /\r|\n|https?:\/\/|\b(?:headers?|response[_ -]?body|stack|traceback)\b/i;
+
+function isJsonProviderErrorMessage(message: string): boolean {
+  if (!message.startsWith('{') && !message.startsWith('[')) {
+    return false;
+  }
+
+  try {
+    JSON.parse(message);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getSafeProviderErrorSummary(message: string): string | null {
+  const redacted = redactSecrets(message).replace(/\s+/gu, ' ').trim();
+
+  if (
+    !redacted ||
+    isJsonProviderErrorMessage(redacted) ||
+    UNSAFE_PROVIDER_ERROR_SUMMARY_PATTERN.test(redacted)
+  ) {
+    return null;
+  }
+
+  return redacted.length <= MAX_PROVIDER_ERROR_SUMMARY_CHARS
+    ? redacted
+    : `${redacted.slice(0, MAX_PROVIDER_ERROR_SUMMARY_CHARS - 3)}...`;
+}
+
 /**
  * Session errors used to be dumped into the transcript as the raw
  * `JSON.stringify(error)` blob (status codes, response headers, provider
@@ -1066,11 +1100,17 @@ function formatOpenCodeSessionErrorText(error: unknown): string {
     asString(asRecord(record?.data)?.message) ?? asString(record?.message);
 
   if (message) {
-    const redactedMessage = redactSecrets(message);
+    const safeSummary = getSafeProviderErrorSummary(
+      summarizeOpenCodeProviderError({ data: { message } }),
+    );
+
+    if (!safeSummary) {
+      return 'The provider returned an error.';
+    }
 
     return name && name !== 'APIError'
-      ? `The provider returned an error (${name}): ${redactedMessage}`
-      : `The provider returned an error: ${redactedMessage}`;
+      ? `The provider returned an error (${name}): ${safeSummary}`
+      : `The provider returned an error: ${safeSummary}`;
   }
 
   if (name) {
@@ -3845,6 +3885,16 @@ export class OpenCodeServerHarness
       this.runtimeEvents.assistantMessage({
         sessionId,
         text: errorText,
+        metadata: {
+          [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: {
+            errorSummary: errorText,
+          },
+        },
+        payload: {
+          [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: {
+            errorSummary: errorText,
+          },
+        },
       });
       // Pair the transcript message with a semantic error event so the harness
       // manager persists the provider detail when it finalizes the failed run.

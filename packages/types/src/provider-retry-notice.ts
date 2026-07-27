@@ -1,6 +1,13 @@
 import { asBoolean, asFiniteNumber, asRecord, asString } from './primitives';
 
 export const PROVIDER_RETRY_NOTICE_PAYLOAD_KEY = 'providerRetryNotice' as const;
+export const TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY =
+  'terminalProviderError' as const;
+
+export type TerminalProviderError = {
+  /** Short redacted provider error safe to display in the task transcript. */
+  errorSummary: string;
+};
 
 export type ProviderRetryNoticeKind =
   | 'provider_error'
@@ -91,4 +98,23 @@ export function getProviderRetryNoticeFromMessageData(
   }
 
   return parseProviderRetryNotice(data[PROVIDER_RETRY_NOTICE_PAYLOAD_KEY]);
+}
+
+export function parseTerminalProviderError(
+  value: unknown,
+): TerminalProviderError | null {
+  const record = asRecord(value);
+  const errorSummary = asString(record?.errorSummary)?.trim();
+
+  return errorSummary ? { errorSummary } : null;
+}
+
+export function getTerminalProviderErrorFromMessageData(
+  data: Record<string, unknown> | null | undefined,
+): TerminalProviderError | null {
+  if (!data) {
+    return null;
+  }
+
+  return parseTerminalProviderError(data[TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]);
 }

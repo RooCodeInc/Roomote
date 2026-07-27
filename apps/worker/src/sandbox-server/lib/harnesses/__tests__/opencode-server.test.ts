@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_LIVE_EVENT_TYPES,
+  TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY,
   TaskEventName,
   asRecord,
   type AcpMessage,
@@ -3144,6 +3145,18 @@ describe('OpenCodeServerHarness', () => {
         'responseHeaders',
       );
       expect(String(errorMessage?.payload.text)).not.toContain('cf-ray');
+      expect(errorMessage?.payload).toMatchObject({
+        [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: {
+          errorSummary:
+            'The provider returned an error: [xAI] The model grok-4.5 is not available in your region.',
+        },
+      });
+      expect(errorMessage?.metadata).toMatchObject({
+        [TERMINAL_PROVIDER_ERROR_PAYLOAD_KEY]: {
+          errorSummary:
+            'The provider returned an error: [xAI] The model grok-4.5 is not available in your region.',
+        },
+      });
       expect(taskEvents).toContainEqual({
         eventName: TaskEventName.Message,
         payload: [
@@ -3207,6 +3220,111 @@ describe('OpenCodeServerHarness', () => {
         'The provider returned an error: Authorization: [redacted]',
       );
       expect(String(errorMessage?.payload.text)).not.toContain('eyJ-secret');
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not persist raw provider diagnostic envelopes', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Start work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'APIError',
+            data: {
+              message:
+                '{"error":{"message":"provider unavailable"},"responseHeaders":{"x-request-id":"secret"}}',
+              isRetryable: false,
+            },
+          },
+        },
+      });
+
+      const errorMessage = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          String(envelope.payload.text ?? '').includes(
+            'The provider returned an error',
+          ),
+      );
+
+      expect(String(errorMessage?.payload.text)).toBe(
+        'The provider returned an error: provider unavailable',
+      );
+      expect(String(errorMessage?.payload.text)).not.toContain(
+        'responseHeaders',
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not persist provider header blobs', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Start work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'Provider rejected request; headers: x-request-id=abc',
+              isRetryable: false,
+            },
+          },
+        },
+      });
+
+      const errorMessage = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          String(envelope.payload.text ?? '').includes(
+            'The provider returned an error',
+          ),
+      );
+
+      expect(String(errorMessage?.payload.text)).toBe(
+        'The provider returned an error.',
+      );
+      expect(String(errorMessage?.payload.text)).not.toContain('headers');
     } finally {
       harness.dispose();
     }

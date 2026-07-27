@@ -4,6 +4,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   type AcpRequestUserInputPayload,
   getProviderRetryNoticeFromMessageData,
+  getTerminalProviderErrorFromMessageData,
   parseLinkedReviewResults,
   stripLlmCitationArtifacts,
 } from '@roomote/types';
@@ -38,6 +39,7 @@ import { useInternalTranscriptRowsVisible } from '../../useInternalTranscriptRow
 import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
+import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
 
 const UserMessageToggle = ({
   isExpanded,
@@ -170,6 +172,12 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
           msg.data as Record<string, unknown>,
         )
       : null;
+  const terminalProviderError =
+    !isUser && msg.kind === 'text'
+      ? getTerminalProviderErrorFromMessageData(
+          msg.data as Record<string, unknown>,
+        )
+      : null;
   const requestUserInputResponse =
     isUser &&
     msg.updateType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
@@ -190,7 +198,8 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
     ? msg.partial !== true && !taskTool && !linkedReviewResult
     : msg.partial !== true &&
       msg.isTurnCompletion === true &&
-      !providerRetryNotice;
+      !providerRetryNotice &&
+      !terminalProviderError;
   const messageContentClassName = cn(
     'min-w-0 flex-1',
     isUser ? 'pt-8' : 'py-0',
@@ -283,6 +292,10 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
             <ProviderRetryNoticeMessage
               data={msg.data as Record<string, unknown>}
               text={content}
+            />
+          ) : terminalProviderError ? (
+            <TerminalProviderErrorMessage
+              data={msg.data as Record<string, unknown>}
             />
           ) : isUser ? (
             <CollapsibleContent renderToggle={UserMessageToggle}>
