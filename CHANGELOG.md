@@ -2,6 +2,28 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.24.0 (2026-07-27)
+
+This release makes Roomote easier to reach across communication channels while refining setup, task loading, and connection reliability.
+
+### Highlights
+
+- Post to Slack, Teams, Telegram, or Discord through one consistent agent tool, with direct links back to rendered task widgets.
+- Select the model for Settings-based environment setup and opt in to product updates during eligible onboarding flows.
+- See the task workspace sooner while its history loads, and resume interrupted MCP OAuth connections safely after signing in.
+- Find the Roomote Discord community directly from the release-update dialog.
+
+### Minor changes
+
+- Choose the model used for environment setup from Settings, and opt in to product updates when completing eligible setup and onboarding flows.
+- Use one provider-neutral channel-posting tool across Slack, Teams, Telegram, and Discord, with each provider continuing to enforce its delivery and authorization constraints. External task replies also include a direct link to their rendered widgets.
+
+### Patch changes
+
+- Let interrupted MCP OAuth connections resume safely after sign-in, route GitHub issue links to their matching environment, and keep source-control attribution and review follow-up behavior accurate. Thanks to @daniel-lxs for contributing the MCP OAuth improvement.
+- Improve deployment and task reliability with faster encrypted configuration access, request timing diagnostics, safer custom MCP environment-variable handling, and quieter automation discovery scans. Thanks to @mrubens for contributing these improvements.
+- Show a workspace-shaped loading state while task history hydrates, preserve accepted or dismissed PR feedback in Discord, and add a Discord community link to the release-update dialog.
+
 ## 0.23.0 (2026-07-27)
 
 This release surfaces active service issues sooner and improves task, automation, self-hosted, and MCP reliability.
