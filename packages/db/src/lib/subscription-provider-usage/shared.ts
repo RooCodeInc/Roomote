@@ -1,6 +1,6 @@
 import { type DatabaseOrTransaction } from '../../db';
 
-export const USAGE_FETCH_TIMEOUT_MS = 10_000;
+const USAGE_FETCH_TIMEOUT_MS = 10_000;
 
 export type UsageFetchOptions = {
   executor?: DatabaseOrTransaction;
@@ -14,7 +14,7 @@ export function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-export function asFiniteNumber(value: unknown): number | undefined {
+function asFiniteNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
   }
