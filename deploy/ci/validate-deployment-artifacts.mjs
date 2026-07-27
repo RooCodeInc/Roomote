@@ -313,6 +313,7 @@ function validateCaddyfile(mode, contents, environment) {
           `${key}=${value}`,
         ]),
         productionCompose.services.caddy.image,
+        'caddy',
         'adapt',
         '--config',
         '/etc/caddy/Caddyfile',
