@@ -1,5 +1,8 @@
 import { DiscordApiError } from '@roomote/communication/discord-provider';
-import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import type {
+  DiscordChannel,
+  DiscordCommunicationProvider,
+} from '@roomote/communication/discord-provider';
 import type { CommunicationMessage } from '@roomote/communication/provider';
 import { db, desc, discordUserMappings, eq } from '@roomote/db/server';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
@@ -142,13 +145,13 @@ async function resolveActingDiscordUserId(
   return mapping?.discordUserId ?? null;
 }
 
-async function assertDiscordChannelAccess(options: {
+export async function assertDiscordChannelAccess(options: {
   provider: DiscordCommunicationProvider;
   channelId: string;
   isExplicitChannel: boolean;
   actingUserId?: string | null;
   requireHistoryPermission?: boolean;
-}): Promise<void> {
+}): Promise<DiscordChannel> {
   let channel;
   try {
     channel = await options.provider.getChannel(options.channelId);
@@ -196,7 +199,7 @@ async function assertDiscordChannelAccess(options: {
   }
 
   if (!options.isExplicitChannel) {
-    return;
+    return channel;
   }
 
   const linkedDiscordUserId = await resolveActingDiscordUserId(
@@ -211,25 +214,28 @@ async function assertDiscordChannelAccess(options: {
 
   if (!channel.guildId) {
     // DMs and group DMs: linked-account gate above is the access control.
-    return;
+    return channel;
   }
 
-  const membership = await options.provider.isUserInGuild({
+  const hasChannelAccess = await options.provider.canUserAccessChannel({
     guildId: channel.guildId,
+    channelId: options.channelId,
     userId: linkedDiscordUserId,
   });
-  if (membership === false) {
+  if (hasChannelAccess === false) {
     throw new McpProxyError(
       403,
-      `Linked Discord user is not a member of the guild for channel ${options.channelId}`,
+      `Linked Discord user cannot access channel ${options.channelId}`,
     );
   }
-  if (membership === null) {
+  if (hasChannelAccess === null) {
     throw new McpProxyError(
       502,
       `Could not verify linked Discord user access for channel ${options.channelId}`,
     );
   }
+
+  return channel;
 }
 
 async function resolveDiscordLookupChannel(options: {

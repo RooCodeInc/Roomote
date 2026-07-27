@@ -1360,21 +1360,26 @@ if (shouldRegisterSlackChannelPostTool()) {
     hasDiscordChatContext()
   ) {
     const postSurface = getChatReplySurfaceLabel();
+    const supportsCrossChannelPosts = postSurface === 'Discord';
 
     roomoteMcpServer.registerTool(
       'post_to_channel',
       {
         title: 'Post To Channel',
         description:
-          `${postSurface}-visible: posts a new standalone message into the ${postSurface} conversation this task was launched from. ` +
+          `${postSurface}-visible: posts a new standalone message into a ${supportsCrossChannelPosts ? 'Discord channel the linked user and bot can access' : `${postSurface} conversation this task was launched from`}. ` +
           'Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. ' +
-          `Pass the ${postSurface} conversation ID this task originated from; posting to other conversations is not supported on ${postSurface}. ` +
+          (supportsCrossChannelPosts
+            ? 'Pass a Discord channel ID. Cross-channel posts are standalone and cannot target an existing thread. '
+            : `Pass the ${postSurface} conversation ID this task originated from; posting to other conversations is not supported on ${postSurface}. `) +
           'The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
         inputSchema: {
           channel: z
             .string()
             .describe(
-              `${postSurface} conversation ID this task originated from`,
+              supportsCrossChannelPosts
+                ? 'Discord channel ID the linked user and bot can access'
+                : `${postSurface} conversation ID this task originated from`,
             ),
           text: z
             .string()

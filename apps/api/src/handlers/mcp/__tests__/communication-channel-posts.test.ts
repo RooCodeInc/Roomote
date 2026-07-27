@@ -3,6 +3,7 @@ const {
   createTeamsProviderMock,
   createTelegramProviderMock,
   discordPostMessageMock,
+  assertDiscordChannelAccessMock,
   getReplyImagesMock,
   teamsPostMessageMock,
   telegramPostMessageMock,
@@ -11,6 +12,7 @@ const {
   createTeamsProviderMock: vi.fn(),
   createTelegramProviderMock: vi.fn(),
   discordPostMessageMock: vi.fn(),
+  assertDiscordChannelAccessMock: vi.fn(),
   getReplyImagesMock: vi.fn(),
   teamsPostMessageMock: vi.fn(),
   telegramPostMessageMock: vi.fn(),
@@ -27,6 +29,10 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('../communication-thread-reply-shared', () => ({
   getCommunicationReplyImages: getReplyImagesMock,
+}));
+
+vi.mock('../discord-thread-lookup', () => ({
+  assertDiscordChannelAccess: assertDiscordChannelAccessMock,
 }));
 
 import { maybeSendCommunicationChannelPost } from '../communication-channel-posts';
@@ -87,6 +93,10 @@ describe('maybeSendCommunicationChannelPost', () => {
     });
     createDiscordProviderMock.mockResolvedValue({
       postMessage: discordPostMessageMock,
+    });
+    assertDiscordChannelAccessMock.mockResolvedValue({
+      guildId: 'guild-1',
+      type: 0,
     });
     discordPostMessageMock.mockResolvedValue({
       provider: 'discord',
@@ -225,13 +235,96 @@ describe('maybeSendCommunicationChannelPost', () => {
     });
   });
 
-  it('rejects Discord posts targeting a different channel', async () => {
+  it('posts to another Discord channel after linked-user access is verified', async () => {
     const response = await maybeSendCommunicationChannelPost({
-      taskRun: discordTaskRun,
+      taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
+      parsedBody: { channel: 'channel-other', text: 'update', images: [] },
+    });
+
+    expect(assertDiscordChannelAccessMock).toHaveBeenCalledWith({
+      provider: expect.anything(),
+      channelId: 'channel-other',
+      isExplicitChannel: true,
+      actingUserId: 'user-1',
+    });
+    expect(discordPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-other',
+      text: 'update',
+      textFormat: 'markdown',
+      images: [],
+    });
+    await expect(jsonBody(response!)).resolves.toEqual({
+      messageTs: 'message-1',
+      channelId: 'channel-other',
+    });
+  });
+
+  it('returns the access-check error for an unauthorized Discord channel', async () => {
+    const { McpProxyError } = await import('../proxy-utils');
+    assertDiscordChannelAccessMock.mockRejectedValueOnce(
+      new McpProxyError(403, 'Linked Discord user cannot access this channel'),
+    );
+
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
       parsedBody: { channel: 'channel-other', text: 'update', images: [] },
     });
 
     expect(response!.status).toBe(403);
+    await expect(jsonBody(response!)).resolves.toEqual({
+      error: 'Linked Discord user cannot access this channel',
+    });
+    expect(discordPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects cross-channel Discord posts that target a thread', async () => {
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
+      parsedBody: {
+        channel: 'channel-other',
+        threadTs: 'thread-other',
+        text: 'update',
+        images: [],
+      },
+    });
+
+    expect(response!.status).toBe(400);
+    expect(discordPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Discord thread supplied as a cross-channel target', async () => {
+    assertDiscordChannelAccessMock.mockResolvedValueOnce({
+      guildId: 'guild-1',
+      type: 11,
+    });
+
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
+      parsedBody: { channel: 'thread-other', text: 'update', images: [] },
+    });
+
+    expect(response!.status).toBe(400);
+    await expect(jsonBody(response!)).resolves.toEqual({
+      error: 'Discord cross-channel posts cannot target a thread',
+    });
+    expect(discordPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['direct message', 1],
+    ['group direct message', 3],
+  ])('rejects a cross-channel Discord %s target', async (_label, type) => {
+    assertDiscordChannelAccessMock.mockResolvedValueOnce({ type });
+
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
+      parsedBody: { channel: 'dm-other', text: 'update', images: [] },
+    });
+
+    expect(response!.status).toBe(403);
+    await expect(jsonBody(response!)).resolves.toEqual({
+      error: 'Discord cross-channel posts only support guild channels',
+    });
     expect(discordPostMessageMock).not.toHaveBeenCalled();
   });
 

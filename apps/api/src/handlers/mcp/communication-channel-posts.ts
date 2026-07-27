@@ -11,11 +11,14 @@ import {
 } from '@roomote/sdk/server';
 
 import { getCommunicationReplyImages } from './communication-thread-reply-shared';
+import { assertDiscordChannelAccess } from './discord-thread-lookup';
+import { McpProxyError } from './proxy-utils';
 
 type ChannelPostTaskRun = {
   id: number;
   taskId: string;
   payload: unknown;
+  actingUserId?: string | null;
 };
 
 type ParsedChannelPostBody = {
@@ -187,16 +190,7 @@ async function sendDiscordChannelPost(params: {
   const jobChannelId = getCommunicationChannelFromTaskPayload(
     params.taskRun.payload,
   );
-
-  if (!isOwnChannel(params.parsedBody.channel, jobChannelId)) {
-    return jsonResponse(
-      {
-        error:
-          'Discord channel posts are only available for the channel this task was launched from',
-      },
-      403,
-    );
-  }
+  const isOriginChannel = isOwnChannel(params.parsedBody.channel, jobChannelId);
 
   const provider =
     await createDiscordCommunicationProviderFromRuntimeCredentials();
@@ -206,6 +200,36 @@ async function sendDiscordChannelPost(params: {
       { error: 'Discord bot token is not configured for outbound posts' },
       503,
     );
+  }
+
+  if (!isOriginChannel) {
+    // Cross-channel writes require the same linked-user check as explicit
+    // Discord reads. The bot must also be able to resolve the target channel.
+    try {
+      const targetChannel = await assertDiscordChannelAccess({
+        provider,
+        channelId: params.parsedBody.channel.replace(/^#/, ''),
+        isExplicitChannel: true,
+        actingUserId: params.taskRun.actingUserId,
+      });
+      if (!targetChannel.guildId) {
+        return jsonResponse(
+          { error: 'Discord cross-channel posts only support guild channels' },
+          403,
+        );
+      }
+      if ([10, 11, 12].includes(targetChannel.type)) {
+        return jsonResponse(
+          { error: 'Discord cross-channel posts cannot target a thread' },
+          400,
+        );
+      }
+    } catch (error) {
+      if (error instanceof McpProxyError) {
+        return jsonResponse({ error: error.message }, error.httpStatus);
+      }
+      throw error;
+    }
   }
 
   const { images, errorResponse } = await getCommunicationReplyImages({
@@ -224,14 +248,22 @@ async function sendDiscordChannelPost(params: {
     );
   }
 
-  // Discord posts land in the thread id directly (not the channel), so an
-  // arbitrary caller-provided thread would redirect the post to any
-  // bot-accessible conversation. Only the task's own stored thread (or its
-  // launch channel) is a valid target.
+  // Discord posts land in the thread id directly (not the channel). Keep
+  // cross-channel writes standalone, while task-originated posts retain their
+  // existing thread behavior.
   const storedThreadId =
     getCommunicationThreadIdFromTaskPayload(params.taskRun.payload) ??
     undefined;
   const requestedThreadTs = params.parsedBody.threadTs?.replace(/^#/, '');
+
+  if (requestedThreadTs && !isOriginChannel) {
+    return jsonResponse(
+      {
+        error: 'Discord cross-channel posts cannot target a thread',
+      },
+      400,
+    );
+  }
 
   if (
     requestedThreadTs &&
@@ -247,12 +279,13 @@ async function sendDiscordChannelPost(params: {
     );
   }
 
-  // Keep the post in the task's own thread so it lands next to the
-  // conversation instead of the parent channel.
-  const threadId = storedThreadId;
+  const channelId = isOriginChannel
+    ? jobChannelId!
+    : params.parsedBody.channel.replace(/^#/, '');
+  const threadId = isOriginChannel ? storedThreadId : undefined;
 
   const reply = await provider.postMessage({
-    channelId: jobChannelId!,
+    channelId,
     ...(threadId ? { threadId } : {}),
     ...(text ? { text } : {}),
     textFormat: 'markdown',
@@ -261,7 +294,7 @@ async function sendDiscordChannelPost(params: {
 
   return jsonResponse({
     messageTs: reply.messageId,
-    channelId: jobChannelId,
+    channelId,
   });
 }
 

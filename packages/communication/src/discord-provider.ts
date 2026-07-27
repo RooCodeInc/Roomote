@@ -1290,6 +1290,84 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     }
   }
 
+  /**
+   * Returns whether a guild member can view a specific channel. `null` means
+   * the membership or permission state could not be verified.
+   */
+  async canUserAccessChannel(input: {
+    guildId: string;
+    channelId: string;
+    userId: string;
+  }): Promise<boolean | null> {
+    try {
+      const [member, roles, channel] = await Promise.all([
+        this.request<{ roles?: string[] }>(
+          'GET',
+          `/guilds/${input.guildId}/members/${input.userId}`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+        this.request<Array<{ id: string; permissions: string }>>(
+          'GET',
+          `/guilds/${input.guildId}/roles`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+        this.request<DiscordApiChannel>(
+          'GET',
+          `/channels/${input.channelId}`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+      ]);
+
+      const memberRoleIds = new Set([input.guildId, ...(member.roles ?? [])]);
+      let value = roles.reduce(
+        (result, role) =>
+          memberRoleIds.has(role.id)
+            ? result | BigInt(role.permissions)
+            : result,
+        0n,
+      );
+      if ((value & DISCORD_PERMISSION_BITS.administrator) !== 0n) {
+        return true;
+      }
+
+      const overwrites = channel.permission_overwrites ?? [];
+      value = this.applyOverwrite(
+        value,
+        overwrites.find((overwrite) => overwrite.id === input.guildId),
+      );
+      const roleOverwrites = overwrites.filter(
+        (overwrite) =>
+          overwrite.type === 0 &&
+          overwrite.id !== input.guildId &&
+          memberRoleIds.has(overwrite.id),
+      );
+      const roleDeny = roleOverwrites.reduce(
+        (result, overwrite) => result | BigInt(overwrite.deny),
+        0n,
+      );
+      const roleAllow = roleOverwrites.reduce(
+        (result, overwrite) => result | BigInt(overwrite.allow),
+        0n,
+      );
+      value = (value & ~roleDeny) | roleAllow;
+      value = this.applyOverwrite(
+        value,
+        overwrites.find(
+          (overwrite) => overwrite.type === 1 && overwrite.id === input.userId,
+        ),
+      );
+      return (value & DISCORD_PERMISSION_BITS.view_channel) !== 0n;
+    } catch (error) {
+      if (error instanceof DiscordApiError) {
+        if (error.status === 403 || error.status === 404) return false;
+      }
+      return null;
+    }
+  }
+
   async editChannel(input: {
     channelId: string;
     name?: string;

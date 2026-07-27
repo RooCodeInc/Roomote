@@ -1,4 +1,5 @@
 import {
+  assertDiscordChannelAccess,
   lookupDiscordThread,
   normalizeDiscordChannelTarget,
 } from '../discord-thread-lookup';
@@ -7,11 +8,13 @@ const {
   getChannelMock,
   fetchThreadMessagesMock,
   isUserInGuildMock,
+  canUserAccessChannelMock,
   diagnoseChannelPermissionsMock,
 } = vi.hoisted(() => ({
   getChannelMock: vi.fn(),
   fetchThreadMessagesMock: vi.fn(),
   isUserInGuildMock: vi.fn(),
+  canUserAccessChannelMock: vi.fn(),
   diagnoseChannelPermissionsMock: vi.fn(),
 }));
 
@@ -34,6 +37,7 @@ vi.mock('@roomote/sdk/server', () => ({
     getChannel: getChannelMock,
     fetchThreadMessages: fetchThreadMessagesMock,
     isUserInGuild: isUserInGuildMock,
+    canUserAccessChannel: canUserAccessChannelMock,
     diagnoseChannelPermissions: diagnoseChannelPermissionsMock,
   })),
 }));
@@ -135,5 +139,37 @@ describe('lookupDiscordThread', () => {
     ).rejects.toThrow(
       'Explicit Discord lookup requires the acting user to have a linked Discord account.',
     );
+  });
+
+  it('rejects an explicit channel the linked Discord user cannot view', async () => {
+    getChannelMock.mockResolvedValue({
+      id: '999000000000000001',
+      name: 'private',
+      type: 0,
+      guildId: '123',
+    });
+    vi.mocked(db.query.discordUserMappings.findFirst).mockResolvedValueOnce({
+      discordUserId: 'discord-user-1',
+    } as never);
+    canUserAccessChannelMock.mockResolvedValueOnce(false);
+
+    await expect(
+      assertDiscordChannelAccess({
+        provider: {
+          getChannel: getChannelMock,
+          canUserAccessChannel: canUserAccessChannelMock,
+        } as never,
+        channelId: '999000000000000001',
+        isExplicitChannel: true,
+        actingUserId: 'user-1',
+      }),
+    ).rejects.toThrow(
+      'Linked Discord user cannot access channel 999000000000000001',
+    );
+    expect(canUserAccessChannelMock).toHaveBeenCalledWith({
+      guildId: '123',
+      channelId: '999000000000000001',
+      userId: 'discord-user-1',
+    });
   });
 });

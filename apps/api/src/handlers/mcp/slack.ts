@@ -1693,6 +1693,7 @@ slackMcp.post('/channel_post', async (c) => {
       id: true,
       taskId: true,
       payload: true,
+      actingUserId: true,
     },
     where: eq(taskRuns.id, authContext.runId),
   });
