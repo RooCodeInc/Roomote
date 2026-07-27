@@ -23,6 +23,7 @@ const mockResolveDiscordRuntimeCredentials = vi.fn();
 const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
+const mockCaptureTaskSettled = vi.fn();
 
 /**
  * Rows resolved by db.select() chains that join tasks with task_runs (the
@@ -173,6 +174,10 @@ vi.mock('@roomote/redis', () => ({
     set: (...args: unknown[]) => mockRedisSet(...args),
     del: (...args: unknown[]) => mockRedisDel(...args),
   }),
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureTaskSettled: (...args: unknown[]) => mockCaptureTaskSettled(...args),
 }));
 
 const mockCreateIssueComment = vi.fn().mockResolvedValue(undefined);
@@ -413,6 +418,36 @@ describe('finishRun', () => {
     });
 
     expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
+  });
+
+  it.each([
+    [RunStatus.Completed, undefined, 'completed'],
+    [RunStatus.Failed, 'docker_worker_start_timeout', 'failed'],
+    [RunStatus.Canceled, undefined, 'canceled'],
+  ] as const)(
+    'captures an anonymous settled event when a run is %s',
+    async (status, errorCode, outcome) => {
+      const startedAt = new Date(Date.now() - 1_000);
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({ startedAt }, { modelProvider: 'openai', model: 'gpt-5.4' }),
+      );
+
+      await finishRun({ id: 1, status, errorCode });
+
+      expect(mockCaptureTaskSettled).toHaveBeenCalledWith(
+        1,
+        outcome,
+        errorCode,
+      );
+    },
+  );
+
+  it('does not capture a settled event when a run becomes idle', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+
+    await finishRun({ id: 1, status: RunStatus.Idle });
+
+    expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
   });
 
   it('derives tasks.state completed via the shared sync when the job completes', async () => {

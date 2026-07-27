@@ -47,7 +47,7 @@ import {
   releaseTaskRun,
   suggestSlackQuestionChannels,
 } from '@roomote/cloud-agents/server';
-import { captureEvent } from '@roomote/telemetry/server';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 import {
   createTaskRunGitHubToken,
   createIssueComment,
@@ -256,15 +256,12 @@ export const finishRun = async ({
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
-  if (status === RunStatus.Completed) {
-    void captureEvent('task_completed', {
-      ...(run.actingUserId ? { userId: run.actingUserId } : {}),
-      properties: {
-        taskType: run.payloadKind,
-        harness: run.harness ?? null,
-        computeProvider: run.vendor ?? null,
-      },
-    });
+  if (
+    status === RunStatus.Completed ||
+    status === RunStatus.Failed ||
+    status === RunStatus.Canceled
+  ) {
+    void captureTaskSettled(run.id, status, errorCode);
   }
 
   if (status === RunStatus.Completed || status === RunStatus.Failed) {

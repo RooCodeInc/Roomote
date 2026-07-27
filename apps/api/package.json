@@ -39,6 +39,7 @@
     "@roomote/redis": "workspace:^",
     "@roomote/sdk": "workspace:^",
     "@roomote/slack": "workspace:^",
+    "@roomote/telemetry": "workspace:^",
     "@roomote/types": "workspace:^",
     "@sentry/node": "10.45.0",
     "@trpc/client": "^11.15.0",

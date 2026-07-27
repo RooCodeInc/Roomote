@@ -43,6 +43,7 @@ import {
   normalizeRepositorySelection,
 } from '@roomote/types';
 import * as GitHub from '@roomote/github';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 
 import { checkRepoAccess } from '@/lib/server';
 import type { UserAuthSuccess } from '@/types';
@@ -1073,24 +1074,31 @@ export async function cancelEnvironmentDefinitionTaskCommand(
 
   const endedAt = new Date();
 
-  await db.transaction(async (tx) => {
-    await tx
+  const canceledRuns = await db.transaction(async (tx) => {
+    const canceled = await tx
       .update(taskRuns)
       .set({
         status: RunStatus.Canceled,
         canceledAt: endedAt,
       })
-      .where(inArray(taskRuns.id, activeRunIds));
+      .where(inArray(taskRuns.id, activeRunIds))
+      .returning({ id: taskRuns.id });
 
     await Promise.all(
-      activeRunIds.map((runId) =>
+      canceled.map((run) =>
         markTaskStartParallelCountEndedAt(tx, {
-          runId,
+          runId: run.id,
           endedAt,
         }),
       ),
     );
+
+    return canceled;
   });
+
+  for (const run of canceledRuns) {
+    void captureTaskSettled(run.id, 'canceled');
+  }
 
   return { success: true as const };
 }

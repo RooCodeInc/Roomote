@@ -11,6 +11,7 @@ const {
   mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
+  mockCaptureTaskSettled,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -21,6 +22,7 @@ const {
   mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
+  mockCaptureTaskSettled: vi.fn(),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -86,6 +88,10 @@ vi.mock('@roomote/ado', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: vi.fn(),
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureTaskSettled: (...args: unknown[]) => mockCaptureTaskSettled(...args),
 }));
 
 vi.mock('../notify-source-run-on-settle', () => ({
@@ -421,8 +427,24 @@ describe('notifyCanceledTaskRunOnSettle', () => {
         notifySourceRunOnSettle: true,
       }),
       sourceRunId: 99,
-      task: { title: 'Verify environment' },
-    } as TaskRun & { task: { title: string } };
+      task: {
+        title: 'Verify environment',
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+        modelProvider: 'openai',
+        model: 'gpt-5.4',
+      },
+    } as TaskRun & {
+      task: {
+        title: string;
+        workflow: 'standard';
+        surface: 'web';
+        trigger: 'manual';
+        modelProvider: string;
+        model: string;
+      };
+    };
     mockTaskRunsFindFirst.mockResolvedValueOnce({
       error: 'Failed to create source control token.',
     });
@@ -436,6 +458,10 @@ describe('notifyCanceledTaskRunOnSettle', () => {
       }),
       RunStatus.Canceled,
       'Verify environment',
+    );
+    expect(mockCaptureTaskSettled).toHaveBeenCalledWith(
+      taskRun.id,
+      RunStatus.Canceled,
     );
   });
 });

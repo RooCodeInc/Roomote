@@ -1,10 +1,14 @@
-import { RunStatus } from '@roomote/types';
+import { RunStatus, exitedRunStatuses } from '@roomote/types';
 import {
+  and,
   db,
   taskRuns,
   eq,
+  inArray,
   markTaskStartParallelCountEndedAt,
+  not,
 } from '@roomote/db/server';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 
 import type { ActiveLinearTaskRunResult } from './types';
 import { clearLinearMessageQueue } from './queue-linear-message';
@@ -51,21 +55,37 @@ export async function cancelLinearTaskRun(
     // Update the run status to Canceled
     const endedAt = new Date();
 
-    await db.transaction(async (tx) => {
-      await tx
+    const canceledRun = await db.transaction(async (tx) => {
+      const [canceled] = await tx
         .update(taskRuns)
         .set({
           status: RunStatus.Canceled,
           canceledAt: endedAt,
           error: 'Canceled by user via stop signal',
         })
-        .where(eq(taskRuns.id, runId));
+        .where(
+          and(
+            eq(taskRuns.id, runId),
+            not(inArray(taskRuns.status, [...exitedRunStatuses])),
+          ),
+        )
+        .returning({ id: taskRuns.id });
+
+      if (!canceled) {
+        return null;
+      }
 
       await markTaskStartParallelCountEndedAt(tx, {
         runId: runId,
         endedAt,
       });
+
+      return canceled;
     });
+
+    if (canceledRun) {
+      void captureTaskSettled(canceledRun.id, RunStatus.Canceled);
+    }
 
     // Clear any pending messages in the queue
     await clearLinearMessageQueue(runId);

@@ -1,4 +1,5 @@
 import { cancelTaskRunDirect } from '@roomote/db/server';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 
 /**
  * Best-effort cancel of a run whose work-item `finalizeWorkItemLaunched` lost
@@ -19,6 +20,9 @@ export async function cancelOrphanedWorkItemRunBestEffort(
       runId,
       error: 'Canceled: work-item launch finalize lost the claim fencing guard',
     });
+    if (canceled) {
+      void captureTaskSettled(runId, 'canceled');
+    }
 
     return canceled
       ? 'orphaned run canceled'

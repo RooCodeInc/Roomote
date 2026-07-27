@@ -16,6 +16,7 @@ import {
   eq,
   getInstanceAnalyticsId,
   getUserAnalyticsId,
+  taskRuns,
 } from '@roomote/db/server';
 import { isAnonymousAnalyticsEnabledFromMetadata } from '@roomote/feature-flags';
 
@@ -297,6 +298,54 @@ export async function captureInstanceEvent(
   properties?: TelemetryEventProperties,
 ): Promise<void> {
   return captureEvent(event, { properties });
+}
+
+/**
+ * Captures a terminal task outcome after its status transaction has committed.
+ * Loading the run here keeps every terminal writer on one anonymous schema.
+ */
+export async function captureTaskSettled(
+  runId: number,
+  outcome: 'completed' | 'failed' | 'canceled',
+  errorCode?: string | null,
+): Promise<void> {
+  try {
+    if (!(await isAnonymousAnalyticsEnabled())) {
+      return;
+    }
+
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, runId),
+      with: { task: true },
+    });
+
+    if (!run) {
+      return;
+    }
+
+    void captureEvent('task_settled', {
+      ...(run.actingUserId ? { userId: run.actingUserId } : {}),
+      properties: {
+        taskType: run.payloadKind,
+        workflow: run.task.workflow,
+        surface: run.task.surface,
+        trigger: run.task.trigger,
+        runKind: run.kind,
+        harness: run.harness ?? null,
+        modelProvider: run.task.modelProvider ?? null,
+        model: run.task.model ?? null,
+        computeProvider: run.vendor ?? null,
+        outcome,
+        durationMs: run.startedAt ? Date.now() - run.startedAt.getTime() : null,
+        ...(outcome === 'failed' && errorCode ? { errorCode } : {}),
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} failed to capture settled task ${runId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 /**

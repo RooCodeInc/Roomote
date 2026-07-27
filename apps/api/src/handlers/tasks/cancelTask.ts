@@ -2,12 +2,19 @@ import type { Context } from 'hono';
 
 import {
   db,
+  and,
   eq,
+  inArray,
   markTaskStartParallelCountEndedAt,
   syncTaskStateFromRuns,
   taskRuns,
 } from '@roomote/db/server';
-import { RunStatus, isExitedRunStatus } from '@roomote/types';
+import {
+  RunStatus,
+  activeRunStatuses,
+  isExitedRunStatus,
+} from '@roomote/types';
+import { captureTaskSettled } from '@roomote/telemetry/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -47,15 +54,25 @@ export async function cancelTask(
 
     const endedAt = new Date();
 
-    await db.transaction(async (tx) => {
-      await tx
+    const canceledRun = await db.transaction(async (tx) => {
+      const [canceled] = await tx
         .update(taskRuns)
         .set({
           status: RunStatus.Canceled,
           cancelRequestedAt: endedAt,
           canceledAt: endedAt,
         })
-        .where(eq(taskRuns.id, job.id));
+        .where(
+          and(
+            eq(taskRuns.id, job.id),
+            inArray(taskRuns.status, [...activeRunStatuses]),
+          ),
+        )
+        .returning({ id: taskRuns.id });
+
+      if (!canceled) {
+        return null;
+      }
 
       // Derive the durable task state from all its runs after canceling this
       // run, so a still-running or already-completed sibling is respected.
@@ -65,7 +82,13 @@ export async function cancelTask(
         runId: job.id,
         endedAt,
       });
+
+      return canceled;
     });
+
+    if (canceledRun) {
+      void captureTaskSettled(canceledRun.id, 'canceled');
+    }
 
     return c.json({ success: true });
   } catch (error) {
