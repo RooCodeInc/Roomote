@@ -31,7 +31,6 @@ jobs:
     permissions:
       contents: read
     outputs:
-      docs_only: ${{ steps.changed-paths.outputs.docs_only }}
       owner: ${{ steps.vars.outputs.owner }}
       version: ${{ steps.vars.outputs.version }}
       product_version: ${{ steps.vars.outputs.product_version }}
@@ -40,56 +39,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-      - name: Classify changed paths
-        id: changed-paths
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ "$GITHUB_EVENT_NAME" != "push" ]; then
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          case "$GITHUB_REF" in
-            refs/heads/develop|refs/heads/main) ;;
-            *)
-              echo "docs_only=false" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
-
-          before="${{ github.event.before }}"
-          if [ "$before" = "0000000000000000000000000000000000000000" ]; then
-            changed_files="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
-          elif git cat-file -e "$before" 2>/dev/null; then
-            changed_files="$(git diff --name-only "$before" "$GITHUB_SHA")"
-          else
-            # Force-pushed over the previous tip; the base is gone, so build everything.
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ -z "$changed_files" ]; then
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          docs_only=true
-          while IFS= read -r path; do
-            case "$path" in
-              apps/docs/*|*.md|*.mdx)
-                ;;
-              *)
-                docs_only=false
-                break
-                ;;
-            esac
-          done <<< "$changed_files"
-
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-
       - name: Resolve image metadata
         id: vars
         shell: bash
@@ -155,7 +104,6 @@ jobs:
   deployment-acceptance:
     name: Deployment acceptance (amd64)
     needs: prepare
-    if: ${{ needs.prepare.outputs.docs_only != 'true' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -247,7 +195,6 @@ jobs:
   build:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
     needs: prepare
-    if: ${{ needs.prepare.outputs.docs_only != 'true' }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -398,7 +345,7 @@ jobs:
     name: Create GitHub Release
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: [prepare, publish]
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.prepare.outputs.docs_only != 'true' }}
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     permissions:
       contents: write
       packages: read
