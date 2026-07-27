@@ -83,6 +83,10 @@ import {
   finishRoutedStart,
   getSlackStartedMessageFollowUrl,
 } from './started-message';
+import {
+  buildStatuspageSlackWarning,
+  getStatuspageIncident,
+} from './statuspage-incidents';
 
 /**
  * Prefixes to distinguish between environment and repository selections.
@@ -367,6 +371,7 @@ interface RoutingPrefillData {
   routingDebug?: RoutingDebugInfo;
   routingDurationMs?: number;
   userRoute?: string;
+  warningText?: string;
 }
 
 interface RoutingConfirmActionValue {
@@ -516,12 +521,21 @@ function truncateText(text: string, maxLength = MAX_TEXT_LENGTH): string {
 
 function buildPlatformAnswerMessage(
   answer: string,
+  warningText?: string,
 ): Pick<SlackMessage, 'blocks' | 'text'> {
   const docsUrl = getDefaultDocsUrl(Env.APP_ENV ?? 'development');
 
   return {
     text: answer,
     blocks: [
+      ...(warningText?.trim()
+        ? [
+            {
+              type: 'section' as const,
+              text: { type: 'mrkdwn' as const, text: warningText.trim() },
+            },
+          ]
+        : []),
       {
         type: 'markdown',
         text: answer,
@@ -663,6 +677,7 @@ export function buildRoutingConfirmBlocks(
   workspaceDisplayName: string,
   modelDisplayName: string | undefined,
   actionValue: RoutingConfirmActionValue,
+  warningText?: string,
 ): SlackBlock[] {
   const text = buildRoutingConfirmationText({
     workspaceDisplayName,
@@ -673,6 +688,14 @@ export function buildRoutingConfirmBlocks(
   const serializedActionValue = JSON.stringify(actionValue);
 
   return [
+    ...(warningText?.trim()
+      ? [
+          {
+            type: 'section' as const,
+            text: { type: 'mrkdwn' as const, text: warningText.trim() },
+          },
+        ]
+      : []),
     {
       type: 'section',
       text: {
@@ -793,6 +816,10 @@ export async function showTaskConfiguration({
     event.channel,
     threadId,
   );
+  const warningText =
+    event.statuspageWarningText ??
+    buildStatuspageSlackWarning(await getStatuspageIncident());
+  event.statuspageWarningText = warningText;
 
   try {
     const threadRootExists = await slack.hasMessageInThread({
@@ -1113,6 +1140,7 @@ export async function showTaskConfiguration({
         workspaceDisplayName,
         getUserRequestedModelDisplayName(routingResult.model),
         { threadId, confirmNonce },
+        warningText,
       );
 
       const confirmMessageTs = await postOrReplaceSlackMessage({
@@ -1149,6 +1177,7 @@ export async function showTaskConfiguration({
         reasoning: routingResult.reasoning,
         routingDebug: routingResult.debug,
         routingDurationMs: suggestedRoutingDurationMs,
+        warningText,
       };
 
       await getRedis().set(
@@ -1173,7 +1202,14 @@ export async function showTaskConfiguration({
 
     // Routing failed or was skipped - show the manual selection UI as fallback
 
-    const blocks: SlackBlock[] = [];
+    const blocks: SlackBlock[] = warningText?.trim()
+      ? [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: warningText.trim() },
+          },
+        ]
+      : [];
 
     // Build workspace options with Environments first, then Repositories
     const workspaceOptions: Array<{
@@ -1657,7 +1693,9 @@ export async function handleTaskConfiguration(
     if (taskRun.reusedExistingRun) {
       await postSlackInteractiveResponse(payload.response_url, {
         replace_original: true,
-        blocks: buildExistingTaskQueuedBlocks(),
+        blocks: buildExistingTaskQueuedBlocks(
+          originalEvent.statuspageWarningText,
+        ),
       });
 
       const lastWorkspaceKey = `last_workspace:${userMapping.userId}`;
@@ -1714,6 +1752,7 @@ export async function handleTaskConfiguration(
       taskId: taskRun.taskId,
       initiatingSlackUserId: payload.user.id,
       taskUrl,
+      warningText: prefill?.warningText ?? originalEvent.statuspageWarningText,
     });
 
     // Update the original message using response_url instead of posting a new message.
@@ -1934,7 +1973,7 @@ async function startImmediateSlackTask({
       threadId,
       replaceMessageTs,
       message: {
-        blocks: buildExistingTaskQueuedBlocks(),
+        blocks: buildExistingTaskQueuedBlocks(event.statuspageWarningText),
       },
     });
 
@@ -1970,6 +2009,7 @@ async function startImmediateSlackTask({
     routingDebug,
     routingDurationMs,
     existingMessageTs: replaceMessageTs,
+    warningText: event.statuspageWarningText,
     slack,
   });
 
@@ -1991,8 +2031,16 @@ export {
   SLACK_STARTUP_FAILURE_TEXT,
 };
 
-function buildExistingTaskQueuedBlocks(): SlackBlock[] {
+function buildExistingTaskQueuedBlocks(warningText?: string): SlackBlock[] {
   return [
+    ...(warningText?.trim()
+      ? [
+          {
+            type: 'section' as const,
+            text: { type: 'mrkdwn' as const, text: warningText.trim() },
+          },
+        ]
+      : []),
     {
       type: 'section',
       text: {
@@ -2223,7 +2271,7 @@ export async function autoConfirmRouting(
         threadId,
         replaceMessageTs: prefill.confirmMessageTs ?? undefined,
         message: {
-          blocks: buildExistingTaskQueuedBlocks(),
+          blocks: buildExistingTaskQueuedBlocks(prefill.warningText),
         },
       });
       return;
@@ -2250,6 +2298,7 @@ export async function autoConfirmRouting(
       routingDurationMs: prefill.routingDurationMs,
       userRoute: prefill.userRoute,
       existingMessageTs: prefill.confirmMessageTs,
+      warningText: prefill.warningText,
       slack,
     });
 
@@ -2430,7 +2479,7 @@ export async function handleSlackRoutingCorrection({
           threadId,
           replaceMessageTs: oldPrefill.confirmMessageTs ?? undefined,
           message: {
-            blocks: buildExistingTaskQueuedBlocks(),
+            blocks: buildExistingTaskQueuedBlocks(oldPrefill.warningText),
           },
         });
         return { handled: true };
@@ -2457,6 +2506,7 @@ export async function handleSlackRoutingCorrection({
         routingDurationMs: oldPrefill.routingDurationMs,
         userRoute: oldPrefill.userRoute,
         existingMessageTs: oldPrefill.confirmMessageTs,
+        warningText: oldPrefill.warningText,
         slack,
       });
 
@@ -2491,7 +2541,10 @@ export async function handleSlackRoutingCorrection({
           channel: event.channel,
           threadId,
           replaceMessageTs: oldPrefill.confirmMessageTs ?? undefined,
-          message: buildPlatformAnswerMessage(reRoutingDecision.result.answer),
+          message: buildPlatformAnswerMessage(
+            reRoutingDecision.result.answer,
+            oldPrefill.warningText,
+          ),
         });
       } finally {
         await removeSlackProcessingReaction({
@@ -2556,6 +2609,7 @@ export async function handleSlackRoutingCorrection({
         routingDebug: result.debug,
         routingDurationMs: oldPrefill.routingDurationMs,
         userRoute: `${newAgentName} → ${newWorkspaceDisplayName}`,
+        warningText: oldPrefill.warningText,
       };
 
       // Replace the old confirmation message with the new routing suggestion
@@ -2572,6 +2626,7 @@ export async function handleSlackRoutingCorrection({
                 threadId,
                 confirmNonce: correctionNonce,
               },
+              oldPrefill.warningText,
             ),
           },
         });
@@ -2592,6 +2647,7 @@ export async function handleSlackRoutingCorrection({
               threadId,
               confirmNonce: correctionNonce,
             },
+            oldPrefill.warningText,
           ),
         });
       }
@@ -2773,7 +2829,7 @@ export async function handleRoutingConfirmOk(payload: SlackInteractivePayload) {
     if (result.reusedExistingRun) {
       await postSlackInteractiveResponse(payload.response_url, {
         replace_original: true,
-        blocks: buildExistingTaskQueuedBlocks(),
+        blocks: buildExistingTaskQueuedBlocks(prefill.warningText),
       });
       return;
     }
@@ -2799,6 +2855,7 @@ export async function handleRoutingConfirmOk(payload: SlackInteractivePayload) {
       routingDurationMs: prefill.routingDurationMs,
       userRoute: prefill.userRoute,
       existingMessageTs: prefill.confirmMessageTs,
+      warningText: prefill.warningText,
       slack,
     });
 

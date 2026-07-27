@@ -124,6 +124,7 @@ export interface SlackStartedMessageData {
   otherRunningTasksCount?: number;
   workspaceOnly?: boolean;
   initiatingSlackUserId?: string;
+  warningText?: string;
 }
 
 /**
@@ -141,6 +142,7 @@ export async function setSlackStartedMessageTs(
     otherRunningTasksCount?: number;
     workspaceOnly?: boolean;
     initiatingSlackUserId?: string;
+    warningText?: string;
   },
 ) {
   const redis = getRedis();

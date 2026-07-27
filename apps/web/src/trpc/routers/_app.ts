@@ -372,6 +372,7 @@ import {
   getReleaseNotesCommand,
   getReleaseStatusCommand,
 } from '../commands/product-releases';
+import { getStatuspageIncident } from '@roomote/slack';
 
 const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
 const stateRecordSchema = z.record(z.string());
@@ -714,6 +715,9 @@ const automationsRouter = createRouter({
 });
 
 export const appRouter = createRouter({
+  statuspage: createRouter({
+    incident: publicProcedure.query(() => getStatuspageIncident()),
+  }),
   analytics: createRouter({
     overview: protectedProcedure
       .input(analyticsOverviewInputSchema)

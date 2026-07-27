@@ -111,6 +111,7 @@ export async function finishRoutedStart({
   routingDurationMs,
   userRoute,
   existingMessageTs,
+  warningText,
   slack,
 }: {
   runId: number | null;
@@ -138,6 +139,7 @@ export async function finishRoutedStart({
   routingDurationMs?: number;
   userRoute?: string;
   existingMessageTs?: string | null;
+  warningText?: string;
   slack: SlackNotifier;
 }): Promise<void> {
   postSlackFinalRouterDebug({
@@ -171,6 +173,7 @@ export async function finishRoutedStart({
     taskId,
     initiatingSlackUserId,
     taskUrl,
+    warningText,
   });
 
   const startedMessageTs = existingMessageTs
@@ -198,6 +201,7 @@ export async function finishRoutedStart({
       modelDisplayName,
       kickoffMessage,
       workspaceOnly,
+      warningText,
     });
   }
 

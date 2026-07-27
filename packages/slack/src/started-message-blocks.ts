@@ -16,6 +16,7 @@ interface BuildStartedBlocksOptions {
   initiatingSlackUserId?: string;
   taskUrl?: string;
   readinessNote?: string;
+  warningText?: string;
 }
 
 interface BuildTaskFailedBlocksOptions {
@@ -45,6 +46,7 @@ export function buildStartedBlocks(
     initiatingSlackUserId,
     taskUrl,
     readinessNote,
+    warningText,
   } = options;
   const actionElements: Record<string, unknown>[] = [];
 
@@ -80,6 +82,14 @@ export function buildStartedBlocks(
     kickoffMessage,
   });
   const blocks: SlackBlock[] = [
+    ...(warningText?.trim()
+      ? [
+          {
+            type: 'section' as const,
+            text: { type: 'mrkdwn' as const, text: warningText.trim() },
+          },
+        ]
+      : []),
     { type: 'section', text: { type: 'mrkdwn', text } },
   ];
 
