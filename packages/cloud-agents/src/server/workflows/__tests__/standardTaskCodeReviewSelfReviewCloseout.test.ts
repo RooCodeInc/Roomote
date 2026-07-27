@@ -113,6 +113,21 @@ describe('Standard Task code-review self-review closeout', () => {
     );
   });
 
+  it('infers GitHub self-review guidance from the task surface', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      codeReviewsEnabled: true,
+      taskSurface: 'github',
+    });
+
+    expect(harnessInstructions).toContain('<code_review_self_review_closeout>');
+    expect(harnessInstructions).toContain(
+      'are doing a self-review on GitHub and will follow up here with those results',
+    );
+  });
+
   it('falls back to GitHub/GitLab when no source-control provider is set', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',

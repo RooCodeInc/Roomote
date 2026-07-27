@@ -203,8 +203,11 @@ export function standardTask({
   // regardless of the flag.
   const backgroundProofDeliveryActive =
     backgroundProofCaptureEnabled && !interactiveMode;
-  const sourceControlPlatformLabel = sourceControlProvider
-    ? getSourceControlProviderLabel(sourceControlProvider)
+  const resolvedSourceControlProvider =
+    sourceControlProvider ??
+    (taskSurface === 'github' ? ('github' as const) : undefined);
+  const sourceControlPlatformLabel = resolvedSourceControlProvider
+    ? getSourceControlProviderLabel(resolvedSourceControlProvider)
     : 'GitHub/GitLab';
   const sourceControlTaskSurface =
     taskSurface === 'github' ||
@@ -218,7 +221,7 @@ export function standardTask({
   // Chat surfaces use their own delivery path.
   const selfReviewFollowUpSupported =
     !isAllRepositoriesSelection &&
-    (!sourceControlTaskSurface || sourceControlProvider === 'github');
+    (!sourceControlTaskSurface || resolvedSourceControlProvider === 'github');
   // When automatic Code Reviewer open/push hooks can fire for this deployment,
   // give the agent decision rules for the user-facing expectation note.
   // Do not key the final note solely on configured prAction: explicit `$create-pr`
@@ -336,15 +339,15 @@ ${buildGitHubMessageInstructions()}`
     <rule>If a workflow or packaged skill distinguishes web dashboard tasks from other surfaces, treat this run as a web dashboard task.</rule>
     <rule>When a secure web-task flow exists for the current step, prefer that flow over asking the user to paste secrets into chat or make local-only task edits.</rule>
   </task_surface_context>`;
-  const sourceControlContext = sourceControlProvider
+  const sourceControlContext = resolvedSourceControlProvider
     ? `
   <source_control_context>
-    <rule>The task repositories are hosted on ${getSourceControlProviderLabel(sourceControlProvider)}.</rule>
+    <rule>The task repositories are hosted on ${getSourceControlProviderLabel(resolvedSourceControlProvider)}.</rule>
     <rule>Pull request and merge request creation or refresh goes through the Roomote MCP \`manage_source_control\` tool, which resolves this provider server-side.</rule>${
-      sourceControlProvider === 'github'
+      resolvedSourceControlProvider === 'github'
         ? ''
         : `
-    <rule>GitHub-only CLI commands such as \`gh pr\` and \`gh api\` cannot operate on ${getSourceControlProviderLabel(sourceControlProvider)} repositories; use local git state and the Roomote MCP tools instead.</rule>`
+    <rule>GitHub-only CLI commands such as \`gh pr\` and \`gh api\` cannot operate on ${getSourceControlProviderLabel(resolvedSourceControlProvider)} repositories; use local git state and the Roomote MCP tools instead.</rule>`
     }
   </source_control_context>`
     : '';
