@@ -1,6 +1,8 @@
 {
 	{$ROOMOTE_CADDY_LOCAL_CERTS:}
-	{$ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET:import roomote_on_demand_tls}
+	on_demand_tls {
+		ask http://web:3000/api/caddy/ask
+	}
 }
 
 (roomote_proxy) {
@@ -10,12 +12,6 @@
 		header_up -X-Roomote-Public-Host
 		lb_try_duration 10s
 		lb_try_interval 250ms
-	}
-}
-
-(roomote_on_demand_tls) {
-	on_demand_tls {
-		ask http://web:3000/api/caddy/ask
 	}
 }
 
