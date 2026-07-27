@@ -13,7 +13,10 @@ import type { HarnessLogger } from '../../../../logging';
 import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  isReservedRuntimeMcpEnvVarName,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  redactReservedOpenCodeEnvReferences,
+  REFUSED_ENV_REFERENCE_PLACEHOLDER,
   type ReasoningEffort,
 } from '@roomote/types';
 
@@ -66,40 +69,60 @@ function createBearerTokenEnvVarName(serverName: string): string {
   return `ROOMOTE_DIRECT_MCP_BEARER_TOKEN_${sanitizeEnvVarSegment(serverName)}`;
 }
 
+/**
+ * Build an OpenCode `{env:NAME}` reference for an *operator-supplied* name,
+ * refusing reserved runtime names.
+ *
+ * Roomote's `${VAR}` pass in `resolveBuiltInMcpServers` already refuses these,
+ * but a refused reference that survives as literal `${VAR}` text would be
+ * re-read here and rewritten into a working reference, undoing that refusal.
+ * Generated `ROOMOTE_DIRECT_MCP_*` names are produced by the runtime rather
+ * than the operator and deliberately do not go through this.
+ */
+function operatorEnvReference(name: string): string {
+  return isReservedRuntimeMcpEnvVarName(name)
+    ? REFUSED_ENV_REFERENCE_PLACEHOLDER
+    : `{env:${name}}`;
+}
+
 function convertHeaderEnvSubstitutions(options: {
   serverName: string;
   headerName: string;
   value: string;
   runtimeEnv: Record<string, string>;
 }): string {
-  const bareEnvVar = resolveHeaderEnvVarNameForOpenCode(options.value);
+  // Refuse reserved names written directly in OpenCode syntax before matching.
+  // These never pass through Roomote's `${VAR}` engine, so this is the only
+  // place they can be caught.
+  const value = redactReservedOpenCodeEnvReferences(options.value);
+  const bareEnvVar = resolveHeaderEnvVarNameForOpenCode(value);
 
   if (bareEnvVar) {
-    return `{env:${bareEnvVar}}`;
+    return operatorEnvReference(bareEnvVar);
   }
 
   const openCodeEnvVarMatch = /^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/u.exec(
-    options.value.trim(),
+    value.trim(),
   );
 
   if (openCodeEnvVarMatch?.[1]) {
-    return `{env:${openCodeEnvVarMatch[1]}}`;
+    return operatorEnvReference(openCodeEnvVarMatch[1]);
   }
 
-  const trimmedValue = options.value.trim();
+  const trimmedValue = value.trim();
   const bearerEnvVarMatch = /^Bearer\s+\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/u.exec(
     trimmedValue,
   );
 
   if (bearerEnvVarMatch?.[1]) {
-    return `Bearer {env:${bearerEnvVarMatch[1]}}`;
+    return `Bearer ${operatorEnvReference(bearerEnvVarMatch[1])}`;
   }
 
   const bearerOpenCodeEnvVarMatch =
     /^Bearer\s+\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/u.exec(trimmedValue);
 
   if (bearerOpenCodeEnvVarMatch?.[1]) {
-    return `Bearer {env:${bearerOpenCodeEnvVarMatch[1]}}`;
+    return `Bearer ${operatorEnvReference(bearerOpenCodeEnvVarMatch[1])}`;
   }
 
   if (options.headerName.toLowerCase() === 'authorization') {
@@ -117,7 +140,7 @@ function convertHeaderEnvSubstitutions(options: {
     options.serverName,
     options.headerName,
   );
-  options.runtimeEnv[envVarName] = options.value;
+  options.runtimeEnv[envVarName] = value;
 
   return `{env:${envVarName}}`;
 }
@@ -127,15 +150,26 @@ function normalizeOpenCodeMcpServers(
   runtimeEnv: Record<string, string>,
 ): OpenCodeConfigMcpServer[] {
   return Object.entries(mcpServers).map(([name, config]) => {
+    // Every operator-supplied string below is serialized verbatim into the
+    // OpenCode config file, and OpenCode resolves `{env:VAR}` anywhere in that
+    // text -- not only in header values. Redact reserved references in all of
+    // them, including the fields that need no other conversion.
     if (config.type === 'stdio') {
+      const environment = Object.fromEntries(
+        Object.entries(config.env).map(([envName, envValue]) => [
+          envName,
+          redactReservedOpenCodeEnvReferences(envValue),
+        ]),
+      );
+
       return {
         type: 'local',
         name,
-        command: config.command,
-        ...(config.args.length > 0 ? { args: config.args } : {}),
-        ...(Object.keys(config.env).length > 0
-          ? { environment: config.env }
+        command: redactReservedOpenCodeEnvReferences(config.command),
+        ...(config.args.length > 0
+          ? { args: config.args.map(redactReservedOpenCodeEnvReferences) }
           : {}),
+        ...(Object.keys(environment).length > 0 ? { environment } : {}),
       };
     }
 
@@ -154,7 +188,7 @@ function normalizeOpenCodeMcpServers(
     return {
       type: 'remote',
       name,
-      url: config.url,
+      url: redactReservedOpenCodeEnvReferences(config.url),
       ...(Object.keys(headers).length > 0 ? { headers } : {}),
     };
   });
