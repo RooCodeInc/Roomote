@@ -114,4 +114,44 @@ describe('handleDiscordPrReviewActionCallback', () => {
       }),
     );
   });
+
+  it('truncates preserved feedback to fit the action resolution', async () => {
+    const content = 'x'.repeat(2_000);
+
+    await handleDiscordPrReviewActionCallback({
+      provider: {} as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-1',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-1',
+        user: { id: 'discord-user-1', username: 'dan' },
+        message: {
+          id: 'message-1',
+          channel_id: 'thread-1',
+          content,
+          author: { id: 'bot-1', username: 'Roomote' },
+          attachments: [],
+          mentions: [],
+        },
+      },
+      interactionDeferred: true,
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Task thread',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      choice: 'yes',
+      nonce: 'nonce-1',
+    });
+
+    const text = mocks.reply.mock.calls[0]?.[0]?.text;
+    expect(text).toHaveLength(2_000);
+    expect(text).toMatch(/\.\.\.\n\nOn it — resolving the review feedback\.$/);
+  });
 });

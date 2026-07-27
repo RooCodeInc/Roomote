@@ -1,5 +1,8 @@
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
-import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import {
+  DISCORD_MAX_MESSAGE_LENGTH,
+  type DiscordCommunicationProvider,
+} from '@roomote/communication/discord-provider';
 import {
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
@@ -39,12 +42,22 @@ export async function handleDiscordPrReviewActionCallback(input: {
       },
       text,
     });
-  const replyToOffer = (resolution: string) =>
-    reply(
-      input.interaction.message?.content
-        ? `${input.interaction.message.content}\n\n${resolution}`
-        : resolution,
-    );
+  const replyToOffer = (resolution: string) => {
+    const content = input.interaction.message?.content;
+    if (!content) return reply(resolution);
+
+    const separator = '\n\n';
+    const availableContentLength =
+      DISCORD_MAX_MESSAGE_LENGTH - separator.length - resolution.length;
+    const preservedContent =
+      content.length <= availableContentLength
+        ? content
+        : availableContentLength > 3
+          ? `${content.slice(0, availableContentLength - 3)}...`
+          : content.slice(0, Math.max(availableContentLength, 0));
+
+    return reply(`${preservedContent}${separator}${resolution}`);
+  };
   const user = input.interaction.member?.user ?? input.interaction.user;
   const mappedUserId = await findDiscordMappedUserId(user?.id);
 
