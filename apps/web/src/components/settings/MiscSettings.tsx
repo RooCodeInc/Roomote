@@ -24,6 +24,13 @@ import {
 } from '@/components/system';
 import { Section } from '@/components/settings';
 import type { MiscSettings as MiscSettingsData } from '@/trpc/commands/misc-settings';
+import {
+  buildRouterDebugSettingsInput,
+  getRouterDebugDestinationSelection,
+  ROUTER_DEBUG_ENV_FALLBACK,
+  ROUTER_DEBUG_NONE,
+  type RouterDebugDestinationSelection,
+} from './router-diagnostics-destination';
 
 function getBugReportUrl(diagnostics: string): string {
   const url = new URL('https://github.com/RooCodeInc/Roomote/issues/new');
@@ -32,20 +39,19 @@ function getBugReportUrl(diagnostics: string): string {
   return url.toString();
 }
 
-const ROUTER_DEBUG_NONE = '__none__';
-
 function RouterDiagnosticsDestination() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const queryKey = trpc.routerDebug.getSettings.queryKey();
   const settings = useQuery(trpc.routerDebug.getSettings.queryOptions());
-  const [provider, setProvider] = useState<string>(ROUTER_DEBUG_NONE);
+  const [provider, setProvider] =
+    useState<RouterDebugDestinationSelection>(ROUTER_DEBUG_NONE);
   const [channelId, setChannelId] = useState('');
   const update = useMutation(
     trpc.routerDebug.updateSettings.mutationOptions({
       onSuccess: (next) => {
         queryClient.setQueryData(queryKey, next);
-        setProvider(next.destination?.provider ?? ROUTER_DEBUG_NONE);
+        setProvider(getRouterDebugDestinationSelection(next));
         setChannelId(next.destination?.channelId ?? '');
         toast.success('Router diagnostics destination updated.');
       },
@@ -55,7 +61,7 @@ function RouterDiagnosticsDestination() {
 
   useEffect(() => {
     if (settings.data) {
-      setProvider(settings.data.destination?.provider ?? ROUTER_DEBUG_NONE);
+      setProvider(getRouterDebugDestinationSelection(settings.data));
       setChannelId(settings.data.destination?.channelId ?? '');
     }
   }, [settings.data]);
@@ -69,25 +75,36 @@ function RouterDiagnosticsDestination() {
         </p>
         <Select
           value={provider}
-          onValueChange={setProvider}
+          onValueChange={(value) =>
+            setProvider(value as RouterDebugDestinationSelection)
+          }
           disabled={settings.isPending || update.isPending}
         >
           <SelectTrigger aria-label="Router diagnostics provider">
             {provider === ROUTER_DEBUG_NONE
               ? 'No diagnostics destination'
-              : provider}
+              : provider === ROUTER_DEBUG_ENV_FALLBACK
+                ? 'Use environment fallback'
+                : provider}
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ROUTER_DEBUG_NONE}>
               No diagnostics destination
             </SelectItem>
+            {settings.data?.envFallbackSlackChannelId ? (
+              <SelectItem value={ROUTER_DEBUG_ENV_FALLBACK}>
+                Use environment fallback (
+                {settings.data.envFallbackSlackChannelId})
+              </SelectItem>
+            ) : null}
             <SelectItem value="slack">Slack</SelectItem>
             <SelectItem value="discord">Discord</SelectItem>
             <SelectItem value="teams">Microsoft Teams</SelectItem>
             <SelectItem value="telegram">Telegram</SelectItem>
           </SelectContent>
         </Select>
-        {provider !== ROUTER_DEBUG_NONE ? (
+        {provider !== ROUTER_DEBUG_NONE &&
+        provider !== ROUTER_DEBUG_ENV_FALLBACK ? (
           <Input
             aria-label="Router diagnostics destination"
             value={channelId}
@@ -99,16 +116,12 @@ function RouterDiagnosticsDestination() {
         <Button
           disabled={
             update.isPending ||
-            (provider !== ROUTER_DEBUG_NONE && !channelId.trim())
+            (provider !== ROUTER_DEBUG_NONE &&
+              provider !== ROUTER_DEBUG_ENV_FALLBACK &&
+              !channelId.trim())
           }
           onClick={() =>
-            update.mutate({
-              provider:
-                provider === ROUTER_DEBUG_NONE
-                  ? null
-                  : (provider as 'slack' | 'discord' | 'teams' | 'telegram'),
-              channelId: provider === ROUTER_DEBUG_NONE ? null : channelId,
-            })
+            update.mutate(buildRouterDebugSettingsInput(provider, channelId))
           }
         >
           Save

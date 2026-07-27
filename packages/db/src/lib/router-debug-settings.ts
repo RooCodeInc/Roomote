@@ -10,7 +10,11 @@ import { deploymentSettings } from '../schema';
 const DEFAULT_DEPLOYMENT_ID = 'default';
 const SLACK_CHANNEL_ID_REGEX = /^[CG][A-Z0-9]{8,}$/i;
 
-export type RouterDebugChannelSource = 'deployment' | 'env' | 'none';
+export type RouterDebugChannelSource =
+  | 'deployment'
+  | 'env'
+  | 'disabled'
+  | 'none';
 
 export type RouterDebugDestination = {
   provider: CommunicationProvider;
@@ -61,6 +65,7 @@ export async function getRouterDebugSettings(
   } = {},
 ): Promise<{
   destination: RouterDebugDestination | null;
+  disabled: boolean;
   routerDebugSlackChannelId: string | null;
   envFallbackSlackChannelId: string | null;
   effectiveRouterDebugSlackChannelId: string | null;
@@ -72,6 +77,7 @@ export async function getRouterDebugSettings(
     columns: {
       routerDebugProvider: true,
       routerDebugChannelId: true,
+      routerDebugDisabled: true,
       routerDebugSlackChannelId: true,
     },
   });
@@ -88,22 +94,26 @@ export async function getRouterDebugSettings(
       | undefined,
     channelId: deployment?.routerDebugChannelId ?? undefined,
   });
-  const destination =
-    deploymentDestination ??
-    (legacySlackChannelId
-      ? { provider: 'slack' as const, channelId: legacySlackChannelId }
-      : envFallbackSlackChannelId
-        ? { provider: 'slack' as const, channelId: envFallbackSlackChannelId }
-        : null);
+  const disabled = deployment?.routerDebugDisabled === true;
+  const destination = disabled
+    ? null
+    : (deploymentDestination ??
+      (legacySlackChannelId
+        ? { provider: 'slack' as const, channelId: legacySlackChannelId }
+        : envFallbackSlackChannelId
+          ? { provider: 'slack' as const, channelId: envFallbackSlackChannelId }
+          : null));
 
   return {
     destination,
+    disabled,
     envFallbackSlackChannelId,
     routerDebugSlackChannelId: legacySlackChannelId,
     effectiveRouterDebugSlackChannelId:
       destination?.provider === 'slack' ? destination.channelId : null,
-    source:
-      deploymentDestination || legacySlackChannelId
+    source: disabled
+      ? 'disabled'
+      : deploymentDestination || legacySlackChannelId
         ? 'deployment'
         : envFallbackSlackChannelId
           ? 'env'
@@ -135,6 +145,7 @@ export async function getConfiguredRouterDebugDestination(
 export async function updateRouterDebugSettings(
   input: {
     destination: RouterDebugDestination | null;
+    disabled?: boolean;
   },
   options: {
     executor?: DatabaseOrTransaction;
@@ -142,6 +153,7 @@ export async function updateRouterDebugSettings(
 ): Promise<void> {
   const executor = options.executor ?? db;
   const destination = normalizeRouterDebugDestination(input.destination);
+  const disabled = input.disabled === true;
   const now = new Date();
 
   await executor
@@ -150,6 +162,7 @@ export async function updateRouterDebugSettings(
       id: DEFAULT_DEPLOYMENT_ID,
       routerDebugProvider: destination?.provider ?? null,
       routerDebugChannelId: destination?.channelId ?? null,
+      routerDebugDisabled: disabled,
       routerDebugSlackChannelId:
         destination?.provider === 'slack' ? destination.channelId : null,
       updatedAt: now,
@@ -159,6 +172,7 @@ export async function updateRouterDebugSettings(
       set: {
         routerDebugProvider: destination?.provider ?? null,
         routerDebugChannelId: destination?.channelId ?? null,
+        routerDebugDisabled: disabled,
         routerDebugSlackChannelId:
           destination?.provider === 'slack' ? destination.channelId : null,
         updatedAt: now,

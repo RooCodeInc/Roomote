@@ -29,9 +29,14 @@ export async function updateRouterDebugSettingsCommand(
   input: {
     provider: CommunicationProvider | null;
     channelId: string | null;
+    disabled: boolean;
   },
 ) {
   assertAdmin(auth);
+
+  if (input.disabled && (input.provider || input.channelId)) {
+    throw new Error('A disabled destination cannot include provider details.');
+  }
 
   const destination =
     input.provider && input.channelId
@@ -107,6 +112,7 @@ export async function updateRouterDebugSettingsCommand(
 
   await updateRouterDebugSettings({
     destination,
+    disabled: input.disabled,
   });
 
   return getRouterDebugSettings();

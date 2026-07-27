@@ -1,5 +1,5 @@
 {
-  "id": "4003454a-c365-4347-8bde-017b8e5fa80e",
+  "id": "93944ecb-cb8c-4147-b765-d70ea04dc709",
   "prevId": "236f9347-e96e-40d8-9726-3e51c6ba8146",
   "version": "7",
   "dialect": "postgresql",
@@ -1282,6 +1282,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "router_debug_disabled": {
+          "name": "router_debug_disabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "router_debug_slack_channel_id": {
           "name": "router_debug_slack_channel_id",

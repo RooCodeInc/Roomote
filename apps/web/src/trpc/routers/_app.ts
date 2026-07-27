@@ -2085,6 +2085,7 @@ export const appRouter = createRouter({
             .enum(['slack', 'teams', 'telegram', 'discord'])
             .nullable(),
           channelId: z.string().trim().min(1).max(255).nullable(),
+          disabled: z.boolean(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
