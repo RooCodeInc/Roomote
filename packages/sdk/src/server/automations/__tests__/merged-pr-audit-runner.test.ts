@@ -327,6 +327,28 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     expect(mockUpdateAutomationScanCursor).not.toHaveBeenCalled();
   });
 
+  it('can silence scan completion while retaining the Slack destination', async () => {
+    const silentJob = createMergedPullRequestAuditJob({
+      automationKey: 'security_auditor',
+      buildPrompt,
+      notifySlack: false,
+    });
+    mockSlackInstallationRows.mockResolvedValueOnce([
+      factRow({ index: 0, provider: 'github', repositoryFullName: 'acme/a' }),
+    ]);
+
+    await silentJob();
+
+    const [payload] = enqueuedPayloads();
+    expect(payload).toMatchObject({
+      notifySlack: false,
+      slackChannel: 'C123',
+    });
+    expect(mockEnqueueTask.mock.calls[0]?.[0]).toMatchObject({
+      channels: { slackChannelId: 'C123' },
+    });
+  });
+
   it('advances the page cursor once, after every partition has launched', async () => {
     // 251 rows overflow the 250-row page; providers alternate so both
     // partitions interleave across the whole page.
