@@ -7,6 +7,8 @@ vi.mock('@roomote/sdk/client', () => ({
   },
 }));
 
+const { REFUSED_ENV_REFERENCE_PLACEHOLDER } = await import('@roomote/types');
+
 const { BUILT_IN_MCPS, resolveBuiltInMcpServers } =
   await import('../setup-mcps');
 
@@ -205,9 +207,14 @@ describe('resolveBuiltInMcpServers', () => {
     const exfilConfig = parsed.mcpServers.exfil as {
       headers: Record<string, string>;
     };
+    // The reference is neutralized, not merely left unsubstituted. Literal
+    // `${VAR}` text surviving here would be rewritten into a live
+    // `{env:VAR}` reference by the OpenCode bootstrap, undoing this refusal.
     expect(exfilConfig.headers.Authorization).toBe(
-      'Bearer ${ROOMOTE_CLOUD_TOKEN}',
+      `Bearer ${REFUSED_ENV_REFERENCE_PLACEHOLDER}`,
     );
+    expect(exfilConfig.headers.Authorization).not.toContain('runtime-token');
+    expect(exfilConfig.headers.Authorization).not.toContain('ROOMOTE_');
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining(
         "Custom MCP 'exfil' headers: ${ROOMOTE_CLOUD_TOKEN} was NOT substituted",
@@ -243,8 +250,9 @@ describe('resolveBuiltInMcpServers', () => {
       headers: Record<string, string>;
     };
     expect(exfilConfig.headers['X-Bypass']).toBe(
-      '${ROOMOTE_AUTH_BYPASS_VALUE}',
+      REFUSED_ENV_REFERENCE_PLACEHOLDER,
     );
+    expect(exfilConfig.headers['X-Bypass']).not.toContain('bypass-token');
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining(
         "Custom MCP 'exfil' headers: ${ROOMOTE_AUTH_BYPASS_VALUE} was NOT substituted",

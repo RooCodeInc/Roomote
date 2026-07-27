@@ -2,11 +2,18 @@ import * as path from 'node:path';
 
 import {
   getMcpIntegrationUpstreamUrl,
+  isReservedRuntimeMcpEnvVarName,
+  isRoomoteNamespacedEnvVarName,
   MCP_INTEGRATIONS,
+  REFUSED_ENV_REFERENCE_PLACEHOLDER,
   type EnvironmentMcpServers,
 } from '@roomote/types';
 
-import { collectEnvVarReferences, substituteEnvVars } from '../../env';
+import {
+  collectEnvVarReferences,
+  redactEnvVarReferences,
+  substituteEnvVars,
+} from '../../env';
 
 // The Roomote MCP server is compiled into the worker's dist directory.
 // Resolve its path relative to the running worker script (process.argv[1]).
@@ -58,41 +65,6 @@ interface IntegrationProxyConfig {
   proxyPath: string;
   upstreamOrigin?: string;
   upstreamPath?: string;
-}
-
-/**
- * Names that belong unambiguously to the Roomote runtime. These never
- * substitute into operator-configured MCP config — not even from the
- * operator-provided overlay — so a value injected into an env map by the
- * runtime can never be reclassified as operator-owned.
- */
-function isRoomoteNamespacedEnvVarName(name: string): boolean {
-  return (
-    name === 'AUTH_TOKEN' ||
-    name === 'BASH_ENV' ||
-    name.startsWith('ROOMOTE_') ||
-    name.startsWith('JOB_AUTH_') ||
-    name.startsWith('PREVIEW_AUTH_')
-  );
-}
-
-/**
- * Roomote runtime / control-plane values that must never be injectable into
- * operator-configured MCP server config via ${...} substitution from the
- * task env. This is deliberately limited to Roomote-internal names: anything
- * the operator defined themselves (deployment env vars) is already present
- * in the sandbox environment, so refusing to substitute it would add
- * friction without protecting anything. Operator-defined names substitute
- * via the overlay in buildMcpSubstitutionLookup; generic reserved names
- * (DATABASE_URL, REDIS_URL) can be shadowed there by an operator's own
- * value, Roomote-namespaced names cannot.
- */
-function isReservedRuntimeMcpEnvVarName(name: string): boolean {
-  return (
-    isRoomoteNamespacedEnvVarName(name) ||
-    name === 'DATABASE_URL' ||
-    name === 'REDIS_URL'
-  );
 }
 
 /**
@@ -149,7 +121,8 @@ function warnUnresolvableConfigReferences(options: {
             `\${${name}} was NOT substituted because the name is a reserved ` +
             `Roomote runtime name. Define your own deployment environment ` +
             `variable under a different name and reference that instead; ` +
-            `the literal text was passed through.`,
+            `the reference was replaced with ` +
+            `'${REFUSED_ENV_REFERENCE_PLACEHOLDER}'.`,
         );
       } else {
         console.warn(
@@ -178,7 +151,19 @@ function resolveConfigValues(
     lookup,
   });
 
-  return substituteEnvVars(values, lookup);
+  // Neutralize refused references before substituting. A reserved name that
+  // is merely left unsubstituted survives as literal `${VAR}` text, which the
+  // OpenCode bootstrap then rewrites into a live `{env:VAR}` reference --
+  // turning this refusal back into a working read of the runtime env. Names
+  // the operator legitimately shadows are already in `lookup` and substitute
+  // normally, so they never reach the redaction below.
+  const redacted = redactEnvVarReferences(
+    values,
+    (name) => !(name in lookup) && isReservedRuntimeMcpEnvVarName(name),
+    REFUSED_ENV_REFERENCE_PLACEHOLDER,
+  );
+
+  return substituteEnvVars(redacted, lookup);
 }
 
 function buildIntegrationProxyMap(): Map<string, IntegrationProxyConfig> {

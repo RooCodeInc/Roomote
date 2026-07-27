@@ -1,2 +1,6 @@
 export { WorkerEnv } from './worker-env';
-export { collectEnvVarReferences, substituteEnvVars } from './substitute';
+export {
+  collectEnvVarReferences,
+  redactEnvVarReferences,
+  substituteEnvVars,
+} from './substitute';
