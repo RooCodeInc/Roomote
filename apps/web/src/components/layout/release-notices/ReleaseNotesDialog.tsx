@@ -177,7 +177,15 @@ export function ReleaseNotesDialog({
           mode={mode}
         />
 
-        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+        <DialogFooter className="flex-row justify-end gap-2">
+          <a
+            href="https://discord.gg/KNw7Sz75UK"
+            target="_blank"
+            className="mr-auto text-sm underline"
+            rel="noreferrer"
+          >
+            Join us on Discord
+          </a>
           <Button variant="outline" asChild>
             <a href={htmlUrl} target="_blank" rel="noreferrer">
               Go to the release
