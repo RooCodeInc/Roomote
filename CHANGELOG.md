@@ -9,8 +9,7 @@ This release gives self-hosted operators more flexible preview hosting and expan
 ### Highlights
 
 - Run self-hosted task previews on flat wildcard hostnames with documented Caddy and Cloudflare Tunnel configuration.
-- Connect an eligible Grok subscription with device-code OAuth and monitor its usage in Models settings.
-- See Z.AI and Z.AI Coding Plan quota usage in Models settings. Thanks again to @pridemusvaire for this contribution.
+- Connect an eligible Grok subscription with device-code OAuth, and see usage for Grok, Z.AI, and Z.AI Coding Plan in Models settings. Thanks again to @pridemusvaire for the xAI/Grok subscription and Z.AI contributions.
 - Send image attachments through configured OpenAI-compatible vision or coding models.
 
 ### Minor changes
