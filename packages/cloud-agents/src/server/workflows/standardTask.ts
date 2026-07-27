@@ -213,7 +213,10 @@ export function standardTask({
   // prompt is built. Push-only units never open a PR/MR by default. When
   // reviewOnCommit is off, no automated open/sync review starts.
   const automaticSelfReviewNoticeGuidanceEnabled =
-    codeReviewsEnabled && codeReviewReviewOnCommit && deliverySkill !== 'push';
+    codeReviewsEnabled &&
+    codeReviewReviewOnCommit &&
+    deliverySkill !== 'push' &&
+    taskSurface !== 'github';
   // Hard-append the note into background-proof closeout wording only when every
   // PR shape this run can still deliver is auto-review eligible. Explicit
   // `$create-pr` / `$create-draft-pr` can flip draft vs ready after the prompt
