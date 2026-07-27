@@ -310,6 +310,10 @@ export async function captureTaskSettled(
   errorCode?: string | null,
 ): Promise<void> {
   try {
+    if (!(await isAnonymousAnalyticsEnabled())) {
+      return;
+    }
+
     const run = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, runId),
       with: { task: true },
