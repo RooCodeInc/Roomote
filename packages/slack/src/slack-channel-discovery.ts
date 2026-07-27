@@ -2,6 +2,13 @@ import { fetchSlackGetJson } from './slack-api-fetch';
 
 const SLACK_CONVERSATIONS_LIST_LIMIT = 999;
 const MAX_SLACK_CONVERSATIONS_LIST_PUBLIC_CHANNEL_RATE_LIMIT_RETRIES = 3;
+const MAX_SLACK_CONVERSATIONS_LIST_INTERACTIVE_RATE_LIMIT_RETRIES = 2;
+
+/**
+ * Interactive flows retry rate limits, but each wait is capped so a
+ * user-facing save adds at most a couple of bounded pauses.
+ */
+const MAX_SLACK_CONVERSATIONS_LIST_INTERACTIVE_RATE_LIMIT_WAIT_MS = 5_000;
 
 type SlackConversationListChannel = {
   id?: string;
@@ -23,9 +30,21 @@ function getConversationsListRateLimitRetries(
       return MAX_SLACK_CONVERSATIONS_LIST_PUBLIC_CHANNEL_RATE_LIMIT_RETRIES;
     case 'listAccessibleChannels':
     case 'resolveChannelId':
-      // Interactive settings flows should fail fast when Slack rate-limits
-      // channel discovery instead of waiting through multi-minute retry windows.
-      return 0;
+      // Interactive settings flows retry a couple of times with capped waits
+      // instead of waiting through Slack's multi-minute retry windows.
+      return MAX_SLACK_CONVERSATIONS_LIST_INTERACTIVE_RATE_LIMIT_RETRIES;
+  }
+}
+
+function getConversationsListRateLimitWaitCapMs(
+  context: SlackConversationsListContext,
+): number | undefined {
+  switch (context) {
+    case 'listPublicChannels':
+      return undefined;
+    case 'listAccessibleChannels':
+    case 'resolveChannelId':
+      return MAX_SLACK_CONVERSATIONS_LIST_INTERACTIVE_RATE_LIMIT_WAIT_MS;
   }
 }
 
@@ -42,6 +61,7 @@ export class SlackChannelDiscovery {
   constructor(
     private readonly token: string,
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly sleepImpl?: (ms: number) => Promise<void>,
   ) {}
 
   private async fetchConversationsListPage(params: {
@@ -67,6 +87,8 @@ export class SlackChannelDiscovery {
       query,
       fetchImpl: this.fetchImpl,
       maxRateLimitRetries: getConversationsListRateLimitRetries(context),
+      maxRateLimitWaitMs: getConversationsListRateLimitWaitCapMs(context),
+      sleepImpl: this.sleepImpl,
     });
   }
 

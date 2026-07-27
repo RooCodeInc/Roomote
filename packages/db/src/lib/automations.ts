@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 
 import {
   type AnnouncerFrequency,
@@ -489,6 +489,16 @@ export function ensureAutomationRowsOnce(): Promise<void> {
 }
 
 export async function listAutomations(): Promise<Automation[]> {
+  const rows = await db.query.automations.findMany();
+
+  // Read paths must not write: only a deployment that is still missing seeded
+  // keys pays for the insert.
+  if (
+    BACKGROUND_AUTOMATION_KEYS.every((key) => rows.some((r) => r.key === key))
+  ) {
+    return rows;
+  }
+
   await ensureAutomationRows();
   return db.query.automations.findMany();
 }
@@ -743,19 +753,12 @@ export type AutomationRuntime = {
   destination: AutomationDestination | null;
 };
 
-export async function getAutomationRuntime(
-  key: BackgroundAutomationKey,
-): Promise<AutomationRuntime> {
-  await ensureAutomationRowsOnce();
-
-  const [automation, settingsRow] = await Promise.all([
-    db.query.automations.findFirst({ where: eq(automations.key, key) }),
-    db.query.deploymentSettings.findFirst({
-      columns: { managerSlackChannelId: true },
-    }),
-  ]);
-
-  const managerSlackChannelId = settingsRow?.managerSlackChannelId ?? null;
+function toAutomationRuntime(params: {
+  key: BackgroundAutomationKey;
+  automation: Automation | undefined;
+  managerSlackChannelId: string | null;
+}): AutomationRuntime {
+  const { key, automation, managerSlackChannelId } = params;
 
   return {
     key,
@@ -776,6 +779,61 @@ export async function getAutomationRuntime(
       managerSlackChannelId,
     ),
   };
+}
+
+export async function getAutomationRuntime(
+  key: BackgroundAutomationKey,
+): Promise<AutomationRuntime> {
+  await ensureAutomationRowsOnce();
+
+  const [automation, settingsRow] = await Promise.all([
+    db.query.automations.findFirst({ where: eq(automations.key, key) }),
+    db.query.deploymentSettings.findFirst({
+      columns: { managerSlackChannelId: true },
+    }),
+  ]);
+
+  return toAutomationRuntime({
+    key,
+    automation,
+    managerSlackChannelId: settingsRow?.managerSlackChannelId ?? null,
+  });
+}
+
+/**
+ * Batched `getAutomationRuntime` for callers that need several automations at
+ * once: the automations rows and the deployment settings row are each read a
+ * single time instead of once per key.
+ */
+export async function getAutomationRuntimes<
+  TKey extends BackgroundAutomationKey,
+>(keys: readonly TKey[]): Promise<Record<TKey, AutomationRuntime>> {
+  await ensureAutomationRowsOnce();
+
+  const [automationRows, settingsRow] = await Promise.all([
+    keys.length > 0
+      ? db.query.automations.findMany({
+          where: inArray(automations.key, [...keys]),
+        })
+      : Promise.resolve([]),
+    db.query.deploymentSettings.findFirst({
+      columns: { managerSlackChannelId: true },
+    }),
+  ]);
+
+  const automationMap = buildAutomationMap(automationRows);
+  const managerSlackChannelId = settingsRow?.managerSlackChannelId ?? null;
+
+  return Object.fromEntries(
+    keys.map((key) => [
+      key,
+      toAutomationRuntime({
+        key,
+        automation: automationMap.get(key),
+        managerSlackChannelId,
+      }),
+    ]),
+  ) as Record<TKey, AutomationRuntime>;
 }
 
 export async function ensureDeploymentSettingsRow(): Promise<void> {
@@ -996,9 +1054,41 @@ export async function getBackgroundAgentSettings(): Promise<BackgroundAgentSetti
   return normalizeBackgroundAgentSettings(row, automationRows);
 }
 
-export async function getBackgroundAgentSettingsForDeployment(): Promise<BackgroundAgentSettings> {
+/**
+ * Deployment settings plus the automations rows they were projected from, so
+ * callers that also need the raw rows do not re-read them.
+ */
+export async function getBackgroundAgentSettingsWithAutomationsForDeployment(): Promise<{
+  settings: BackgroundAgentSettings;
+  automationRows: Automation[];
+}> {
+  const [row, automationRows] = await Promise.all([
+    db.query.deploymentSettings.findFirst(),
+    listAutomations(),
+  ]);
+
+  if (row) {
+    return {
+      settings: normalizeBackgroundAgentSettings(row, automationRows),
+      automationRows,
+    };
+  }
+
+  // Fresh deployment: seed the singleton row, then project from it.
   await ensureDeploymentSettingsRow();
-  return getBackgroundAgentSettings();
+
+  return {
+    settings: normalizeBackgroundAgentSettings(
+      await db.query.deploymentSettings.findFirst(),
+      automationRows,
+    ),
+    automationRows,
+  };
+}
+
+export async function getBackgroundAgentSettingsForDeployment(): Promise<BackgroundAgentSettings> {
+  return (await getBackgroundAgentSettingsWithAutomationsForDeployment())
+    .settings;
 }
 
 /**
