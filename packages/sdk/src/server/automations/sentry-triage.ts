@@ -202,7 +202,7 @@ export const sentryTriageJob = createScheduledTriageJob({
       }),
       trigger: 'scheduled',
       ...(destination.provider === 'slack'
-        ? { notifySlack: true, slackChannel: channelId }
+        ? { notifySlack: false, slackChannel: channelId }
         : {}),
       suggestionSource: 'sentry_triage',
       historicalThreadFeedbackDebugSnippet: recentThreadFeedback.debugSnippet,
