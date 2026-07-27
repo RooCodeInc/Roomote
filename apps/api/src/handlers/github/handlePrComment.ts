@@ -854,6 +854,7 @@ async function deliverFollowUpToExistingTask({
   taskId,
   userId,
   message,
+  quoteText = message,
   status,
   taskPhase,
   commenterDisplayName,
@@ -861,6 +862,7 @@ async function deliverFollowUpToExistingTask({
   taskId: string;
   userId?: string | null;
   message: string;
+  quoteText?: string;
   status: RunStatus;
   taskPhase: string | null;
   commenterDisplayName?: string;
@@ -890,6 +892,7 @@ async function deliverFollowUpToExistingTask({
           taskId,
           userId: senderUserId,
           message,
+          quoteText,
           senderMode: 'github_pr_follow_up',
           ...(commenterDisplayName
             ? { workerQuoteUserName: commenterDisplayName }
@@ -899,6 +902,7 @@ async function deliverFollowUpToExistingTask({
           taskId,
           userId: senderUserId,
           message,
+          quoteText,
           senderMode: 'github_pr_follow_up',
           ...(commenterDisplayName
             ? { workerQuoteUserName: commenterDisplayName }
@@ -932,12 +936,14 @@ async function resumeExistingTaskAndDeliverFollowUp({
   userId,
   sourceRunId,
   message,
+  quoteText = message,
   resumePromptFallbackTask,
 }: {
   taskId: string;
   userId?: string | null;
   sourceRunId: number;
   message: string;
+  quoteText?: string;
   resumePromptFallbackTask: SnapshotResumePromptFallbackTask;
 }) {
   const sourceRun = await findLatestTaskRun(taskId, {
@@ -984,6 +990,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
       taskId,
       userId,
       message,
+      quoteText,
       status: sourceRun.status,
       taskPhase: sourceRun.taskPhase,
     });
@@ -1510,6 +1517,7 @@ export async function handlePrComment(
             taskId: activePrOwner.taskId,
             userId: reviewer.properties.userId,
             message: followUpMessage,
+            quoteText: mention.body ?? '',
             status: activePrOwner.status,
             taskPhase: activePrOwner.taskPhase,
             commenterDisplayName,
