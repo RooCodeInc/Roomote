@@ -224,6 +224,15 @@ async function sendDiscordChannelPost(params: {
           400,
         );
       }
+      if ([15, 16].includes(targetChannel.type)) {
+        return jsonResponse(
+          {
+            error:
+              'Discord cross-channel posts do not support forum or media channels',
+          },
+          400,
+        );
+      }
     } catch (error) {
       if (error instanceof McpProxyError) {
         return jsonResponse({ error: error.message }, error.httpStatus);

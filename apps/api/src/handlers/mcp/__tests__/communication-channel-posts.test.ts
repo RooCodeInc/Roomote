@@ -328,6 +328,28 @@ describe('maybeSendCommunicationChannelPost', () => {
     expect(discordPostMessageMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['forum', 15],
+    ['media', 16],
+  ])('rejects a cross-channel Discord %s target', async (_label, type) => {
+    assertDiscordChannelAccessMock.mockResolvedValueOnce({
+      guildId: 'guild-1',
+      type,
+    });
+
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: { ...discordTaskRun, actingUserId: 'user-1' },
+      parsedBody: { channel: 'forum-other', text: 'update', images: [] },
+    });
+
+    expect(response!.status).toBe(400);
+    await expect(jsonBody(response!)).resolves.toEqual({
+      error:
+        'Discord cross-channel posts do not support forum or media channels',
+    });
+    expect(discordPostMessageMock).not.toHaveBeenCalled();
+  });
+
   it('rejects Discord posts targeting a thread the task does not own', async () => {
     const response = await maybeSendCommunicationChannelPost({
       taskRun: discordTaskRun,
