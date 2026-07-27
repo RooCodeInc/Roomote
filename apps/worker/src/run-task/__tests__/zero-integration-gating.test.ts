@@ -172,6 +172,7 @@ vi.mock('../agent-home', () => ({
   activateSkillsFolder: activateSkillsFolderMock,
   readConfiguredSkillsFolder: vi.fn(() => undefined),
   resolvePackagedSkillsFolder: resolvePackagedSkillsFolderMock,
+  seedRuntimeHomeMiseGlobalConfig: vi.fn(() => false),
 }));
 
 vi.mock('../create-harness', () => ({

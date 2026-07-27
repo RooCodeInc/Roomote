@@ -69,6 +69,7 @@ import { TaskCancellationController } from './task-cancellation-controller';
 import {
   activateSkillsFolder,
   resolvePackagedSkillsFolder,
+  seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
 
@@ -766,6 +767,17 @@ export const runTask = async ({
 
     if (workerHomeDir) {
       runtimeEnv.HOME = resolveTaskRuntimeHomeDir(workspacePath);
+
+      if (
+        seedRuntimeHomeMiseGlobalConfig({
+          homeDir: runtimeEnv.HOME,
+          sourceHomeDir: workerHomeDir,
+        })
+      ) {
+        logger.info(
+          `[runTask] Seeded runtime home mise global config from ${workerHomeDir}`,
+        );
+      }
     }
 
     delete runtimeEnv.ROOMOTE_TASK_TERMINAL;
