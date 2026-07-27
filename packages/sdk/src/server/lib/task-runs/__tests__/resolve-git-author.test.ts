@@ -15,16 +15,15 @@ function uniqueGitHubUserId(): number {
 }
 
 /**
- * resolveGitAuthor reads the persisted commit-author block off the run's
- * tasks row (commitAuthorKind/commitAuthorUserId/commitAuthorLogin/
- * commitAuthorExternalId) and resolves it to a git identity.
+ * resolveGitAuthor resolves a linked live acting user and falls back to
+ * Roomote when a run has no current actor.
  */
 describe('resolveGitAuthor', () => {
   it('returns the default Roomote identity when the commit author is unevaluated', async () => {
     const task = await taskFactory.create({});
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
     );
 
     expect(result).toEqual({
@@ -39,7 +38,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
     );
 
     expect(result).toEqual({
@@ -65,7 +64,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: user.id }),
     );
 
     expect(result).toEqual({
@@ -84,7 +83,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: user.id }),
     );
 
     expect(result).toEqual({
@@ -93,7 +92,7 @@ describe('resolveGitAuthor', () => {
     });
   });
 
-  it('resolves an external commit author to the noreply email from the frozen identity', async () => {
+  it('falls back to Roomote when the run has no linked acting user', async () => {
     const task = await taskFactory.create({
       commitAuthorKind: 'external',
       commitAuthorLogin: 'octocat',
@@ -102,16 +101,16 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
     );
 
     expect(result).toEqual({
-      name: 'Octo Cat',
-      email: '12345+octocat@users.noreply.github.com',
+      name: PRODUCT_NAME,
+      email: 'roomote@roomote.dev',
     });
   });
 
-  it('falls back to the login as the display name for external authors without a display name', async () => {
+  it('does not reuse an external launch identity without an acting user', async () => {
     const task = await taskFactory.create({
       commitAuthorKind: 'external',
       commitAuthorLogin: 'octocat',
@@ -119,12 +118,12 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
     );
 
     expect(result).toEqual({
-      name: 'octocat',
-      email: '12345+octocat@users.noreply.github.com',
+      name: PRODUCT_NAME,
+      email: 'roomote@roomote.dev',
     });
   });
 
@@ -136,7 +135,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id }),
+      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
     );
 
     expect(result).toEqual({
@@ -145,11 +144,70 @@ describe('resolveGitAuthor', () => {
     });
   });
 
-  it('throws when the run points at a missing task', async () => {
-    await expect(
-      db.transaction(async (tx) =>
-        resolveGitAuthor(tx, { id: 1, taskId: 'missing-task-id' }),
-      ),
-    ).rejects.toThrow(/not found/);
+  it('does not require a task lookup when the run has no acting user', async () => {
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, {
+        id: 1,
+        taskId: 'missing-task-id',
+        actingUserId: null,
+      }),
+    );
+
+    expect(result).toEqual({
+      name: PRODUCT_NAME,
+      email: 'roomote@roomote.dev',
+    });
+  });
+
+  it('uses the live acting user instead of the launch-time author', async () => {
+    const launchOwner = await userFactory.create({ name: 'Launch Owner' });
+    const participant = await userFactory.create({ name: 'Participant' });
+    const githubUserId = uniqueGitHubUserId();
+    await db.insert(githubUserMappings).values({
+      userId: participant.id,
+      githubLogin: 'participant',
+      githubUserId,
+    });
+    const task = await taskFactory.create({
+      commitAuthorKind: 'user',
+      commitAuthorUserId: launchOwner.id,
+    });
+
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, {
+        id: 1,
+        taskId: task.id,
+        actingUserId: participant.id,
+      }),
+    );
+
+    expect(result).toEqual({
+      name: 'Participant',
+      email: `${githubUserId}+participant@users.noreply.github.com`,
+    });
+  });
+
+  it('falls back to Roomote when the live acting user has no GitHub identity', async () => {
+    const launchOwner = await userFactory.create({ name: 'Launch Owner' });
+    const participant = await userFactory.create({
+      name: 'Unlinked Participant',
+    });
+    const task = await taskFactory.create({
+      commitAuthorKind: 'user',
+      commitAuthorUserId: launchOwner.id,
+    });
+
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, {
+        id: 1,
+        taskId: task.id,
+        actingUserId: participant.id,
+      }),
+    );
+
+    expect(result).toEqual({
+      name: PRODUCT_NAME,
+      email: 'roomote@roomote.dev',
+    });
   });
 });

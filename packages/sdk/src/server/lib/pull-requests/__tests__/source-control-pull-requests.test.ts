@@ -17,6 +17,8 @@ const {
   mockResolveAdoBaseUrl,
   mockBuildAdoOrganizationApiBaseUrl,
   mockResolveConfiguredGitHubAppSlugIfConfigured,
+  mockResolveLaunchTaskCommitAuthor,
+  mockResolveRunCommitAuthor,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetDeploymentPrAction: vi.fn(),
@@ -31,6 +33,15 @@ const {
   mockResolveAdoBaseUrl: vi.fn(),
   mockBuildAdoOrganizationApiBaseUrl: vi.fn(),
   mockResolveConfiguredGitHubAppSlugIfConfigured: vi.fn(),
+  mockResolveLaunchTaskCommitAuthor: vi.fn(),
+  mockResolveRunCommitAuthor: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  resolveLaunchTaskCommitAuthor: (...args: unknown[]) =>
+    mockResolveLaunchTaskCommitAuthor(...args),
+  resolveRunCommitAuthor: (...args: unknown[]) =>
+    mockResolveRunCommitAuthor(...args),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -156,6 +167,13 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Roomote',
+      prAssigneeLogin: null,
+    });
+    mockResolveLaunchTaskCommitAuthor.mockResolvedValue({
+      prAssigneeLogin: null,
+    });
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
@@ -317,6 +335,13 @@ describe('platform-managed draft state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Roomote',
+      prAssigneeLogin: null,
+    });
+    mockResolveLaunchTaskCommitAuthor.mockResolvedValue({
+      prAssigneeLogin: null,
+    });
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
@@ -345,6 +370,7 @@ describe('platform-managed draft state', () => {
         issues: {
           addLabels: vi.fn().mockResolvedValue({}),
           addAssignees: vi.fn().mockResolvedValue({}),
+          removeAssignees: vi.fn().mockResolvedValue({}),
         },
       },
       graphql: vi.fn().mockResolvedValue({}),
@@ -642,6 +668,13 @@ describe('optional targetBranch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Roomote',
+      prAssigneeLogin: null,
+    });
+    mockResolveLaunchTaskCommitAuthor.mockResolvedValue({
+      prAssigneeLogin: null,
+    });
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
@@ -685,6 +718,7 @@ describe('optional targetBranch', () => {
         issues: {
           addLabels: vi.fn().mockResolvedValue({}),
           addAssignees: vi.fn().mockResolvedValue({}),
+          removeAssignees: vi.fn().mockResolvedValue({}),
         },
       },
       graphql: vi.fn().mockResolvedValue({}),
@@ -808,6 +842,177 @@ describe('optional targetBranch', () => {
       number: 13,
       targetBranch: 'develop',
     });
+  });
+
+  it('assigns a new GitHub pull request to the live acting user instead of the launch owner', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Participant',
+      prAssigneeLogin: 'participant',
+    });
+    mockResolveLaunchTaskCommitAuthor.mockResolvedValueOnce({
+      displayName: 'Launch Owner',
+      prAssigneeLogin: 'launch-owner',
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        assignees: ['launch-owner'],
+      },
+    });
+
+    expect(octokit.rest.issues.addAssignees).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ['participant'] }),
+    );
+  });
+
+  it('uses the live actor in the body only when creating a pull request', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Participant',
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: '> Opened on behalf of Launch Owner. Follow up by mentioning @roomote.',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: '> Opened on behalf of Participant. Follow up by mentioning @roomote.',
+      }),
+    );
+  });
+
+  it('preserves the original opener line when updating a pull request', async () => {
+    const existing = {
+      number: 11,
+      node_id: 'node-11',
+      html_url: 'https://github.com/acme/web/pull/11',
+      title: 'Old title',
+      draft: false,
+      base: { ref: 'develop' },
+      body: '> Opened on behalf of Launch Owner. Follow up by mentioning @roomote.',
+    };
+    const octokit = makeOctokit({
+      list: [existing],
+      updated: { ...existing, title: '[Feature] X' },
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Participant',
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        body: '> Opened on behalf of Participant. Follow up by mentioning @roomote.',
+      },
+    });
+
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: '> Opened on behalf of Launch Owner. Follow up by mentioning @roomote.',
+      }),
+    );
+  });
+
+  it('removes the stale launch-owner assignment when updating a pull request', async () => {
+    const existing = {
+      number: 11,
+      node_id: 'node-11',
+      html_url: 'https://github.com/acme/web/pull/11',
+      title: 'Old title',
+      draft: false,
+      base: { ref: 'develop' },
+      assignees: [{ login: 'launch-owner' }],
+    };
+    const octokit = makeOctokit({
+      list: [existing],
+      updated: { ...existing, title: '[Feature] X' },
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Participant',
+      prAssigneeLogin: 'participant',
+    });
+    mockResolveLaunchTaskCommitAuthor.mockResolvedValue({
+      displayName: 'Launch Owner',
+      prAssigneeLogin: 'launch-owner',
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...baseInput },
+    });
+
+    expect(octokit.rest.issues.removeAssignees).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ['launch-owner'] }),
+    );
+    expect(octokit.rest.issues.addAssignees).toHaveBeenCalledWith(
+      expect.objectContaining({ assignees: ['participant'] }),
+    );
+  });
+
+  it('removes the launch-owner assignee when the live actor has no GitHub identity', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      displayName: 'Roomote',
+      prAssigneeLogin: null,
+    });
+    mockResolveLaunchTaskCommitAuthor.mockResolvedValueOnce({
+      displayName: 'Launch Owner',
+      prAssigneeLogin: 'launch-owner',
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        assignees: ['launch-owner'],
+      },
+    });
+
+    expect(octokit.rest.issues.addAssignees).not.toHaveBeenCalled();
   });
 
   it('rejects creating a GitHub pull request without targetBranch with actionable guidance', async () => {

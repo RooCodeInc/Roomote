@@ -48,7 +48,7 @@ import { githubPrConflictResolve } from './workflows/githubPrConflictResolve';
 import { getWorkspaceRepositoryFullNames } from './workflows/utils';
 import {
   DEFAULT_ROOMOTE_COMMIT_AUTHOR,
-  resolveTaskCommitAuthor,
+  resolveRunCommitAuthor,
 } from './commit-author';
 
 import { getTaskUrl } from './task-url';
@@ -142,7 +142,7 @@ export async function generatePrompt({
     },
   });
   const commitAuthor = taskRow
-    ? await resolveTaskCommitAuthor(db, taskRow)
+    ? await resolveRunCommitAuthor(db, taskRun)
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
   const { conflictResolverFrequency, conflictResolverLabel } =
     await getBackgroundAgentSettings().catch(() => ({
