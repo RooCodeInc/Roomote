@@ -552,11 +552,9 @@ set_env_value ROOMOTE_PREVIEW_DOMAIN "$preview_domain"
 set_env_value ROOMOTE_TLS_MODE "$tls_mode"
 if [ "$tls_mode" = 'internal' ]; then
   set_env_value ROOMOTE_CADDY_LOCAL_CERTS 'local_certs'
-  set_env_value ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET ''
   set_env_value ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET ''
 else
   set_env_value ROOMOTE_CADDY_LOCAL_CERTS ''
-  set_env_value ROOMOTE_CADDY_GLOBAL_TLS_SNIPPET 'import roomote_on_demand_tls'
   set_env_value ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET 'import roomote_on_demand_wildcard_tls'
 fi
 set_env_value TRPC_URL "https://$domain/_roomote-api"
