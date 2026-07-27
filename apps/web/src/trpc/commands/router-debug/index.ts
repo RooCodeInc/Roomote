@@ -1,6 +1,11 @@
 import {
+  and,
+  db,
+  eq,
   getRouterDebugSettings,
+  isNotNull,
   normalizeRouterDebugDestination,
+  teamsInstallations,
   updateRouterDebugSettings,
 } from '@roomote/db/server';
 import type { CommunicationProvider } from '@roomote/types';
@@ -59,6 +64,38 @@ export async function updateRouterDebugSettingsCommand(
     if (!adapter) {
       throw new Error(
         `Connect ${destination.provider} before choosing a destination.`,
+      );
+    }
+
+    if (destination.provider === 'teams') {
+      const [installation] = await db
+        .select({ id: teamsInstallations.id })
+        .from(teamsInstallations)
+        .where(
+          and(
+            eq(teamsInstallations.conversationId, destination.channelId),
+            eq(teamsInstallations.isActive, true),
+            isNotNull(teamsInstallations.serviceUrl),
+          ),
+        )
+        .limit(1);
+
+      if (!installation) {
+        throw new Error('Choose an active Microsoft Teams conversation.');
+      }
+    } else if (adapter.fetchChannelMessages) {
+      try {
+        await adapter.fetchChannelMessages({
+          channelId: destination.channelId,
+        });
+      } catch {
+        throw new Error(
+          `Roomote cannot access that ${destination.provider} destination.`,
+        );
+      }
+    } else {
+      throw new Error(
+        `Roomote cannot verify ${destination.provider} destinations yet.`,
       );
     }
   }
