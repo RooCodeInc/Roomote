@@ -68,7 +68,10 @@ export function extractShowWidgetFallbackDelivery(
     return null;
   }
 
-  const widgetUrl = new URL(`/task/${taskId}`, process.env.R_APP_URL);
+  const widgetUrl = new URL(
+    `/task/${taskId}`,
+    process.env.R_PUBLIC_URL ?? process.env.R_APP_URL,
+  );
   widgetUrl.hash = `msg-${envelope.ts}`;
 
   return {

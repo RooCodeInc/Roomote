@@ -46,18 +46,33 @@ function buildEnvelope(
 }
 
 describe('extractShowWidgetFallbackDelivery', () => {
-  it('extracts a fallback from a completed first-party widget result', () => {
-    const widgetUrl = new URL('/task/task-1', process.env.R_APP_URL);
-    widgetUrl.hash = 'msg-1';
+  it('prefers the public app URL for a completed first-party widget result', () => {
+    const originalAppUrl = process.env.R_APP_URL;
+    const originalPublicUrl = process.env.R_PUBLIC_URL;
+    process.env.R_APP_URL = 'http://internal.example.com';
+    process.env.R_PUBLIC_URL = 'https://app.example.com';
 
-    expect(
-      extractShowWidgetFallbackDelivery(buildEnvelope(), 'task-1'),
-    ).toEqual({
-      toolCallId: 'call-1',
-      title: 'Plan',
-      textFallback: 'Plan fallback',
-      widgetUrl: widgetUrl.toString(),
-    });
+    try {
+      expect(
+        extractShowWidgetFallbackDelivery(buildEnvelope(), 'task-1'),
+      ).toEqual({
+        toolCallId: 'call-1',
+        title: 'Plan',
+        textFallback: 'Plan fallback',
+        widgetUrl: 'https://app.example.com/task/task-1#msg-1',
+      });
+    } finally {
+      if (originalAppUrl === undefined) {
+        delete process.env.R_APP_URL;
+      } else {
+        process.env.R_APP_URL = originalAppUrl;
+      }
+      if (originalPublicUrl === undefined) {
+        delete process.env.R_PUBLIC_URL;
+      } else {
+        process.env.R_PUBLIC_URL = originalPublicUrl;
+      }
+    }
   });
 
   it.each([
