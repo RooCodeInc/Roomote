@@ -1025,31 +1025,68 @@ export function hasEnvironmentOidcTargets(
   return getEnvironmentOidcTargets(config).length > 0;
 }
 
+export const MULTI_PROVIDER_ENVIRONMENT_REPOSITORIES_ERROR =
+  'Environment repositories must all belong to the same source control provider.';
+
 export const MULTI_INSTALLATION_ENVIRONMENT_REPOSITORIES_ERROR =
   'Environment repositories must all belong to the same GitHub App installation.';
 
-type EnvironmentRepositoryInstallationReference = {
+export const MULTI_HOST_ENVIRONMENT_REPOSITORIES_ERROR =
+  'Environment repositories must all belong to the same source control instance.';
+
+type EnvironmentRepositoryConnectionReference = {
   fullName: string;
+  sourceControlProvider: string | null | undefined;
+  /**
+   * Source-control host (e.g. a self-managed Gitea/GitLab instance). Nullable
+   * for historical rows that predate host backfill, so only non-null values
+   * participate in the same-instance comparison.
+   */
+  host: string | null | undefined;
   installationId: string | number | null | undefined;
 };
 
-export function getEnvironmentRepositoryInstallationError(
-  repositories: EnvironmentRepositoryInstallationReference[],
+function distinctDefined<T>(values: Array<T | null | undefined>): Set<T> {
+  return new Set(
+    values.filter((value): value is T => value !== null && value !== undefined),
+  );
+}
+
+/**
+ * Environments must not mix repositories from different source control
+ * connections: one provider, one GitHub App installation, and one
+ * provider instance (host) per environment. Task launch resolves a single
+ * provider token and base URL per run, so a mixed environment could never
+ * authenticate against all of its repositories.
+ */
+export function getEnvironmentRepositoryConnectionError(
+  repositories: EnvironmentRepositoryConnectionReference[],
 ): string | null {
-  const installationIds = new Set(
-    repositories
-      .map((repository) => repository.installationId)
-      .filter(
-        (installationId): installationId is string | number =>
-          installationId !== null && installationId !== undefined,
-      ),
+  const providers = distinctDefined(
+    repositories.map((repository) => repository.sourceControlProvider),
   );
 
-  if (installationIds.size <= 1) {
-    return null;
+  if (providers.size > 1) {
+    return MULTI_PROVIDER_ENVIRONMENT_REPOSITORIES_ERROR;
   }
 
-  return MULTI_INSTALLATION_ENVIRONMENT_REPOSITORIES_ERROR;
+  const installationIds = distinctDefined(
+    repositories.map((repository) => repository.installationId),
+  );
+
+  if (installationIds.size > 1) {
+    return MULTI_INSTALLATION_ENVIRONMENT_REPOSITORIES_ERROR;
+  }
+
+  const hosts = distinctDefined(
+    repositories.map((repository) => repository.host),
+  );
+
+  if (hosts.size > 1) {
+    return MULTI_HOST_ENVIRONMENT_REPOSITORIES_ERROR;
+  }
+
+  return null;
 }
 
 export function getMissingEnvironmentRepositoryError(

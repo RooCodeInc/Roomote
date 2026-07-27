@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { EnvironmentConfig } from '@roomote/types';
 import {
   environmentConfigSchema,
-  getEnvironmentRepositoryInstallationError,
+  getEnvironmentRepositoryConnectionError,
   getMissingEnvironmentRepositoryError,
 } from '@roomote/types';
 import { and, eq, inArray, isNotNull, notInArray } from 'drizzle-orm';
@@ -364,7 +364,13 @@ async function resolveConfiguredRepositories(config: EnvironmentConfig) {
             eq(repositories.isActive, true),
             inArray(repositories.fullName, repositoryNames),
           ),
-          columns: { id: true, fullName: true, installationId: true },
+          columns: {
+            id: true,
+            fullName: true,
+            sourceControlProvider: true,
+            host: true,
+            installationId: true,
+          },
         })
       : [];
 
@@ -473,7 +479,7 @@ async function applyDefinition(
     await resolveConfiguredRepositories(config);
 
   const repositoryConfigError =
-    getEnvironmentRepositoryInstallationError(repositoryRows);
+    getEnvironmentRepositoryConnectionError(repositoryRows);
 
   if (repositoryConfigError) {
     return { skip: { source, reason: repositoryConfigError } };

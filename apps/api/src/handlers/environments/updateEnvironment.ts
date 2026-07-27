@@ -132,7 +132,13 @@ export async function updateEnvironment(
               eq(repositories.isActive, true),
               inArray(repositories.fullName, repositoryNames),
             ),
-            columns: { id: true, fullName: true, installationId: true },
+            columns: {
+              id: true,
+              fullName: true,
+              sourceControlProvider: true,
+              host: true,
+              installationId: true,
+            },
           })
         : [];
 
