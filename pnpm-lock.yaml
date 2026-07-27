@@ -54,6 +54,7 @@ overrides:
   webpack: 5.104.1
   yaml-language-server>yaml: 2.8.3
   '@opentelemetry/propagator-jaeger': 2.9.0
+  '@hono/node-server': 2.0.10
   body-parser: 2.3.0
   brace-expansion@<1.1.16: 1.1.16
   brace-expansion@>=2.0.0 <2.1.2: 2.1.2
@@ -130,8 +131,8 @@ importers:
         specifier: 3.1000.0
         version: 3.1000.0
       '@hono/node-server':
-        specifier: 2.0.5
-        version: 2.0.5(hono@4.12.27)
+        specifier: 2.0.10
+        version: 2.0.10(hono@4.12.27)
       '@hono/trpc-server':
         specifier: ^0.4.2
         version: 0.4.2(@trpc/server@11.15.0(typescript@5.9.3))(hono@4.12.27)
@@ -251,8 +252,8 @@ importers:
         specifier: ^6.16.4
         version: 6.16.4
       '@hono/node-server':
-        specifier: 2.0.5
-        version: 2.0.5(hono@4.12.27)
+        specifier: 2.0.10
+        version: 2.0.10(hono@4.12.27)
       '@roomote/cloud-agents':
         specifier: workspace:^
         version: link:../../packages/cloud-agents
@@ -886,8 +887,8 @@ importers:
   apps/worker:
     dependencies:
       '@hono/node-server':
-        specifier: 2.0.5
-        version: 2.0.5(hono@4.12.27)
+        specifier: 2.0.10
+        version: 2.0.10(hono@4.12.27)
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
@@ -2748,14 +2749,8 @@ packages:
   '@hey-api/types@0.1.4':
     resolution: {integrity: sha512-thWfawrDIP7wSI9ioT13I5soaaqB5vAPIiZmgD8PbeEVKNrkonc0N/Sjj97ezl7oQgusZmaNphGdMKipPO6IBg==}
 
-  '@hono/node-server@1.19.13':
-    resolution: {integrity: sha512-TsQLe4i2gvoTtrHje625ngThGBySOgSK3Xo2XRYOdqGN1teR8+I7vchQC46uLJi8OF62YTYA3AhSpumtkhsaKQ==}
-    engines: {node: '>=18.14.1'}
-    peerDependencies:
-      hono: ^4
-
-  '@hono/node-server@2.0.5':
-    resolution: {integrity: sha512-yQFvDmyDo3y6rEOJZDUYPJ49DIKTPpIk4kGvm40xx4Ejne0Pu9a1+exxPN+C1UppWK/WGZX9F++/Xs231tE86g==}
+  '@hono/node-server@2.0.10':
+    resolution: {integrity: sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
@@ -13245,11 +13240,7 @@ snapshots:
 
   '@hey-api/types@0.1.4': {}
 
-  '@hono/node-server@1.19.13(hono@4.12.27)':
-    dependencies:
-      hono: 4.12.27
-
-  '@hono/node-server@2.0.5(hono@4.12.27)':
+  '@hono/node-server@2.0.10(hono@4.12.27)':
     dependencies:
       hono: 4.12.27
 
@@ -13541,7 +13532,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)':
     dependencies:
-      '@hono/node-server': 1.19.13(hono@4.12.27)
+      '@hono/node-server': 2.0.10(hono@4.12.27)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
