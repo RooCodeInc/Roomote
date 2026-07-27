@@ -233,6 +233,72 @@ describe('snapshot id persistence (real database)', () => {
     );
   });
 
+  /**
+   * Both attempts overlap: the row is still empty when the attempt under test
+   * starts, so its short-circuit does not fire, and a competitor claims the
+   * row while it is mid-snapshot. The finalizing update is unconditional, so
+   * a loser that finalizes its own id would overwrite the recorded one and
+   * point the run at a snapshot no consumer ever saw.
+   */
+  function claimRowMidFlight(runId: number, winnerCreatedAt: Date) {
+    return async (
+      snapshotId: string,
+      onSnapshotCreated?: (id: string) => Promise<void>,
+    ) => {
+      await db
+        .update(taskRuns)
+        .set({ snapshotId: 'im-winner', snapshotCreatedAt: winnerCreatedAt })
+        .where(eq(taskRuns.id, runId));
+      await onSnapshotCreated?.(snapshotId);
+    };
+  }
+
+  it('finalizes the winning id when a concurrent attempt claims the row mid-flight', async () => {
+    const run = await createIdleRunAwaitingSnapshot();
+    const winnerCreatedAt = new Date('2026-04-24T06:29:00.000Z');
+    const claim = claimRowMidFlight(run.id, winnerCreatedAt);
+
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+      await claim('im-loser', onSnapshotCreated);
+      return { snapshotId: 'im-loser' };
+    });
+
+    await snapshotJob(buildJob(run.id, 0));
+
+    const finalized = await readRun(run.id);
+
+    expect(finalized.snapshotId).toBe('im-winner');
+    expect(finalized.snapshotCreatedAt?.toISOString()).toBe(
+      winnerCreatedAt.toISOString(),
+    );
+    expect(finalized.status).toBe(RunStatus.Completed);
+  });
+
+  it('finalizes the winning id when a losing attempt then fails during teardown', async () => {
+    const run = await createIdleRunAwaitingSnapshot();
+    const winnerCreatedAt = new Date('2026-04-24T06:29:00.000Z');
+    const claim = claimRowMidFlight(run.id, winnerCreatedAt);
+
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+      await claim('im-loser', onSnapshotCreated);
+      throw new Error('teardown exploded');
+    });
+
+    await snapshotJob(buildJob(run.id, 2));
+
+    const finalized = await readRun(run.id);
+
+    // The recovery path must recover the recorded snapshot, not this
+    // attempt's own.
+    expect(finalized.snapshotId).toBe('im-winner');
+    expect(finalized.snapshotCreatedAt?.toISOString()).toBe(
+      winnerCreatedAt.toISOString(),
+    );
+    expect(finalized.status).toBe(RunStatus.Completed);
+  });
+
   it('does not let a losing concurrent attempt overwrite the recorded snapshot', async () => {
     const run = await createIdleRunAwaitingSnapshot();
 

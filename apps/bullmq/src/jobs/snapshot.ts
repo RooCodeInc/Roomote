@@ -386,7 +386,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       snapshotResult = await client.createSnapshot({
         instanceId,
         onSnapshotCreated: async (createdSnapshotId) => {
-          persistedSnapshotCreatedAt = await persistCreatedSnapshotId({
+          const recorded = await persistCreatedSnapshotId({
             runId,
             taskRun,
             snapshotId: createdSnapshotId,
@@ -396,9 +396,41 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
             snapshotIntentId,
             triggerPath,
           });
-          persistedSnapshotId = createdSnapshotId;
+          // Whatever is on the row wins, which is not necessarily the id this
+          // attempt just produced.
+          persistedSnapshotId = recorded.snapshotId;
+          persistedSnapshotCreatedAt = recorded.snapshotCreatedAt;
         },
       });
+
+      // A concurrent attempt may have claimed the row while this one was
+      // snapshotting. The finalizing update is unconditional, so finalizing
+      // our own id here would overwrite the recorded one and point the run at
+      // a snapshot no consumer ever saw. Ours becomes an orphaned image.
+      if (
+        persistedSnapshotId &&
+        persistedSnapshotId !== snapshotResult.snapshotId
+      ) {
+        await recordSnapshotQueueEvent(taskRun, {
+          eventType: 'decision',
+          message: `Deferring to snapshot ${persistedSnapshotId} recorded for sandbox ${instanceId} by a concurrent attempt.`,
+          details: {
+            queueJobId,
+            queueAttempt,
+            snapshotIntentId,
+            triggerPath,
+            decision: 'defer_to_recorded_snapshot',
+            sandboxId: instanceId,
+            recordedSnapshotId: persistedSnapshotId,
+            orphanedSnapshotId: snapshotResult.snapshotId,
+          },
+        });
+
+        snapshotResult = {
+          ...snapshotResult,
+          snapshotId: persistedSnapshotId,
+        };
+      }
 
       const { snapshotId } = snapshotResult;
 
@@ -999,8 +1031,10 @@ async function requestPostFailureCredentialRestore(input: {
  * task unresumable.
  *
  * Guarded on `snapshotId IS NULL` so a redelivered attempt never clobbers the
- * id a previous one already recorded. Returns the creation time now on the row
- * so the caller stamps expiry from when the snapshot really happened.
+ * id a previous one already recorded. Returns whichever snapshot is actually
+ * on the row, with its creation time: an attempt that loses the claim has to
+ * finalize the winner, because the finalizing update is unconditional and
+ * would otherwise point the run at its own orphaned image.
  */
 async function persistCreatedSnapshotId(input: {
   runId: number;
@@ -1011,7 +1045,7 @@ async function persistCreatedSnapshotId(input: {
   queueAttempt: number;
   snapshotIntentId: string;
   triggerPath: string | null;
-}): Promise<Date> {
+}): Promise<{ snapshotId: string; snapshotCreatedAt: Date }> {
   const snapshotCreatedAt = new Date();
 
   const [persisted] = await db
@@ -1034,20 +1068,28 @@ async function persistCreatedSnapshotId(input: {
   };
 
   if (!persisted) {
-    // Another attempt got there first. Keep its timestamp: ours would make an
+    // Another attempt got there first. Adopt its id and timestamp wholesale:
+    // ours names an image nothing references, and its clock would make an
     // already-aging snapshot look freshly created.
     const existing = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, input.runId),
-      columns: { snapshotCreatedAt: true },
+      columns: { snapshotId: true, snapshotCreatedAt: true },
     });
 
     await recordSnapshotQueueEvent(input.taskRun, {
       eventType: 'decision',
       message: `Snapshot ${input.snapshotId} for sandbox ${input.instanceId} was already persisted by another attempt.`,
-      details: { ...details, decision: 'skip_persist_snapshot_id_claim_lost' },
+      details: {
+        ...details,
+        decision: 'skip_persist_snapshot_id_claim_lost',
+        winningSnapshotId: existing?.snapshotId ?? null,
+      },
     });
 
-    return existing?.snapshotCreatedAt ?? snapshotCreatedAt;
+    return {
+      snapshotId: existing?.snapshotId ?? input.snapshotId,
+      snapshotCreatedAt: existing?.snapshotCreatedAt ?? snapshotCreatedAt,
+    };
   }
 
   await recordSnapshotQueueEvent(input.taskRun, {
@@ -1060,7 +1102,7 @@ async function persistCreatedSnapshotId(input: {
     },
   });
 
-  return snapshotCreatedAt;
+  return { snapshotId: input.snapshotId, snapshotCreatedAt };
 }
 
 async function recordSnapshotQueueEvent(
