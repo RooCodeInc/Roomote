@@ -131,7 +131,6 @@ export function useTaskSession(
   }) =>
     query?.state?.data?.refetchInterval ??
     (isSnapshotting ? 2_000 : (refetchInterval ?? false));
-
   const sessionQuery = useQuery(
     trpc.sandboxSession.byTaskId.queryOptions(
       { taskId },
@@ -140,6 +139,9 @@ export function useTaskSession(
       },
     ),
   );
+  const sessionRefetchInterval =
+    sessionQuery.data?.refetchInterval ??
+    (isSnapshotting ? 2_000 : (refetchInterval ?? false));
 
   // Switch to fast-poll (2s) while a snapshot is in progress so the UI
   // picks up snapshotCreatedAt promptly and shows the "Going to sleep" state.
@@ -183,7 +185,7 @@ export function useTaskSession(
         enabled:
           sessionQuery.isSuccess &&
           sessionQuery.data?.sessionState !== 'not-found',
-        refetchInterval: effectiveRefetchInterval(sessionQuery),
+        refetchInterval: sessionRefetchInterval,
       },
     ),
   );
