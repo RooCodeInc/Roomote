@@ -9,6 +9,7 @@ import {
   desc,
   eq,
   githubUserMappings,
+  tasks,
   users,
 } from '@roomote/db/server';
 
@@ -232,7 +233,7 @@ export async function resolveTaskCommitAuthor(
         kind: 'user',
         displayName,
         githubLogin,
-        prAssigneeLogin,
+        prAssigneeLogin: null,
         gitAuthor: ROOMOTE_GIT_AUTHOR,
       };
     }
@@ -241,7 +242,7 @@ export async function resolveTaskCommitAuthor(
       kind: 'user',
       displayName,
       githubLogin,
-      prAssigneeLogin,
+      prAssigneeLogin: githubIdentity.githubLogin,
       gitAuthor: {
         name: displayName,
         email: `${githubIdentity.githubUserId}+${githubIdentity.githubLogin}@users.noreply.github.com`,
@@ -283,4 +284,63 @@ export async function resolveTaskCommitAuthor(
     ...DEFAULT_ROOMOTE_COMMIT_AUTHOR,
     prAssigneeLogin,
   };
+}
+
+/**
+ * Resolves attribution for a live run. A linked participant owns their turns;
+ * all ownerless or unlinked runs use the Roomote app identity.
+ */
+export async function resolveRunCommitAuthor(
+  tx: DatabaseOrTransaction,
+  run: { taskId: string; actingUserId: string | null },
+): Promise<ResolvedTaskCommitAuthor> {
+  if (run.actingUserId) {
+    const [user, githubIdentity] = await Promise.all([
+      tx.query.users.findFirst({
+        where: eq(users.id, run.actingUserId),
+        columns: { id: true },
+      }),
+      findLatestGithubIdentityForUser(tx, run.actingUserId),
+    ]);
+    if (!user || !githubIdentity.githubLogin || !githubIdentity.githubUserId) {
+      return DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+    }
+
+    return resolveTaskCommitAuthor(tx, {
+      commitAuthorKind: 'user',
+      commitAuthorUserId: run.actingUserId,
+      commitAuthorLogin: null,
+      commitAuthorExternalId: null,
+      prAssigneeLogin: null,
+      actorDisplayName: null,
+    });
+  }
+
+  return DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+}
+
+/** Resolves immutable launch attribution for audit and legacy PR cleanup. */
+export async function resolveLaunchTaskCommitAuthor(
+  tx: DatabaseOrTransaction,
+  taskId: string,
+): Promise<ResolvedTaskCommitAuthor> {
+  const task = await tx.query.tasks.findFirst({
+    where: eq(tasks.id, taskId),
+    columns: {
+      commitAuthorKind: true,
+      commitAuthorUserId: true,
+      commitAuthorLogin: true,
+      commitAuthorExternalId: true,
+      prAssigneeLogin: true,
+      actorDisplayName: true,
+    },
+  });
+
+  if (!task) {
+    throw new Error(
+      `Task ${taskId} not found while resolving launch attribution.`,
+    );
+  }
+
+  return resolveTaskCommitAuthor(tx, task);
 }
