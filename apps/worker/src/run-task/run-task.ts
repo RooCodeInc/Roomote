@@ -573,6 +573,7 @@ const CODE_MODE_FLAG = FeatureFlag.CodeMode;
 export const runTask = async ({
   taskRun,
   envVars,
+  userEnvVars,
   workspacePath,
   usesSharedWorkspaceRoot,
   repoPaths,
@@ -1155,7 +1156,15 @@ export const runTask = async ({
       integrations,
       mcpTaskEnv,
       environmentMcpServers: environmentConfig?.mcpServers,
-      operatorEnvVars: deploymentEnvVars,
+      // The pre-injection snapshot, NOT deploymentEnvVars: by harness start,
+      // `envVars` has been mutated with runtime-internal entries (auth bypass
+      // values, BASH_ENV, ...) that must not ride the operator overlay past
+      // the reserved-name guard.
+      operatorEnvVars: Object.fromEntries(
+        Object.entries(userEnvVars ?? {}).filter(
+          (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+      ),
       taskRun,
       developerInstructionsContent: harnessDeveloperInstructions,
       callbacks,

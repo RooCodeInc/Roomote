@@ -150,6 +150,14 @@ export type RunTaskCallbacks = {
 export type RunTaskOptions = {
   taskRun: DequeuedTaskRun['taskRun'];
   envVars: Record<string, string | undefined>;
+  /**
+   * Snapshot of the dequeue-provided env vars taken before injectEnvVars adds
+   * runtime-internal entries (auth bypass values, BASH_ENV, ...). This is the
+   * operator-owned set used for custom MCP config `${...}` substitution;
+   * `envVars` must not be used for that because post-injection it can
+   * reclassify internal values as operator-provided.
+   */
+  userEnvVars?: Record<string, string | undefined>;
   workspacePath: string;
   usesSharedWorkspaceRoot?: boolean;
   repoPaths?: Record<string, string>;

@@ -72,6 +72,11 @@ interface ExecuteTaskRunConfig<TJobContext extends PreparedTaskRunBase> {
   workspaceConfigFn: (jobContext: TJobContext) => Promise<WorkspaceConfig>;
   runFn: (params: {
     jobContext: TJobContext;
+    /**
+     * Snapshot of the dequeue-provided env vars taken before injectEnvVars
+     * adds runtime-internal entries. This is the operator-owned set.
+     */
+    userEnvVars: Record<string, string | undefined>;
     workspace: WorkspaceConfig;
     workspacePath: string;
     usesSharedWorkspaceRoot: boolean;
@@ -661,6 +666,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
 
     const runTaskPromise = runFn({
       jobContext,
+      userEnvVars,
       workspace,
       workspacePath,
       usesSharedWorkspaceRoot,

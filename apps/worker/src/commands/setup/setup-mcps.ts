@@ -61,20 +61,15 @@ interface IntegrationProxyConfig {
 }
 
 /**
- * Roomote runtime / control-plane values that must never be injectable into
- * operator-configured MCP server config via ${...} substitution. This is
- * deliberately limited to Roomote-internal names: anything the operator
- * defined themselves (deployment env vars) is already present in the sandbox
- * environment, so refusing to substitute it would add friction without
- * protecting anything. Operator-defined names always substitute — see
- * buildMcpSubstitutionLookup.
+ * Names that belong unambiguously to the Roomote runtime. These never
+ * substitute into operator-configured MCP config — not even from the
+ * operator-provided overlay — so a value injected into an env map by the
+ * runtime can never be reclassified as operator-owned.
  */
-function isReservedRuntimeMcpEnvVarName(name: string): boolean {
+function isRoomoteNamespacedEnvVarName(name: string): boolean {
   return (
     name === 'AUTH_TOKEN' ||
     name === 'BASH_ENV' ||
-    name === 'DATABASE_URL' ||
-    name === 'REDIS_URL' ||
     name.startsWith('ROOMOTE_') ||
     name.startsWith('JOB_AUTH_') ||
     name.startsWith('PREVIEW_AUTH_')
@@ -82,11 +77,32 @@ function isReservedRuntimeMcpEnvVarName(name: string): boolean {
 }
 
 /**
+ * Roomote runtime / control-plane values that must never be injectable into
+ * operator-configured MCP server config via ${...} substitution from the
+ * task env. This is deliberately limited to Roomote-internal names: anything
+ * the operator defined themselves (deployment env vars) is already present
+ * in the sandbox environment, so refusing to substitute it would add
+ * friction without protecting anything. Operator-defined names substitute
+ * via the overlay in buildMcpSubstitutionLookup; generic reserved names
+ * (DATABASE_URL, REDIS_URL) can be shadowed there by an operator's own
+ * value, Roomote-namespaced names cannot.
+ */
+function isReservedRuntimeMcpEnvVarName(name: string): boolean {
+  return (
+    isRoomoteNamespacedEnvVarName(name) ||
+    name === 'DATABASE_URL' ||
+    name === 'REDIS_URL'
+  );
+}
+
+/**
  * Build the ${...} substitution lookup for custom MCP config: the task env
  * minus reserved runtime names, overlaid with operator-defined deployment
  * vars. Operator values win on collision, so an operator var that happens to
- * share a reserved name (for example their own DATABASE_URL) resolves to the
- * operator's value — never to a Roomote-internal one.
+ * share a generic reserved name (for example their own DATABASE_URL)
+ * resolves to the operator's value — never to a Roomote-internal one.
+ * Roomote-namespaced names are dropped even from the operator overlay as
+ * defense in depth against runtime-injected entries.
  */
 function buildMcpSubstitutionLookup(
   taskEnv: Record<string, string> | undefined,
@@ -98,7 +114,11 @@ function buildMcpSubstitutionLookup(
         ([name]) => !isReservedRuntimeMcpEnvVarName(name),
       ),
     ),
-    ...operatorEnvVars,
+    ...Object.fromEntries(
+      Object.entries(operatorEnvVars ?? {}).filter(
+        ([name]) => !isRoomoteNamespacedEnvVarName(name),
+      ),
+    ),
   };
 }
 
