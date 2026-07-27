@@ -1064,7 +1064,6 @@ function VercelConnectionFields({
 export function Integrations() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const searchParamsString = searchParams.toString();
   const { isAdmin } = useAuthorizedUser();
   const deepLinkedIntegrationId = (
     searchParams.get('service') ??
@@ -1616,9 +1615,11 @@ export function Integrations() {
     setDismissedDeepLinkIntegrationId(deepLinkedIntegrationId);
     setClearedDeepLinkIntegrationId(deepLinkedIntegrationId);
 
-    const nextSearchParams = new URLSearchParams(searchParamsString);
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
     nextSearchParams.delete('service');
     nextSearchParams.delete('highlight');
+    nextSearchParams.delete('mcp');
+    nextSearchParams.delete('reason');
 
     const nextSearch = nextSearchParams.toString();
     window.history.replaceState(

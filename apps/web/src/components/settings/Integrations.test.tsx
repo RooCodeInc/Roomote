@@ -785,6 +785,22 @@ describe('Integrations settings', () => {
     );
   });
 
+  it('does not restore cleared OAuth result parameters when dismissing Linear', () => {
+    state.searchParams = 'service=linear&mcp=error&reason=access_denied';
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+    state.linearInstallation = null;
+
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+
+    expect(replaceState).toHaveBeenLastCalledWith(
+      null,
+      '',
+      '/settings/integrations',
+    );
+  });
+
   it('shows workspace connection status for an enabled org-scoped MCP', () => {
     state.deploymentEnablements = [{ mcpId: 'pylon', enabled: true }];
     state.userConnections = [{ mcpId: 'pylon', authStatus: 'authenticated' }];
