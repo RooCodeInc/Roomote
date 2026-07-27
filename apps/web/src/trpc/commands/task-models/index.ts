@@ -7,6 +7,7 @@ import {
   inArray,
   isChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected,
+  isXaiSubscriptionConnected,
   isNull,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
@@ -298,12 +299,14 @@ export async function getTaskModelSettingsCommand(
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
   ]);
   // The Available Models list always shows the full recommended set for
   // every connected provider; entries that are not persisted yet render
@@ -313,6 +316,7 @@ export async function getTaskModelSettingsCommand(
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   });
   // Models selected for a runtime role (or as the default coding model) stay
   // listed and active even when a release drops them from the recommended
@@ -414,12 +418,14 @@ export async function getTaskModelProviderSetupCommand(
     setupNewState,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   ] = await Promise.all([
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
     getDeploymentSetupNewState(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
   ]);
 
   // Include non-secret OpenAI-compatible env values (base URLs + connection
@@ -459,6 +465,7 @@ export async function getTaskModelProviderSetupCommand(
     selectedProvider: setupNewState.modelProvider,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   });
 
   return { providerSetup };
@@ -554,14 +561,17 @@ export async function saveTaskModelProviderCommand(
 
   if (provider.authKind === 'oauth') {
     throw new Error(
-      `${provider.label} is connected with a ChatGPT account from the Models settings page and does not use an API key.`,
+      `${provider.label} is connected with a subscription account from the Models settings page and does not use an API key.`,
     );
   }
 
   // When remapping a newly named OpenAI-compatible connection,, rewrite the
   // primary base URL key by treating apiKey as the template primary value and
   // collecting against the named descriptor.
-  const chatgptConnected = await isChatGptSubscriptionConnected();
+  const [chatgptConnected, xaiSubscriptionConnected] = await Promise.all([
+    isChatGptSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
+  ]);
 
   let addedRecommendedModelCount = 0;
 
@@ -614,6 +624,7 @@ export async function saveTaskModelProviderCommand(
         runtimeEnv: process.env,
         persistedEnvVarNames,
         chatgptConnected,
+        xaiSubscriptionConnected,
       }),
     ]);
     const autoAdd = buildAutoAddedTaskModelSettings({
@@ -827,7 +838,7 @@ export async function deleteTaskModelProviderCommand(
 
   if (provider.authKind === 'oauth') {
     throw new Error(
-      `${provider.label} is connected with a ChatGPT account and cannot be deleted here.`,
+      `${provider.label} is connected with a subscription account and cannot be deleted here.`,
     );
   }
 
@@ -837,12 +848,14 @@ export async function deleteTaskModelProviderCommand(
       persistedEnvVarNames,
       setupNewState,
       chatgptConnected,
+      xaiSubscriptionConnected,
       persistedTaskModelSettings,
     ] = await Promise.all([
       getDeploymentRuntimeModelConfig(),
       getPersistedEnvironmentVariableNames(tx),
       getDeploymentSetupNewState(tx),
       isChatGptSubscriptionConnected(),
+      isXaiSubscriptionConnected(),
       getDeploymentTaskModelSettings(),
     ]);
 
@@ -852,16 +865,30 @@ export async function deleteTaskModelProviderCommand(
       persistedEnvVarNames,
       selectedProvider: setupNewState.modelProvider,
       chatgptConnected,
+      xaiSubscriptionConnected,
     });
     const providerStatus = providerSetup.providers.find(
       (candidate) => candidate.id === provider.id,
     );
 
+    // xAI dual-path: API key and SuperGrok share the `xai` catalog id. When
+    // deleting the key while a subscription remains, only strip env vars and
+    // leave models/runtime intact.
+    const xaiKeyOnlyDelete =
+      provider.id === 'xai' &&
+      xaiSubscriptionConnected &&
+      Boolean(providerSetup.xaiApiKeyConnected);
+
     if (!providerStatus?.savedApiKeySatisfied) {
       throw new Error(`${provider.label} does not have saved credentials.`);
     }
 
-    if (getConnectedModelProviderCount(providerSetup) <= 1) {
+    // Key-only xAI delete is allowed even when the catalog shows a single
+    // connected `xai` entry, because the subscription remains as a provider.
+    if (
+      !xaiKeyOnlyDelete &&
+      getConnectedModelProviderCount(providerSetup) <= 1
+    ) {
       throw new Error('Keep at least one inference provider connected.');
     }
 
@@ -876,6 +903,11 @@ export async function deleteTaskModelProviderCommand(
             inArray(environmentVariables.name, providerEnvVarNames),
           ),
         );
+    }
+
+    if (xaiKeyOnlyDelete) {
+      // Subscription still covers xai/* models; do not cascade model removal.
+      return;
     }
 
     const nextModelState = removeTaskModelsForProvider({
@@ -920,11 +952,13 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     settings,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
     persistedEnvVarNames,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
     getPersistedEnvironmentVariableNames(),
   ]);
   const providerSetup = buildSetupModelStatus({
@@ -932,21 +966,27 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     persistedEnvVarNames,
     chatgptConnected,
     githubCopilotConnected,
+    xaiSubscriptionConnected,
   });
-  const openaiConnected = Boolean(
-    providerSetup.providers.find(
-      (provider) =>
-        provider.id === 'openai' &&
-        (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
-    ),
-  );
+  const isApiKeyProviderConnected = (providerId: SetupModelProviderId) =>
+    Boolean(
+      providerSetup.providers.find(
+        (provider) =>
+          provider.id === providerId &&
+          (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
+      ),
+    );
   const enabledModels = getEnabledTaskModels(settings);
   const defaultModel = getDefaultTaskModel(settings);
 
   return {
     defaultModelId: defaultModel.id,
     chatgptConnected,
-    openaiConnected,
+    openaiConnected: isApiKeyProviderConnected('openai'),
+    // Display-grouping inputs: `xai/` models group under the Grok
+    // subscription only when the API-key sibling is not also connected.
+    xaiSubscriptionConnected,
+    xaiConnected: isApiKeyProviderConnected('xai'),
     models: enabledModels.map((option) => ({
       ...option,
       isDefault: option.id === defaultModel.id,

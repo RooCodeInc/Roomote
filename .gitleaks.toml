@@ -1,0 +1,18 @@
+# Roomote gitleaks configuration.
+# Extends default rules; only add allowlist entries with a concrete reason.
+#
+# Scope allowlists to the specific value, never to a whole file: a path
+# allowlist exempts every future line in that file from every rule.
+
+title = "Roomote"
+
+[allowlist]
+description = "False positives and intentional public identifiers"
+
+# Public Grok CLI OAuth client id reused by peer tools for SuperGrok
+# device-code login. This is not a secret; it is the same client_id published
+# by ecosystem agents (Hermes, OpenClaw, CC Switch) for auth.x.ai. It is
+# UUID-shaped, which is the only reason the default rules flag it.
+regexes = [
+  '''b1a00492-073a-47ea-816f-4c329264a828''',
+]

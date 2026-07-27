@@ -159,6 +159,7 @@ export async function resolveThreadReplyLivePreviewUrl(
         taskId,
         portNameToSlug(primaryPortName),
         previewProxyBaseUrl,
+        previewRuntimeConfig.effective.previewProxySubdomainSuffix ?? undefined,
       ),
       initialPath,
     );

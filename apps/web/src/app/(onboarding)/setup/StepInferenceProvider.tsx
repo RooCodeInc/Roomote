@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   getDefaultAdditionalEnvValues,
   getSetupModelProvider,
@@ -28,6 +29,7 @@ import {
 import { AdditionalEnvFieldInput } from '@/components/settings/AdditionalEnvFieldInput';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
+import { XaiConnectDialog } from '@/components/settings/XaiConnectDialog';
 
 import { StepTitle } from './StepTitle';
 import { SetupFooter } from './SetupFooter';
@@ -101,12 +103,24 @@ export function StepInferenceProvider({
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
   const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
     useState(false);
+  const [isXaiDialogOpen, setIsXaiDialogOpen] = useState(false);
   const chatgptStatusQuery = useQuery(
     trpc.chatgptSubscription.status.queryOptions(undefined, {
       enabled: selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID,
     }),
   );
   const chatgptStatus = chatgptStatusQuery.data ?? null;
+  // SuperGrok is dual-path with the xAI API key: onboarding offers both on the
+  // shared `xai` surface (and on the separate `xai-subscription` catalog id).
+  const isXaiSurface =
+    selectedProvider === 'xai' ||
+    selectedProvider === XAI_SUBSCRIPTION_PROVIDER_ID;
+  const xaiStatusQuery = useQuery(
+    trpc.xaiSubscription.status.queryOptions(undefined, {
+      enabled: isXaiSurface,
+    }),
+  );
+  const xaiStatus = xaiStatusQuery.data ?? null;
   const saveModelConfig = useMutation(
     trpc.setupNew.saveModelConfig.mutationOptions({
       onSuccess: async () => {
@@ -149,6 +163,7 @@ export function StepInferenceProvider({
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
     setIsGitHubCopilotDialogOpen(false);
+    setIsXaiDialogOpen(false);
   }, [selectedProvider]);
 
   useEffect(() => {
@@ -179,6 +194,9 @@ export function StepInferenceProvider({
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const githubCopilotConnected = Boolean(modelSetup.githubCopilotConnected);
+  const xaiSubscriptionConnected = Boolean(
+    modelSetup.xaiSubscriptionConnected || xaiStatus?.connected,
+  );
   const hasRuntimeProviderKey =
     selectedProviderStatus?.runtimeApiKeySatisfied === true;
   const hasSavedProviderKey =
@@ -203,7 +221,14 @@ export function StepInferenceProvider({
     !editingSavedValue;
   const shouldShowConfiguredMask =
     hasRuntimeProviderKey || shouldShowSavedValueMask;
-  const canContinueWithoutApiKey = hasRuntimeProviderKey || hasSavedProviderKey;
+  // SuperGrok covers the `xai` surface without an API key, same pattern as
+  // ChatGPT covering openai/. Continue when either path is satisfied.
+  const canContinueWithoutApiKey =
+    hasRuntimeProviderKey ||
+    hasSavedProviderKey ||
+    (isXaiSurface && xaiSubscriptionConnected) ||
+    (isChatGptProvider && chatgptConnected) ||
+    (isGitHubCopilotProvider && githubCopilotConnected);
   const hasMissingRequiredFields =
     !canContinueWithoutApiKey &&
     additionalEnvFields.some(
@@ -388,8 +413,30 @@ export function StepInferenceProvider({
           </Button>
         ) : null}
 
-        {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
+        {isXaiSurface && !hasRuntimeProviderKey && !xaiSubscriptionConnected ? (
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            disabled={saveModelConfig.isPending}
+            onClick={() => setIsXaiDialogOpen(true)}
+          >
+            Connect Grok subscription
+          </Button>
+        ) : null}
+
+        {(hasRuntimeProviderKey ||
+          hasSavedProviderKey ||
+          (isXaiSurface && xaiSubscriptionConnected)) && <Check />}
       </div>
+
+      {isXaiSurface && !hasRuntimeProviderKey && xaiSubscriptionConnected ? (
+        <span className="text-sm text-muted-foreground">
+          {xaiStatus?.email
+            ? `Connected as ${xaiStatus.email}`
+            : 'Connected to a SuperGrok / X Premium+ account.'}
+        </span>
+      ) : null}
 
       {requiresConnectionName && !hasRuntimeProviderKey ? (
         <div className="flex max-w-lg items-center gap-2">
@@ -528,6 +575,15 @@ export function StepInferenceProvider({
       <GitHubCopilotConnectDialog
         open={isGitHubCopilotDialogOpen}
         onOpenChange={setIsGitHubCopilotDialogOpen}
+        onConnected={async () => {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.setupNew.status.queryKey(),
+          });
+        }}
+      />
+      <XaiConnectDialog
+        open={isXaiDialogOpen}
+        onOpenChange={setIsXaiDialogOpen}
         onConnected={async () => {
           await queryClient.invalidateQueries({
             queryKey: trpc.setupNew.status.queryKey(),

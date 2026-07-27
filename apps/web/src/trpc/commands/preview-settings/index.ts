@@ -83,7 +83,10 @@ export interface PreviewSettingsSnapshot {
   overrideState: {
     hasOverrides: boolean;
     overriddenFields: Array<
-      'previewProxyBaseUrl' | 'previewDomains' | 'roomotePreviewDomain'
+      | 'previewProxyBaseUrl'
+      | 'previewProxySubdomainSuffix'
+      | 'previewDomains'
+      | 'roomotePreviewDomain'
     >;
   };
   configSource: {

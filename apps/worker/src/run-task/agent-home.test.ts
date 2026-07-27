@@ -282,6 +282,25 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toBeUndefined();
   });
 
+  it('rebases xAI onto the gateway when the Grok subscription marker is set', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'xai/grok-4.5',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_XAI: '1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider.xai?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/xai/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+  });
+
   it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
@@ -357,6 +376,63 @@ describe('generateOpenCodeConfig provider support', () => {
         apiKey: '{env:OPENAI_COMPATIBLE_API_KEY}',
       },
       models: { 'gpt-4o': { name: 'gpt-4o' } },
+    });
+  });
+
+  it('marks only the configured OpenAI-compatible vision model as image-capable', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/text-model',
+        R_VISION_MODEL: 'openai-compatible/vision-model',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'compat-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, Record<string, unknown>> }
+      >;
+    };
+    const models = config.provider['openai-compatible']?.models;
+
+    expect(models?.['vision-model']).toMatchObject({
+      name: 'vision-model',
+      attachment: true,
+      modalities: {
+        input: ['text', 'image'],
+        output: ['text'],
+      },
+    });
+    expect(models?.['text-model']).not.toHaveProperty('attachment');
+    expect(models?.['text-model']).not.toHaveProperty('modalities');
+  });
+
+  it('falls back to the OpenAI-compatible coding model when no vision model is configured', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/vision-model',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'compat-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, Record<string, unknown>> }
+      >;
+    };
+
+    expect(
+      config.provider['openai-compatible']?.models['vision-model'],
+    ).toMatchObject({
+      attachment: true,
+      modalities: {
+        input: ['text', 'image'],
+        output: ['text'],
+      },
     });
   });
 

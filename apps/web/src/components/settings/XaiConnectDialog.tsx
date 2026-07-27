@@ -26,7 +26,7 @@ type DeviceAuth = {
   expiresInMs: number;
 };
 
-export function GitHubCopilotConnectDialog({
+export function XaiConnectDialog({
   open,
   onOpenChange,
   onConnected,
@@ -39,10 +39,16 @@ export function GitHubCopilotConnectDialog({
   const queryClient = useQueryClient();
   const [deviceAuth, setDeviceAuth] = useState<DeviceAuth | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const pollingRef = useRef(false);
+  /**
+   * Monotonic generation bumped whenever a poll loop must die (close, restart,
+   * unmount). A shared boolean is not enough: cancel + reopen can flip the
+   * flag back to true and revive a stale loop that still holds the previous
+   * device code.
+   */
+  const pollGenerationRef = useRef(0);
 
   const startMutation = useMutation(
-    trpc.githubCopilotSubscription.startDeviceAuth.mutationOptions({
+    trpc.xaiSubscription.startDeviceAuth.mutationOptions({
       onSuccess: (result) => {
         setDeviceAuth(result);
         setError(null);
@@ -51,17 +57,23 @@ export function GitHubCopilotConnectDialog({
     }),
   );
   const pollMutation = useMutation(
-    trpc.githubCopilotSubscription.pollDeviceAuth.mutationOptions(),
+    trpc.xaiSubscription.pollDeviceAuth.mutationOptions(),
   );
 
+  function invalidatePollLoops() {
+    pollGenerationRef.current += 1;
+  }
+
   function close(next: boolean) {
-    if (!next) pollingRef.current = false;
+    if (!next) {
+      invalidatePollLoops();
+    }
     onOpenChange(next);
   }
 
   useEffect(() => {
     if (!open) {
-      pollingRef.current = false;
+      invalidatePollLoops();
       setDeviceAuth(null);
       setError(null);
       return;
@@ -72,28 +84,33 @@ export function GitHubCopilotConnectDialog({
   }, [deviceAuth, open, startMutation]);
 
   useEffect(() => {
-    if (!open || !deviceAuth || pollingRef.current) return;
-    pollingRef.current = true;
+    if (!open || !deviceAuth) {
+      return;
+    }
 
+    const generation = ++pollGenerationRef.current;
+    const activeDeviceCode = deviceAuth.deviceCode;
     const expiresAt = Date.now() + deviceAuth.expiresInMs;
 
     const poll = async () => {
       let intervalMs = deviceAuth.intervalMs;
-      while (pollingRef.current) {
+      while (pollGenerationRef.current === generation) {
         if (Date.now() >= expiresAt) {
-          pollingRef.current = false;
           setError(
-            'GitHub authorization code expired. Restart the connection.',
+            'xAI device authorization code expired. Restart the connection.',
           );
           return;
         }
 
         const result = await pollMutation.mutateAsync({
-          deviceCode: deviceAuth.deviceCode,
+          deviceCode: activeDeviceCode,
         });
+        // Another open/close/restart may have started while we awaited.
+        if (pollGenerationRef.current !== generation) {
+          return;
+        }
         if (result.status === 'success') {
-          pollingRef.current = false;
-          toast.success('GitHub Copilot subscription connected.');
+          toast.success('xAI Grok subscription connected.');
           await Promise.all([
             queryClient.invalidateQueries({
               queryKey: trpc.taskModels.providerSetup.queryKey(),
@@ -102,29 +119,35 @@ export function GitHubCopilotConnectDialog({
               queryKey: trpc.taskModels.launchOptions.queryKey(),
             }),
             queryClient.invalidateQueries({
-              queryKey: trpc.githubCopilotSubscription.status.queryKey(),
+              queryKey: trpc.xaiSubscription.status.queryKey(),
             }),
             queryClient.invalidateQueries({
               queryKey: trpc.subscriptionUsage.list.queryKey(),
             }),
           ]);
+          if (pollGenerationRef.current !== generation) {
+            return;
+          }
           await onConnected?.();
+          if (pollGenerationRef.current !== generation) {
+            return;
+          }
           close(false);
           return;
         }
         if (result.status === 'failed') {
-          pollingRef.current = false;
           setError(result.error);
           return;
         }
         // slow_down returns the new absolute poll interval, not a delta.
-        if (result.intervalMs) intervalMs = result.intervalMs;
+        if (result.intervalMs) {
+          intervalMs = result.intervalMs;
+        }
 
         const remainingMs = expiresAt - Date.now();
         if (remainingMs <= 0) {
-          pollingRef.current = false;
           setError(
-            'GitHub authorization code expired. Restart the connection.',
+            'xAI device authorization code expired. Restart the connection.',
           );
           return;
         }
@@ -135,15 +158,20 @@ export function GitHubCopilotConnectDialog({
     };
 
     void poll().catch((pollError: unknown) => {
-      pollingRef.current = false;
+      if (pollGenerationRef.current !== generation) {
+        return;
+      }
       setError(
         pollError instanceof Error
           ? pollError.message
-          : 'GitHub authorization polling failed.',
+          : 'xAI authorization polling failed.',
       );
     });
     return () => {
-      pollingRef.current = false;
+      // Invalidate only this effect's generation when deviceAuth/open change.
+      if (pollGenerationRef.current === generation) {
+        pollGenerationRef.current += 1;
+      }
     };
     // The polling lifecycle is intentionally keyed only to the active device
     // flow; mutation/query objects are recreated by hooks between renders.
@@ -154,22 +182,23 @@ export function GitHubCopilotConnectDialog({
     <Dialog open={open} onOpenChange={close}>
       <DialogContent size="md">
         <DialogHeader>
-          <DialogTitle>Connect GitHub Copilot</DialogTitle>
+          <DialogTitle>Connect xAI Grok subscription</DialogTitle>
           <DialogDescription>
-            Sign in with a GitHub account that has an active Copilot plan.
+            Sign in with a SuperGrok or eligible X Premium+ account to run Grok
+            models on your subscription instead of an API key.
           </DialogDescription>
         </DialogHeader>
 
         {deviceAuth ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Open GitHub, then enter this one-time code:
+              Open xAI, then enter this one-time code:
             </p>
             <Input
               readOnly
               className="font-mono text-lg tracking-widest"
               value={deviceAuth.userCode}
-              aria-label="GitHub device authorization code"
+              aria-label="xAI device authorization code"
             />
             <Button asChild className="w-full">
               <a
@@ -177,7 +206,7 @@ export function GitHubCopilotConnectDialog({
                 target="_blank"
                 rel="noreferrer"
               >
-                Open GitHub
+                Open xAI
                 <ExternalLink />
               </a>
             </Button>
@@ -200,6 +229,7 @@ export function GitHubCopilotConnectDialog({
           {error ? (
             <Button
               onClick={() => {
+                invalidatePollLoops();
                 setError(null);
                 setDeviceAuth(null);
                 startMutation.reset();

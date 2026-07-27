@@ -188,6 +188,19 @@ describe('inference gateway key lookups', () => {
     ).toBe('https://api.example.com/api/inference/github-copilot');
   });
 
+  it('registers xAI with the hybrid xai-oauth strategy and API host', () => {
+    const provider = getInferenceGatewayProvider('xai');
+    expect(provider).toMatchObject({
+      authStrategy: 'xai-oauth',
+      envVarNames: ['XAI_API_KEY'],
+      upstreamBaseUrl: 'https://api.x.ai',
+      openCodeBaseUrlSuffix: '/v1',
+    });
+    expect(provider?.allowedPaths).toEqual(
+      expect.arrayContaining(['/v1/chat/completions', '/v1/responses']),
+    );
+  });
+
   it('offers exactly the regions its gateway providers hold base URLs for', () => {
     const regionProviders = INFERENCE_GATEWAY_PROVIDERS.filter(
       (provider) => provider.region?.baseUrls,

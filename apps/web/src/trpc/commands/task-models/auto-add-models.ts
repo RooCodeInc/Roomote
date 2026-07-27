@@ -22,19 +22,22 @@ function deriveDisplayNameFromModelId(modelId: string): string {
 /**
  * Model-id prefixes of the providers currently connected (saved or runtime
  * env). A connected ChatGPT subscription serves `openai/` model ids, so it
- * contributes `openai` alongside its own `chatgpt` catalog id.
+ * contributes `openai` alongside its own `chatgpt` catalog id. SuperGrok
+ * similarly contributes `xai` alongside `xai-subscription`.
  */
 export function collectConnectedTaskModelProviderIds(options: {
   runtimeEnv: Partial<Record<string, string | undefined>>;
   persistedEnvVarNames: Iterable<string>;
   chatgptConnected: boolean;
   githubCopilotConnected?: boolean;
+  xaiSubscriptionConnected?: boolean;
 }): Set<string> {
   const status = buildSetupModelStatus({
     runtimeEnv: options.runtimeEnv,
     persistedEnvVarNames: options.persistedEnvVarNames,
     chatgptConnected: options.chatgptConnected,
     githubCopilotConnected: options.githubCopilotConnected,
+    xaiSubscriptionConnected: options.xaiSubscriptionConnected,
   });
 
   return new Set([
@@ -45,6 +48,7 @@ export function collectConnectedTaskModelProviderIds(options: {
       )
       .map((provider) => provider.id),
     ...(options.chatgptConnected ? ['openai'] : []),
+    ...(options.xaiSubscriptionConnected ? ['xai'] : []),
   ]);
 }
 

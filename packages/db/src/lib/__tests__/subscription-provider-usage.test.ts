@@ -1,15 +1,32 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockGetFreshXaiAccessToken } = vi.hoisted(() => ({
+  mockGetFreshXaiAccessToken: vi.fn(),
+}));
 
 vi.mock('../../encryption', () => ({
   encryptJSON: (value: unknown) => JSON.stringify(value),
   decryptSecrets: async (value: string) => JSON.parse(value) as unknown,
 }));
 
+vi.mock('../xai-subscription', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../xai-subscription')>();
+  return {
+    ...actual,
+    getFreshXaiAccessToken: mockGetFreshXaiAccessToken,
+  };
+});
+
 import {
   fetchChatGptUsage,
   fetchGitHubCopilotUsage,
   fetchKimiForCodingUsage,
+  fetchXaiSubscriptionUsage,
+  fetchZaiCodingPlanUsage,
+  fetchZaiUsage,
   getSubscriptionProviderUsage,
+  parseXaiSubscriptionUsage,
+  parseZaiQuotaUsage,
 } from '../subscription-provider-usage';
 
 /** Executor whose deployment-secret reads resolve the given rows per call. */
@@ -406,5 +423,473 @@ describe('getSubscriptionProviderUsage', () => {
 
     expect(usage).toHaveLength(1);
     expect(usage[0]).toMatchObject({ providerId: 'kimi-for-coding' });
+  });
+});
+
+describe('parseXaiSubscriptionUsage', () => {
+  it('normalizes included usage, credits, and on-demand windows', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        included_usage: {
+          used_percent: 42.5,
+          used: 425,
+          remaining: 575,
+          limit: 1000,
+          resets_at: '2026-08-01T00:00:00.000Z',
+        },
+        credits: { balance: 12.5 },
+        on_demand: { used: 3, limit: 10 },
+      },
+      Date.parse('2026-07-01T00:00:00.000Z'),
+    );
+
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        usedPercent: 42.5,
+        used: 425,
+        remaining: 575,
+        limit: 1000,
+        resetsAt: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        label: 'Credits',
+        remaining: 12.5,
+      },
+      {
+        label: 'On-demand',
+        used: 3,
+        limit: 10,
+        usedPercent: 30,
+      },
+    ]);
+  });
+
+  it('parses the live cli-chat-proxy format=credits payload', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        config: {
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: '2026-07-24T01:21:57.505552+00:00',
+            end: '2026-07-31T01:21:57.505552+00:00',
+          },
+          creditUsagePercent: 27,
+          onDemandCap: { val: 0 },
+          onDemandUsed: { val: 0 },
+          productUsage: [
+            { product: 'GrokBuild', usagePercent: 26 },
+            { product: 'Api', usagePercent: 1 },
+            { product: 'GrokChat' },
+            { product: 'GrokVoice' },
+          ],
+          prepaidBalance: { val: 0 },
+          billingPeriodEnd: '2026-07-31T01:21:57.505552+00:00',
+        },
+      },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    // Only the aggregate pool renders: the per-product entries slice the
+    // same shared pool (duplicate-looking bars), and a zero on-demand
+    // credit balance is the idle state, not a warning.
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        usedPercent: 27,
+        resetsAt: '2026-07-31T01:21:57.505Z',
+      },
+    ]);
+  });
+
+  it('shows the credit balance only when on-demand credits exist', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        config: {
+          creditUsagePercent: 100,
+          prepaidBalance: { val: 12.5 },
+          billingPeriodEnd: '2026-07-31T01:21:57.505552+00:00',
+        },
+      },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    // Pool exhausted with a positive balance: tasks continue on metered
+    // spend, which is exactly when the operator needs to see the number.
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        usedPercent: 100,
+        resetsAt: '2026-07-31T01:21:57.505Z',
+      },
+      {
+        label: 'Credits',
+        remaining: 12.5,
+      },
+    ]);
+  });
+
+  it('parses the live monthly billing payload', () => {
+    const windows = parseXaiSubscriptionUsage(
+      {
+        config: {
+          monthlyLimit: { val: 150_000 },
+          used: { val: 73_743 },
+          billingPeriodEnd: '2026-08-01T00:00:00+00:00',
+        },
+      },
+      Date.parse('2026-07-26T00:00:00.000Z'),
+    );
+
+    expect(windows).toEqual([
+      {
+        label: 'Included usage',
+        used: 73_743,
+        limit: 150_000,
+        usedPercent: 49.162,
+        resetsAt: '2026-08-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('returns an empty list for unusable payloads', () => {
+    expect(parseXaiSubscriptionUsage(null)).toEqual([]);
+    expect(parseXaiSubscriptionUsage({})).toEqual([]);
+    expect(parseXaiSubscriptionUsage({ plan: 'pro' })).toEqual([]);
+  });
+});
+
+describe('fetchXaiSubscriptionUsage', () => {
+  beforeEach(() => {
+    mockGetFreshXaiAccessToken.mockReset();
+  });
+
+  it('fetches user then billing and returns normalized windows', async () => {
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-access',
+      expires: Date.now() + 3_600_000,
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ userId: 'user-1' }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          includedUsage: {
+            usedPercent: 10,
+            limit: 100,
+            remaining: 90,
+          },
+        }),
+      );
+
+    const usage = await fetchXaiSubscriptionUsage({ fetchImpl });
+
+    expect(usage).toMatchObject({
+      providerId: 'xai-subscription',
+      windows: [
+        {
+          label: 'Included usage',
+          usedPercent: 10,
+          limit: 100,
+          remaining: 90,
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://cli-chat-proxy.grok.com/v1/user',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer xai-access',
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer xai-access',
+        }),
+      }),
+    );
+  });
+
+  it('returns null when no subscription is connected', async () => {
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+    const fetchImpl = vi.fn();
+    await expect(fetchXaiSubscriptionUsage({ fetchImpl })).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the billing payload cannot be parsed', async () => {
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-access',
+      expires: Date.now() + 3_600_000,
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'user-1' }))
+      .mockResolvedValueOnce(jsonResponse({ status: 'ok' }));
+
+    await expect(fetchXaiSubscriptionUsage({ fetchImpl })).resolves.toBeNull();
+  });
+});
+
+describe('parseZaiQuotaUsage', () => {
+  it('normalizes live monitor quota windows and plan level', () => {
+    const parsed = parseZaiQuotaUsage({
+      code: 200,
+      data: {
+        level: 'lite',
+        limits: [
+          {
+            type: 'TOKENS_LIMIT',
+            unit: 3,
+            percentage: 16,
+            nextResetTime: 1_777_819_631_597,
+          },
+          {
+            type: 'TOKENS_LIMIT',
+            unit: 6,
+            percentage: 4,
+            nextResetTime: 1_778_262_784_969,
+          },
+          {
+            type: 'TIME_LIMIT',
+            unit: 5,
+            percentage: 0,
+            nextResetTime: 1_780_336_384_978,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.planType).toBe('lite');
+    expect(parsed.windows).toEqual([
+      {
+        label: '5h limit',
+        usedPercent: 16,
+        resetsAt: new Date(1_777_819_631_597).toISOString(),
+      },
+      {
+        label: 'Weekly limit',
+        usedPercent: 4,
+        resetsAt: new Date(1_778_262_784_969).toISOString(),
+      },
+      {
+        label: 'Monthly tools',
+        usedPercent: 0,
+        resetsAt: new Date(1_780_336_384_978).toISOString(),
+      },
+    ]);
+  });
+
+  it('derives usedPercent from remaining/limit when percentage is absent', () => {
+    const parsed = parseZaiQuotaUsage([
+      {
+        type: 'TOKENS_LIMIT',
+        unit: 3,
+        remaining: 75,
+        limit: 100,
+      },
+    ]);
+
+    expect(parsed.windows).toEqual([
+      {
+        label: '5h limit',
+        usedPercent: 25,
+        remaining: 75,
+        limit: 100,
+      },
+    ]);
+  });
+
+  it('returns empty windows for unusable payloads', () => {
+    expect(parseZaiQuotaUsage(null)).toEqual({ windows: [] });
+    expect(parseZaiQuotaUsage({})).toEqual({ windows: [] });
+    expect(parseZaiQuotaUsage({ code: 200, data: { level: 'pro' } })).toEqual({
+      planType: 'pro',
+      windows: [],
+    });
+  });
+});
+
+describe('fetchZaiUsage', () => {
+  it('returns null when no API key is configured', async () => {
+    const fetchImpl = vi.fn();
+    await expect(
+      fetchZaiUsage({ runtimeEnv: {}, fetchImpl }),
+    ).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('fetches the international quota endpoint by default', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 200,
+        data: {
+          level: 'pro',
+          limits: [{ type: 'TOKENS_LIMIT', unit: 3, percentage: 12 }],
+        },
+      }),
+    );
+
+    const usage = await fetchZaiUsage({
+      runtimeEnv: { ZAI_API_KEY: 'zai-key' },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.z.ai/api/monitor/usage/quota/limit',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer zai-key',
+        }),
+      }),
+    );
+    expect(usage).toMatchObject({
+      providerId: 'zai',
+      planType: 'pro',
+      windows: [{ label: '5h limit', usedPercent: 12 }],
+    });
+  });
+
+  it('returns null on non-OK responses without throwing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, 401));
+
+    await expect(
+      fetchZaiUsage({ runtimeEnv: { ZAI_API_KEY: 'zai-key' }, fetchImpl }),
+    ).resolves.toBeNull();
+    expect(fetchImpl).toHaveBeenCalled();
+  });
+
+  it('returns null on HTTP 200 business auth failures', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 1000,
+        msg: 'Authentication Failed',
+        success: false,
+      }),
+    );
+
+    await expect(
+      fetchZaiUsage({ runtimeEnv: { ZAI_API_KEY: 'bad-key' }, fetchImpl }),
+    ).resolves.toBeNull();
+  });
+
+  it('parses live coding-plan TIME_LIMIT rows with currentValue/usage', () => {
+    const parsed = parseZaiQuotaUsage({
+      code: 200,
+      success: true,
+      data: {
+        level: 'max',
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 0 },
+          {
+            type: 'TOKENS_LIMIT',
+            unit: 6,
+            number: 1,
+            percentage: 30,
+            nextResetTime: 1_785_560_352_998,
+          },
+          {
+            type: 'TIME_LIMIT',
+            unit: 5,
+            number: 1,
+            usage: 4000,
+            currentValue: 24,
+            remaining: 3976,
+            percentage: 1,
+            nextResetTime: 1_785_819_552_997,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.planType).toBe('max');
+    expect(parsed.windows).toEqual([
+      { label: '5h limit', usedPercent: 0 },
+      {
+        label: 'Weekly limit',
+        usedPercent: 30,
+        resetsAt: new Date(1_785_560_352_998).toISOString(),
+      },
+      {
+        label: 'Monthly tools',
+        usedPercent: 1,
+        used: 24,
+        remaining: 3976,
+        limit: 4000,
+        resetsAt: new Date(1_785_819_552_997).toISOString(),
+      },
+    ]);
+  });
+
+  it('uses the China host when ZAI_REGION is china', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 200,
+        data: {
+          limits: [{ type: 'TOKENS_LIMIT', unit: 6, percentage: 8 }],
+        },
+      }),
+    );
+
+    await fetchZaiUsage({
+      runtimeEnv: { ZAI_API_KEY: 'zai-key', ZAI_REGION: 'china' },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://open.bigmodel.cn/api/monitor/usage/quota/limit',
+      expect.anything(),
+    );
+  });
+
+  it('returns null when the payload has no displayable windows', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ code: 200, data: { level: 'lite' } }));
+
+    await expect(
+      fetchZaiUsage({ runtimeEnv: { ZAI_API_KEY: 'zai-key' }, fetchImpl }),
+    ).resolves.toBeNull();
+  });
+});
+
+describe('fetchZaiCodingPlanUsage', () => {
+  it('fetches coding-plan keys against the same monitor path', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        code: 200,
+        data: {
+          level: 'max',
+          limits: [{ type: 'TOKENS_LIMIT', unit: 6, percentage: 33 }],
+        },
+      }),
+    );
+
+    const usage = await fetchZaiCodingPlanUsage({
+      runtimeEnv: {
+        ZAI_CODING_PLAN_API_KEY: 'coding-key',
+        ZAI_CODING_PLAN_REGION: 'global',
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.z.ai/api/monitor/usage/quota/limit',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer coding-key',
+        }),
+      }),
+    );
+    expect(usage).toMatchObject({
+      providerId: 'zai-coding-plan',
+      planType: 'max',
+      windows: [{ label: 'Weekly limit', usedPercent: 33 }],
+    });
   });
 });

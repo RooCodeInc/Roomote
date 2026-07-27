@@ -57,6 +57,7 @@ import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   REASONING_EFFORT_OPTIONS,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
   buildRecommendedDeploymentModelConfig,
   getRecommendedModelPresets,
   groupModelsByDisplayProvider,
@@ -833,6 +834,16 @@ export function ModelSettingsSection({
       provider.id === 'openai' &&
       (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
   );
+  const xaiSubscriptionConnected = sortedConnectedProviders.some(
+    (provider) =>
+      provider.id === XAI_SUBSCRIPTION_PROVIDER_ID &&
+      provider.savedApiKeySatisfied,
+  );
+  const xaiConnected = sortedConnectedProviders.some(
+    (provider) =>
+      provider.id === 'xai' &&
+      (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
+  );
   const activeNewModelProvider = useMemo(
     () =>
       sortedConnectedProviders.find(
@@ -1104,29 +1115,26 @@ export function ModelSettingsSection({
 
     return options;
   }, [settingsData]);
+  const groupOptions = useMemo(
+    () => ({
+      chatgptConnected,
+      openaiConnected,
+      xaiSubscriptionConnected,
+      xaiConnected,
+    }),
+    [chatgptConnected, openaiConnected, xaiSubscriptionConnected, xaiConnected],
+  );
   const codingModelGroups = useMemo(
-    () =>
-      groupModelsByDisplayProvider(codingModelOptions, {
-        chatgptConnected,
-        openaiConnected,
-      }),
-    [codingModelOptions, chatgptConnected, openaiConnected],
+    () => groupModelsByDisplayProvider(codingModelOptions, groupOptions),
+    [codingModelOptions, groupOptions],
   );
   const helperModelGroups = useMemo(
-    () =>
-      groupModelsByDisplayProvider(helperModelOptions, {
-        chatgptConnected,
-        openaiConnected,
-      }),
-    [helperModelOptions, chatgptConnected, openaiConnected],
+    () => groupModelsByDisplayProvider(helperModelOptions, groupOptions),
+    [helperModelOptions, groupOptions],
   );
   const modelGroups = useMemo(
-    () =>
-      groupModelsByDisplayProvider(models, {
-        chatgptConnected,
-        openaiConnected,
-      }),
-    [models, chatgptConnected, openaiConnected],
+    () => groupModelsByDisplayProvider(models, groupOptions),
+    [models, groupOptions],
   );
   const roleOptionGroups: Record<
     TaskModelRole,

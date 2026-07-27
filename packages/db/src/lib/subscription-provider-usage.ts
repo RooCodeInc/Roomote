@@ -3,7 +3,12 @@ import {
   CHATGPT_USAGE_ENDPOINT,
   GITHUB_COPILOT_USAGE_ENDPOINT,
   KIMI_FOR_CODING_USAGE_ENDPOINTS,
+  XAI_USAGE_BILLING_ENDPOINT,
+  XAI_USAGE_USER_ENDPOINT,
+  ZAI_USAGE_HOSTS,
+  ZAI_USAGE_QUOTA_PATH,
   type SubscriptionProviderUsage,
+  type SubscriptionUsageProviderId,
   type SubscriptionUsageWindow,
 } from '@roomote/types';
 
@@ -11,6 +16,7 @@ import { type DatabaseOrTransaction } from '../db';
 import { getFreshChatGptAccessToken } from './chatgpt-subscription';
 import { getGitHubCopilotAccessToken } from './github-copilot-subscription';
 import { resolveModelProviderEnvValue } from './model-runtime-config';
+import { getFreshXaiAccessToken } from './xai-subscription';
 
 /**
  * Server-side usage/quota lookups for subscription-style inference providers,
@@ -34,21 +40,35 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/** Kimi's usage payload serializes numbers as strings, so coerce both. */
+/**
+ * Coerce a bare number/string, or Grok's `{ val: N }` credit wrappers, into a
+ * finite number. Kimi also serializes numbers as strings.
+ */
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  const record = asRecord(value);
+  if (record && 'val' in record) {
+    return asFiniteNumber(record.val);
+  }
+  return undefined;
+}
+
 function firstNumber(
   source: Record<string, unknown> | undefined,
   keys: readonly string[],
 ): number | undefined {
   for (const key of keys) {
-    const value = source?.[key];
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === 'string' && value.trim().length > 0) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
+    const parsed = asFiniteNumber(source?.[key]);
+    if (parsed !== undefined) {
+      return parsed;
     }
   }
   return undefined;
@@ -529,6 +549,496 @@ export async function fetchKimiForCodingUsage(
   return null;
 }
 
+// --- xAI Grok subscription ------------------------------------------------
+
+/**
+ * Live `GET /v1/billing?format=credits` nests usage under `config` with
+ * `{ val }` wrappers and product-level percents. Older/synthetic shapes put
+ * fields at the root. Accept both so the settings bar keeps working.
+ */
+function resolveXaiBillingConfig(
+  payload: unknown,
+): Record<string, unknown> | undefined {
+  const root = asRecord(payload);
+  if (!root) {
+    return undefined;
+  }
+  return asRecord(root.config) ?? root;
+}
+
+function resolveXaiResetsAt(
+  config: Record<string, unknown>,
+  now: number,
+): string | undefined {
+  const period = asRecord(config.currentPeriod ?? config.current_period);
+  return (
+    toResetIso(
+      period?.end ??
+        period?.ends_at ??
+        period?.endsAt ??
+        config.billingPeriodEnd ??
+        config.billing_period_end ??
+        config.resets_at ??
+        config.reset_at,
+    ) ??
+    resetFromRelativeSeconds(
+      firstNumber(config, ['reset_in', 'resets_in_seconds']),
+      now,
+    )
+  );
+}
+
+/**
+ * Parse the unofficial Grok billing payload. Shape is not documented; accept
+ * the live cli-chat-proxy `config` form plus earlier included-usage/credits
+ * guesses. Exported for unit tests.
+ */
+export function parseXaiSubscriptionUsage(
+  payload: unknown,
+  now: number = Date.now(),
+): SubscriptionUsageWindow[] {
+  const root = asRecord(payload);
+  if (!root) {
+    return [];
+  }
+
+  const config = resolveXaiBillingConfig(payload);
+  if (!config) {
+    return [];
+  }
+
+  const windows: SubscriptionUsageWindow[] = [];
+  const resetsAt = resolveXaiResetsAt(config, now);
+
+  // Live format=credits: paid Grok plans share one weekly pool across all
+  // Grok products, so only the aggregate percent is shown. The payload's
+  // per-product breakdown slices the same pool and would render as duplicate
+  // bars whenever one product dominates (an API-only deployment shows
+  // "Api: N%" identical to the aggregate); the breakdown stays on grok.com's
+  // own usage page.
+  const creditUsagePercent = firstNumber(config, [
+    'creditUsagePercent',
+    'credit_usage_percent',
+    'used_percent',
+    'usedPercent',
+    'included_used_percent',
+    'includedUsedPercent',
+  ]);
+
+  if (creditUsagePercent !== undefined) {
+    windows.push({
+      label: 'Included usage',
+      usedPercent: clampPercent(creditUsagePercent),
+      ...(resetsAt && { resetsAt }),
+    });
+  }
+
+  // Live monthly billing (`/v1/billing` without format=credits).
+  const monthlyLimit = firstNumber(config, [
+    'monthlyLimit',
+    'monthly_limit',
+    'limit',
+    'allowance',
+    'total',
+    'entitlement',
+  ]);
+  const monthlyUsed = firstNumber(config, ['used', 'consumed', 'includedUsed']);
+  if (
+    windows.length === 0 &&
+    (monthlyLimit !== undefined || monthlyUsed !== undefined)
+  ) {
+    windows.push({
+      label: 'Included usage',
+      ...(monthlyUsed !== undefined && { used: monthlyUsed }),
+      ...(monthlyLimit !== undefined && { limit: monthlyLimit }),
+      ...(monthlyUsed !== undefined &&
+        monthlyLimit !== undefined &&
+        monthlyLimit > 0 && {
+          usedPercent: clampPercent((monthlyUsed / monthlyLimit) * 100),
+        }),
+      ...(resetsAt && { resetsAt }),
+    });
+  }
+
+  // Legacy / synthetic nested shapes (kept for unit tests and older proxies).
+  const included = asRecord(
+    config.included_usage ??
+      config.includedUsage ??
+      config.included ??
+      root.included_usage ??
+      root.includedUsage ??
+      root.included,
+  );
+  if (windows.length === 0 && included) {
+    const includedPercent = firstNumber(included, [
+      'used_percent',
+      'usedPercent',
+      'percent_used',
+      'percentUsed',
+    ]);
+    const includedLimit = firstNumber(included, [
+      'limit',
+      'allowance',
+      'total',
+      'entitlement',
+    ]);
+    const includedRemaining = firstNumber(included, [
+      'remaining',
+      'remaining_credits',
+      'remainingCredits',
+    ]);
+    const includedUsed = firstNumber(included, ['used', 'consumed']);
+    const includedResetsAt =
+      toResetIso(
+        included['resets_at'] ?? included['reset_at'] ?? included['resetTime'],
+      ) ?? resetsAt;
+
+    if (
+      includedPercent !== undefined ||
+      includedLimit !== undefined ||
+      includedRemaining !== undefined ||
+      includedUsed !== undefined
+    ) {
+      windows.push({
+        label: 'Included usage',
+        ...(includedPercent !== undefined && {
+          usedPercent: clampPercent(includedPercent),
+        }),
+        ...(includedUsed !== undefined && { used: includedUsed }),
+        ...(includedRemaining !== undefined && {
+          remaining: includedRemaining,
+        }),
+        ...(includedLimit !== undefined && { limit: includedLimit }),
+        ...(includedResetsAt && { resetsAt: includedResetsAt }),
+      });
+    }
+  }
+
+  const credits = asRecord(config.credits ?? config.credit ?? root.credits);
+  const creditBalance =
+    firstNumber(credits, [
+      'balance',
+      'remaining',
+      'available',
+      'prepaid_balance',
+      'prepaidBalance',
+    ]) ??
+    firstNumber(config, ['prepaidBalance', 'prepaid_balance', 'creditBalance']);
+  // On-demand credits are the overflow path once the included pool is
+  // exhausted: a positive balance means tasks keep running on metered spend,
+  // which operators need to see. A zero balance is the common idle state and
+  // reads as an error ("Credits: 0 left"), so omit it like On-demand below.
+  if (creditBalance !== undefined && creditBalance > 0) {
+    windows.push({
+      label: 'Credits',
+      remaining: creditBalance,
+    });
+  }
+
+  const onDemand = asRecord(
+    config.on_demand ??
+      config.onDemand ??
+      config.ondemand ??
+      root.on_demand ??
+      root.onDemand,
+  );
+  const onDemandUsed =
+    firstNumber(onDemand, ['used', 'consumed']) ??
+    firstNumber(config, ['onDemandUsed', 'on_demand_used']);
+  const onDemandLimit =
+    firstNumber(onDemand, ['limit', 'cap', 'allowance']) ??
+    firstNumber(config, ['onDemandCap', 'on_demand_cap']);
+  if (
+    (onDemandUsed !== undefined && onDemandUsed > 0) ||
+    (onDemandLimit !== undefined && onDemandLimit > 0)
+  ) {
+    windows.push({
+      label: 'On-demand',
+      ...(onDemandUsed !== undefined && { used: onDemandUsed }),
+      ...(onDemandLimit !== undefined && { limit: onDemandLimit }),
+      ...(onDemandUsed !== undefined &&
+        onDemandLimit !== undefined &&
+        onDemandLimit > 0 && {
+          usedPercent: clampPercent((onDemandUsed / onDemandLimit) * 100),
+        }),
+    });
+  }
+
+  return windows;
+}
+
+export async function fetchXaiSubscriptionUsage(
+  options: UsageFetchOptions = {},
+): Promise<SubscriptionProviderUsage | null> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const token = await getFreshXaiAccessToken({
+    ...(options.executor && { executor: options.executor }),
+    fetchImpl,
+  });
+
+  if (!token) {
+    return null;
+  }
+
+  const authHeaders = {
+    authorization: `Bearer ${token.access}`,
+    accept: 'application/json',
+    'user-agent': 'roomote',
+  };
+
+  // Identity-first: resolve user, then request billing for that session.
+  // Fail closed without surfacing identity or raw bodies to callers.
+  const userResult = await fetchJson(
+    fetchImpl,
+    XAI_USAGE_USER_ENDPOINT,
+    authHeaders,
+  );
+  if (userResult.status !== 200 || !asRecord(userResult.payload)?.userId) {
+    // Some deployments return `id` instead of `userId`.
+    const user = asRecord(userResult.payload);
+    if (
+      userResult.status !== 200 ||
+      (!firstString(user, ['userId', 'user_id', 'id']) &&
+        !firstNumber(user, ['userId', 'id']))
+    ) {
+      return null;
+    }
+  }
+
+  const billingResult = await fetchJson(
+    fetchImpl,
+    XAI_USAGE_BILLING_ENDPOINT,
+    authHeaders,
+  );
+  const windows = parseXaiSubscriptionUsage(billingResult.payload, Date.now());
+
+  if (windows.length === 0) {
+    return null;
+  }
+
+  return {
+    providerId: 'xai-subscription',
+    windows,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+// --- Z.AI / Z.AI Coding Plan ----------------------------------------------
+
+/**
+ * Unit values observed in the Z.AI monitor quota UI / Coding Plan tools:
+ * 3 = 5-hour token window, 6 = weekly token window, 5 = monthly tool quota.
+ */
+function zaiQuotaWindowLabel(
+  type: string | undefined,
+  unit: number | undefined,
+): string {
+  if (unit === 3) {
+    // Match ChatGPT's compact window label convention (`5h limit`).
+    return '5h limit';
+  }
+  if (unit === 6) {
+    return 'Weekly limit';
+  }
+  if (unit === 5) {
+    return type === 'TIME_LIMIT' ? 'Monthly tools' : 'Monthly limit';
+  }
+  if (type === 'TOKENS_LIMIT') {
+    return 'Token limit';
+  }
+  if (type === 'TIME_LIMIT') {
+    return 'Time limit';
+  }
+  return 'Usage';
+}
+
+function parseZaiQuotaLimitEntry(
+  entry: Record<string, unknown> | undefined,
+): SubscriptionUsageWindow | undefined {
+  if (!entry) {
+    return undefined;
+  }
+
+  const type = firstString(entry, ['type']);
+  const unit = firstNumber(entry, ['unit']);
+  const usedPercent = firstNumber(entry, [
+    'percentage',
+    'percent',
+    'used_percent',
+    'usedPercent',
+  ]);
+  const remaining = firstNumber(entry, ['remaining', 'remain']);
+  // Live TIME_LIMIT rows use `usage` as the cap and `currentValue` as spent.
+  const limit = firstNumber(entry, ['limit', 'total', 'quota', 'usage']);
+  const used = firstNumber(entry, [
+    'used',
+    'consumed',
+    'currentValue',
+    'current_value',
+  ]);
+  const resetsAt = toResetIso(
+    entry.nextResetTime ??
+      entry.next_reset_time ??
+      entry.resetTime ??
+      entry.resets_at,
+  );
+
+  if (
+    usedPercent === undefined &&
+    remaining === undefined &&
+    limit === undefined &&
+    used === undefined
+  ) {
+    return undefined;
+  }
+
+  const derivedPercent =
+    usedPercent ??
+    (limit !== undefined &&
+    limit > 0 &&
+    remaining !== undefined &&
+    Number.isFinite(remaining)
+      ? clampPercent(((limit - remaining) / limit) * 100)
+      : used !== undefined && limit !== undefined && limit > 0
+        ? clampPercent((used / limit) * 100)
+        : undefined);
+
+  return {
+    label: zaiQuotaWindowLabel(type, unit),
+    ...(derivedPercent !== undefined && {
+      usedPercent: clampPercent(derivedPercent),
+    }),
+    ...(used !== undefined && { used }),
+    ...(remaining !== undefined && { remaining }),
+    ...(limit !== undefined && { limit }),
+    ...(resetsAt && { resetsAt }),
+  };
+}
+
+/**
+ * Parse Z.AI monitor quota payloads. Live shape:
+ * `{ code: 200, data: { level, limits: [{ type, unit, percentage, nextResetTime }] } }`.
+ * Older tools also report a bare array of limit rows. Exported for tests.
+ */
+export function parseZaiQuotaUsage(payload: unknown): {
+  planType?: string;
+  windows: SubscriptionUsageWindow[];
+} {
+  const root = asRecord(payload);
+  const data = asRecord(root?.data) ?? root;
+
+  const planType = firstString(data, [
+    'level',
+    'plan',
+    'planType',
+    'plan_type',
+  ]);
+
+  const rawLimits =
+    (data && (data.limits ?? data.limit)) ??
+    (Array.isArray(payload) ? payload : undefined) ??
+    (Array.isArray(root?.limits) ? root.limits : undefined);
+
+  const windows: SubscriptionUsageWindow[] = [];
+  if (Array.isArray(rawLimits)) {
+    for (const raw of rawLimits) {
+      const window = parseZaiQuotaLimitEntry(asRecord(raw));
+      if (window) {
+        windows.push(window);
+      }
+    }
+  }
+
+  return {
+    ...(planType && { planType }),
+    windows,
+  };
+}
+
+function resolveZaiUsageHost(
+  region: string | null | undefined,
+): (typeof ZAI_USAGE_HOSTS)[keyof typeof ZAI_USAGE_HOSTS] {
+  return region === 'china' ? ZAI_USAGE_HOSTS.china : ZAI_USAGE_HOSTS.global;
+}
+
+async function fetchZaiFamilyUsage(
+  options: UsageFetchOptions,
+  config: {
+    providerId: Extract<SubscriptionUsageProviderId, 'zai' | 'zai-coding-plan'>;
+    apiKeyEnvNames: readonly string[];
+    regionEnvNames: readonly string[];
+  },
+): Promise<SubscriptionProviderUsage | null> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const apiKey = await resolveModelProviderEnvValue(config.apiKeyEnvNames, {
+    ...(options.runtimeEnv && { runtimeEnv: options.runtimeEnv }),
+    ...(options.executor && { executor: options.executor }),
+  });
+
+  if (!apiKey) {
+    return null;
+  }
+
+  const region = await resolveModelProviderEnvValue(config.regionEnvNames, {
+    ...(options.runtimeEnv && { runtimeEnv: options.runtimeEnv }),
+    ...(options.executor && { executor: options.executor }),
+  });
+
+  const endpoint = `${resolveZaiUsageHost(region)}${ZAI_USAGE_QUOTA_PATH}`;
+  const { status, payload } = await fetchJson(fetchImpl, endpoint, {
+    authorization: `Bearer ${apiKey}`,
+    accept: 'application/json',
+    'user-agent': 'roomote',
+  });
+
+  if (status !== 200) {
+    return null;
+  }
+
+  // The monitor API often returns HTTP 200 with a business error envelope
+  // (`code: 1000`, `success: false`) for bad keys — treat as no usage.
+  const root = asRecord(payload);
+  const businessCode = firstNumber(root, ['code']);
+  if (
+    root?.success === false ||
+    (businessCode !== undefined && businessCode !== 200)
+  ) {
+    return null;
+  }
+
+  const parsed = parseZaiQuotaUsage(payload);
+  if (parsed.windows.length === 0) {
+    return null;
+  }
+
+  return {
+    providerId: config.providerId,
+    ...(parsed.planType && { planType: parsed.planType }),
+    windows: parsed.windows,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+export async function fetchZaiUsage(
+  options: UsageFetchOptions = {},
+): Promise<SubscriptionProviderUsage | null> {
+  return fetchZaiFamilyUsage(options, {
+    providerId: 'zai',
+    apiKeyEnvNames: ['ZAI_API_KEY'],
+    regionEnvNames: ['ZAI_REGION'],
+  });
+}
+
+export async function fetchZaiCodingPlanUsage(
+  options: UsageFetchOptions = {},
+): Promise<SubscriptionProviderUsage | null> {
+  return fetchZaiFamilyUsage(options, {
+    providerId: 'zai-coding-plan',
+    apiKeyEnvNames: ['ZAI_CODING_PLAN_API_KEY'],
+    regionEnvNames: ['ZAI_CODING_PLAN_REGION'],
+  });
+}
+
 // --- Aggregate ------------------------------------------------------------
 
 /**
@@ -543,6 +1053,9 @@ export async function getSubscriptionProviderUsage(
     fetchChatGptUsage(options),
     fetchGitHubCopilotUsage(options),
     fetchKimiForCodingUsage(options),
+    fetchXaiSubscriptionUsage(options),
+    fetchZaiUsage(options),
+    fetchZaiCodingPlanUsage(options),
   ]);
 
   return results.flatMap((result) =>

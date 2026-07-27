@@ -238,6 +238,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'ollama',
         'vllm',
         'chatgpt',
+        'xai-subscription',
       ],
     );
   });
@@ -249,14 +250,16 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         expect(provider.suggestedTaskModels).toEqual([]);
         continue;
       }
-      // ChatGPT serves openai/ models; the Bedrock setup surface serves the
-      // worker's custom bedrock-mantle/ OpenCode provider.
+      // ChatGPT serves openai/ models; SuperGrok serves xai/; Bedrock uses
+      // the worker's custom bedrock-mantle/ OpenCode provider.
       const expectedPrefix =
         provider.id === 'chatgpt'
           ? 'openai/'
-          : provider.id === 'amazon-bedrock'
-            ? 'bedrock-mantle/'
-            : `${provider.id}/`;
+          : provider.id === 'xai-subscription'
+            ? 'xai/'
+            : provider.id === 'amazon-bedrock'
+              ? 'bedrock-mantle/'
+              : `${provider.id}/`;
 
       expect(provider.defaultRoomoteModel.startsWith(expectedPrefix)).toBe(
         true,
@@ -282,9 +285,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       const expectedPrefix =
         provider.id === 'chatgpt'
           ? 'openai/'
-          : provider.id === 'amazon-bedrock'
-            ? 'bedrock-mantle/'
-            : `${provider.id}/`;
+          : provider.id === 'xai-subscription'
+            ? 'xai/'
+            : provider.id === 'amazon-bedrock'
+              ? 'bedrock-mantle/'
+              : `${provider.id}/`;
       const suggestedModelIds = new Set(
         provider.suggestedTaskModels.map((suggestion) => suggestion.id),
       );
@@ -453,6 +458,29 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ).toBe('openai');
   });
 
+  it('groups xai/ models under the Grok subscription when it is the only xAI connection', () => {
+    expect(
+      getDisplayModelProviderId('xai/grok-4.5', {
+        xaiSubscriptionConnected: true,
+      }),
+    ).toBe('xai-subscription');
+    expect(getDisplayModelProviderId('xai/grok-4.5', {})).toBe('xai');
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        xaiSubscriptionConnected: true,
+      }),
+    ).toBe('openai');
+  });
+
+  it('keeps xai/ models under xAI when an API key is also connected', () => {
+    expect(
+      getDisplayModelProviderId('xai/grok-4.5', {
+        xaiSubscriptionConnected: true,
+        xaiConnected: true,
+      }),
+    ).toBe('xai');
+  });
+
   it('groups model chooser options by display provider and catalog order', () => {
     const groups = groupModelsByDisplayProvider(
       [
@@ -571,6 +599,28 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     );
     expect(disconnected?.runtimeApiKeySatisfied).toBe(false);
     expect(disconnected?.savedApiKeySatisfied).toBe(false);
+  });
+
+  it('marks xAI Grok subscription connected as its own OAuth provider without an API key', () => {
+    const status = buildSetupModelStatus({
+      xaiSubscriptionConnected: true,
+    });
+    const subscription = status.providers.find(
+      (provider) => provider.id === 'xai-subscription',
+    );
+    const xaiKey = status.providers.find((provider) => provider.id === 'xai');
+    expect(subscription?.savedApiKeySatisfied).toBe(true);
+    expect(xaiKey?.savedApiKeySatisfied).toBe(false);
+    expect(status.xaiSubscriptionConnected).toBe(true);
+    expect(status.xaiApiKeyConnected).toBe(false);
+  });
+
+  it('reports xaiApiKeyConnected when XAI_API_KEY is present', () => {
+    const status = buildSetupModelStatus({
+      persistedEnvVarNames: ['XAI_API_KEY'],
+    });
+    expect(status.xaiApiKeyConnected).toBe(true);
+    expect(status.xaiSubscriptionConnected).toBe(false);
   });
 });
 

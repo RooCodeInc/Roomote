@@ -441,6 +441,9 @@ export async function spawnDockerWorker(
       publicAppUrl: process.env.R_PUBLIC_URL || process.env.R_APP_URL,
       previewProxyBaseUrl:
         resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl ?? undefined,
+      previewProxySubdomainSuffix:
+        resolvedPreviewRuntimeConfig.effective.previewProxySubdomainSuffix ??
+        undefined,
     });
 
     await updateTaskRunMachine({
@@ -795,6 +798,7 @@ export function buildDockerSandboxServerUrl(params: {
   taskId?: string | null;
   publicAppUrl?: string;
   previewProxyBaseUrl?: string;
+  previewProxySubdomainSuffix?: string;
 }): string | undefined {
   if (!params.taskId) {
     return undefined;
@@ -805,6 +809,7 @@ export function buildDockerSandboxServerUrl(params: {
       params.taskId,
       portNameToSlug(SANDBOX_SERVER_NAMED_PORT.name),
       params.previewProxyBaseUrl,
+      params.previewProxySubdomainSuffix,
     );
   }
 

@@ -331,6 +331,13 @@ import {
   pollGitHubCopilotDeviceAuthCommand,
   startGitHubCopilotDeviceAuthCommand,
 } from '../commands/github-copilot-subscription';
+import {
+  disconnectXaiSubscriptionCommand,
+  getXaiSubscriptionStatusCommand,
+  isXaiSubscriptionConnectedCommand,
+  pollXaiDeviceAuthCommand,
+  startXaiDeviceAuthCommand,
+} from '../commands/xai-subscription';
 import { getSubscriptionProviderUsageCommand } from '../commands/subscription-usage';
 import { getProviderCreditBalancesCommand } from '../commands/provider-credits';
 import {
@@ -2020,6 +2027,26 @@ export const appRouter = createRouter({
       ),
     disconnect: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectGitHubCopilotSubscriptionCommand(auth),
+    ),
+  }),
+
+  xaiSubscription: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getXaiSubscriptionStatusCommand(auth),
+    ),
+    isConnected: protectedProcedure.query(({ ctx: { auth } }) =>
+      isXaiSubscriptionConnectedCommand(auth),
+    ),
+    startDeviceAuth: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      startXaiDeviceAuthCommand(auth),
+    ),
+    pollDeviceAuth: protectedProcedure
+      .input(z.object({ deviceCode: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        pollXaiDeviceAuthCommand(auth, input),
+      ),
+    disconnect: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      disconnectXaiSubscriptionCommand(auth),
     ),
   }),
 

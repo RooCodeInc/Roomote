@@ -4,12 +4,14 @@ const {
   mockEnvironmentVariablesFindMany,
   mockResolveOpenCodeAuthContent,
   mockResolveGitHubCopilotOpenCodeAuthContent,
+  mockGetFreshXaiAccessToken,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockDeploymentSettingsFindFirst: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockResolveOpenCodeAuthContent: vi.fn(),
   mockResolveGitHubCopilotOpenCodeAuthContent: vi.fn(),
+  mockGetFreshXaiAccessToken: vi.fn(),
 }));
 
 vi.mock('../encryption', () => ({
@@ -45,6 +47,11 @@ vi.mock('./github-copilot-subscription', () => ({
     mockResolveGitHubCopilotOpenCodeAuthContent(...args),
 }));
 
+vi.mock('./xai-subscription', () => ({
+  getFreshXaiAccessToken: (...args: unknown[]) =>
+    mockGetFreshXaiAccessToken(...args),
+}));
+
 vi.mock('../schema', () => ({
   deploymentSettings: { id: 'deploymentSettings.id' },
   eq: vi.fn(),
@@ -62,6 +69,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
     mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
   });
 
   it('prefers real runtime env values over persisted deployment config', async () => {
@@ -689,6 +697,92 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(env.R_INFERENCE_GATEWAY_GITHUB_COPILOT).toBe('1');
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+  });
+
+  it('emits the xAI gateway marker for OAuth-only setups without shipping tokens or a real key', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+      },
+    });
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-oauth-access',
+      expires: Date.now() + 3_600_000,
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      // No XAI_API_KEY: subscription alone must cover the gateway path.
+      deploymentEnvVars: {},
+    });
+
+    expect(mockGetFreshXaiAccessToken).toHaveBeenCalled();
+    // OAuth record stays on the control plane; marker drives worker rebase.
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(env).not.toHaveProperty('XAI_API_KEY');
+    expect(env.R_INFERENCE_GATEWAY_XAI).toBe('1');
+    // Advertise XAI_API_KEY in served keys so the worker rebases xai even
+    // when only the subscription is connected.
+    expect(env.R_INFERENCE_GATEWAY_KEYS?.split(',')).toContain('XAI_API_KEY');
+  });
+
+  it('does not emit the xAI gateway marker when no subscription is connected', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+      },
+    });
+    mockGetFreshXaiAccessToken.mockResolvedValue(null);
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_XAI');
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+  });
+
+  it('injects a mint access token as XAI_API_KEY for non-gateway OAuth-only control plane', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+      },
+    });
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-oauth-access-only',
+      expires: Date.now() + 3_600_000,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    // OpenCode's xAI provider is API-key shaped: inject the access token as
+    // XAI_API_KEY and never ship the refresh token or oauth JSON.
+    expect(env.XAI_API_KEY).toBe('xai-oauth-access-only');
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+  });
+
+  it('prefers a connected OAuth access token over BYOK XAI_API_KEY on the control plane', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'xai/grok-4.5',
+      },
+    });
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-oauth-access-only',
+      expires: Date.now() + 3_600_000,
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { XAI_API_KEY: 'sk-byok-key' },
+    });
+
+    // Match gateway precedence: subscription wins when connected.
+    expect(env.XAI_API_KEY).toBe('xai-oauth-access-only');
   });
 
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {

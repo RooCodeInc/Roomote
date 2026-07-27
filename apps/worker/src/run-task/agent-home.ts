@@ -21,6 +21,8 @@ import {
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
+  XAI_OPENCODE_PROVIDER_ID,
   type InferenceGatewayProvider,
   isConfiguredEnvValue,
   isOpenAiCompatibleProviderId,
@@ -805,6 +807,7 @@ function mergeOpenAiCompatibleProviderConfig(
   providerConfig: Record<string, unknown>,
   runtimeEnv: Record<string, string>,
   modelIds: Array<string | undefined>,
+  visionModel?: string,
 ): Record<string, unknown> {
   let merged = providerConfig;
   const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
@@ -870,6 +873,15 @@ function mergeOpenAiCompatibleProviderConfig(
               modelId,
               {
                 name: modelId,
+                ...(visionModel === `${providerId}/${modelId}`
+                  ? {
+                      attachment: true,
+                      modalities: {
+                        input: ['text', 'image'],
+                        output: ['text'],
+                      },
+                    }
+                  : {}),
                 ...asRecord(existingModels[modelId]),
               },
             ]),
@@ -902,6 +914,8 @@ function mergeInferenceGatewayProviderConfig(
     runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
   const routeGitHubCopilotThroughGateway =
     runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME] === '1';
+  const routeXaiThroughGateway =
+    runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] === '1';
 
   if (!gatewayUrl) {
     return providerConfig;
@@ -967,6 +981,21 @@ function mergeInferenceGatewayProviderConfig(
         'github-copilot',
         gatewayUrl,
         copilotProvider,
+      );
+    }
+  }
+
+  // xAI Grok subscription served by the gateway: rebase even when no
+  // XAI_API_KEY was withheld (OAuth-only setups).
+  if (routeXaiThroughGateway) {
+    const xaiProvider = getInferenceGatewayProvider(XAI_OPENCODE_PROVIDER_ID);
+
+    if (xaiProvider) {
+      merged = rebaseProviderOntoGateway(
+        merged,
+        XAI_OPENCODE_PROVIDER_ID,
+        gatewayUrl,
+        xaiProvider,
       );
     }
   }
@@ -1609,6 +1638,7 @@ function resolveModelBackedOpenCodeConfig(
         ),
         runtimeEnv,
         configuredModelIds,
+        visionModel ?? effectiveCodingModel,
       ),
       runtimeEnv,
       configuredModelIds,

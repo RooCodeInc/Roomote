@@ -46,8 +46,16 @@ export function ModelSelect({
     return groupModelsByDisplayProvider(sortedModels, {
       chatgptConnected: data?.chatgptConnected,
       openaiConnected: data?.openaiConnected,
+      xaiSubscriptionConnected: data?.xaiSubscriptionConnected,
+      xaiConnected: data?.xaiConnected,
     });
-  }, [data?.chatgptConnected, data?.openaiConnected, data?.models]);
+  }, [
+    data?.chatgptConnected,
+    data?.openaiConnected,
+    data?.xaiSubscriptionConnected,
+    data?.xaiConnected,
+    data?.models,
+  ]);
   const showProviderHeaders = modelGroups.length > 1;
 
   return (
