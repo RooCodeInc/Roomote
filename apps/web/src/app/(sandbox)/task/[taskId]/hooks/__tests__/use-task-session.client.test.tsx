@@ -4,6 +4,7 @@ const {
   fetchQueryMock,
   sessionQueryOptionsMock,
   sessionRefetchMock,
+  artifactsQueryOptionsMock,
   tokenQueryOptionsMock,
   useQueryClientMock,
   useQueryMock,
@@ -12,6 +13,7 @@ const {
   fetchQueryMock: vi.fn(),
   sessionQueryOptionsMock: vi.fn(),
   sessionRefetchMock: vi.fn(),
+  artifactsQueryOptionsMock: vi.fn(),
   tokenQueryOptionsMock: vi.fn(),
   useQueryClientMock: vi.fn(),
   useQueryMock: vi.fn(),
@@ -47,6 +49,10 @@ describe('useTaskSession', () => {
       queryKey: ['auth.sandboxToken', input],
       ...options,
     }));
+    artifactsQueryOptionsMock.mockImplementation((input, options) => ({
+      queryKey: ['artifacts.forTask', input],
+      ...options,
+    }));
 
     useTRPCMock.mockReturnValue({
       sandboxSession: {
@@ -57,6 +63,11 @@ describe('useTaskSession', () => {
       auth: {
         sandboxToken: {
           queryOptions: tokenQueryOptionsMock,
+        },
+      },
+      artifacts: {
+        forTask: {
+          queryOptions: artifactsQueryOptionsMock,
         },
       },
     });
@@ -81,6 +92,10 @@ describe('useTaskSession', () => {
           isLoading: false,
           refetch: sessionRefetchMock,
         };
+      }
+
+      if (queryCallCount === 2) {
+        return { data: [], isLoading: false };
       }
 
       return {
@@ -126,6 +141,31 @@ describe('useTaskSession', () => {
     });
   });
 
+  it('fetches artifacts using the canonical task id after alias resolution', () => {
+    useQueryMock.mockReset();
+    useQueryMock
+      .mockReturnValueOnce({
+        data: {
+          taskId: 'canonical-task',
+          sessionState: 'historical',
+          taskRun: null,
+          task: null,
+          prompt: null,
+        },
+        isLoading: false,
+        isSuccess: true,
+      })
+      .mockReturnValueOnce({ data: [], isLoading: false })
+      .mockReturnValueOnce({ data: undefined, isLoading: false });
+
+    renderHook(() => useTaskSession('task-alias', { refetchInterval: 30_000 }));
+
+    expect(artifactsQueryOptionsMock).toHaveBeenCalledWith(
+      { taskId: 'canonical-task' },
+      expect.objectContaining({ enabled: true, refetchInterval: 30_000 }),
+    );
+  });
+
   it('splits session loading from token loading for interactive tasks', () => {
     useQueryMock.mockReset();
     useQueryMock
@@ -149,6 +189,10 @@ describe('useTaskSession', () => {
         data: undefined,
         isLoading: true,
         isError: false,
+      }))
+      .mockImplementationOnce(() => ({
+        data: [],
+        isLoading: false,
       }));
 
     const { result } = renderHook(() => useTaskSession('task-1'));
@@ -208,6 +252,10 @@ describe('useTaskSession', () => {
         isLoading: false,
         isError: true,
         error: new Error('401 unauthorized'),
+      }))
+      .mockImplementationOnce(() => ({
+        data: [],
+        isLoading: false,
       }));
 
     const { result } = renderHook(() => useTaskSession('task-1'));
@@ -232,7 +280,7 @@ describe('useTaskSession', () => {
     useQueryMock.mockImplementation(() => {
       queryCallCount += 1;
 
-      if (queryCallCount % 2 === 1) {
+      if (queryCallCount % 3 === 1) {
         return {
           data: {
             sessionState: 'interactive',
@@ -249,6 +297,10 @@ describe('useTaskSession', () => {
           isLoading: false,
           refetch: sessionRefetch,
         };
+      }
+
+      if (queryCallCount % 3 === 2) {
+        return { data: [], isLoading: false };
       }
 
       return {

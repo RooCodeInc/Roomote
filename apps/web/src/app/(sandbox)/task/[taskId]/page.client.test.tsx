@@ -187,6 +187,18 @@ describe('SandboxPage', () => {
     expect(screen.queryByTestId('startup')).not.toBeInTheDocument();
   });
 
+  it('shows the task workspace skeleton while session metadata is loading', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      isSessionLoading: true,
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({});
+
+    renderPage();
+
+    expect(screen.getByLabelText('Loading task workspace')).toBeInTheDocument();
+  });
+
   it('keeps the startup surface for booting tasks with no transcript content yet', () => {
     useTaskSessionMock.mockReturnValue(baseSession);
     useTaskMessageEnvelopesMock.mockReturnValue({
