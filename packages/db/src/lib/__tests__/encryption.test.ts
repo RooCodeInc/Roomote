@@ -7,6 +7,36 @@ import {
 } from '../encryption';
 
 describe('Encryption utilities', () => {
+  describe('derived key caching', () => {
+    it('reuses the derived key when decrypting the same ciphertext', () => {
+      // Every request re-reads the same stored rows; without caching each
+      // read pays a fresh scrypt derivation, synchronously.
+      const encrypted = encrypt('cached-secret');
+
+      expect(decrypt(encrypted)).toBe('cached-secret');
+
+      const started = performance.now();
+
+      for (let index = 0; index < 20; index += 1) {
+        expect(decrypt(encrypted)).toBe('cached-secret');
+      }
+
+      // 20 uncached scrypt derivations take hundreds of milliseconds; cached
+      // reads are microseconds. The bound is loose so the assertion is about
+      // the cache existing, not about machine speed.
+      expect(performance.now() - started).toBeLessThan(150);
+    });
+
+    it('keeps distinct ciphertexts independent', () => {
+      const first = encrypt('first-secret');
+      const second = encrypt('second-secret');
+
+      expect(decrypt(first)).toBe('first-secret');
+      expect(decrypt(second)).toBe('second-secret');
+      expect(decrypt(first)).toBe('first-secret');
+    });
+  });
+
   describe('encrypt/decrypt', () => {
     it('should encrypt and decrypt a string correctly', () => {
       const originalText = 'This is a secret message';
