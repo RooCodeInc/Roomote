@@ -3174,7 +3174,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('redacts credential-shaped values from provider error messages', async () => {
+  it('does not persist credential-shaped provider headers', async () => {
     const { client, harness } = createHarness();
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
@@ -3217,9 +3217,10 @@ describe('OpenCodeServerHarness', () => {
       );
 
       expect(String(errorMessage?.payload.text)).toBe(
-        'The provider returned an error: Authorization: [redacted]',
+        'The provider returned an error.',
       );
       expect(String(errorMessage?.payload.text)).not.toContain('eyJ-secret');
+      expect(String(errorMessage?.payload.text)).not.toContain('Authorization');
     } finally {
       harness.dispose();
     }
@@ -3279,7 +3280,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('does not persist provider header blobs', async () => {
+  it('does not persist bare provider header diagnostics', async () => {
     const { client, harness } = createHarness();
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
@@ -3306,7 +3307,7 @@ describe('OpenCodeServerHarness', () => {
           error: {
             name: 'APIError',
             data: {
-              message: 'Provider rejected request; headers: x-request-id=abc',
+              message: 'Provider rejected request; x-request-id: secret',
               isRetryable: false,
             },
           },
@@ -3324,7 +3325,7 @@ describe('OpenCodeServerHarness', () => {
       expect(String(errorMessage?.payload.text)).toBe(
         'The provider returned an error.',
       );
-      expect(String(errorMessage?.payload.text)).not.toContain('headers');
+      expect(String(errorMessage?.payload.text)).not.toContain('x-request-id');
     } finally {
       harness.dispose();
     }
