@@ -2,7 +2,7 @@ import { Env } from './env';
 
 const REQUEST_TIMEOUT_MS = 5_000;
 
-export type ProductUpdatesSource = 'setup' | 'onboarding';
+type ProductUpdatesSource = 'setup' | 'onboarding';
 
 /** Sends opt-in subscriptions separately from anonymous telemetry. */
 export async function subscribeToProductUpdates(
