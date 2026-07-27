@@ -60,6 +60,7 @@ function runSilenceHook(hookEventName, input) {
     hook_event_name: hookEventName,
     threadId: input.sessionID,
     tool_name: input.tool,
+    tool_args: input.args,
   });
 }
 

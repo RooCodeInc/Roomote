@@ -146,6 +146,35 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     expect(output.output).toBe('tool output');
   });
 
+  it('rejects a progress reply before an automation task has a result', async () => {
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        startedAtMs: Date.now(),
+        currentTurnRequiresInitialAck: false,
+        requiresTerminalCloseoutWithoutTurn: true,
+      }),
+      'utf8',
+    );
+
+    process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE = stateFilePath;
+    process.env.ROOMOTE_NODE_EXECUTABLE = process.execPath;
+
+    const hooks = await loadHooks();
+    await expect(
+      hooks['tool.execute.before'](
+        {
+          tool: 'roomote_send_chat_reply',
+          sessionID: 'ses_parent',
+          callID: 'call_automation_progress',
+          args: { purpose: 'progress' },
+        },
+        { args: { purpose: 'progress' } },
+      ),
+    ).rejects.toThrow('Automation-started tasks must stay silent');
+  });
+
   it('fails Slack-posting tool calls from subagent sessions', async () => {
     const stateFilePath = path.join(tempDir, 'slack-state.json');
 
