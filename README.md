@@ -24,11 +24,11 @@ API keys.
 
 ![Roomote chat workflow demo](assets/roomote-hero.gif)
 
-[![Deploy on Roomote Cloud](https://roomote.dev/images/deploy-button.png)](https://cloud.roomote.dev/sign-up)
+<a href="https://cloud.roomote.dev/sign-up"><img src="https://roomote.dev/images/deploy-button.png" alt="Deploy on Roomote Cloud" style="height: 40px; width: auto;"></a>
 &nbsp;&nbsp;
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo?referralCode=roomote)
+<a href="https://railway.com/deploy/Rj2cFo?referralCode=roomote"><img src="https://railway.com/button.svg" alt="Deploy on Railway" style="height: 40px; width: auto;"></a>
 &nbsp;&nbsp;
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote)
+<a href="https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" style="height: 40px; width: auto;"></a>
 
 
 ---
