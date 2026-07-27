@@ -206,6 +206,19 @@ export function standardTask({
   const sourceControlPlatformLabel = sourceControlProvider
     ? getSourceControlProviderLabel(sourceControlProvider)
     : 'GitHub/GitLab';
+  const sourceControlTaskSurface =
+    taskSurface === 'github' ||
+    taskSurface === 'gitlab' ||
+    taskSurface === 'gitea' ||
+    taskSurface === 'bitbucket' ||
+    taskSurface === 'ado';
+  // Source-control self-review summaries can currently return to the
+  // originating PR only for GitHub. All-repository tasks cannot know which
+  // delivered repositories have an environment mapping for automatic review.
+  // Chat surfaces use their own delivery path.
+  const selfReviewFollowUpSupported =
+    !isAllRepositoriesSelection &&
+    (!sourceControlTaskSurface || sourceControlProvider === 'github');
   // When automatic Code Reviewer open/push hooks can fire for this deployment,
   // give the agent decision rules for the user-facing expectation note.
   // Do not key the final note solely on configured prAction: explicit `$create-pr`
@@ -213,7 +226,10 @@ export function standardTask({
   // prompt is built. Push-only units never open a PR/MR by default. When
   // reviewOnCommit is off, no automated open/sync review starts.
   const automaticSelfReviewNoticeGuidanceEnabled =
-    codeReviewsEnabled && codeReviewReviewOnCommit && deliverySkill !== 'push';
+    codeReviewsEnabled &&
+    codeReviewReviewOnCommit &&
+    deliverySkill !== 'push' &&
+    selfReviewFollowUpSupported;
   // Hard-append the note into background-proof closeout wording only when every
   // PR shape this run can still deliver is auto-review eligible. Explicit
   // `$create-pr` / `$create-draft-pr` can flip draft vs ready after the prompt

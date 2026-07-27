@@ -1,4 +1,5 @@
 import { standardTask } from '../standardTask';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 describe('Standard Task code-review self-review closeout', () => {
   it('omits self-review closeout guidance when code reviews are disabled or omitted', () => {
@@ -61,17 +62,54 @@ describe('Standard Task code-review self-review closeout', () => {
     );
   });
 
-  it('names GitLab when the source-control provider is GitLab', () => {
+  it('omits self-review follow-up guidance for unsupported source-control surfaces', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
       codeReviewsEnabled: true,
       sourceControlProvider: 'gitlab',
+      taskSurface: 'gitlab',
+    });
+
+    expect(harnessInstructions).not.toContain(
+      '<code_review_self_review_closeout>',
+    );
+    expect(harnessInstructions).not.toContain(
+      'are doing a self-review on GitLab and will follow up here with those results',
+    );
+  });
+
+  it('omits self-review follow-up guidance for all-repositories tasks', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: ALL_REPOSITORIES,
+      taskRunUrl: 'https://example.com/task/123',
+      codeReviewsEnabled: true,
+      sourceControlProvider: 'github',
+      taskSurface: 'slack',
+    });
+
+    expect(harnessInstructions).not.toContain(
+      '<code_review_self_review_closeout>',
+    );
+    expect(harnessInstructions).not.toContain(
+      'are doing a self-review on GitHub and will follow up here with those results',
+    );
+  });
+
+  it('keeps self-review follow-up guidance for GitHub source-control tasks', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      codeReviewsEnabled: true,
+      sourceControlProvider: 'github',
+      taskSurface: 'github',
     });
 
     expect(harnessInstructions).toContain(
-      'are doing a self-review on GitLab and will follow up here with those results',
+      'are doing a self-review on GitHub and will follow up here with those results',
     );
   });
 
