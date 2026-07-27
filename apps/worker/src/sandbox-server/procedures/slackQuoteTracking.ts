@@ -15,20 +15,7 @@ import {
  * leak into the stored Slack reply quote.
  */
 function normalizeSlackQuoteText(text: string): string {
-  const trimmed = text.trim();
-
-  const normalized = normalizeTranscriptUserText(trimmed);
-
-  if (normalized && normalized !== trimmed) {
-    return normalized;
-  }
-
-  // Malformed GitHub envelope: the full extraction did not match. Strip the
-  // leading marker so it never leaks into the stored quote. The canonical
-  // builder always emits a well-formed envelope, so this branch is defensive.
-  return trimmed.startsWith('<github-pr-follow-up>')
-    ? trimmed.replace(/^<github-pr-follow-up>\s*/, '')
-    : text;
+  return normalizeTranscriptUserText(text) ?? text;
 }
 
 async function getSlackQuoteTrackingConfig(params: {

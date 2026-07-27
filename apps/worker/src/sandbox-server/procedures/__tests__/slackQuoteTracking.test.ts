@@ -263,7 +263,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     );
   });
 
-  it('strips the leading marker even when the envelope is malformed so it never leaks into the quote', async () => {
+  it('preserves malformed envelopes rather than applying a partial fallback', async () => {
     const malformedMessage = [
       '<github-pr-follow-up>',
       'This envelope is missing the requested-follow-up block so it will not fully parse.',
@@ -283,7 +283,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
       },
       {
         runId: 1,
-        text: 'This envelope is missing the requested-follow-up block so it will not fully parse.',
+        text: malformedMessage,
         userName: 'Ada Lovelace',
       },
     );
