@@ -1771,6 +1771,8 @@ export async function handleTaskConfiguration(
         workspaceDisplayName,
         kickoffMessage: effectiveKickoffMessage,
         workspaceOnly: false,
+        warningText:
+          prefill?.warningText ?? originalEvent.statuspageWarningText,
       });
     }
 
