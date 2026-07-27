@@ -74,6 +74,23 @@ export const TASK_SURFACES = [
 
 export type TaskSurface = (typeof TASK_SURFACES)[number];
 
+/** Task surfaces backed by a source-control provider rather than a chat UI. */
+export const SOURCE_CONTROL_TASK_SURFACES = [
+  'github',
+  'gitlab',
+  'gitea',
+  'bitbucket',
+  'ado',
+] as const satisfies ReadonlyArray<TaskSurface>;
+
+export function isSourceControlTaskSurface(
+  surface: TaskSurface | null | undefined,
+): boolean {
+  return (SOURCE_CONTROL_TASK_SURFACES as readonly string[]).includes(
+    surface ?? '',
+  );
+}
+
 export const TASK_TRIGGERS = [
   'message',
   'webhook',

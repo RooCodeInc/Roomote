@@ -25,6 +25,7 @@ import {
   isTaskExecutingTurn,
   isPrReviewTaskRun,
   isResumableTaskPayloadKind,
+  isSourceControlTaskSurface,
   isLaunchCodingHarness,
   isSnapshotResumable,
   resolveTaskWorkspace,
@@ -37,6 +38,22 @@ import {
   WORK_ITEM_ACTIVE_STATUSES,
   shouldUseAppTokenOnly,
 } from '../task-runs';
+
+describe('isSourceControlTaskSurface', () => {
+  it.each(['github', 'gitlab', 'gitea', 'bitbucket', 'ado'] as const)(
+    'recognizes %s',
+    (surface) => {
+      expect(isSourceControlTaskSurface(surface)).toBe(true);
+    },
+  );
+
+  it.each(['web', 'slack', 'teams', 'telegram', 'discord', 'linear'] as const)(
+    'excludes %s',
+    (surface) => {
+      expect(isSourceControlTaskSurface(surface)).toBe(false);
+    },
+  );
+});
 
 describe('isPrReviewTaskRun', () => {
   it('returns true for GithubPrReview type', () => {
