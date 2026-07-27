@@ -2,6 +2,28 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.22.0 (2026-07-27)
+
+This release gives self-hosted operators more flexible preview hosting and expands managed inference subscription support.
+
+### Highlights
+
+- Run self-hosted task previews on flat wildcard hostnames with documented Caddy and Cloudflare Tunnel configuration.
+- Connect an eligible Grok subscription with device-code OAuth and monitor its usage in Models settings.
+- See Z.AI and Z.AI Coding Plan quota usage in Models settings. Thanks again to @pridemusvaire for this contribution.
+- Send image attachments through configured OpenAI-compatible vision or coding models.
+
+### Minor changes
+
+- Support flat preview hostnames for self-hosted deployments, with runtime configuration, Caddy routing, production Compose coverage, and deployment guidance.
+- Connect an eligible Grok subscription with device-code OAuth, use xAI models without exposing subscription tokens to task sandboxes, and see subscription usage in Models settings.
+- Show Z.AI and Z.AI Coding Plan quota usage bars under connected provider rows in Models settings (5h and weekly windows from the monitor quota API).
+
+### Patch changes
+
+- Apply persisted flat preview hostname suffix settings consistently at runtime and in preview diagnostics.
+- Allow image attachments when a custom OpenAI-compatible provider supplies the configured vision model or falls back to the coding model.
+
 ## 0.21.1 (2026-07-26)
 
 This release restores reliable structured routing while preserving tool restrictions for non-task agent sessions.
