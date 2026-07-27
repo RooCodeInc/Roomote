@@ -1291,8 +1291,8 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
   }
 
   /**
-   * Returns whether a guild member can view a specific channel. `null` means
-   * the membership or permission state could not be verified.
+   * Returns whether a guild member can view and send to a specific channel.
+   * `null` means the membership or permission state could not be verified.
    */
   async canUserAccessChannel(input: {
     guildId: string;
@@ -1359,7 +1359,10 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
           (overwrite) => overwrite.type === 1 && overwrite.id === input.userId,
         ),
       );
-      return (value & DISCORD_PERMISSION_BITS.view_channel) !== 0n;
+      return (
+        (value & DISCORD_PERMISSION_BITS.view_channel) !== 0n &&
+        (value & DISCORD_PERMISSION_BITS.send_messages) !== 0n
+      );
     } catch (error) {
       if (error instanceof DiscordApiError) {
         if (error.status === 403 || error.status === 404) return false;
