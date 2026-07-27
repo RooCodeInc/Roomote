@@ -147,6 +147,20 @@ export interface WriteFileInput {
 export interface CreateSnapshotInput {
   instanceId: string;
   signal?: AbortSignal;
+  /**
+   * Durably record the snapshot id the moment the provider produces it, before
+   * the adapter tears the source instance down. Adapters snapshot and then
+   * destroy the sandbox, so the id only reaches the caller after that teardown
+   * returns; a crash or a stalled-job redelivery in between used to lose an
+   * otherwise-good snapshot for good. Providers expose no lookup by source
+   * instance (Modal images are addressable only by id), so the id cannot be
+   * recovered afterwards -- it has to be persisted the instant it exists.
+   *
+   * Called at most once per successful snapshot. Adapters must let a rejection
+   * propagate: failing to persist means the snapshot is unreachable, and the
+   * caller needs the failure rather than a sandbox destroyed for nothing.
+   */
+  onSnapshotCreated?: (snapshotId: string) => Promise<void>;
 }
 
 export interface CreateSnapshotResult {

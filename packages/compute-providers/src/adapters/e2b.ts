@@ -577,6 +577,7 @@ export class E2bClient implements ComputeProviderClient {
               { snapshotId: lateSnapshot.snapshotId },
             )}`,
           );
+          await input.onSnapshotCreated?.(lateSnapshot.snapshotId);
           await this.killSandboxAfterSnapshot(input.instanceId);
         },
       });
@@ -598,6 +599,10 @@ export class E2bClient implements ComputeProviderClient {
     console.log(
       `[E2bClient] Snapshot created: ${snapshot.snapshotId}; killing sandbox ${input.instanceId}`,
     );
+
+    // Persist before killing: the id is unrecoverable once the caller's write
+    // is skipped, and the sandbox is already gone by then.
+    await input.onSnapshotCreated?.(snapshot.snapshotId);
 
     await this.killSandboxAfterSnapshot(input.instanceId);
 

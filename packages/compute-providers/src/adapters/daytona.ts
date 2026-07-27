@@ -599,6 +599,7 @@ export class DaytonaClient implements ComputeProviderClient {
               { snapshotName },
             )}`,
           );
+          await input.onSnapshotCreated?.(snapshotName);
           await this.destroySandboxAfterSnapshot(input.instanceId);
         },
       });
@@ -621,6 +622,10 @@ export class DaytonaClient implements ComputeProviderClient {
     console.log(
       `[DaytonaClient] Snapshot created: ${snapshotName}; destroying sandbox ${input.instanceId}`,
     );
+
+    // Daytona's name is derived from the instance id, so this one is
+    // reconstructable -- persist here anyway to keep the contract uniform.
+    await input.onSnapshotCreated?.(snapshotName);
 
     await this.destroySandboxAfterSnapshot(input.instanceId);
 

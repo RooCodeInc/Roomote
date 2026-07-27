@@ -193,35 +193,73 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     },
     { logPrefix: 'snapshotJob', logger: console },
   );
-  const { status } = await client.getInstanceStatus({ instanceId });
+  // A stalled-job redelivery can land after `onSnapshotCreated` already
+  // persisted the id (see the createSnapshot call below). By then the adapter
+  // has terminated the sandbox, and no provider can look an image up by its
+  // source instance -- so re-snapshotting is impossible as well as pointless.
+  // Finalize from the persisted id instead of failing the run on an instance
+  // that is stopped precisely because the snapshot succeeded.
+  let snapshotResult: CreateSnapshotResult | null = taskRun.snapshotId
+    ? { snapshotId: taskRun.snapshotId }
+    : null;
+  // Real creation time of the snapshot, carried from the early persist (or
+  // from the row when this is a redelivery) so expiry is measured from when
+  // the snapshot was taken rather than from whenever this job finishes.
+  let persistedSnapshotCreatedAt: Date | null =
+    taskRun.snapshotCreatedAt ?? null;
   const snapshotAttemptStartedAt = new Date();
-  let snapshotResult: CreateSnapshotResult | null = null;
   let reconciledSnapshot: SourceInstanceSnapshot | null = null;
   const shouldCompleteTask = shouldCompleteTaskOnSnapshot(taskRun.payload);
   const clearedCompletionPayload = withoutCompleteTaskOnSnapshot(
     taskRun.payload,
   ) as TaskRun['payload'];
 
-  await recordSnapshotQueueEvent(taskRun, {
-    eventType: 'decision',
-    message: `Observed sandbox ${instanceId} in status ${status} before snapshot attempt.`,
-    details: {
-      queueJobId,
-      queueAttempt,
-      snapshotIntentId,
-      triggerPath,
-      decision: 'pre_snapshot_instance_status_observed',
-      sandboxId: instanceId,
-      instanceStatus: status,
-      taskRunStatus: taskRun.status,
-      taskPhase: taskRun.taskPhase ?? null,
-      sleepAt: taskRun.sleepAt?.toISOString() ?? null,
-      sleepRequestedAt: taskRun.sleepRequestedAt?.toISOString() ?? null,
-      snapshotRequestedAt: taskRun.snapshotRequestedAt?.toISOString() ?? null,
-    },
-  });
+  if (snapshotResult) {
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Reusing snapshot ${snapshotResult.snapshotId} already persisted for sandbox ${instanceId}.`,
+      details: {
+        queueJobId,
+        queueAttempt,
+        snapshotIntentId,
+        triggerPath,
+        decision: 'reuse_persisted_snapshot',
+        sandboxId: instanceId,
+        snapshotId: snapshotResult.snapshotId,
+        taskRunStatus: taskRun.status,
+        taskPhase: taskRun.taskPhase ?? null,
+      },
+    });
+  }
 
-  if (status !== 'running') {
+  // Skipped entirely when a persisted snapshot short-circuited the attempt:
+  // the sandbox is already gone and its status tells us nothing useful.
+  const status = snapshotResult
+    ? null
+    : (await client.getInstanceStatus({ instanceId })).status;
+
+  if (status !== null) {
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Observed sandbox ${instanceId} in status ${status} before snapshot attempt.`,
+      details: {
+        queueJobId,
+        queueAttempt,
+        snapshotIntentId,
+        triggerPath,
+        decision: 'pre_snapshot_instance_status_observed',
+        sandboxId: instanceId,
+        instanceStatus: status,
+        taskRunStatus: taskRun.status,
+        taskPhase: taskRun.taskPhase ?? null,
+        sleepAt: taskRun.sleepAt?.toISOString() ?? null,
+        sleepRequestedAt: taskRun.sleepRequestedAt?.toISOString() ?? null,
+        snapshotRequestedAt: taskRun.snapshotRequestedAt?.toISOString() ?? null,
+      },
+    });
+  }
+
+  if (status !== null && status !== 'running') {
     reconciledSnapshot = await reconcileSnapshotAfterRetryStatusChange({
       taskRun,
       client,
@@ -306,7 +344,10 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     }
   }
 
-  if (!snapshotResult) {
+  // `status` is non-null exactly when no snapshot was already persisted, so
+  // this is the same condition as `!snapshotResult` -- spelled out so the
+  // status stays narrowed for the reconcile helpers below.
+  if (!snapshotResult && status !== null) {
     await requestPreSnapshotScrub({
       taskRun,
       instanceId,
@@ -340,6 +381,18 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
 
       snapshotResult = await client.createSnapshot({
         instanceId,
+        onSnapshotCreated: async (createdSnapshotId) => {
+          persistedSnapshotCreatedAt = await persistCreatedSnapshotId({
+            runId,
+            taskRun,
+            snapshotId: createdSnapshotId,
+            instanceId,
+            queueJobId,
+            queueAttempt,
+            snapshotIntentId,
+            triggerPath,
+          });
+        },
       });
 
       const { snapshotId } = snapshotResult;
@@ -565,8 +618,13 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   const { snapshotId, usageObservation } = snapshotResult;
   const now = new Date();
 
+  // Expiry runs from when the snapshot was actually taken. On a redelivery
+  // that can be minutes before `now`, and restamping it here would hand out a
+  // resume window the snapshot no longer has.
+  const snapshotCreatedAt = persistedSnapshotCreatedAt ?? now;
+
   const snapshotExpiresAt = new Date(
-    now.getTime() + SANDBOX_SNAPSHOT_EXPIRY_MS,
+    snapshotCreatedAt.getTime() + SANDBOX_SNAPSHOT_EXPIRY_MS,
   );
 
   await db.transaction(async (tx) => {
@@ -575,7 +633,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       .set({
         payload: clearedCompletionPayload,
         snapshotId,
-        snapshotCreatedAt: now,
+        snapshotCreatedAt,
         snapshotFailedAt: null,
         sleepAt: null,
         taskPhase: null,
@@ -622,7 +680,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       provider,
       snapshotId,
       snapshotStatus: 'ready',
-      snapshotCreatedAt: now,
+      snapshotCreatedAt,
       snapshotExpiresAt,
       attachmentSource,
       maxPendingUpdatedAt: attachmentSource ? null : taskRun.createdAt,
@@ -894,6 +952,79 @@ async function requestPostFailureCredentialRestore(input: {
       },
     });
   }
+}
+
+/**
+ * Write the snapshot id the instant the provider hands it over, before the
+ * adapter tears the sandbox down and long before this job reaches its
+ * finalizing transaction. Everything between those two points -- the teardown
+ * RPC, a stalled-job redelivery, a worker restart -- used to be a window where
+ * a perfectly good snapshot was lost with no way to find it again, leaving the
+ * task unresumable.
+ *
+ * Guarded on `snapshotId IS NULL` so a redelivered attempt never clobbers the
+ * id a previous one already recorded. Returns the creation time now on the row
+ * so the caller stamps expiry from when the snapshot really happened.
+ */
+async function persistCreatedSnapshotId(input: {
+  runId: number;
+  taskRun: TaskRun;
+  snapshotId: string;
+  instanceId: string;
+  queueJobId: string | null;
+  queueAttempt: number;
+  snapshotIntentId: string;
+  triggerPath: string | null;
+}): Promise<Date> {
+  const snapshotCreatedAt = new Date();
+
+  const [persisted] = await db
+    .update(taskRuns)
+    .set({
+      snapshotId: input.snapshotId,
+      snapshotCreatedAt,
+      snapshotFailedAt: null,
+    })
+    .where(and(eq(taskRuns.id, input.runId), isNull(taskRuns.snapshotId)))
+    .returning({ id: taskRuns.id });
+
+  const details = {
+    queueJobId: input.queueJobId,
+    queueAttempt: input.queueAttempt,
+    snapshotIntentId: input.snapshotIntentId,
+    triggerPath: input.triggerPath,
+    sandboxId: input.instanceId,
+    snapshotId: input.snapshotId,
+  };
+
+  if (!persisted) {
+    // Another attempt got there first. Keep its timestamp: ours would make an
+    // already-aging snapshot look freshly created.
+    const existing = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.runId),
+      columns: { snapshotCreatedAt: true },
+    });
+
+    await recordSnapshotQueueEvent(input.taskRun, {
+      eventType: 'decision',
+      message: `Snapshot ${input.snapshotId} for sandbox ${input.instanceId} was already persisted by another attempt.`,
+      details: { ...details, decision: 'skip_persist_snapshot_id_claim_lost' },
+    });
+
+    return existing?.snapshotCreatedAt ?? snapshotCreatedAt;
+  }
+
+  await recordSnapshotQueueEvent(input.taskRun, {
+    eventType: 'decision',
+    message: `Persisted snapshot ${input.snapshotId} for sandbox ${input.instanceId} before teardown.`,
+    details: {
+      ...details,
+      decision: 'persist_snapshot_id_before_teardown',
+      snapshotCreatedAt: snapshotCreatedAt.toISOString(),
+    },
+  });
+
+  return snapshotCreatedAt;
 }
 
 async function recordSnapshotQueueEvent(
