@@ -15,7 +15,9 @@ import {
   useValidateEnvironmentConfig,
 } from '@/hooks/environments';
 import { useRepositories } from '@/hooks/source-control';
+import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useTRPC } from '@/trpc/client';
+import { ModelSelect } from '@/components/tasks';
 
 import {
   Alert,
@@ -62,6 +64,7 @@ export function CreateEnvironmentPage({
   const repositories = useRepositories();
   const createEnvironment = useCreateEnvironment();
   const validateConfig = useValidateEnvironmentConfig();
+  const launchTaskModels = useLaunchTaskModels();
 
   const [activeView, setActiveView] = useState<MasterView>(
     suggestedMcpId ? 'yaml' : 'agent',
@@ -74,6 +77,9 @@ export function CreateEnvironmentPage({
     [],
   );
   const [agentSetupGuidance, setAgentSetupGuidance] = useState('');
+  const [selectedModelId, setSelectedModelId] = useState<string>();
+  const effectiveSelectedModelId =
+    selectedModelId ?? launchTaskModels.data?.defaultModelId;
 
   const startDefinitionTask = useMutation(
     trpc.environments.startDefinitionTask.mutationOptions({
@@ -91,6 +97,7 @@ export function CreateEnvironmentPage({
     setPendingConfig(null);
     setSelectedRepositoryIds([]);
     setAgentSetupGuidance('');
+    setSelectedModelId(undefined);
     setActiveView('agent');
   };
 
@@ -150,6 +157,9 @@ export function CreateEnvironmentPage({
     await startDefinitionTask.mutateAsync({
       repositoryIds: selectedRepositoryIds,
       changeRequest: agentSetupGuidance.trim() || undefined,
+      ...(effectiveSelectedModelId
+        ? { selectedModelId: effectiveSelectedModelId }
+        : {}),
     });
   };
 
@@ -191,6 +201,8 @@ export function CreateEnvironmentPage({
                 onStartAgent={() => void handleStartAgent()}
                 setupGuidance={agentSetupGuidance}
                 onSetupGuidanceChange={setAgentSetupGuidance}
+                selectedModelId={effectiveSelectedModelId}
+                onSelectedModelIdChange={setSelectedModelId}
                 onSwitchToYaml={() => setActiveView('yaml')}
                 isStartAgentPending={startDefinitionTask.isPending}
                 isBusy={isBusy}
@@ -224,6 +236,8 @@ function AgentMasterView({
   onStartAgent,
   setupGuidance,
   onSetupGuidanceChange,
+  selectedModelId,
+  onSelectedModelIdChange,
   onSwitchToYaml,
   isStartAgentPending,
   isBusy,
@@ -235,6 +249,8 @@ function AgentMasterView({
   onStartAgent: () => void;
   setupGuidance: string;
   onSetupGuidanceChange: (value: string) => void;
+  selectedModelId?: string;
+  onSelectedModelIdChange: (value: string) => void;
   onSwitchToYaml: () => void;
   isStartAgentPending: boolean;
   isBusy: boolean;
@@ -248,6 +264,8 @@ function AgentMasterView({
       onStartAgent={onStartAgent}
       setupGuidance={setupGuidance}
       onSetupGuidanceChange={onSetupGuidanceChange}
+      selectedModelId={selectedModelId}
+      onSelectedModelIdChange={onSelectedModelIdChange}
       onSwitchToYaml={onSwitchToYaml}
       isStartAgentPending={isStartAgentPending}
       isBusy={isBusy}
@@ -263,6 +281,8 @@ function AgentRepositorySelectionSubview({
   onStartAgent,
   setupGuidance,
   onSetupGuidanceChange,
+  selectedModelId,
+  onSelectedModelIdChange,
   onSwitchToYaml,
   isStartAgentPending,
   isBusy,
@@ -274,6 +294,8 @@ function AgentRepositorySelectionSubview({
   onStartAgent: () => void;
   setupGuidance: string;
   onSetupGuidanceChange: (value: string) => void;
+  selectedModelId?: string;
+  onSelectedModelIdChange: (value: string) => void;
   onSwitchToYaml: () => void;
   isStartAgentPending: boolean;
   isBusy: boolean;
@@ -340,6 +362,13 @@ function AgentRepositorySelectionSubview({
           <HandMetal />
           Enter YAML directly
         </Button>
+
+        <ModelSelect
+          value={selectedModelId}
+          onValueChange={onSelectedModelIdChange}
+          disabled={isBusy}
+          ariaLabel="Environment setup model"
+        />
 
         <Button
           size="sm"
