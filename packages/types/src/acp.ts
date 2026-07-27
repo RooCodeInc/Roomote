@@ -1020,6 +1020,7 @@ export interface ShowWidgetFallbackDelivery {
   toolCallId: string;
   title: string | null;
   textFallback: string;
+  widgetUrl: string;
 }
 
 export type AcpPlanEntryStatus = 'pending' | 'in_progress' | 'completed';

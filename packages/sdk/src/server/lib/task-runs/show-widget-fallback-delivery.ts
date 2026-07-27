@@ -28,6 +28,7 @@ function parseJsonRecord(value: string): Record<string, unknown> | null {
 
 export function extractShowWidgetFallbackDelivery(
   envelope: AcpPersistedEnvelope,
+  taskId: string,
 ): ShowWidgetFallbackDelivery | null {
   if (envelope.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolResult) {
     return null;
@@ -67,10 +68,17 @@ export function extractShowWidgetFallbackDelivery(
     return null;
   }
 
+  const widgetUrl = new URL(
+    `/task/${taskId}`,
+    process.env.R_PUBLIC_URL ?? process.env.R_APP_URL,
+  );
+  widgetUrl.hash = `msg-${envelope.ts}`;
+
   return {
     toolCallId,
     title: asTrimmedString(result.title),
     textFallback,
+    widgetUrl: widgetUrl.toString(),
   };
 }
 

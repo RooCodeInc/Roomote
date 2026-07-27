@@ -74,9 +74,10 @@ export async function deliverShowWidgetFallback(input: {
   const text = input.delivery.title
     ? `${input.delivery.title}\n\n${input.delivery.textFallback}`
     : input.delivery.textFallback;
+  const message = `${text}\n\n[View widget](${input.delivery.widgetUrl})`;
 
   try {
-    await replyToChatThread(config, { text });
+    await replyToChatThread(config, { text: message });
   } catch (error) {
     await sdk.taskRuns
       .releaseShowWidgetFallbackDelivery(claimInput)

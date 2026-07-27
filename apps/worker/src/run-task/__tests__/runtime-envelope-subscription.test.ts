@@ -171,6 +171,7 @@ describe('subscribeHarnessCallbacks', () => {
       toolCallId: 'call-widget-1',
       title: 'Status',
       textFallback: 'Ready',
+      widgetUrl: 'https://app.example.com/task/task-widget#msg-1772823376050',
     };
     recordMessageEnvelopeMock.mockResolvedValue(fallback);
 
