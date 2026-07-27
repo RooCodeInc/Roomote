@@ -1035,6 +1035,7 @@ async function resumeExistingTaskAndDeliverFollowUp({
     // Carry the follow-up on the resume run itself so the resumed worker can
     // send it after the harness session is actually ready.
     resumePrompt: message,
+    resumeQuoteText: quoteText,
     resumePromptSource: 'github',
     resumePromptFallbackTask,
   } satisfies TaskPayload<typeof TaskPayloadKind.SnapshotResume>;
@@ -1511,6 +1512,7 @@ export async function handlePrComment(
             userId: reviewer.properties.userId,
             sourceRunId: activePrOwner.runId,
             message: followUpMessage,
+            quoteText: mention.body ?? '',
             resumePromptFallbackTask,
           })
         : await deliverFollowUpToExistingTask({
