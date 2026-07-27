@@ -234,6 +234,11 @@ export class RoomoteBrokerClient implements ComputeProviderClient {
       })) as { status: string; snapshotId?: string; error?: string };
 
       if (operation.status === 'succeeded' && operation.snapshotId) {
+        // Record the id before returning. The broker has already snapshotted
+        // and torn down the sandbox by this point, so a stall between here
+        // and the caller's write loses the only handle to that snapshot.
+        await input.onSnapshotCreated?.(operation.snapshotId);
+
         return { snapshotId: operation.snapshotId };
       }
 
