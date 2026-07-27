@@ -12,6 +12,9 @@
  *   - Lookup is explicitly provided, never reads process.env.
  *   - Unresolved references are left intact for visibility.
  */
+const ENV_VAR_REFERENCE_PATTERN =
+  /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+
 export function substituteEnvVars(
   vars: Record<string, string>,
   lookup: Record<string, string>,
@@ -20,7 +23,7 @@ export function substituteEnvVars(
 
   for (const [key, value] of Object.entries(vars)) {
     result[key] = value.replace(
-      /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g,
+      ENV_VAR_REFERENCE_PATTERN,
       (match, braced: string | undefined, bare: string | undefined) => {
         const varName = braced ?? bare!;
         return varName in lookup ? lookup[varName]! : match;
@@ -29,4 +32,12 @@ export function substituteEnvVars(
   }
 
   return result;
+}
+
+/** List the $VAR / ${VAR} names a value references, in order of appearance. */
+export function collectEnvVarReferences(value: string): string[] {
+  return Array.from(
+    value.matchAll(ENV_VAR_REFERENCE_PATTERN),
+    (match) => (match[1] ?? match[2])!,
+  );
 }

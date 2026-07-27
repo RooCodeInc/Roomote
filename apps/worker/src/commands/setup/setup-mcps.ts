@@ -6,7 +6,7 @@ import {
   type EnvironmentMcpServers,
 } from '@roomote/types';
 
-import { substituteEnvVars } from '../../env';
+import { collectEnvVarReferences, substituteEnvVars } from '../../env';
 
 // The Roomote MCP server is compiled into the worker's dist directory.
 // Resolve its path relative to the running worker script (process.argv[1]).
@@ -60,51 +60,125 @@ interface IntegrationProxyConfig {
   upstreamPath?: string;
 }
 
-function isRestrictedMcpEnvVarName(name: string): boolean {
-  // Roomote runtime / control-plane secrets must not be injectable into
-  // operator-configured MCP server env via ${...} substitution.
-  if (
+/**
+ * Names that belong unambiguously to the Roomote runtime. These never
+ * substitute into operator-configured MCP config — not even from the
+ * operator-provided overlay — so a value injected into an env map by the
+ * runtime can never be reclassified as operator-owned.
+ */
+function isRoomoteNamespacedEnvVarName(name: string): boolean {
+  return (
     name === 'AUTH_TOKEN' ||
     name === 'BASH_ENV' ||
-    name === 'DATABASE_URL' ||
-    name === 'REDIS_URL' ||
     name.startsWith('ROOMOTE_') ||
     name.startsWith('JOB_AUTH_') ||
     name.startsWith('PREVIEW_AUTH_')
-  ) {
-    return true;
-  }
-
-  return /_SECRET$/i.test(name) || /_PRIVATE_KEY$/i.test(name);
+  );
 }
 
-function filterMcpEnvLookup(
-  lookup: Record<string, string> | undefined,
-): Record<string, string> | undefined {
-  if (!lookup) {
-    return undefined;
-  }
-
-  return Object.fromEntries(
-    Object.entries(lookup).filter(([key]) => !isRestrictedMcpEnvVarName(key)),
+/**
+ * Roomote runtime / control-plane values that must never be injectable into
+ * operator-configured MCP server config via ${...} substitution from the
+ * task env. This is deliberately limited to Roomote-internal names: anything
+ * the operator defined themselves (deployment env vars) is already present
+ * in the sandbox environment, so refusing to substitute it would add
+ * friction without protecting anything. Operator-defined names substitute
+ * via the overlay in buildMcpSubstitutionLookup; generic reserved names
+ * (DATABASE_URL, REDIS_URL) can be shadowed there by an operator's own
+ * value, Roomote-namespaced names cannot.
+ */
+function isReservedRuntimeMcpEnvVarName(name: string): boolean {
+  return (
+    isRoomoteNamespacedEnvVarName(name) ||
+    name === 'DATABASE_URL' ||
+    name === 'REDIS_URL'
   );
+}
+
+/**
+ * Build the ${...} substitution lookup for custom MCP config: the task env
+ * minus reserved runtime names, overlaid with operator-defined deployment
+ * vars. Operator values win on collision, so an operator var that happens to
+ * share a generic reserved name (for example their own DATABASE_URL)
+ * resolves to the operator's value — never to a Roomote-internal one.
+ * Roomote-namespaced names are dropped even from the operator overlay as
+ * defense in depth against runtime-injected entries.
+ */
+function buildMcpSubstitutionLookup(
+  taskEnv: Record<string, string> | undefined,
+  operatorEnvVars: Record<string, string> | undefined,
+): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(taskEnv ?? {}).filter(
+        ([name]) => !isReservedRuntimeMcpEnvVarName(name),
+      ),
+    ),
+    ...Object.fromEntries(
+      Object.entries(operatorEnvVars ?? {}).filter(
+        ([name]) => !isRoomoteNamespacedEnvVarName(name),
+      ),
+    ),
+  };
+}
+
+/**
+ * Warn about `${VAR}` references that will not be substituted, so a refused
+ * or misspelled reference fails loudly instead of reaching the MCP server as
+ * a literal `${VAR}` string with no trace anywhere.
+ */
+function warnUnresolvableConfigReferences(options: {
+  serverName: string;
+  field: 'env' | 'headers';
+  values: Record<string, string>;
+  lookup: Record<string, string>;
+}): void {
+  const warnedNames = new Set<string>();
+
+  for (const value of Object.values(options.values)) {
+    for (const name of collectEnvVarReferences(value)) {
+      if (warnedNames.has(name) || name in options.lookup) {
+        continue;
+      }
+
+      warnedNames.add(name);
+
+      if (isReservedRuntimeMcpEnvVarName(name)) {
+        console.warn(
+          `[resolveBuiltInMcpServers] Custom MCP '${options.serverName}' ${options.field}: ` +
+            `\${${name}} was NOT substituted because the name is a reserved ` +
+            `Roomote runtime name. Define your own deployment environment ` +
+            `variable under a different name and reference that instead; ` +
+            `the literal text was passed through.`,
+        );
+      } else {
+        console.warn(
+          `[resolveBuiltInMcpServers] Custom MCP '${options.serverName}' ${options.field}: ` +
+            `\${${name}} is not defined in the task environment; the literal ` +
+            `reference was passed through unchanged.`,
+        );
+      }
+    }
+  }
 }
 
 function resolveConfigValues(
   values: Record<string, string> | undefined,
-  lookup: Record<string, string> | undefined,
+  lookup: Record<string, string>,
+  context: { serverName: string; field: 'env' | 'headers' },
 ): Record<string, string> | undefined {
   if (!values) {
     return undefined;
   }
 
-  const safeLookup = filterMcpEnvLookup(lookup);
+  warnUnresolvableConfigReferences({
+    serverName: context.serverName,
+    field: context.field,
+    values,
+    lookup,
+  });
 
-  if (!safeLookup) {
-    return values;
-  }
-
-  return substituteEnvVars(values, safeLookup);
+  return substituteEnvVars(values, lookup);
 }
 
 function buildIntegrationProxyMap(): Map<string, IntegrationProxyConfig> {
@@ -240,6 +314,7 @@ export function resolveBuiltInMcpServers(
   taskEnv?: Record<string, string>,
   integrations?: IntegrationMcpOptions,
   environmentMcpServers?: EnvironmentMcpServers,
+  operatorEnvVars?: Record<string, string>,
 ): Record<string, McpServerConfig> {
   // The extension's StdioClientTransport only inherits a minimal set of
   // env vars (HOME, PATH, SHELL, TERM, USER) via getDefaultEnvironment().
@@ -359,6 +434,11 @@ export function resolveBuiltInMcpServers(
   // Add environment-specific MCP servers.
   // Built-ins and integration MCPs take precedence over custom names.
   if (environmentMcpServers) {
+    const substitutionLookup = buildMcpSubstitutionLookup(
+      taskEnv,
+      operatorEnvVars,
+    );
+
     for (const [name, config] of Object.entries(environmentMcpServers)) {
       if (resolvedMcps[name]) {
         console.warn(
@@ -374,14 +454,20 @@ export function resolveBuiltInMcpServers(
           args: config.args,
           env: {
             ...stdioEnvExtras,
-            ...resolveConfigValues(config.env, taskEnv),
+            ...resolveConfigValues(config.env, substitutionLookup, {
+              serverName: name,
+              field: 'env',
+            }),
           },
         };
       } else {
         resolvedMcps[name] = {
           type: 'streamable-http',
           url: config.url,
-          headers: resolveConfigValues(config.headers, taskEnv),
+          headers: resolveConfigValues(config.headers, substitutionLookup, {
+            serverName: name,
+            field: 'headers',
+          }),
         };
       }
     }

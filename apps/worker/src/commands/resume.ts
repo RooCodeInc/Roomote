@@ -41,6 +41,7 @@ export async function resume(runId: number): Promise<boolean> {
     }) => buildWorkspaceConfig({ environmentId, repo, selectedRepositories }),
     runFn: async ({
       jobContext,
+      userEnvVars,
       workspace,
       workspacePath,
       usesSharedWorkspaceRoot,
@@ -88,6 +89,7 @@ export async function resume(runId: number): Promise<boolean> {
       return runTask({
         ...jobContext,
         envVars: jobContext.envVars,
+        userEnvVars,
         workspacePath,
         prompt: '',
         harnessInstructions: jobContext.harnessInstructions,
