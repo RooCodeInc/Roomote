@@ -293,7 +293,7 @@ describe('payload fields and prompt context', () => {
       }),
     ).toEqual({
       channelTag: 'slack_channel_id',
-      postToolName: 'post_to_slack_channel',
+      postToolName: 'post_to_channel',
       surfaceLabel: 'Slack',
     });
     expect(

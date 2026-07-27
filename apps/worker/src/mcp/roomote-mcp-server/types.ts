@@ -134,7 +134,7 @@ export interface SlackThreadReplyResponse {
   messageTs: string;
 }
 
-export interface SlackChannelPostResponse {
+export interface ChannelPostResponse {
   messageTs: string;
   channelId: string;
 }

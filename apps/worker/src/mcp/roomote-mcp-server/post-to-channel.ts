@@ -1,4 +1,4 @@
-import { postToSlackChannel } from './slack-api-client.js';
+import { postToChannel } from './slack-api-client.js';
 import {
   errorResultWithArtifacts,
   normalizeOptionalText,
@@ -57,35 +57,10 @@ type ChannelPostInput = {
   imageArtifactIds?: string[];
 };
 
-export async function handlePostToSlackChannel(
-  input: ChannelPostInput,
-  artifactConfig: ArtifactConfig,
-  roomoteConfig: RoomoteConfig,
-): Promise<ToolResult> {
-  const rawChannel = input.channel.trim();
-  if (!rawChannel) {
-    return errorResult('channel is required');
-  }
-  const channelTarget = normalizeSlackChannelTarget(rawChannel);
-  if (!channelTarget) {
-    return errorResult('channel is required');
-  }
-  if ('error' in channelTarget) {
-    return errorResult(channelTarget.error);
-  }
-
-  return postChannelMessage(
-    { ...input, channel: channelTarget.value },
-    artifactConfig,
-    roomoteConfig,
-  );
-}
-
 /**
  * Surface-generic channel post. Slack targets get Slack channel-name
- * normalization; Teams conversation ids and Telegram chat ids are opaque and
- * pass through untouched (the API restricts them to the task's own
- * conversation).
+ * normalization; every other provider receives its opaque channel ID
+ * unchanged for provider-specific authorization and delivery.
  */
 export async function handlePostToChannel(
   input: ChannelPostInput,
@@ -94,14 +69,21 @@ export async function handlePostToChannel(
 ): Promise<ToolResult> {
   const provider =
     process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim().toLowerCase();
-
-  if (provider !== 'teams' && provider !== 'telegram') {
-    return handlePostToSlackChannel(input, artifactConfig, roomoteConfig);
+  const rawChannel = input.channel.trim();
+  if (!rawChannel) {
+    return errorResult('channel is required');
   }
 
-  const channel = input.channel.trim();
-  if (!channel) {
-    return errorResult('channel is required');
+  let channel = rawChannel;
+  if (!provider || provider === 'slack') {
+    const channelTarget = normalizeSlackChannelTarget(rawChannel);
+    if (!channelTarget) {
+      return errorResult('channel is required');
+    }
+    if ('error' in channelTarget) {
+      return errorResult(channelTarget.error);
+    }
+    channel = channelTarget.value;
   }
 
   return postChannelMessage(
@@ -146,7 +128,7 @@ async function postChannelMessage(
     uploadedArtifactIds.push(...uploads.uploadedArtifactIds);
     allArtifactIds.push(...uploads.uploadedArtifactIds);
 
-    const reply = await postToSlackChannel(roomoteConfig, {
+    const reply = await postToChannel(roomoteConfig, {
       channel: input.channel,
       ...(threadTs && { threadTs }),
       ...(text && { text }),

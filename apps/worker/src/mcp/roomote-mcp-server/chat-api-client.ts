@@ -7,7 +7,7 @@ import type {
   CommunicationChannelMessagesResponse,
   CommunicationMessageContextResponse,
   RoomoteConfig,
-  SlackChannelPostResponse,
+  ChannelPostResponse,
   SlackMutationResponse,
   SlackReactionAddResponse,
   SlackThreadReplyResponse,
@@ -113,7 +113,7 @@ export async function replyToSlackThread(
   );
 }
 
-export async function postToSlackChannel(
+export async function postToChannel(
   config: RoomoteConfig,
   input: {
     channel: string;
@@ -121,12 +121,12 @@ export async function postToSlackChannel(
     text?: string;
     images?: Array<{ artifactId: string }>;
   },
-): Promise<SlackChannelPostResponse> {
-  return postToChatEndpoint<SlackChannelPostResponse>(
+): Promise<ChannelPostResponse> {
+  return postToChatEndpoint<ChannelPostResponse>(
     config,
     'channel_post',
     input,
-    'Failed to post to Slack channel',
+    'Failed to post to channel',
   );
 }
 

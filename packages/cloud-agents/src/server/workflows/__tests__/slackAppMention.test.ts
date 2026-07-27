@@ -86,7 +86,7 @@ describe('slackAppMention', () => {
     );
     expect(result.harnessInstructions).toContain('<slack_visibility_contract>');
     expect(result.harnessInstructions).toContain(
-      'Task UI commentary, todo updates, internal reasoning, and ordinary tool results are not visible in Slack. Slack-visible actions for the current turn are `send_chat_reply`, `send_chat_reaction_emoji`, `post_to_slack_channel`, and Slack-rendered `request_user_input` prompts.',
+      'Task UI commentary, todo updates, internal reasoning, and ordinary tool results are not visible in Slack. Slack-visible actions for the current turn are `send_chat_reply`, `send_chat_reaction_emoji`, `post_to_channel`, and Slack-rendered `request_user_input` prompts.',
     );
     expect(result.harnessInstructions).toContain(
       'Intermediary updates belong in the `commentary` channel. They do not satisfy Slack turns and they are not Slack-visible replies.',
@@ -157,7 +157,7 @@ describe('slackAppMention', () => {
     );
     expect(result.harnessInstructions).toContain(
       '<slack_modern_markdown>\n' +
-        '    Slack replies from `send_chat_reply`, `post_to_slack_channel`, and fast-agent final answers render in Slack `markdown` blocks, not legacy-limited mrkdwn.',
+        '    Slack replies from `send_chat_reply`, `post_to_channel`, and fast-agent final answers render in Slack `markdown` blocks, not legacy-limited mrkdwn.',
     );
     expect(result.harnessInstructions).toContain(
       '    Use modern Markdown as a readability tool when it improves scanability. Supported formatting includes:\n' +
@@ -217,7 +217,7 @@ describe('slackAppMention', () => {
       'Keep Slack-visible replies in the originating thread by default, even when the context references a customer message, linked feedback thread, or another Slack channel.',
     );
     expect(result.harnessInstructions).toContain(
-      'Use `post_to_slack_channel` only when the current user explicitly asks you to send or relay an update to a different Slack channel or thread. Do not use it to answer third parties just because another conversation appears in context.',
+      'Use `post_to_channel` only when the current user explicitly asks you to send or relay an update to a different channel or thread. Do not use it to answer third parties just because another conversation appears in context.',
     );
     expect(result.harnessInstructions).toContain(
       'When a blocker, delivery update, input request, useful progress update, or closeout would otherwise leave the Slack thread hanging, post the concise Slack lifecycle reply before finalizing.',
@@ -331,7 +331,7 @@ describe('slackAppMention', () => {
     );
     expect(result.harnessInstructions).toContain(
       '<slack_modern_markdown>\n' +
-        '    Slack replies from `send_chat_reply`, `post_to_slack_channel`, and fast-agent final answers render in Slack `markdown` blocks, not legacy-limited mrkdwn.',
+        '    Slack replies from `send_chat_reply`, `post_to_channel`, and fast-agent final answers render in Slack `markdown` blocks, not legacy-limited mrkdwn.',
     );
     expect(result.harnessInstructions).toContain(
       '    Do not assume Slack formatting is limited to old mrkdwn. Do not avoid tables or code fences just because the target is Slack. Use them when they make the reply clearer.\n' +
@@ -613,9 +613,6 @@ describe('buildChatProviderMessageInstructions', () => {
       expect(instructions).toContain('send_chat_reaction_emoji');
       expect(instructions).toContain('white_check_mark');
       expect(instructions).toContain('thumbsdown');
-      expect(instructions).toContain(
-        'Do not use Slack-only tools such as `post_to_slack_channel`',
-      );
       expect(instructions).not.toContain(
         'Do not use Slack-only tools such as `send_chat_reaction_emoji`',
       );

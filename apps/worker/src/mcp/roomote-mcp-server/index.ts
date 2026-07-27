@@ -49,10 +49,7 @@ import {
   type ChatReplyPurpose,
   recordChatReplySatisfaction,
 } from './chat-reply-satisfaction.js';
-import {
-  handlePostToChannel,
-  handlePostToSlackChannel,
-} from './post-to-slack-channel.js';
+import { handlePostToChannel } from './post-to-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
@@ -239,7 +236,7 @@ roomoteMcpServer.registerTool(
         : 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not auto-posted to chat for this task; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ') +
       'Returns rawUrl for direct embedding (for example PR <img src>). ' +
       (shouldIncludeLegacySlackArtifactCompositionGuidance()
-        ? 'After uploading image files, if `send_chat_reply` or `post_to_slack_channel` is available, pass the returned artifact IDs to those tools via `imageArtifactIds` so the user sees them directly in Slack. '
+        ? 'After uploading image files, if `send_chat_reply` or `post_to_channel` is available, pass the returned artifact IDs to those tools via `imageArtifactIds` so the user sees them directly in Slack. '
         : '') +
       'Use action "download" to retrieve an artifact by task ID and artifact path (requires taskId and path). Downloads may target the current task or another task, so artifacts such as plans published by earlier tasks can be retrieved. ' +
       'For download, the path must include the category prefix exactly as stored in Roomote (e.g., "plans/my-plan.md" or "tmp/capture.png", not just the filename). ' +
@@ -450,7 +447,7 @@ function shouldIncludeLegacySlackArtifactCompositionGuidance(): boolean {
   return false;
 }
 
-function shouldRegisterSlackChannelPostTool(): boolean {
+function shouldRegisterChannelPostTool(): boolean {
   return Boolean(process.env.ROOMOTE_TASK_ID?.trim());
 }
 
@@ -1353,89 +1350,92 @@ function recordSuccessfulSlackTurnSatisfactionResult(
   }
 }
 
-if (shouldRegisterSlackChannelPostTool()) {
-  if (
-    hasTelegramChatContext() ||
-    hasTeamsChatContext() ||
-    hasDiscordChatContext()
-  ) {
-    const postSurface = getChatReplySurfaceLabel();
+if (shouldRegisterChannelPostTool()) {
+  const postSurface = getChatReplySurfaceLabel();
 
-    roomoteMcpServer.registerTool(
-      'post_to_channel',
-      {
-        title: 'Post To Channel',
-        description:
-          `${postSurface}-visible: posts a new standalone message into the ${postSurface} conversation this task was launched from. ` +
-          'Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. ' +
-          `Pass the ${postSurface} conversation ID this task originated from; posting to other conversations is not supported on ${postSurface}. ` +
-          'The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
-        inputSchema: {
-          channel: z
-            .string()
-            .describe(
-              `${postSurface} conversation ID this task originated from`,
-            ),
-          text: z
-            .string()
-            .optional()
-            .describe(
-              'Markdown text to post. Lead with the answer or takeaway.',
-            ),
-          imagePaths: z
-            .array(z.string())
-            .optional()
-            .describe(
-              'Optional workspace-relative or /tmp image file paths to upload and attach',
-            ),
-          imageArtifactIds: z
-            .array(z.string())
-            .optional()
-            .describe(
-              'Optional already-uploaded artifact IDs for images that should be attached',
-            ),
-        },
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: false,
-          idempotentHint: false,
-          openWorldHint: false,
-        },
+  roomoteMcpServer.registerTool(
+    'post_to_channel',
+    {
+      title: 'Post To Channel',
+      description:
+        `${postSurface}-visible: posts a new standalone message into a ${postSurface} channel the Roomote app can access. ` +
+        'Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. ' +
+        'Pass a channel ID (Slack also accepts a channel name or mention). Cross-channel posts are subject to provider-specific authorization and target support. ' +
+        'The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
+      inputSchema: {
+        channel: z
+          .string()
+          .describe(`${postSurface} channel ID the Roomote app can access`),
+        threadTs: z
+          .string()
+          .optional()
+          .describe(
+            'Optional existing thread or message ID when the target provider supports thread replies',
+          ),
+        text: z
+          .string()
+          .optional()
+          .describe('Markdown text to post. Lead with the answer or takeaway.'),
+        imagePaths: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Optional workspace-relative or /tmp image file paths to upload and attach',
+          ),
+        imageArtifactIds: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Optional already-uploaded artifact IDs for images that should be attached',
+          ),
       },
-      async (params): Promise<ToolResult> => {
-        const artifactConfig = getArtifactConfig();
-        if (!artifactConfig) {
-          return errorResult(
-            'ROOMOTE_CLOUD_TOKEN environment variable not set',
-          );
-        }
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const artifactConfig = getArtifactConfig();
+      if (!artifactConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
 
-        const roomoteConfig = getRoomoteConfig();
-        if (!roomoteConfig) {
-          return errorResult(
-            'ROOMOTE_CLOUD_TOKEN environment variable not set',
-          );
-        }
+      const roomoteConfig = getRoomoteConfig();
+      if (!roomoteConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
 
-        const taskId = process.env.ROOMOTE_TASK_ID;
-        if (!taskId?.trim()) {
-          return errorResult('ROOMOTE_TASK_ID environment variable not set');
-        }
+      const taskId = process.env.ROOMOTE_TASK_ID;
+      if (!taskId?.trim()) {
+        return errorResult('ROOMOTE_TASK_ID environment variable not set');
+      }
 
-        return handlePostToChannel(
-          {
-            taskId,
-            channel: params.channel,
-            text: params.text,
-            imagePaths: params.imagePaths,
-            imageArtifactIds: params.imageArtifactIds,
-          },
-          artifactConfig,
-          roomoteConfig,
+      if (
+        postSurface === 'Slack' &&
+        hasSubmittedAutomationSlackSummary &&
+        process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan
+      ) {
+        return errorResult(
+          'Automation suggestions were already submitted and posted to Slack. Do not call post_to_channel for a duplicate summary.',
         );
-      },
-    );
-  }
+      }
+
+      return handlePostToChannel(
+        {
+          taskId,
+          channel: params.channel,
+          threadTs: params.threadTs,
+          text: params.text,
+          imagePaths: params.imagePaths,
+          imageArtifactIds: params.imageArtifactIds,
+        },
+        artifactConfig,
+        roomoteConfig,
+      );
+    },
+  );
 
   if (
     hasSlackChatContext() ||
@@ -1563,113 +1563,6 @@ if (shouldRegisterSlackChannelPostTool()) {
       return result;
     },
   );
-
-  // Teams/Telegram/Discord tasks get the surface-generic post_to_channel
-  // instead; exposing the Slack-labeled tool there invites opaque
-  // conversation ids into Slack channel-name normalization, which mangles
-  // them.
-  if (
-    !hasTeamsChatContext() &&
-    !hasTelegramChatContext() &&
-    !hasDiscordChatContext()
-  ) {
-    roomoteMcpServer.registerTool(
-      'post_to_slack_channel',
-      {
-        title: 'Post To Slack Channel',
-        description:
-          'Slack-visible: posts to a Slack channel that the Roomote Slack app is already a member of. ' +
-          'Use this only when the current user explicitly asks you to send or relay an update to a different Slack channel or thread than the originating thread. ' +
-          'Do not use it to answer a customer, third party, or linked Slack conversation just because that conversation appears in context. ' +
-          'The channel can be a channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>. ' +
-          'Slack messages posted by this tool render in Slack `markdown` blocks. Use modern Markdown as a readability tool when it improves scanability; headings, blockquotes, fenced code blocks, tables, links, and inline formatting are allowed when they make the reply clearer. ' +
-          'When the post mentions actionable code references, link the important ones with short-label GitHub blob permalinks at the exact inspected revision, add resolvable line anchors, and mention the file or symbol in prose rather than inventing a link. ' +
-          'The tool will not join channels for you.',
-        inputSchema: {
-          channel: z
-            .string()
-            .describe(
-              'Slack channel ID, channel name, or Slack channel mention that the app is already in',
-            ),
-          threadTs: z
-            .string()
-            .optional()
-            .describe(
-              'Optional Slack thread timestamp to post inside an existing thread in that channel',
-            ),
-          text: z
-            .string()
-            .optional()
-            .describe(
-              'Markdown text to post. ' +
-                'Slack messages posted by this tool render in Slack `markdown` blocks. Use modern Markdown as a readability tool when it improves scanability; headings, blockquotes, fenced code blocks, tables, links, and inline formatting are allowed when they make the reply clearer. ' +
-                'Lead with the answer or takeaway, use short paragraphs with blank lines between them, and put each list item on its own line. ' +
-                'Reserve backticks for literal code, not emphasis.',
-            ),
-          imagePaths: z
-            .array(z.string())
-            .optional()
-            .describe(
-              'Optional workspace-relative or /tmp image file paths to upload and attach',
-            ),
-          imageArtifactIds: z
-            .array(z.string())
-            .optional()
-            .describe(
-              'Optional already-uploaded artifact IDs for images that should be attached',
-            ),
-        },
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: false,
-          idempotentHint: false,
-          openWorldHint: false,
-        },
-      },
-      async (params): Promise<ToolResult> => {
-        const artifactConfig = getArtifactConfig();
-        if (!artifactConfig) {
-          return errorResult(
-            'ROOMOTE_CLOUD_TOKEN environment variable not set',
-          );
-        }
-
-        const roomoteConfig = getRoomoteConfig();
-        if (!roomoteConfig) {
-          return errorResult(
-            'ROOMOTE_CLOUD_TOKEN environment variable not set',
-          );
-        }
-
-        const taskId = process.env.ROOMOTE_TASK_ID;
-        if (!taskId?.trim()) {
-          return errorResult('ROOMOTE_TASK_ID environment variable not set');
-        }
-
-        if (
-          hasSubmittedAutomationSlackSummary &&
-          process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan
-        ) {
-          return errorResult(
-            'Automation suggestions were already submitted and posted to Slack. Do not call post_to_slack_channel for a duplicate summary.',
-          );
-        }
-
-        return handlePostToSlackChannel(
-          {
-            taskId,
-            channel: params.channel,
-            threadTs: params.threadTs,
-            text: params.text,
-            imagePaths: params.imagePaths,
-            imageArtifactIds: params.imageArtifactIds,
-          },
-          artifactConfig,
-          roomoteConfig,
-        );
-      },
-    );
-  }
 }
 
 async function main() {

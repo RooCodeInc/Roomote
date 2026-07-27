@@ -1290,6 +1290,32 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     }
   }
 
+  /**
+   * Returns whether a guild member can access a specific channel, optionally
+   * requiring message-send permission for write operations. `null` means the
+   * membership or permission state could not be verified.
+   */
+  async canUserAccessChannel(input: {
+    guildId: string;
+    channelId: string;
+    userId: string;
+    requireSendPermission?: boolean;
+  }): Promise<boolean | null> {
+    try {
+      const { value } = await this.resolveEffectiveChannelPermissions(input);
+      return (
+        (value & DISCORD_PERMISSION_BITS.view_channel) !== 0n &&
+        (!input.requireSendPermission ||
+          (value & DISCORD_PERMISSION_BITS.send_messages) !== 0n)
+      );
+    } catch (error) {
+      if (error instanceof DiscordApiError) {
+        if (error.status === 403 || error.status === 404) return false;
+      }
+      return null;
+    }
+  }
+
   async editChannel(input: {
     channelId: string;
     name?: string;
@@ -1316,66 +1342,10 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     // The guild-members endpoint takes a real user id — Discord rejects the
     // literal `@me` there with 400 Invalid Form Body (unlike /users/@me).
     const bot = await this.getBotInfo();
-    const [member, roles, channel] = await Promise.all([
-      this.request<{ roles?: string[] }>(
-        'GET',
-        `/guilds/${input.guildId}/members/${bot.id}`,
-        undefined,
-        { retryNetworkErrors: true, retryServerErrors: true },
-      ),
-      this.request<Array<{ id: string; permissions: string }>>(
-        'GET',
-        `/guilds/${input.guildId}/roles`,
-        undefined,
-        { retryNetworkErrors: true, retryServerErrors: true },
-      ),
-      this.request<DiscordApiChannel>(
-        'GET',
-        `/channels/${input.channelId}`,
-        undefined,
-        { retryNetworkErrors: true, retryServerErrors: true },
-      ),
-    ]);
-
-    const memberRoleIds = new Set([input.guildId, ...(member.roles ?? [])]);
-    let value = roles.reduce(
-      (result, role) =>
-        memberRoleIds.has(role.id) ? result | BigInt(role.permissions) : result,
-      0n,
-    );
-    if ((value & DISCORD_PERMISSION_BITS.administrator) !== 0n) {
-      value = Object.values(DISCORD_PERMISSION_BITS).reduce(
-        (result, bit) => result | bit,
-        value,
-      );
-    } else {
-      const overwrites = channel.permission_overwrites ?? [];
-      value = this.applyOverwrite(
-        value,
-        overwrites.find((overwrite) => overwrite.id === input.guildId),
-      );
-      const roleOverwrites = overwrites.filter(
-        (overwrite) =>
-          overwrite.type === 0 &&
-          overwrite.id !== input.guildId &&
-          memberRoleIds.has(overwrite.id),
-      );
-      const roleDeny = roleOverwrites.reduce(
-        (result, overwrite) => result | BigInt(overwrite.deny),
-        0n,
-      );
-      const roleAllow = roleOverwrites.reduce(
-        (result, overwrite) => result | BigInt(overwrite.allow),
-        0n,
-      );
-      value = (value & ~roleDeny) | roleAllow;
-      value = this.applyOverwrite(
-        value,
-        overwrites.find(
-          (overwrite) => overwrite.type === 1 && overwrite.id === bot.id,
-        ),
-      );
-    }
+    const { channel, value } = await this.resolveEffectiveChannelPermissions({
+      ...input,
+      userId: bot.id,
+    });
 
     const names = Object.keys(DISCORD_PERMISSION_BITS).filter(
       (name): name is DiscordPermissionName => name !== 'administrator',
@@ -1459,6 +1429,76 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
           }
         : {}),
     };
+  }
+
+  private async resolveEffectiveChannelPermissions(input: {
+    guildId: string;
+    channelId: string;
+    userId: string;
+  }): Promise<{ channel: DiscordApiChannel; value: bigint }> {
+    const [member, roles, channel] = await Promise.all([
+      this.request<{ roles?: string[] }>(
+        'GET',
+        `/guilds/${input.guildId}/members/${input.userId}`,
+        undefined,
+        { retryNetworkErrors: true, retryServerErrors: true },
+      ),
+      this.request<Array<{ id: string; permissions: string }>>(
+        'GET',
+        `/guilds/${input.guildId}/roles`,
+        undefined,
+        { retryNetworkErrors: true, retryServerErrors: true },
+      ),
+      this.request<DiscordApiChannel>(
+        'GET',
+        `/channels/${input.channelId}`,
+        undefined,
+        { retryNetworkErrors: true, retryServerErrors: true },
+      ),
+    ]);
+
+    const memberRoleIds = new Set([input.guildId, ...(member.roles ?? [])]);
+    let value = roles.reduce(
+      (result, role) =>
+        memberRoleIds.has(role.id) ? result | BigInt(role.permissions) : result,
+      0n,
+    );
+    if ((value & DISCORD_PERMISSION_BITS.administrator) !== 0n) {
+      value = Object.values(DISCORD_PERMISSION_BITS).reduce(
+        (result, bit) => result | bit,
+        value,
+      );
+      return { channel, value };
+    }
+
+    const overwrites = channel.permission_overwrites ?? [];
+    value = this.applyOverwrite(
+      value,
+      overwrites.find((overwrite) => overwrite.id === input.guildId),
+    );
+    const roleOverwrites = overwrites.filter(
+      (overwrite) =>
+        overwrite.type === 0 &&
+        overwrite.id !== input.guildId &&
+        memberRoleIds.has(overwrite.id),
+    );
+    const roleDeny = roleOverwrites.reduce(
+      (result, overwrite) => result | BigInt(overwrite.deny),
+      0n,
+    );
+    const roleAllow = roleOverwrites.reduce(
+      (result, overwrite) => result | BigInt(overwrite.allow),
+      0n,
+    );
+    value = (value & ~roleDeny) | roleAllow;
+    value = this.applyOverwrite(
+      value,
+      overwrites.find(
+        (overwrite) => overwrite.type === 1 && overwrite.id === input.userId,
+      ),
+    );
+
+    return { channel, value };
   }
 
   private applyOverwrite(

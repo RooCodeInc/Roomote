@@ -1,7 +1,10 @@
 import { ACP_LIVE_EVENT_TYPES } from '@roomote/types';
 
 import type { AcpUiMessage } from './types';
-import { shouldHideAcpMessage } from './message-visibility';
+import {
+  isInternalDebugToolCallMessage,
+  shouldHideAcpMessage,
+} from './message-visibility';
 
 function mcpToolCallMessage(
   toolName: string,
@@ -174,5 +177,18 @@ describe('message visibility helpers', () => {
         mcpToolResultMessage('browser_navigate', 'third-party-browser'),
       ),
     ).toBe(false);
+  });
+
+  it('hides internal post_to_channel calls from the Roomote server', () => {
+    expect(
+      isInternalDebugToolCallMessage(
+        mcpToolCallMessage('post_to_channel', 'roomote'),
+      ),
+    ).toBe(true);
+    expect(
+      isInternalDebugToolCallMessage(
+        mcpToolResultMessage('post_to_channel', 'roomote'),
+      ),
+    ).toBe(true);
   });
 });

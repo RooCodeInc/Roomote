@@ -110,10 +110,7 @@ vi.mock('../destination', () => ({
   buildDestinationPromptContext: (destination: { provider: string }) => ({
     channelTag:
       destination.provider === 'slack' ? 'slack_channel_id' : 'channel_id',
-    postToolName:
-      destination.provider === 'slack'
-        ? 'post_to_slack_channel'
-        : 'post_to_channel',
+    postToolName: 'post_to_channel',
     surfaceLabel: destination.provider,
   }),
 }));

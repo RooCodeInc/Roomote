@@ -1,6 +1,6 @@
 ---
 name: mock-slack-testing
-description: Run Roomote Slack integration flows through the existing mock Slack harness instead of a real Slack workspace. Use when testing Slack app mentions, interactive payloads, URL verification, outbound Slack posts, deleted-thread suppression, `reply_to_slack_thread`, `post_to_slack_channel`, Slack app creation via `apps.manifest.create`, `SLACK_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
+description: Run Roomote Slack integration flows through the existing mock Slack harness instead of a real Slack workspace. Use when testing Slack app mentions, interactive payloads, URL verification, outbound Slack posts, deleted-thread suppression, `reply_to_slack_thread`, `post_to_channel`, Slack app creation via `apps.manifest.create`, `SLACK_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
 ---
 
 # Mock Slack Testing

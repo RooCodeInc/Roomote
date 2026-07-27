@@ -92,7 +92,7 @@ vi.mock('../automation-thread-feedback', () => ({
 vi.mock('../destination', () => ({
   buildDestinationPromptContext: vi.fn(() => ({
     channelTag: 'slack_channel',
-    postToolName: 'post_to_slack_channel',
+    postToolName: 'post_to_channel',
     surfaceLabel: 'Slack',
   })),
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),

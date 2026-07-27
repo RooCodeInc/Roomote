@@ -69,11 +69,16 @@ import {
   maybeAddCommunicationReaction,
   maybeSendCommunicationThreadReply,
 } from './communication-thread-replies';
-import { maybeSendCommunicationChannelPost } from './communication-channel-posts';
+import { sendCommunicationChannelPost } from './communication-channel-posts';
 import {
   buildThreadReplyImageBlocks,
   errorResponseForThreadReplyImageError,
 } from './chat-reply-helpers';
+import {
+  absolutizeSetupMarkdownBlocks,
+  absolutizeSetupMarkdownLinks,
+  getSlackFallbackText,
+} from './slack-message-content';
 
 type SlackMcpVariables = Variables & { mcpAuth: McpAuth };
 const SLACK_MAX_MESSAGE_BLOCKS = 50;
@@ -83,14 +88,6 @@ const LATE_BIND_THREAD_RETRY_MS = 150;
 // ~5s at the shared 100ms retry cadence; must comfortably exceed the Slack
 // post + bind retries performed while the late-bind lock is held.
 const LATE_BIND_LOCK_MAX_ACQUIRE_ATTEMPTS = 50;
-
-function getFallbackText(text: string | undefined, imageCount: number): string {
-  if (text) {
-    return text;
-  }
-
-  return `Shared ${imageCount} image attachment${imageCount === 1 ? '' : 's'}`;
-}
 
 function getSlackThreadReplyWebPath(payload: unknown): string | null {
   if (!payload || typeof payload !== 'object') {
@@ -123,41 +120,6 @@ function buildSlackThreadReplyTaskUrl({
   url.searchParams.set('utm_campaign', 'slack.thread_reply');
 
   return url.toString();
-}
-
-function absolutizeSetupMarkdownLinks(text: string): string {
-  const origin = Env.R_APP_URL;
-
-  return text.replace(
-    /\[([^\]]+)\]\((\/setup(?:[/?#][^)]+)?)\)/g,
-    (_match, label: string, path: string) => `[${label}](${origin}${path})`,
-  );
-}
-
-function absolutizeSetupMarkdownBlocks(
-  blocks: unknown[] | undefined,
-): unknown[] | undefined {
-  if (!blocks) {
-    return blocks;
-  }
-
-  return blocks.map((block) => {
-    if (!block || typeof block !== 'object' || Array.isArray(block)) {
-      return block;
-    }
-
-    if (
-      (block as { type?: unknown }).type !== 'markdown' ||
-      typeof (block as { text?: unknown }).text !== 'string'
-    ) {
-      return block;
-    }
-
-    return {
-      ...block,
-      text: absolutizeSetupMarkdownLinks((block as { text: string }).text),
-    };
-  });
 }
 
 function isSetupThreadReplyPayload(payload: unknown): boolean {
@@ -501,9 +463,8 @@ function parseRequestBody(body: unknown): {
 
 /**
  * Parses the channel target as-provided. Slack channel-name normalization
- * happens later in the route, after the communication-provider dispatch, so
- * opaque Teams conversation ids and Telegram chat ids reach the dispatch
- * untouched (Slack normalization lowercases, which breaks Teams id matching).
+ * happens in the provider-specific target resolver so opaque Teams
+ * conversation ids and Telegram chat ids remain untouched.
  */
 function parseChannelPostRequestBody(body: unknown): {
   channel: string;
@@ -969,7 +930,7 @@ slackMcp.post('/thread_reply', async (c) => {
       normalizedText ??
       (normalizedBlocks && normalizedBlocks.length > 0
         ? 'Slack reply'
-        : getFallbackText(undefined, imageBlocks.length));
+        : getSlackFallbackText(undefined, imageBlocks.length));
     const blocks: unknown[] = [];
     const maxReplyBlocks = Math.max(
       0,
@@ -993,7 +954,7 @@ slackMcp.post('/thread_reply', async (c) => {
 
     const rootMessageTs = await slack.postMessage({
       channel: slackReplyTarget.channel,
-      text: getFallbackText(fallbackText, imageBlocks.length),
+      text: getSlackFallbackText(fallbackText, imageBlocks.length),
       unfurl_links: false,
       unfurl_media: false,
       blocks,
@@ -1073,7 +1034,7 @@ slackMcp.post('/thread_reply', async (c) => {
       parsedBody.text ??
         (normalizedBlocks && normalizedBlocks.length > 0
           ? 'Slack reply'
-          : getFallbackText(parsedBody.text, imageBlocks.length)),
+          : getSlackFallbackText(parsedBody.text, imageBlocks.length)),
     ).catch((error) => {
       console.error(
         `[slackMcp#thread_reply] Failed to persist late-bound Slack bot reply ${rootMessageTs}: ${
@@ -1120,7 +1081,7 @@ slackMcp.post('/thread_reply', async (c) => {
           normalizedText ??
           (normalizedBlocks && normalizedBlocks.length > 0
             ? 'Slack reply'
-            : getFallbackText(undefined, imageBlocks.length));
+            : getSlackFallbackText(undefined, imageBlocks.length));
         const fallbackText =
           normalizedText && pendingQuote
             ? `${pendingQuote.quote}\n${normalizedText}`
@@ -1167,7 +1128,7 @@ slackMcp.post('/thread_reply', async (c) => {
         const nextMessageTs = await slack.postMessage({
           channel: slackReplyTarget.channel,
           thread_ts: existingThreadTs,
-          text: getFallbackText(fallbackText, imageBlocks.length),
+          text: getSlackFallbackText(fallbackText, imageBlocks.length),
           unfurl_links: false,
           unfurl_media: false,
           blocks,
@@ -1211,7 +1172,7 @@ slackMcp.post('/thread_reply', async (c) => {
             parsedBody.text ??
               (normalizedBlocks && normalizedBlocks.length > 0
                 ? 'Slack reply'
-                : getFallbackText(parsedBody.text, imageBlocks.length)),
+                : getSlackFallbackText(parsedBody.text, imageBlocks.length)),
           );
         } catch (error) {
           console.error(
@@ -1682,7 +1643,7 @@ slackMcp.post('/channel_post', async (c) => {
   if (!isRunTokenContext(authContext)) {
     return c.json(
       {
-        error: 'Slack channel post MCP is only available for task run tokens',
+        error: 'Channel post MCP is only available for task run tokens',
       },
       403,
     );
@@ -1693,6 +1654,7 @@ slackMcp.post('/channel_post', async (c) => {
       id: true,
       taskId: true,
       payload: true,
+      actingUserId: true,
     },
     where: eq(taskRuns.id, authContext.runId),
   });
@@ -1703,8 +1665,9 @@ slackMcp.post('/channel_post', async (c) => {
 
   // No principal equality check: the run-scoped token IS the authorization
   // (only this run's sandbox holds it), and this endpoint operates via the
-  // deployment Slack bot token, so there is no impersonation vector. The
-  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // deployment communication credentials, so there is no impersonation
+  // vector. The token's userId is mint-time attribution while
+  // task_runs.actingUserId is
   // current-steering attribution — they legitimately diverge once a web steer
   // or follow-up switches the acting user mid-run.
 
@@ -1723,120 +1686,8 @@ slackMcp.post('/channel_post', async (c) => {
     );
   }
 
-  const communicationResponse = await maybeSendCommunicationChannelPost({
+  return sendCommunicationChannelPost({
     taskRun,
     parsedBody,
   });
-  if (communicationResponse) {
-    return communicationResponse;
-  }
-
-  const channelTarget = normalizeSlackChannelTarget(parsedBody.channel);
-  if (!channelTarget) {
-    return c.json({ error: 'channel is required' }, 400);
-  }
-  if ('error' in channelTarget) {
-    return c.json({ error: channelTarget.error }, 400);
-  }
-  parsedBody.channel = channelTarget.value;
-
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    columns: { botAccessToken: true },
-    where: eq(slackInstallations.isActive, true),
-  });
-
-  if (!slackInstallation?.botAccessToken) {
-    return c.json(
-      { error: 'No active Slack installation found for this deployment' },
-      404,
-    );
-  }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
-  const resolvedChannelId = await slack.resolveChannelId(parsedBody.channel);
-  if (!resolvedChannelId) {
-    return c.json(
-      { error: `Could not resolve Slack channel ${parsedBody.channel}.` },
-      404,
-    );
-  }
-
-  const membership = await slack.isAppInChannel(resolvedChannelId);
-  if (membership === false) {
-    return c.json(
-      {
-        error: `Slack app is not a member of channel ${parsedBody.channel}.`,
-      },
-      403,
-    );
-  }
-
-  if (membership === null) {
-    return c.json(
-      {
-        error: `Could not verify Slack access for channel ${parsedBody.channel}.`,
-      },
-      502,
-    );
-  }
-
-  const artifactIds = [
-    ...new Set(parsedBody.images.map((image) => image.artifactId)),
-  ];
-  let imageBlocks: Array<{
-    type: 'image';
-    image_url: string;
-    alt_text: string;
-  }>;
-  try {
-    imageBlocks = await buildThreadReplyImageBlocks({
-      artifactIds,
-      taskRun: { id: taskRun.id, taskId: taskRun.taskId },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const response = errorResponseForThreadReplyImageError(message);
-    if (response) {
-      return response;
-    }
-    throw error;
-  }
-
-  const blocks: unknown[] = [];
-  const normalizedText = parsedBody.text
-    ? absolutizeSetupMarkdownLinks(parsedBody.text)
-    : undefined;
-
-  if (normalizedText) {
-    blocks.push({
-      type: 'markdown',
-      text: normalizedText,
-    });
-  }
-  blocks.push(...imageBlocks);
-
-  const messageTs = await slack.postMessage({
-    channel: resolvedChannelId,
-    ...(parsedBody.threadTs && { thread_ts: parsedBody.threadTs }),
-    text: getFallbackText(normalizedText, imageBlocks.length),
-    unfurl_links: false,
-    unfurl_media: false,
-    ...(blocks.length > 0 && { blocks }),
-  });
-
-  if (!messageTs) {
-    if (parsedBody.threadTs) {
-      return c.json(
-        { error: 'Slack thread source message no longer exists' },
-        409,
-      );
-    }
-
-    return c.json(
-      { error: 'Slack chat.postMessage returned no message timestamp' },
-      502,
-    );
-  }
-
-  return c.json({ messageTs, channelId: resolvedChannelId });
 });
