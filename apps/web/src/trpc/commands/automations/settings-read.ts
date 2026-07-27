@@ -10,12 +10,13 @@ import {
   desc,
   discordInstallations,
   eq,
-  getAutomationRuntime,
+  getAutomationRuntimes,
   getBackgroundAgentSettingsForDeployment,
+  getBackgroundAgentSettingsWithAutomationsForDeployment,
   inArray,
-  listAutomations,
   resolveTelegramRuntimeCredentials,
   tasks,
+  type Automation,
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
@@ -25,7 +26,7 @@ import {
   type ResolvedAutomationDestination,
 } from '@roomote/sdk/server';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
-import { SlackNotifier } from '@roomote/slack';
+import { SlackChannelInfoCache, SlackNotifier } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -138,10 +139,9 @@ async function listRecentAutomationTasks(): Promise<
   return grouped;
 }
 
-async function buildAutomationStatus(): Promise<
-  Partial<Record<BackgroundAutomationKey, AutomationStatusSummary>>
-> {
-  const automationRows = await listAutomations();
+function buildAutomationStatus(
+  automationRows: Automation[],
+): Partial<Record<BackgroundAutomationKey, AutomationStatusSummary>> {
   const status: Partial<
     Record<BackgroundAutomationKey, AutomationStatusSummary>
   > = {};
@@ -211,9 +211,15 @@ async function resolveAutomationDestinations(params: {
   slackConnected: boolean;
   notifier: SlackNotifier | null;
 }): Promise<ResolvedAutomationDestinations> {
+  // One batched read for every reporting automation instead of a runtime
+  // lookup (plus its deployment_settings read) per key.
+  const runtimes = await getAutomationRuntimes(
+    MANAGER_REPORTING_AUTOMATION_KEYS,
+  );
+
   const entries = await Promise.all(
     MANAGER_REPORTING_AUTOMATION_KEYS.map(async (key) => {
-      const runtime = await getAutomationRuntime(key);
+      const runtime = runtimes[key];
       const destination = await resolveAutomationRuntimeDestination({
         runtime,
         slackConnected: params.slackConnected,
@@ -296,16 +302,15 @@ export async function getBackgroundAgentSettingsCommand(
   assertAdmin(auth);
 
   const [
-    settings,
+    { settings, automationRows },
     slackInstallation,
     discordInstallation,
     telegramCredentials,
     teamsPrimaryConversation,
     sentryConnected,
     recentRuns,
-    status,
   ] = await Promise.all([
-    getBackgroundAgentSettingsForDeployment(),
+    getBackgroundAgentSettingsWithAutomationsForDeployment(),
     findActiveSlackInstallationForOrg(),
     db.query.discordInstallations.findFirst({
       where: eq(discordInstallations.isActive, true),
@@ -315,12 +320,8 @@ export async function getBackgroundAgentSettingsCommand(
     findTeamsPrimaryConversation(),
     hasActiveSentryIntegration(),
     listRecentAutomationTasks(),
-    buildAutomationStatus(),
   ]);
-  const relayUsers = await listReviewerRelayUserRecords(
-    auth,
-    getRelayEligibleCreatorIds(settings.reviewCodeSettings),
-  );
+  const status = buildAutomationStatus(automationRows);
   const visibleSettings = maskSlackChannelAutoStartSettings(auth, settings);
 
   const botScopes = extractSlackBotScopes(slackInstallation?.scopes).map(
@@ -333,56 +334,71 @@ export async function getBackgroundAgentSettingsCommand(
         (scope) => !grantedScopes.has(scope),
       )
     : [];
+  // Request-scoped memo (backed by the shared Redis cache) so the warning and
+  // display-name passes resolve each channel through Slack at most once.
   const notifier = slackInstallation
-    ? new SlackNotifier(slackInstallation.botAccessToken)
+    ? new SlackNotifier(slackInstallation.botAccessToken, {
+        channelInfoCache: new SlackChannelInfoCache(slackInstallation.teamId),
+      })
     : null;
-  const slackChannelAccessWarnings = await getSlackChannelAccessWarnings({
-    notifier,
-    channelAutoStartSlackChannelIds:
-      visibleSettings.channelAutoStartSlackChannels.map(
-        ({ channelId }) => channelId,
-      ),
-    managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
-    suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
-    announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
-    platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
-    sentryTriageSlackChannelId: visibleSettings.sentryTriageSlackChannelId,
-    dependabotTriageSlackChannelId:
-      visibleSettings.dependabotTriageSlackChannelId,
-    codeqlTriageSlackChannelId: visibleSettings.codeqlTriageSlackChannelId,
-    securityAuditorSlackChannelId:
-      visibleSettings.securityAuditorSlackChannelId,
-    codeQualityAuditorSlackChannelId:
-      visibleSettings.codeQualityAuditorSlackChannelId,
-    ciFailureTriageSlackChannelId:
-      visibleSettings.ciFailureTriageSlackChannelId,
-  });
-  const slackChannelDisplayNames = await getSlackChannelDisplayNames({
-    notifier,
-    channelAutoStartSlackChannelIds:
-      visibleSettings.channelAutoStartSlackChannels.map(
-        ({ channelId }) => channelId,
-      ),
-    managerSlackChannelId: visibleSettings.managerSlackChannelId,
-    managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
-    suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
-    announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
-    platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
-    sentryTriageSlackChannelId: visibleSettings.sentryTriageSlackChannelId,
-    dependabotTriageSlackChannelId:
-      visibleSettings.dependabotTriageSlackChannelId,
-    codeqlTriageSlackChannelId: visibleSettings.codeqlTriageSlackChannelId,
-    securityAuditorSlackChannelId:
-      visibleSettings.securityAuditorSlackChannelId,
-    codeQualityAuditorSlackChannelId:
-      visibleSettings.codeQualityAuditorSlackChannelId,
-    ciFailureTriageSlackChannelId:
-      visibleSettings.ciFailureTriageSlackChannelId,
-  });
-  const resolvedDestinations = await resolveAutomationDestinations({
-    slackConnected: Boolean(slackInstallation?.isActive),
-    notifier,
-  });
+  const [
+    relayUsers,
+    slackChannelAccessWarnings,
+    slackChannelDisplayNames,
+    resolvedDestinations,
+  ] = await Promise.all([
+    listReviewerRelayUserRecords(
+      auth,
+      getRelayEligibleCreatorIds(settings.reviewCodeSettings),
+    ),
+    getSlackChannelAccessWarnings({
+      notifier,
+      channelAutoStartSlackChannelIds:
+        visibleSettings.channelAutoStartSlackChannels.map(
+          ({ channelId }) => channelId,
+        ),
+      managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
+      suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
+      announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
+      platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
+      sentryTriageSlackChannelId: visibleSettings.sentryTriageSlackChannelId,
+      dependabotTriageSlackChannelId:
+        visibleSettings.dependabotTriageSlackChannelId,
+      codeqlTriageSlackChannelId: visibleSettings.codeqlTriageSlackChannelId,
+      securityAuditorSlackChannelId:
+        visibleSettings.securityAuditorSlackChannelId,
+      codeQualityAuditorSlackChannelId:
+        visibleSettings.codeQualityAuditorSlackChannelId,
+      ciFailureTriageSlackChannelId:
+        visibleSettings.ciFailureTriageSlackChannelId,
+    }),
+    getSlackChannelDisplayNames({
+      notifier,
+      channelAutoStartSlackChannelIds:
+        visibleSettings.channelAutoStartSlackChannels.map(
+          ({ channelId }) => channelId,
+        ),
+      managerSlackChannelId: visibleSettings.managerSlackChannelId,
+      managerStatsSlackChannelId: visibleSettings.managerStatsSlackChannelId,
+      suggesterSlackChannelId: visibleSettings.suggesterSlackChannelId,
+      announcerSlackChannelId: visibleSettings.announcerSlackChannelId,
+      platformIssueSlackChannelId: visibleSettings.platformIssueSlackChannelId,
+      sentryTriageSlackChannelId: visibleSettings.sentryTriageSlackChannelId,
+      dependabotTriageSlackChannelId:
+        visibleSettings.dependabotTriageSlackChannelId,
+      codeqlTriageSlackChannelId: visibleSettings.codeqlTriageSlackChannelId,
+      securityAuditorSlackChannelId:
+        visibleSettings.securityAuditorSlackChannelId,
+      codeQualityAuditorSlackChannelId:
+        visibleSettings.codeQualityAuditorSlackChannelId,
+      ciFailureTriageSlackChannelId:
+        visibleSettings.ciFailureTriageSlackChannelId,
+    }),
+    resolveAutomationDestinations({
+      slackConnected: Boolean(slackInstallation?.isActive),
+      notifier,
+    }),
+  ]);
 
   // The reviewer mapping derives its managed-login list synchronously from
   // the cached configured app slug.

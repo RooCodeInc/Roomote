@@ -537,6 +537,8 @@ describe('SlackNotifier', () => {
           headers: expect.objectContaining({
             Authorization: `Bearer ${token}`,
           }),
+          // Every Slack call is bounded by a timeout signal.
+          signal: expect.any(AbortSignal),
         }),
       );
       expect(result).toBe(true);

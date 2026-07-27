@@ -6,7 +6,6 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   getMcpIntegrationConnectionScope,
-  hasEnabledBackgroundAgents,
   isSelfServeMcpIntegration,
   isDeploymentScopedMcpIntegration,
   MCP_INTEGRATIONS,
@@ -111,11 +110,8 @@ export function OnboardingCard() {
   const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
   const mcpPending = enablements.isPending || userMcpConnections.isPending;
-  const { data: automationSettingsResult, isPending: automationsPending } =
-    useQuery(trpc.automations.getSettings.queryOptions());
-  const hasEnabledBackgroundAgentSettings = automationSettingsResult?.settings
-    ? hasEnabledBackgroundAgents(automationSettingsResult.settings)
-    : false;
+  const { data: automationOnboardingStatus, isPending: automationsPending } =
+    useQuery(trpc.automations.onboardingStatus.queryOptions());
 
   const promotedMcpIntegrations = mcpPending
     ? []
@@ -373,8 +369,8 @@ export function OnboardingCard() {
     },
     visible:
       !automationsPending &&
-      Boolean(automationSettingsResult?.settings) &&
-      !hasEnabledBackgroundAgentSettings,
+      Boolean(automationOnboardingStatus) &&
+      !automationOnboardingStatus?.hasEnabledAutomations,
   });
 
   const activeCard = cards.find((card) => card.visible && !dismissed[card.id]);

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { createTRPCClient, httpBatchStreamLink } from '@trpc/client';
 import { createTRPCContext } from '@trpc/tanstack-react-query';
 import superjson from 'superjson';
 
@@ -33,7 +33,11 @@ export function TRPCReactProvider({
 
   const [trpcClient] = useState(() =>
     createTRPCClient<AppRouter>({
-      links: [httpBatchLink({ url: '/api/trpc', transformer: superjson })],
+      // Streaming so one slow procedure in a batch cannot hold back the
+      // responses of the fast ones.
+      links: [
+        httpBatchStreamLink({ url: '/api/trpc', transformer: superjson }),
+      ],
     }),
   );
 

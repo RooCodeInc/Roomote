@@ -155,13 +155,21 @@ describe('SlackChannelDiscovery', () => {
       );
     });
 
-    it('fails fast when conversations.list is rate limited', async () => {
+    it('gives up after the rate-limit retry budget is exhausted', async () => {
       const consoleErrorSpy = vi
         .spyOn(console, 'error')
         .mockImplementation(() => undefined);
+      const waits: number[] = [];
+      const retryingDiscovery = new SlackChannelDiscovery(
+        token,
+        fetchMock as unknown as typeof fetch,
+        async (ms) => {
+          waits.push(ms);
+        },
+      );
 
       try {
-        fetchMock.mockResolvedValueOnce({
+        fetchMock.mockResolvedValue({
           ok: false,
           status: 429,
           statusText: 'Too Many Requests',
@@ -170,10 +178,13 @@ describe('SlackChannelDiscovery', () => {
           },
         });
 
-        await expect(discovery.listAccessibleChannels()).resolves.toEqual([]);
-        expect(fetchMock).toHaveBeenCalledTimes(1);
+        await expect(
+          retryingDiscovery.listAccessibleChannels(),
+        ).resolves.toEqual([]);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(waits).toEqual([5_000, 5_000]);
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[listAccessibleChannels] Slack conversations.list exhausted 0 rate-limit retries',
+          '[listAccessibleChannels] Slack conversations.list exhausted 2 rate-limit retries',
         );
       } finally {
         consoleErrorSpy.mockRestore();
@@ -231,13 +242,57 @@ describe('SlackChannelDiscovery', () => {
       }
     });
 
-    it('fails fast when conversations.list is rate limited', async () => {
+    it('retries a rate-limited conversations.list with capped waits', async () => {
+      const waits: number[] = [];
+      const retryingDiscovery = new SlackChannelDiscovery(
+        token,
+        fetchMock as unknown as typeof fetch,
+        async (ms) => {
+          waits.push(ms);
+        },
+      );
+
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: {
+            get: (name: string) => (name === 'Retry-After' ? '60' : null),
+          },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            channels: [{ id: 'C999', name: 'team-updates' }],
+            response_metadata: { next_cursor: '' },
+          }),
+        });
+
+      await expect(
+        retryingDiscovery.resolveChannelId('#team-updates'),
+      ).resolves.toBe('C999');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      // Slack asked for 60s; the interactive cap keeps the save responsive.
+      expect(waits).toEqual([5_000]);
+    });
+
+    it('fails fast once the rate-limit retry budget is exhausted', async () => {
       const consoleErrorSpy = vi
         .spyOn(console, 'error')
         .mockImplementation(() => undefined);
+      const waits: number[] = [];
+      const retryingDiscovery = new SlackChannelDiscovery(
+        token,
+        fetchMock as unknown as typeof fetch,
+        async (ms) => {
+          waits.push(ms);
+        },
+      );
 
       try {
-        fetchMock.mockResolvedValueOnce({
+        fetchMock.mockResolvedValue({
           ok: false,
           status: 429,
           statusText: 'Too Many Requests',
@@ -247,11 +302,12 @@ describe('SlackChannelDiscovery', () => {
         });
 
         await expect(
-          discovery.resolveChannelId('#team-updates'),
+          retryingDiscovery.resolveChannelId('#team-updates'),
         ).resolves.toBeNull();
-        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(waits).toEqual([5_000, 5_000]);
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          '[resolveChannelId] Slack conversations.list exhausted 0 rate-limit retries',
+          '[resolveChannelId] Slack conversations.list exhausted 2 rate-limit retries',
         );
       } finally {
         consoleErrorSpy.mockRestore();

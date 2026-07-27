@@ -281,6 +281,7 @@ import {
 import {
   createCustomAutomationCommand,
   deleteCustomAutomationCommand,
+  getAutomationOnboardingStatusCommand,
   getBackgroundAgentSettingsCommand,
   listAutomationDiscordChannelsCommand,
   listCustomAutomationsCommand,
@@ -425,6 +426,11 @@ const conflictResolverMaxPrAgeDaysSchema = z.union([
 const automationsRouter = createRouter({
   getSettings: protectedProcedure.query(({ ctx: { auth } }) =>
     getBackgroundAgentSettingsCommand(auth),
+  ),
+
+  // Slack-free subset of getSettings for the dashboard onboarding nudge.
+  onboardingStatus: protectedProcedure.query(({ ctx: { auth } }) =>
+    getAutomationOnboardingStatusCommand(auth),
   ),
 
   listSlackChannels: protectedProcedure.query(({ ctx: { auth } }) =>
