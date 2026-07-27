@@ -11,6 +11,8 @@ const {
   hydrateLinearMcpConnectionAfterOauthMock,
   isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegrationMock,
+  loggerErrorMock,
+  loggerWarnMock,
   mcpConnectionsFindFirstMock,
   storeTokensMock,
   updateAuthStatusMock,
@@ -25,6 +27,8 @@ const {
   hydrateLinearMcpConnectionAfterOauthMock: vi.fn(),
   isDeploymentScopedMcpIntegrationMock: vi.fn(),
   isSelfServeMcpIntegrationMock: vi.fn(),
+  loggerErrorMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
   storeTokensMock: vi.fn(),
   updateAuthStatusMock: vi.fn(),
@@ -41,6 +45,13 @@ vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
 vi.mock('@/lib/server/mcp-linear', () => ({
   hydrateLinearMcpConnectionAfterOauth:
     hydrateLinearMcpConnectionAfterOauthMock,
+}));
+
+vi.mock('@/lib/server/logger', () => ({
+  logger: {
+    error: loggerErrorMock,
+    warn: loggerWarnMock,
+  },
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -169,6 +180,30 @@ describe('GET /api/mcp-oauth/callback', () => {
     );
   });
 
+  it('records callback host context when the Roomote session is unavailable', async () => {
+    authorizeMock.mockResolvedValueOnce({ success: false });
+    const request = new NextRequest(
+      'https://legacy.example/api/mcp-oauth/callback?code=auth-code&state=state-1',
+    );
+
+    const response = await GET(request);
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=unauthorized',
+    );
+    expect(consumeOAuthStateMock).not.toHaveBeenCalled();
+    expect(loggerWarnMock).toHaveBeenCalledWith(
+      {
+        event: 'mcp_oauth_callback_rejected',
+        reason: 'unauthorized',
+        requestHost: 'legacy.example',
+        configuredCallbackHost: 'customer.example',
+        callbackHostMatchesRequest: false,
+      },
+      'MCP OAuth callback was rejected',
+    );
+  });
+
   it('redirects oauth errors to the public settings host', async () => {
     const response = await GET(
       buildRequest(
@@ -178,9 +213,70 @@ describe('GET /api/mcp-oauth/callback', () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe(
-      'https://customer.example/settings?mcp=error',
+      'https://customer.example/settings?mcp=error&reason=access_denied',
     );
     expect(updateAuthStatusMock).toHaveBeenCalledWith(CONNECTION_ID, 'error');
     expect(exchangeCodeForTokensMock).not.toHaveBeenCalled();
+    expect(loggerWarnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'mcp_oauth_provider_error',
+        providerError: 'access_denied',
+        hasErrorDescription: true,
+      }),
+      'MCP OAuth provider returned an error',
+    );
+  });
+
+  it('surfaces token exchange failures with a safe reason and stage', async () => {
+    exchangeCodeForTokensMock.mockRejectedValueOnce(
+      new Error('provider response omitted'),
+    );
+
+    const response = await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=token_exchange_failed',
+    );
+    expect(updateAuthStatusMock).toHaveBeenCalledWith(CONNECTION_ID, 'error');
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'mcp_oauth_callback_failed',
+        failureStage: 'token_exchange',
+        reason: 'token_exchange_failed',
+        integrationId: 'linear',
+        connectionId: CONNECTION_ID,
+        errorName: 'Error',
+      }),
+      'MCP OAuth callback failed',
+    );
+    expect(JSON.stringify(loggerErrorMock.mock.calls)).not.toContain(
+      'provider response omitted',
+    );
+  });
+
+  it('distinguishes Linear workspace metadata failures after token storage', async () => {
+    hydrateLinearMcpConnectionAfterOauthMock.mockRejectedValueOnce(
+      new Error('viewer lookup failed'),
+    );
+
+    const response = await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(storeTokensMock).toHaveBeenCalledWith(CONNECTION_ID, {
+      access_token: 'access-token',
+      refresh_token: 'refresh-token',
+    });
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=linear_metadata_failed',
+    );
+    expect(updateAuthStatusMock).toHaveBeenCalledWith(CONNECTION_ID, 'error');
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'mcp_oauth_callback_failed',
+        failureStage: 'linear_metadata',
+        reason: 'linear_metadata_failed',
+        integrationId: 'linear',
+      }),
+      'MCP OAuth callback failed',
+    );
   });
 });

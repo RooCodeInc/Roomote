@@ -53,6 +53,7 @@ const state = vi.hoisted(() => ({
   linearInstallation: {
     linearOrganizationName: 'Roomote',
   } as null | { linearOrganizationName?: string },
+  linearRedirectPath: '',
   searchParams: '',
 }));
 
@@ -140,10 +141,13 @@ vi.mock('@/hooks/linear', () => ({
     data: state.linearInstallation,
     isPending: false,
   }),
-  useConnectLinear: () => ({
-    isPending: false,
-    mutate: mutations.connectLinear,
-  }),
+  useConnectLinear: (redirectPath: string) => {
+    state.linearRedirectPath = redirectPath;
+    return {
+      isPending: false,
+      mutate: mutations.connectLinear,
+    };
+  },
   useDisconnectLinear: () => ({
     isPending: false,
     mutate: mutations.disconnectLinear,
@@ -377,6 +381,7 @@ describe('Integrations settings', () => {
     state.linearInstallation = {
       linearOrganizationName: 'Roomote',
     };
+    state.linearRedirectPath = '';
     state.asanaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
@@ -384,6 +389,57 @@ describe('Integrations settings', () => {
     state.featureFlags = {};
     state.snowflakeConnection = null;
     state.searchParams = '';
+  });
+
+  it('returns Linear OAuth to a service-specific integrations URL', () => {
+    render(<Integrations />);
+
+    expect(state.linearRedirectPath).toBe(
+      '/settings/integrations?service=linear',
+    );
+  });
+
+  it('explains a Linear callback failure and clears transient OAuth params', () => {
+    state.searchParams =
+      'service=linear&mcp=error&reason=linear_metadata_failed';
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+    window.history.replaceState(
+      null,
+      '',
+      '/settings/integrations?service=linear&mcp=error&reason=linear_metadata_failed',
+    );
+
+    render(<Integrations />);
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Roomote connected to Linear but could not verify the workspace. Try again.',
+    );
+    expect(replaceState).toHaveBeenLastCalledWith(
+      null,
+      '',
+      '/settings/integrations?service=linear',
+    );
+  });
+
+  it('confirms a successful Linear callback and clears transient OAuth params', () => {
+    state.searchParams = 'service=linear&mcp=connected';
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+    window.history.replaceState(
+      null,
+      '',
+      '/settings/integrations?service=linear&mcp=connected',
+    );
+
+    render(<Integrations />);
+
+    expect(toast.success).toHaveBeenCalledWith(
+      'Linear connected successfully.',
+    );
+    expect(replaceState).toHaveBeenLastCalledWith(
+      null,
+      '',
+      '/settings/integrations?service=linear',
+    );
   });
 
   it('sorts integrations alphabetically and splits installed vs available', () => {

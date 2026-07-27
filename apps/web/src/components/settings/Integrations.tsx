@@ -1,7 +1,7 @@
 'use client';
 
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -108,6 +108,55 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect Vercel teams, projects, deployments, logs, and domain availability.',
   zero: 'Roomote will be able to authenticate the workspace Zero connection so agents can discover and pay for external capabilities.',
 };
+const MCP_INTEGRATION_NAME_BY_ID = new Map(
+  MCP_INTEGRATIONS.map((integration) => [integration.id, integration.name]),
+);
+
+function getMcpOAuthServiceName(serviceId: string): string | null {
+  return MCP_INTEGRATION_NAME_BY_ID.get(serviceId) ?? null;
+}
+
+function getMcpOAuthErrorMessage(
+  reason: string | null,
+  serviceId: string,
+): string {
+  const serviceName = getMcpOAuthServiceName(serviceId);
+  const subject = serviceName ?? 'The integration';
+  const object = serviceName ?? 'the integration';
+  const label = serviceName ?? 'integration';
+  const authorization = serviceName
+    ? `${serviceName} authorization`
+    : 'the integration authorization';
+  const provider = serviceName ? `${serviceName}'s` : "the integration's";
+
+  switch (reason) {
+    case 'access_denied':
+      return `${subject} authorization was canceled. No changes were saved.`;
+    case 'unauthorized':
+      return `Your Roomote session expired while connecting ${object}. Sign in and try again.`;
+    case 'invalid_state':
+      return `This ${label} authorization attempt expired or was already used. Start the connection again.`;
+    case 'missing_params':
+      return `${subject} did not return the information Roomote needed. Try connecting again.`;
+    case 'not_found':
+      return `Roomote could not find this ${label} connection. Start the connection again.`;
+    case 'not_registered':
+      return `Roomote could not resume ${authorization}. Try connecting again.`;
+    case 'provider_metadata_failed':
+      return `Roomote could not reach ${provider} authorization service. Try again.`;
+    case 'token_exchange_failed':
+    case 'token_storage_failed':
+      return `${subject} approved access, but Roomote could not complete the connection. Try again.`;
+    case 'linear_metadata_failed':
+      return 'Roomote connected to Linear but could not verify the workspace. Try again.';
+    case 'deployment_enablement_failed':
+      return `${subject} connected, but Roomote could not enable it for this workspace. Try again.`;
+    case 'provider_error':
+      return `${subject} could not authorize Roomote. Try connecting again.`;
+    default:
+      return `Roomote could not complete the ${object} connection. Try again.`;
+  }
+}
 
 type IntegrationItem = {
   id: string;
@@ -1065,7 +1114,12 @@ function VercelConnectionFields({
 export function Integrations() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const searchParamsString = searchParams.toString();
   const { isAdmin } = useAuthorizedUser();
+  const mcpOAuthStatus = searchParams.get('mcp');
+  const mcpOAuthReason = searchParams.get('reason');
+  const mcpOAuthServiceId = (searchParams.get('service') ?? '').trim();
+  const handledMcpOAuthResultRef = useRef<string | null>(null);
   const deepLinkedIntegrationId = (
     searchParams.get('service') ??
     searchParams.get('highlight') ??
@@ -1119,7 +1173,7 @@ export function Integrations() {
   } | null>(null);
 
   const linearInstallation = useLinearInstallation();
-  const connectLinear = useConnectLinear(pathname);
+  const connectLinear = useConnectLinear(`${pathname}?service=linear`);
   const disconnectLinear = useDisconnectLinear();
 
   const deploymentEnablements = useDeploymentMcpEnablements();
@@ -1596,6 +1650,50 @@ export function Integrations() {
       : null;
 
   useEffect(() => {
+    if (mcpOAuthStatus !== 'connected' && mcpOAuthStatus !== 'error') {
+      return;
+    }
+
+    const resultKey = [
+      mcpOAuthStatus,
+      mcpOAuthReason ?? '',
+      mcpOAuthServiceId,
+    ].join(':');
+    if (handledMcpOAuthResultRef.current === resultKey) {
+      return;
+    }
+    handledMcpOAuthResultRef.current = resultKey;
+
+    const serviceName = getMcpOAuthServiceName(mcpOAuthServiceId);
+    if (mcpOAuthStatus === 'connected') {
+      toast.success(
+        serviceName
+          ? `${serviceName} connected successfully.`
+          : 'Integration connected successfully.',
+      );
+    } else {
+      toast.error(getMcpOAuthErrorMessage(mcpOAuthReason, mcpOAuthServiceId));
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParamsString);
+    nextSearchParams.delete('mcp');
+    nextSearchParams.delete('reason');
+
+    const nextSearch = nextSearchParams.toString();
+    window.history.replaceState(
+      null,
+      '',
+      nextSearch.length > 0 ? `${pathname}?${nextSearch}` : pathname,
+    );
+  }, [
+    mcpOAuthReason,
+    mcpOAuthServiceId,
+    mcpOAuthStatus,
+    pathname,
+    searchParamsString,
+  ]);
+
+  useEffect(() => {
     setDismissedDeepLinkIntegrationId(null);
     setClearedDeepLinkIntegrationId(null);
   }, [deepLinkedIntegrationId]);
@@ -1616,7 +1714,7 @@ export function Integrations() {
     setDismissedDeepLinkIntegrationId(deepLinkedIntegrationId);
     setClearedDeepLinkIntegrationId(deepLinkedIntegrationId);
 
-    const nextSearchParams = new URLSearchParams(searchParams.toString());
+    const nextSearchParams = new URLSearchParams(searchParamsString);
     nextSearchParams.delete('service');
     nextSearchParams.delete('highlight');
 
