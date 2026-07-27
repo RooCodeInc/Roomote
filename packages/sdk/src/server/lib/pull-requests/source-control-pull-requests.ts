@@ -325,6 +325,7 @@ async function persistSourceControlPullRequestAssociation({
         prTitle: result.title,
         repository: result.repositoryFullName,
         status,
+        createdByRoomote: result.action === 'created',
         prBaseRef: result.targetBranch,
       })
       .onConflictDoUpdate({

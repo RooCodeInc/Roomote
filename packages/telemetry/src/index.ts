@@ -34,6 +34,51 @@ export const TELEMETRY_EVENT_NAME_PATTERN = /^[$a-z][a-z0-9_]{0,99}$/;
 
 export const MAX_TELEMETRY_BATCH_SIZE = 20;
 
+/** Non-identifying sources permitted on deployment activation events. */
+export const ACTIVATION_ENVIRONMENT_SOURCES = [
+  'setup',
+  'settings',
+  'mcp',
+] as const;
+
+export type ActivationEnvironmentSource =
+  (typeof ACTIVATION_ENVIRONMENT_SOURCES)[number];
+
+export type ActivationTaskProperties = {
+  workflow: string;
+  surface: string;
+  trigger: string;
+  harness: string | null;
+  model: string | null;
+  computeProvider: string | null;
+};
+
+/** Activation events contain routing classifications, never user or repo data. */
+export function buildActivationTaskProperties(
+  properties: ActivationTaskProperties,
+): TelemetryEventProperties {
+  return {
+    workflow: properties.workflow,
+    surface: properties.surface,
+    trigger: properties.trigger,
+    harness: properties.harness,
+    model: properties.model,
+    computeProvider: properties.computeProvider,
+  };
+}
+
+export function buildActivationPrMergedProperties(properties: {
+  provider: string;
+  workflow: string;
+  surface: string;
+}): TelemetryEventProperties {
+  return {
+    provider: properties.provider,
+    workflow: properties.workflow,
+    surface: properties.surface,
+  };
+}
+
 /**
  * Wire types for the hosted Ping service (`/v1/*`). Versioned: breaking
  * changes require a new API version, additive fields do not.

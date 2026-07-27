@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { PAGEVIEW_EVENT, TELEMETRY_EVENT_NAME_PATTERN } from '../index';
+import {
+  buildActivationPrMergedProperties,
+  buildActivationTaskProperties,
+  PAGEVIEW_EVENT,
+  TELEMETRY_EVENT_NAME_PATTERN,
+} from '../index';
 import {
   getTelemetryConfigurationNotice,
   isTelemetryEnvAllowedFor,
@@ -177,5 +182,37 @@ describe('TELEMETRY_EVENT_NAME_PATTERN', () => {
     expect(TELEMETRY_EVENT_NAME_PATTERN.test('')).toBe(false);
     expect(TELEMETRY_EVENT_NAME_PATTERN.test('a'.repeat(120))).toBe(false);
     expect(TELEMETRY_EVENT_NAME_PATTERN.test('drop;table')).toBe(false);
+  });
+});
+
+describe('activation event properties', () => {
+  it('allows only safe task routing classifications', () => {
+    expect(
+      buildActivationTaskProperties({
+        workflow: 'standard',
+        surface: 'slack',
+        trigger: 'message',
+        harness: 'opencode',
+        model: 'gpt-5',
+        computeProvider: 'modal',
+      }),
+    ).toEqual({
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+      harness: 'opencode',
+      model: 'gpt-5',
+      computeProvider: 'modal',
+    });
+  });
+
+  it('allows only provider and task classifications for merged PRs', () => {
+    expect(
+      buildActivationPrMergedProperties({
+        provider: 'github',
+        workflow: 'standard',
+        surface: 'web',
+      }),
+    ).toEqual({ provider: 'github', workflow: 'standard', surface: 'web' });
   });
 });
