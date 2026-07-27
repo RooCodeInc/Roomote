@@ -835,6 +835,9 @@ export const taskPullRequests = pgTable(
     githubReviewCommentId: bigint('github_review_comment_id', {
       mode: 'number',
     }),
+    // Only server-side PR creation marks this true. Transcript and review
+    // associations must not count as Roomote-created PR outcomes.
+    createdByRoomote: boolean('created_by_roomote').notNull().default(false),
 
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),

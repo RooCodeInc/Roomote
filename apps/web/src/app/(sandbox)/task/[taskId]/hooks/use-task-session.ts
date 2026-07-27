@@ -126,27 +126,22 @@ export function useTaskSession(
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [isSnapshotting, setIsSnapshotting] = useState(false);
-
+  const effectiveRefetchInterval = (query?: {
+    state?: { data?: { refetchInterval?: number } };
+  }) =>
+    query?.state?.data?.refetchInterval ??
+    (isSnapshotting ? 2_000 : (refetchInterval ?? false));
   const sessionQuery = useQuery(
     trpc.sandboxSession.byTaskId.queryOptions(
       { taskId },
       {
-        refetchInterval: (query) => {
-          const serverInterval = query.state.data?.refetchInterval;
-
-          if (serverInterval) {
-            return serverInterval;
-          }
-
-          if (isSnapshotting) {
-            return 2_000;
-          }
-
-          return refetchInterval ?? false;
-        },
+        refetchInterval: effectiveRefetchInterval,
       },
     ),
   );
+  const sessionRefetchInterval =
+    sessionQuery.data?.refetchInterval ??
+    (isSnapshotting ? 2_000 : (refetchInterval ?? false));
 
   // Switch to fast-poll (2s) while a snapshot is in progress so the UI
   // picks up snapshotCreatedAt promptly and shows the "Going to sleep" state.
@@ -183,6 +178,18 @@ export function useTaskSession(
     ),
   );
 
+  const artifactsQuery = useQuery(
+    trpc.artifacts.forTask.queryOptions(
+      { taskId: sessionQuery.data?.taskId ?? taskId },
+      {
+        enabled:
+          sessionQuery.isSuccess &&
+          sessionQuery.data?.sessionState !== 'not-found',
+        refetchInterval: sessionRefetchInterval,
+      },
+    ),
+  );
+
   const task: SessionTask | null | undefined = sessionQuery.data?.task;
   // The session command returns the run row joined with its user and the
   // task-level pull-request fallback; cast once here so the rest of the task
@@ -191,7 +198,7 @@ export function useTaskSession(
     | SessionTaskRun
     | null
     | undefined;
-  const artifacts = sessionQuery.data?.artifacts ?? EMPTY_ARTIFACTS;
+  const artifacts = artifactsQuery.data ?? EMPTY_ARTIFACTS;
 
   const payloadBlank =
     taskRun && 'blank' in taskRun.payload ? taskRun.payload.blank : undefined;

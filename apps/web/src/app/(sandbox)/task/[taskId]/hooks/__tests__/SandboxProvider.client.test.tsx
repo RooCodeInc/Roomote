@@ -197,6 +197,25 @@ describe('SandboxProvider runtime state sync', () => {
     vi.restoreAllMocks();
   });
 
+  it('keeps workspace children mounted while history is loading', () => {
+    render(
+      createWrapper(
+        <SandboxProvider
+          taskId="task-loading-shell"
+          url="http://sandbox.test"
+          token={undefined}
+          history={{ data: undefined, isSuccess: false, isError: false }}
+          fallback={<div>loading</div>}
+        >
+          <div data-testid="workspace-shell" />
+        </SandboxProvider>,
+      ),
+    );
+
+    expect(screen.getByTestId('workspace-shell')).toBeInTheDocument();
+    expect(screen.queryByText('loading')).not.toBeInTheDocument();
+  });
+
   it('renders hydrated children before the websocket connects and waits for a token before opening transport', async () => {
     createTRPCProxyClientMock.mockReturnValue({
       commands: {

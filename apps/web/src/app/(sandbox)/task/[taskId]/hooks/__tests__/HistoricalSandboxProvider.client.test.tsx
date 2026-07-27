@@ -58,6 +58,25 @@ describe('HistoricalSandboxProvider', () => {
     expect(screen.getByTestId('phase')).toHaveTextContent('idle');
   });
 
+  it('keeps workspace children mounted while history is loading', () => {
+    render(
+      <HistoricalSandboxProvider
+        taskId="task-123"
+        history={{
+          data: undefined,
+          isPending: true,
+          isSuccess: false,
+          isError: false,
+        }}
+        harness="opencode-server"
+      >
+        <div data-testid="workspace-shell" />
+      </HistoricalSandboxProvider>,
+    );
+
+    expect(screen.getByTestId('workspace-shell')).toBeInTheDocument();
+  });
+
   it('updates the sandbox task phase when persisted task metadata changes', () => {
     const { rerender } = render(
       <HistoricalSandboxProvider

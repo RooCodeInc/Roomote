@@ -165,6 +165,26 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
       }),
     );
   });
+
+  it('applies the selected model to settings-created setup tasks', async () => {
+    await startEnvironmentDefinitionTaskCommand(buildMockAuth(), {
+      repositoryIds: ['repo-1'],
+      selectedModelId: 'openrouter/z-ai/glm-5.2',
+    });
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          harness: 'opencode-server',
+          payload: expect.objectContaining({
+            harnessModelOverrides: {
+              'opencode-server': 'openrouter/z-ai/glm-5.2',
+            },
+          }),
+        }),
+      }),
+    );
+  });
 });
 
 describe('retryEnvironmentVerificationCommand', () => {

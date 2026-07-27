@@ -21,7 +21,7 @@ import { useTRPC } from '@/trpc/client';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useRecentTasks } from '@/hooks/useRecentTasks';
 
-import { FramedSurface, Loading } from '@/components/layout';
+import { FramedSurface } from '@/components/layout';
 import { EmptyState } from '@/components/system';
 
 import { useSandboxLayout } from '../../use-sandbox-layout';
@@ -40,6 +40,7 @@ import { Header } from './Header';
 import { HistoricalContent } from './HistoricalContent';
 import { getTaskNotificationPhase } from './hooks/task-notification-phase';
 import { MemoizedLiveContent } from './LiveContent';
+import { TaskWorkspaceSkeleton } from './TaskWorkspaceSkeleton';
 
 export default function SandboxPage() {
   const { taskId: unresolvedTaskId } = useParams<{ taskId: string }>();
@@ -194,11 +195,7 @@ export default function SandboxPage() {
   useTaskCompletionNotification(taskPhase ?? undefined, { sessionState });
 
   if (isSessionLoading) {
-    return (
-      <FramedSurface surfaceClassName="flex items-center justify-center">
-        <Loading layout="centered" className="flex-1" />
-      </FramedSurface>
-    );
+    return <TaskWorkspaceSkeleton />;
   }
 
   if (sessionState === 'error') {
@@ -248,12 +245,6 @@ export default function SandboxPage() {
         harness={taskRun?.harness ?? DEFAULT_CODING_HARNESS}
         taskStatus={taskRun?.status ?? null}
         taskPhase={(taskRun?.taskPhase as TaskPhase | null | undefined) ?? null}
-        fallback={
-          <>
-            <Header session={session} />
-            <Loading layout="centered" className="flex-1" />
-          </>
-        }
       >
         <HistoricalContent session={session} />
       </HistoricalSandboxProvider>
@@ -268,12 +259,6 @@ export default function SandboxPage() {
         harness={taskRun?.harness ?? DEFAULT_CODING_HARNESS}
         taskStatus={taskRun?.status ?? null}
         taskPhase={(taskRun?.taskPhase as TaskPhase | null | undefined) ?? null}
-        fallback={
-          <>
-            <Header session={session} />
-            <Loading layout="centered" className="flex-1" />
-          </>
-        }
       >
         <HistoricalContent
           session={session}
@@ -337,12 +322,6 @@ export default function SandboxPage() {
       initialTaskStatus={taskRun?.status ?? null}
       initialTaskPhase={
         (taskRun?.taskPhase as TaskPhase | null | undefined) ?? null
-      }
-      fallback={
-        <>
-          <Header session={session} />
-          <Loading layout="centered" className="flex-1" />
-        </>
       }
     >
       <MemoizedLiveContent

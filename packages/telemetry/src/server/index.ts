@@ -29,6 +29,10 @@ import {
   type PingVersionCheckRequest,
   type PingVersionCheckResponse,
   type TelemetryEventProperties,
+  type ActivationEnvironmentSource,
+  type ActivationTaskProperties,
+  buildActivationPrMergedProperties,
+  buildActivationTaskProperties,
 } from '../index';
 
 const LOG_PREFIX = '[telemetry]';
@@ -298,6 +302,37 @@ export async function captureInstanceEvent(
   properties?: TelemetryEventProperties,
 ): Promise<void> {
   return captureEvent(event, { properties });
+}
+
+/** Deployment-level activation events always use the anonymous instance id. */
+export async function captureActivationSetupCompleted(): Promise<void> {
+  return captureInstanceEvent('activation_setup_completed');
+}
+
+export async function captureActivationEnvironmentSaved(
+  source: ActivationEnvironmentSource,
+): Promise<void> {
+  return captureInstanceEvent('activation_environment_saved', { source });
+}
+
+export async function captureActivationTaskCreated(
+  properties: ActivationTaskProperties,
+): Promise<void> {
+  return captureInstanceEvent(
+    'activation_task_created',
+    buildActivationTaskProperties(properties),
+  );
+}
+
+export async function captureActivationPrMerged(properties: {
+  provider: string;
+  workflow: string;
+  surface: string;
+}): Promise<void> {
+  return captureInstanceEvent(
+    'activation_pr_merged',
+    buildActivationPrMergedProperties(properties),
+  );
 }
 
 /**

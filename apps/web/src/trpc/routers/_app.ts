@@ -1344,6 +1344,7 @@ export const appRouter = createRouter({
           repositoryIds: z.array(z.string().uuid()).min(1),
           environmentId: z.string().optional(),
           changeRequest: z.string().trim().min(1).max(8_000).optional(),
+          selectedModelId: z.string().trim().min(1).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>

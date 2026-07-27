@@ -88,6 +88,33 @@ vi.mock('@/hooks/source-control', () => ({
   }),
 }));
 
+vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
+  useLaunchTaskModels: () => ({
+    data: { defaultModelId: 'openrouter/openai/gpt-5.4' },
+  }),
+}));
+
+vi.mock('@/components/tasks', () => ({
+  ModelSelect: ({
+    value,
+    onValueChange,
+    ariaLabel,
+  }: {
+    value?: string;
+    onValueChange: (value: string) => void;
+    ariaLabel?: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      value={value ?? ''}
+      onChange={(event) => onValueChange(event.currentTarget.value)}
+    >
+      <option value="">Model</option>
+      <option value="openrouter/z-ai/glm-5.2">GLM 5.2</option>
+    </select>
+  ),
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     environments: {
@@ -250,6 +277,10 @@ describe('CreateEnvironmentPage', () => {
     fireEvent.change(screen.getByPlaceholderText(/Optional agent guidance/i), {
       target: { value: 'Use the API service from the first repo set.' },
     });
+    fireEvent.change(
+      screen.getByRole('combobox', { name: /environment setup model/i }),
+      { target: { value: 'openrouter/z-ai/glm-5.2' } },
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Start Agent' }));
 
@@ -259,6 +290,7 @@ describe('CreateEnvironmentPage', () => {
     expect(mockStartDefinitionTask.mock.calls[0]?.[0]).toEqual({
       repositoryIds: ['repo-1'],
       changeRequest: 'Use the API service from the first repo set.',
+      selectedModelId: 'openrouter/z-ai/glm-5.2',
     });
     expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
   });
