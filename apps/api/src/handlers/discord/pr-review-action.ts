@@ -1,5 +1,8 @@
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
-import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import {
+  DISCORD_MAX_MESSAGE_LENGTH,
+  type DiscordCommunicationProvider,
+} from '@roomote/communication/discord-provider';
 import {
   claimPendingPrReviewAction,
   claimPendingPrReviewActionsForThread,
@@ -39,6 +42,22 @@ export async function handleDiscordPrReviewActionCallback(input: {
       },
       text,
     });
+  const replyToOffer = (resolution: string) => {
+    const content = input.interaction.message?.content;
+    if (!content) return reply(resolution);
+
+    const separator = '\n\n';
+    const availableContentLength =
+      DISCORD_MAX_MESSAGE_LENGTH - separator.length - resolution.length;
+    const preservedContent =
+      content.length <= availableContentLength
+        ? content
+        : availableContentLength > 3
+          ? `${content.slice(0, availableContentLength - 3)}...`
+          : content.slice(0, Math.max(availableContentLength, 0));
+
+    return reply(`${preservedContent}${separator}${resolution}`);
+  };
   const user = input.interaction.member?.user ?? input.interaction.user;
   const mappedUserId = await findDiscordMappedUserId(user?.id);
 
@@ -53,12 +72,12 @@ export async function handleDiscordPrReviewActionCallback(input: {
   const pending = await claimPendingPrReviewAction(input.nonce);
 
   if (!pending) {
-    await reply('This offer was already handled or has expired.');
+    await replyToOffer('This offer was already handled or has expired.');
     return;
   }
 
   if (input.choice === 'dismiss') {
-    await reply('Dismissed.');
+    await replyToOffer('Dismissed.');
     return;
   }
 
@@ -82,7 +101,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
     });
 
     if (dispatched.outcome === 'unavailable') {
-      await reply(
+      await replyToOffer(
         input.choice === 'auto'
           ? "I'll resolve future feedback on this PR, but this task can no longer be resumed for the current feedback. Reply here to start fresh."
           : 'This task can no longer be resumed. Reply here to start fresh.',
@@ -90,7 +109,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
       return;
     }
 
-    await reply(
+    await replyToOffer(
       input.choice === 'auto'
         ? "I'll resolve these and any future feedback on this PR automatically. Starting on the current feedback now."
         : 'On it — resolving the review feedback.',
@@ -101,7 +120,9 @@ export async function handleDiscordPrReviewActionCallback(input: {
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    await reply('Failed to start the follow-up. Reply here to ask again.');
+    await replyToOffer(
+      'Failed to start the follow-up. Reply here to ask again.',
+    );
   }
 }
 
