@@ -1,6 +1,6 @@
 {
-  "id": "0018_custom_automations",
-  "prevId": "50f000bb-cdd7-41a7-8353-588a83fa9090",
+  "id": "236f9347-e96e-40d8-9726-3e51c6ba8146",
+  "prevId": "840f869a-acba-4364-ba75-63f6f6623edf",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -910,6 +910,195 @@
           "tableFrom": "compute_provider_usage_samples",
           "tableTo": "tasks",
           "columnsFrom": ["task_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.custom_automations": {
+      "name": "custom_automations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prompt": {
+          "name": "prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "schedule_mode": {
+          "name": "schedule_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'off'"
+        },
+        "environment_id": {
+          "name": "environment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target": {
+          "name": "target",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_run_at": {
+          "name": "last_run_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_succeeded_at": {
+          "name": "last_succeeded_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_failed_at": {
+          "name": "last_failed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_launched_task_id": {
+          "name": "last_launched_task_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "launch_claimed_at": {
+          "name": "launch_claimed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "custom_automations_name_unique_idx": {
+          "name": "custom_automations_name_unique_idx",
+          "columns": [
+            {
+              "expression": "name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "custom_automations_enabled_idx": {
+          "name": "custom_automations_enabled_idx",
+          "columns": [
+            {
+              "expression": "enabled",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "custom_automations_environment_id_idx": {
+          "name": "custom_automations_environment_id_idx",
+          "columns": [
+            {
+              "expression": "environment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "custom_automations_environment_id_environments_id_fk": {
+          "name": "custom_automations_environment_id_environments_id_fk",
+          "tableFrom": "custom_automations",
+          "tableTo": "environments",
+          "columnsFrom": ["environment_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "custom_automations_created_by_user_id_users_id_fk": {
+          "name": "custom_automations_created_by_user_id_users_id_fk",
+          "tableFrom": "custom_automations",
+          "tableTo": "users",
+          "columnsFrom": ["created_by_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "custom_automations_last_launched_task_id_tasks_id_fk": {
+          "name": "custom_automations_last_launched_task_id_tasks_id_fk",
+          "tableFrom": "custom_automations",
+          "tableTo": "tasks",
+          "columnsFrom": ["last_launched_task_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
@@ -6636,8 +6825,21 @@
           "primaryKey": false,
           "notNull": false
         },
+        "created_by_roomote": {
+          "name": "created_by_roomote",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "status": {
           "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "auto_handle_feedback_by_user_id": {
+          "name": "auto_handle_feedback_by_user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -6740,6 +6942,15 @@
           "columnsFrom": ["repository_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "task_pull_requests_auto_handle_feedback_by_user_id_users_id_fk": {
+          "name": "task_pull_requests_auto_handle_feedback_by_user_id_users_id_fk",
+          "tableFrom": "task_pull_requests",
+          "tableTo": "users",
+          "columnsFrom": ["auto_handle_feedback_by_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
