@@ -330,6 +330,7 @@ describe('maybeSendCommunicationChannelPost', () => {
   });
 
   it.each([
+    ['category', 4],
     ['forum', 15],
     ['media', 16],
   ])('rejects a cross-channel Discord %s target', async (_label, type) => {
@@ -346,7 +347,7 @@ describe('maybeSendCommunicationChannelPost', () => {
     expect(response!.status).toBe(400);
     await expect(jsonBody(response!)).resolves.toEqual({
       error:
-        'Discord cross-channel posts do not support forum or media channels',
+        'Discord cross-channel posts do not support category, forum, or media channels',
     });
     expect(discordPostMessageMock).not.toHaveBeenCalled();
   });

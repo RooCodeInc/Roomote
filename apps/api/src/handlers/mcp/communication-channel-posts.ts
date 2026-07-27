@@ -225,11 +225,11 @@ async function sendDiscordChannelPost(params: {
           400,
         );
       }
-      if ([15, 16].includes(targetChannel.type)) {
+      if ([4, 15, 16].includes(targetChannel.type)) {
         return jsonResponse(
           {
             error:
-              'Discord cross-channel posts do not support forum or media channels',
+              'Discord cross-channel posts do not support category, forum, or media channels',
           },
           400,
         );
