@@ -11,6 +11,7 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   sourceControlProviderSchema,
+  TaskPayloadKind,
 } from '@roomote/types';
 
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -102,7 +103,7 @@ type EnqueuePrReviewNotificationResult = {
 
 type PrReviewNotificationRoutingRun = Pick<
   TaskRun,
-  'id' | 'taskId' | 'payload'
+  'id' | 'taskId' | 'payload' | 'payloadKind'
 >;
 
 export type PrReviewNotificationRoute =
@@ -114,7 +115,13 @@ export type PrReviewNotificationRoute =
       serviceUrl: string;
     }
   | { provider: 'telegram'; channelId: string; threadId: string | null }
-  | { provider: 'discord'; channelId: string; threadId: string | null };
+  | { provider: 'discord'; channelId: string; threadId: string | null }
+  | {
+      provider: 'source_control';
+      sourceControlProvider: 'github';
+      repository: string;
+      prNumber: number;
+    };
 
 let prReviewNotificationQueue: Queue<PrReviewNotificationRequest> | null = null;
 
@@ -229,11 +236,36 @@ export async function resolvePrReviewNotificationRoute(
 
   const { channel, threadTs } = await resolveSlackTaskRunRouting(job);
 
-  if (!channel || !threadTs) {
-    return null;
+  if (channel && threadTs) {
+    return { provider: 'slack', channelId: channel, threadId: threadTs };
   }
 
-  return { provider: 'slack', channelId: channel, threadId: threadTs };
+  // GitHub-triggered review tasks do not have a communications thread. Post
+  // their terminal self-review result back to the PR instead of leaving the
+  // promised follow-up only in task history.
+  if (
+    job.payloadKind === TaskPayloadKind.GithubPrReview ||
+    job.payloadKind === TaskPayloadKind.GithubPrReviewSync
+  ) {
+    const payload = job.payload as { repo?: unknown; prNumber?: unknown };
+
+    if (
+      typeof payload.repo === 'string' &&
+      payload.repo.trim() &&
+      typeof payload.prNumber === 'number' &&
+      Number.isInteger(payload.prNumber) &&
+      payload.prNumber > 0
+    ) {
+      return {
+        provider: 'source_control',
+        sourceControlProvider: 'github',
+        repository: payload.repo,
+        prNumber: payload.prNumber,
+      };
+    }
+  }
+
+  return null;
 }
 
 /**

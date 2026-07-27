@@ -785,7 +785,17 @@ export async function preparePrReviewNotificationDelivery({
   request: PrReviewNotificationRequest;
   events: PrReviewActivityEvent[];
 }): Promise<PreparedPrReviewNotification> {
-  const route = await resolvePrReviewNotificationRoute(taskRun);
+  const resolvedRoute = await resolvePrReviewNotificationRoute(taskRun);
+  // Source-control fallback is the promised terminal self-review follow-up.
+  // Other review activity remains task-history-only when no chat route exists.
+  const route =
+    resolvedRoute?.provider === 'source_control' &&
+    !events.some(
+      (event) =>
+        event.kind === 'review_summary' && event.roomoteAuthored === true,
+    )
+      ? null
+      : resolvedRoute;
   const context = await gatherPrReviewTriageContext({
     taskRun,
     repository: request.repository,
@@ -809,7 +819,8 @@ export async function preparePrReviewNotificationDelivery({
   // Prefer the chat provider's link syntax when a conversation route exists.
   // For web-only tasks (no chat route), keep markdown so the task transcript
   // renders links cleanly in the web UI.
-  const formatProvider = route?.provider ?? 'teams';
+  const formatProvider =
+    route && route.provider !== 'source_control' ? route.provider : 'teams';
 
   return {
     post: true,

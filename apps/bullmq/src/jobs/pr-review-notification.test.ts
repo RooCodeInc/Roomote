@@ -16,6 +16,7 @@ const {
   mockStickyFooterPost,
   mockSetPendingPrReviewAction,
   mockDispatchFollowUp,
+  mockWriteSourceControlPullRequest,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -32,6 +33,7 @@ const {
   mockStickyFooterPost: vi.fn(),
   mockSetPendingPrReviewAction: vi.fn(),
   mockDispatchFollowUp: vi.fn(),
+  mockWriteSourceControlPullRequest: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -101,6 +103,7 @@ vi.mock('@roomote/sdk/server', () => ({
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
   dispatchPrReviewFollowUp: mockDispatchFollowUp,
+  writeSourceControlPullRequestForTaskRun: mockWriteSourceControlPullRequest,
   attachPendingPrReviewActionMessage: vi.fn(),
 }));
 
@@ -210,6 +213,43 @@ describe('prReviewNotificationJob', () => {
       messageTs: '999.888',
     });
     expect(mockSchedule).not.toHaveBeenCalled();
+  });
+
+  it('posts the notification to a source-control pull request when no chat route exists', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'source_control',
+        sourceControlProvider: 'github',
+        repository: 'owner/repo',
+        prNumber: 42,
+      },
+      text: 'I reviewed the PR on GitHub and found no issues.',
+      followUpQuestion: null,
+      followUpPrompt: null,
+    });
+    mockWriteSourceControlPullRequest.mockResolvedValue({
+      url: 'https://github.com/owner/repo/pull/42#issuecomment-1',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockWriteSourceControlPullRequest).toHaveBeenCalledWith({
+      taskRun: expect.objectContaining({ id: 1 }),
+      input: {
+        action: 'create_pull_request_comment',
+        repositoryFullName: 'owner/repo',
+        prNumber: 42,
+        body: 'I reviewed the PR on GitHub and found no issues.',
+        sourceControlProvider: 'github',
+      },
+    });
+    expect(mockRecordDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: expect.objectContaining({ provider: 'source_control' }),
+        messageTs: 'https://github.com/owner/repo/pull/42#issuecomment-1',
+      }),
+    );
   });
 
   it('posts Yes/Dismiss action buttons and stores the pending offer when the triage produced a follow-up', async () => {
