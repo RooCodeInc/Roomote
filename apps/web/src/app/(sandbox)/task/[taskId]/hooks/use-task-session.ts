@@ -190,6 +190,7 @@ export function useTaskSession(
         enabled:
           sessionQuery.isSuccess &&
           sessionQuery.data?.sessionState !== 'not-found',
+        refetchInterval: sessionQuery.data?.refetchInterval ?? false,
       },
     ),
   );

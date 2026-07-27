@@ -162,7 +162,7 @@ describe('useTaskSession', () => {
 
     expect(artifactsQueryOptionsMock).toHaveBeenCalledWith(
       { taskId: 'canonical-task' },
-      expect.objectContaining({ enabled: true }),
+      expect.objectContaining({ enabled: true, refetchInterval: false }),
     );
   });
 
