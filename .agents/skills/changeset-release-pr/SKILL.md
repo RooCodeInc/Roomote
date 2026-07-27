@@ -62,7 +62,26 @@ git log v<last>..origin/develop --oneline --first-parent
 For anything ambiguous, read the PR body with `gh pr view <number>` to identify
 the user-facing or operator-facing impact.
 
-### 3. Subtract existing pending changesets
+### 3. Identify external contributors
+
+For every merged PR that will have a changelog bullet, inspect its author with
+`gh pr view <number> --json author`. Thank contributors only when the author is
+not a bot and is not a code owner. Read the applicable `CODEOWNERS` file and
+resolve its individual GitHub-owner entries and organization-team entries before
+classifying the author; if this repository has no `CODEOWNERS` file, no author
+is excluded on that basis. Do not treat an author as external merely because
+their PR was merged by someone else.
+
+- Treat GitHub App and bot accounts as bots; never add contributor thanks for
+  them.
+- Do not thank maintainers listed directly or through a code-owner team.
+- Keep a mapping from each eligible external contributor to the release note
+  that covers their PR. If multiple eligible contributors are covered by one
+  note, thank each of them in that note.
+- Do not add a thank-you to a skipped internal, docs-only, CI, or dependency
+  change that does not receive a changelog bullet.
+
+### 4. Subtract existing pending changesets
 
 ```bash
 find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' -print
@@ -71,7 +90,7 @@ find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' -print
 Read every pending file. A change already covered by a pending changeset must
 not receive a duplicate note.
 
-### 4. Classify the remaining changes
+### 5. Classify the remaining changes
 
 - **Include** user-visible or operator-visible capabilities, behavior changes,
   fixes to visible symptoms, and notable performance or UX improvements.
@@ -79,7 +98,7 @@ not receive a duplicate note.
   refactors, and dependency bumps with no visible effect. They ship without a
   changelog bullet.
 
-### 5. Confirm the bump level
+### 6. Confirm the bump level
 
 If the user specified patch, minor, or major, use it. Otherwise ask and include
 a recommendation based on the actual changes:
@@ -93,7 +112,7 @@ single product version. If an existing pending changeset is higher than the
 user's choice, say that the higher bump will win. Individual notes may carry
 different levels and are grouped by level in the changelog.
 
-### 6. Author missing changesets locally
+### 7. Author missing changesets locally
 
 Create one `.changeset/<descriptive-slug>.md` file per logical release note:
 
@@ -113,10 +132,14 @@ One concise, user-facing summary of the change.
   mention the previous symptom when describing a fix.
 - Group closely related PRs when they form one user-facing story. Otherwise keep
   their notes separate.
+- For a note that covers an eligible external contributor's PR, add a concise
+  sentence such as `Thanks to @octocat for contributing this improvement.` Keep
+  the thanks in the same paragraph as the release-note summary. Update an
+  existing pending changeset when it is the note that covers the contribution.
 - These newly authored files are temporary release inputs. `pnpm run version`
   consumes them before the release branch is committed.
 
-### 7. Generate and verify the release
+### 8. Generate and verify the release
 
 Start from the current `origin/develop` tip. If `develop` advances before the
 release PR merges, rebuild the release artifacts from the new tip and repeat the
@@ -165,7 +188,7 @@ Then verify:
 Run the release-script tests and the repository's appropriate static checks
 before opening the PR.
 
-### 8. Open the release PR
+### 9. Open the release PR
 
 Commit the generated release artifacts on a feature branch and open a PR against
 `develop` titled **Release Roomote X.Y.Z**. The PR body should include:
