@@ -101,9 +101,6 @@ async function sendTeamsChannelPost(params: {
   taskRun: ChannelPostTaskRun;
   parsedBody: ParsedChannelPostBody;
 }): Promise<Response> {
-  const jobChannelId = getCommunicationChannelFromTaskPayload(
-    params.taskRun.payload,
-  );
   const serviceUrl = getCommunicationServiceUrlFromTaskPayload(
     params.taskRun.payload,
   );
