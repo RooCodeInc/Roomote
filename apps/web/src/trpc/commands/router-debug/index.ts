@@ -4,6 +4,7 @@ import {
   updateRouterDebugSettings,
 } from '@roomote/db/server';
 import type { CommunicationProvider } from '@roomote/types';
+import { getCommunicationProviderAdapter } from '@roomote/sdk/server';
 import { SlackNotifier } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
@@ -52,6 +53,13 @@ export async function updateRouterDebugSettingsCommand(
 
     if (hasChannelAccess !== true) {
       throw new Error('Invite Roomote to that Slack channel before saving.');
+    }
+  } else if (destination) {
+    const adapter = await getCommunicationProviderAdapter(destination.provider);
+    if (!adapter) {
+      throw new Error(
+        `Connect ${destination.provider} before choosing a destination.`,
+      );
     }
   }
 

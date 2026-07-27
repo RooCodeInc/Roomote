@@ -175,6 +175,38 @@ async function postNonSlackRouterDebugMessage(params: {
   });
 }
 
+export async function postRouterDebugText(text: string): Promise<void> {
+  const destination = await getConfiguredRouterDebugDestination();
+  if (!destination) return;
+
+  try {
+    if (destination.provider !== 'slack') {
+      await postNonSlackRouterDebugMessage({
+        provider: destination.provider,
+        channelId: destination.channelId,
+        text,
+      });
+      return;
+    }
+
+    const installation = await db.query.slackInstallations.findFirst({
+      where: eq(slackInstallations.isActive, true),
+      columns: { botAccessToken: true },
+    });
+    if (!installation?.botAccessToken) return;
+    await createSlackWebClient(installation.botAccessToken).chat.postMessage({
+      channel: destination.channelId,
+      text,
+      unfurl_links: false,
+      unfurl_media: false,
+    });
+  } catch (error) {
+    console.error(
+      `[RouterDebug] Failed to post router debug message: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 export async function postRouterDebugMessage(
   params: RouterDebugParams,
 ): Promise<void> {

@@ -1,19 +1,16 @@
-const { getConfiguredRouterDebugSlackChannelIdMock } = vi.hoisted(() => ({
-  getConfiguredRouterDebugSlackChannelIdMock: vi.fn(),
+const { postRouterDebugTextMock } = vi.hoisted(() => ({
+  postRouterDebugTextMock: vi.fn(),
 }));
 
-vi.mock('@roomote/db/server', () => {
-  return {
-    getConfiguredRouterDebugSlackChannelId:
-      getConfiguredRouterDebugSlackChannelIdMock,
-  };
-});
+vi.mock('@roomote/slack', () => ({
+  postRouterDebugText: postRouterDebugTextMock,
+}));
 
 import { postChannelAutoStartRoutingDebug } from './channel-auto-start-routing-debug.js';
 
 describe('postChannelAutoStartRoutingDebug', () => {
   beforeEach(() => {
-    getConfiguredRouterDebugSlackChannelIdMock.mockResolvedValue('CDEBUG');
+    postRouterDebugTextMock.mockResolvedValue(undefined);
   });
 
   it('posts the launch decision reason to the routing debug channel', async () => {
@@ -32,19 +29,13 @@ describe('postChannelAutoStartRoutingDebug', () => {
       taskOutcome: 'started',
     });
 
-    expect(isAppInChannel).toHaveBeenCalledWith('CDEBUG');
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'CDEBUG',
-        text: expect.stringContaining(
-          'llm_reason: Provider outage matches the criteria.',
-        ),
-      }),
+    expect(postRouterDebugTextMock).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'llm_reason: Provider outage matches the criteria.',
+      ),
     );
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining('task_outcome: started'),
-      }),
+    expect(postRouterDebugTextMock).toHaveBeenCalledWith(
+      expect.stringContaining('task_outcome: started'),
     );
   });
 
@@ -64,7 +55,6 @@ describe('postChannelAutoStartRoutingDebug', () => {
       taskOutcomeDetails: 'Launch gate stopped before task startup.',
     });
 
-    expect(isAppInChannel).toHaveBeenCalledWith('CDEBUG');
-    expect(postMessage).not.toHaveBeenCalled();
+    expect(postRouterDebugTextMock).toHaveBeenCalled();
   });
 });
