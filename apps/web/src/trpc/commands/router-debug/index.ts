@@ -1,8 +1,9 @@
 import {
   getRouterDebugSettings,
-  normalizeRouterDebugSlackChannelId,
+  normalizeRouterDebugDestination,
   updateRouterDebugSettings,
 } from '@roomote/db/server';
+import type { CommunicationProvider } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
@@ -19,20 +20,25 @@ export async function getRouterDebugSettingsCommand(auth: UserAuthSuccess) {
 export async function updateRouterDebugSettingsCommand(
   auth: UserAuthSuccess,
   input: {
-    routerDebugSlackChannelId: string | null;
+    provider: CommunicationProvider | null;
+    channelId: string | null;
   },
 ) {
   assertAdmin(auth);
 
-  const routerDebugSlackChannelId = input.routerDebugSlackChannelId
-    ? normalizeRouterDebugSlackChannelId(input.routerDebugSlackChannelId)
-    : null;
+  const destination =
+    input.provider && input.channelId
+      ? normalizeRouterDebugDestination({
+          provider: input.provider,
+          channelId: input.channelId,
+        })
+      : null;
 
-  if (input.routerDebugSlackChannelId && !routerDebugSlackChannelId) {
-    throw new Error('Choose a valid Slack channel.');
+  if ((input.provider || input.channelId) && !destination) {
+    throw new Error('Choose a provider and destination.');
   }
 
-  if (routerDebugSlackChannelId) {
+  if (destination?.provider === 'slack') {
     const slackInstallation = await findActiveSlackInstallationForOrg();
 
     if (!slackInstallation?.botAccessToken) {
@@ -41,7 +47,7 @@ export async function updateRouterDebugSettingsCommand(
 
     const notifier = new SlackNotifier(slackInstallation.botAccessToken);
     const hasChannelAccess = await notifier.isAppInChannel(
-      routerDebugSlackChannelId,
+      destination.channelId,
     );
 
     if (hasChannelAccess !== true) {
@@ -50,7 +56,7 @@ export async function updateRouterDebugSettingsCommand(
   }
 
   await updateRouterDebugSettings({
-    routerDebugSlackChannelId,
+    destination,
   });
 
   return getRouterDebugSettings();

@@ -957,60 +957,6 @@ describe('CommsProviderSection', () => {
     });
   });
 
-  describe('Slack diagnostics channel', () => {
-    it('renders the diagnostics channel control when Slack is installed', () => {
-      state.slackInstallation = { teamName: 'Roomote' };
-      state.slackChannels = [
-        {
-          id: 'CDEBUG',
-          name: 'router-debug',
-          label: '#router-debug',
-          isPrivate: false,
-          isMember: true,
-        },
-      ];
-
-      render(
-        <CommsProviderSection
-          provider={buildSlackProvider({
-            savedSatisfied: true,
-            setupSatisfied: true,
-          })}
-          onSave={vi.fn()}
-          onClear={vi.fn()}
-          savePending={false}
-          clearPending={false}
-        />,
-      );
-
-      expect(screen.getByText('Diagnostics channel')).toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: 'Refresh Slack channels' }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole('button', { name: 'Refresh Slack channels' })
-          .previousElementSibling,
-      ).not.toBeNull();
-    });
-
-    it('hides the diagnostics channel control when Slack is not installed', () => {
-      render(
-        <CommsProviderSection
-          provider={buildSlackProvider({
-            savedSatisfied: true,
-            setupSatisfied: true,
-          })}
-          onSave={vi.fn()}
-          onClear={vi.fn()}
-          savePending={false}
-          clearPending={false}
-        />,
-      );
-
-      expect(screen.queryByText('Diagnostics channel')).not.toBeInTheDocument();
-    });
-  });
-
   describe('Slack client id display', () => {
     it('shows the existing non-secret client id when present', () => {
       render(

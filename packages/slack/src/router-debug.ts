@@ -1,10 +1,19 @@
 import {
+  and,
   db,
   eq,
-  getConfiguredRouterDebugSlackChannelId,
+  getConfiguredRouterDebugDestination,
+  isNotNull,
+  resolveDiscordRuntimeCredentials,
+  resolveTeamsBotRuntimeCredentials,
+  resolveTelegramRuntimeCredentials,
   slackInstallations,
+  teamsInstallations,
 } from '@roomote/db/server';
 import type { RoutingDebugInfo } from '@roomote/cloud-agents/server';
+import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
+import { createTeamsCommunicationProviderFromEnv } from '@roomote/communication/teams-provider';
 import type { ChatPostMessageArguments } from '@slack/web-api';
 
 import { createSlackWebClient } from './web-client';
@@ -88,14 +97,109 @@ function formatSummaryFields(
     .join('\n');
 }
 
+function formatPlainRouterDebugMessage(params: RouterDebugParams): string {
+  const fields = [
+    `Source: ${params.source}`,
+    `Environment: ${params.selectedWorkspace.name}`,
+    params.userRoute ? `User override: ${params.userRoute}` : null,
+    `Message:\n${truncate(params.taskDescription, 500) || '(empty)'}`,
+    `Why this route:\n${truncate(params.reasoning, 2500) || '(none)'}`,
+  ];
+
+  return ['Router diagnostics', ...fields.filter(Boolean)].join('\n\n');
+}
+
+async function postNonSlackRouterDebugMessage(params: {
+  provider: 'discord' | 'teams' | 'telegram';
+  channelId: string;
+  text: string;
+}): Promise<void> {
+  if (params.provider === 'discord') {
+    const credentials = await resolveDiscordRuntimeCredentials();
+    if (!credentials.botToken) return;
+    await new DiscordCommunicationProvider({
+      botToken: credentials.botToken,
+      ...(credentials.applicationId
+        ? { applicationId: credentials.applicationId }
+        : {}),
+    }).postMessage({
+      channelId: params.channelId,
+      text: params.text,
+      textFormat: 'markdown',
+    });
+    return;
+  }
+
+  if (params.provider === 'telegram') {
+    const credentials = await resolveTelegramRuntimeCredentials();
+    if (!credentials.botToken) return;
+    await new TelegramCommunicationProvider({
+      botToken: credentials.botToken,
+    }).postMessage({
+      channelId: params.channelId,
+      text: params.text,
+      textFormat: 'markdown',
+    });
+    return;
+  }
+
+  const credentials = await resolveTeamsBotRuntimeCredentials();
+  const [installation] = await db
+    .select({ serviceUrl: teamsInstallations.serviceUrl })
+    .from(teamsInstallations)
+    .where(
+      and(
+        eq(teamsInstallations.conversationId, params.channelId),
+        eq(teamsInstallations.isActive, true),
+        isNotNull(teamsInstallations.serviceUrl),
+      ),
+    )
+    .limit(1);
+  if (!installation?.serviceUrl) return;
+  const provider = createTeamsCommunicationProviderFromEnv({
+    ...(credentials.botAppId
+      ? { R_TEAMS_BOT_APP_ID: credentials.botAppId }
+      : {}),
+    ...(credentials.botAppPassword
+      ? { R_TEAMS_BOT_APP_PASSWORD: credentials.botAppPassword }
+      : {}),
+    ...(credentials.botTenantId
+      ? { R_TEAMS_BOT_TENANT_ID: credentials.botTenantId }
+      : {}),
+  });
+  await provider?.postMessage({
+    channelId: params.channelId,
+    serviceUrl: installation.serviceUrl,
+    text: params.text,
+    textFormat: 'markdown',
+  });
+}
+
 export async function postRouterDebugMessage(
   params: RouterDebugParams,
 ): Promise<void> {
-  const debugChannelId = await getConfiguredRouterDebugSlackChannelId();
+  const destination = await getConfiguredRouterDebugDestination();
 
-  if (!debugChannelId) {
+  if (!destination) {
     return;
   }
+
+  if (destination.provider !== 'slack') {
+    try {
+      await postNonSlackRouterDebugMessage({
+        provider: destination.provider,
+        channelId: destination.channelId,
+        text: formatPlainRouterDebugMessage(params),
+      });
+    } catch (error) {
+      console.error(
+        `[RouterDebug] Failed to post router debug message: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return;
+  }
+
+  const debugChannelId = destination.channelId;
 
   console.log(
     `[RouterDebug] Called: channelId=${debugChannelId}, source=${params.source}`,

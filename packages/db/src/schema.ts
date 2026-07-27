@@ -137,6 +137,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   id: text('id').notNull().primaryKey().default('default'),
   metadata: jsonb('metadata').notNull().default({}),
   taskModelSettings: jsonb('task_model_settings').$type<TaskModelSettings>(),
+  routerDebugProvider: text('router_debug_provider'),
+  routerDebugChannelId: text('router_debug_channel_id'),
+  // Retained for N-1 rollback compatibility with releases that only support Slack.
   routerDebugSlackChannelId: text('router_debug_slack_channel_id'),
   runtimeModelConfig: jsonb(
     'runtime_model_config',

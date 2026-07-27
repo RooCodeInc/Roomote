@@ -2081,12 +2081,10 @@ export const appRouter = createRouter({
     updateSettings: protectedProcedure
       .input(
         z.object({
-          routerDebugSlackChannelId: z
-            .string()
-            .trim()
-            .min(1)
-            .max(160)
+          provider: z
+            .enum(['slack', 'teams', 'telegram', 'discord'])
             .nullable(),
+          channelId: z.string().trim().min(1).max(255).nullable(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>

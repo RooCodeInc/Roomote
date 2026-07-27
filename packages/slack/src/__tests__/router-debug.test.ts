@@ -21,7 +21,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
-  getConfiguredRouterDebugSlackChannelId: getDebugChannelMock,
+  getConfiguredRouterDebugDestination: getDebugChannelMock,
   slackInstallations: {
     isActive: 'isActive',
   },
@@ -43,7 +43,10 @@ describe('postRouterDebugMessage', () => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    getDebugChannelMock.mockResolvedValue('CDEBUG');
+    getDebugChannelMock.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'CDEBUG',
+    });
     findFirstMock.mockResolvedValue({ botAccessToken: 'xoxb-token' });
     chatPostMessageMock.mockResolvedValue({ ok: true });
   });
