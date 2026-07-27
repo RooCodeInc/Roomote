@@ -47,10 +47,16 @@ function buildEnvelope(
 
 describe('extractShowWidgetFallbackDelivery', () => {
   it('extracts a fallback from a completed first-party widget result', () => {
-    expect(extractShowWidgetFallbackDelivery(buildEnvelope())).toEqual({
+    const widgetUrl = new URL('/task/task-1', process.env.R_APP_URL);
+    widgetUrl.hash = 'msg-1';
+
+    expect(
+      extractShowWidgetFallbackDelivery(buildEnvelope(), 'task-1'),
+    ).toEqual({
       toolCallId: 'call-1',
       title: 'Plan',
       textFallback: 'Plan fallback',
+      widgetUrl: widgetUrl.toString(),
     });
   });
 
@@ -62,7 +68,10 @@ describe('extractShowWidgetFallbackDelivery', () => {
     { output: JSON.stringify({ success: true, shown: true }) },
   ])('rejects non-deliverable widget payloads: %o', (payloadOverrides) => {
     expect(
-      extractShowWidgetFallbackDelivery(buildEnvelope(payloadOverrides)),
+      extractShowWidgetFallbackDelivery(
+        buildEnvelope(payloadOverrides),
+        'task-1',
+      ),
     ).toBeNull();
   });
 });
