@@ -13,6 +13,7 @@ import { useTRPC } from '@/trpc/client';
 import { NavbarHeader, SideNav, FramedSurface } from '@/components/layout';
 import { CommandPaletteProvider } from '@/components/layout/CommandPaletteContext';
 import { CommandPalette } from '@/components/layout/CommandPalette';
+import { McpOAuthResultFeedback } from '@/components/layout/McpOAuthResultFeedback';
 import { ManagedAccessBanner } from './ManagedAccessBanner';
 
 export default function AuthenticatedLayoutClient({
@@ -92,6 +93,7 @@ function AuthenticatedLayoutShell({ children }: { children: React.ReactNode }) {
 
   return (
     <CommandPaletteProvider>
+      <McpOAuthResultFeedback />
       <div className="flex h-effective-viewport min-h-0 flex-col bg-card">
         <div className="mx-2 rounded-b-2xl overflow-clip">
           <ManagedAccessBanner />

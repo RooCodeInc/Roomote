@@ -399,49 +399,6 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('explains a Linear callback failure and clears transient OAuth params', () => {
-    state.searchParams =
-      'service=linear&mcp=error&reason=linear_metadata_failed';
-    const replaceState = vi.spyOn(window.history, 'replaceState');
-    window.history.replaceState(
-      null,
-      '',
-      '/settings/integrations?service=linear&mcp=error&reason=linear_metadata_failed',
-    );
-
-    render(<Integrations />);
-
-    expect(toast.error).toHaveBeenCalledWith(
-      'Roomote connected to Linear but could not verify the workspace. Try again.',
-    );
-    expect(replaceState).toHaveBeenLastCalledWith(
-      null,
-      '',
-      '/settings/integrations?service=linear',
-    );
-  });
-
-  it('confirms a successful Linear callback and clears transient OAuth params', () => {
-    state.searchParams = 'service=linear&mcp=connected';
-    const replaceState = vi.spyOn(window.history, 'replaceState');
-    window.history.replaceState(
-      null,
-      '',
-      '/settings/integrations?service=linear&mcp=connected',
-    );
-
-    render(<Integrations />);
-
-    expect(toast.success).toHaveBeenCalledWith(
-      'Linear connected successfully.',
-    );
-    expect(replaceState).toHaveBeenLastCalledWith(
-      null,
-      '',
-      '/settings/integrations?service=linear',
-    );
-  });
-
   it('sorts integrations alphabetically and splits installed vs available', () => {
     const sorted = sortIntegrationItems([
       { id: 'sentry', name: 'Sentry', enabled: false },

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { type NextRequest, NextResponse } from 'next/server';
 
 import {
@@ -24,6 +25,10 @@ import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
 import { hydrateLinearMcpConnectionAfterOauth } from '@/lib/server/mcp-linear';
+import type {
+  McpOAuthErrorReason,
+  McpOAuthResult,
+} from '@/lib/mcp-oauth-result';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +36,9 @@ export const dynamic = 'force-dynamic';
 
 const DEFAULT_REDIRECT_PATH = '/settings';
 const REDIRECT_STATE_DELIMITER = '~';
+const CALLBACK_PATH = '/api/mcp-oauth/callback';
+const CONTINUATION_COOKIE_PREFIX = 'roomote-mcp-oauth-continuation-';
+const CONTINUATION_MAX_AGE_SECONDS = 10 * 60;
 
 type McpOAuthCallbackStage =
   | 'state_validation'
@@ -42,7 +50,9 @@ type McpOAuthCallbackStage =
   | 'linear_metadata'
   | 'deployment_enablement';
 
-function getCallbackFailureReason(stage: McpOAuthCallbackStage): string {
+function getCallbackFailureReason(
+  stage: McpOAuthCallbackStage,
+): McpOAuthErrorReason {
   switch (stage) {
     case 'provider_discovery':
       return 'provider_metadata_failed';
@@ -94,34 +104,67 @@ function readRedirectPathFromState(state: string | null): string {
   }
 }
 
-function withMcpQuery(
+function getContinuationCookieName(state: string): string {
+  const stateHash = createHash('sha256')
+    .update(state)
+    .digest('hex')
+    .slice(0, 16);
+  return `${CONTINUATION_COOKIE_PREFIX}${stateHash}`;
+}
+
+function getContinuationCookieOptions(webUrl: string) {
+  return {
+    httpOnly: true,
+    sameSite: 'lax' as const,
+    secure: new URL(webUrl).protocol === 'https:',
+    path: CALLBACK_PATH,
+  };
+}
+
+function redirectWithMcpResult(
   webUrl: string,
   redirectPath: string,
-  mcpStatus: 'error' | 'connected',
-  reason?: string,
-) {
+  result: McpOAuthResult,
+  state: string | null,
+): NextResponse {
   const url = new URL(redirectPath, webUrl);
-  url.searchParams.set('mcp', mcpStatus);
-  if (reason) {
-    url.searchParams.set('reason', reason);
+  url.searchParams.set('mcp', result.status);
+  if (result.status === 'error' && result.reason) {
+    url.searchParams.set('reason', result.reason);
   }
-  return url;
+
+  const response = NextResponse.redirect(url);
+  if (state) {
+    response.cookies.set(getContinuationCookieName(state), '', {
+      ...getContinuationCookieOptions(webUrl),
+      maxAge: 0,
+    });
+  }
+  return response;
 }
 
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
-  const code = request.nextUrl.searchParams.get('code');
   const state = request.nextUrl.searchParams.get('state');
+  const queryCode = request.nextUrl.searchParams.get('code');
+  const isResume = request.nextUrl.searchParams.get('resume') === '1';
+  const code =
+    queryCode ??
+    (state && isResume
+      ? (request.cookies.get(getContinuationCookieName(state))?.value ?? null)
+      : null);
   const error = request.nextUrl.searchParams.get('error');
   const errorDescription =
     request.nextUrl.searchParams.get('error_description');
 
   const webUrl = getPublicAppUrl(webEnv);
   const redirectPath = readRedirectPathFromState(state);
+  const redirectToResult = (result: McpOAuthResult) =>
+    redirectWithMcpResult(webUrl, redirectPath, result, state);
 
   // Handle OAuth errors
   if (error) {
-    const reason =
+    const reason: McpOAuthErrorReason =
       error === 'access_denied' ? 'access_denied' : 'provider_error';
     logger.warn(
       {
@@ -137,9 +180,7 @@ export async function GET(request: NextRequest) {
         const oauthState = await consumeOAuthState(state);
         if (oauthState) {
           await updateAuthStatus(oauthState.connectionId, 'error');
-          return NextResponse.redirect(
-            withMcpQuery(webUrl, redirectPath, 'error', reason),
-          );
+          return redirectToResult({ status: 'error', reason });
         }
       } catch (e) {
         logger.error(
@@ -152,9 +193,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'error', reason),
-    );
+    return redirectToResult({ status: 'error', reason });
   }
 
   // Validate required parameters
@@ -168,9 +207,7 @@ export async function GET(request: NextRequest) {
       },
       'MCP OAuth callback was rejected',
     );
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'error', 'missing_params'),
-    );
+    return redirectToResult({ status: 'error', reason: 'missing_params' });
   }
 
   const authResult = await authorize();
@@ -187,10 +224,21 @@ export async function GET(request: NextRequest) {
       'MCP OAuth callback requires sign-in before it can continue',
     );
 
-    const callbackReturnPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+    const callbackReturnUrl = new URL(CALLBACK_PATH, webUrl);
+    callbackReturnUrl.searchParams.set('state', state);
+    callbackReturnUrl.searchParams.set('resume', '1');
     const signInUrl = new URL('/sign-in', webUrl);
-    signInUrl.searchParams.set('redirect_url', callbackReturnPath);
-    return NextResponse.redirect(signInUrl);
+    signInUrl.searchParams.set(
+      'redirect_url',
+      `${callbackReturnUrl.pathname}${callbackReturnUrl.search}`,
+    );
+    const response = NextResponse.redirect(signInUrl);
+    response.headers.set('Cache-Control', 'no-store');
+    response.cookies.set(getContinuationCookieName(state), code, {
+      ...getContinuationCookieOptions(webUrl),
+      maxAge: CONTINUATION_MAX_AGE_SECONDS,
+    });
+    return response;
   }
   const { userId } = authResult;
 
@@ -209,9 +257,7 @@ export async function GET(request: NextRequest) {
         },
         'MCP OAuth callback was rejected',
       );
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'invalid_state'),
-      );
+      return redirectToResult({ status: 'error', reason: 'invalid_state' });
     }
 
     const resolvedConnectionId = oauthState.connectionId;
@@ -222,24 +268,18 @@ export async function GET(request: NextRequest) {
       where: eq(mcpConnections.id, resolvedConnectionId),
     });
     if (!connection) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_found' });
     }
     integrationId = connection.mcpId;
     connectionRole = connection.connectionRole;
 
     const integration = getMcpIntegration(connection.mcpId);
     if (!integration) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_found' });
     }
 
     if (!isSelfServeMcpIntegration(integration) || !integration.url) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_found' });
     }
 
     const requiresOrgAdmin = isDeploymentScopedMcpIntegration(
@@ -252,22 +292,18 @@ export async function GET(request: NextRequest) {
       (requiresOrgAdmin && !isAdmin) ||
       (!requiresOrgAdmin && connection.userId !== userId)
     ) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_found' });
     }
 
     failureStage = 'client_lookup';
     const clientInfo = await getClientInformation(resolvedConnectionId);
     if (!clientInfo) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_registered'),
-      );
+      return redirectToResult({ status: 'error', reason: 'not_registered' });
     }
 
     failureStage = 'provider_discovery';
     const serverMetadata = await discoverOAuthEndpoints(integration.url);
-    const redirectUri = new URL('/api/mcp-oauth/callback', webUrl).toString();
+    const redirectUri = new URL(CALLBACK_PATH, webUrl).toString();
 
     failureStage = 'token_exchange';
     const tokens = await exchangeCodeForTokens(
@@ -310,9 +346,7 @@ export async function GET(request: NextRequest) {
         });
     }
 
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'connected'),
-    );
+    return redirectToResult({ status: 'connected' });
   } catch (error) {
     const reason = getCallbackFailureReason(failureStage);
     logger.error(
@@ -344,8 +378,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'error', reason),
-    );
+    return redirectToResult({ status: 'error', reason });
   }
 }

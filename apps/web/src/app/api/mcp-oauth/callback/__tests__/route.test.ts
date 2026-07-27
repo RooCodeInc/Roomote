@@ -180,35 +180,55 @@ describe('GET /api/mcp-oauth/callback', () => {
     );
   });
 
-  it('signs in on the configured host and resumes the unconsumed callback', async () => {
+  it('resumes after sign-in without putting the authorization code in the URL', async () => {
     authorizeMock.mockResolvedValueOnce({ success: false });
-    const request = new NextRequest(
-      'https://legacy.example/api/mcp-oauth/callback?code=auth-code&state=state-1',
-    );
+    const request = buildRequest('?code=auth-code&state=state-1');
 
     const response = await GET(request);
 
     expect(response.headers.get('location')).toBe(
-      'https://customer.example/sign-in?redirect_url=%2Fapi%2Fmcp-oauth%2Fcallback%3Fcode%3Dauth-code%26state%3Dstate-1',
+      'https://customer.example/sign-in?redirect_url=%2Fapi%2Fmcp-oauth%2Fcallback%3Fstate%3Dstate-1%26resume%3D1',
     );
+    expect(response.headers.get('location')).not.toContain('auth-code');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const setCookie = response.headers.get('set-cookie');
+    expect(setCookie).toContain('roomote-mcp-oauth-continuation-');
+    expect(setCookie).toContain('auth-code');
+    expect(setCookie).toContain('Path=/api/mcp-oauth/callback');
+    expect(setCookie).toContain('Max-Age=600');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('Secure');
+    expect(setCookie).toContain('SameSite=lax');
     expect(consumeOAuthStateMock).not.toHaveBeenCalled();
     expect(loggerWarnMock).toHaveBeenCalledWith(
       {
         event: 'mcp_oauth_callback_auth_required',
-        requestHost: 'legacy.example',
+        requestHost: 'customer.example',
         configuredCallbackHost: 'customer.example',
-        callbackHostMatchesRequest: false,
+        callbackHostMatchesRequest: true,
       },
       'MCP OAuth callback requires sign-in before it can continue',
     );
 
+    const continuationCookie = setCookie?.split(';', 1)[0];
     const resumedResponse = await GET(
-      buildRequest('?code=auth-code&state=state-1'),
+      new NextRequest(
+        'https://customer.example/api/mcp-oauth/callback?state=state-1&resume=1',
+        { headers: { cookie: continuationCookie ?? '' } },
+      ),
     );
     expect(resumedResponse.headers.get('location')).toBe(
       'https://customer.example/settings?mcp=connected',
     );
+    expect(resumedResponse.headers.get('set-cookie')).toContain('Max-Age=0');
     expect(consumeOAuthStateMock).toHaveBeenCalledTimes(1);
+    expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
+      'https://mcp.linear.app/token',
+      'auth-code',
+      'verifier-1',
+      { client_id: 'client-1' },
+      PUBLIC_CALLBACK,
+    );
     expect(storeTokensMock).toHaveBeenCalledWith(CONNECTION_ID, {
       access_token: 'access-token',
       refresh_token: 'refresh-token',
