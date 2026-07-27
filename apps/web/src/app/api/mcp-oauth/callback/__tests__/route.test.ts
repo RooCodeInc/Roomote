@@ -11,6 +11,8 @@ const {
   hydrateLinearMcpConnectionAfterOauthMock,
   isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegrationMock,
+  loggerErrorMock,
+  loggerWarnMock,
   mcpConnectionsFindFirstMock,
   storeTokensMock,
   updateAuthStatusMock,
@@ -25,6 +27,8 @@ const {
   hydrateLinearMcpConnectionAfterOauthMock: vi.fn(),
   isDeploymentScopedMcpIntegrationMock: vi.fn(),
   isSelfServeMcpIntegrationMock: vi.fn(),
+  loggerErrorMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
   storeTokensMock: vi.fn(),
   updateAuthStatusMock: vi.fn(),
@@ -41,6 +45,13 @@ vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
 vi.mock('@/lib/server/mcp-linear', () => ({
   hydrateLinearMcpConnectionAfterOauth:
     hydrateLinearMcpConnectionAfterOauthMock,
+}));
+
+vi.mock('@/lib/server/logger', () => ({
+  logger: {
+    error: loggerErrorMock,
+    warn: loggerWarnMock,
+  },
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -169,6 +180,61 @@ describe('GET /api/mcp-oauth/callback', () => {
     );
   });
 
+  it('resumes after sign-in without putting the authorization code in the URL', async () => {
+    authorizeMock.mockResolvedValueOnce({ success: false });
+    const request = buildRequest('?code=auth-code&state=state-1');
+
+    const response = await GET(request);
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/sign-in?redirect_url=%2Fapi%2Fmcp-oauth%2Fcallback%3Fstate%3Dstate-1%26resume%3D1',
+    );
+    expect(response.headers.get('location')).not.toContain('auth-code');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const setCookie = response.headers.get('set-cookie');
+    expect(setCookie).toContain('roomote-mcp-oauth-continuation-');
+    expect(setCookie).toContain('auth-code');
+    expect(setCookie).toContain('Path=/api/mcp-oauth/callback');
+    expect(setCookie).toContain('Max-Age=600');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('Secure');
+    expect(setCookie).toContain('SameSite=lax');
+    expect(consumeOAuthStateMock).not.toHaveBeenCalled();
+    expect(loggerWarnMock).toHaveBeenCalledWith(
+      {
+        event: 'mcp_oauth_callback_auth_required',
+        requestHost: 'customer.example',
+        configuredCallbackHost: 'customer.example',
+        callbackHostMatchesRequest: true,
+      },
+      'MCP OAuth callback requires sign-in before it can continue',
+    );
+
+    const continuationCookie = setCookie?.split(';', 1)[0];
+    const resumedResponse = await GET(
+      new NextRequest(
+        'https://customer.example/api/mcp-oauth/callback?state=state-1&resume=1',
+        { headers: { cookie: continuationCookie ?? '' } },
+      ),
+    );
+    expect(resumedResponse.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=connected',
+    );
+    expect(resumedResponse.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect(consumeOAuthStateMock).toHaveBeenCalledTimes(1);
+    expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
+      'https://mcp.linear.app/token',
+      'auth-code',
+      'verifier-1',
+      { client_id: 'client-1' },
+      PUBLIC_CALLBACK,
+    );
+    expect(storeTokensMock).toHaveBeenCalledWith(CONNECTION_ID, {
+      access_token: 'access-token',
+      refresh_token: 'refresh-token',
+    });
+  });
+
   it('redirects oauth errors to the public settings host', async () => {
     const response = await GET(
       buildRequest(
@@ -178,9 +244,70 @@ describe('GET /api/mcp-oauth/callback', () => {
 
     expect(response.status).toBe(307);
     expect(response.headers.get('location')).toBe(
-      'https://customer.example/settings?mcp=error',
+      'https://customer.example/settings?mcp=error&reason=access_denied',
     );
     expect(updateAuthStatusMock).toHaveBeenCalledWith(CONNECTION_ID, 'error');
     expect(exchangeCodeForTokensMock).not.toHaveBeenCalled();
+    expect(loggerWarnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'mcp_oauth_provider_error',
+        providerError: 'access_denied',
+        hasErrorDescription: true,
+      }),
+      'MCP OAuth provider returned an error',
+    );
+  });
+
+  it('surfaces token exchange failures with a safe reason and stage', async () => {
+    exchangeCodeForTokensMock.mockRejectedValueOnce(
+      new Error('provider response omitted'),
+    );
+
+    const response = await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=token_exchange_failed',
+    );
+    expect(updateAuthStatusMock).toHaveBeenCalledWith(CONNECTION_ID, 'error');
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'mcp_oauth_callback_failed',
+        failureStage: 'token_exchange',
+        reason: 'token_exchange_failed',
+        integrationId: 'linear',
+        connectionId: CONNECTION_ID,
+        errorName: 'Error',
+      }),
+      'MCP OAuth callback failed',
+    );
+    expect(JSON.stringify(loggerErrorMock.mock.calls)).not.toContain(
+      'provider response omitted',
+    );
+  });
+
+  it('distinguishes Linear workspace metadata failures after token storage', async () => {
+    hydrateLinearMcpConnectionAfterOauthMock.mockRejectedValueOnce(
+      new Error('viewer lookup failed'),
+    );
+
+    const response = await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(storeTokensMock).toHaveBeenCalledWith(CONNECTION_ID, {
+      access_token: 'access-token',
+      refresh_token: 'refresh-token',
+    });
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=linear_metadata_failed',
+    );
+    expect(updateAuthStatusMock).toHaveBeenCalledWith(CONNECTION_ID, 'error');
+    expect(loggerErrorMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'mcp_oauth_callback_failed',
+        failureStage: 'linear_metadata',
+        reason: 'linear_metadata_failed',
+        integrationId: 'linear',
+      }),
+      'MCP OAuth callback failed',
+    );
   });
 });
