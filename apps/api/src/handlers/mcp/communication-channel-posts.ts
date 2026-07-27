@@ -28,12 +28,6 @@ type ParsedChannelPostBody = {
   images: Array<{ artifactId: string }>;
 };
 
-/**
- * Teams and Telegram have no channel-membership model equivalent to Slack's
- * `isAppInChannel`, so cross-surface channel posts are restricted to the
- * conversation the task was launched from — the only channel whose delivery
- * context (and, for Teams, serviceUrl) the task legitimately holds.
- */
 function isOwnChannel(requested: string, jobChannelId: string | null): boolean {
   return Boolean(jobChannelId) && requested.replace(/^#/, '') === jobChannelId;
 }
@@ -52,16 +46,7 @@ async function sendTelegramChannelPost(params: {
   const jobChannelId = getCommunicationChannelFromTaskPayload(
     params.taskRun.payload,
   );
-
-  if (!isOwnChannel(params.parsedBody.channel, jobChannelId)) {
-    return jsonResponse(
-      {
-        error:
-          'Telegram channel posts are only available for the chat this task was launched from',
-      },
-      403,
-    );
-  }
+  const isOriginChannel = isOwnChannel(params.parsedBody.channel, jobChannelId);
 
   const provider =
     await createTelegramCommunicationProviderFromRuntimeCredentials();
@@ -89,15 +74,17 @@ async function sendTelegramChannelPost(params: {
     );
   }
 
-  // Without an explicit thread target, keep the post in the task's own topic
-  // so it lands next to the conversation instead of the chat's General topic.
+  // Preserve the task topic only for its originating chat. A target chat's
+  // topic is unknown, so cross-channel posts remain standalone by default.
   const threadId =
     params.parsedBody.threadTs ??
-    getCommunicationThreadIdFromTaskPayload(params.taskRun.payload) ??
+    (isOriginChannel
+      ? getCommunicationThreadIdFromTaskPayload(params.taskRun.payload)
+      : undefined) ??
     undefined;
 
   const reply = await provider.postMessage({
-    channelId: jobChannelId!,
+    channelId: params.parsedBody.channel,
     ...(threadId ? { threadId } : {}),
     ...(text ? { text } : {}),
     textFormat: 'markdown',
@@ -106,7 +93,7 @@ async function sendTelegramChannelPost(params: {
 
   return jsonResponse({
     messageTs: reply.messageId,
-    channelId: jobChannelId,
+    channelId: params.parsedBody.channel,
   });
 }
 
@@ -120,16 +107,6 @@ async function sendTeamsChannelPost(params: {
   const serviceUrl = getCommunicationServiceUrlFromTaskPayload(
     params.taskRun.payload,
   );
-
-  if (!isOwnChannel(params.parsedBody.channel, jobChannelId)) {
-    return jsonResponse(
-      {
-        error:
-          'Teams channel posts are only available for the conversation this task was launched from',
-      },
-      403,
-    );
-  }
 
   if (!serviceUrl) {
     return jsonResponse(
@@ -169,7 +146,7 @@ async function sendTeamsChannelPost(params: {
 
   const threadTs = params.parsedBody.threadTs;
   const reply = await provider.postMessage({
-    channelId: jobChannelId!,
+    channelId: params.parsedBody.channel,
     serviceUrl,
     ...(threadTs ? { threadId: threadTs, replyToMessageId: threadTs } : {}),
     ...(text ? { text } : {}),
@@ -179,7 +156,7 @@ async function sendTeamsChannelPost(params: {
 
   return jsonResponse({
     messageTs: reply.messageId,
-    channelId: jobChannelId,
+    channelId: params.parsedBody.channel,
   });
 }
 

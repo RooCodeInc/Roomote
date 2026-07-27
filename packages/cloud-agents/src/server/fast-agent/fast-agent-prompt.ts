@@ -65,7 +65,7 @@ ${buildRoomoteStyleGuidanceSection()}
 - Do not use emoji.
 - Lead with the answer, not a preamble or a recap of the question.
 <slack_modern_markdown>
-Slack replies from \`send_chat_reply\`, \`post_to_slack_channel\`, and fast-agent final answers render in Slack \`markdown\` blocks, not legacy-limited mrkdwn.
+    Slack replies from \`send_chat_reply\`, \`post_to_channel\`, and fast-agent final answers render in Slack \`markdown\` blocks, not legacy-limited mrkdwn.
 
 Use modern Markdown as a readability tool when it improves scanability. Supported formatting includes:
 - headings: \`#\`, \`##\`, \`###\`

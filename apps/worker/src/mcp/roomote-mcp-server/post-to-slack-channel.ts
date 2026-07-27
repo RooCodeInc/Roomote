@@ -83,9 +83,8 @@ export async function handlePostToSlackChannel(
 
 /**
  * Surface-generic channel post. Slack targets get Slack channel-name
- * normalization; Teams conversation ids and Telegram chat ids are opaque and
- * pass through untouched (the API restricts them to the task's own
- * conversation).
+ * normalization; every other provider receives its opaque channel ID
+ * unchanged for provider-specific authorization and delivery.
  */
 export async function handlePostToChannel(
   input: ChannelPostInput,
@@ -95,7 +94,7 @@ export async function handlePostToChannel(
   const provider =
     process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim().toLowerCase();
 
-  if (provider !== 'teams' && provider !== 'telegram') {
+  if (!provider || provider === 'slack') {
     return handlePostToSlackChannel(input, artifactConfig, roomoteConfig);
   }
 

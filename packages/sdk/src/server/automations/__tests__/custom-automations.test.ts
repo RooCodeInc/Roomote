@@ -25,7 +25,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../destination', () => ({
   buildDestinationPromptContext: vi.fn(() => ({
     channelTag: 'slack_channel_id',
-    postToolName: 'post_to_slack_channel',
+    postToolName: 'post_to_channel',
     surfaceLabel: 'Slack',
   })),
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),

@@ -198,7 +198,7 @@ describe('roomote MCP tool descriptions', () => {
       'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof; for Slack-started tasks when visual-proof auto-post is enabled, visual-proof uploads are posted back to the originating Slack thread automatically.',
     );
     expect(artifactsTool.config.description).not.toContain(
-      'After uploading image files, if `send_chat_reply` or `post_to_slack_channel` is available, pass the returned artifact IDs to those tools via `imageArtifactIds` so the user sees them directly in Slack.',
+      'After uploading image files, if `send_chat_reply` or `post_to_channel` is available, pass the returned artifact IDs to those tools via `imageArtifactIds` so the user sees them directly in Slack.',
     );
   });
 
@@ -631,21 +631,19 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('documents Slack channel post formatting on the text parameter', async () => {
+  it('documents the provider-neutral channel post tool', async () => {
     const { registeredTools } = await importRoomoteMcpServer({
       ROOMOTE_TASK_ID: 'task_123',
+      ROOMOTE_SLACK_CHANNEL: 'C123',
     });
-    const postTool = getRegisteredTool(
-      registeredTools,
-      'post_to_slack_channel',
-    );
+    const postTool = getRegisteredTool(registeredTools, 'post_to_channel');
     const textField = getInputSchemaField(postTool, 'text');
 
     expect(textField.description).toBe(
-      'Markdown text to post. Slack messages posted by this tool render in Slack `markdown` blocks. Use modern Markdown as a readability tool when it improves scanability; headings, blockquotes, fenced code blocks, tables, links, and inline formatting are allowed when they make the reply clearer. Lead with the answer or takeaway, use short paragraphs with blank lines between them, and put each list item on its own line. Reserve backticks for literal code, not emphasis.',
+      'Markdown text to post. Lead with the answer or takeaway.',
     );
     expect(postTool.config.description).toBe(
-      'Slack-visible: posts to a Slack channel that the Roomote Slack app is already a member of. Use this only when the current user explicitly asks you to send or relay an update to a different Slack channel or thread than the originating thread. Do not use it to answer a customer, third party, or linked Slack conversation just because that conversation appears in context. The channel can be a channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>. Slack messages posted by this tool render in Slack `markdown` blocks. Use modern Markdown as a readability tool when it improves scanability; headings, blockquotes, fenced code blocks, tables, links, and inline formatting are allowed when they make the reply clearer. When the post mentions actionable code references, link the important ones with short-label GitHub blob permalinks at the exact inspected revision, add resolvable line anchors, and mention the file or symbol in prose rather than inventing a link. The tool will not join channels for you.',
+      'Slack-visible: posts a new standalone message into a Slack channel the Roomote app can access. Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. Pass a channel ID (Slack also accepts a channel name or mention). Cross-channel posts are subject to provider-specific authorization and target support. The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
     );
     expect(postTool.config.description).not.toContain(
       '<slack_modern_markdown>',

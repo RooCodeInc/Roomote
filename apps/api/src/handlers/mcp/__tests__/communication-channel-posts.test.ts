@@ -133,14 +133,22 @@ describe('maybeSendCommunicationChannelPost', () => {
     });
   });
 
-  it('rejects Telegram posts targeting a different chat', async () => {
+  it('posts to another Telegram chat without reusing the origin topic', async () => {
     const response = await maybeSendCommunicationChannelPost({
       taskRun: telegramTaskRun,
       parsedBody: { channel: '-1009999999999', text: 'update', images: [] },
     });
 
-    expect(response!.status).toBe(403);
-    expect(telegramPostMessageMock).not.toHaveBeenCalled();
+    expect(telegramPostMessageMock).toHaveBeenCalledWith({
+      channelId: '-1009999999999',
+      text: 'update',
+      textFormat: 'markdown',
+      images: [],
+    });
+    await expect(jsonBody(response!)).resolves.toEqual({
+      messageTs: '901',
+      channelId: '-1009999999999',
+    });
   });
 
   it('returns 503 when the Telegram bot token is not configured', async () => {
@@ -177,14 +185,23 @@ describe('maybeSendCommunicationChannelPost', () => {
     });
   });
 
-  it('rejects Teams posts targeting a different conversation', async () => {
+  it('posts to another Teams conversation with the task serviceUrl', async () => {
     const response = await maybeSendCommunicationChannelPost({
       taskRun: teamsTaskRun,
       parsedBody: { channel: '19:other@thread.v2', text: 'update', images: [] },
     });
 
-    expect(response!.status).toBe(403);
-    expect(teamsPostMessageMock).not.toHaveBeenCalled();
+    expect(teamsPostMessageMock).toHaveBeenCalledWith({
+      channelId: '19:other@thread.v2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      text: 'update',
+      textFormat: 'markdown',
+      images: [],
+    });
+    await expect(jsonBody(response!)).resolves.toEqual({
+      messageTs: 'activity-1',
+      channelId: '19:other@thread.v2',
+    });
   });
 
   it('returns 503 when the task payload has no serviceUrl', async () => {

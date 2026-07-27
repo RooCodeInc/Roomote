@@ -383,6 +383,25 @@ describe('handlePostToChannel', () => {
     });
   });
 
+  it('passes Discord channel ids through untouched', async () => {
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER = 'discord';
+    vi.mocked(postToSlackChannel).mockResolvedValue({
+      messageTs: 'message-1',
+      channelId: '1527713580311642272',
+    });
+
+    await handlePostToChannel(
+      { taskId: 'task-1', channel: '1527713580311642272', text: 'update' },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+      channel: '1527713580311642272',
+      text: 'update',
+    });
+  });
+
   it('falls back to Slack channel normalization without a chat provider', async () => {
     delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
     vi.mocked(postToSlackChannel).mockResolvedValue({
