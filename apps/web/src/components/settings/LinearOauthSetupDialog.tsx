@@ -10,7 +10,6 @@ import {
   Alert,
   AlertDescription,
   Button,
-  Copy,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -52,31 +51,6 @@ const EMPTY_FORM: LinearOauthForm = {
   clientSecret: '',
   webhookSecret: '',
 };
-
-function EndpointField({ label, value }: { label: string; value: string }) {
-  const copyValue = async () => {
-    await navigator.clipboard.writeText(value);
-    toast.success(`${label} copied.`);
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      <div className="flex gap-2">
-        <Input value={value} readOnly className="font-mono text-xs" />
-        <Button
-          type="button"
-          size="icon"
-          variant="outline"
-          aria-label={`Copy ${label.toLowerCase()}`}
-          onClick={copyValue}
-        >
-          <Copy />
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 function CredentialField({
   id,
@@ -207,9 +181,9 @@ export function LinearOauthSetupDialog({
                   Create a Linear app for this deployment.
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  Self-hosted Roomote needs its own Linear app. The manifest
-                  pre-fills the callback, webhook, and agent event settings.
-                  Review it in Linear, then create the app.
+                  Roomote needs its own Linear app. The manifest pre-fills the
+                  callback, webhook, and agent event settings. Review it in
+                  Linear, then create the app.
                 </p>
               </div>
               <Button
@@ -227,10 +201,6 @@ export function LinearOauthSetupDialog({
                 Create Linear app
                 <ExternalLink />
               </Button>
-              <div className="grid gap-3">
-                <EndpointField label="Callback URL" value={setup.callbackUrl} />
-                <EndpointField label="Webhook URL" value={setup.webhookUrl} />
-              </div>
             </section>
 
             <section className="space-y-3">

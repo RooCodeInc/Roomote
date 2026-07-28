@@ -67,6 +67,7 @@ function buildLinearOauthSetup(publicOrigin: string) {
     distribution: 'private',
     display: {
       description: DEPLOYMENT_APP_DESCRIPTION,
+      iconUrl: new URL('/roomote-logo.png', publicOrigin).toString(),
     },
     developer: { name: 'Roomote' },
     oauth: {

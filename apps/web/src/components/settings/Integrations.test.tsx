@@ -496,6 +496,8 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('button', { name: 'Create Linear app' }),
     ).toBeInTheDocument();
+    expect(screen.queryByText('Callback URL')).not.toBeInTheDocument();
+    expect(screen.queryByText('Webhook URL')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Client ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Client secret')).toBeInTheDocument();
     expect(screen.getByLabelText('Webhook secret')).toBeInTheDocument();
