@@ -23,7 +23,11 @@ import {
 import { buildTaskStartingText } from '@roomote/communication/chat-messages';
 import { getRedis } from '@roomote/redis';
 import { postRouterDebugMessage } from '@roomote/slack';
-import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
+import {
+  db,
+  resolveDeploymentEnvVar,
+  setTrustedRunActingUserOnSuccess,
+} from '@roomote/db/server';
 import {
   createMcpOauthReplay,
   findLinearDeploymentMcpConnectionByIdentity,
@@ -302,7 +306,11 @@ linear.post('/', async (c) => {
 
   // Verify webhook signature
   const signature = headers['linear-signature'] ?? '';
-  const webhookSecret = Env.R_LINEAR_WEBHOOK_SECRET;
+  const webhookSecret = await resolveDeploymentEnvVar(
+    'R_LINEAR_WEBHOOK_SECRET',
+    db,
+    { R_LINEAR_WEBHOOK_SECRET: Env.R_LINEAR_WEBHOOK_SECRET },
+  );
 
   if (!webhookSecret) {
     console.error('[LinearWebhook] R_LINEAR_WEBHOOK_SECRET not configured');

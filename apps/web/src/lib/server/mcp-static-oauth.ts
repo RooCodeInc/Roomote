@@ -155,6 +155,19 @@ function getStaticOauthEnvCandidates(
   ];
 }
 
+export function getStaticOauthEnvKeys(
+  integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
+): string[] {
+  return Array.from(
+    new Set(
+      getStaticOauthEnvCandidates(integration).flatMap((candidate) => [
+        candidate.clientIdEnv,
+        ...(candidate.clientSecretEnv ? [candidate.clientSecretEnv] : []),
+      ]),
+    ),
+  );
+}
+
 function resolveStaticOauthIntegration(
   env: unknown,
   integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,

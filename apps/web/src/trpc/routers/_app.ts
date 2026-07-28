@@ -112,6 +112,8 @@ import {
 import {
   getLinearInstallationCommand,
   disconnectLinearAppCommand,
+  getLinearOauthSetupCommand,
+  saveLinearOauthSetupCommand,
 } from '../commands/linear';
 import { getTeamsIntegrationStatusCommand } from '../commands/teams';
 import {
@@ -1146,6 +1148,22 @@ export const appRouter = createRouter({
     disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectLinearAppCommand(auth),
     ),
+
+    oauthSetup: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinearOauthSetupCommand(auth),
+    ),
+
+    saveOauthSetup: protectedProcedure
+      .input(
+        z.object({
+          clientId: z.string().max(1_000),
+          clientSecret: z.string().max(10_000),
+          webhookSecret: z.string().max(10_000),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveLinearOauthSetupCommand(auth, input),
+      ),
   }),
 
   teams: createRouter({

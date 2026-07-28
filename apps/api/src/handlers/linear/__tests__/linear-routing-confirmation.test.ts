@@ -13,6 +13,7 @@ const {
   findLinearUserMcpConnectionByIdentityMock,
   getValidAccessTokenMock,
   createMcpOauthReplayMock,
+  resolveDeploymentEnvVarMock,
 } = vi.hoisted(() => ({
   redisMock: {
     eval: vi.fn().mockResolvedValue(null),
@@ -31,6 +32,7 @@ const {
   findLinearUserMcpConnectionByIdentityMock: vi.fn(),
   getValidAccessTokenMock: vi.fn(),
   createMcpOauthReplayMock: vi.fn(),
+  resolveDeploymentEnvVarMock: vi.fn().mockResolvedValue('test-linear-secret'),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -154,6 +156,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     },
     linearAuthTokens: {},
     webhooks: { id: 'id', deliveryId: 'deliveryId' },
+    resolveDeploymentEnvVar: resolveDeploymentEnvVarMock,
     eq: vi.fn(),
     and: vi.fn(),
   };
@@ -293,6 +296,11 @@ describe('linear routed task startup', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(resolveDeploymentEnvVarMock).toHaveBeenCalledWith(
+      'R_LINEAR_WEBHOOK_SECRET',
+      db,
+      { R_LINEAR_WEBHOOK_SECRET: 'test-linear-secret' },
+    );
     expect(emitThought).toHaveBeenCalledWith(
       'session-1',
       'Getting started...',

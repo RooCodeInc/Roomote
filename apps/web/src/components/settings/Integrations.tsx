@@ -17,6 +17,7 @@ import {
   useConnectLinear,
   useDisconnectLinear,
   useLinearInstallation,
+  useLinearOauthSetup,
 } from '@/hooks/linear';
 import {
   useAsanaConnection,
@@ -35,7 +36,6 @@ import {
   useVercelConnection,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { DOCS_LINEAR_INTEGRATION_URL } from '@/lib/docs';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import {
   saveAsanaConnectionSchema,
@@ -77,6 +77,7 @@ import {
 } from '@/components/system';
 import { McpToolManagementDialog } from './McpToolManagementDialog';
 import { McpIcon } from './McpIcon';
+import { LinearOauthSetupDialog } from './LinearOauthSetupDialog';
 
 const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   asana:
@@ -163,20 +164,7 @@ function getLinearOauthSetupStatus(
       ? 'Linear OAuth setup is incomplete. Finish configuring both client credentials before connecting.'
       : 'Linear OAuth is not configured for this deployment.';
 
-  return (
-    <>
-      {message}{' '}
-      <Link
-        href={DOCS_LINEAR_INTEGRATION_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="underline underline-offset-2"
-      >
-        View setup guide
-      </Link>
-      .
-    </>
-  );
+  return message;
 }
 
 type AdminConfiguredIntegrationItemOptions = {
@@ -1149,10 +1137,12 @@ export function Integrations() {
     mcpId: string;
     integrationName: string;
   } | null>(null);
+  const [isLinearOauthSetupOpen, setIsLinearOauthSetupOpen] = useState(false);
 
   const linearInstallation = useLinearInstallation();
   const connectLinear = useConnectLinear(`${pathname}?service=linear`);
   const disconnectLinear = useDisconnectLinear();
+  const linearOauthSetup = useLinearOauthSetup(isAdmin);
 
   const deploymentEnablements = useDeploymentMcpEnablements();
   const oauthReadiness = useMcpOauthReadiness();
@@ -1304,6 +1294,14 @@ export function Integrations() {
     const linearOauthUnavailable =
       !linearInstallation.data &&
       (linearOauthStatus === 'missing' || linearOauthStatus === 'partial');
+    const canManageLinearOauth =
+      isAdmin &&
+      Boolean(
+        linearOauthSetup.data &&
+        Object.values(linearOauthSetup.data.fields).some(
+          (field) => !field.managedByEnvironment,
+        ),
+      );
     const openMcpToolDialog = (integration: McpIntegrationDefinition) =>
       setToolDialogState({
         mcpId: integration.id,
@@ -1351,6 +1349,23 @@ export function Integrations() {
         statusIcon: linearOauthUnavailable ? (
           <TriangleAlert className="size-4" />
         ) : undefined,
+        headerAction: canManageLinearOauth
+          ? {
+              label: linearOauthUnavailable
+                ? 'Set up Linear'
+                : 'Edit OAuth setup',
+              ariaLabel: linearOauthUnavailable
+                ? 'Set up Linear OAuth'
+                : 'Edit Linear OAuth setup',
+              onAction: () => setIsLinearOauthSetupOpen(true),
+              isPending: linearOauthSetup.isPending,
+              icon: linearOauthUnavailable ? (
+                <Settings2 className="size-4" />
+              ) : (
+                <Pencil className="size-4" />
+              ),
+            }
+          : undefined,
         onAction: linearOauthUnavailable
           ? undefined
           : () => {
@@ -1616,6 +1631,8 @@ export function Integrations() {
     grafanaConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
+    linearOauthSetup.data,
+    linearOauthSetup.isPending,
     oauthReadiness.data,
     oauthReadiness.isPending,
     isAdmin,
@@ -1973,6 +1990,11 @@ export function Integrations() {
             setToolDialogState(null);
           }
         }}
+      />
+      <LinearOauthSetupDialog
+        open={isLinearOauthSetupOpen}
+        onOpenChange={setIsLinearOauthSetupOpen}
+        setup={linearOauthSetup.data}
       />
       <AdminConfiguredIntegrationDialog
         integrationName="Asana"

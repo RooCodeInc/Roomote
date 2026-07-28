@@ -57,6 +57,16 @@ const state = vi.hoisted(() => ({
   linearInstallation: {
     linearOrganizationName: 'Roomote',
   } as null | { linearOrganizationName?: string },
+  linearOauthSetup: {
+    callbackUrl: 'https://roomote.example/api/mcp-oauth/callback',
+    webhookUrl: 'https://roomote.example/api/webhooks/linear',
+    manifestUrl: 'https://linear.app/settings/api/applications/new?manifest=x',
+    fields: {
+      clientId: { configured: false, managedByEnvironment: false },
+      clientSecret: { configured: false, managedByEnvironment: false },
+      webhookSecret: { configured: false, managedByEnvironment: false },
+    },
+  },
   linearRedirectPath: '',
   searchParams: '',
 }));
@@ -73,6 +83,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
+    saveLinearOauthSetup: vi.fn(),
   },
   selectMock: {
     latestOnValueChange: null as null | ((value: string) => void),
@@ -155,6 +166,14 @@ vi.mock('@/hooks/linear', () => ({
   useDisconnectLinear: () => ({
     isPending: false,
     mutate: mutations.disconnectLinear,
+  }),
+  useLinearOauthSetup: () => ({
+    data: state.linearOauthSetup,
+    isPending: false,
+  }),
+  useSaveLinearOauthSetup: () => ({
+    isPending: false,
+    mutate: mutations.saveLinearOauthSetup,
   }),
 }));
 
@@ -254,11 +273,18 @@ vi.mock('@/components/system', () => ({
   BrandIcon: ({ name }: { name: string }) => (
     <svg aria-label={name} role="img" />
   ),
-  Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
-  ),
+  Button: ({
+    children,
+    asChild,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean }) =>
+    asChild ? (
+      children
+    ) : (
+      <button type="button" {...props}>
+        {children}
+      </button>
+    ),
   Card: ({
     children,
     ...props
@@ -270,6 +296,7 @@ vi.mock('@/components/system', () => ({
   CardHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CardTitle: ({ children }: { children: ReactNode }) => <h3>{children}</h3>,
   Check: () => <svg aria-hidden="true" />,
+  Copy: () => <svg aria-hidden="true" />,
   Dialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
     open ? <div>{children}</div> : null,
   DialogContent: ({ children }: { children: ReactNode }) => (
@@ -288,6 +315,7 @@ vi.mock('@/components/system', () => ({
   Eye: () => <svg aria-hidden="true" />,
   EyeOff: () => <svg aria-hidden="true" />,
   EthernetPort: () => <svg aria-hidden="true" />,
+  ExternalLink: () => <svg aria-hidden="true" />,
   Info: () => <svg aria-hidden="true" />,
   InfoTooltip: ({ content }: { content: string }) => <span>{content}</span>,
   Input: ({ ...props }: InputHTMLAttributes<HTMLInputElement>) => (
@@ -419,14 +447,14 @@ describe('Integrations settings', () => {
       .closest('[id="integration-linear"]');
 
     expect(linearCard).toHaveTextContent(
-      'Linear OAuth is not configured for this deployment. View setup guide.',
+      'Linear OAuth is not configured for this deployment.',
     );
     expect(
       screen.queryByRole('button', { name: 'Enable Linear' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: 'View setup guide' }),
-    ).toHaveAttribute('href', 'https://docs.roomote.dev/integrations/linear');
+      screen.getByRole('button', { name: 'Set up Linear OAuth' }),
+    ).toBeInTheDocument();
   });
 
   it('distinguishes incomplete Linear OAuth setup for admins', () => {
@@ -440,7 +468,7 @@ describe('Integrations settings', () => {
       .closest('[id="integration-linear"]');
 
     expect(linearCard).toHaveTextContent(
-      'Linear OAuth setup is incomplete. Finish configuring both client credentials before connecting. View setup guide.',
+      'Linear OAuth setup is incomplete. Finish configuring both client credentials before connecting.',
     );
   });
 
@@ -457,8 +485,28 @@ describe('Integrations settings', () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('link', { name: 'View setup guide' }),
+      screen.queryByRole('button', { name: 'Set up Linear OAuth' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('opens the guided Linear OAuth setup for admins', () => {
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(<Integrations />);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set up Linear OAuth' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Open Linear app setup' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Client ID')).toBeInTheDocument();
+    expect(screen.getByLabelText('Client secret')).toBeInTheDocument();
+    expect(screen.getByLabelText('Webhook secret')).toBeInTheDocument();
   });
 
   it('surfaces the server error when starting Linear fails', () => {

@@ -14,16 +14,19 @@ priority, or discussion.
 
 ## Setup
 
-For self-hosted deployments, create a Linear OAuth application before
-connecting the workspace. Configure its callback as
-`<R_PUBLIC_URL>/api/mcp-oauth/callback`, then set
-`R_LINEAR_CLIENT_ID`, `R_LINEAR_CLIENT_SECRET`, and
-`R_LINEAR_WEBHOOK_SECRET` on the Roomote deployment.
-
 <Steps>
-  <Step title="Connect Linear">
-    In Roomote, go to **Settings > Integrations** and connect your Linear
-    workspace.
+  <Step title="Set up the OAuth app">
+    On a self-hosted deployment, an administrator goes to **Settings >
+    Integrations**, selects **Set up Linear**, and opens the pre-filled Linear
+    app manifest. After creating the private app, copy its client ID, client
+    secret, and webhook secret back into Roomote. Roomote encrypts the saved
+    credentials.
+  </Step>
+  <Step title="Connect the workspace">
+    Select **Enable Linear**, approve the app in Linear, and return to Roomote.
+    Deployments that provide `R_LINEAR_CLIENT_ID`,
+    `R_LINEAR_CLIENT_SECRET`, and `R_LINEAR_WEBHOOK_SECRET` in the runtime
+    environment continue to use those values and skip the in-app setup.
   </Step>
   <Step title="Link your user account">
     Link your Linear identity when prompted so Roomote can associate issue
