@@ -538,7 +538,7 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
       </CardHeader>
 
       {item.status || footerActions.length > 0 ? (
-        <CardContent className="p-">
+        <CardContent>
           <div className="flex gap-3 p-0">
             <div
               className={`mt-0.5 ${iconColumnWidthClass} shrink-0`}
@@ -556,7 +556,7 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
                 </div>
               )}
               {footerActions.length > 0 ? (
-                <div className="flex gap-2">
+                <div className="-ml-4 flex gap-2">
                   {footerActions.map((action) => (
                     <Button
                       key={action.ariaLabel}
@@ -1146,7 +1146,7 @@ export function Integrations() {
   const linearOauthUnavailable =
     linearOauthStatus === 'missing' || linearOauthStatus === 'partial';
   const linearOauthSetup = useLinearOauthSetup(
-    isAdmin && linearOauthUnavailable,
+    isAdmin && (linearOauthUnavailable || isLinearOauthSetupOpen),
   );
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
   const userMcpConnections = useUserMcpConnections();
@@ -1290,6 +1290,7 @@ export function Integrations() {
       (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
     );
     const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
+    const canConfigureLinearOauth = isAdmin && !linearOauthUnavailable;
     const canReconnectLinear =
       isAdmin && Boolean(linearInstallation.data) && !linearOauthUnavailable;
     const startLinearConnection = () => {
@@ -1370,6 +1371,15 @@ export function Integrations() {
                 icon: <RefreshCw />,
               }
             : undefined,
+        utilityAction: canConfigureLinearOauth
+          ? {
+              label: 'Configure credentials',
+              ariaLabel: 'Configure Linear',
+              onAction: () => setIsLinearOauthSetupOpen(true),
+              isPending: isLinearOauthSetupOpen && linearOauthSetup.isPending,
+              icon: <Settings2 />,
+            }
+          : undefined,
         onAction: linearOauthUnavailable
           ? undefined
           : () => {
@@ -1632,6 +1642,7 @@ export function Integrations() {
     oauthReadiness.isPending,
     isAdmin,
     isGrafanaDialogOpen,
+    isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveGrafanaConnection.isPending,
     saveVercelConnection.isPending,

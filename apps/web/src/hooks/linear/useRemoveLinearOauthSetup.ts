@@ -6,12 +6,12 @@ import { useTRPC } from '@/trpc/client';
 
 import { useInvalidateLinearOauthSetup } from './useInvalidateLinearOauthSetup';
 
-export function useSaveLinearOauthSetup() {
+export function useRemoveLinearOauthSetup() {
   const trpc = useTRPC();
   const invalidateLinearOauthSetup = useInvalidateLinearOauthSetup();
 
   return useMutation(
-    trpc.linear.saveOauthSetup.mutationOptions({
+    trpc.linear.removeOauthSetup.mutationOptions({
       onSuccess: invalidateLinearOauthSetup,
     }),
   );

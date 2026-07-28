@@ -113,6 +113,7 @@ import {
   getLinearInstallationCommand,
   disconnectLinearAppCommand,
   getLinearOauthSetupCommand,
+  removeLinearOauthSetupCommand,
   saveLinearOauthSetupCommand,
 } from '../commands/linear';
 import { getTeamsIntegrationStatusCommand } from '../commands/teams';
@@ -1151,6 +1152,10 @@ export const appRouter = createRouter({
 
     oauthSetup: protectedProcedure.query(({ ctx: { auth } }) =>
       getLinearOauthSetupCommand(auth),
+    ),
+
+    removeOauthSetup: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      removeLinearOauthSetupCommand(auth),
     ),
 
     saveOauthSetup: protectedProcedure

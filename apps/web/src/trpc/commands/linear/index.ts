@@ -10,6 +10,7 @@ import { clearLinearDeploymentConnection } from './oauth-setup';
 
 export {
   getLinearOauthSetupCommand,
+  removeLinearOauthSetupCommand,
   saveLinearOauthSetupCommand,
 } from './oauth-setup';
 
