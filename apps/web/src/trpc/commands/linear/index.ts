@@ -1,5 +1,4 @@
 import { db } from '@roomote/db/server';
-import { LINEAR_APP_OAUTH_SCOPES } from '@roomote/types';
 import {
   findLinearDeploymentMcpConnection,
   getLinearDeploymentMetadata,
@@ -21,7 +20,6 @@ type LinearInstallationSummary = {
   linearOrganizationName: string | null;
   linearOrganizationUrlKey: string | null;
   appUserId: string | null;
-  requiresReconnect: boolean;
 };
 
 export async function getLinearInstallationCommand(
@@ -42,9 +40,6 @@ export async function getLinearInstallationCommand(
     linearOrganizationName: metadata.linearOrganizationName,
     linearOrganizationUrlKey: metadata.linearOrganizationUrlKey,
     appUserId: metadata.appUserId,
-    requiresReconnect: !LINEAR_APP_OAUTH_SCOPES.every((scope) =>
-      connection.scopes?.includes(scope),
-    ),
   };
 }
 

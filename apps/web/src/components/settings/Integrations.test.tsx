@@ -56,11 +56,7 @@ const state = vi.hoisted(() => ({
   },
   linearInstallation: {
     linearOrganizationName: 'Roomote',
-    requiresReconnect: false,
-  } as null | {
-    linearOrganizationName?: string;
-    requiresReconnect: boolean;
-  },
+  } as null | { linearOrganizationName?: string },
   linearOauthSetup: {
     callbackUrl: 'https://roomote.example/api/mcp-oauth/callback',
     webhookUrl: 'https://roomote.example/api/webhooks/linear',
@@ -421,7 +417,6 @@ describe('Integrations settings', () => {
     state.mcpToolsError = null;
     state.linearInstallation = {
       linearOrganizationName: 'Roomote',
-      requiresReconnect: false,
     };
     state.linearRedirectPath = '';
     state.asanaConnection = null;
@@ -521,10 +516,7 @@ describe('Integrations settings', () => {
   });
 
   it('offers setup for a legacy workspace when deployment credentials are missing', () => {
-    state.linearInstallation = {
-      linearOrganizationName: 'Legacy workspace',
-      requiresReconnect: false,
-    };
+    state.linearInstallation = { linearOrganizationName: 'Legacy workspace' };
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
 
     render(<Integrations />);
@@ -537,19 +529,8 @@ describe('Integrations settings', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('asks administrators to reconnect Linear when agent scopes are missing', () => {
-    state.linearInstallation = {
-      linearOrganizationName: 'Legacy workspace',
-      requiresReconnect: true,
-    };
-
+  it('lets administrators reconnect a configured Linear workspace', () => {
     render(<Integrations />);
-
-    expect(
-      screen.getByText(
-        'Reconnect Linear to enable mentions and issue delegation.',
-      ),
-    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect Linear' }));
 

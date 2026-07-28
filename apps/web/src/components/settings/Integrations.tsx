@@ -1145,9 +1145,6 @@ export function Integrations() {
   )?.status;
   const linearOauthUnavailable =
     linearOauthStatus === 'missing' || linearOauthStatus === 'partial';
-  const linearRequiresReconnect = Boolean(
-    linearInstallation.data?.requiresReconnect,
-  );
   const linearOauthSetup = useLinearOauthSetup(
     isAdmin && linearOauthUnavailable,
   );
@@ -1293,7 +1290,8 @@ export function Integrations() {
       (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
     );
     const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
-    const canReconnectLinear = isAdmin && linearRequiresReconnect;
+    const canReconnectLinear =
+      isAdmin && Boolean(linearInstallation.data) && !linearOauthUnavailable;
     const startLinearConnection = () => {
       connectLinear.mutate(undefined, {
         onSuccess: (url) => {
@@ -1350,15 +1348,10 @@ export function Integrations() {
           disconnectLinear.isPending,
         status: linearOauthUnavailable
           ? getLinearOauthSetupStatus(linearOauthStatus, isAdmin)
-          : linearRequiresReconnect
-            ? isAdmin
-              ? 'Reconnect Linear to enable mentions and issue delegation.'
-              : 'Linear must be reconnected by an administrator.'
-            : undefined,
-        statusIcon:
-          linearOauthUnavailable || linearRequiresReconnect ? (
-            <TriangleAlert className="size-4" />
-          ) : undefined,
+          : undefined,
+        statusIcon: linearOauthUnavailable ? (
+          <TriangleAlert className="size-4" />
+        ) : undefined,
         headerAction: canSetUpLinearOauth
           ? {
               label: 'Set it up',
@@ -1636,7 +1629,6 @@ export function Integrations() {
     linearOauthSetup.isPending,
     linearOauthStatus,
     linearOauthUnavailable,
-    linearRequiresReconnect,
     oauthReadiness.isPending,
     isAdmin,
     isGrafanaDialogOpen,
