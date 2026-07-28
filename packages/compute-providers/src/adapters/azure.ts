@@ -980,10 +980,23 @@ export class AzureClient implements ComputeProviderClient {
 
     if (!this.credentialPromise) {
       this.credentialPromise = import('@azure/identity').then(
-        ({ DefaultAzureCredential, ManagedIdentityCredential }) =>
-          this.config.managedIdentityClientId
+        ({
+          ClientSecretCredential,
+          DefaultAzureCredential,
+          ManagedIdentityCredential,
+        }) => {
+          // Deterministic order: explicit service principal (container
+          // deployments) > user-assigned MI > ambient chain (az login,
+          // system-assigned MI).
+          if (this.config.servicePrincipal) {
+            const { tenantId, clientId, clientSecret } =
+              this.config.servicePrincipal;
+            return new ClientSecretCredential(tenantId, clientId, clientSecret);
+          }
+          return this.config.managedIdentityClientId
             ? new ManagedIdentityCredential(this.config.managedIdentityClientId)
-            : new DefaultAzureCredential(),
+            : new DefaultAzureCredential();
+        },
       );
     }
     const credential = await this.credentialPromise;

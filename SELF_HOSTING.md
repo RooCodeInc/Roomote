@@ -748,11 +748,23 @@ AZURE_SANDBOX_DISK_IMAGE=...
 # Optional: user-assigned managed identity client ID for Azure-hosted
 # controllers; omit to use the ambient Azure credential chain
 AZURE_CLIENT_ID=...
+# Optional (recommended for Docker installs): service principal auth —
+# all three together. az login inside containers is impractical, so
+# Docker/compose deployments should use this or a managed identity.
+AZURE_TENANT_ID=...
+AZURE_CLIENT_ID=<service-principal-app-id>
+AZURE_CLIENT_SECRET=...
 ```
 
 Azure auth uses the ambient Azure credential chain instead of an API key:
 `az login` for local runs, or a managed identity (optionally user-assigned via
-`AZURE_CLIENT_ID`) when the controller itself runs in Azure. One-time sandbox
+`AZURE_CLIENT_ID`) when the controller itself runs in Azure. Containerized
+installs (docker compose, including `deploy/install.sh`) cannot use `az
+login` inside the container — configure the service principal triple
+(`AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`), created with
+`az ad sp create-for-rbac --name <name> --skip-assignment` plus a
+`Container Apps SandboxGroup Data Owner` role assignment on the sandbox
+group, or run the controller on an Azure VM with a managed identity. One-time sandbox
 group bootstrap: `aca sandboxgroup create --name <group> --location <region>
 --set-config` — the calling principal is granted the Container Apps
 SandboxGroup Data Owner role automatically; grant it explicitly to any

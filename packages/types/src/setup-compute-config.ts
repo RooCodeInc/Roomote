@@ -538,11 +538,29 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
       },
       {
         // Optional user-assigned managed identity client id for Azure-hosted
-        // controllers. Omit to use az-login (local) or the system-assigned
-        // identity (deployed).
+        // controllers — OR the service principal's client (app) id when paired
+        // with AZURE_TENANT_ID + AZURE_CLIENT_SECRET. Omit both paths to use
+        // az-login (local) or the system-assigned identity (deployed).
         envVarName: 'AZURE_CLIENT_ID',
-        label: 'Managed Identity Client ID',
+        label: 'Managed Identity / Service Principal Client ID',
         required: false,
+        category: 'credential',
+        advanced: true,
+      },
+      {
+        // Service principal auth for containerized/headless deployments where
+        // az login is impractical: all three SP values must be set together.
+        envVarName: 'AZURE_TENANT_ID',
+        label: 'Service Principal Tenant ID',
+        required: false,
+        category: 'credential',
+        advanced: true,
+      },
+      {
+        envVarName: 'AZURE_CLIENT_SECRET',
+        label: 'Service Principal Client Secret',
+        required: false,
+        secret: true,
         category: 'credential',
         advanced: true,
       },

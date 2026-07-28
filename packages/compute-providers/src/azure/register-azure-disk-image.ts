@@ -49,6 +49,16 @@ export interface RegisterAzureDiskImageOptions {
    * system-assigned identity when deployed).
    */
   managedIdentityClientId?: string;
+  /**
+   * Service principal credentials (`AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
+   * `AZURE_CLIENT_SECRET`). Preferred for containerized deployments where
+   * `az login` is impractical inside the container.
+   */
+  servicePrincipal?: {
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+  };
   /** Test seam; defaults to global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -127,10 +137,22 @@ export async function registerAzureDiskImage(
 
     if (!credentialPromise) {
       credentialPromise = import('@azure/identity').then(
-        ({ DefaultAzureCredential, ManagedIdentityCredential }) =>
-          managedIdentityClientId
+        ({
+          ClientSecretCredential,
+          DefaultAzureCredential,
+          ManagedIdentityCredential,
+        }) => {
+          // Same deterministic order as the adapter: explicit service
+          // principal > user-assigned MI > ambient chain.
+          if (options.servicePrincipal) {
+            const { tenantId, clientId, clientSecret } =
+              options.servicePrincipal;
+            return new ClientSecretCredential(tenantId, clientId, clientSecret);
+          }
+          return managedIdentityClientId
             ? new ManagedIdentityCredential(managedIdentityClientId)
-            : new DefaultAzureCredential(),
+            : new DefaultAzureCredential();
+        },
       );
     }
     const credential = await credentialPromise;

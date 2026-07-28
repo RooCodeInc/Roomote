@@ -164,12 +164,23 @@ const PROVISIONING_PROVIDERS: Record<
 
       // Azure disk image registration has no per-call registry credentials:
       // the worker image must be public.
+      const spTenantId = resolvedEnv.AZURE_TENANT_ID;
+      const spClientId = resolvedEnv.AZURE_CLIENT_ID;
+      const spClientSecret = resolvedEnv.AZURE_CLIENT_SECRET;
       const registered = await registerAzureDiskImage({
         subscriptionId,
         resourceGroup,
         sandboxGroup,
         region,
-        managedIdentityClientId: resolvedEnv.AZURE_CLIENT_ID,
+        ...(spTenantId && spClientId && spClientSecret
+          ? {
+              servicePrincipal: {
+                tenantId: spTenantId,
+                clientId: spClientId,
+                clientSecret: spClientSecret,
+              },
+            }
+          : { managedIdentityClientId: resolvedEnv.AZURE_CLIENT_ID }),
         imageRef,
         name: templateRef,
       });

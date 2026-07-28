@@ -359,11 +359,22 @@ export interface AzureConfig {
   diskImage: string;
   /**
    * Optional client ID of a user-assigned managed identity
-   * (`AZURE_CLIENT_ID`). When unset, auth falls back to the ambient Azure
-   * credential chain (az login locally, system-assigned identity when
-   * deployed).
+   * (`AZURE_CLIENT_ID`). When unset and no service principal is configured,
+   * auth falls back to the ambient Azure credential chain (az login locally,
+   * system-assigned identity when deployed).
    */
   managedIdentityClientId?: string;
+  /**
+   * Service principal credentials (`AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
+   * `AZURE_CLIENT_SECRET`). Preferred for containerized deployments: unlike
+   * the ambient chain, these values come through Roomote's resolved-env
+   * channel (DB-persisted setup values or process env), not only process env.
+   */
+  servicePrincipal?: {
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+  };
   /**
    * Maximum sandbox lifetime in milliseconds, enforced provider-side via the
    * sandbox auto-delete lifecycle policy.

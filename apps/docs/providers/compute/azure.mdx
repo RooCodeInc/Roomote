@@ -32,9 +32,13 @@ Use Azure Container Apps when:
    The calling principal is granted the Container Apps SandboxGroup Data
    Owner role automatically; grant it explicitly to any additional principal,
    such as a deployed controller's managed identity.
-3. Authentication: `az login` for local runs, or a managed identity when the
+3. Authentication: `az login` for local runs; a managed identity when the
    Roomote controller itself runs in Azure (set `AZURE_CLIENT_ID` for a
-   user-assigned identity).
+   user-assigned identity); or a service principal (recommended for
+   containerized installs, where `az login` is impractical) —
+   `az ad sp create-for-rbac --name <name> --skip-assignment`, then grant the
+   app the Data Owner role from step 2 and set all three of
+   `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`.
 
 ## Configuration
 
@@ -54,6 +58,9 @@ Optional values:
 ```sh
 AZURE_CLIENT_ID=...
 AZURE_SANDBOX_DISK_IMAGE=...
+# Service principal auth (all three together; recommended for Docker installs)
+AZURE_TENANT_ID=...
+AZURE_CLIENT_SECRET=...
 ```
 
 `AZURE_SANDBOX_DISK_IMAGE` selects the worker disk image. Leave it unset to
