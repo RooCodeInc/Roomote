@@ -319,4 +319,69 @@ describe('linear routed task startup', () => {
     expect(emitElicitation).not.toHaveBeenCalled();
     expect(redisMock.set).not.toHaveBeenCalled();
   });
+
+  it('uses the session user when a direct delegation has no creator', async () => {
+    vi.mocked(routeTask).mockResolvedValue({
+      status: 'routed',
+      result: {
+        workspace: { type: 'all_repositories' },
+        reasoning: 'Best fit for review work',
+      },
+    });
+
+    const payload = makePayload({
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: { id: 'linear-user-1', name: 'Linear User' },
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(findLinearUserMcpConnectionByIdentityMock).toHaveBeenCalledWith({
+      linearUserId: 'linear-user-1',
+      linearOrganizationId: 'linear-org-1',
+    });
+    expect(createLinearAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+    );
+  });
+
+  it('requires account linking when a direct delegation user is unlinked', async () => {
+    findLinearUserMcpConnectionByIdentityMock.mockResolvedValue(null);
+
+    const payload = makePayload({
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: { id: 'linear-user-2', name: 'Unlinked User' },
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(emitElicitation).toHaveBeenCalledWith(
+      'session-1',
+      'Please link your Roomote account to continue.',
+      expect.objectContaining({ signal: 'auth' }),
+    );
+    expect(createLinearAgentRun).not.toHaveBeenCalled();
+  });
 });

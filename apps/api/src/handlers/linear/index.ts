@@ -432,12 +432,12 @@ async function handleAgentSessionEvent(
     return handleStopSignal(sessionId, linearClient, agentSession.issue.id);
   }
 
-  // Extract Linear user ID from the webhook payload - always use agentSession.creator
-  const linearUserId = agentSession.creator?.id;
+  // Direct issue delegations omit creator but retain the initiating user.
+  const linearUserId = agentSession.creator?.id ?? agentSession.user?.id;
 
   if (!linearUserId) {
     console.error(
-      `[LinearWebhook] No Linear user ID found for session ${sessionId} - agentSession.creator is missing`,
+      `[LinearWebhook] No Linear user ID found for session ${sessionId} - agentSession.creator and agentSession.user are missing`,
     );
     await linearClient.emitError(
       sessionId,
