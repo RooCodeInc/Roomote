@@ -117,6 +117,11 @@ CA when you manage that trust chain yourself. The option applies only to the
 private tunnel-to-Caddy hop; Cloudflare still serves a publicly trusted
 certificate to browsers.
 
+In the Cloudflare dashboard, enable **Match SNI to Host** for the wildcard
+`*.example.com` public hostname. This sends the incoming preview hostname as
+the TLS server name to Caddy, so flat wildcard preview URLs such as
+`task-port-preview.example.com` reach the matching origin without 502 errors.
+
 ### Private networks and tunnels
 
 When a reverse tunnel or private network terminates public TLS before traffic
