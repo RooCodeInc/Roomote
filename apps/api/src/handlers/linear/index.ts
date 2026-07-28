@@ -217,7 +217,7 @@ async function startLinearTask({
 }: {
   linearClient: LinearClient;
   payload: AgentSessionEventPayload;
-  userId: string;
+  userId?: string;
   routedTask: RoutedLinearTask;
   agentSession: AgentSessionEventPayload['agentSession'];
 }): Promise<WebhookResponse> {
@@ -432,12 +432,14 @@ async function handleAgentSessionEvent(
     return handleStopSignal(sessionId, linearClient, agentSession.issue.id);
   }
 
-  // Extract Linear user ID from the webhook payload - always use agentSession.creator
-  const linearUserId = agentSession.creator?.id;
+  // Direct issue delegations can omit human identity entirely. The signed
+  // webhook and org-level connection establish the trusted automation caller.
+  const linearUserId =
+    agentSession.creator?.id ?? agentSession.user?.id ?? agentActivity?.userId;
 
-  if (!linearUserId) {
+  if (!linearUserId && action === 'prompted') {
     console.error(
-      `[LinearWebhook] No Linear user ID found for session ${sessionId} - agentSession.creator is missing`,
+      `[LinearWebhook] No Linear user ID found for prompted session ${sessionId}`,
     );
     await linearClient.emitError(
       sessionId,
@@ -446,95 +448,107 @@ async function handleAgentSessionEvent(
     return { status: 'error', message: 'No Linear user ID in payload' };
   }
 
-  // Check if this Linear user is linked to a Roomote account
-  console.log(
-    `[LinearWebhook] Checking user mapping for linearUserId=${linearUserId}`,
-  );
+  let userId: string | undefined;
 
-  const userMapping = await findLinearUserMcpConnectionByIdentity({
-    linearUserId,
-    linearOrganizationId: organizationId,
-  });
-
-  console.log(
-    `[LinearWebhook] User mapping result: ${userMapping ? `found (userId=${userMapping.userId})` : 'not found'}`,
-  );
-
-  if (!userMapping) {
+  if (linearUserId) {
     console.log(
-      `[LinearWebhook] Linear user ${linearUserId} not linked - emitting auth signal`,
+      `[LinearWebhook] Checking user mapping for linearUserId=${linearUserId}`,
     );
 
-    const authToken = generateAuthToken();
-
-    await createMcpOauthReplay({
-      token: authToken,
-      payload, // Store the original payload to replay after auth
-      userId: null,
-      mcpId: 'linear',
-      connectionId: null,
-      connectionRole: LINEAR_USER_CONNECTION_ROLE,
-      sessionId,
-      redirectTo: null,
-      metadata: {
-        linearUserId,
-        linearOrganizationId: organizationId,
-      },
-      expiresAt: new Date(Date.now() + AUTH_TOKEN_EXPIRY_MS),
+    const userMapping = await findLinearUserMcpConnectionByIdentity({
+      linearUserId,
+      linearOrganizationId: organizationId,
     });
 
-    const authUrl = `${getAuthBaseUrl()}/api/mcp-oauth/replay/${authToken}`;
-    console.log(`[LinearWebhook] Auth URL created for session ${sessionId}`);
-
-    // Emit an auth elicitation signal
     console.log(
-      `[LinearWebhook] Emitting auth elicitation for session ${sessionId}`,
-    );
-    const authResult = await linearClient.emitElicitation(
-      sessionId,
-      `Please link your ${PRODUCT_NAME} account to continue.`,
-      {
-        signal: 'auth',
-        signalMetadata: {
-          url: authUrl,
-          userId: linearUserId,
-          providerName: PRODUCT_NAME,
-        },
-      },
+      `[LinearWebhook] User mapping result: ${userMapping ? `found (userId=${userMapping.userId})` : 'not found'}`,
     );
 
-    console.log(
-      `[LinearWebhook] Auth elicitation result: ${JSON.stringify(authResult)}`,
-    );
-
-    if (!authResult.success) {
-      console.error(
-        `[LinearWebhook] Failed to emit auth signal: ${authResult.error}`,
+    if (!userMapping) {
+      console.log(
+        `[LinearWebhook] Linear user ${linearUserId} not linked - emitting auth signal`,
       );
+
+      const authToken = generateAuthToken();
+
+      await createMcpOauthReplay({
+        token: authToken,
+        payload, // Store the original payload to replay after auth
+        userId: null,
+        mcpId: 'linear',
+        connectionId: null,
+        connectionRole: LINEAR_USER_CONNECTION_ROLE,
+        sessionId,
+        redirectTo: null,
+        metadata: {
+          linearUserId,
+          linearOrganizationId: organizationId,
+        },
+        expiresAt: new Date(Date.now() + AUTH_TOKEN_EXPIRY_MS),
+      });
+
+      const authUrl = `${getAuthBaseUrl()}/api/mcp-oauth/replay/${authToken}`;
+      console.log(`[LinearWebhook] Auth URL created for session ${sessionId}`);
+
+      // Emit an auth elicitation signal
+      console.log(
+        `[LinearWebhook] Emitting auth elicitation for session ${sessionId}`,
+      );
+      const authResult = await linearClient.emitElicitation(
+        sessionId,
+        `Please link your ${PRODUCT_NAME} account to continue.`,
+        {
+          signal: 'auth',
+          signalMetadata: {
+            url: authUrl,
+            userId: linearUserId,
+            providerName: PRODUCT_NAME,
+          },
+        },
+      );
+
+      console.log(
+        `[LinearWebhook] Auth elicitation result: ${JSON.stringify(authResult)}`,
+      );
+
+      if (!authResult.success) {
+        console.error(
+          `[LinearWebhook] Failed to emit auth signal: ${authResult.error}`,
+        );
+      }
+
+      return { status: 'ok' };
     }
 
-    return { status: 'ok' };
-  }
+    if (!userMapping.userId) {
+      console.error(
+        `[LinearWebhook] Linear link for user ${linearUserId} is missing a Roomote user id`,
+      );
+      await linearClient.emitError(
+        sessionId,
+        'Your Linear account link is incomplete. Please reconnect your account and try again.',
+      );
+      return { status: 'error', message: 'Linked user id is missing' };
+    }
 
-  // User is linked - update userId to the linked user
-  const userId = userMapping.userId;
-  if (!userId) {
-    console.error(
-      `[LinearWebhook] Linear link for user ${linearUserId} is missing a Roomote user id`,
+    userId = userMapping.userId;
+    console.log(
+      `[LinearWebhook] Linear user ${linearUserId} is linked to Roomote user ${userId}`,
     );
-    await linearClient.emitError(
-      sessionId,
-      'Your Linear account link is incomplete. Please reconnect your account and try again.',
+  } else {
+    console.log(
+      `[LinearWebhook] Starting trusted Linear automation for session ${sessionId}`,
     );
-    return { status: 'error', message: 'Linked user id is missing' };
   }
-
-  console.log(
-    `[LinearWebhook] Linear user ${linearUserId} is linked to Roomote user ${userId}`,
-  );
 
   // Check if this is a follow-up prompt for an existing session
   if (action === 'prompted') {
+    if (!userId) {
+      return {
+        status: 'error',
+        message: 'No linked user for prompted session',
+      };
+    }
     // First, check for an active task run. When a job is running (e.g. waiting
     // on ask_followup_question), the user's reply must be delivered to it
     // immediately. This takes priority over routing confirmation and
@@ -1007,6 +1021,20 @@ async function handleAgentSessionEvent(
   }
 
   // If routing was not used or failed, use the elicitation fallback flow
+  if (!userId) {
+    return startLinearTask({
+      linearClient,
+      payload,
+      userId,
+      routedTask: {
+        workspaceSelection: { repo: ALL_REPOSITORIES },
+        workspaceDisplayName: 'all repos',
+        workspaceType: 'all_repositories',
+      },
+      agentSession: enrichedSession,
+    });
+  }
+
   console.log(
     `[LinearWebhook] LLM routing not available or failed, starting elicitation fallback for session ${sessionId}`,
   );
