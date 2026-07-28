@@ -356,6 +356,92 @@ describe('linear routed task startup', () => {
     );
   });
 
+  it('starts a trusted Linear automation without a human identity', async () => {
+    vi.mocked(routeTask).mockResolvedValue({
+      status: 'routed',
+      result: {
+        workspace: { type: 'all_repositories' },
+        reasoning: 'Best fit for review work',
+      },
+    });
+
+    const payload = makePayload({
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: undefined,
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(findLinearUserMcpConnectionByIdentityMock).not.toHaveBeenCalled();
+    expect(createLinearAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: undefined }),
+    );
+  });
+
+  it('uses all repositories when automation routing fails', async () => {
+    vi.mocked(routeTask).mockRejectedValue(new Error('routing unavailable'));
+
+    const payload = makePayload({
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: undefined,
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createLinearAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: undefined,
+        repo: ALL_REPOSITORIES,
+      }),
+    );
+  });
+
+  it('rejects an unidentified prompted session', async () => {
+    const payload = makePayload({
+      action: 'prompted',
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: undefined,
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(findLinearUserMcpConnectionByIdentityMock).not.toHaveBeenCalled();
+    expect(createLinearAgentRun).not.toHaveBeenCalled();
+  });
+
   it('requires account linking when a direct delegation user is unlinked', async () => {
     findLinearUserMcpConnectionByIdentityMock.mockResolvedValue(null);
 
