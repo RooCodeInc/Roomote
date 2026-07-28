@@ -14,6 +14,12 @@ priority, or discussion.
 
 ## Setup
 
+For self-hosted deployments, create a Linear OAuth application before
+connecting the workspace. Configure its callback as
+`<R_PUBLIC_URL>/api/mcp-oauth/callback`, then set
+`R_LINEAR_CLIENT_ID`, `R_LINEAR_CLIENT_SECRET`, and
+`R_LINEAR_WEBHOOK_SECRET` on the Roomote deployment.
+
 <Steps>
   <Step title="Connect Linear">
     In Roomote, go to **Settings > Integrations** and connect your Linear

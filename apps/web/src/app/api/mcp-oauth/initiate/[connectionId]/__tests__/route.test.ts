@@ -9,7 +9,9 @@ const {
   getClientInformationMock,
   getMcpIntegrationAuthorizationParametersMock,
   getMcpIntegrationMock,
+  getMcpIntegrationOauthEndpointsMock,
   getMcpIntegrationOauthScopeModeMock,
+  getMcpIntegrationOauthScopeSeparatorMock,
   getMcpIntegrationOauthScopesMock,
   getPreferredTokenEndpointAuthMethodMock,
   isDeploymentScopedMcpIntegrationMock,
@@ -30,7 +32,9 @@ const {
   getClientInformationMock: vi.fn(),
   getMcpIntegrationAuthorizationParametersMock: vi.fn(),
   getMcpIntegrationMock: vi.fn(),
+  getMcpIntegrationOauthEndpointsMock: vi.fn(),
   getMcpIntegrationOauthScopeModeMock: vi.fn(),
+  getMcpIntegrationOauthScopeSeparatorMock: vi.fn(),
   getMcpIntegrationOauthScopesMock: vi.fn(),
   getPreferredTokenEndpointAuthMethodMock: vi.fn(),
   isDeploymentScopedMcpIntegrationMock: vi.fn(),
@@ -83,7 +87,10 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/types', () => ({
   getMcpIntegrationAuthorizationParameters:
     getMcpIntegrationAuthorizationParametersMock,
+  getMcpIntegrationOauthEndpoints: getMcpIntegrationOauthEndpointsMock,
   getMcpIntegrationOauthScopeMode: getMcpIntegrationOauthScopeModeMock,
+  getMcpIntegrationOauthScopeSeparator:
+    getMcpIntegrationOauthScopeSeparatorMock,
   getMcpIntegrationOauthScopes: getMcpIntegrationOauthScopesMock,
   getMcpIntegration: getMcpIntegrationMock,
   isDeploymentScopedMcpIntegration: isDeploymentScopedMcpIntegrationMock,
@@ -139,6 +146,8 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getPreferredTokenEndpointAuthMethodMock.mockReturnValue('none');
     getMcpIntegrationOauthScopesMock.mockReturnValue(undefined);
     getMcpIntegrationOauthScopeModeMock.mockReturnValue(undefined);
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue(undefined);
+    getMcpIntegrationOauthScopeSeparatorMock.mockReturnValue(' ');
     getMcpIntegrationAuthorizationParametersMock.mockReturnValue([]);
     generateCodeVerifierMock.mockReturnValue('verifier-value');
     generateCodeChallengeMock.mockResolvedValue('challenge-value');
@@ -167,6 +176,68 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     expect(getClientInformationMock).toHaveBeenCalledWith(CONNECTION_ID, {
       expectedRedirectUri: PUBLIC_CALLBACK,
     });
+  });
+
+  it('uses the Linear API OAuth flow instead of Linear MCP OAuth', async () => {
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://linear.app/oauth/authorize',
+      tokenEndpoint: 'https://api.linear.app/oauth/token',
+    });
+    getMcpIntegrationOauthScopesMock.mockReturnValue(['read', 'write']);
+    getMcpIntegrationOauthScopeSeparatorMock.mockReturnValue(',');
+    getMcpIntegrationAuthorizationParametersMock.mockReturnValue([
+      { name: 'actor', value: 'app' },
+    ]);
+    getClientInformationMock.mockResolvedValue({
+      client_id: 'linear-client',
+      client_secret: 'linear-secret',
+      token_endpoint_auth_method: 'client_secret_post',
+    });
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    const authUrl = new URL(response.headers.get('location')!);
+    expect(authUrl.origin).toBe('https://linear.app');
+    expect(authUrl.pathname).toBe('/oauth/authorize');
+    expect(authUrl.searchParams.get('scope')).toBe('read,write');
+    expect(authUrl.searchParams.get('actor')).toBe('app');
+    expect(authUrl.searchParams.get('redirect_uri')).toBe(PUBLIC_CALLBACK);
+    expect(discoverOAuthEndpointsMock).not.toHaveBeenCalled();
+    expect(discoverOAuthProtectedResourceMetadataMock).not.toHaveBeenCalled();
+    expect(registerOAuthClientMock).not.toHaveBeenCalled();
+  });
+
+  it('stores the configured Linear OAuth client for the callback', async () => {
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://linear.app/oauth/authorize',
+      tokenEndpoint: 'https://api.linear.app/oauth/token',
+    });
+    getMcpIntegrationOauthScopesMock.mockReturnValue(['read', 'write']);
+    getMcpIntegrationOauthScopeSeparatorMock.mockReturnValue(',');
+    getClientInformationMock.mockResolvedValue(undefined);
+    resolveStaticOauthClientInformationMock.mockReturnValue({
+      client_id: 'linear-client',
+      client_secret: 'linear-secret',
+      token_endpoint_auth_method: 'client_secret_post',
+    });
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(response.status).toBe(307);
+    expect(storeClientInformationMock).toHaveBeenCalledWith(
+      CONNECTION_ID,
+      {
+        client_id: 'linear-client',
+        client_secret: 'linear-secret',
+        token_endpoint_auth_method: 'client_secret_post',
+      },
+      PUBLIC_CALLBACK,
+    );
+    expect(registerOAuthClientMock).not.toHaveBeenCalled();
   });
 
   it('re-registers when stored client was registered against a different callback', async () => {
