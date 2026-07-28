@@ -10,6 +10,12 @@ type StaticOauthPairResolution =
       status: 'missing' | 'partial';
     };
 
+export type StaticOauthReadiness =
+  | 'not_required'
+  | 'ready'
+  | 'missing'
+  | 'partial';
+
 const STATIC_OAUTH_FALLBACKS: Partial<Record<string, StaticOauthClientEnv[]>> =
   {};
 
@@ -136,7 +142,7 @@ function resolveStaticOauthCandidateInformation(
   };
 }
 
-export function getStaticOauthEnvCandidates(
+function getStaticOauthEnvCandidates(
   integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
 ): StaticOauthClientEnv[] {
   if (!integration.oauthClientEnv) {
@@ -149,7 +155,7 @@ export function getStaticOauthEnvCandidates(
   ];
 }
 
-export function resolveStaticOauthClientInformation(
+function resolveStaticOauthIntegration(
   env: unknown,
   integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
 ) {
@@ -160,18 +166,45 @@ export function resolveStaticOauthClientInformation(
     );
 
     if (candidateInformation.status === 'configured') {
-      return {
-        client_id: candidateInformation.client_id,
-        client_secret: candidateInformation.client_secret,
-        token_endpoint_auth_method:
-          candidateInformation.token_endpoint_auth_method,
-      };
+      return candidateInformation;
     }
 
     if (candidateInformation.status === 'partial') {
-      return undefined;
+      return candidateInformation;
     }
   }
 
-  return undefined;
+  return { status: 'missing' as const };
+}
+
+export function resolveStaticOauthClientInformation(
+  env: unknown,
+  integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
+) {
+  const resolution = resolveStaticOauthIntegration(env, integration);
+
+  if (resolution.status !== 'configured') {
+    return undefined;
+  }
+
+  return {
+    client_id: resolution.client_id,
+    client_secret: resolution.client_secret,
+    token_endpoint_auth_method: resolution.token_endpoint_auth_method,
+  };
+}
+
+export function getStaticOauthReadiness(
+  env: unknown,
+  integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
+): StaticOauthReadiness {
+  const candidates = getStaticOauthEnvCandidates(integration);
+
+  if (candidates.length === 0) {
+    return 'not_required';
+  }
+
+  const resolution = resolveStaticOauthIntegration(env, integration);
+
+  return resolution.status === 'configured' ? 'ready' : resolution.status;
 }

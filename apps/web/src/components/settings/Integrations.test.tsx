@@ -14,6 +14,10 @@ import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-er
 
 const state = vi.hoisted(() => ({
   deploymentEnablements: [] as Array<{ mcpId: string; enabled: boolean }>,
+  oauthReadiness: [{ mcpId: 'linear', status: 'ready' as const }] as Array<{
+    mcpId: string;
+    status: 'ready' | 'missing' | 'partial';
+  }>,
   userConnections: [] as Array<{
     id?: string;
     mcpId: string;
@@ -157,6 +161,10 @@ vi.mock('@/hooks/linear', () => ({
 vi.mock('@/hooks/mcp-connections', () => ({
   useDeploymentMcpEnablements: () => ({
     data: state.deploymentEnablements,
+  }),
+  useMcpOauthReadiness: () => ({
+    data: state.oauthReadiness,
+    isPending: false,
   }),
   useUserMcpConnections: () => ({
     data: state.userConnections,
@@ -375,6 +383,7 @@ describe('Integrations settings', () => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
     state.deploymentEnablements = [];
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
     state.userConnections = [];
     state.mcpTools = null;
     state.mcpToolsError = null;
@@ -396,6 +405,74 @@ describe('Integrations settings', () => {
 
     expect(state.linearRedirectPath).toBe(
       '/settings/integrations?service=linear',
+    );
+  });
+
+  it('explains missing Linear OAuth setup to admins before they connect', () => {
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(<Integrations />);
+
+    const linearCard = screen
+      .getByRole('heading', { name: 'Linear' })
+      .closest('[id="integration-linear"]');
+
+    expect(linearCard).toHaveTextContent(
+      'Linear OAuth is not configured for this deployment. View setup guide.',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Enable Linear' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'View setup guide' }),
+    ).toHaveAttribute('href', 'https://docs.roomote.dev/integrations/linear');
+  });
+
+  it('distinguishes incomplete Linear OAuth setup for admins', () => {
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'partial' }];
+
+    render(<Integrations />);
+
+    const linearCard = screen
+      .getByRole('heading', { name: 'Linear' })
+      .closest('[id="integration-linear"]');
+
+    expect(linearCard).toHaveTextContent(
+      'Linear OAuth setup is incomplete. Finish configuring both client credentials before connecting. View setup guide.',
+    );
+  });
+
+  it('asks non-admins to contact an administrator when OAuth is unavailable', () => {
+    state.isAdmin = false;
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Linear is not configured for this deployment. Ask an administrator to finish its OAuth setup.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'View setup guide' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('surfaces the server error when starting Linear fails', () => {
+    state.linearInstallation = null;
+    mutations.connectLinear.mockImplementation((_variables, options) => {
+      options?.onError?.(new Error('Linear OAuth setup changed. Try again.'));
+    });
+
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Linear' }));
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Linear OAuth setup changed. Try again.',
     );
   });
 
