@@ -1925,7 +1925,10 @@ export function generateOpenCodeConfig({
   );
   fs.mkdirSync(openCodeConfigDir, { recursive: true });
   removeDisabledProviderConfiguration(runtimeEnv, homeDir);
-  const resolvedModel = resolveConfiguredPromptModel(model);
+  const configuredModel = resolveConfiguredPromptModel(model);
+  const resolvedModel = configuredModel
+    ? toBedrockMantleRuntimeModelId(configuredModel)
+    : undefined;
   // A variant task model (`openrouter/...:nitro`) surfaces as its catalog base
   // model here (inline config + per-prompt model selection); the operator
   // config records the provider alias that carries the variant to OpenRouter.

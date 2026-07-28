@@ -58,6 +58,25 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rewrites a Bedrock Mantle OpenAI launch-time model override', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+      },
+      model: 'bedrock-mantle/openai.gpt-5.6-luna',
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { models?: Record<string, unknown> }>;
+    };
+
+    expect(result.model).toBe('bedrock-mantle-openai/openai.gpt-5.6-luna');
+    expect(
+      config.provider['bedrock-mantle-openai']?.models?.['openai.gpt-5.6-luna'],
+    ).toBeDefined();
+  });
+
   it('ignores a disabled launch-time model override', () => {
     const runtimeEnv = {
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
