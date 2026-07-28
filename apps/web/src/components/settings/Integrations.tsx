@@ -1146,7 +1146,7 @@ export function Integrations() {
   const linearOauthUnavailable =
     linearOauthStatus === 'missing' || linearOauthStatus === 'partial';
   const linearOauthSetup = useLinearOauthSetup(
-    isAdmin && linearOauthUnavailable,
+    isAdmin && (linearOauthUnavailable || isLinearOauthSetupOpen),
   );
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
   const userMcpConnections = useUserMcpConnections();
@@ -1290,6 +1290,7 @@ export function Integrations() {
       (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
     );
     const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
+    const canConfigureLinearOauth = isAdmin && !linearOauthUnavailable;
     const canReconnectLinear =
       isAdmin && Boolean(linearInstallation.data) && !linearOauthUnavailable;
     const startLinearConnection = () => {
@@ -1370,6 +1371,15 @@ export function Integrations() {
                 icon: <RefreshCw />,
               }
             : undefined,
+        utilityAction: canConfigureLinearOauth
+          ? {
+              label: 'Configure credentials',
+              ariaLabel: 'Configure Linear',
+              onAction: () => setIsLinearOauthSetupOpen(true),
+              isPending: isLinearOauthSetupOpen && linearOauthSetup.isPending,
+              icon: <Settings2 />,
+            }
+          : undefined,
         onAction: linearOauthUnavailable
           ? undefined
           : () => {
@@ -1632,6 +1642,7 @@ export function Integrations() {
     oauthReadiness.isPending,
     isAdmin,
     isGrafanaDialogOpen,
+    isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveGrafanaConnection.isPending,
     saveVercelConnection.isPending,

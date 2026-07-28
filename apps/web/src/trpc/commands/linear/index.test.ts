@@ -1,11 +1,17 @@
 const {
   envState,
   deletedConnectionsState,
+  persistedEnvVarNamesState,
+  deleteDeploymentEnvironmentVariablesMock,
+  getPersistedEnvironmentVariableNamesMock,
   resolveDeploymentEnvVarMock,
   upsertDeploymentEnvironmentVariablesMock,
 } = vi.hoisted(() => ({
   envState: {} as Record<string, string | undefined>,
   deletedConnectionsState: [] as Array<{ id: string }>,
+  persistedEnvVarNamesState: [] as string[],
+  deleteDeploymentEnvironmentVariablesMock: vi.fn(),
+  getPersistedEnvironmentVariableNamesMock: vi.fn(),
   resolveDeploymentEnvVarMock: vi.fn(),
   upsertDeploymentEnvironmentVariablesMock: vi.fn(),
 }));
@@ -15,6 +21,10 @@ vi.mock('@/lib/server/get-public-app-url', () => ({
   getPublicAppUrl: () => 'https://roomote.example',
 }));
 vi.mock('../environment-variables', () => ({
+  deleteDeploymentEnvironmentVariables:
+    deleteDeploymentEnvironmentVariablesMock,
+  getPersistedEnvironmentVariableNames:
+    getPersistedEnvironmentVariableNamesMock,
   upsertDeploymentEnvironmentVariables:
     upsertDeploymentEnvironmentVariablesMock,
 }));
@@ -54,6 +64,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import {
   getLinearOauthSetupCommand,
+  removeLinearOauthSetupCommand,
   saveLinearOauthSetupCommand,
 } from './index';
 
@@ -69,6 +80,10 @@ describe('Linear OAuth setup', () => {
       delete envState[key];
     }
     deletedConnectionsState.splice(0);
+    persistedEnvVarNamesState.splice(0);
+    getPersistedEnvironmentVariableNamesMock.mockImplementation(
+      async () => persistedEnvVarNamesState,
+    );
     resolveDeploymentEnvVarMock.mockResolvedValue(null);
   });
 
@@ -99,7 +114,36 @@ describe('Linear OAuth setup', () => {
     });
   });
 
-  it('requires an administrator to view or save app setup', async () => {
+  it('identifies credentials saved in Roomote separately from runtime values', async () => {
+    persistedEnvVarNamesState.push(
+      'R_LINEAR_CLIENT_ID',
+      'R_LINEAR_CLIENT_SECRET',
+    );
+    envState.R_LINEAR_CLIENT_ID = 'runtime-client';
+    resolveDeploymentEnvVarMock.mockResolvedValue('configured');
+
+    const setup = await getLinearOauthSetupCommand(ADMIN);
+
+    expect(setup.fields).toEqual({
+      clientId: {
+        configured: true,
+        managedByEnvironment: true,
+        savedInRoomote: true,
+      },
+      clientSecret: {
+        configured: true,
+        managedByEnvironment: false,
+        savedInRoomote: true,
+      },
+      webhookSecret: {
+        configured: true,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+    });
+  });
+
+  it('requires an administrator to view, save, or remove app setup', async () => {
     const nonAdmin = { ...ADMIN, isAdmin: false };
 
     await expect(getLinearOauthSetupCommand(nonAdmin)).rejects.toThrow(
@@ -112,6 +156,25 @@ describe('Linear OAuth setup', () => {
         webhookSecret: 'webhook-secret',
       }),
     ).rejects.toThrow('Unauthorized');
+    await expect(removeLinearOauthSetupCommand(nonAdmin)).rejects.toThrow(
+      'Unauthorized',
+    );
+  });
+
+  it('removes saved credentials and disconnects the current workspace', async () => {
+    deletedConnectionsState.push({ id: 'linear-connection' });
+
+    const result = await removeLinearOauthSetupCommand(ADMIN);
+
+    expect(deleteDeploymentEnvironmentVariablesMock).toHaveBeenCalledWith(
+      expect.anything(),
+      [
+        'R_LINEAR_CLIENT_ID',
+        'R_LINEAR_CLIENT_SECRET',
+        'R_LINEAR_WEBHOOK_SECRET',
+      ],
+    );
+    expect(result).toEqual({ success: true });
   });
 
   it('saves all three credentials in the encrypted deployment store', async () => {

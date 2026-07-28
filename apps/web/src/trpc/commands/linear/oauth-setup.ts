@@ -18,7 +18,11 @@ import {
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import type { UserAuthSuccess } from '@/types';
 
-import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
+import {
+  deleteDeploymentEnvironmentVariables,
+  getPersistedEnvironmentVariableNames,
+  upsertDeploymentEnvironmentVariables,
+} from '../environment-variables';
 
 const LINEAR_OAUTH_ENV_FIELDS = {
   clientId: 'R_LINEAR_CLIENT_ID',
@@ -130,6 +134,9 @@ export async function getLinearOauthSetupCommand(auth: UserAuthSuccess) {
   const publicOrigin = getPublicAppUrl(Env);
   const runtimeEnv = getLinearRuntimeEnv();
   const urls = buildLinearOauthSetup(publicOrigin);
+  const persistedEnvVarNames = new Set(
+    await getPersistedEnvironmentVariableNames(),
+  );
   const fieldEntries = await Promise.all(
     Object.entries(LINEAR_OAUTH_ENV_FIELDS).map(async ([field, envName]) => {
       const runtimeValue = getRuntimeEnvValue(envName);
@@ -144,6 +151,7 @@ export async function getLinearOauthSetupCommand(auth: UserAuthSuccess) {
         {
           configured: Boolean(effectiveValue),
           managedByEnvironment: Boolean(runtimeValue),
+          savedInRoomote: persistedEnvVarNames.has(envName),
         },
       ] as const;
     }),
@@ -153,9 +161,27 @@ export async function getLinearOauthSetupCommand(auth: UserAuthSuccess) {
     ...urls,
     fields: Object.fromEntries(fieldEntries) as Record<
       LinearOauthSetupField,
-      { configured: boolean; managedByEnvironment: boolean }
+      {
+        configured: boolean;
+        managedByEnvironment: boolean;
+        savedInRoomote: boolean;
+      }
     >,
   };
+}
+
+export async function removeLinearOauthSetupCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  await db.transaction(async (tx) => {
+    await deleteDeploymentEnvironmentVariables(
+      tx,
+      Object.values(LINEAR_OAUTH_ENV_FIELDS),
+    );
+    await clearLinearDeploymentConnection(tx, auth.userId);
+  });
+
+  return { success: true as const };
 }
 
 export async function saveLinearOauthSetupCommand(
