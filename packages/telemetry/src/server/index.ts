@@ -437,6 +437,7 @@ export async function sendInstanceReport(
     const request: PingInstanceReportRequest = {
       instanceId: await getInstanceAnalyticsId(),
       appVersion: getAppVersion(),
+      cloud: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
       sentAt: new Date().toISOString(),
       report,
     };

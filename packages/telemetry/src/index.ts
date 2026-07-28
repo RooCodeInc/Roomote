@@ -101,6 +101,7 @@ export interface PingEventsRequest {
 export interface PingInstanceReportRequest {
   instanceId: string;
   appVersion?: string;
+  cloud: boolean;
   sentAt: string;
   report: Record<string, unknown>;
 }
