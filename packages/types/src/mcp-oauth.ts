@@ -166,6 +166,13 @@ export type McpConnectionRole =
   | 'linear_org_install'
   | 'linear_user_link';
 
+export const LINEAR_APP_OAUTH_SCOPES = [
+  'read',
+  'write',
+  'app:assignable',
+  'app:mentionable',
+] as const;
+
 /**
  * MCP Server Configuration
  * This is what gets written to .roomote/mcp.json in the workspace
@@ -633,7 +640,9 @@ export function getMcpIntegrationOauthScopes(
   }
 
   if (integration.id === 'linear') {
-    return role === 'linear_user_link' ? ['read'] : ['read', 'write'];
+    return role === 'linear_user_link'
+      ? ['read']
+      : [...LINEAR_APP_OAUTH_SCOPES];
   }
 
   return integration.oauthScopes;

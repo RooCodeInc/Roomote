@@ -56,7 +56,11 @@ const state = vi.hoisted(() => ({
   },
   linearInstallation: {
     linearOrganizationName: 'Roomote',
-  } as null | { linearOrganizationName?: string },
+    requiresReconnect: false,
+  } as null | {
+    linearOrganizationName?: string;
+    requiresReconnect: boolean;
+  },
   linearOauthSetup: {
     callbackUrl: 'https://roomote.example/api/mcp-oauth/callback',
     webhookUrl: 'https://roomote.example/api/webhooks/linear',
@@ -417,6 +421,7 @@ describe('Integrations settings', () => {
     state.mcpToolsError = null;
     state.linearInstallation = {
       linearOrganizationName: 'Roomote',
+      requiresReconnect: false,
     };
     state.linearRedirectPath = '';
     state.asanaConnection = null;
@@ -516,7 +521,10 @@ describe('Integrations settings', () => {
   });
 
   it('offers setup for a legacy workspace when deployment credentials are missing', () => {
-    state.linearInstallation = { linearOrganizationName: 'Legacy workspace' };
+    state.linearInstallation = {
+      linearOrganizationName: 'Legacy workspace',
+      requiresReconnect: false,
+    };
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
 
     render(<Integrations />);
@@ -527,6 +535,31 @@ describe('Integrations settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Disable Linear' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('asks administrators to reconnect Linear when agent scopes are missing', () => {
+    state.linearInstallation = {
+      linearOrganizationName: 'Legacy workspace',
+      requiresReconnect: true,
+    };
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText(
+        'Reconnect Linear to enable mentions and issue delegation.',
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect Linear' }));
+
+    expect(mutations.connectLinear).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
   });
 
   it('surfaces the server error when starting Linear fails', () => {

@@ -1145,6 +1145,9 @@ export function Integrations() {
   )?.status;
   const linearOauthUnavailable =
     linearOauthStatus === 'missing' || linearOauthStatus === 'partial';
+  const linearRequiresReconnect = Boolean(
+    linearInstallation.data?.requiresReconnect,
+  );
   const linearOauthSetup = useLinearOauthSetup(
     isAdmin && linearOauthUnavailable,
   );
@@ -1290,6 +1293,20 @@ export function Integrations() {
       (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
     );
     const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
+    const canReconnectLinear = isAdmin && linearRequiresReconnect;
+    const startLinearConnection = () => {
+      connectLinear.mutate(undefined, {
+        onSuccess: (url) => {
+          window.location.href = url;
+        },
+        onError: (error) =>
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : 'Failed to enable Linear. Please try again.',
+          ),
+      });
+    };
     const openMcpToolDialog = (integration: McpIntegrationDefinition) =>
       setToolDialogState({
         mcpId: integration.id,
@@ -1333,10 +1350,15 @@ export function Integrations() {
           disconnectLinear.isPending,
         status: linearOauthUnavailable
           ? getLinearOauthSetupStatus(linearOauthStatus, isAdmin)
-          : undefined,
-        statusIcon: linearOauthUnavailable ? (
-          <TriangleAlert className="size-4" />
-        ) : undefined,
+          : linearRequiresReconnect
+            ? isAdmin
+              ? 'Reconnect Linear to enable mentions and issue delegation.'
+              : 'Linear must be reconnected by an administrator.'
+            : undefined,
+        statusIcon:
+          linearOauthUnavailable || linearRequiresReconnect ? (
+            <TriangleAlert className="size-4" />
+          ) : undefined,
         headerAction: canSetUpLinearOauth
           ? {
               label: 'Set it up',
@@ -1346,7 +1368,15 @@ export function Integrations() {
                 linearOauthSetup.isPending || linearOauthSetup.data == null,
               icon: <Settings2 />,
             }
-          : undefined,
+          : canReconnectLinear
+            ? {
+                label: 'Reconnect',
+                ariaLabel: 'Reconnect Linear',
+                onAction: startLinearConnection,
+                isPending: connectLinear.isPending,
+                icon: <RefreshCw />,
+              }
+            : undefined,
         onAction: linearOauthUnavailable
           ? undefined
           : () => {
@@ -1364,17 +1394,7 @@ export function Integrations() {
                 return;
               }
 
-              connectLinear.mutate(undefined, {
-                onSuccess: (url) => {
-                  window.location.href = url;
-                },
-                onError: (error) =>
-                  toast.error(
-                    error instanceof Error
-                      ? error.message
-                      : 'Failed to enable Linear. Please try again.',
-                  ),
-              });
+              startLinearConnection();
             },
       },
       ...visibleMcpIntegrations
@@ -1616,6 +1636,7 @@ export function Integrations() {
     linearOauthSetup.isPending,
     linearOauthStatus,
     linearOauthUnavailable,
+    linearRequiresReconnect,
     oauthReadiness.isPending,
     isAdmin,
     isGrafanaDialogOpen,

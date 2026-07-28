@@ -186,7 +186,12 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       authorizationEndpoint: 'https://linear.app/oauth/authorize',
       tokenEndpoint: 'https://api.linear.app/oauth/token',
     });
-    getMcpIntegrationOauthScopesMock.mockReturnValue(['read', 'write']);
+    getMcpIntegrationOauthScopesMock.mockReturnValue([
+      'read',
+      'write',
+      'app:assignable',
+      'app:mentionable',
+    ]);
     getMcpIntegrationOauthScopeSeparatorMock.mockReturnValue(',');
     getMcpIntegrationAuthorizationParametersMock.mockReturnValue([
       { name: 'actor', value: 'app' },
@@ -204,7 +209,9 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     const authUrl = new URL(response.headers.get('location')!);
     expect(authUrl.origin).toBe('https://linear.app');
     expect(authUrl.pathname).toBe('/oauth/authorize');
-    expect(authUrl.searchParams.get('scope')).toBe('read,write');
+    expect(authUrl.searchParams.get('scope')).toBe(
+      'read,write,app:assignable,app:mentionable',
+    );
     expect(authUrl.searchParams.get('actor')).toBe('app');
     expect(authUrl.searchParams.get('redirect_uri')).toBe(PUBLIC_CALLBACK);
     expect(discoverOAuthEndpointsMock).not.toHaveBeenCalled();

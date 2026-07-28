@@ -1,11 +1,15 @@
 const {
   envState,
   deletedConnectionsState,
+  findLinearDeploymentMcpConnectionMock,
+  getLinearDeploymentMetadataMock,
   resolveDeploymentEnvVarMock,
   upsertDeploymentEnvironmentVariablesMock,
 } = vi.hoisted(() => ({
   envState: {} as Record<string, string | undefined>,
   deletedConnectionsState: [] as Array<{ id: string }>,
+  findLinearDeploymentMcpConnectionMock: vi.fn(),
+  getLinearDeploymentMetadataMock: vi.fn(),
   resolveDeploymentEnvVarMock: vi.fn(),
   upsertDeploymentEnvironmentVariablesMock: vi.fn(),
 }));
@@ -47,12 +51,13 @@ vi.mock('@roomote/db/server', () => ({
   deploymentMcpEnablements: { mcpId: 'mcpId' },
 }));
 vi.mock('@roomote/sdk/server', () => ({
-  findLinearDeploymentMcpConnection: vi.fn(),
-  getLinearDeploymentMetadata: vi.fn(),
+  findLinearDeploymentMcpConnection: findLinearDeploymentMcpConnectionMock,
+  getLinearDeploymentMetadata: getLinearDeploymentMetadataMock,
   LINEAR_ORG_CONNECTION_ROLE: 'linear_org_install',
 }));
 
 import {
+  getLinearInstallationCommand,
   getLinearOauthSetupCommand,
   saveLinearOauthSetupCommand,
 } from './index';
@@ -69,7 +74,47 @@ describe('Linear OAuth setup', () => {
       delete envState[key];
     }
     deletedConnectionsState.splice(0);
+    findLinearDeploymentMcpConnectionMock.mockResolvedValue(undefined);
+    getLinearDeploymentMetadataMock.mockReturnValue(null);
     resolveDeploymentEnvVarMock.mockResolvedValue(null);
+  });
+
+  it('requires older Linear app installations to reconnect for agent scopes', async () => {
+    findLinearDeploymentMcpConnectionMock.mockResolvedValue({
+      id: 'linear-connection',
+      authStatus: 'authenticated',
+      authConfig: {},
+      scopes: ['read', 'write'],
+    });
+    getLinearDeploymentMetadataMock.mockReturnValue({
+      linearOrganizationId: 'linear-org',
+      linearOrganizationName: 'Roomote',
+      linearOrganizationUrlKey: 'roomote',
+      appUserId: 'linear-app-user',
+    });
+
+    await expect(getLinearInstallationCommand(ADMIN)).resolves.toMatchObject({
+      requiresReconnect: true,
+    });
+  });
+
+  it('accepts Linear app installations with mention and assignment scopes', async () => {
+    findLinearDeploymentMcpConnectionMock.mockResolvedValue({
+      id: 'linear-connection',
+      authStatus: 'authenticated',
+      authConfig: {},
+      scopes: ['read', 'write', 'app:assignable', 'app:mentionable'],
+    });
+    getLinearDeploymentMetadataMock.mockReturnValue({
+      linearOrganizationId: 'linear-org',
+      linearOrganizationName: 'Roomote',
+      linearOrganizationUrlKey: 'roomote',
+      appUserId: 'linear-app-user',
+    });
+
+    await expect(getLinearInstallationCommand(ADMIN)).resolves.toMatchObject({
+      requiresReconnect: false,
+    });
   });
 
   it('builds a private Linear app manifest for this deployment', async () => {
