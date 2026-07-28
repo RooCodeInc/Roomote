@@ -11,6 +11,10 @@ import {
 import { LINEAR_ORG_CONNECTION_ROLE } from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
+import {
+  buildDeploymentAppName,
+  DEPLOYMENT_APP_DESCRIPTION,
+} from '@/lib/server/deployment-app-name';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import type { UserAuthSuccess } from '@/types';
 
@@ -62,12 +66,11 @@ function buildLinearOauthSetup(publicOrigin: string) {
     schemaVersion: '1.0.0',
     distribution: 'private',
     display: {
-      description:
-        'Run Roomote agents from Linear issues and keep progress in sync.',
+      description: DEPLOYMENT_APP_DESCRIPTION,
     },
     developer: { name: 'Roomote' },
     oauth: {
-      client_name: 'Roomote',
+      client_name: buildDeploymentAppName(publicOrigin),
       client_uri: publicOrigin,
       redirect_uris: [callbackUrl],
       grant_types: ['authorization_code'],

@@ -20,6 +20,7 @@ import {
   ExternalLink,
   Input,
   Label,
+  Skeleton,
   Spinner,
   TriangleAlert,
 } from '@/components/system';
@@ -70,7 +71,7 @@ function EndpointField({ label, value }: { label: string; value: string }) {
           aria-label={`Copy ${label.toLowerCase()}`}
           onClick={copyValue}
         >
-          <Copy className="size-4" />
+          <Copy />
         </Button>
       </div>
     </div>
@@ -173,18 +174,19 @@ export function LinearOauthSetupDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>Set up Linear</DialogTitle>
           <DialogDescription>
-            Create a private OAuth app for this Roomote deployment, then save
-            the credentials it gives you.
+            Create a Linear app for this deployment, then connect it to your
+            workspace.
           </DialogDescription>
         </DialogHeader>
 
         {!setup ? (
-          <div className="flex min-h-40 items-center justify-center">
-            <Spinner />
+          <div className="space-y-4 py-2">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-32 w-full" />
           </div>
         ) : (
           <div className="space-y-6 py-2">
@@ -201,11 +203,13 @@ export function LinearOauthSetupDialog({
 
             <section className="space-y-3">
               <div>
-                <h3 className="font-medium">1. Create the app in Linear</h3>
+                <h3 className="font-medium">
+                  Create a Linear app for this deployment.
+                </h3>
                 <p className="text-sm text-muted-foreground">
-                  The manifest pre-fills the callback, webhook, and agent event
-                  settings for this deployment. Review it in Linear, then create
-                  the app.
+                  Self-hosted Roomote needs its own Linear app. The manifest
+                  pre-fills the callback, webhook, and agent event settings.
+                  Review it in Linear, then create the app.
                 </p>
               </div>
               <Button
@@ -220,8 +224,8 @@ export function LinearOauthSetupDialog({
                   )
                 }
               >
-                Open Linear app setup
-                <ExternalLink className="size-4" />
+                Create Linear app
+                <ExternalLink />
               </Button>
               <div className="grid gap-3">
                 <EndpointField label="Callback URL" value={setup.callbackUrl} />
@@ -231,10 +235,11 @@ export function LinearOauthSetupDialog({
 
             <section className="space-y-3">
               <div>
-                <h3 className="font-medium">2. Save the credentials</h3>
+                <h3 className="font-medium">Then save the credentials.</h3>
                 <p className="text-sm text-muted-foreground">
                   Copy these values from the new app&apos;s settings. Roomote
-                  encrypts values saved here.
+                  encrypts values saved here. After they are saved, Enable
+                  Linear connects the app to your workspace.
                 </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -277,7 +282,7 @@ export function LinearOauthSetupDialog({
               rel="noopener noreferrer"
             >
               Setup guide
-              <ExternalLink className="size-4" />
+              <ExternalLink />
             </Link>
           </Button>
           <div className="flex justify-end gap-2">

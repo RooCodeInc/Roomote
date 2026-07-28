@@ -446,14 +446,12 @@ describe('Integrations settings', () => {
       .getByRole('heading', { name: 'Linear' })
       .closest('[id="integration-linear"]');
 
-    expect(linearCard).toHaveTextContent(
-      'Linear OAuth is not configured for this deployment.',
-    );
+    expect(linearCard).toHaveTextContent('Not configured.');
     expect(
       screen.queryByRole('button', { name: 'Enable Linear' }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Set up Linear OAuth' }),
+      screen.getByRole('button', { name: 'Set up Linear' }),
     ).toBeInTheDocument();
   });
 
@@ -467,9 +465,7 @@ describe('Integrations settings', () => {
       .getByRole('heading', { name: 'Linear' })
       .closest('[id="integration-linear"]');
 
-    expect(linearCard).toHaveTextContent(
-      'Linear OAuth setup is incomplete. Finish configuring both client credentials before connecting.',
-    );
+    expect(linearCard).toHaveTextContent('Configuration incomplete.');
   });
 
   it('asks non-admins to contact an administrator when OAuth is unavailable', () => {
@@ -480,12 +476,10 @@ describe('Integrations settings', () => {
     render(<Integrations />);
 
     expect(
-      screen.getByText(
-        'Linear is not configured for this deployment. Ask an administrator to finish its OAuth setup.',
-      ),
+      screen.getByText('Not configured. Ask an administrator to set it up.'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Set up Linear OAuth' }),
+      screen.queryByRole('button', { name: 'Set up Linear' }),
     ).not.toBeInTheDocument();
   });
 
@@ -494,19 +488,45 @@ describe('Integrations settings', () => {
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
 
     render(<Integrations />);
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Set up Linear OAuth' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Linear' }));
 
     expect(
       screen.getByRole('heading', { name: 'Set up Linear' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Open Linear app setup' }),
+      screen.getByRole('button', { name: 'Create Linear app' }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Client ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Client secret')).toBeInTheDocument();
     expect(screen.getByLabelText('Webhook secret')).toBeInTheDocument();
+  });
+
+  it('only offers app creation while Linear is unconfigured', () => {
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Set up Linear' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Enable Linear' }),
+    ).toBeInTheDocument();
+  });
+
+  it('offers setup for a legacy workspace when deployment credentials are missing', () => {
+    state.linearInstallation = { linearOrganizationName: 'Legacy workspace' };
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByRole('button', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disable Linear' }),
+    ).not.toBeInTheDocument();
   });
 
   it('surfaces the server error when starting Linear fails', () => {

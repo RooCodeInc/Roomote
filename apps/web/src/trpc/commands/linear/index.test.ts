@@ -86,8 +86,9 @@ describe('Linear OAuth setup', () => {
     expect(manifest).toMatchObject({
       schemaVersion: '1.0.0',
       distribution: 'private',
+      display: { description: 'Cloud coding agents for all' },
       oauth: {
-        client_name: 'Roomote',
+        client_name: 'roomote-example',
         redirect_uris: [setup.callbackUrl],
       },
       webhook: {
@@ -96,6 +97,21 @@ describe('Linear OAuth setup', () => {
         resourceTypes: ['AgentSessionEvent'],
       },
     });
+  });
+
+  it('requires an administrator to view or save app setup', async () => {
+    const nonAdmin = { ...ADMIN, isAdmin: false };
+
+    await expect(getLinearOauthSetupCommand(nonAdmin)).rejects.toThrow(
+      'Unauthorized',
+    );
+    await expect(
+      saveLinearOauthSetupCommand(nonAdmin, {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        webhookSecret: 'webhook-secret',
+      }),
+    ).rejects.toThrow('Unauthorized');
   });
 
   it('saves all three credentials in the encrypted deployment store', async () => {

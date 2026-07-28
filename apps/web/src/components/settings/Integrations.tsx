@@ -156,15 +156,10 @@ function getLinearOauthSetupStatus(
   isAdmin: boolean,
 ): ReactNode {
   if (!isAdmin) {
-    return 'Linear is not configured for this deployment. Ask an administrator to finish its OAuth setup.';
+    return 'Not configured. Ask an administrator to set it up.';
   }
 
-  const message =
-    status === 'partial'
-      ? 'Linear OAuth setup is incomplete. Finish configuring both client credentials before connecting.'
-      : 'Linear OAuth is not configured for this deployment.';
-
-  return message;
+  return status === 'partial' ? 'Configuration incomplete.' : 'Not configured.';
 }
 
 type AdminConfiguredIntegrationItemOptions = {
@@ -1142,10 +1137,17 @@ export function Integrations() {
   const linearInstallation = useLinearInstallation();
   const connectLinear = useConnectLinear(`${pathname}?service=linear`);
   const disconnectLinear = useDisconnectLinear();
-  const linearOauthSetup = useLinearOauthSetup(isAdmin);
 
   const deploymentEnablements = useDeploymentMcpEnablements();
   const oauthReadiness = useMcpOauthReadiness();
+  const linearOauthStatus = oauthReadiness.data?.find(
+    (entry) => entry.mcpId === 'linear',
+  )?.status;
+  const linearOauthUnavailable =
+    linearOauthStatus === 'missing' || linearOauthStatus === 'partial';
+  const linearOauthSetup = useLinearOauthSetup(
+    isAdmin && linearOauthUnavailable,
+  );
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
   const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
@@ -1287,21 +1289,7 @@ export function Integrations() {
     const userConnectionMap = new Map(
       (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
     );
-    const oauthReadinessMap = new Map<string, OauthReadinessStatus>(
-      (oauthReadiness.data ?? []).map((entry) => [entry.mcpId, entry.status]),
-    );
-    const linearOauthStatus = oauthReadinessMap.get('linear');
-    const linearOauthUnavailable =
-      !linearInstallation.data &&
-      (linearOauthStatus === 'missing' || linearOauthStatus === 'partial');
-    const canManageLinearOauth =
-      isAdmin &&
-      Boolean(
-        linearOauthSetup.data &&
-        Object.values(linearOauthSetup.data.fields).some(
-          (field) => !field.managedByEnvironment,
-        ),
-      );
+    const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
     const openMcpToolDialog = (integration: McpIntegrationDefinition) =>
       setToolDialogState({
         mcpId: integration.id,
@@ -1349,21 +1337,14 @@ export function Integrations() {
         statusIcon: linearOauthUnavailable ? (
           <TriangleAlert className="size-4" />
         ) : undefined,
-        headerAction: canManageLinearOauth
+        headerAction: canSetUpLinearOauth
           ? {
-              label: linearOauthUnavailable
-                ? 'Set up Linear'
-                : 'Edit OAuth setup',
-              ariaLabel: linearOauthUnavailable
-                ? 'Set up Linear OAuth'
-                : 'Edit Linear OAuth setup',
+              label: 'Set it up',
+              ariaLabel: 'Set up Linear',
               onAction: () => setIsLinearOauthSetupOpen(true),
-              isPending: linearOauthSetup.isPending,
-              icon: linearOauthUnavailable ? (
-                <Settings2 className="size-4" />
-              ) : (
-                <Pencil className="size-4" />
-              ),
+              isPending:
+                linearOauthSetup.isPending || linearOauthSetup.data == null,
+              icon: <Settings2 />,
             }
           : undefined,
         onAction: linearOauthUnavailable
@@ -1633,7 +1614,8 @@ export function Integrations() {
     linearInstallation.isPending,
     linearOauthSetup.data,
     linearOauthSetup.isPending,
-    oauthReadiness.data,
+    linearOauthStatus,
+    linearOauthUnavailable,
     oauthReadiness.isPending,
     isAdmin,
     isGrafanaDialogOpen,
