@@ -72,6 +72,10 @@ function getAuthenticatedPromptUserName(
   );
 }
 
+function buildModelVisibleWebPrompt(prompt: string): string {
+  return `<web_ui_follow_up>\n${prompt}\n</web_ui_follow_up>`;
+}
+
 async function assertSandboxRpcEndpointReachable(sandboxServerUrl: string) {
   const controller = new AbortController();
   const timeoutId = setTimeout(
@@ -296,11 +300,16 @@ export async function sendSandboxPromptCommand(
       ],
     });
 
+    const prompt =
+      parsed.source === 'web' && typeof parsed.prompt === 'string'
+        ? buildModelVisibleWebPrompt(parsed.prompt)
+        : parsed.prompt;
+
     return await client.commands.sendPrompt.mutate({
       prompt:
-        outOfBandContext && typeof parsed.prompt === 'string'
-          ? withOutOfBandContext(outOfBandContext, parsed.prompt)
-          : parsed.prompt,
+        outOfBandContext && typeof prompt === 'string'
+          ? withOutOfBandContext(outOfBandContext, prompt)
+          : prompt,
       quoteText: parsed.prompt,
       taskTool: parsed.taskTool,
       images: parsed.images,

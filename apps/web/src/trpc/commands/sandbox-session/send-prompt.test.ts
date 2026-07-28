@@ -150,7 +150,7 @@ describe('sendSandboxPromptCommand', () => {
 
     expect(mockSendPromptMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: 'keep going',
+        prompt: '<web_ui_follow_up>\nkeep going\n</web_ui_follow_up>',
         quoteText: 'keep going',
         source: 'web',
         userName: 'Auth Fallback Name',
@@ -183,7 +183,7 @@ describe('sendSandboxPromptCommand', () => {
     expect(mockSendPromptMutate).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt:
-          '<out_of_band_context>\nnotice\n</out_of_band_context>\n\nPlease fix it.',
+          '<out_of_band_context>\nnotice\n</out_of_band_context>\n\n<web_ui_follow_up>\nPlease fix it.\n</web_ui_follow_up>',
         quoteText: 'Please fix it.',
       }),
     );
@@ -217,7 +217,7 @@ describe('sendSandboxPromptCommand', () => {
 
     expect(mockSendPromptMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: 'change direction',
+        prompt: '<web_ui_follow_up>\nchange direction\n</web_ui_follow_up>',
         autoSteerWhenQueued: true,
       }),
     );
@@ -255,7 +255,7 @@ describe('sendSandboxPromptCommand', () => {
 
     expect(mockSendPromptMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: 'keep going',
+        prompt: '<web_ui_follow_up>\nkeep going\n</web_ui_follow_up>',
         source: 'web',
         userName: 'casey',
       }),
@@ -335,7 +335,7 @@ describe('sendSandboxPromptCommand', () => {
     expect(updatedRun?.actingUserId).toBe(user.id);
     expect(mockSendPromptMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: 'keep going',
+        prompt: '<web_ui_follow_up>\nkeep going\n</web_ui_follow_up>',
         // Actor handoffs steer so the previous actor's turn does not keep
         // running after the credential identity changes.
         autoSteerWhenQueued: true,
@@ -370,7 +370,7 @@ describe('sendSandboxPromptCommand', () => {
 
     expect(mockSendPromptMutate).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: 'keep going',
+        prompt: '<web_ui_follow_up>\nkeep going\n</web_ui_follow_up>',
         autoSteerWhenQueued: undefined,
       }),
     );

@@ -26,6 +26,7 @@ describe('GitHub message instructions', () => {
     expect(instructions).toContain(
       'begin the next GitHub reply with a Markdown blockquote of that follow-up',
     );
+    expect(instructions).toContain('<web_ui_follow_up>');
     expect(instructions).toContain('not injected out-of-band context');
     expect(instructions).toContain('keep it to 280 characters');
     expect(instructions).toContain('public-reply policy prohibits disclosing');
