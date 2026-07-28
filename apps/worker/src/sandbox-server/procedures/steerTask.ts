@@ -18,6 +18,7 @@ export const steerTask = publicProcedure
     z
       .object({
         prompt: z.string(),
+        quoteText: z.string(),
         images: z.array(z.string()).optional(),
         userName: z.string().optional(),
       })
@@ -70,7 +71,7 @@ export const steerTask = publicProcedure
       try {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
-          text: input.prompt,
+          text: input.quoteText,
           userName: input.userName,
           logPrefix: 'steerTask',
           warn: (message) => ctx.harnessLogger?.warn(message),
@@ -126,7 +127,7 @@ export const steerTask = publicProcedure
       try {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
-          text: input.prompt,
+          text: input.quoteText,
           userName: input.userName,
           logPrefix: 'steerTask',
           warn: (message) => ctx.harnessLogger?.warn(message),
@@ -195,7 +196,7 @@ export const steerTask = publicProcedure
     try {
       trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
         runId: ctx.runId,
-        text: input.prompt,
+        text: input.quoteText,
         userName: input.userName,
         logPrefix: 'steerTask',
         warn: (message) => ctx.harnessLogger?.warn(message),
