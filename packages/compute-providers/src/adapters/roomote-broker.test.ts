@@ -420,6 +420,43 @@ describe('RoomoteBrokerClient', () => {
     }
   });
 
+  it('reports the snapshot id before returning it', async () => {
+    let polls = 0;
+    const { client } = harness((request) => {
+      if (request.path.endsWith('/snapshot')) {
+        return jsonResponse({ operationId: 'op-1' }, 202);
+      }
+
+      polls += 1;
+      return jsonResponse(
+        polls < 2
+          ? { status: 'running' }
+          : { status: 'succeeded', snapshotId: 'im-1' },
+      );
+    });
+
+    const reported: string[] = [];
+
+    vi.useFakeTimers();
+    try {
+      const pending = client.createSnapshot({
+        instanceId: 'sb-1',
+        onSnapshotCreated: async (snapshotId) => {
+          reported.push(snapshotId);
+        },
+      });
+      await vi.advanceTimersByTimeAsync(11_000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // The broker has already torn the sandbox down by the time it reports
+    // success, so a stall before the caller records the id would strand the
+    // snapshot with no way to look it up again.
+    expect(reported).toEqual(['im-1']);
+  });
+
   it('surfaces snapshot failures with the broker error', async () => {
     const { client } = harness((request) =>
       request.path.endsWith('/snapshot')

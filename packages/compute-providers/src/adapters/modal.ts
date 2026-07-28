@@ -927,6 +927,10 @@ export class ModalClient implements ComputeProviderClient {
               { imageId: lateImage.imageId },
             )}`,
           );
+          // The abort already rejected this call, so the id has no other way
+          // back to the caller. Persist before terminating so an aborted
+          // attempt still leaves a resumable snapshot behind.
+          await input.onSnapshotCreated?.(lateImage.imageId);
           await this.terminateSandboxAfterSnapshot(sandbox, input.instanceId);
         },
       });
@@ -941,6 +945,11 @@ export class ModalClient implements ComputeProviderClient {
     console.log(
       `[ModalClient] Snapshot created: ${image.imageId}; terminating sandbox ${input.instanceId}`,
     );
+
+    // Persist before terminating, not after returning. Modal images are
+    // addressable only by id, so an id lost between here and the caller's
+    // write is a snapshot nobody can ever resume.
+    await input.onSnapshotCreated?.(image.imageId);
 
     // Terminate the sandbox after snapshotting to free resources.
     await this.terminateSandboxAfterSnapshot(sandbox, input.instanceId);

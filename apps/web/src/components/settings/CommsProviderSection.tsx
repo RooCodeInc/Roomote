@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SetupAuthProviderStatus } from '@roomote/types';
 
@@ -77,10 +77,6 @@ import {
   Info,
   Plug,
   RefreshCw,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
   Spinner,
   Trash2,
   TriangleAlert,
@@ -94,56 +90,6 @@ const MICROSOFT_APP_ID_PATTERN =
 
 function getProviderIconId(providerId: CommsProviderId): string {
   return providerId === 'microsoft' ? 'teams' : providerId;
-}
-
-type SlackChannelOption = {
-  id: string;
-  name: string;
-  label: string;
-  isPrivate?: boolean;
-  isMember?: boolean | null;
-};
-
-const ROUTER_DEBUG_CHANNEL_NONE_VALUE = '__none__';
-
-function getChannelLabel(
-  channelId: string | null | undefined,
-  channels: SlackChannelOption[],
-) {
-  if (!channelId) {
-    return null;
-  }
-
-  return (
-    channels.find((channel) => channel.id === channelId)?.label ?? channelId
-  );
-}
-
-function buildRouterDebugChannelOptions({
-  channels,
-  selectedChannelId,
-  envFallbackChannelId,
-}: {
-  channels: SlackChannelOption[];
-  selectedChannelId: string | null;
-  envFallbackChannelId: string | null;
-}) {
-  const options = [...channels];
-  const optionIds = new Set(options.map((channel) => channel.id));
-
-  for (const channelId of [selectedChannelId, envFallbackChannelId]) {
-    if (channelId && !optionIds.has(channelId)) {
-      options.push({
-        id: channelId,
-        name: channelId,
-        label: channelId,
-        isMember: null,
-      });
-      optionIds.add(channelId);
-    }
-  }
-
-  return options;
 }
 
 function SlackWorkspaceAuthButton({ configured }: { configured: boolean }) {
@@ -204,185 +150,6 @@ function SlackWorkspaceAuthButton({ configured }: { configured: boolean }) {
       {isPending ? <Spinner size="sm" /> : <Plug className="size-4" />}
       {isInstalled ? 'Re-auth' : 'Auth'}
     </Button>
-  );
-}
-
-function SlackDiagnosticsChannel() {
-  const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const routerDebugSettingsQueryKey = trpc.routerDebug.getSettings.queryKey();
-  const slackInstallation = useSlackInstallation();
-
-  const slackConnected = Boolean(slackInstallation.data);
-
-  const routerDebugSettings = useQuery(
-    trpc.routerDebug.getSettings.queryOptions(),
-  );
-  const slackChannelsQuery = useQuery(
-    trpc.automations.listSlackChannels.queryOptions(undefined, {
-      enabled: Boolean(slackConnected),
-    }),
-  );
-  const updateRouterDebugSettings = useMutation(
-    trpc.routerDebug.updateSettings.mutationOptions({
-      onSuccess: (settings) => {
-        queryClient.setQueryData(routerDebugSettingsQueryKey, settings);
-        setDraftChannelId(settings.routerDebugSlackChannelId);
-        toast.success('Diagnostics channel updated.');
-      },
-      onError: (error) => {
-        toast.error(error.message || 'Failed to update diagnostics channel.');
-      },
-    }),
-  );
-
-  const [draftChannelId, setDraftChannelId] = useState<string | null>(
-    routerDebugSettings.data?.routerDebugSlackChannelId ?? null,
-  );
-
-  useEffect(() => {
-    if (routerDebugSettings.data === undefined) {
-      return;
-    }
-
-    setDraftChannelId(routerDebugSettings.data.routerDebugSlackChannelId);
-  }, [routerDebugSettings.data]);
-
-  if (!slackConnected) {
-    return null;
-  }
-
-  const settings = routerDebugSettings.data;
-  const envFallbackChannelId = settings?.envFallbackSlackChannelId ?? null;
-  const effectiveChannelId =
-    settings?.effectiveRouterDebugSlackChannelId ?? null;
-  const channels = (slackChannelsQuery.data?.channels ??
-    []) as SlackChannelOption[];
-  const channelOptions = buildRouterDebugChannelOptions({
-    channels,
-    selectedChannelId: draftChannelId,
-    envFallbackChannelId,
-  });
-  const draftLabel = getChannelLabel(draftChannelId, channelOptions);
-  const effectiveLabel = getChannelLabel(effectiveChannelId, channelOptions);
-  const persistedChannelId = settings?.routerDebugSlackChannelId ?? null;
-  const dirty = draftChannelId !== persistedChannelId;
-  const selectDisabled =
-    routerDebugSettings.isPending ||
-    routerDebugSettings.isError ||
-    !slackConnected ||
-    updateRouterDebugSettings.isPending;
-  const saveDisabled =
-    !dirty ||
-    selectDisabled ||
-    slackChannelsQuery.isPending ||
-    slackChannelsQuery.isError;
-
-  return (
-    <div className="space-y-3 max-w-xl">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Diagnostics channel</p>
-        <p className="text-sm text-muted-foreground">
-          Slack channel that receives routing diagnostics posts.
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <Select
-            value={draftChannelId ?? ROUTER_DEBUG_CHANNEL_NONE_VALUE}
-            disabled={selectDisabled}
-            onValueChange={(value) => {
-              setDraftChannelId(
-                value === ROUTER_DEBUG_CHANNEL_NONE_VALUE ? null : value,
-              );
-            }}
-          >
-            <SelectTrigger
-              id="comms-slack-diagnostics-channel"
-              className="w-full"
-            >
-              <span className="truncate text-left">
-                {draftLabel ??
-                  (envFallbackChannelId
-                    ? `Use env fallback (${envFallbackChannelId})`
-                    : 'No diagnostics channel')}
-              </span>
-            </SelectTrigger>
-            <SelectContent align="start">
-              <SelectItem value={ROUTER_DEBUG_CHANNEL_NONE_VALUE}>
-                {envFallbackChannelId
-                  ? 'Use env fallback'
-                  : 'No diagnostics channel'}
-              </SelectItem>
-              {slackChannelsQuery.isPending ? (
-                <SelectItem value="__loading__" disabled>
-                  Loading channels...
-                </SelectItem>
-              ) : slackChannelsQuery.isError ? (
-                <SelectItem value="__error__" disabled>
-                  Could not load channels. Try refreshing.
-                </SelectItem>
-              ) : channelOptions.length > 0 ? (
-                channelOptions.map((channel) => (
-                  <SelectItem key={channel.id} value={channel.id}>
-                    {channel.label}
-                  </SelectItem>
-                ))
-              ) : (
-                <SelectItem value="__empty__" disabled>
-                  No channels found.
-                </SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="shrink-0"
-          aria-label="Refresh Slack channels"
-          title="Refresh Slack channels"
-          disabled={!slackConnected || slackChannelsQuery.isFetching}
-          onClick={() => {
-            void slackChannelsQuery.refetch();
-          }}
-        >
-          {slackChannelsQuery.isFetching ? (
-            <Spinner size="sm" />
-          ) : (
-            <RefreshCw />
-          )}
-        </Button>
-      </div>
-      {routerDebugSettings.isError ? (
-        <p className="text-sm text-destructive">
-          Failed to load diagnostics settings.
-        </p>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          {settings?.source === 'deployment' && effectiveLabel
-            ? `Diagnostics posts currently go to ${effectiveLabel}.`
-            : settings?.source === 'env' && effectiveLabel
-              ? `Diagnostics posts currently use the env fallback ${effectiveLabel}.`
-              : 'Diagnostics posts are disabled until a channel is selected.'}
-        </p>
-      )}
-      <div>
-        <Button
-          type="button"
-          disabled={saveDisabled}
-          onClick={() => {
-            updateRouterDebugSettings.mutate({
-              routerDebugSlackChannelId: draftChannelId,
-            });
-          }}
-        >
-          {updateRouterDebugSettings.isPending ? <Spinner size="sm" /> : null}
-          Save
-        </Button>
-      </div>
-    </div>
   );
 }
 
@@ -861,9 +628,6 @@ export function CommsProviderSection({
                 (hasConfiguredValues || teamsBotConfigured) && (
                   <TeamsBotStatus />
                 )}
-              {provider.id === 'slack' && hasConfiguredValues && (
-                <SlackDiagnosticsChannel />
-              )}
             </div>
 
             {providerOwnsActions ? null : (

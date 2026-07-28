@@ -55,12 +55,12 @@ function runHook(scriptPath, input) {
   };
 }
 
-function runSilenceHook(hookEventName, input) {
+function runSilenceHook(hookEventName, input, toolArgs) {
   return runHook(SILENCE_HOOK_PATH, {
     hook_event_name: hookEventName,
     threadId: input.sessionID,
     tool_name: input.tool,
-    tool_args: input.args,
+    tool_args: toolArgs ?? input.args,
   });
 }
 
@@ -81,7 +81,7 @@ function appendWarning(output, reason) {
 }
 
 export const RoomoteOpenCodeSlackHooks = async () => ({
-  'tool.execute.before': async (input) => {
+  'tool.execute.before': async (input, context) => {
     // Mostly advisory: Slack-discipline reminders are appended to the tool
     // result in tool.execute.after instead of blocking the tool call. The
     // one hard stop is a permissionDecision of 'deny' (subagent sessions
@@ -89,7 +89,7 @@ export const RoomoteOpenCodeSlackHooks = async () => ({
     let decision;
 
     try {
-      decision = runSilenceHook('PreToolUse', input);
+      decision = runSilenceHook('PreToolUse', input, context?.args);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       process.stderr.write(

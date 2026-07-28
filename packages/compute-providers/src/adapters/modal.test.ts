@@ -536,6 +536,39 @@ describe('ModalClient', () => {
     expect(snapshotFilesystemMock).toHaveBeenCalledWith(20 * 60_000);
   });
 
+  it('reports the snapshot id before terminating the source sandbox', async () => {
+    const order: string[] = [];
+    const terminateMock = vi.fn(async () => {
+      order.push('terminate');
+    });
+
+    sandboxFromIdMock.mockResolvedValue({
+      sandboxId: 'modal-123',
+      snapshotFilesystem: vi.fn().mockResolvedValue({ imageId: 'im-abc123' }),
+      terminate: terminateMock,
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    const result = await client.createSnapshot({
+      instanceId: 'modal-123',
+      onSnapshotCreated: async (snapshotId) => {
+        order.push(`persist:${snapshotId}`);
+      },
+    });
+
+    // Modal images are addressable only by id, so a crash between the
+    // snapshot and the caller's write would strand a good snapshot forever.
+    // The persist hook has to land first.
+    expect(order).toEqual(['persist:im-abc123', 'terminate']);
+    expect(result).toEqual({ snapshotId: 'im-abc123' });
+    expect(terminateMock).toHaveBeenCalled();
+  });
+
   it('splits large file writes into multiple handle.write calls', async () => {
     const writeMock = vi.fn().mockResolvedValue(undefined);
     const closeMock = vi.fn().mockResolvedValue(undefined);

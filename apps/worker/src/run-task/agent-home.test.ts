@@ -58,6 +58,25 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rewrites a Bedrock Mantle OpenAI launch-time model override', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+      },
+      model: 'bedrock-mantle/openai.gpt-5.6-luna',
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { models?: Record<string, unknown> }>;
+    };
+
+    expect(result.model).toBe('bedrock-mantle-openai/openai.gpt-5.6-luna');
+    expect(
+      config.provider['bedrock-mantle-openai']?.models?.['openai.gpt-5.6-luna'],
+    ).toBeDefined();
+  });
+
   it('ignores a disabled launch-time model override', () => {
     const runtimeEnv = {
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
@@ -124,6 +143,34 @@ describe('generateOpenCodeConfig provider support', () => {
         },
       },
     });
+    expect(result.configContent).not.toContain('bedrock-key');
+  });
+
+  it('routes Bedrock OpenAI models through the Mantle OpenAI endpoint', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'bedrock-mantle/openai.gpt-5.6-terra',
+        AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+        AWS_REGION: 'us-west-2',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider['bedrock-mantle-openai']).toMatchObject({
+      npm: '@ai-sdk/openai',
+      name: 'Amazon Bedrock',
+      options: {
+        baseURL: 'https://bedrock-mantle.us-west-2.api.aws/openai/v1',
+        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+      },
+      models: {
+        'openai.gpt-5.6-terra': {},
+      },
+    });
+    expect(config.provider['bedrock-mantle']).toBeUndefined();
     expect(result.configContent).not.toContain('bedrock-key');
   });
 
@@ -228,6 +275,34 @@ describe('generateOpenCodeConfig provider support', () => {
         'anthropic.claude-sonnet-5': {},
       },
     });
+  });
+
+  it('rebases Bedrock Mantle OpenAI models onto the gateway', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'bedrock-mantle/openai.gpt-5.6-terra',
+        AWS_REGION: 'us-west-2',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'AWS_BEARER_TOKEN_BEDROCK',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider['bedrock-mantle-openai']).toMatchObject({
+      npm: '@ai-sdk/openai',
+      options: {
+        baseURL:
+          'https://api.example.com/api/inference/bedrock-mantle-openai/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+      models: {
+        'openai.gpt-5.6-terra': {},
+      },
+    });
+    expect(config.provider['bedrock-mantle']).toBeUndefined();
   });
 
   it('rebases the openai provider onto the ChatGPT gateway segment in gateway mode', () => {

@@ -183,7 +183,13 @@ describe('snapshotJob', () => {
     );
     updateFn.mockReturnValue({ set: setFn });
     setFn.mockReturnValue({ where: updateWhereFn });
-    updateWhereFn.mockResolvedValue([]);
+    // The early snapshot-id persist chains `.returning()` off `.where()`,
+    // while every other update awaits `.where()` directly. Support both.
+    updateWhereFn.mockImplementation(() =>
+      Object.assign(Promise.resolve([]), {
+        returning: () => Promise.resolve([{ id: baseTaskRun.id }]),
+      }),
+    );
     mockMarkTaskStartParallelCountEndedAt.mockResolvedValue(undefined);
     mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
@@ -1366,5 +1372,134 @@ describe('snapshotJob', () => {
       }),
     );
     expect(mockCaptureBullMqMessage).not.toHaveBeenCalled();
+  });
+
+  it('persists the snapshot id before the adapter tears the sandbox down', async () => {
+    const persistOrder: string[] = [];
+
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+      await onSnapshotCreated?.('snap_persisted_early');
+      // Stands in for the adapter's post-snapshot teardown, which is where the
+      // id used to be lost when the process died or the job was redelivered.
+      persistOrder.push('teardown');
+      return { snapshotId: 'snap_persisted_early' };
+    });
+
+    setFn.mockImplementation((values: Record<string, unknown>) => {
+      if (values.snapshotId === 'snap_persisted_early' && !values.status) {
+        persistOrder.push('persist');
+      }
+      return { where: updateWhereFn };
+    });
+
+    await snapshotJob({
+      data: { runId: 123, sandboxId: 'sb-early-persist' },
+    } as never);
+
+    expect(persistOrder).toEqual(['persist', 'teardown']);
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotId: 'snap_persisted_early',
+        snapshotCreatedAt: expect.any(Date),
+        snapshotFailedAt: null,
+      }),
+    );
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'persist_snapshot_id_before_teardown',
+          snapshotId: 'snap_persisted_early',
+        }),
+      }),
+    );
+  });
+
+  it('finalizes from the persisted snapshot when a redelivery finds the sandbox stopped', async () => {
+    const snapshotCreatedAt = new Date('2026-04-24T06:30:00.000Z');
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      snapshotId: 'snap_persisted_early',
+      snapshotCreatedAt,
+    });
+    // The sandbox is stopped precisely because the first attempt snapshotted
+    // it successfully. Re-snapshotting is impossible, so the job must not ask.
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+
+    await snapshotJob({
+      data: { runId: 123, sandboxId: 'sb-redelivered' },
+    } as never);
+
+    expect(mockGetInstanceStatus).not.toHaveBeenCalled();
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(mockCaptureBullMqMessage).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'reuse_persisted_snapshot',
+          snapshotId: 'snap_persisted_early',
+        }),
+      }),
+    );
+    // Completed, resumable, and still carrying its original creation time so
+    // the resume window is not silently extended.
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotId: 'snap_persisted_early',
+        snapshotCreatedAt,
+        snapshotFailedAt: null,
+        status: RunStatus.Completed,
+      }),
+    );
+    expect(mockAttachEnvironmentSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        snapshotId: 'snap_persisted_early',
+        snapshotCreatedAt,
+        snapshotStatus: 'ready',
+      }),
+    );
+  });
+
+  it('keeps an existing snapshot id when a losing attempt tries to persist', async () => {
+    const winnerCreatedAt = new Date('2026-04-24T06:31:00.000Z');
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    // No row returned: the guarded update matched nothing because another
+    // attempt already recorded a snapshot id.
+    updateWhereFn.mockImplementation(() =>
+      Object.assign(Promise.resolve([]), {
+        returning: () => Promise.resolve([]),
+      }),
+    );
+    mockFindFirst
+      .mockResolvedValueOnce(baseTaskRun)
+      .mockResolvedValueOnce({ snapshotCreatedAt: winnerCreatedAt });
+    mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+      await onSnapshotCreated?.('snap_loser');
+      return { snapshotId: 'snap_loser' };
+    });
+
+    await snapshotJob({
+      data: { runId: 123, sandboxId: 'sb-race' },
+    } as never);
+
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'skip_persist_snapshot_id_claim_lost',
+        }),
+      }),
+    );
+    // The winner's creation time drives expiry, not this attempt's clock.
+    expect(mockAttachEnvironmentSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ snapshotCreatedAt: winnerCreatedAt }),
+    );
   });
 });

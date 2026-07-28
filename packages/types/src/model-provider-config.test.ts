@@ -322,10 +322,54 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(kimiK3ByProvider).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/moonshotai/kimi-k3' },
       { providerId: 'vercel', modelId: 'vercel/moonshotai/kimi-k3' },
+      { providerId: 'baseten', modelId: 'baseten/moonshotai/Kimi-K3' },
+      { providerId: 'togetherai', modelId: 'togetherai/moonshotai/Kimi-K3' },
       { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
       { providerId: 'kimi-for-coding', modelId: 'kimi-for-coding/k3' },
+      { providerId: 'opencode', modelId: 'opencode/kimi-k3' },
     ]);
   });
+
+  it.each([
+    {
+      displayName: 'GPT 5.6 Sol',
+      modelId: 'gpt-5.6-sol',
+    },
+    {
+      displayName: 'GPT 5.6 Terra',
+      modelId: 'gpt-5.6-terra',
+    },
+    {
+      displayName: 'GPT 5.6 Luna',
+      modelId: 'gpt-5.6-luna',
+    },
+  ])(
+    'recommends $displayName only from providers that support it',
+    ({ displayName, modelId }) => {
+      const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+        (provider) => {
+          const model = provider.suggestedTaskModels.find(
+            (suggestion) => suggestion.displayName === displayName,
+          );
+
+          return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+        },
+      );
+
+      expect(providersByModel).toEqual([
+        { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
+        { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
+        { providerId: 'openai', modelId: `openai/${modelId}` },
+        { providerId: 'opencode', modelId: `opencode/${modelId}` },
+        {
+          providerId: 'amazon-bedrock',
+          modelId: `bedrock-mantle/openai.${modelId}`,
+        },
+        { providerId: 'github-copilot', modelId: `github-copilot/${modelId}` },
+        { providerId: 'chatgpt', modelId: `openai/${modelId}` },
+      ]);
+    },
+  );
 
   it('recommends Gemini 3.6 Flash only from providers that support it', () => {
     const geminiFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
