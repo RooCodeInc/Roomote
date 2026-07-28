@@ -143,22 +143,24 @@ export async function manageSourceControl(
       case 'create_pull_request_comment':
       case 'resolve_pull_request_thread':
       case 'submit_pull_request_review':
-      case 'update_pull_request_comment':
+      case 'update_pull_request_comment': {
         const writeResult = await writeSourceControlPullRequestForTaskRun({
           taskRun,
           input,
         });
         await clearQuoteAfterSuccess();
         return c.json(writeResult);
+      }
       case 'get_issue':
       case 'list_issue_comments':
-      case 'create_issue_comment':
+      case 'create_issue_comment': {
         const issueResult = await manageSourceControlIssueForTaskRun({
           taskRun,
           input,
         });
         await clearQuoteAfterSuccess();
         return c.json(issueResult);
+      }
     }
   } catch (error) {
     if (error instanceof z.ZodError) {
