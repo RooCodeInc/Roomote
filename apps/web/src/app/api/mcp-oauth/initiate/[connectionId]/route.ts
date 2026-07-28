@@ -34,7 +34,7 @@ import {
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
-import { resolveStaticOauthClientInformation } from '@/lib/server/mcp-static-oauth';
+import { resolveDeploymentStaticOauthClientInformation } from '@/lib/server/deployment-static-oauth';
 
 export const runtime = 'nodejs';
 
@@ -147,13 +147,6 @@ function getOAuthServerMetadataOverride(
   };
 }
 
-function getStaticClientInformation(
-  env: unknown,
-  integration: McpIntegration,
-): OAuthClientInformation | undefined {
-  return resolveStaticOauthClientInformation(env, integration);
-}
-
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ connectionId: string }> },
@@ -229,22 +222,20 @@ export async function GET(
       connection.connectionRole,
     );
 
-    let clientInfo: OAuthClientInformation | undefined =
-      await getClientInformation(connectionId, {
+    const staticClientInfo =
+      await resolveDeploymentStaticOauthClientInformation(webEnv, integration);
+    let clientInfo: OAuthClientInformation | undefined;
+
+    if (staticClientInfo) {
+      // Configured deployment credentials are authoritative. Replacing the
+      // stored client also migrates connections created by the old dynamic
+      // registration flow before their next authorization or token refresh.
+      await storeClientInformation(connectionId, staticClientInfo, redirectUri);
+      clientInfo = staticClientInfo;
+    } else {
+      clientInfo = await getClientInformation(connectionId, {
         expectedRedirectUri: redirectUri,
       });
-
-    if (!clientInfo) {
-      const staticClientInfo = getStaticClientInformation(webEnv, integration);
-
-      if (staticClientInfo) {
-        await storeClientInformation(
-          connectionId,
-          staticClientInfo,
-          redirectUri,
-        );
-        clientInfo = staticClientInfo;
-      }
     }
 
     if (!clientInfo && serverMetadata.registration_endpoint) {

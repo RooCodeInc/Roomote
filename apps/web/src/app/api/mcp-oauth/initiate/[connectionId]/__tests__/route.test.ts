@@ -18,7 +18,7 @@ const {
   isSelfServeMcpIntegrationMock,
   mcpConnectionsFindFirstMock,
   registerOAuthClientMock,
-  resolveStaticOauthClientInformationMock,
+  resolveDeploymentStaticOauthClientInformationMock,
   storeClientInformationMock,
   storeOAuthStateWithIdMock,
 } = vi.hoisted(() => ({
@@ -41,7 +41,7 @@ const {
   isSelfServeMcpIntegrationMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
   registerOAuthClientMock: vi.fn(),
-  resolveStaticOauthClientInformationMock: vi.fn(),
+  resolveDeploymentStaticOauthClientInformationMock: vi.fn(),
   storeClientInformationMock: vi.fn(),
   storeOAuthStateWithIdMock: vi.fn(),
 }));
@@ -54,8 +54,9 @@ vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
   bootstrapWebRuntimeEnv: bootstrapWebRuntimeEnvMock,
 }));
 
-vi.mock('@/lib/server/mcp-static-oauth', () => ({
-  resolveStaticOauthClientInformation: resolveStaticOauthClientInformationMock,
+vi.mock('@/lib/server/deployment-static-oauth', () => ({
+  resolveDeploymentStaticOauthClientInformation:
+    resolveDeploymentStaticOauthClientInformationMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -153,7 +154,9 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     generateCodeChallengeMock.mockResolvedValue('challenge-value');
     generateStateMock.mockReturnValue('state-value');
     storeOAuthStateWithIdMock.mockResolvedValue(undefined);
-    resolveStaticOauthClientInformationMock.mockReturnValue(undefined);
+    resolveDeploymentStaticOauthClientInformationMock.mockResolvedValue(
+      undefined,
+    );
     registerOAuthClientMock.mockResolvedValue({
       client_id: 'fresh-client',
     });
@@ -217,7 +220,7 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationOauthScopesMock.mockReturnValue(['read', 'write']);
     getMcpIntegrationOauthScopeSeparatorMock.mockReturnValue(',');
     getClientInformationMock.mockResolvedValue(undefined);
-    resolveStaticOauthClientInformationMock.mockReturnValue({
+    resolveDeploymentStaticOauthClientInformationMock.mockResolvedValue({
       client_id: 'linear-client',
       client_secret: 'linear-secret',
       token_endpoint_auth_method: 'client_secret_post',
@@ -238,6 +241,35 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       PUBLIC_CALLBACK,
     );
     expect(registerOAuthClientMock).not.toHaveBeenCalled();
+  });
+
+  it('replaces a legacy registered client with configured deployment credentials', async () => {
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://linear.app/oauth/authorize',
+      tokenEndpoint: 'https://api.linear.app/oauth/token',
+    });
+    getClientInformationMock.mockResolvedValue({
+      client_id: 'legacy-dynamic-client',
+      client_secret: 'legacy-secret',
+    });
+    resolveDeploymentStaticOauthClientInformationMock.mockResolvedValue({
+      client_id: 'configured-client',
+      client_secret: 'configured-secret',
+      token_endpoint_auth_method: 'client_secret_post',
+    });
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(getClientInformationMock).not.toHaveBeenCalled();
+    expect(storeClientInformationMock).toHaveBeenCalledWith(
+      CONNECTION_ID,
+      expect.objectContaining({ client_id: 'configured-client' }),
+      PUBLIC_CALLBACK,
+    );
+    const authUrl = new URL(response.headers.get('location')!);
+    expect(authUrl.searchParams.get('client_id')).toBe('configured-client');
   });
 
   it('re-registers when stored client was registered against a different callback', async () => {

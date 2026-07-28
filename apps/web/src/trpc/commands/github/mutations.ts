@@ -23,6 +23,10 @@ import { Env } from '@/lib/server';
 import { encodeRecord } from '@/lib';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import {
+  buildDeploymentAppName,
+  DEPLOYMENT_APP_DESCRIPTION,
+} from '@/lib/server/deployment-app-name';
+import {
   createSignedGitHubAuthState,
   decodeSignedGitHubAuthState,
 } from '@/lib/server/github-oauth-state';
@@ -80,8 +84,6 @@ const GITHUB_APP_DEFAULT_EVENTS = [
   'workflow_job',
   'workflow_run',
 ] as const;
-
-const GITHUB_APP_MANIFEST_DESCRIPTION = 'Cloud coding agents for all';
 
 type GitHubAppManifest = {
   name: string;
@@ -207,32 +209,12 @@ function getGitHubWebhookUrl() {
   return new URL('/api/webhooks/github', webhookBaseUrl).toString();
 }
 
-function buildGitHubManifestName() {
-  // GitHub enforces a 34-character maximum on GitHub App names.
-  const GITHUB_APP_NAME_MAX_LENGTH = 34;
-  const prefix = 'roomote-';
-
-  const host = new URL(getPublicAppUrl(Env)).hostname
-    .replace(/[^a-zA-Z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-  if (!host) {
-    return 'roomote';
-  }
-
-  // Optionally prefix with `roomote-` when the deployment hostname does not
-  // already start with `roomote`, then trim the final name to GitHub's limit.
-  const candidate = host.startsWith('roomote') ? host : `${prefix}${host}`;
-
-  return candidate.slice(0, GITHUB_APP_NAME_MAX_LENGTH).replace(/-+$/g, '');
-}
-
 function buildGitHubAppManifest(): GitHubAppManifest {
   const callbackUrl = getGitHubCallbackUrl();
 
   return {
-    name: buildGitHubManifestName(),
-    description: GITHUB_APP_MANIFEST_DESCRIPTION,
+    name: buildDeploymentAppName(getPublicAppUrl(Env)),
+    description: DEPLOYMENT_APP_DESCRIPTION,
     url: callbackUrl,
     redirect_url: callbackUrl,
     setup_url: callbackUrl,

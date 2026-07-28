@@ -32,10 +32,8 @@ import { encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
-import {
-  getStaticOauthReadiness,
-  type StaticOauthReadiness,
-} from '@/lib/server/mcp-static-oauth';
+import type { StaticOauthReadiness } from '@/lib/server/mcp-static-oauth';
+import { getDeploymentStaticOauthReadiness } from '@/lib/server/deployment-static-oauth';
 import { Env } from '@/lib/server/env';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import type {
@@ -87,8 +85,10 @@ function getStaticOauthSetupError(
   return `${integration.name} isn't available on this Roomote deployment yet. Ask the team managing this deployment to configure OAuth before connecting.`;
 }
 
-function assertStaticOauthReady(integration: McpIntegration): void {
-  const readiness = getStaticOauthReadiness(Env, integration);
+async function assertStaticOauthReady(
+  integration: McpIntegration,
+): Promise<void> {
+  const readiness = await getDeploymentStaticOauthReadiness(Env, integration);
   const error = getStaticOauthSetupError(integration, readiness);
 
   if (error) {
@@ -527,11 +527,21 @@ export async function getDeploymentMcpEnablementsCommand(
  * server.
  */
 export async function getMcpOauthReadinessCommand(_auth: UserAuthSuccess) {
-  return MCP_INTEGRATIONS.flatMap((integration) => {
-    const status = getStaticOauthReadiness(Env, integration);
+  const readiness = await Promise.all(
+    MCP_INTEGRATIONS.map(async (integration) => ({
+      mcpId: integration.id,
+      status: await getDeploymentStaticOauthReadiness(Env, integration),
+    })),
+  );
 
-    return status === 'not_required' ? [] : [{ mcpId: integration.id, status }];
-  });
+  return readiness.filter(
+    (
+      entry,
+    ): entry is {
+      mcpId: string;
+      status: Exclude<StaticOauthReadiness, 'not_required'>;
+    } => entry.status !== 'not_required',
+  );
 }
 
 /**
@@ -579,7 +589,7 @@ export async function setDeploymentMcpEnabledCommand(
     integration?.oauthClientEnv &&
     !isDeploymentScopedMcpIntegration(input.mcpId)
   ) {
-    assertStaticOauthReady(integration);
+    await assertStaticOauthReady(integration);
   }
 
   const [result] = await db
@@ -1262,7 +1272,7 @@ export async function connectMcpCommand(
     );
   }
 
-  assertStaticOauthReady(integration);
+  await assertStaticOauthReady(integration);
 
   if (
     input.redirectTo &&
