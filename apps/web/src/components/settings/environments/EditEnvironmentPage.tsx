@@ -728,12 +728,6 @@ function AgentRepositorySelectionSubview({
           <ArrowLeft />
           Edit YAML directly
         </Button>
-        <ModelSelect
-          value={selectedModelId}
-          onValueChange={onSelectedModelIdChange}
-          disabled={isBusy}
-          ariaLabel="Environment edit model"
-        />
         <Button
           type="button"
           onClick={onStartAgent}
@@ -744,6 +738,12 @@ function AgentRepositorySelectionSubview({
           Start Agent
           <ArrowRight />
         </Button>
+        <ModelSelect
+          value={selectedModelId}
+          onValueChange={onSelectedModelIdChange}
+          disabled={isBusy}
+          ariaLabel="Environment edit model"
+        />
       </div>
     </>
   );
