@@ -538,7 +538,7 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
       </CardHeader>
 
       {item.status || footerActions.length > 0 ? (
-        <CardContent className="p-">
+        <CardContent>
           <div className="flex gap-3 p-0">
             <div
               className={`mt-0.5 ${iconColumnWidthClass} shrink-0`}
@@ -556,7 +556,7 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
                 </div>
               )}
               {footerActions.length > 0 ? (
-                <div className="flex gap-2">
+                <div className="-ml-4 flex gap-2">
                   {footerActions.map((action) => (
                     <Button
                       key={action.ariaLabel}
