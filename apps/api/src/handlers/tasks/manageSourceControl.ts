@@ -1,6 +1,11 @@
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
+import {
+  clearLatestUserMessageForReplyQuoteIfId,
+  getLatestUserMessageForReplyQuote,
+} from '@roomote/communication/messages';
+import { resolveSourceControlProviderFromPayload } from '@roomote/types';
 
 import {
   createOrUpdateSourceControlPullRequestForTaskRun,
@@ -26,6 +31,27 @@ import {
   McpProxyError,
 } from '../mcp/proxy-utils';
 import { logHandlerError } from '../utils';
+
+const GITHUB_REPLY_QUOTE_MAX_LENGTH = 280;
+
+function formatGitHubReplyQuote(params: {
+  userName: string;
+  text: string;
+}): string | null {
+  const userName = params.userName.replace(/\s+/g, ' ').trim();
+  const text = params.text.trim();
+
+  if (!userName || !text) {
+    return null;
+  }
+
+  const truncated =
+    text.length <= GITHUB_REPLY_QUOTE_MAX_LENGTH
+      ? text
+      : `${text.slice(0, GITHUB_REPLY_QUOTE_MAX_LENGTH - 3).trimEnd()}...`;
+
+  return `> **${userName}:** ${truncated.replaceAll('\n', '\n> ')}`;
+}
 
 /**
  * POST /api/mcp/tasks/:taskId/source_control
@@ -66,6 +92,35 @@ export async function manageSourceControl(
       runId: auth.authContext.runId,
       taskId,
     });
+    const isGitHubTask =
+      resolveSourceControlProviderFromPayload(taskRun.payload) === 'github';
+    const bodyInput = 'body' in input ? input : null;
+    const shouldQuote =
+      isGitHubTask &&
+      (input.action === 'reply_to_pull_request_comment' ||
+        input.action === 'create_pull_request_comment' ||
+        input.action === 'create_issue_comment') &&
+      typeof bodyInput?.body === 'string';
+    const pendingQuote = shouldQuote
+      ? await getLatestUserMessageForReplyQuote('github', taskRun.id)
+      : null;
+
+    if (pendingQuote && typeof bodyInput?.body === 'string') {
+      const quote = formatGitHubReplyQuote(pendingQuote);
+      if (quote) {
+        bodyInput.body = `${quote}\n\n${bodyInput.body}`;
+      }
+    }
+
+    const clearQuoteAfterSuccess = async () => {
+      if (pendingQuote) {
+        await clearLatestUserMessageForReplyQuoteIfId(
+          'github',
+          taskRun.id,
+          pendingQuote.id,
+        );
+      }
+    };
 
     switch (input.action) {
       case 'create_or_update_pull_request':
@@ -89,21 +144,21 @@ export async function manageSourceControl(
       case 'resolve_pull_request_thread':
       case 'submit_pull_request_review':
       case 'update_pull_request_comment':
-        return c.json(
-          await writeSourceControlPullRequestForTaskRun({
-            taskRun,
-            input,
-          }),
-        );
+        const writeResult = await writeSourceControlPullRequestForTaskRun({
+          taskRun,
+          input,
+        });
+        await clearQuoteAfterSuccess();
+        return c.json(writeResult);
       case 'get_issue':
       case 'list_issue_comments':
       case 'create_issue_comment':
-        return c.json(
-          await manageSourceControlIssueForTaskRun({
-            taskRun,
-            input,
-          }),
-        );
+        const issueResult = await manageSourceControlIssueForTaskRun({
+          taskRun,
+          input,
+        });
+        await clearQuoteAfterSuccess();
+        return c.json(issueResult);
     }
   } catch (error) {
     if (error instanceof z.ZodError) {

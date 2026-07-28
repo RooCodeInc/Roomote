@@ -314,6 +314,24 @@ describe('communication message queues', () => {
       );
     });
 
+    it('supports GitHub reply quotes without adding GitHub as a chat provider', async () => {
+      await setLatestUserMessageForReplyQuote('github', 44, {
+        text: 'ship it',
+        userName: 'Ada',
+      });
+
+      expect(setMock).toHaveBeenCalledWith(
+        'github:latest_user_message:44',
+        JSON.stringify({
+          id: 'quote-id-fixed',
+          text: 'ship it',
+          userName: 'Ada',
+        }),
+        'EX',
+        30 * 24 * 60 * 60,
+      );
+    });
+
     it('reads the latest user message', async () => {
       getMock.mockResolvedValueOnce(
         JSON.stringify({

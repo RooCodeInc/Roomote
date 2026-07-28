@@ -7,6 +7,8 @@ import {
   queuedCommunicationMessageSchema,
 } from '@roomote/types';
 
+type ReplyQuoteProvider = CommunicationProvider | 'github';
+
 const COMMUNICATION_MESSAGE_TTL_SECONDS = 60 * 60;
 const COMMUNICATION_MESSAGE_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
 const LATEST_INBOUND_MESSAGE_ID_TTL_SECONDS = 60 * 60 * 24;
@@ -20,7 +22,7 @@ export interface LatestUserMessageForReplyQuote {
 }
 
 type TrackLatestUserMessageForReplyQuoteParams = {
-  provider: CommunicationProvider;
+  provider: ReplyQuoteProvider;
   runId: number;
   text: string;
   userName: string;
@@ -72,7 +74,7 @@ function getLatestInboundMessageIdKey(
 }
 
 function getLatestUserMessageForReplyQuoteKey(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
 ): string {
   return `${provider}:latest_user_message:${runId}`;
@@ -108,7 +110,7 @@ function parseLatestUserMessageForReplyQuote(
 }
 
 function getCommunicationMessageDedupeKey(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
   messageId: string,
 ): string {
@@ -350,7 +352,7 @@ export async function getLatestInboundMessageId(
  * quote it back into the originating chat thread (Discord parity with Slack).
  */
 export async function setLatestUserMessageForReplyQuote(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
   message: Omit<LatestUserMessageForReplyQuote, 'id'> & { id?: string },
 ): Promise<LatestUserMessageForReplyQuote> {
@@ -399,7 +401,7 @@ export async function trackLatestUserMessageForReplyQuote({
 }
 
 export async function getLatestUserMessageForReplyQuote(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
 ): Promise<LatestUserMessageForReplyQuote | null> {
   const redis = getRedis();
@@ -410,7 +412,7 @@ export async function getLatestUserMessageForReplyQuote(
 }
 
 export async function clearLatestUserMessageForReplyQuote(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
 ): Promise<void> {
   try {
@@ -430,7 +432,7 @@ export async function clearLatestUserMessageForReplyQuote(
  * was quoted on this delivery. Prevents clearing a newer same-text follow-up.
  */
 export async function clearLatestUserMessageForReplyQuoteIfId(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
   id: string,
 ): Promise<boolean> {
