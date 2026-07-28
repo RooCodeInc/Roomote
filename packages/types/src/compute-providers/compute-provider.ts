@@ -13,6 +13,7 @@ export const computeProviders = [
   'e2b',
   'blaxel',
   'roomote',
+  'azure',
 ] as const;
 
 export type ComputeProvider = (typeof computeProviders)[number];
@@ -26,6 +27,7 @@ export const snapshotCapableComputeProviders = [
   'e2b',
   'daytona',
   'roomote',
+  'azure',
 ] as const satisfies readonly ComputeProvider[];
 
 /**
@@ -36,6 +38,7 @@ export const snapshotCapableComputeProviders = [
 export const standbyResumeCapableComputeProviders = [
   'docker',
   'blaxel',
+  'azure',
 ] as const satisfies readonly ComputeProvider[];
 
 /**
@@ -141,6 +144,16 @@ export const BLAXEL_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
     ...SANDBOX_WORKER_RUNTIME_PATHS,
   });
 
+/**
+ * Azure Container Apps sandboxes boot from a disk image baked from the same
+ * worker OCI image as the other hosted providers, so they share the Vercel
+ * sandbox worker filesystem layout too.
+ */
+export const AZURE_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
+  Object.freeze({
+    ...SANDBOX_WORKER_RUNTIME_PATHS,
+  });
+
 export const LOCAL_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
   Object.freeze({
     ...SANDBOX_WORKER_RUNTIME_PATHS,
@@ -157,6 +170,7 @@ const RUNTIME_PATHS_BY_ENVIRONMENT: Record<
   e2b: E2B_WORKER_RUNTIME_PATHS,
   blaxel: BLAXEL_WORKER_RUNTIME_PATHS,
   roomote: MODAL_WORKER_RUNTIME_PATHS,
+  azure: AZURE_WORKER_RUNTIME_PATHS,
   local: LOCAL_WORKER_RUNTIME_PATHS,
 };
 

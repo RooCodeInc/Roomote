@@ -167,6 +167,11 @@ async function createSleepCheckClient(provider: ComputeProvider) {
         provider: 'blaxel',
         envFallback: await resolveComputeProviderEnvValues('blaxel'),
       });
+    case 'azure':
+      return createComputeProviderClient({
+        provider: 'azure',
+        envFallback: await resolveComputeProviderEnvValues('azure'),
+      });
     case 'docker':
       return createComputeProviderClient({ provider: 'docker' });
     default:

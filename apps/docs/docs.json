@@ -83,7 +83,8 @@
               "providers/compute/modal",
               "providers/compute/e2b",
               "providers/compute/daytona",
-              "providers/compute/blaxel"
+              "providers/compute/blaxel",
+              "providers/compute/azure"
             ]
           },
           "environment-variables"

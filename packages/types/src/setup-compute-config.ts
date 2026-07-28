@@ -503,6 +503,52 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     ],
   },
   {
+    provider: 'azure',
+    label: 'Azure Container Apps',
+    description:
+      'Azure Container Apps sandboxes (preview) with memory+disk snapshots and sub-second suspend/resume standby. Auth uses the ambient Azure login (az) or a managed identity — no API key. Requires an Azure sandbox group.',
+    supportsSnapshots: true,
+    fields: [
+      {
+        envVarName: 'AZURE_SUBSCRIPTION_ID',
+        label: 'Azure Subscription ID',
+        category: 'credential',
+      },
+      {
+        envVarName: 'AZURE_RESOURCE_GROUP',
+        label: 'Azure Resource Group',
+        category: 'credential',
+      },
+      {
+        envVarName: 'AZURE_SANDBOX_GROUP',
+        label: 'Sandbox Group Name',
+        category: 'credential',
+      },
+      {
+        envVarName: 'AZURE_SANDBOX_REGION',
+        label: 'Sandbox Region',
+        category: 'credential',
+      },
+      {
+        // Provisioned by baking the Roomote worker OCI image into a sandbox
+        // disk image (or process env); not a Settings/setup form input.
+        envVarName: 'AZURE_SANDBOX_DISK_IMAGE',
+        label: 'Worker Disk Image',
+        category: 'infrastructure',
+      },
+      {
+        // Optional user-assigned managed identity client id for Azure-hosted
+        // controllers. Omit to use az-login (local) or the system-assigned
+        // identity (deployed).
+        envVarName: 'AZURE_CLIENT_ID',
+        label: 'Managed Identity Client ID',
+        required: false,
+        category: 'credential',
+        advanced: true,
+      },
+    ],
+  },
+  {
     provider: 'docker',
     label: 'Local Docker',
     comment: 'Run on this host',
@@ -577,6 +623,7 @@ const SETUP_PROVISIONABLE_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'E2B_TEMPLATE_ID',
   'DAYTONA_SNAPSHOT_NAME',
   'BLAXEL_IMAGE',
+  'AZURE_SANDBOX_DISK_IMAGE',
 ]);
 
 /**

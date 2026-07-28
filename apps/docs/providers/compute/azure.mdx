@@ -1,0 +1,87 @@
+---
+title: Azure Container Apps
+icon: '/logo/integrations/azure.svg'
+description: Run Roomote tasks on Azure Container Apps sandboxes.
+---
+
+Azure Container Apps sandboxes are hardware-isolated microVMs that run Roomote
+tasks on your own Azure subscription. The provider supports memory+disk
+snapshots and sub-second suspend/resume standby, so both environment setup
+caching and task sleep/resume flows keep the full workspace state.
+
+Azure Container Apps sandboxes are in public preview; expect API drift.
+
+## When to use Azure Container Apps
+
+Use Azure Container Apps when:
+
+- task work should run inside your own Azure subscription
+- you want hosted sandboxes without managing an API key (auth uses the
+  ambient Azure login or a managed identity)
+- memory+disk snapshots or standby with sub-second resume is useful
+
+## Prerequisites
+
+1. An Azure subscription and resource group.
+2. A sandbox group (one-time bootstrap):
+
+   ```sh
+   aca sandboxgroup create --name <group> --location <region> --set-config
+   ```
+
+   The calling principal is granted the Container Apps SandboxGroup Data
+   Owner role automatically; grant it explicitly to any additional principal,
+   such as a deployed controller's managed identity.
+3. Authentication: `az login` for local runs, or a managed identity when the
+   Roomote controller itself runs in Azure (set `AZURE_CLIENT_ID` for a
+   user-assigned identity).
+
+## Configuration
+
+Add Azure Container Apps from **Settings > Sandboxes**, or provide the values
+as deployment env vars:
+
+```sh
+DEFAULT_COMPUTE_PROVIDER=azure
+AZURE_SUBSCRIPTION_ID=...
+AZURE_RESOURCE_GROUP=...
+AZURE_SANDBOX_GROUP=...
+AZURE_SANDBOX_REGION=...
+```
+
+Optional values:
+
+```sh
+AZURE_CLIENT_ID=...
+AZURE_SANDBOX_DISK_IMAGE=...
+```
+
+`AZURE_SANDBOX_DISK_IMAGE` selects the worker disk image. Leave it unset to
+let Roomote provision it automatically: the setup wizard and the Settings >
+Sandboxes page bake a disk image from the published worker OCI image after
+the Azure settings are saved (the image must be publicly pullable — disk
+image registration has no per-call registry credentials).
+
+## Snapshots and standby
+
+Azure snapshots capture memory and disk, so a restored sandbox resumes in
+sub-second time with processes still alive. Task standby uses the same
+memory-preserving suspend/resume, and sandboxes bill storage-only while
+suspended. Preview port URLs do not survive a snapshot restore; Roomote
+re-adds ports after resume.
+
+## Verify setup
+
+1. save the Azure subscription, resource group, sandbox group, and region
+2. select Azure Container Apps as the default sandbox provider
+3. start a small task from an environment
+4. confirm the task starts, streams logs, and can run project commands
+5. verify preview links if the task starts a web app
+
+## Common issues
+
+- **Authentication fails.** Run `az login` locally, or confirm the deployed
+  controller's managed identity holds the Container Apps SandboxGroup Data
+  Owner role on the sandbox group.
+- **Sandbox creation is slow on first use.** Cold disk image pulls take
+  longer; the worker disk image bake is a one-time provisioning step.

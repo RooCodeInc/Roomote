@@ -2,4 +2,8 @@ packages:
   - "apps/*"
   - "packages/*"
 minimumReleaseAge: 10080
+# jose@6.2.4 is the version already pinned in the lockfile; allow
+# lockfile-affecting changes while it finishes maturing.
+minimumReleaseAgeExclude:
+  - jose
 blockExoticSubdeps: true

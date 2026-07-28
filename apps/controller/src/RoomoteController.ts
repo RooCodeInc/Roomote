@@ -21,6 +21,7 @@ import {
   DOCKER_SPAWN_TIMEOUT_MS,
   spawnE2bWorker,
   spawnBlaxelWorker,
+  spawnAzureWorker,
   spawnModalWorker,
 } from './compute-providers';
 
@@ -302,6 +303,57 @@ export class RoomoteController extends BaseController {
           blaxelImage,
           blaxelRegion: resolvedEnv.BLAXEL_REGION,
           blaxelTimeoutMs: timeoutMs,
+          localTarballPath: this.localWorkerReleasePath,
+        });
+        return;
+      }
+      case 'azure': {
+        const azureSubscriptionId = resolvedEnv.AZURE_SUBSCRIPTION_ID;
+        const azureResourceGroup = resolvedEnv.AZURE_RESOURCE_GROUP;
+        const azureSandboxGroup = resolvedEnv.AZURE_SANDBOX_GROUP;
+        const azureRegion = resolvedEnv.AZURE_SANDBOX_REGION;
+        const azureDiskImage = resolvedEnv.AZURE_SANDBOX_DISK_IMAGE;
+
+        if (!azureSubscriptionId) {
+          throw new Error(
+            'AZURE_SUBSCRIPTION_ID is required to spawn Azure workers',
+          );
+        }
+
+        if (!azureResourceGroup) {
+          throw new Error(
+            'AZURE_RESOURCE_GROUP is required to spawn Azure workers',
+          );
+        }
+
+        if (!azureSandboxGroup) {
+          throw new Error(
+            'AZURE_SANDBOX_GROUP is required to spawn Azure workers',
+          );
+        }
+
+        if (!azureRegion) {
+          throw new Error(
+            'AZURE_SANDBOX_REGION is required to spawn Azure workers',
+          );
+        }
+
+        if (!azureDiskImage) {
+          throw new Error(
+            'AZURE_SANDBOX_DISK_IMAGE is required to spawn Azure workers',
+          );
+        }
+
+        await spawnAzureWorker(taskRun, authToken, {
+          deploymentSlug,
+          azureTags: this.buildSandboxTags(),
+          azureSubscriptionId,
+          azureResourceGroup,
+          azureSandboxGroup,
+          azureRegion,
+          azureDiskImage,
+          azureClientId: resolvedEnv.AZURE_CLIENT_ID,
+          azureTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
         });
         return;

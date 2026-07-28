@@ -12,9 +12,11 @@ import { queuePersistedTaskRun } from '@roomote/cloud-agents/server';
 import {
   buildBlaxelWorkerImage,
   buildE2bWorkerTemplate,
+  deriveAzureWorkerDiskImageName,
   deriveBlaxelWorkerImageName,
   deriveDaytonaWorkerSnapshotName,
   deriveE2bWorkerTemplateRef,
+  registerAzureDiskImage,
   registerDaytonaWorkerSnapshot,
 } from '@roomote/compute-providers';
 import {
@@ -136,6 +138,43 @@ const PROVISIONING_PROVIDERS: Record<
       });
 
       return { artifactRef: built.imageRef };
+    },
+  },
+  azure: {
+    envVarName: 'AZURE_SANDBOX_DISK_IMAGE',
+    deriveArtifactRef: deriveAzureWorkerDiskImageName,
+    provision: async ({ resolvedEnv, imageRef, templateRef }) => {
+      const subscriptionId = resolvedEnv.AZURE_SUBSCRIPTION_ID;
+      const resourceGroup = resolvedEnv.AZURE_RESOURCE_GROUP;
+      const sandboxGroup = resolvedEnv.AZURE_SANDBOX_GROUP;
+      const region = resolvedEnv.AZURE_SANDBOX_REGION;
+
+      if (!subscriptionId) {
+        throw new Error('AZURE_SUBSCRIPTION_ID is not configured');
+      }
+      if (!resourceGroup) {
+        throw new Error('AZURE_RESOURCE_GROUP is not configured');
+      }
+      if (!sandboxGroup) {
+        throw new Error('AZURE_SANDBOX_GROUP is not configured');
+      }
+      if (!region) {
+        throw new Error('AZURE_SANDBOX_REGION is not configured');
+      }
+
+      // Azure disk image registration has no per-call registry credentials:
+      // the worker image must be public.
+      const registered = await registerAzureDiskImage({
+        subscriptionId,
+        resourceGroup,
+        sandboxGroup,
+        region,
+        managedIdentityClientId: resolvedEnv.AZURE_CLIENT_ID,
+        imageRef,
+        name: templateRef,
+      });
+
+      return { artifactRef: registered.diskImageId };
     },
   },
 };

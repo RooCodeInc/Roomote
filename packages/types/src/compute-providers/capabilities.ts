@@ -87,6 +87,22 @@ export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsDockerProjects: true,
 };
 
+export const AZURE_CAPABILITIES: ComputeProviderCapabilities = {
+  supportsCreateInstance: true,
+  supportsDestroyInstance: true,
+  supportsCommandExecution: true,
+  // Poll-based streaming over detached-command log files.
+  supportsCommandOutputStreaming: true,
+  supportsCommandOutputLookup: true,
+  supportsSnapshots: true,
+  // ACA suspend/resume preserves full memory+disk with sub-second restore.
+  supportsStandbyResume: true,
+  supportsResume: true,
+  supportsFileWrite: true,
+  // dockerd runs inside the ACA microVM (verified against the worker image).
+  supportsDockerProjects: true,
+};
+
 export function getComputeProviderCapabilities(
   provider: ComputeProvider,
 ): ComputeProviderCapabilities {
@@ -104,6 +120,8 @@ export function getComputeProviderCapabilities(
       return E2B_CAPABILITIES;
     case 'blaxel':
       return BLAXEL_CAPABILITIES;
+    case 'azure':
+      return AZURE_CAPABILITIES;
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported provider: ${_exhaustive}`);

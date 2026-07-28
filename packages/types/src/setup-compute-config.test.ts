@@ -306,6 +306,7 @@ describe('buildSetupComputeStatus', () => {
       'e2b',
       'daytona',
       'blaxel',
+      'azure',
       'docker',
     ]);
     expect(
@@ -683,6 +684,9 @@ describe('buildSetupComputeStatus', () => {
       // Blaxel can build its sandbox image from the registry-qualified worker
       // image during setup, just like E2B and Daytona provision artifacts.
       blaxel: true,
+      // Azure bakes its sandbox disk image from the worker image during setup,
+      // the same provisioning story as Daytona/E2B.
+      azure: true,
       docker: true,
       // Roomote Cloud credentials are deployment-managed; a worker image
       // alone cannot satisfy them.
@@ -714,6 +718,7 @@ describe('buildSetupComputeStatus', () => {
       daytona: false,
       e2b: false,
       blaxel: false,
+      azure: false,
       docker: true,
       roomote: false,
     });
@@ -739,6 +744,7 @@ describe('buildSetupComputeStatus', () => {
       e2b: true,
       roomote: false,
       blaxel: false,
+      azure: false,
       docker: true,
     });
   });
@@ -995,7 +1001,7 @@ describe('getDefaultAvailableComputeProvider', () => {
   it('falls back to docker when every provider is excluded', () => {
     expect(
       getDefaultAvailableComputeProvider(
-        new Set(['docker', 'modal', 'daytona', 'e2b', 'blaxel']),
+        new Set(['docker', 'modal', 'daytona', 'e2b', 'blaxel', 'azure']),
       ),
     ).toBe('docker');
   });

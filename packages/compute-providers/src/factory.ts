@@ -10,6 +10,7 @@ import {
 import type {
   ComputeProviderClient,
   ComputeProviderFactoryOptions,
+  AzureConfig,
   BlaxelConfig,
   DaytonaConfig,
   E2bConfig,
@@ -23,6 +24,7 @@ import {
   DaytonaClient,
   E2bClient,
   BlaxelClient,
+  AzureClient,
 } from './adapters';
 
 const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
@@ -314,6 +316,41 @@ export function createComputeProviderClient(
           : {}),
       };
       return new BlaxelClient(config);
+    }
+
+    case 'azure': {
+      const subscriptionId =
+        options.config?.subscriptionId ?? envValue('AZURE_SUBSCRIPTION_ID');
+      const resourceGroup =
+        options.config?.resourceGroup ?? envValue('AZURE_RESOURCE_GROUP');
+      const sandboxGroup =
+        options.config?.sandboxGroup ?? envValue('AZURE_SANDBOX_GROUP');
+      const region = options.config?.region ?? envValue('AZURE_SANDBOX_REGION');
+      const diskImage =
+        options.config?.diskImage ?? envValue('AZURE_SANDBOX_DISK_IMAGE');
+      const managedIdentityClientId =
+        options.config?.managedIdentityClientId ?? envValue('AZURE_CLIENT_ID');
+
+      assertDefined(subscriptionId, 'Missing AZURE_SUBSCRIPTION_ID');
+      assertDefined(resourceGroup, 'Missing AZURE_RESOURCE_GROUP');
+      assertDefined(sandboxGroup, 'Missing AZURE_SANDBOX_GROUP');
+      assertDefined(region, 'Missing AZURE_SANDBOX_REGION');
+      assertDefined(diskImage, 'Missing AZURE_SANDBOX_DISK_IMAGE');
+
+      const config: AzureConfig = {
+        ...(options.config ?? {}),
+        subscriptionId,
+        resourceGroup,
+        sandboxGroup,
+        region,
+        diskImage,
+        ...(options.config?.managedIdentityClientId === undefined &&
+        managedIdentityClientId
+          ? { managedIdentityClientId }
+          : {}),
+      };
+
+      return new AzureClient(config);
     }
 
     default: {

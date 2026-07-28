@@ -47,6 +47,7 @@ const BRAND_ICON_BY_PROVIDER: Record<ComputeProvider, string> = {
   daytona: 'daytona',
   e2b: 'e2b',
   blaxel: 'blaxel',
+  azure: 'azure',
   roomote: 'roomote',
 };
 

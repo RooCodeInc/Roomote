@@ -13,7 +13,8 @@ export type WorkerComputeProviderLabel =
   | 'modal'
   | 'daytona'
   | 'e2b'
-  | 'blaxel';
+  | 'blaxel'
+  | 'azure';
 
 export type WorkerComputeProviderFingerprintKind = 'base-image' | 'runtime';
 
@@ -26,6 +27,7 @@ export function getWorkerComputeProviderLabel(
     case 'daytona':
     case 'e2b':
     case 'blaxel':
+    case 'azure':
       return provider;
     // Roomote Cloud workers run inside Modal sandboxes, so worker-side
     // runtime handling (cgroup layout, usage polling) must match Modal.

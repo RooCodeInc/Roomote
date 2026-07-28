@@ -737,9 +737,30 @@ BL_API_KEY=...
 BL_WORKSPACE=...
 # Optional prebuilt Blaxel image override
 BLAXEL_IMAGE=sandbox/roomote-worker:<version>
+
+# Azure Container Apps (preview)
+DEFAULT_COMPUTE_PROVIDER=azure
+AZURE_SUBSCRIPTION_ID=...
+AZURE_RESOURCE_GROUP=...
+AZURE_SANDBOX_GROUP=...
+AZURE_SANDBOX_REGION=...
+AZURE_SANDBOX_DISK_IMAGE=...
+# Optional: user-assigned managed identity client ID for Azure-hosted
+# controllers; omit to use the ambient Azure credential chain
+AZURE_CLIENT_ID=...
 ```
 
-`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`, and `BLAXEL_IMAGE` can also be provisioned
+Azure auth uses the ambient Azure credential chain instead of an API key:
+`az login` for local runs, or a managed identity (optionally user-assigned via
+`AZURE_CLIENT_ID`) when the controller itself runs in Azure. One-time sandbox
+group bootstrap: `aca sandboxgroup create --name <group> --location <region>
+--set-config` — the calling principal is granted the Container Apps
+SandboxGroup Data Owner role automatically; grant it explicitly to any
+additional principal (for example a deployed controller's managed identity).
+Azure Container Apps sandboxes are in public preview, so expect API drift.
+
+`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`, `BLAXEL_IMAGE`, and
+`AZURE_SANDBOX_DISK_IMAGE` can also be provisioned
 automatically during setup when a registry-qualified `DOCKER_WORKER_IMAGE`
 is configured — the setup wizard and the Settings → Sandboxes page build the
 worker base artifact in your provider account after credentials are saved.

@@ -38,6 +38,7 @@
     "@daytonaio/sdk": "^0.190.1",
     "@roomote/env": "workspace:^",
     "@roomote/types": "workspace:^",
+    "@azure/identity": "^4.13.1",
     "e2b": "^2.31.0",
     "jsonwebtoken": "^9.0.3",
     "lru-cache": "^11.2.6",

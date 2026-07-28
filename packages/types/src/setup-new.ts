@@ -18,7 +18,8 @@ export const WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE =
 
 /**
  * Progress of a setup-time worker base-image provisioning run (an E2B
- * template build, Daytona snapshot registration, or Blaxel image build). The run
+ * template build, Daytona snapshot registration, Blaxel image build, or Azure
+ * disk image bake). The run
  * executes detached in the web process after the provider's config is
  * saved, so a `building` entry older than
  * {@link SETUP_COMPUTE_PROVISIONING_STALE_MS} is treated as failed (the
@@ -83,6 +84,7 @@ export const SETUP_COMPUTE_PROVISIONING_STATE_FIELDS = {
   e2b: 'e2bTemplateBuild',
   daytona: 'daytonaSnapshotBuild',
   blaxel: 'blaxelImageBuild',
+  azure: 'azureDiskImageBuild',
 } as const satisfies Partial<Record<ComputeProvider, keyof SetupNewState>>;
 
 export type SetupProvisionableComputeProvider =
@@ -130,6 +132,7 @@ export type SetupNewState = {
   e2bTemplateBuild: SetupNewComputeProvisioningState | null;
   daytonaSnapshotBuild: SetupNewComputeProvisioningState | null;
   blaxelImageBuild: SetupNewComputeProvisioningState | null;
+  azureDiskImageBuild: SetupNewComputeProvisioningState | null;
   lastInteractedByUserId: string | null;
 };
 
@@ -158,6 +161,7 @@ export function createEmptySetupNewState(): SetupNewState {
     e2bTemplateBuild: null,
     daytonaSnapshotBuild: null,
     blaxelImageBuild: null,
+    azureDiskImageBuild: null,
     lastInteractedByUserId: null,
   };
 }

@@ -207,7 +207,7 @@ as per-task auth tokens or workspace paths.
 
 | Env var                              | Required          | Used for                                                                                                                                 |
 | ------------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, and `blaxel`. |
+| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, `blaxel`, and `azure`. |
 | `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                                  |
 | `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker. In production, prefer an immutable registry-qualified tag.                                                  |
 | `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                          |
@@ -243,6 +243,12 @@ as per-task auth tokens or workspace paths.
 | `BLAXEL_REGION`                      | Optional          | Blaxel sandbox placement region. Unset lets Blaxel choose the closest region.                                                            |
 | `BLAXEL_STANDBY_MAX_COUNT`           | Optional          | Maximum Blaxel standby sandboxes retained for resume. Defaults to `25`; `0` disables retention.                                          |
 | `BLAXEL_STANDBY_MAX_AGE_HOURS`       | Optional          | Maximum age of a Blaxel standby sandbox. Defaults to `168`, capped at `168`.                                                             |
+| `AZURE_SUBSCRIPTION_ID`              | Azure             | Azure subscription ID hosting the sandbox group. Can also be saved from **Settings > Sandboxes**.                                          |
+| `AZURE_RESOURCE_GROUP`               | Azure             | Resource group containing the Azure sandbox group.                                                                                        |
+| `AZURE_SANDBOX_GROUP`                | Azure             | Azure Container Apps sandbox group name.                                                                                                  |
+| `AZURE_SANDBOX_REGION`               | Azure             | Data-plane region for the sandbox group, for example `canadacentral`.                                                                     |
+| `AZURE_SANDBOX_DISK_IMAGE`           | Azure             | Worker disk image ID. Auto-provisioned from the worker OCI image during setup when unset.                                                 |
+| `AZURE_CLIENT_ID`                    | Optional          | User-assigned managed identity client ID. Unset uses `az login` locally or the system-assigned identity when deployed.                     |
 | `WORKER_RELEASE_CHANNEL`             | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                                      |
 | `WORKER_RELEASE_VERSION`             | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                             |
 | `LOCAL_SANDBOX_FILES_DIR`            | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                          |
