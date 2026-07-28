@@ -9,6 +9,7 @@ import {
 } from '@roomote/db/server';
 import {
   getMcpIntegration,
+  getMcpIntegrationOauthEndpoints,
   isDeploymentScopedMcpIntegration,
   isSelfServeMcpIntegration,
 } from '@roomote/types';
@@ -302,12 +303,14 @@ export async function GET(request: NextRequest) {
     }
 
     failureStage = 'provider_discovery';
-    const serverMetadata = await discoverOAuthEndpoints(integration.url);
+    const tokenEndpoint =
+      getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
+      (await discoverOAuthEndpoints(integration.url)).token_endpoint;
     const redirectUri = new URL(CALLBACK_PATH, webUrl).toString();
 
     failureStage = 'token_exchange';
     const tokens = await exchangeCodeForTokens(
-      serverMetadata.token_endpoint,
+      tokenEndpoint,
       code,
       oauthState.codeVerifier,
       clientInfo,

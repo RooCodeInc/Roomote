@@ -8,6 +8,7 @@ const {
   exchangeCodeForTokensMock,
   getClientInformationMock,
   getMcpIntegrationMock,
+  getMcpIntegrationOauthEndpointsMock,
   hydrateLinearMcpConnectionAfterOauthMock,
   isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegrationMock,
@@ -24,6 +25,7 @@ const {
   exchangeCodeForTokensMock: vi.fn(),
   getClientInformationMock: vi.fn(),
   getMcpIntegrationMock: vi.fn(),
+  getMcpIntegrationOauthEndpointsMock: vi.fn(),
   hydrateLinearMcpConnectionAfterOauthMock: vi.fn(),
   isDeploymentScopedMcpIntegrationMock: vi.fn(),
   isSelfServeMcpIntegrationMock: vi.fn(),
@@ -83,6 +85,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/types', () => ({
   getMcpIntegration: getMcpIntegrationMock,
+  getMcpIntegrationOauthEndpoints: getMcpIntegrationOauthEndpointsMock,
   isDeploymentScopedMcpIntegration: isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegration: isSelfServeMcpIntegrationMock,
 }));
@@ -127,6 +130,10 @@ describe('GET /api/mcp-oauth/callback', () => {
       name: 'Linear',
       url: 'https://mcp.linear.app/mcp',
     });
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://linear.app/oauth/authorize',
+      tokenEndpoint: 'https://api.linear.app/oauth/token',
+    });
     isSelfServeMcpIntegrationMock.mockReturnValue(true);
     isDeploymentScopedMcpIntegrationMock.mockReturnValue(false);
     getClientInformationMock.mockResolvedValue({
@@ -152,12 +159,13 @@ describe('GET /api/mcp-oauth/callback', () => {
       'https://customer.example/settings?mcp=connected',
     );
     expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
-      'https://mcp.linear.app/token',
+      'https://api.linear.app/oauth/token',
       'auth-code',
       'verifier-1',
       { client_id: 'client-1' },
       PUBLIC_CALLBACK,
     );
+    expect(discoverOAuthEndpointsMock).not.toHaveBeenCalled();
   });
 
   it('falls back to R_APP_URL for token exchange redirect_uri when R_PUBLIC_URL is unset', async () => {
@@ -172,7 +180,7 @@ describe('GET /api/mcp-oauth/callback', () => {
       'http://localhost:13000/settings?mcp=connected',
     );
     expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
-      'https://mcp.linear.app/token',
+      'https://api.linear.app/oauth/token',
       'auth-code',
       'verifier-1',
       { client_id: 'client-1' },
@@ -223,7 +231,7 @@ describe('GET /api/mcp-oauth/callback', () => {
     expect(resumedResponse.headers.get('set-cookie')).toContain('Max-Age=0');
     expect(consumeOAuthStateMock).toHaveBeenCalledTimes(1);
     expect(exchangeCodeForTokensMock).toHaveBeenCalledWith(
-      'https://mcp.linear.app/token',
+      'https://api.linear.app/oauth/token',
       'auth-code',
       'verifier-1',
       { client_id: 'client-1' },

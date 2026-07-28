@@ -221,6 +221,11 @@ export type McpIntegrationOAuthClientEnv = {
   tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod;
 };
 
+export type McpIntegrationOAuthEndpoints = {
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
+};
+
 export type McpIntegrationAuthorizationParameter = {
   name: string;
   value: string;
@@ -243,7 +248,9 @@ export type McpIntegration = {
   connectionScope?: 'user' | 'deployment';
   authorizationParameters?: McpIntegrationAuthorizationParameter[];
   oauthClientEnv?: McpIntegrationOAuthClientEnv;
+  oauthEndpoints?: McpIntegrationOAuthEndpoints;
   oauthScopes?: string[];
+  oauthScopeSeparator?: ' ' | ',';
   oauthScopeMode?: McpIntegrationOauthScopeMode;
   connectionMode?: McpIntegrationConnectionMode;
   serverMode?: McpIntegrationServerMode;
@@ -291,6 +298,16 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     connectionScope: 'deployment',
     connectionMode: 'oauth',
     serverMode: 'upstream_proxy',
+    oauthClientEnv: {
+      clientIdEnv: 'R_LINEAR_CLIENT_ID',
+      clientSecretEnv: 'R_LINEAR_CLIENT_SECRET',
+      tokenEndpointAuthMethod: 'client_secret_post',
+    },
+    oauthEndpoints: {
+      authorizationEndpoint: 'https://linear.app/oauth/authorize',
+      tokenEndpoint: 'https://api.linear.app/oauth/token',
+    },
+    oauthScopeSeparator: ',',
   },
   {
     id: 'sentry',
@@ -620,6 +637,36 @@ export function getMcpIntegrationOauthScopes(
   }
 
   return integration.oauthScopes;
+}
+
+export function getMcpIntegrationOauthEndpoints(
+  integrationOrId: McpIntegration | string | undefined,
+): McpIntegrationOAuthEndpoints | undefined {
+  if (!integrationOrId) {
+    return undefined;
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.oauthEndpoints;
+}
+
+export function getMcpIntegrationOauthScopeSeparator(
+  integrationOrId: McpIntegration | string | undefined,
+): ' ' | ',' {
+  if (!integrationOrId) {
+    return ' ';
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.oauthScopeSeparator ?? ' ';
 }
 
 export function getMcpIntegrationOauthScopeMode(

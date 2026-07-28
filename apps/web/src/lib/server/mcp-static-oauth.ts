@@ -1,4 +1,4 @@
-import type { McpIntegration } from '@roomote/types';
+import { MCP_INTEGRATIONS, type McpIntegration } from '@roomote/types';
 
 type StaticOauthClientEnv = NonNullable<McpIntegration['oauthClientEnv']>;
 type StaticOauthPairResolution =
@@ -13,9 +13,28 @@ type StaticOauthPairResolution =
 const STATIC_OAUTH_FALLBACKS: Partial<Record<string, StaticOauthClientEnv[]>> =
   {};
 
-const STATIC_OAUTH_ENV_KEYS = new Set<string>();
+const STATIC_OAUTH_ENV_PAIRS = MCP_INTEGRATIONS.flatMap((integration) => {
+  const clientIdEnv = integration.oauthClientEnv?.clientIdEnv;
+  const clientSecretEnv = integration.oauthClientEnv?.clientSecretEnv;
 
-const STATIC_OAUTH_ENV_PARTNERS: Record<string, string> = {};
+  return clientIdEnv && clientSecretEnv
+    ? [[clientIdEnv, clientSecretEnv] as const]
+    : [];
+});
+
+const STATIC_OAUTH_ENV_KEYS = new Set(
+  STATIC_OAUTH_ENV_PAIRS.flatMap(([clientIdEnv, clientSecretEnv]) => [
+    clientIdEnv,
+    clientSecretEnv,
+  ]),
+);
+
+const STATIC_OAUTH_ENV_PARTNERS = Object.fromEntries(
+  STATIC_OAUTH_ENV_PAIRS.flatMap(([clientIdEnv, clientSecretEnv]) => [
+    [clientIdEnv, clientSecretEnv],
+    [clientSecretEnv, clientIdEnv],
+  ]),
+);
 
 export function getStaticOauthEnvPartnerKey(key: string): string | undefined {
   return STATIC_OAUTH_ENV_PARTNERS[key];

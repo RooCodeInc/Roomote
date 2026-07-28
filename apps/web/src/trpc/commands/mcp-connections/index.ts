@@ -1249,6 +1249,13 @@ export async function connectMcpCommand(
     );
   }
 
+  const missingOauthEnvNames = getMissingStaticOauthEnvNames(integration);
+  if (missingOauthEnvNames.length > 0) {
+    throw new Error(
+      `${integration.name} isn't available on this Roomote deployment yet. Ask the team managing this Roomote deployment to finish the required OAuth setup before connecting it.`,
+    );
+  }
+
   if (
     input.redirectTo &&
     (!input.redirectTo.startsWith('/') || input.redirectTo.startsWith('//'))
