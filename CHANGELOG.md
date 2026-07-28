@@ -2,6 +2,28 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.25.0 (2026-07-28)
+
+This release expands account and diagnostics configuration while making task execution and Slack automation more reliable.
+
+### Highlights
+
+- Add a password to OAuth-first accounts from Personal Settings for flexible email/password sign-in.
+- Route diagnostics to the configured Slack, Discord, Microsoft Teams, or Telegram destination.
+- Keep Bedrock Mantle model launches, task snapshots, and Slack automation running reliably.
+
+### Minor changes
+
+- OAuth-first users can now set a password from Personal Settings and later sign in with their profile email and password.
+- Configure router diagnostics in Deployment settings to send them through Slack, Discord, Microsoft Teams, or Telegram.
+
+### Patch changes
+
+- Let automation tasks send their final Slack outcome, blocker, or handoff without rejecting valid closeout replies.
+- Keep Amazon Bedrock Mantle model recommendations current and ensure compatible OpenAI models launch through their supported Responses API.
+- Preserve successful task snapshots before sandbox teardown so interrupted workers can resume tasks reliably across supported compute providers.
+- Keep Slack-surface tasks working after progress updates instead of treating a status message as the end of the task.
+
 ## 0.24.0 (2026-07-27)
 
 This release makes Roomote easier to reach across communication channels while refining setup, task loading, and connection reliability.
