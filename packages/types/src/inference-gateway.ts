@@ -25,11 +25,14 @@ export const INFERENCE_GATEWAY_URL_ENV_VAR_NAME = 'R_INFERENCE_GATEWAY_URL';
 export const INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME = 'R_INFERENCE_GATEWAY_KEYS';
 
 /**
- * OpenCode registers Bedrock models under this provider id (an
- * Anthropic-compatible endpoint), distinct from the `amazon-bedrock` setup
- * provider id.
+ * OpenCode registers Bedrock Anthropic models under this provider id, distinct
+ * from the `amazon-bedrock` setup provider id.
  */
 export const BEDROCK_MANTLE_OPENCODE_PROVIDER_ID = 'bedrock-mantle';
+
+/** OpenCode provider id for Bedrock Mantle's OpenAI-compatible endpoint. */
+export const BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID =
+  'bedrock-mantle-openai';
 
 /** Matches valid cloud regions like `us-east-1`. */
 export const INFERENCE_GATEWAY_REGION_PATTERN =
@@ -100,6 +103,7 @@ export interface InferenceGatewayProvider {
   id:
     | SetupModelProviderId
     | typeof BEDROCK_MANTLE_OPENCODE_PROVIDER_ID
+    | typeof BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID
     | typeof CHATGPT_GATEWAY_PROVIDER_ID;
   name: string;
   /**
@@ -407,6 +411,19 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       },
       authHeader: { name: 'x-api-key' },
       allowedPaths: ANTHROPIC_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
+      name: 'Amazon Bedrock',
+      envVarNames: ['AWS_BEARER_TOKEN_BEDROCK'],
+      upstreamBaseUrl: 'https://bedrock-mantle.{region}.api.aws/openai',
+      region: {
+        envVarName: 'AWS_REGION',
+        default: DEFAULT_BEDROCK_MANTLE_REGION,
+      },
+      authHeader: { name: 'x-api-key' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
     },
     {
