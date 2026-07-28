@@ -3,6 +3,7 @@ import * as path from 'node:path';
 
 import {
   applyImplicitLiteLlmModelPrefix,
+  BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenAiCompatibleProviderInstance,
@@ -852,6 +853,79 @@ function mergeBedrockMantleProviderConfig(
   };
 }
 
+function mergeBedrockMantleOpenAiProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  const prefix = `${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/`;
+  const mantleModelIds = [
+    ...new Set(
+      modelIds.flatMap((modelId) => {
+        const normalized = modelId?.trim();
+
+        return normalized?.startsWith(prefix)
+          ? [normalized.slice(prefix.length)]
+          : [];
+      }),
+    ),
+  ];
+
+  if (mantleModelIds.length === 0) {
+    return providerConfig;
+  }
+
+  const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
+
+  if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
+    throw new Error(
+      `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
+    );
+  }
+
+  const existingProvider = asRecord(
+    providerConfig[BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID],
+  );
+  const existingOptions = asRecord(existingProvider.options);
+  const existingModels = asRecord(existingProvider.models);
+
+  return {
+    ...providerConfig,
+    [BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID]: {
+      ...existingProvider,
+      npm: '@ai-sdk/openai-compatible',
+      name: 'Amazon Bedrock',
+      options: {
+        ...existingOptions,
+        baseURL: `https://bedrock-mantle.${region}.api.aws/openai/v1`,
+        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+      },
+      models: {
+        ...existingModels,
+        ...Object.fromEntries(
+          mantleModelIds.map((modelId) => [
+            modelId,
+            {
+              name: modelId,
+              ...asRecord(existingModels[modelId]),
+            },
+          ]),
+        ),
+      },
+    },
+  };
+}
+
+function toBedrockMantleRuntimeModelId(modelId: string): string {
+  const prefix = `${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/openai.`;
+
+  return modelId.startsWith(prefix)
+    ? `${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/${modelId.slice(
+        BEDROCK_MANTLE_OPENCODE_PROVIDER_ID.length + 1,
+      )}`
+    : modelId;
+}
+
 function mergeOpenAiCompatibleProviderConfig(
   providerConfig: Record<string, unknown>,
   runtimeEnv: Record<string, string>,
@@ -984,6 +1058,15 @@ function mergeInferenceGatewayProviderConfig(
   let merged = providerConfig;
 
   for (const [providerId, gatewayProvider] of gatewayProviders) {
+    if (
+      providerId === BEDROCK_MANTLE_OPENCODE_PROVIDER_ID &&
+      !modelIds.some((modelId) =>
+        modelId?.trim().startsWith(`${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/`),
+      )
+    ) {
+      continue;
+    }
+
     // ChatGPT-subscription OAuth authenticates through opencode's Codex
     // plugin directly; leave the openai provider on its default base URL
     // when a subscription record is present in the sandbox (non-gateway mode).
@@ -1047,6 +1130,25 @@ function mergeInferenceGatewayProviderConfig(
         xaiProvider,
       );
     }
+  }
+
+  const bedrockMantleOpenAiProvider = getInferenceGatewayProvider(
+    BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
+  );
+  if (
+    bedrockMantleOpenAiProvider &&
+    modelIds.some((modelId) =>
+      modelId
+        ?.trim()
+        .startsWith(`${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/`),
+    )
+  ) {
+    merged = rebaseProviderOntoGateway(
+      merged,
+      BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
+      gatewayUrl,
+      bedrockMantleOpenAiProvider,
+    );
   }
 
   // These providers are configured explicitly because OpenCode has no catalog
@@ -1494,24 +1596,44 @@ function resolveModelBackedOpenCodeConfig(
   const normalizedModelOverride = modelOverride
     ? collectOpenRouterVariantModelAlias(
         variantAliases,
-        applyImplicitLiteLlmModelPrefix(modelOverride, isLiteLlmConfigured),
+        toBedrockMantleRuntimeModelId(
+          applyImplicitLiteLlmModelPrefix(modelOverride, isLiteLlmConfigured),
+        ),
       )
     : undefined;
-  const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
+  const model = collectOpenRouterVariantModelAlias(
+    variantAliases,
+    toBedrockMantleRuntimeModelId(rawModel),
+  );
   const smallModel = rawSmallModel
-    ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
+    ? collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(rawSmallModel),
+      )
     : undefined;
   const visionModel = rawVisionModel
-    ? collectOpenRouterVariantModelAlias(variantAliases, rawVisionModel)
+    ? collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(rawVisionModel),
+      )
     : undefined;
   const codeReviewModel = rawCodeReviewModel
-    ? collectOpenRouterVariantModelAlias(variantAliases, rawCodeReviewModel)
+    ? collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(rawCodeReviewModel),
+      )
     : undefined;
   const exploreModel = rawExploreModel
-    ? collectOpenRouterVariantModelAlias(variantAliases, rawExploreModel)
+    ? collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(rawExploreModel),
+      )
     : undefined;
   const planningModel = rawPlanningModel
-    ? collectOpenRouterVariantModelAlias(variantAliases, rawPlanningModel)
+    ? collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(rawPlanningModel),
+      )
     : undefined;
   const effectiveCodingModel = normalizedModelOverride ?? model;
 
@@ -1680,14 +1802,18 @@ function resolveModelBackedOpenCodeConfig(
   ];
   const providerConfig = mergeInferenceGatewayProviderConfig(
     mergeBedrockMantleProviderConfig(
-      mergeOpenAiCompatibleProviderConfig(
-        mergeOpenRouterVariantAliasModels(
-          providerReasoningConfig,
-          variantAliases,
+      mergeBedrockMantleOpenAiProviderConfig(
+        mergeOpenAiCompatibleProviderConfig(
+          mergeOpenRouterVariantAliasModels(
+            providerReasoningConfig,
+            variantAliases,
+          ),
+          runtimeEnv,
+          configuredModelIds,
+          visionModel ?? effectiveCodingModel,
         ),
         runtimeEnv,
         configuredModelIds,
-        visionModel ?? effectiveCodingModel,
       ),
       runtimeEnv,
       configuredModelIds,
