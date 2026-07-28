@@ -529,6 +529,20 @@ describe('Integrations settings', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('lets administrators reconnect a configured Linear workspace', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect Linear' }));
+
+    expect(mutations.connectLinear).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
   it('surfaces the server error when starting Linear fails', () => {
     state.linearInstallation = null;
     mutations.connectLinear.mockImplementation((_variables, options) => {

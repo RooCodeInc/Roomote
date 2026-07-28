@@ -1290,6 +1290,21 @@ export function Integrations() {
       (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
     );
     const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
+    const canReconnectLinear =
+      isAdmin && Boolean(linearInstallation.data) && !linearOauthUnavailable;
+    const startLinearConnection = () => {
+      connectLinear.mutate(undefined, {
+        onSuccess: (url) => {
+          window.location.href = url;
+        },
+        onError: (error) =>
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : 'Failed to enable Linear. Please try again.',
+          ),
+      });
+    };
     const openMcpToolDialog = (integration: McpIntegrationDefinition) =>
       setToolDialogState({
         mcpId: integration.id,
@@ -1346,7 +1361,15 @@ export function Integrations() {
                 linearOauthSetup.isPending || linearOauthSetup.data == null,
               icon: <Settings2 />,
             }
-          : undefined,
+          : canReconnectLinear
+            ? {
+                label: 'Reconnect',
+                ariaLabel: 'Reconnect Linear',
+                onAction: startLinearConnection,
+                isPending: connectLinear.isPending,
+                icon: <RefreshCw />,
+              }
+            : undefined,
         onAction: linearOauthUnavailable
           ? undefined
           : () => {
@@ -1364,17 +1387,7 @@ export function Integrations() {
                 return;
               }
 
-              connectLinear.mutate(undefined, {
-                onSuccess: (url) => {
-                  window.location.href = url;
-                },
-                onError: (error) =>
-                  toast.error(
-                    error instanceof Error
-                      ? error.message
-                      : 'Failed to enable Linear. Please try again.',
-                  ),
-              });
+              startLinearConnection();
             },
       },
       ...visibleMcpIntegrations
