@@ -566,6 +566,32 @@ describe('inference gateway', () => {
     );
   });
 
+  it('proxies Bedrock Mantle OpenAI Responses requests', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/bedrock-mantle-openai/v1/responses',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://bedrock-mantle.us-east-1.api.aws/openai/v1/responses',
+    );
+    expect(new Headers(init.headers).get('x-api-key')).toBe(
+      'provider-secret-key',
+    );
+  });
+
+  it('rejects Bedrock Mantle OpenAI Chat Completions requests', async () => {
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/bedrock-mantle-openai/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(403);
+  });
+
   it('proxies a configured LiteLLM endpoint with its optional key', async () => {
     const fetchMock = stubUpstreamFetch();
     mockResolveModelProviderEnvValue.mockImplementation(

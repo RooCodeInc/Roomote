@@ -893,7 +893,9 @@ function mergeBedrockMantleOpenAiProviderConfig(
     ...providerConfig,
     [BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID]: {
       ...existingProvider,
-      npm: '@ai-sdk/openai-compatible',
+      // Mantle GPT models support the OpenAI Responses API, not Chat
+      // Completions. The native provider selects the Responses transport.
+      npm: '@ai-sdk/openai',
       name: 'Amazon Bedrock',
       options: {
         ...existingOptions,

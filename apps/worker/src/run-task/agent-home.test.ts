@@ -160,7 +160,7 @@ describe('generateOpenCodeConfig provider support', () => {
     };
 
     expect(config.provider['bedrock-mantle-openai']).toMatchObject({
-      npm: '@ai-sdk/openai-compatible',
+      npm: '@ai-sdk/openai',
       name: 'Amazon Bedrock',
       options: {
         baseURL: 'https://bedrock-mantle.us-west-2.api.aws/openai/v1',
@@ -292,7 +292,7 @@ describe('generateOpenCodeConfig provider support', () => {
     };
 
     expect(config.provider['bedrock-mantle-openai']).toMatchObject({
-      npm: '@ai-sdk/openai-compatible',
+      npm: '@ai-sdk/openai',
       options: {
         baseURL:
           'https://api.example.com/api/inference/bedrock-mantle-openai/v1',

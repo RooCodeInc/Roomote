@@ -184,6 +184,9 @@ const OPENAI_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
   '/v1/models',
 ];
 
+/** OpenAI Responses API routes required by Mantle's GPT models. */
+const OPENAI_RESPONSES_INFERENCE_PATHS: readonly string[] = ['/v1/responses'];
+
 /** Inference endpoints for Anthropic-compatible upstreams. */
 const ANTHROPIC_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
   '/v1/messages',
@@ -423,7 +426,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
         default: DEFAULT_BEDROCK_MANTLE_REGION,
       },
       authHeader: { name: 'x-api-key' },
-      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      allowedPaths: OPENAI_RESPONSES_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
     },
     {
