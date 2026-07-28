@@ -21,8 +21,8 @@ This release expands account and diagnostics configuration while making task exe
 
 - Let automation tasks send their final Slack outcome, blocker, or handoff without rejecting valid closeout replies.
 - Keep Amazon Bedrock Mantle model recommendations current and ensure compatible OpenAI models launch through their supported Responses API.
-- Preserve successful task snapshots before sandbox teardown so interrupted workers can resume tasks reliably across supported compute providers. Thanks to @daniel-lxs for contributing this improvement.
-- Keep Slack-surface tasks working after progress updates instead of treating a status message as the end of the task. Thanks to @daniel-lxs for contributing this improvement.
+- Preserve successful task snapshots before sandbox teardown so interrupted workers can resume tasks reliably across supported compute providers.
+- Keep Slack-surface tasks working after progress updates instead of treating a status message as the end of the task.
 
 ## 0.24.0 (2026-07-27)
 
