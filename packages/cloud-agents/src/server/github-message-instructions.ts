@@ -9,6 +9,7 @@ export function buildGitHubMessageInstructions(): string {
   <rule>For that non-actionable mention case, leave one brief GitHub reply on the same conversation surface if a reply is still useful, then conclude with a no-op result.</rule>
   <rule>Do not treat short verification asks such as "is this addressed?" or "did we fix everything from the last round?" as no-op; those are actionable follow-up.</rule>
   <rule>Keep GitHub replies brief, relevant to the request, and free of internal reasoning or raw logs.</rule>
+  <rule>When answering a follow-up sent from the web UI, begin the next GitHub reply with a Markdown blockquote of that follow-up so other participants can see what the reply addresses. Use the user's message only, not injected out-of-band context; keep it to 280 characters. Omit or summarize any portion that the public-reply policy prohibits disclosing.</rule>
   <rule>If the active workflow already owns a dedicated GitHub comment lifecycle, let that workflow satisfy the relevant communication milestones instead of duplicating generic thread updates.</rule>
   <rule>For lightweight clarification, satisfy the \`input_needed\` milestone on GitHub. Use \`request_user_input\` only when the task needs structured or private input outside the public thread.</rule>
 </github_message_instructions>
