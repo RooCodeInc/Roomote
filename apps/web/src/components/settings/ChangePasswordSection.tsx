@@ -31,10 +31,8 @@ function getAuthErrorMessage(
 }
 
 export function ChangePasswordSection({
-  email,
   mode = 'change',
 }: {
-  email?: string;
   mode?: 'change' | 'set';
 }) {
   const trpc = useTRPC();
@@ -135,7 +133,7 @@ export function ChangePasswordSection({
     >
       <p className="text-muted-foreground">
         {mode === 'set'
-          ? `Set a password to sign in with ${email ?? 'this email'} on mobile and other devices.`
+          ? 'Set a password to enable sign in with email and password.'
           : 'Update your password to keep your account secure.'}
       </p>
       <Dialog open={isOpen} onOpenChange={handleOpenChange}>
@@ -146,7 +144,7 @@ export function ChangePasswordSection({
             </DialogTitle>
             <DialogDescription>
               {mode === 'set'
-                ? 'Choose a password for signing in with your email.'
+                ? 'Choose a password to enable sign in with email and password.'
                 : 'Enter your current password, then choose a new one.'}
             </DialogDescription>
           </DialogHeader>

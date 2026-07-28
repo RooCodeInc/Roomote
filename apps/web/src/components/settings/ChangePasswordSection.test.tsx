@@ -110,13 +110,15 @@ describe('ChangePasswordSection', () => {
   });
 
   it('sets a password for OAuth-only users without requesting a current password', async () => {
-    render(<ChangePasswordSection email="ada@example.com" mode="set" />);
+    render(<ChangePasswordSection mode="set" />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Set password' }));
 
     expect(screen.queryByLabelText('Current password')).not.toBeInTheDocument();
     expect(
-      screen.getByText('Choose a password for signing in with your email.'),
+      screen.getByText(
+        'Choose a password to enable sign in with email and password.',
+      ),
     ).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('New password'), {
       target: { value: 'new-password' },

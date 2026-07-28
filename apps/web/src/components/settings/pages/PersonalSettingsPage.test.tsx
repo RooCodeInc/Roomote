@@ -81,7 +81,7 @@ describe('PersonalSettingsPage', () => {
     );
     expect(screen.getByText('Change password')).toBeInTheDocument();
     expect(changePasswordSectionMock).toHaveBeenCalledWith(
-      { email: 'ada@example.com', mode: 'set' },
+      { mode: 'set' },
       undefined,
     );
   });

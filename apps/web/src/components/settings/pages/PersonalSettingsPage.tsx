@@ -28,10 +28,7 @@ export function PersonalSettingsPage({
         profile={profile}
       />
       {canChangePassword || canSetPassword ? (
-        <ChangePasswordSection
-          email={profile.email}
-          mode={canChangePassword ? 'change' : 'set'}
-        />
+        <ChangePasswordSection mode={canChangePassword ? 'change' : 'set'} />
       ) : null}
       <UserPreferencesSection />
       <LinkedAccounts />
