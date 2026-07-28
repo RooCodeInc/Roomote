@@ -184,6 +184,7 @@ import {
 } from '../commands/sandbox-session';
 import {
   getDeploymentMcpEnablementsCommand,
+  getMcpOauthReadinessCommand,
   setDeploymentMcpEnabledCommand,
   getUserMcpConnectionsCommand,
   getAsanaConnectionCommand,
@@ -1468,6 +1469,10 @@ export const appRouter = createRouter({
   mcpConnections: createRouter({
     deploymentEnablements: protectedProcedure.query(({ ctx: { auth } }) =>
       getDeploymentMcpEnablementsCommand(auth),
+    ),
+
+    oauthReadiness: protectedProcedure.query(({ ctx: { auth } }) =>
+      getMcpOauthReadinessCommand(auth),
     ),
 
     setDeploymentEnabled: protectedProcedure

@@ -13,3 +13,8 @@ export const DOCS_ENVIRONMENT_DEFINITION_URL = `${DOCS_BASE_URL}/environments/de
  * Public docs page for self-hosting, upgrades, and day-2 operations.
  */
 export const DOCS_SELF_HOSTING_URL = `${DOCS_BASE_URL}/self-hosting`;
+
+/**
+ * Public setup guide for the Linear integration.
+ */
+export const DOCS_LINEAR_INTEGRATION_URL = `${DOCS_BASE_URL}/integrations/linear`;

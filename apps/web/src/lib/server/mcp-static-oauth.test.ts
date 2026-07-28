@@ -1,6 +1,7 @@
 import { getMcpIntegration } from '@roomote/types';
 
 import {
+  getStaticOauthReadiness,
   getStaticOauthEnvPartnerKey,
   resolveStaticOauthClientInformation,
 } from './mcp-static-oauth';
@@ -34,5 +35,28 @@ describe('Linear static OAuth configuration', () => {
         linear!,
       ),
     ).toBeUndefined();
+  });
+
+  it.each([
+    {
+      env: {
+        R_LINEAR_CLIENT_ID: 'linear-client',
+        R_LINEAR_CLIENT_SECRET: 'linear-secret',
+      },
+      expected: 'ready',
+    },
+    { env: {}, expected: 'missing' },
+    {
+      env: { R_LINEAR_CLIENT_ID: 'linear-client' },
+      expected: 'partial',
+    },
+  ] as const)('reports $expected OAuth readiness', ({ env, expected }) => {
+    expect(getStaticOauthReadiness(env, linear!)).toBe(expected);
+  });
+
+  it('reports that integrations without static credentials need no setup', () => {
+    expect(getStaticOauthReadiness({}, getMcpIntegration('notion')!)).toBe(
+      'not_required',
+    );
   });
 });

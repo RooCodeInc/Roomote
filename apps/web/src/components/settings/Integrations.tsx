@@ -24,6 +24,7 @@ import {
   useDisconnectMcp,
   useGrafanaConnection,
   useDeploymentMcpEnablements,
+  useMcpOauthReadiness,
   useSaveAsanaConnection,
   useSaveGrafanaConnection,
   useSaveSnowflakeConnection,
@@ -34,6 +35,7 @@ import {
   useVercelConnection,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { DOCS_LINEAR_INTEGRATION_URL } from '@/lib/docs';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import {
   saveAsanaConnectionSchema,
@@ -144,7 +146,38 @@ type IntegrationItem = {
   highlighted?: boolean;
 };
 
+type OauthReadinessStatus = 'ready' | 'missing' | 'partial';
+
 type McpIntegrationDefinition = (typeof MCP_INTEGRATIONS)[number];
+
+function getLinearOauthSetupStatus(
+  status: Exclude<OauthReadinessStatus, 'ready'>,
+  isAdmin: boolean,
+): ReactNode {
+  if (!isAdmin) {
+    return 'Linear is not configured for this deployment. Ask an administrator to finish its OAuth setup.';
+  }
+
+  const message =
+    status === 'partial'
+      ? 'Linear OAuth setup is incomplete. Finish configuring both client credentials before connecting.'
+      : 'Linear OAuth is not configured for this deployment.';
+
+  return (
+    <>
+      {message}{' '}
+      <Link
+        href={DOCS_LINEAR_INTEGRATION_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline underline-offset-2"
+      >
+        View setup guide
+      </Link>
+      .
+    </>
+  );
+}
 
 type AdminConfiguredIntegrationItemOptions = {
   integration: McpIntegrationDefinition;
@@ -1122,6 +1155,7 @@ export function Integrations() {
   const disconnectLinear = useDisconnectLinear();
 
   const deploymentEnablements = useDeploymentMcpEnablements();
+  const oauthReadiness = useMcpOauthReadiness();
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
   const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
@@ -1263,6 +1297,13 @@ export function Integrations() {
     const userConnectionMap = new Map(
       (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
     );
+    const oauthReadinessMap = new Map<string, OauthReadinessStatus>(
+      (oauthReadiness.data ?? []).map((entry) => [entry.mcpId, entry.status]),
+    );
+    const linearOauthStatus = oauthReadinessMap.get('linear');
+    const linearOauthUnavailable =
+      !linearInstallation.data &&
+      (linearOauthStatus === 'missing' || linearOauthStatus === 'partial');
     const openMcpToolDialog = (integration: McpIntegrationDefinition) =>
       setToolDialogState({
         mcpId: integration.id,
@@ -1301,27 +1342,44 @@ export function Integrations() {
         isMcpBased: false,
         isPending:
           linearInstallation.isPending ||
+          (!linearInstallation.data && oauthReadiness.isPending) ||
           connectLinear.isPending ||
           disconnectLinear.isPending,
-        onAction: () => {
-          if (linearInstallation.data) {
-            disconnectLinear.mutate(undefined, {
-              onSuccess: () =>
-                toast.success('Linear disabled for this deployment.'),
-              onError: () =>
-                toast.error('Failed to disable Linear. Please try again.'),
-            });
-            return;
-          }
+        status: linearOauthUnavailable
+          ? getLinearOauthSetupStatus(linearOauthStatus, isAdmin)
+          : undefined,
+        statusIcon: linearOauthUnavailable ? (
+          <TriangleAlert className="size-4" />
+        ) : undefined,
+        onAction: linearOauthUnavailable
+          ? undefined
+          : () => {
+              if (linearInstallation.data) {
+                disconnectLinear.mutate(undefined, {
+                  onSuccess: () =>
+                    toast.success('Linear disabled for this deployment.'),
+                  onError: (error) =>
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : 'Failed to disable Linear. Please try again.',
+                    ),
+                });
+                return;
+              }
 
-          connectLinear.mutate(undefined, {
-            onSuccess: (url) => {
-              window.location.href = url;
+              connectLinear.mutate(undefined, {
+                onSuccess: (url) => {
+                  window.location.href = url;
+                },
+                onError: (error) =>
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : 'Failed to enable Linear. Please try again.',
+                  ),
+              });
             },
-            onError: () =>
-              toast.error('Failed to enable Linear. Please try again.'),
-          });
-        },
       },
       ...visibleMcpIntegrations
         .filter((integration) => {
@@ -1558,6 +1616,8 @@ export function Integrations() {
     grafanaConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
+    oauthReadiness.data,
+    oauthReadiness.isPending,
     isAdmin,
     isGrafanaDialogOpen,
     saveAsanaConnection.isPending,
