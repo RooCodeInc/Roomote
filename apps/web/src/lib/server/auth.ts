@@ -57,6 +57,12 @@ type RoomoteAuth = {
         redirectTo: string;
       };
     }): Promise<unknown>;
+    setPassword(input: {
+      body: {
+        newPassword: string;
+      };
+      headers: Headers;
+    }): Promise<unknown>;
   };
   handler(request: Request): Promise<Response>;
 };

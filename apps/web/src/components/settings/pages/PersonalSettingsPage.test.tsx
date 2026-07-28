@@ -50,7 +50,13 @@ describe('PersonalSettingsPage', () => {
   });
 
   it('passes credential editing availability to the user profile section', () => {
-    render(<PersonalSettingsPage canChangePassword={true} profile={profile} />);
+    render(
+      <PersonalSettingsPage
+        canChangePassword={true}
+        canSetPassword={false}
+        profile={profile}
+      />,
+    );
 
     expect(screen.getByText('User profile')).toBeInTheDocument();
     expect(userProfileSectionMock).toHaveBeenCalledWith(
@@ -60,15 +66,23 @@ describe('PersonalSettingsPage', () => {
     expect(screen.getByText('Change password')).toBeInTheDocument();
   });
 
-  it('hides password changes for OAuth-only users', () => {
+  it('renders password enrollment for OAuth-only users', () => {
     render(
-      <PersonalSettingsPage canChangePassword={false} profile={profile} />,
+      <PersonalSettingsPage
+        canChangePassword={false}
+        canSetPassword={true}
+        profile={profile}
+      />,
     );
 
     expect(userProfileSectionMock).toHaveBeenCalledWith(
       { canChangePassword: false, profile },
       undefined,
     );
-    expect(screen.queryByText('Change password')).not.toBeInTheDocument();
+    expect(screen.getByText('Change password')).toBeInTheDocument();
+    expect(changePasswordSectionMock).toHaveBeenCalledWith(
+      { mode: 'set' },
+      undefined,
+    );
   });
 });

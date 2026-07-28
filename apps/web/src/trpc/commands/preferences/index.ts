@@ -1,7 +1,9 @@
 import { db, eq, users } from '@roomote/db/server';
 import { FeatureFlag } from '@roomote/feature-flags';
+import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
+import { getAuth } from '@/lib/server/auth';
 import { userHasCredentialAccount } from '@/lib/server/user-management';
 import {
   DEFAULT_PERSONAL_PREFERENCES,
@@ -64,9 +66,24 @@ export async function getPersonalPreferencesCommand(
 export async function getPersonalAccountCapabilitiesCommand(
   auth: UserAuthSuccess,
 ) {
+  const hasCredentialAccount = await userHasCredentialAccount(auth.userId);
+
   return {
-    canChangePassword: await userHasCredentialAccount(auth.userId),
+    canChangePassword: hasCredentialAccount,
+    canSetPassword: !hasCredentialAccount,
   };
+}
+
+export async function setPersonalPasswordCommand(
+  _auth: UserAuthSuccess,
+  newPassword: string,
+) {
+  const auth = await getAuth();
+
+  await auth.api.setPassword({
+    body: { newPassword },
+    headers: await headers(),
+  });
 }
 
 export async function updatePersonalPreferencesCommand(

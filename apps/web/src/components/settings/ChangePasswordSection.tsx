@@ -1,6 +1,7 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import {
@@ -18,6 +19,7 @@ import {
   Spinner,
 } from '@/components/system';
 import { authClient } from '@/lib/auth-client';
+import { useTRPC } from '@/trpc/client';
 
 import { Section } from './Section';
 
@@ -28,12 +30,29 @@ function getAuthErrorMessage(
   return error?.message || fallback;
 }
 
-export function ChangePasswordSection() {
+export function ChangePasswordSection({
+  mode = 'change',
+}: {
+  mode?: 'change' | 'set';
+}) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const accountCapabilitiesQueryKey =
+    trpc.preferences.accountCapabilities.queryKey();
+  const setPasswordMutation = useMutation(
+    trpc.preferences.setPassword.mutationOptions({
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: accountCapabilitiesQueryKey,
+        });
+      },
+    }),
+  );
 
   const resetForm = () => {
     setCurrentPassword('');
@@ -64,20 +83,27 @@ export function ChangePasswordSection() {
     setIsSubmitting(true);
 
     try {
-      const result = await authClient.changePassword({
-        currentPassword,
-        newPassword,
-        revokeOtherSessions: true,
-      });
+      if (mode === 'set') {
+        await setPasswordMutation.mutateAsync({ newPassword });
+      } else {
+        const result = await authClient.changePassword({
+          currentPassword,
+          newPassword,
+          revokeOtherSessions: true,
+        });
 
-      if (result.error) {
-        toast.error(
-          getAuthErrorMessage(result.error, 'Unable to change your password.'),
-        );
-        return;
+        if (result.error) {
+          toast.error(
+            getAuthErrorMessage(
+              result.error,
+              'Unable to change your password.',
+            ),
+          );
+          return;
+        }
       }
 
-      toast.success('Password changed.');
+      toast.success(mode === 'set' ? 'Password set.' : 'Password changed.');
       handleOpenChange(false);
     } catch (error) {
       toast.error(
@@ -101,34 +127,42 @@ export function ChangePasswordSection() {
           variant="outline"
           onClick={() => setIsOpen(true)}
         >
-          Change password
+          {mode === 'set' ? 'Set password' : 'Change password'}
         </Button>
       }
     >
       <p className="text-muted-foreground">
-        Update your password to keep your account secure.
+        {mode === 'set'
+          ? 'Set a password to enable sign in with email and password.'
+          : 'Update your password to keep your account secure.'}
       </p>
       <Dialog open={isOpen} onOpenChange={handleOpenChange}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Change password</DialogTitle>
+            <DialogTitle>
+              {mode === 'set' ? 'Set password' : 'Change password'}
+            </DialogTitle>
             <DialogDescription>
-              Enter your current password, then choose a new one.
+              {mode === 'set'
+                ? 'Choose a password to enable sign in with email and password.'
+                : 'Enter your current password, then choose a new one.'}
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={handleSubmit}>
-            <div className="space-y-1">
-              <Label htmlFor="current-password">Current password</Label>
-              <Input
-                id="current-password"
-                secret={true}
-                autoComplete="current-password"
-                required
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                disabled={isSubmitting}
-              />
-            </div>
+            {mode === 'change' ? (
+              <div className="space-y-1">
+                <Label htmlFor="current-password">Current password</Label>
+                <Input
+                  id="current-password"
+                  secret={true}
+                  autoComplete="current-password"
+                  required
+                  value={currentPassword}
+                  onChange={(event) => setCurrentPassword(event.target.value)}
+                  disabled={isSubmitting}
+                />
+              </div>
+            ) : null}
             <div className="space-y-1">
               <Label htmlFor="new-password">New password</Label>
               <Input

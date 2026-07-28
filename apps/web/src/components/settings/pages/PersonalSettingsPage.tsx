@@ -15,9 +15,11 @@ import {
 export function PersonalSettingsPage({
   profile,
   canChangePassword,
+  canSetPassword,
 }: {
   profile: UserProfileSectionProfile;
   canChangePassword: boolean;
+  canSetPassword: boolean;
 }) {
   return (
     <SettingsShell pageId="personal">
@@ -25,7 +27,9 @@ export function PersonalSettingsPage({
         canChangePassword={canChangePassword}
         profile={profile}
       />
-      {canChangePassword ? <ChangePasswordSection /> : null}
+      {canChangePassword || canSetPassword ? (
+        <ChangePasswordSection mode={canChangePassword ? 'change' : 'set'} />
+      ) : null}
       <UserPreferencesSection />
       <LinkedAccounts />
       <ShowDebugUISection />
