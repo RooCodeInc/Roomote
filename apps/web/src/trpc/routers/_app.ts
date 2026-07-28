@@ -136,6 +136,7 @@ import {
 import {
   getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
+  setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
 } from '../commands/preferences';
 import {
@@ -1226,6 +1227,11 @@ export const appRouter = createRouter({
     accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalAccountCapabilitiesCommand(auth),
     ),
+    setPassword: protectedProcedure
+      .input(z.object({ newPassword: z.string().min(8) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setPersonalPasswordCommand(auth, input.newPassword),
+      ),
     getPersonal: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalPreferencesCommand(auth),
     ),

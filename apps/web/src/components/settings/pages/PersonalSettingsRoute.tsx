@@ -17,6 +17,7 @@ export function PersonalSettingsRoute() {
   return (
     <PersonalSettingsPage
       canChangePassword={accountCapabilities.data?.canChangePassword ?? false}
+      canSetPassword={accountCapabilities.data?.canSetPassword ?? false}
       profile={{
         email: user.primaryEmail ?? '',
         imageUrl: user.resource.imageUrl,

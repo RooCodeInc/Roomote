@@ -1,7 +1,10 @@
 import { render } from '@testing-library/react';
 
-let accountCapabilities: { canChangePassword: boolean } | undefined = {
+let accountCapabilities:
+  | { canChangePassword: boolean; canSetPassword: boolean }
+  | undefined = {
   canChangePassword: true,
+  canSetPassword: false,
 };
 
 const { personalSettingsPageMock } = vi.hoisted(() => ({
@@ -38,7 +41,7 @@ import { PersonalSettingsRoute } from './PersonalSettingsRoute';
 
 describe('PersonalSettingsRoute', () => {
   beforeEach(() => {
-    accountCapabilities = { canChangePassword: true };
+    accountCapabilities = { canChangePassword: true, canSetPassword: false };
     personalSettingsPageMock.mockClear();
   });
 
@@ -48,6 +51,7 @@ describe('PersonalSettingsRoute', () => {
     expect(personalSettingsPageMock).toHaveBeenCalledWith(
       {
         canChangePassword: true,
+        canSetPassword: false,
         profile: {
           email: 'ada@example.com',
           imageUrl: 'https://example.com/ada.png',
@@ -64,7 +68,10 @@ describe('PersonalSettingsRoute', () => {
     render(<PersonalSettingsRoute />);
 
     expect(personalSettingsPageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ canChangePassword: false }),
+      expect.objectContaining({
+        canChangePassword: false,
+        canSetPassword: false,
+      }),
       undefined,
     );
   });

@@ -1,8 +1,22 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
 
-const { changePasswordMock } = vi.hoisted(() => ({
-  changePasswordMock: vi.fn(),
+const { changePasswordMock, invalidateQueriesMock, setPasswordMock } =
+  vi.hoisted(() => ({
+    changePasswordMock: vi.fn(),
+    invalidateQueriesMock: vi.fn(),
+    setPasswordMock: vi.fn(),
+  }));
+
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: (options: { onSuccess?: () => void }) => ({
+    mutateAsync: async (input: { newPassword: string }) => {
+      const result = await setPasswordMock(input);
+      options.onSuccess?.();
+      return result;
+    },
+  }),
+  useQueryClient: () => ({ invalidateQueries: invalidateQueriesMock }),
 }));
 
 vi.mock('sonner', () => ({
@@ -18,6 +32,15 @@ vi.mock('@/lib/auth-client', () => ({
   },
 }));
 
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    preferences: {
+      accountCapabilities: { queryKey: () => ['accountCapabilities'] },
+      setPassword: { mutationOptions: (options: unknown) => options },
+    },
+  }),
+}));
+
 import { ChangePasswordSection } from './ChangePasswordSection';
 
 describe('ChangePasswordSection', () => {
@@ -27,6 +50,7 @@ describe('ChangePasswordSection', () => {
       data: { status: true },
       error: null,
     });
+    setPasswordMock.mockResolvedValue(undefined);
   });
 
   it('opens a password form with strength and confirmation indicators', () => {
@@ -83,5 +107,33 @@ describe('ChangePasswordSection', () => {
 
     expect(toast.error).toHaveBeenCalledWith('Passwords do not match.');
     expect(changePasswordMock).not.toHaveBeenCalled();
+  });
+
+  it('sets a password for OAuth-only users without requesting a current password', async () => {
+    render(<ChangePasswordSection email="ada@example.com" mode="set" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set password' }));
+
+    expect(screen.queryByLabelText('Current password')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Choose a password for signing in with your email.'),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('New password'), {
+      target: { value: 'new-password' },
+    });
+    fireEvent.change(screen.getByLabelText('Confirm password'), {
+      target: { value: 'new-password' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save password' }));
+
+    await waitFor(() => {
+      expect(setPasswordMock).toHaveBeenCalledWith({
+        newPassword: 'new-password',
+      });
+    });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+      queryKey: ['accountCapabilities'],
+    });
+    expect(toast.success).toHaveBeenCalledWith('Password set.');
   });
 });
