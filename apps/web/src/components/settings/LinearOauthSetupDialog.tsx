@@ -276,9 +276,9 @@ export function LinearOauthSetupDialog({
                       Create a Linear app for this deployment.
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                      Self-hosted Roomote needs its own Linear app. The manifest
-                      pre-fills the callback, webhook, and agent event settings.
-                      Review it in Linear, then create the app.
+                      Roomote needs its own Linear app. The manifest pre-fills
+                      the callback, webhook, and agent event settings. Review it
+                      in Linear, then create the app.
                     </p>
                   </div>
                   <Button
