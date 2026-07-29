@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 
-import { Button, Checkbox, Plus, ScrollArea } from '@/components/system';
+import { Checkbox, ScrollArea } from '@/components/system';
 import { PackagePlus } from 'lucide-react';
 
 type RepositorySummary = {

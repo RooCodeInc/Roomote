@@ -19,7 +19,6 @@ import {
   AlertDescription,
   AlertTitle,
   Button,
-  CircleCheck,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -31,7 +30,6 @@ import {
   Label,
   Loader2,
   Pencil,
-  Plus,
   RadioGroup,
   RadioGroupItem,
   Select,
@@ -183,10 +181,6 @@ export function CreateGitHubRepoDialog({
     activeInstallations[0]?.accountLogin ??
     null;
   const owner = selectedOwner ?? defaultOwner;
-
-  const newRepoUrl = owner
-    ? `https://github.com/new?owner=${encodeURIComponent(owner)}`
-    : 'https://github.com/new';
 
   const forkTarget = parseGitHubRepoReference(forkReference);
   const forkUrl = forkTarget
@@ -366,9 +360,9 @@ export function CreateGitHubRepoDialog({
 
         <div className="space-y-2 mt-4">
           <p className="text-xs text-muted-foreground">
-            If the your GitHub integration doesn't have access to "all repos" by
-            default, make sure to grant it access to the new one, otherwise it
-            won't be detected.
+            If your GitHub integration does not have access to all repositories
+            by default, grant it access to the new one or it will not be
+            detected.
             {isAdmin ? (
               <Button
                 type="button"
@@ -396,42 +390,5 @@ export function CreateGitHubRepoDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-export function CreateGitHubRepoButton({
-  onRepositoryDetected,
-  size = 'sm',
-  variant = 'outline',
-  className,
-}: {
-  onRepositoryDetected?: (repository: DetectedRepository) => void;
-  size?: 'xs' | 'sm' | 'default';
-  variant?: 'outline' | 'ghost' | 'link' | 'default';
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      <Button
-        type="button"
-        size={size}
-        variant={variant}
-        className={className}
-        onClick={() => setOpen(true)}
-      >
-        <Plus />
-        Create a new repository
-      </Button>
-      <CreateGitHubRepoDialog
-        open={open}
-        onOpenChange={setOpen}
-        onRepositoryDetected={(repository) => {
-          setOpen(false);
-          onRepositoryDetected?.(repository);
-        }}
-      />
-    </>
   );
 }
