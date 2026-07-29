@@ -101,7 +101,10 @@ describe('Linear OAuth setup', () => {
     expect(manifest).toMatchObject({
       schemaVersion: '1.0.0',
       distribution: 'private',
-      display: { description: 'Cloud coding agents for all' },
+      display: {
+        description: 'Cloud coding agents for all',
+        iconUrl: 'https://roomote.example/roomote-logo.png',
+      },
       oauth: {
         client_name: 'roomote-example',
         redirect_uris: [setup.callbackUrl],
