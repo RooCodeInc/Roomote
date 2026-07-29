@@ -81,6 +81,7 @@ const memberAuth = {
 describe('releases commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     mockEnv.RELEASE_VERSION = 'v0.14.0';
     delete mockEnv.RELEASE_PRODUCT_VERSION;
     mockIsRoomoteCloudEnabled.mockReturnValue(false);
@@ -135,6 +136,15 @@ describe('releases commands', () => {
       runningVersion: 'main-037146ca',
       displayVersion: '037146ca',
       updateAvailable: false,
+    });
+  });
+
+  it('uses the GitHub build commit when a branch build has no named version', async () => {
+    mockEnv.RELEASE_VERSION = 'main';
+    vi.stubEnv('GITHUB_SHA', '037146ca');
+
+    await expect(getReleaseStatusCommand(memberAuth)).resolves.toMatchObject({
+      displayVersion: '037146ca',
     });
   });
 

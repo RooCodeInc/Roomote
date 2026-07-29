@@ -10,10 +10,10 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   ExternalLink,
+  Info,
   LogOut,
 } from '@/components/system';
 
@@ -33,6 +33,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/system';
+import Image from 'next/image';
 
 export const UserMenu = ({
   portalContainer,
@@ -152,14 +153,11 @@ function SignedInUserMenu({
           </div>
 
           <DropdownMenuSeparator />
-          {displayVersion ? (
-            <>
-              <DropdownMenuItem onClick={() => setIsAboutOpen(true)}>
-                Roomote version {displayVersion}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          ) : null}
+          <DropdownMenuItem onClick={() => setIsAboutOpen(true)}>
+            <Info />
+            About Roomote
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <a
               href={DOCS_BASE_URL}
@@ -183,42 +181,49 @@ function SignedInUserMenu({
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>About Roomote</DialogTitle>
-            <DialogDescription>
-              Made with care by humans and robots.
-            </DialogDescription>
+            {displayVersion && (
+              <DialogDescription>
+                You&apos;re running Roomote version{' '}
+                <span className="font-mono text-[0.9em]">
+                  {isReleaseVersion && releaseUrl ? (
+                    <a
+                      href={releaseUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline"
+                    >
+                      {displayVersion}
+                    </a>
+                  ) : (
+                    displayVersion
+                  )}
+                </span>
+              </DialogDescription>
+            )}
           </DialogHeader>
-          {displayVersion ? (
-            <p>
-              Roomote version{' '}
-              {isReleaseVersion && releaseUrl ? (
-                <a
-                  href={releaseUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline"
-                >
-                  {displayVersion}
-                </a>
-              ) : (
-                displayVersion
-              )}
-            </p>
-          ) : null}
-          <DialogFooter>
-            <Button variant="outline" asChild>
+
+          <p className="max-w-54 min-h-14 md:max-w-none md:min-h-auto">
+            Made with care by humans and robots.
+          </p>
+          <div>
+            <Button variant="link" size="sm" asChild>
               <a
                 href={GITHUB_RELEASES_BASE_URL}
                 target="_blank"
                 rel="noreferrer"
               >
-                See all releases
+                See all Roomote releases
                 <ExternalLink />
               </a>
             </Button>
-            <Button type="button" onClick={() => setIsAboutOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
+          </div>
+          <Image
+            src="/elements/about.png"
+            alt=""
+            width={100}
+            height={100}
+            className="absolute bottom-0 right-4 size-30"
+          />
         </DialogContent>
       </Dialog>
     </>

@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import { db, deploymentSettings, eq } from '@roomote/db/server';
 import {
   getRedis,
@@ -60,11 +62,43 @@ function getDisplayVersion(): string | null {
     }
 
     // Channel builds include their commit after the final dash.
-    return releaseVersion.match(/[a-f0-9]{7,40}$/i)?.[0] ?? releaseVersion;
+    const commitFromRelease = releaseVersion.match(/[a-f0-9]{7,40}$/i)?.[0];
+    if (commitFromRelease) {
+      return commitFromRelease;
+    }
+  }
+
+  // Channel image builds receive their commit from GitHub Actions. A source
+  // checkout (the normal development path) has neither build metadata value,
+  // so resolve HEAD directly instead.
+  const commit = process.env.GITHUB_SHA?.trim() || getLocalGitCommit();
+  if (commit) {
+    return commit;
   }
 
   const productVersion = normalizeProductVersion(Env.RELEASE_PRODUCT_VERSION);
-  return productVersion ? toReleaseTag(productVersion) : null;
+  if (productVersion) {
+    return toReleaseTag(productVersion);
+  }
+
+  // Keep a useful identifier for deployments that do not expose commit
+  // metadata (for example a locally built self-hosted image).
+  return releaseVersion ?? null;
+}
+
+function getLocalGitCommit(): string | null {
+  try {
+    const commit = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return commit || null;
+  } catch {
+    // Release images do not include .git. They always have RELEASE_VERSION,
+    // but keep this fallback safe for custom and detached deployments.
+    return null;
+  }
 }
 
 function canSeeUpdateStatus(auth: UserAuthSuccess): boolean {
