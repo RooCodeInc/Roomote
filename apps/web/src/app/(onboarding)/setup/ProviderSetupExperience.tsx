@@ -66,7 +66,7 @@ const MICROSOFT_APP_ID_FIELD_ENV_VAR_NAMES = new Set([
  * Entra client id. The package-download note further down explains the same
  * problem, but the feedback belongs at the field where the value was typed.
  */
-export function getMicrosoftAppIdFormatWarning(
+function getMicrosoftAppIdFormatWarning(
   providerId: string,
   envVarName: string,
   value: string,
