@@ -117,3 +117,11 @@ export {
 
 // Session comment enrichment (fetches all comments including external ones)
 export { enrichSessionComments } from './enrich-session-comments';
+
+// Shared routing for both webhook intake and post-OAuth replay.
+export type {
+  LinearWorkspaceSelection,
+  ResolvedLinearTaskDestination,
+  ResolveLinearTaskDestinationResult,
+} from './resolve-task-destination';
+export { resolveLinearTaskDestination } from './resolve-task-destination';
