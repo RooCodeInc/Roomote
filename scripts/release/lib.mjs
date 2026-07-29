@@ -182,6 +182,77 @@ export function extractChangelogSection(changelogMarkdown, version) {
   return lines.slice(start, end).join('\n').trim();
 }
 
+const DISCORD_EMBED_TITLE_LIMIT = 256;
+const DISCORD_EMBED_DESCRIPTION_LIMIT = 4096;
+const ROOMOTE_BRAND_COLOR = 0xb0cd26;
+
+function truncateDiscordText(value, limit) {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit - 1).trimEnd()}…`;
+}
+
+/**
+ * Build the Discord webhook payload for a published GitHub Release.
+ *
+ * @param {{
+ *   name?: string | null,
+ *   body?: string | null,
+ *   url: string,
+ *   publishedAt?: string | null,
+ *   tagName: string
+ * }} release
+ */
+export function buildDiscordReleasePayload(release) {
+  if (!release || typeof release !== 'object') {
+    throw new TypeError('GitHub Release data is required');
+  }
+
+  const tagName =
+    typeof release.tagName === 'string' ? release.tagName.trim() : '';
+  const url = typeof release.url === 'string' ? release.url.trim() : '';
+  if (!tagName || !url) {
+    throw new TypeError('GitHub Release tagName and url are required');
+  }
+
+  const releaseName =
+    typeof release.name === 'string' && release.name.trim()
+      ? release.name.trim()
+      : `Roomote ${tagName}`;
+  const titleSuffix = ' is now available';
+  const title = `${truncateDiscordText(
+    releaseName,
+    DISCORD_EMBED_TITLE_LIMIT - titleSuffix.length,
+  )}${titleSuffix}`;
+
+  let description =
+    typeof release.body === 'string' && release.body.trim()
+      ? release.body.trim()
+      : `Roomote ${tagName} is now available.`;
+  if (description.length > DISCORD_EMBED_DESCRIPTION_LIMIT) {
+    const readMore = `\n\n[Read the full release notes](${url})`;
+    description = `${description
+      .slice(0, DISCORD_EMBED_DESCRIPTION_LIMIT - readMore.length - 1)
+      .trimEnd()}…${readMore}`;
+  }
+
+  const embed = {
+    title,
+    url,
+    description,
+    color: ROOMOTE_BRAND_COLOR,
+    footer: { text: 'RooCodeInc/Roomote • GitHub Release' },
+  };
+  if (typeof release.publishedAt === 'string' && release.publishedAt.trim()) {
+    embed.timestamp = release.publishedAt;
+  }
+
+  return {
+    username: 'Roomote Releases',
+    allowed_mentions: { parse: [] },
+    embeds: [embed],
+  };
+}
+
 /**
  * Find the commit that introduced the given product version on a ref.
  *
