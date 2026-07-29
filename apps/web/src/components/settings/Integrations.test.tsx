@@ -732,20 +732,20 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('shows configured integrations separately and an empty enabled state', () => {
+  it('shows configured integrations separately and an empty connected state', () => {
     state.linearInstallation = null;
 
     render(<Integrations />);
 
-    const enabledSection = screen
-      .getByRole('heading', { name: 'Enabled' })
+    const connectedSection = screen
+      .getByRole('heading', { name: 'Connected' })
       .closest('section');
     const configuredSection = screen
       .getByRole('heading', { name: 'Configured' })
       .closest('section');
 
-    expect(enabledSection).toHaveTextContent(
-      "You haven't enabled any integrations yet.",
+    expect(connectedSection).toHaveTextContent(
+      "You haven't connected any integrations yet.",
     );
     expect(
       within(configuredSection as HTMLElement).getByRole('heading', {
@@ -771,11 +771,11 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('renders enabled, configured, and available sections with compact action buttons', () => {
+  it('renders connected, configured, and available sections with compact action buttons', () => {
     render(<Integrations />);
 
-    const enabledSection = screen
-      .getByRole('heading', { name: 'Enabled' })
+    const connectedSection = screen
+      .getByRole('heading', { name: 'Connected' })
       .closest('section');
     const availableSection = screen
       .getByRole('heading', { name: 'Available' })
@@ -784,12 +784,12 @@ describe('Integrations settings', () => {
       .getByRole('heading', { name: 'Configured' })
       .closest('section');
 
-    expect(enabledSection).not.toBeNull();
+    expect(connectedSection).not.toBeNull();
     expect(availableSection).not.toBeNull();
     expect(configuredSection).not.toBeNull();
 
     expect(
-      within(enabledSection as HTMLElement)
+      within(connectedSection as HTMLElement)
         .getAllByRole('heading', { level: 3 })
         .map((heading) => heading.textContent),
     ).toEqual(['Linear']);
