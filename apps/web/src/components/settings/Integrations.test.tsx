@@ -346,7 +346,7 @@ vi.mock('@/components/system', () => ({
   ),
   LinearLogo: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
-  Plus: () => <svg aria-hidden="true" />,
+  Plus: () => <svg aria-hidden="true" data-icon="plus" />,
   PlugIcon: () => <svg aria-hidden="true" />,
   RefreshCw: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="refresh-cw" />
@@ -389,12 +389,13 @@ vi.mock('@/components/system', () => ({
       {children}
     </button>
   ),
-  Settings2: () => <svg aria-hidden="true" />,
+  Settings2: () => <svg aria-hidden="true" data-icon="settings-2" />,
   Skeleton: ({ className }: { className?: string }) => (
     <div className={className}>loading</div>
   ),
   Spinner: () => <span>loading</span>,
   Star: () => <svg aria-hidden="true" />,
+  Trash: () => <svg aria-hidden="true" />,
   Switch: ({
     checked,
     onCheckedChange,
@@ -473,7 +474,7 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('uses the standard add action for missing Linear OAuth setup', () => {
+  it('uses the settings action for missing Linear OAuth setup', () => {
     state.linearInstallation = null;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
 
@@ -485,7 +486,12 @@ describe('Integrations settings', () => {
 
     expect(linearCard).not.toBeNull();
     expect(
-      screen.getByRole('button', { name: 'Enable Linear' }),
+      screen.getByRole('button', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole('button', { name: 'Set up Linear' })
+        .querySelector('[data-icon="settings-2"]'),
     ).toBeInTheDocument();
   });
 
@@ -513,7 +519,7 @@ describe('Integrations settings', () => {
       screen.getByText('Not configured. Ask an administrator to set it up.'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Enable Linear' }),
+      screen.queryByRole('button', { name: 'Set up Linear' }),
     ).not.toBeInTheDocument();
   });
 
@@ -522,7 +528,7 @@ describe('Integrations settings', () => {
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
 
     render(<Integrations />);
-    fireEvent.click(screen.getByRole('button', { name: 'Enable Linear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Linear' }));
 
     expect(
       screen.getByRole('heading', { name: 'Set up Linear' }),
@@ -564,7 +570,12 @@ describe('Integrations settings', () => {
     expect(configureButton).toBeInTheDocument();
     expect(configureButton).not.toHaveTextContent('Configure');
     expect(
-      screen.getByRole('button', { name: 'Enable Linear' }),
+      screen.getByRole('button', { name: 'Connect Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole('button', { name: 'Connect Linear' })
+        .querySelector('[data-icon="plus"]'),
     ).toBeInTheDocument();
   });
 
@@ -668,7 +679,7 @@ describe('Integrations settings', () => {
     render(<Integrations />);
 
     expect(
-      screen.getByRole('button', { name: 'Enable Linear' }),
+      screen.getByRole('button', { name: 'Set up Linear' }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Disable Linear' }),
@@ -697,28 +708,50 @@ describe('Integrations settings', () => {
 
     render(<Integrations />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Enable Linear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Linear' }));
 
     expect(toast.error).toHaveBeenCalledWith(
       'Linear OAuth setup changed. Try again.',
     );
   });
 
-  it('sorts integrations alphabetically and splits installed vs available', () => {
+  it('sorts integrations alphabetically and splits enabled, configured, and available', () => {
     const sorted = sortIntegrationItems([
       { id: 'sentry', name: 'Sentry', enabled: false },
       { id: 'linear', name: 'Linear', enabled: true },
-      { id: 'notion', name: 'Notion', enabled: false },
+      { id: 'notion', name: 'Notion', enabled: false, configured: true },
       { id: 'asana', name: 'Asana', enabled: false },
     ]);
     const grouped = splitIntegrationItems(sorted);
 
     expect(grouped.installed.map((item) => item.name)).toEqual(['Linear']);
+    expect(grouped.configured.map((item) => item.name)).toEqual(['Notion']);
     expect(grouped.available.map((item) => item.name)).toEqual([
       'Asana',
-      'Notion',
       'Sentry',
     ]);
+  });
+
+  it('shows configured integrations separately and an empty enabled state', () => {
+    state.linearInstallation = null;
+
+    render(<Integrations />);
+
+    const enabledSection = screen
+      .getByRole('heading', { name: 'Enabled' })
+      .closest('section');
+    const configuredSection = screen
+      .getByRole('heading', { name: 'Configured' })
+      .closest('section');
+
+    expect(enabledSection).toHaveTextContent(
+      "You haven't enabled any integrations yet.",
+    );
+    expect(
+      within(configuredSection as HTMLElement).getByRole('heading', {
+        name: 'Linear',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('highlights a selected integration above alphabetical order', () => {
@@ -738,7 +771,7 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('renders enabled and available sections with compact action buttons', () => {
+  it('renders enabled, configured, and available sections with compact action buttons', () => {
     render(<Integrations />);
 
     const enabledSection = screen
@@ -747,9 +780,13 @@ describe('Integrations settings', () => {
     const availableSection = screen
       .getByRole('heading', { name: 'Available' })
       .closest('section');
+    const configuredSection = screen
+      .getByRole('heading', { name: 'Configured' })
+      .closest('section');
 
     expect(enabledSection).not.toBeNull();
     expect(availableSection).not.toBeNull();
+    expect(configuredSection).not.toBeNull();
 
     expect(
       within(enabledSection as HTMLElement)
