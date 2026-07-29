@@ -1,10 +1,12 @@
 const {
   consumeMcpOauthReplayMock,
+  dbUpdateSetMock,
   dbUpdateMock,
   getMcpOauthReplayMock,
   linearViewerMock,
 } = vi.hoisted(() => ({
   consumeMcpOauthReplayMock: vi.fn(),
+  dbUpdateSetMock: vi.fn(),
   dbUpdateMock: vi.fn(),
   getMcpOauthReplayMock: vi.fn(),
   linearViewerMock: vi.fn(),
@@ -55,7 +57,7 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
       organization: Promise.resolve({ id: 'linear-org-1' }),
     });
     dbUpdateMock.mockReturnValue({
-      set: vi.fn(() => ({ where: vi.fn() })),
+      set: dbUpdateSetMock.mockReturnValue({ where: vi.fn() }),
     });
   });
 
@@ -89,7 +91,7 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
             connectionRole: 'user',
             userId: 'roomote-user-1',
           } as never,
-          accessToken: 'access-token',
+          tokens: { access_token: 'access-token' },
           replayToken: 'replay-token',
         }),
       ).rejects.toThrow(
@@ -100,4 +102,38 @@ describe('hydrateLinearMcpConnectionAfterOauth', () => {
       expect(consumeMcpOauthReplayMock).not.toHaveBeenCalled();
     },
   );
+
+  it('stores Linear identity metadata and OAuth tokens in one update', async () => {
+    await hydrateLinearMcpConnectionAfterOauth({
+      connection: {
+        id: 'connection-1',
+        connectionRole: 'user',
+        userId: 'roomote-user-1',
+        authConfig: { type: 'oauth_client', client_id: 'client-1' },
+      } as never,
+      tokens: {
+        access_token: 'access-token',
+        refresh_token: 'refresh-token',
+        expires_in: 3600,
+        scope: 'read write',
+      },
+    });
+
+    expect(dbUpdateMock).toHaveBeenCalledTimes(1);
+    expect(dbUpdateSetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        tokenExpiresAt: expect.any(Date),
+        scopes: ['read', 'write'],
+        authStatus: 'authenticated',
+        enabled: true,
+        authConfig: expect.objectContaining({
+          client_id: 'client-1',
+          linearOrganizationId: 'linear-org-1',
+          linearUserId: 'linear-user-1',
+        }),
+      }),
+    );
+  });
 });

@@ -76,10 +76,6 @@ export async function GET(
         mcpConnections.connectionRole,
       ],
       set: {
-        userId: targetUserId,
-        authConfig: null,
-        enabled: false,
-        authStatus: 'pending',
         updatedAt: new Date(),
       },
     })

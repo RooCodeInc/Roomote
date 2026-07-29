@@ -8,6 +8,7 @@ const {
   getMcpIntegrationMock,
   getMcpOauthReplayMock,
   insertReturningMock,
+  onConflictDoUpdateMock,
   updateMcpOauthReplayMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
@@ -17,6 +18,7 @@ const {
   getMcpIntegrationMock: vi.fn(),
   getMcpOauthReplayMock: vi.fn(),
   insertReturningMock: vi.fn(),
+  onConflictDoUpdateMock: vi.fn(),
   updateMcpOauthReplayMock: vi.fn(),
 }));
 
@@ -28,9 +30,9 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
-        onConflictDoUpdate: vi.fn(() => ({
+        onConflictDoUpdate: onConflictDoUpdateMock.mockReturnValue({
           returning: insertReturningMock,
-        })),
+        }),
       })),
     })),
   },
@@ -88,6 +90,10 @@ describe('GET /api/mcp-oauth/replay/[token]', () => {
     expect(response.headers.get('location')).toBe(
       'https://roomote.example/api/mcp-oauth/initiate/connection-1?redirectTo=%2Fsettings%2Fpersonal&replayToken=replay-token',
     );
+    expect(onConflictDoUpdateMock).toHaveBeenCalledWith({
+      target: ['userId', 'mcpId', 'connectionRole'],
+      set: { updatedAt: expect.any(Date) },
+    });
   });
 
   it('sends signed-out users to sign in on the public app origin', async () => {
