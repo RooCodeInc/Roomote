@@ -155,9 +155,13 @@ function SignedInUserMenu({
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setIsAboutOpen(true)}>
             <Info />
-            About Roomote
+            <span className="grow">About Roomote</span>
+            {displayVersion && (
+              <span className="text-muted-foreground text-xs">
+                v{displayVersion}
+              </span>
+            )}
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <a
               href={DOCS_BASE_URL}
