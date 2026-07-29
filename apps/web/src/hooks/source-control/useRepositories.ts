@@ -8,8 +8,19 @@ type UseRepositoriesInput = {
   sourceControlProvider?: SourceControlProvider;
 };
 
-export const useRepositories = (input?: UseRepositoriesInput) => {
+type UseRepositoriesOptions = {
+  refetchInterval?: number | false;
+  refetchIntervalInBackground?: false;
+};
+
+export const useRepositories = (
+  input?: UseRepositoriesInput,
+  options?: UseRepositoriesOptions,
+) => {
   const trpc = useTRPC();
 
-  return useQuery(trpc.sourceControl.repositories.queryOptions(input));
+  return useQuery({
+    ...trpc.sourceControl.repositories.queryOptions(input),
+    ...options,
+  });
 };

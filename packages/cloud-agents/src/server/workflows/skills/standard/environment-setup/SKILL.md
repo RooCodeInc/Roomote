@@ -31,6 +31,22 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
         <validation>The repository target and branch baseline are explicit before config drafting starts.</validation>
       </step>
 
+      <step number="1a">
+        <title>Bootstrap an empty repository before analysis</title>
+        <description>A brand-new repository with no commits (for example one just created on github.com) cannot be analyzed or validated until it has an initial commit. Give it the smallest possible bootstrap, then continue normally.</description>
+        <actions>
+          <action>Detect emptiness from the checked-out workspace: `git log --oneline -1` failing (unborn HEAD) together with an effectively empty worktree means the repository has no commits yet. If the repository has any commits, skip this step entirely and continue with normal analysis.</action>
+          <action>When the repository is empty, create exactly one bootstrap commit containing only a `README.md` (the repository name as a title plus a line noting that Roomote initialized the repository) and a minimal general-purpose `.gitignore`. Do not scaffold application code, frameworks, package manifests, CI config, or anything beyond those two files; building the actual project is the user's next task, not part of environment setup.</action>
+          <action>Commit directly to the branch the workspace is already on (the unborn branch was already pointed at the repository's stored default branch) and push it with `git push -u origin <default-branch>`. Never force-push.</action>
+          <action>If the push is rejected because commits appeared on the remote in the meantime, discard the bootstrap commit, fetch, check out the remote default branch, and continue as a normal non-empty repository.</action>
+          <action>After the bootstrap push succeeds, continue the normal workflow against the now-initialized repository and expect the resulting environment definition to be minimal: typically the repository mapping alone with no commands, services, docker projects, or ports, because there is no application to install, test, or start yet. Do not invent install, dev, or test commands for code that does not exist.</action>
+          <action>When launching the follow-up verification task for such a minimal environment, adapt the verification prompt to what actually exists: it should confirm the workspace clones and environment setup completes cleanly, not expect a running service, test suite, or localhost surface.</action>
+          <action>In `agentInstructions`, note that the repository was newly initialized by Roomote and contains no application code yet.</action>
+          <action>In the final handoff, say that the repository was brand new, that Roomote pushed the initial commit, and that the user's next task can start building the actual project.</action>
+        </actions>
+        <validation>An empty repository receives exactly one README plus .gitignore bootstrap commit on its default branch; a repository with any existing commits is untouched by this step.</validation>
+      </step>
+
       <step number="2">
         <title>Inspect static repository evidence</title>
         <description>Collect only evidence that supports concrete environment fields.</description>
@@ -304,6 +320,8 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
 <rule>Use `repositories[].commands` only for executing commands and setting configuration needed to validate the environment.</rule>
 <rule>If setup requires configuration or runtime file creation or modification, represent it with `repositories[].commands` entries instead of asking the user to edit files directly.</rule>
 <rule>Do not use `repositories[].commands` to write, generate, or patch application or source code; if source changes are required, report that as a blocker or separate follow-up work.</rule>
+<rule>When the target repository has no commits at all, bootstrap it with exactly one commit containing only `README.md` and `.gitignore` pushed to its default branch; never force-push, and never scaffold application code, frameworks, package manifests, or CI config during environment setup.</rule>
+<rule>For a just-bootstrapped repository, keep the environment definition minimal (typically the repository mapping with no commands, services, or ports) instead of inventing commands for application code that does not exist yet.</rule>
 <rule>Treat each `run` field as newline-split before execution. Do not rely on YAML multiline blocks to preserve shell control flow across lines.</rule>
 <rule>Do not emit YAML `run: |` blocks for `if ... fi`, `case`, loops, heredocs, or multiline shell functions unless the entire block is wrapped inside one explicit shell command such as `bash -lc '...'`.</rule>
 <rule>When setup logic needs conditional or multiline behavior, prefer multiple simple command entries or one explicit shell wrapper command over raw multiline shell fragments.</rule>

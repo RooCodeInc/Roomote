@@ -52,6 +52,7 @@ interface SelectEnvironmentOrRepositoryProps {
   lockedBranch?: string;
   allowAuto?: boolean;
   onCreate: () => void;
+  onCreateRepository?: () => void;
   onEdit: (e: React.MouseEvent, envId: string) => void;
   onDelete: (e: React.MouseEvent, env: EnvironmentWithMeta) => void;
 }
@@ -61,6 +62,7 @@ export const SelectEnvironmentOrRepository = ({
   lockedBranch,
   allowAuto = false,
   onCreate,
+  onCreateRepository,
   onEdit,
   onDelete,
 }: SelectEnvironmentOrRepositoryProps) => {
@@ -455,6 +457,19 @@ export const SelectEnvironmentOrRepository = ({
                     Create environment
                   </span>
                 </DropdownMenuItem>
+                {onCreateRepository ? (
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      onCreateRepository();
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Plus className="size-3.5" />
+                      New GitHub repository
+                    </span>
+                  </DropdownMenuItem>
+                ) : null}
               </>
             )}
 

@@ -127,6 +127,12 @@ Subscribe to these events:
 GitHub Apps also receive `installation` and `installation_repositories`
 events automatically; you do not need to subscribe to them in the app form.
 
+Roomote uses the **Repository** and `installation_repositories` events to
+pick up newly created or newly granted repositories without a manual refresh.
+If your app was created before the **Repository** event was part of the
+manifest, confirm it is enabled under the app's **Permissions & events** page
+— GitHub has no API to update an app's event subscriptions.
+
 ## Save credentials
 
 Copy these values into the `/setup` manual form, deployment env vars, or your
