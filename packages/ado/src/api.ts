@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
 import {
-  ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT,
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
   stripCloneUrlUserInfo,
