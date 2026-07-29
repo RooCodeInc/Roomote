@@ -24,6 +24,9 @@ const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 export const ADO_API_VERSION = '7.1';
 const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
+// Fits the whole TF401444 sentence (~204 chars with its three GUIDs) while
+// still keeping pathological provider messages toast-sized.
+const ADO_ERROR_MESSAGE_MAX_CHARS = 240;
 const ADO_ENTRA_TOKEN_SCOPE = 'https://app.vssps.visualstudio.com/.default';
 const ADO_ENTRA_RESOURCE_SCOPE =
   '499b84ac-1321-427f-aa17-267ca6975798/.default';
@@ -236,6 +239,102 @@ function normalizeOrganization(organization: string): string {
   return trimmed;
 }
 
+type AdoAuthMode = 'pat' | 'entra' | 'delegated';
+
+/**
+ * Effective deployment auth mode. `ADO_AUTH_MODE` is only written by the setup
+ * and Settings forms, so deployments configured from raw env vars fall back to
+ * the same inference {@link resolveAdoToken} uses: a PAT when one is present,
+ * otherwise the Entra service principal.
+ */
+async function resolveAdoAuthMode(): Promise<AdoAuthMode> {
+  const authMode = (await resolveDeploymentEnvVar('ADO_AUTH_MODE'))?.trim();
+
+  if (authMode === 'pat' || authMode === 'entra' || authMode === 'delegated') {
+    return authMode;
+  }
+
+  return (await resolveDeploymentEnvVar('ADO_TOKEN'))?.trim() ? 'pat' : 'entra';
+}
+
+/**
+ * Thrown while acquiring a Microsoft Entra token. `definitive` separates a
+ * rejected credential (bad client id/secret/tenant, revoked refresh token:
+ * the token endpoint answers 400/401) from an unverifiable failure (network,
+ * timeout, 5xx). The validate* helpers map definitive failures to `invalid`,
+ * which blocks saving, and everything else to `unknown`, which does not.
+ */
+class AdoTokenAcquisitionError extends Error {
+  readonly definitive: boolean;
+
+  constructor(message: string, definitive: boolean) {
+    super(message);
+    this.name = 'AdoTokenAcquisitionError';
+    this.definitive = definitive;
+  }
+}
+
+function isDefinitiveTokenEndpointStatus(status: number): boolean {
+  return status === 400 || status === 401;
+}
+
+async function requestAdoEntraClientCredentialsToken({
+  clientId,
+  clientSecret,
+  tenantId,
+  fetchImpl = fetch,
+  timeoutMs,
+}: {
+  clientId: string;
+  clientSecret: string;
+  tenantId: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<{ token: string; expiresIn: number }> {
+  const response = await fetchImpl(
+    `https://login.microsoftonline.com/${encodeURIComponent(tenantId.trim())}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId.trim(),
+        client_secret: clientSecret.trim(),
+        scope: ADO_ENTRA_TOKEN_SCOPE,
+        grant_type: 'client_credentials',
+      }),
+      ...(timeoutMs === undefined
+        ? {}
+        : { signal: AbortSignal.timeout(timeoutMs) }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new AdoTokenAcquisitionError(
+      `Azure DevOps Microsoft Entra token request failed: ${response.status} ${response.statusText}`,
+      isDefinitiveTokenEndpointStatus(response.status),
+    );
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: unknown;
+    expires_in?: unknown;
+  };
+  const token =
+    typeof payload.access_token === 'string' ? payload.access_token : null;
+
+  if (!token) {
+    throw new Error(
+      'Azure DevOps Microsoft Entra token response did not include an access token.',
+    );
+  }
+
+  return {
+    token,
+    expiresIn:
+      typeof payload.expires_in === 'number' ? payload.expires_in : 3600,
+  };
+}
+
 export async function resolveAdoToken(): Promise<string | null> {
   const authMode = await resolveDeploymentEnvVar('ADO_AUTH_MODE');
   if (authMode === 'delegated') {
@@ -264,40 +363,11 @@ export async function resolveAdoToken(): Promise<string | null> {
     return cachedAdoEntraToken.token;
   }
 
-  const response = await fetch(
-    `https://login.microsoftonline.com/${encodeURIComponent(tenantId.trim())}/oauth2/v2.0/token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId.trim(),
-        client_secret: clientSecret.trim(),
-        scope: ADO_ENTRA_TOKEN_SCOPE,
-        grant_type: 'client_credentials',
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Azure DevOps Microsoft Entra token request failed: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  const payload = (await response.json()) as {
-    access_token?: unknown;
-    expires_in?: unknown;
-  };
-  const token =
-    typeof payload.access_token === 'string' ? payload.access_token : null;
-  const expiresIn =
-    typeof payload.expires_in === 'number' ? payload.expires_in : 3600;
-
-  if (!token) {
-    throw new Error(
-      'Azure DevOps Microsoft Entra token response did not include an access token.',
-    );
-  }
+  const { token, expiresIn } = await requestAdoEntraClientCredentialsToken({
+    clientId,
+    clientSecret,
+    tenantId,
+  });
 
   cachedAdoEntraToken = {
     token,
@@ -307,13 +377,24 @@ export async function resolveAdoToken(): Promise<string | null> {
   return token;
 }
 
-async function resolveAdoDelegatedToken(): Promise<string | null> {
-  const linkedAccountId = await resolveDeploymentEnvVar(
-    'ADO_LINKED_ACCOUNT_ID',
-  );
-  const clientId = await resolveDeploymentEnvVar('ADO_CLIENT_ID');
-  const clientSecret = await resolveDeploymentEnvVar('ADO_CLIENT_SECRET');
+async function resolveAdoDelegatedToken(overrides?: {
+  linkedAccountId?: string;
+  clientId?: string;
+  clientSecret?: string;
+  tenantId?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<string | null> {
+  const linkedAccountId =
+    overrides?.linkedAccountId ??
+    (await resolveDeploymentEnvVar('ADO_LINKED_ACCOUNT_ID'));
+  const clientId =
+    overrides?.clientId ?? (await resolveDeploymentEnvVar('ADO_CLIENT_ID'));
+  const clientSecret =
+    overrides?.clientSecret ??
+    (await resolveDeploymentEnvVar('ADO_CLIENT_SECRET'));
   const tenantId =
+    overrides?.tenantId ??
     (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ??
     (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID'));
 
@@ -364,12 +445,13 @@ async function resolveAdoDelegatedToken(): Promise<string | null> {
     !clientSecret?.trim() ||
     !tenantId?.trim()
   ) {
-    throw new Error(
+    throw new AdoTokenAcquisitionError(
       'Azure DevOps delegated connection needs to be reconnected. Open Settings and connect with Microsoft again.',
+      true,
     );
   }
 
-  const response = await fetch(
+  const response = await (overrides?.fetchImpl ?? fetch)(
     `https://login.microsoftonline.com/${encodeURIComponent(tenantId.trim())}/oauth2/v2.0/token`,
     {
       method: 'POST',
@@ -381,12 +463,18 @@ async function resolveAdoDelegatedToken(): Promise<string | null> {
         refresh_token: account.refreshToken,
         scope: ADO_ENTRA_RESOURCE_SCOPE,
       }),
+      ...(overrides?.timeoutMs === undefined
+        ? {}
+        : { signal: AbortSignal.timeout(overrides.timeoutMs) }),
     },
   );
 
   if (!response.ok) {
-    throw new Error(
+    // 400 means Entra rejected the grant itself (expired or revoked refresh
+    // token, bad client secret); anything else is unverifiable.
+    throw new AdoTokenAcquisitionError(
       `Azure DevOps delegated token refresh failed: ${response.status} ${response.statusText}`,
+      isDefinitiveTokenEndpointStatus(response.status),
     );
   }
 
@@ -496,6 +584,104 @@ function buildAdoBasicAuthHeader(token: string): string {
   return `Basic ${Buffer.from(`:${token}`, 'utf8').toString('base64')}`;
 }
 
+/**
+ * Carries the HTTP status alongside the message so callers can tell a rejected
+ * credential apart from any other failure and replace the raw status with
+ * actionable text (see {@link describeAdoApiError}).
+ */
+export class AdoApiError extends Error {
+  readonly status: number;
+  /** Azure DevOps' own explanation, when the response body carried one. */
+  readonly providerMessage: string | null;
+
+  constructor(
+    status: number,
+    statusText: string,
+    providerMessage: string | null = null,
+  ) {
+    super(`Azure DevOps API request failed: ${status} ${statusText}`);
+    this.name = 'AdoApiError';
+    this.status = status;
+    this.providerMessage = providerMessage;
+  }
+}
+
+/**
+ * Azure DevOps answers a rejected credential with a 203 sign-in page as often
+ * as it answers 401/403, so all three mean "this credential cannot do that".
+ */
+function isAdoAuthorizationFailureStatus(status: number): boolean {
+  return status === 203 || status === 401 || status === 403;
+}
+
+const GUID_PATTERN =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/**
+ * Provider messages like TF401444 embed `tenant\tenant\objectId` GUID chains
+ * that dominate a toast without helping anyone read it. Collapse them to a
+ * single ellipsis for display; the untrimmed message stays on the thrown
+ * {@link AdoApiError} for logs.
+ */
+function compactAdoProviderMessage(message: string): string {
+  return message
+    .replace(GUID_PATTERN, '…')
+    .replace(/…(\\+…)+/g, '…')
+    .replace(/\s{2,}/g, ' ');
+}
+
+/**
+ * What an admin should actually do about a rejected credential. Entra tokens
+ * are minted from the `.default` scope, so an app registration that was never
+ * granted the Azure DevOps API permissions, or whose newly added permissions
+ * were never saved in the Azure portal, or that was never added to the
+ * organization, authenticates fine and fails on every API call instead.
+ *
+ * This surfaces as a toast: a short lead-in, then Azure DevOps' own
+ * (GUID-compacted) explanation, then one clipped action. The permission names
+ * and the add-save-consent walkthrough live in the setup/Settings guidance
+ * and the docs, which the guidance links to.
+ */
+function buildAdoCredentialRejectionMessage({
+  authMode,
+  status,
+  providerMessage,
+}: {
+  authMode: AdoAuthMode;
+  status?: number;
+  providerMessage?: string | null;
+}): string {
+  const suffix = status === undefined ? '' : ` (status ${status})`;
+  const quote = providerMessage
+    ? `: “${compactAdoProviderMessage(providerMessage)}”`
+    : '.';
+
+  if (authMode === 'pat') {
+    return `Azure DevOps rejected the access token${suffix}${quote} Confirm it is active, belongs to the organization, and has Code read access.`;
+  }
+
+  return `Azure DevOps rejected the Microsoft Entra credential${suffix}${quote} Check API permissions and organization membership.`;
+}
+
+/**
+ * Message to surface for a failed Azure DevOps call. Rejected credentials get
+ * mode-specific remediation; everything else keeps its original message.
+ */
+export async function describeAdoApiError(error: unknown): Promise<string> {
+  if (
+    !(error instanceof AdoApiError) ||
+    !isAdoAuthorizationFailureStatus(error.status)
+  ) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  return buildAdoCredentialRejectionMessage({
+    authMode: await resolveAdoAuthMode(),
+    status: error.status,
+    providerMessage: error.providerMessage,
+  });
+}
+
 async function requestAdoJson<T>({
   organizationApiBaseUrl,
   fetchImpl = fetch,
@@ -529,8 +715,10 @@ async function requestAdoJson<T>({
   );
 
   if (![200, 201].includes(response.status)) {
-    throw new Error(
-      `Azure DevOps API request failed: ${response.status} ${response.statusText}`,
+    throw new AdoApiError(
+      response.status,
+      response.statusText,
+      readAdoErrorMessage(await response.text().catch(() => '')),
     );
   }
 
@@ -715,18 +903,57 @@ export async function getAdoPullRequest({
 }
 
 export type AdoTokenValidationResult =
-  | { status: 'valid'; displayName: string }
+  | { status: 'valid' }
   | { status: 'invalid'; error: string }
   | { status: 'unknown'; error: string };
 
-export async function validateAdoToken({
+/**
+ * Azure DevOps explains most rejections in the response body
+ * (`{"message": "TF401444: Please sign-in at least once as …"}`), which is
+ * more specific than anything we can infer from the status alone. Pull it out
+ * so the admin sees the provider's own diagnosis next to the remediation.
+ */
+function readAdoErrorMessage(body: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const message =
+      typeof parsed === 'object' && parsed !== null
+        ? (parsed as { message?: unknown }).message
+        : null;
+
+    if (typeof message !== 'string' || !message.trim()) {
+      return null;
+    }
+
+    const collapsed = message.trim().replace(/\s+/g, ' ');
+    return collapsed.length > ADO_ERROR_MESSAGE_MAX_CHARS
+      ? `${collapsed.slice(0, ADO_ERROR_MESSAGE_MAX_CHARS)}…`
+      : collapsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Single real Azure DevOps call every credential must be able to make. This is
+ * the same repository listing the sync performs, so a PAT without Code access
+ * or an Entra app registration that cannot reach the organization fails at
+ * save time with remediation instead of at the first sync with a bare 401.
+ *
+ * Deliberately not `/_apis/connectionData`: that resource is preview-only and
+ * answers 400 unless the api-version carries a `-preview` suffix, which would
+ * make a working credential look unverifiable rather than valid.
+ */
+async function probeAdoCredential({
   token,
+  authMode,
   organization,
   baseUrl,
   fetchImpl = fetch,
   timeoutMs = ADO_TOKEN_VALIDATION_TIMEOUT_MS,
 }: {
   token: string;
+  authMode: AdoAuthMode;
   organization: string;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
@@ -741,8 +968,9 @@ export async function validateAdoToken({
       organization,
     });
     const response = await fetchImpl(
-      buildAdoApiUrl(organizationApiBaseUrl, '/_apis/connectionData', {
+      buildAdoApiUrl(organizationApiBaseUrl, '/_apis/git/repositories', {
         'api-version': ADO_API_VERSION,
+        $top: 1,
       }),
       {
         method: 'GET',
@@ -754,43 +982,176 @@ export async function validateAdoToken({
       },
     );
 
-    // Azure DevOps answers rejected PATs with a 203 sign-in page instead of
-    // a 401, so treat that status as a definitive rejection too.
-    if ([203, 401, 403].includes(response.status)) {
+    if (isAdoAuthorizationFailureStatus(response.status)) {
       return {
         status: 'invalid',
-        error:
-          'Azure DevOps rejected the access token. Confirm it is active, belongs to the organization, and has Code read access.',
+        error: buildAdoCredentialRejectionMessage({
+          authMode,
+          providerMessage: readAdoErrorMessage(await response.text()),
+        }),
       };
     }
 
     if (response.status !== 200) {
       return {
         status: 'unknown',
-        error: `Could not verify the Azure DevOps token: ${response.status} ${response.statusText}`,
+        error: `Could not verify the Azure DevOps credential: ${response.status} ${response.statusText}`,
       };
     }
 
-    const { authenticatedUser } = adoConnectionDataSchema.parse(
-      await response.json(),
-    );
-
-    return {
-      status: 'valid',
-      displayName:
-        authenticatedUser.providerDisplayName ??
-        authenticatedUser.displayName ??
-        authenticatedUser.uniqueName ??
-        authenticatedUser.id,
-    };
+    return { status: 'valid' };
   } catch (error) {
     return {
       status: 'unknown',
-      error: `Could not verify the Azure DevOps token: ${
+      error: `Could not verify the Azure DevOps credential: ${
         error instanceof Error ? error.message : String(error)
       }`,
     };
   }
+}
+
+export async function validateAdoToken(params: {
+  token: string;
+  organization: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<AdoTokenValidationResult> {
+  return probeAdoCredential({ ...params, authMode: 'pat' });
+}
+
+/**
+ * Verifies a Microsoft Entra service principal end to end: the tenant issues a
+ * client-credentials token, then that token makes a real Azure DevOps call.
+ * The token request only proves the client id/secret/tenant are right; the
+ * `.default` scope succeeds no matter which API permissions were consented, so
+ * the second step is the one that catches a permission-less app registration.
+ */
+export async function validateAdoEntraCredentials({
+  clientId,
+  clientSecret,
+  tenantId,
+  organization,
+  baseUrl,
+  fetchImpl,
+  timeoutMs = ADO_TOKEN_VALIDATION_TIMEOUT_MS,
+}: {
+  clientId: string;
+  clientSecret: string;
+  tenantId: string;
+  organization: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<AdoTokenValidationResult> {
+  let token: string;
+
+  try {
+    ({ token } = await requestAdoEntraClientCredentialsToken({
+      clientId,
+      clientSecret,
+      tenantId,
+      fetchImpl,
+      timeoutMs,
+    }));
+  } catch (error) {
+    // Only a definitive rejection by the token endpoint blocks saving.
+    // Network trouble, timeouts, and 5xx answers are unverifiable, matching
+    // how an unreachable Azure DevOps is treated below.
+    if (error instanceof AdoTokenAcquisitionError && error.definitive) {
+      return {
+        status: 'invalid',
+        error: `Microsoft Entra did not issue an Azure DevOps token. Confirm the client ID, client secret, and tenant ID are correct and the client secret has not expired. (${error.message})`,
+      };
+    }
+
+    return {
+      status: 'unknown',
+      error: `Could not verify the Microsoft Entra credential: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  return probeAdoCredential({
+    token,
+    authMode: 'entra',
+    organization,
+    baseUrl,
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
+/**
+ * Verifies the Azure DevOps account linked through delegated sign-in, using
+ * the stored access token (refreshed first when it has expired).
+ */
+export async function validateAdoDelegatedCredentials({
+  linkedAccountId,
+  clientId,
+  clientSecret,
+  tenantId,
+  organization,
+  baseUrl,
+  fetchImpl,
+  timeoutMs = ADO_TOKEN_VALIDATION_TIMEOUT_MS,
+}: {
+  linkedAccountId: string;
+  clientId?: string;
+  clientSecret?: string;
+  tenantId?: string;
+  organization: string;
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}): Promise<AdoTokenValidationResult> {
+  let token: string | null;
+
+  try {
+    token = await resolveAdoDelegatedToken({
+      linkedAccountId,
+      clientId,
+      clientSecret,
+      tenantId,
+      fetchImpl,
+      timeoutMs,
+    });
+  } catch (error) {
+    // Only a definitive rejection blocks saving: a missing refresh token
+    // (reconnect needed) or the token endpoint refusing the grant. A network
+    // failure or 5xx during refresh is unverifiable.
+    if (error instanceof AdoTokenAcquisitionError && error.definitive) {
+      return {
+        status: 'invalid',
+        error: error.message,
+      };
+    }
+
+    return {
+      status: 'unknown',
+      error: `Could not verify the delegated Azure DevOps connection: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  if (!token) {
+    return {
+      status: 'invalid',
+      error:
+        'No Azure DevOps account is connected. Connect with Microsoft again, then save.',
+    };
+  }
+
+  return probeAdoCredential({
+    token,
+    authMode: 'delegated',
+    organization,
+    baseUrl,
+    fetchImpl,
+    timeoutMs,
+  });
 }
 
 function normalizeAdoParentCommentId(

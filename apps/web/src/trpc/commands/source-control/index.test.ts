@@ -15,6 +15,9 @@ const {
   mockUpsertDeploymentEnvironmentVariables,
   mockResolveAdoOrganization,
   mockValidateAdoToken,
+  mockValidateAdoEntraCredentials,
+  mockValidateAdoDelegatedCredentials,
+  mockDescribeAdoApiError,
   mockValidateGiteaToken,
   mockEnv,
 } = vi.hoisted(() => ({
@@ -32,6 +35,9 @@ const {
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockResolveAdoOrganization: vi.fn(),
   mockValidateAdoToken: vi.fn(),
+  mockValidateAdoEntraCredentials: vi.fn(),
+  mockValidateAdoDelegatedCredentials: vi.fn(),
+  mockDescribeAdoApiError: vi.fn(),
   mockValidateGiteaToken: vi.fn(),
   mockEnv: {
     R_APP_URL: 'https://roomote.example.com',
@@ -41,12 +47,15 @@ const {
 }));
 
 vi.mock('@roomote/ado', () => ({
+  describeAdoApiError: mockDescribeAdoApiError,
   ensureAdoServiceHooksForRepositories:
     mockEnsureAdoServiceHooksForRepositories,
   removeAdoServiceHooksForRepositories:
     mockRemoveAdoServiceHooksForRepositories,
   resolveAdoOrganization: mockResolveAdoOrganization,
   syncAdoRepositories: mockSyncAdoRepositories,
+  validateAdoDelegatedCredentials: mockValidateAdoDelegatedCredentials,
+  validateAdoEntraCredentials: mockValidateAdoEntraCredentials,
   validateAdoToken: mockValidateAdoToken,
 }));
 
@@ -174,6 +183,11 @@ describe('source-control commands', () => {
     mockValidateGiteaToken.mockResolvedValue({ status: 'valid' });
     mockResolveAdoOrganization.mockResolvedValue(null);
     mockValidateAdoToken.mockResolvedValue({ status: 'valid' });
+    mockValidateAdoEntraCredentials.mockResolvedValue({ status: 'valid' });
+    mockValidateAdoDelegatedCredentials.mockResolvedValue({ status: 'valid' });
+    mockDescribeAdoApiError.mockImplementation(async (error: unknown) =>
+      error instanceof Error ? error.message : String(error),
+    );
   });
 
   it('creates GitLab webhooks during the OAuth-triggered repository sync', async () => {
@@ -523,6 +537,134 @@ describe('source-control commands', () => {
     });
 
     expect(mockValidateAdoToken).not.toHaveBeenCalled();
+  });
+
+  it('probes Microsoft Entra service-principal credentials before saving them', async () => {
+    mockValidateAdoEntraCredentials.mockResolvedValue({
+      status: 'invalid',
+      error: 'Azure DevOps rejected the Microsoft Entra credential.',
+    });
+
+    await expect(
+      assertValidSourceControlConfigInput({
+        provider: 'ado',
+        values: {
+          ADO_ORGANIZATION: 'acme',
+          ADO_AUTH_MODE: 'entra',
+          ADO_CLIENT_ID: 'client-id',
+          ADO_CLIENT_SECRET: 'client-secret',
+          ADO_TENANT_ID: 'tenant-id',
+        },
+      }),
+    ).rejects.toThrow('Azure DevOps rejected the Microsoft Entra credential.');
+
+    expect(mockValidateAdoEntraCredentials).toHaveBeenCalledWith({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      baseUrl: undefined,
+    });
+    expect(mockValidateAdoToken).not.toHaveBeenCalled();
+  });
+
+  it('probes runtime-configured Entra credentials the form submits as blank', async () => {
+    // The Settings form sends an empty string for every field already
+    // satisfied by a runtime env var. Falling back on those blanks is what
+    // makes the probe run at all; otherwise the whole check is skipped and
+    // an unusable credential saves cleanly.
+    mockResolveAdoOrganization.mockResolvedValue('acme');
+    mockResolveDeploymentEnvVar.mockImplementation(
+      async (name: string) =>
+        ({
+          ADO_CLIENT_ID: 'runtime-client-id',
+          ADO_CLIENT_SECRET: 'runtime-client-secret',
+          ADO_TENANT_ID: 'runtime-tenant-id',
+        })[name] ?? null,
+    );
+    mockValidateAdoEntraCredentials.mockResolvedValue({
+      status: 'invalid',
+      error: 'Azure DevOps rejected the Microsoft Entra credential.',
+    });
+
+    await expect(
+      assertValidSourceControlConfigInput({
+        provider: 'ado',
+        values: {
+          ADO_ORGANIZATION: '',
+          ADO_CLIENT_ID: '',
+          ADO_CLIENT_SECRET: '',
+          ADO_TENANT_ID: '',
+          ADO_AUTH_MODE: 'entra',
+          ADO_LINKED_ACCOUNT_ID: '',
+        },
+      }),
+    ).rejects.toThrow('Azure DevOps rejected the Microsoft Entra credential.');
+
+    expect(mockValidateAdoEntraCredentials).toHaveBeenCalledWith({
+      clientId: 'runtime-client-id',
+      clientSecret: 'runtime-client-secret',
+      tenantId: 'runtime-tenant-id',
+      organization: 'acme',
+      baseUrl: undefined,
+    });
+  });
+
+  it('probes the delegated Azure DevOps account once it is linked', async () => {
+    await assertValidSourceControlConfigInput({
+      provider: 'ado',
+      values: {
+        ADO_ORGANIZATION: 'acme',
+        ADO_AUTH_MODE: 'delegated',
+        ADO_CLIENT_ID: 'client-id',
+        ADO_CLIENT_SECRET: 'client-secret',
+        ADO_TENANT_ID: 'tenant-id',
+        ADO_LINKED_ACCOUNT_ID: 'ado-user@example.com',
+      },
+    });
+
+    expect(mockValidateAdoDelegatedCredentials).toHaveBeenCalledWith({
+      linkedAccountId: 'ado-user@example.com',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      baseUrl: undefined,
+    });
+  });
+
+  it('skips the delegated probe before the Microsoft account is connected', async () => {
+    await assertValidSourceControlConfigInput({
+      provider: 'ado',
+      allowIncompleteDelegated: true,
+      values: {
+        ADO_ORGANIZATION: 'acme',
+        ADO_AUTH_MODE: 'delegated',
+        ADO_CLIENT_ID: 'client-id',
+        ADO_CLIENT_SECRET: 'client-secret',
+        ADO_TENANT_ID: 'tenant-id',
+        ADO_LINKED_ACCOUNT_ID: '',
+      },
+    });
+
+    expect(mockValidateAdoDelegatedCredentials).not.toHaveBeenCalled();
+  });
+
+  it('explains a rejected Azure DevOps credential instead of echoing the sync status', async () => {
+    mockSyncAdoRepositories.mockRejectedValue(
+      new Error('Azure DevOps API request failed: 401 Unauthorized'),
+    );
+    mockDescribeAdoApiError.mockResolvedValue(
+      'Azure DevOps rejected the Microsoft Entra credential (status 401). Add the API permissions.',
+    );
+
+    await expect(
+      syncRepositoriesCommand(buildMockAuth(), { provider: 'ado' }),
+    ).resolves.toEqual({
+      success: false,
+      error:
+        'Azure DevOps rejected the Microsoft Entra credential (status 401). Add the API permissions.',
+    });
   });
 
   it('requires Gitea OAuth credentials during config validation', async () => {
