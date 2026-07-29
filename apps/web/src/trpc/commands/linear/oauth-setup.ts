@@ -3,6 +3,7 @@ import {
   db,
   deploymentMcpEnablements,
   eq,
+  githubInstallations,
   isNull,
   mcpConnections,
   resolveDeploymentEnvVar,
@@ -11,10 +12,6 @@ import {
 import { LINEAR_ORG_CONNECTION_ROLE } from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
-import {
-  buildDeploymentAppName,
-  DEPLOYMENT_APP_DESCRIPTION,
-} from '@/lib/server/deployment-app-name';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import type { UserAuthSuccess } from '@/types';
 
@@ -59,7 +56,13 @@ function getLinearRuntimeEnv(): Partial<Record<string, string | undefined>> {
   );
 }
 
-function buildLinearOauthSetup(publicOrigin: string) {
+function buildLinearOauthSetup({
+  publicOrigin,
+  developerName,
+}: {
+  publicOrigin: string;
+  developerName: string;
+}) {
   const callbackUrl = new URL(
     '/api/mcp-oauth/callback',
     publicOrigin,
@@ -70,12 +73,12 @@ function buildLinearOauthSetup(publicOrigin: string) {
     schemaVersion: '1.0.0',
     distribution: 'private',
     display: {
-      description: DEPLOYMENT_APP_DESCRIPTION,
+      description: 'Work from Linear with your own coding agent',
       iconUrl: new URL('/roomote-logo.png', publicOrigin).toString(),
     },
-    developer: { name: 'Roomote' },
+    developer: { name: developerName },
     oauth: {
-      client_name: buildDeploymentAppName(publicOrigin),
+      client_name: 'Roomote',
       client_uri: publicOrigin,
       redirect_uris: [callbackUrl],
       grant_types: ['authorization_code'],
@@ -134,10 +137,20 @@ export async function getLinearOauthSetupCommand(auth: UserAuthSuccess) {
 
   const publicOrigin = getPublicAppUrl(Env);
   const runtimeEnv = getLinearRuntimeEnv();
-  const urls = buildLinearOauthSetup(publicOrigin);
-  const persistedEnvVarNames = new Set(
-    await getPersistedEnvironmentVariableNames(),
-  );
+  const [githubInstallation, persistedEnvVarNames] = await Promise.all([
+    db.query.githubInstallations.findFirst({
+      where: isNull(githubInstallations.suspendedAt),
+      columns: { accountLogin: true },
+    }),
+    getPersistedEnvironmentVariableNames(),
+  ]);
+  const urls = buildLinearOauthSetup({
+    publicOrigin,
+    developerName: githubInstallation
+      ? `${githubInstallation.accountLogin}[bot]`
+      : 'Roomote',
+  });
+  const savedEnvVarNames = new Set(persistedEnvVarNames);
   const fieldEntries = await Promise.all(
     Object.entries(LINEAR_OAUTH_ENV_FIELDS).map(async ([field, envName]) => {
       const runtimeValue = getRuntimeEnvValue(envName);
@@ -152,7 +165,7 @@ export async function getLinearOauthSetupCommand(auth: UserAuthSuccess) {
         {
           configured: Boolean(effectiveValue),
           managedByEnvironment: Boolean(runtimeValue),
-          savedInRoomote: persistedEnvVarNames.has(envName),
+          savedInRoomote: savedEnvVarNames.has(envName),
         },
       ] as const;
     }),

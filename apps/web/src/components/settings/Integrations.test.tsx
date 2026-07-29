@@ -528,7 +528,19 @@ describe('Integrations settings', () => {
       screen.getByRole('heading', { name: 'Set up Linear' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Create Linear app' }),
+      screen.getByRole('button', { name: 'Open Linear app creation' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('1', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('2', { exact: true })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', {
+        name: 'Create a Linear app.',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', {
+        name: 'Copy the app credentials.',
+      }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Callback URL')).not.toBeInTheDocument();
     expect(screen.queryByText('Webhook URL')).not.toBeInTheDocument();
@@ -595,6 +607,12 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('heading', { name: 'Configure Linear' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Update the app credentials.' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open Linear app creation' }),
+    ).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Remove saved credentials' }),
     );
