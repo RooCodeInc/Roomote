@@ -76,7 +76,7 @@ export function SandboxShell({
     <div className="h-viewport flex flex-col overflow-hidden">
       {/* Mobile-only top bar */}
       <div
-        className={`md:hidden top-0 ${zIndex('NAV_HEADER')} bg-background w-full shrink-0 outline outline-b outline-border`}
+        className={`md:hidden top-0 ${zIndex('NAV_HEADER')} w-full shrink-0 bg-card`}
       >
         {isSignedIn ? (
           <NavbarHeader />

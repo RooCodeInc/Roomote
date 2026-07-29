@@ -315,12 +315,12 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
                     ) : null}
                     {requestUserInputResponse.questionTexts.map(
                       (questionText, index) => (
-                        <span
+                        <p
                           key={index}
-                          className="mt-1 block italic text-muted-foreground"
+                          className="mt-1 border-l-2 pl-2 text-muted-foreground"
                         >
                           {questionText}
-                        </span>
+                        </p>
                       ),
                     )}
                     <span className="mt-2 block">{baseContent}</span>
