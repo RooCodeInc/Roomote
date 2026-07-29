@@ -15,10 +15,7 @@ import {
 import { Env } from '@roomote/env';
 import {
   type RoutingDebugInfo,
-  type RoutingWorkspace,
   enqueueTask,
-  routeTask,
-  buildLinearRoutingContext,
 } from '@roomote/cloud-agents/server';
 import { buildTaskStartingText } from '@roomote/communication/chat-messages';
 import { getRedis } from '@roomote/redis';
@@ -52,12 +49,14 @@ import {
   cancelLinearTaskRun,
   parseAgentSessionEventPayload,
   createLinearAgentRun,
-  startElicitationFallback,
   findPendingSelection,
   handleElicitationResponse,
   deletePendingSelection,
   enrichSessionComments,
+  resolveLinearTaskDestination,
   type CreateLinearAgentRunResult,
+  type LinearWorkspaceSelection,
+  type ResolvedLinearTaskDestination,
 } from '@roomote/linear';
 
 import type { WebhookResponse } from '../../types';
@@ -118,37 +117,7 @@ const AUTH_TOKEN_EXPIRY_MS = 15 * 60 * 1000;
  * Result of workspace mapping that properly distinguishes between
  * repository names and environment IDs.
  */
-interface WorkspaceSelection {
-  repo?: string;
-  environmentId?: string;
-}
-
-/**
- * Maps a routing workspace to the appropriate repo/environmentId fields.
- *
- * @param workspace - The workspace selection from the LLM router
- * @returns Object with either repo or environmentId populated
- */
-function mapWorkspaceToSelection(
-  workspace: RoutingWorkspace,
-): WorkspaceSelection {
-  switch (workspace.type) {
-    case 'environment':
-      return { environmentId: workspace.id };
-    case 'all_repositories':
-      return { repo: ALL_REPOSITORIES };
-  }
-}
-
-/**
- * Derives the workspace type from a WorkspaceSelection.
- */
-function deriveWorkspaceType(
-  ws: WorkspaceSelection,
-): 'environment' | 'all_repositories' {
-  if (ws.environmentId) return 'environment';
-  return 'all_repositories';
-}
+type WorkspaceSelection = LinearWorkspaceSelection;
 
 /**
  * Maps an elicitation workspace type + value to the appropriate WorkspaceSelection.
@@ -201,16 +170,7 @@ function postLinearFinalRouterDebug({
   });
 }
 
-interface RoutedLinearTask {
-  workspaceSelection: WorkspaceSelection;
-  workspaceDisplayName: string;
-  workspaceType: 'environment' | 'all_repositories';
-  kickoffMessage?: string;
-  reasoning?: string;
-  routingDebug?: RoutingDebugInfo;
-  routingDurationMs?: number;
-  userRoute?: string;
-}
+type RoutedLinearTask = ResolvedLinearTaskDestination;
 
 async function startLinearTask({
   linearClient,
@@ -929,203 +889,41 @@ async function handleAgentSessionEvent(
     agentSession,
   );
 
-  let workspaceSelection: WorkspaceSelection = { repo: ALL_REPOSITORIES };
-
   console.log(`[LinearWebhook] Attempting to route Linear task`);
-
-  try {
-    // Production routing already resolves the correct workspace, so keep the
-    // existing Linear task description input and only change the kickoff flow.
-    const taskDescription =
-      agentSession.comment?.body ||
-      agentSession.issue.description ||
-      agentSession.issue.title;
-
-    // Build routing context with all relevant Linear data
-    const routingContext = await buildLinearRoutingContext({
-      userId,
-      taskDescription,
-      issueIdentifier: agentSession.issue.identifier,
-      issueTitle: agentSession.issue.title,
-      issueDescription: agentSession.issue.description,
-      projectName: agentSession.issue.project?.name,
-      teamName: agentSession.issue.team?.name,
-      guidance: agentSession.guidance,
-      previousComments: enrichedSession.previousComments?.map((c) => ({
-        body: c.body,
-        username: c.user?.name,
-      })),
-      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    });
-
-    // Attempt LLM routing
-    const routingStart = Date.now();
-    const routingDecision = await routeTask(routingContext);
-    const routingDurationMs = Date.now() - routingStart;
-
-    if (routingDecision.status === 'platform_answer') {
-      const responseResult = await linearClient.emitResponse(
-        sessionId,
-        routingDecision.result.answer,
-      );
-
-      if (!responseResult.success) {
-        console.error(
-          `[LinearWebhook] Failed to emit platform answer to Linear: ${responseResult.error}`,
-        );
-      }
-
-      return { status: 'ok' };
-    }
-
-    if (routingDecision.status === 'routed') {
-      const { result } = routingDecision;
-
-      console.log(
-        `[LinearWebhook] LLM routing decision: ` +
-          `workspace=${result.workspace.type}${result.workspace.type === 'environment' ? `(${result.workspace.name})` : ''}, ` +
-          `reasoning="${result.reasoning}"`,
-      );
-
-      const ws = mapWorkspaceToSelection(result.workspace);
-
-      const wsDesc =
-        ws.repo === ALL_REPOSITORIES
-          ? 'all repos'
-          : ws.repo ||
-            (result.workspace.type === 'environment'
-              ? result.workspace.name
-              : `environment(${ws.environmentId})`);
-
-      return startLinearTask({
-        linearClient,
-        payload,
-        userId,
-        routedTask: {
-          workspaceSelection: ws,
-          workspaceDisplayName: wsDesc,
-          workspaceType: deriveWorkspaceType(ws),
-          ...(result.kickoffMessage
-            ? { kickoffMessage: result.kickoffMessage }
-            : {}),
-          reasoning: result.reasoning,
-          routingDebug: result.debug,
-          routingDurationMs,
-        },
-        agentSession: enrichedSession,
-      });
-    } else {
-      console.log(
-        `[LinearWebhook] LLM routing fell back: ${routingDecision.reason}`,
-      );
-    }
-  } catch (routingError) {
-    console.error(
-      `[LinearWebhook] LLM routing error, falling back to default:`,
-      routingError instanceof Error
-        ? routingError.message
-        : String(routingError),
-    );
-  }
-
-  // If routing was not used or failed, use the elicitation fallback flow
-  if (!userId) {
-    return startLinearTask({
-      linearClient,
-      payload,
-      userId,
-      routedTask: {
-        workspaceSelection: { repo: ALL_REPOSITORIES },
-        workspaceDisplayName: 'all repos',
-        workspaceType: 'all_repositories',
-      },
-      agentSession: enrichedSession,
-    });
-  }
-
-  console.log(
-    `[LinearWebhook] LLM routing not available or failed, starting elicitation fallback for session ${sessionId}`,
-  );
-
-  const fallbackResult = await startElicitationFallback({
-    sessionId,
-    linearOrganizationId: organizationId,
-    userId,
+  const destinationResult = await resolveLinearTaskDestination({
     payload,
+    agentSession: enrichedSession,
+    userId,
     linearClient,
+    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
   });
 
-  if (fallbackResult.status === 'error') {
-    console.error(
-      `[LinearWebhook] Elicitation fallback error: ${fallbackResult.message}`,
-    );
-
-    const errorResult = await linearClient.emitError(
+  if (destinationResult.status === 'platform_answer') {
+    const responseResult = await linearClient.emitResponse(
       sessionId,
-      `Failed to start workspace selection: ${fallbackResult.message}`,
+      destinationResult.answer,
     );
 
-    if (!errorResult.success) {
+    if (!responseResult.success) {
       console.error(
-        `[LinearWebhook] Failed to emit error to Linear: ${errorResult.error}`,
+        `[LinearWebhook] Failed to emit platform answer to Linear: ${responseResult.error}`,
       );
     }
-
-    return { status: 'error', message: fallbackResult.message };
-  }
-
-  // Check if the elicitation completed immediately (e.g., only one workspace)
-  if (fallbackResult.pendingSelection.step === 'completed') {
-    const selectedRepo =
-      fallbackResult.pendingSelection.selectedRepo ?? ALL_REPOSITORIES;
-
-    const wsOptions = fallbackResult.pendingSelection
-      .workspaceOptions as Array<{
-      type: 'all' | 'environment';
-      id: string;
-      name: string;
-    }> | null;
-
-    const matchedWs = wsOptions?.find((ws) => ws.id === selectedRepo);
-
-    if (matchedWs?.type === 'environment') {
-      workspaceSelection = { environmentId: matchedWs.id };
-    } else if (selectedRepo === ALL_REPOSITORIES) {
-      workspaceSelection = { repo: ALL_REPOSITORIES };
-    } else {
-      workspaceSelection = { repo: selectedRepo };
-    }
-
-    console.log(
-      `[LinearWebhook] Elicitation auto-completed with workspace=${JSON.stringify(workspaceSelection)}`,
-    );
-
-    await deletePendingSelection(sessionId);
-  } else {
-    console.log(
-      `[LinearWebhook] Elicitation started, awaiting workspace selection for session ${sessionId}`,
-    );
 
     return { status: 'ok' };
   }
 
-  // Create the task run
-  const runResult = await createLinearAgentRun({
-    agentSession: enrichedSession,
-    payload,
-    userId,
-    repo: workspaceSelection.repo,
-    environmentId: workspaceSelection.environmentId,
-  });
-
-  if (runResult.status === 'error') {
-    console.error(
-      `[LinearWebhook] Failed to create task run: ${runResult.message}`,
+  if (destinationResult.status === 'awaiting_selection') {
+    console.log(
+      `[LinearWebhook] Elicitation started, awaiting workspace selection for session ${sessionId}`,
     );
+    return { status: 'ok' };
+  }
 
+  if (destinationResult.status === 'error') {
     const errorResult = await linearClient.emitError(
       sessionId,
-      `Failed to start agent: ${runResult.message}`,
+      `Failed to start workspace selection: ${destinationResult.message}`,
     );
 
     if (!errorResult.success) {
@@ -1134,20 +932,16 @@ async function handleAgentSessionEvent(
       );
     }
 
-    return { status: 'error', message: runResult.message };
+    return { status: 'error', message: destinationResult.message };
   }
 
-  console.log(
-    `[LinearWebhook] Created ${describeLinearRunResult(runResult)} for session ${sessionId}`,
-  );
-
-  await updateLinearSessionTaskUrlForDirectLaunch({
+  return startLinearTask({
     linearClient,
-    sessionId,
-    runResult,
+    payload,
+    userId,
+    routedTask: destinationResult.destination,
+    agentSession: enrichedSession,
   });
-
-  return { status: 'ok' };
 }
 
 /**
