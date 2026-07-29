@@ -182,6 +182,146 @@ export function extractChangelogSection(changelogMarkdown, version) {
   return lines.slice(start, end).join('\n').trim();
 }
 
+const DISCORD_EMBED_TITLE_LIMIT = 256;
+const DISCORD_EMBED_DESCRIPTION_LIMIT = 4096;
+const ROOMOTE_BRAND_COLOR = 0xb0cd26;
+const ROOMOTE_DEVELOPMENT_COLOR = 0x20bbc9;
+
+function truncateDiscordText(value, limit) {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit - 1).trimEnd()}…`;
+}
+
+/**
+ * Build the Discord webhook payload for a published GitHub Release.
+ *
+ * @param {{
+ *   name?: string | null,
+ *   body?: string | null,
+ *   url: string,
+ *   publishedAt?: string | null,
+ *   tagName: string
+ * }} release
+ */
+export function buildDiscordReleasePayload(release) {
+  if (!release || typeof release !== 'object') {
+    throw new TypeError('GitHub Release data is required');
+  }
+
+  const tagName =
+    typeof release.tagName === 'string' ? release.tagName.trim() : '';
+  const url = typeof release.url === 'string' ? release.url.trim() : '';
+  if (!tagName || !url) {
+    throw new TypeError('GitHub Release tagName and url are required');
+  }
+
+  const releaseName =
+    typeof release.name === 'string' && release.name.trim()
+      ? release.name.trim()
+      : `Roomote ${tagName}`;
+  const titleSuffix = ' is now available';
+  const title = `${truncateDiscordText(
+    releaseName,
+    DISCORD_EMBED_TITLE_LIMIT - titleSuffix.length,
+  )}${titleSuffix}`;
+
+  let description =
+    typeof release.body === 'string' && release.body.trim()
+      ? release.body.trim()
+      : `Roomote ${tagName} is now available.`;
+  if (description.length > DISCORD_EMBED_DESCRIPTION_LIMIT) {
+    const readMore = `\n\n[Read the full release notes](${url})`;
+    description = `${description
+      .slice(0, DISCORD_EMBED_DESCRIPTION_LIMIT - readMore.length - 1)
+      .trimEnd()}…${readMore}`;
+  }
+
+  const embed = {
+    title,
+    url,
+    description,
+    color: ROOMOTE_BRAND_COLOR,
+    footer: { text: 'RooCodeInc/Roomote • GitHub Release' },
+  };
+  if (typeof release.publishedAt === 'string' && release.publishedAt.trim()) {
+    embed.timestamp = release.publishedAt;
+  }
+
+  return {
+    username: 'Roomote Releases',
+    allowed_mentions: { parse: [] },
+    embeds: [embed],
+  };
+}
+
+/**
+ * Build the Discord webhook payload for a successful branch image publish.
+ *
+ * @param {{
+ *   branch: 'develop' | 'main',
+ *   commitMessage?: string | null,
+ *   committedAt?: string | null,
+ *   repository: string,
+ *   sha: string,
+ *   version: string
+ * }} build
+ */
+export function buildDiscordBuildPayload(build) {
+  if (!build || typeof build !== 'object') {
+    throw new TypeError('Build data is required');
+  }
+
+  const branch = build.branch;
+  const repository =
+    typeof build.repository === 'string' ? build.repository.trim() : '';
+  const sha = typeof build.sha === 'string' ? build.sha.trim() : '';
+  const version =
+    typeof build.version === 'string' ? build.version.trim() : '';
+  if (
+    (branch !== 'develop' && branch !== 'main') ||
+    !repository ||
+    !sha ||
+    !version
+  ) {
+    throw new TypeError(
+      'Build branch, repository, sha, and version are required',
+    );
+  }
+
+  const environment = branch === 'develop' ? 'Development' : 'Main';
+  const commitUrl = `https://github.com/${repository}/commit/${sha}`;
+  const commitMessage =
+    typeof build.commitMessage === 'string' && build.commitMessage.trim()
+      ? build.commitMessage.trim()
+      : 'Published from the latest branch commit.';
+  const description = truncateDiscordText(
+    commitMessage,
+    DISCORD_EMBED_DESCRIPTION_LIMIT,
+  );
+  const embed = {
+    title: `${environment} build is ready`,
+    url: commitUrl,
+    description,
+    color:
+      branch === 'develop' ? ROOMOTE_DEVELOPMENT_COLOR : ROOMOTE_BRAND_COLOR,
+    fields: [
+      { name: 'Branch', value: `\`${branch}\``, inline: true },
+      { name: 'Image tag', value: `\`${version}\``, inline: true },
+      { name: 'Commit', value: `[${sha.slice(0, 8)}](${commitUrl})`, inline: true },
+    ],
+    footer: { text: 'RooCodeInc/Roomote • GHCR Publish' },
+  };
+  if (typeof build.committedAt === 'string' && build.committedAt.trim()) {
+    embed.timestamp = build.committedAt;
+  }
+
+  return {
+    username: 'Roomote Builds',
+    allowed_mentions: { parse: [] },
+    embeds: [embed],
+  };
+}
+
 /**
  * Find the commit that introduced the given product version on a ref.
  *

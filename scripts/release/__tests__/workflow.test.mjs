@@ -21,3 +21,52 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
   assert.match(promoteScript, /find-version-commit\.mjs/);
   assert.match(promoteScript, /gh pr create/);
 });
+
+test('GHCR release workflow announces only newly created releases in Discord', () => {
+  const workflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/publish-ghcr.yml'), 'utf8'),
+  );
+
+  const steps = workflow.jobs['create-github-release'].steps;
+  const publishRelease = steps.find((step) => step.id === 'publish_release');
+  const announceRelease = steps.find(
+    (step) => step.name === 'Announce GitHub Release in Discord',
+  );
+
+  assert.match(publishRelease.run, /created=true/);
+  assert.match(publishRelease.run, /created=false/);
+  assert.equal(
+    announceRelease.if,
+    "${{ steps.publish_release.outputs.created == 'true' }}",
+  );
+  assert.equal(announceRelease['continue-on-error'], true);
+  assert.equal(
+    announceRelease.env.DISCORD_MAIN_WEBHOOK_URL,
+    '${{ secrets.DISCORD_MAIN_WEBHOOK_URL }}',
+  );
+  assert.match(announceRelease.run, /build-discord-release-payload\.mjs/);
+  assert.match(announceRelease.run, /--retry-all-errors/);
+});
+
+test('GHCR workflow routes develop and main publishes to separate Discord webhooks', () => {
+  const workflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/publish-ghcr.yml'), 'utf8'),
+  );
+
+  const job = workflow.jobs['notify-discord-build'];
+  const announceBuild = job.steps.find(
+    (step) => step.name === 'Announce branch publish in Discord',
+  );
+
+  assert.match(job.if, /refs\/heads\/develop/);
+  assert.match(job.if, /refs\/heads\/main/);
+  assert.equal(
+    announceBuild.env.DISCORD_DEVELOPMENT_WEBHOOK_URL,
+    '${{ secrets.DISCORD_DEVELOPMENT_WEBHOOK_URL }}',
+  );
+  assert.equal(
+    announceBuild.env.DISCORD_MAIN_WEBHOOK_URL,
+    '${{ secrets.DISCORD_MAIN_WEBHOOK_URL }}',
+  );
+  assert.match(announceBuild.run, /build-discord-build-payload\.mjs/);
+});
