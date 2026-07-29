@@ -51,8 +51,16 @@ return redis.call('DEL', KEYS[1])
 const CLAIM_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if not raw then return nil end
+local ok, data = pcall(cjson.decode, raw)
+if not ok or type(data) ~= 'table' or type(data.id) ~= 'string' then return nil end
+redis.call('SET', KEYS[2], data.id, 'EX', ARGV[1])
 redis.call('DEL', KEYS[1])
 return raw
+`;
+const RESTORE_CLAIMED_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT = `
+if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+return redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3], 'NX')
 `;
 
 const QUEUE_COMMUNICATION_MESSAGE_ONCE_SCRIPT = `
@@ -84,6 +92,13 @@ function getLatestUserMessageForReplyQuoteKey(
   runId: number,
 ): string {
   return `${provider}:latest_user_message:${runId}`;
+}
+
+function getLatestUserMessageClaimKey(
+  provider: ReplyQuoteProvider,
+  runId: number,
+): string {
+  return `${provider}:latest_user_message_claim:${runId}`;
 }
 
 function parseLatestUserMessageForReplyQuote(
@@ -423,8 +438,10 @@ export async function claimLatestUserMessageForReplyQuote(
 ): Promise<LatestUserMessageForReplyQuote | null> {
   const raw = await getRedis().eval(
     CLAIM_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT,
-    1,
+    2,
     getLatestUserMessageForReplyQuoteKey(provider, runId),
+    getLatestUserMessageClaimKey(provider, runId),
+    LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS,
   );
   return parseLatestUserMessageForReplyQuote(
     typeof raw === 'string' ? raw : null,
@@ -436,12 +453,14 @@ export async function restoreClaimedLatestUserMessageForReplyQuote(
   runId: number,
   message: LatestUserMessageForReplyQuote,
 ): Promise<void> {
-  await getRedis().set(
+  await getRedis().eval(
+    RESTORE_CLAIMED_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT,
+    2,
     getLatestUserMessageForReplyQuoteKey(provider, runId),
+    getLatestUserMessageClaimKey(provider, runId),
+    message.id,
     JSON.stringify(message),
-    'EX',
     LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS,
-    'NX',
   );
 }
 
