@@ -47,6 +47,7 @@ vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
 vi.mock('@/lib/server/mcp-linear', () => ({
   hydrateLinearMcpConnectionAfterOauth:
     hydrateLinearMcpConnectionAfterOauthMock,
+  LinearReplayIdentityMismatchError: class extends Error {},
 }));
 
 vi.mock('@/lib/server/logger', () => ({
@@ -89,6 +90,8 @@ vi.mock('@roomote/types', () => ({
   isDeploymentScopedMcpIntegration: isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegration: isSelfServeMcpIntegrationMock,
 }));
+
+import { LinearReplayIdentityMismatchError } from '@/lib/server/mcp-linear';
 
 import { GET } from '../route';
 
@@ -237,10 +240,16 @@ describe('GET /api/mcp-oauth/callback', () => {
       { client_id: 'client-1' },
       PUBLIC_CALLBACK,
     );
-    expect(storeTokensMock).toHaveBeenCalledWith(CONNECTION_ID, {
-      access_token: 'access-token',
-      refresh_token: 'refresh-token',
+    expect(hydrateLinearMcpConnectionAfterOauthMock).toHaveBeenCalledWith({
+      connection: expect.objectContaining({ id: CONNECTION_ID }),
+      tokens: {
+        access_token: 'access-token',
+        refresh_token: 'refresh-token',
+      },
+      replayToken: null,
+      enabledByUserId: 'user-1',
     });
+    expect(storeTokensMock).not.toHaveBeenCalled();
   });
 
   it('redirects oauth errors to the public settings host', async () => {
@@ -293,17 +302,14 @@ describe('GET /api/mcp-oauth/callback', () => {
     );
   });
 
-  it('distinguishes Linear workspace metadata failures after token storage', async () => {
+  it('does not store Linear tokens when identity metadata validation fails', async () => {
     hydrateLinearMcpConnectionAfterOauthMock.mockRejectedValueOnce(
       new Error('viewer lookup failed'),
     );
 
     const response = await GET(buildRequest('?code=auth-code&state=state-1'));
 
-    expect(storeTokensMock).toHaveBeenCalledWith(CONNECTION_ID, {
-      access_token: 'access-token',
-      refresh_token: 'refresh-token',
-    });
+    expect(storeTokensMock).not.toHaveBeenCalled();
     expect(response.headers.get('location')).toBe(
       'https://customer.example/settings?mcp=error&reason=linear_metadata_failed',
     );
@@ -317,5 +323,19 @@ describe('GET /api/mcp-oauth/callback', () => {
       }),
       'MCP OAuth callback failed',
     );
+  });
+
+  it('preserves the existing connection status on replay identity mismatch', async () => {
+    hydrateLinearMcpConnectionAfterOauthMock.mockRejectedValueOnce(
+      new LinearReplayIdentityMismatchError(),
+    );
+
+    const response = await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=linear_metadata_failed',
+    );
+    expect(storeTokensMock).not.toHaveBeenCalled();
+    expect(updateAuthStatusMock).not.toHaveBeenCalled();
   });
 });

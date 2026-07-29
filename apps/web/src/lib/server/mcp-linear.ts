@@ -10,6 +10,7 @@ import {
 import {
   consumeMcpOauthReplay,
   findLinearDeploymentMcpConnection,
+  getMcpOauthReplay,
   getValidAccessToken,
   getLinearDeploymentMetadata,
   LINEAR_ORG_CONNECTION_ROLE,
@@ -22,6 +23,7 @@ import {
   parseAgentSessionEventPayload,
   resolveLinearTaskDestination,
 } from '@roomote/linear';
+import type { OAuthTokens } from '@roomote/types';
 
 import { Env } from '@/lib/server/env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
@@ -30,14 +32,44 @@ type McpConnectionRecord = Awaited<
   ReturnType<typeof db.query.mcpConnections.findFirst>
 >;
 
-async function updateLinearConnectionMetadata(input: {
+export class LinearReplayIdentityMismatchError extends Error {
+  constructor() {
+    super('The authorized Linear account does not match the requested session');
+    this.name = 'LinearReplayIdentityMismatchError';
+  }
+}
+
+function replayMatchesLinearIdentity(
+  replay: { mcpId: string; metadata: unknown },
+  identity: { linearOrganizationId: string; linearUserId: string },
+) {
+  if (
+    replay.mcpId !== 'linear' ||
+    !replay.metadata ||
+    typeof replay.metadata !== 'object'
+  ) {
+    return false;
+  }
+
+  const metadata = replay.metadata as Record<string, unknown>;
+  return (
+    metadata.linearOrganizationId === identity.linearOrganizationId &&
+    metadata.linearUserId === identity.linearUserId
+  );
+}
+
+async function storeLinearConnection(input: {
   connection: NonNullable<McpConnectionRecord>;
+  tokens: OAuthTokens;
   linearOrganizationId: string;
   linearOrganizationName?: string | null;
   linearOrganizationUrlKey?: string | null;
   appUserId?: string;
   linearUserId?: string;
 }) {
+  const tokenExpiresAt = input.tokens.expires_in
+    ? new Date(Date.now() + input.tokens.expires_in * 1000)
+    : null;
   const authConfig =
     input.connection.authConfig &&
     typeof input.connection.authConfig === 'object'
@@ -55,6 +87,14 @@ async function updateLinearConnectionMetadata(input: {
         ...(input.appUserId ? { appUserId: input.appUserId } : {}),
         ...(input.linearUserId ? { linearUserId: input.linearUserId } : {}),
       } as NonNullable<McpConnectionRecord>['authConfig'],
+      accessToken: input.tokens.access_token,
+      refreshToken: input.tokens.refresh_token || null,
+      tokenExpiresAt,
+      scopes: input.tokens.scope
+        ? input.tokens.scope.split(/[\s,]+/).filter(Boolean)
+        : [],
+      authStatus: 'authenticated',
+      enabled: true,
       updatedAt: new Date(),
     })
     .where(eq(mcpConnections.id, input.connection.id));
@@ -63,13 +103,15 @@ async function updateLinearConnectionMetadata(input: {
 async function resumeLinearReplay(input: {
   replayToken: string;
   userId: string;
+  linearOrganizationId: string;
+  linearUserId: string;
 }) {
   const replay = await consumeMcpOauthReplay(input.replayToken);
   if (!replay) {
     return;
   }
 
-  if (replay.mcpId !== 'linear') {
+  if (!replayMatchesLinearIdentity(replay, input)) {
     return;
   }
 
@@ -170,11 +212,13 @@ async function resumeLinearReplay(input: {
 
 export async function hydrateLinearMcpConnectionAfterOauth(input: {
   connection: NonNullable<McpConnectionRecord>;
-  accessToken: string;
+  tokens: OAuthTokens;
   replayToken?: string | null;
   enabledByUserId?: string;
 }) {
-  const viewerClient = new LinearClient({ accessToken: input.accessToken });
+  const viewerClient = new LinearClient({
+    accessToken: input.tokens.access_token,
+  });
   const viewer = await viewerClient.viewer;
   const organization = await viewer.organization;
 
@@ -183,8 +227,9 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
   }
 
   if (input.connection.connectionRole === LINEAR_ORG_CONNECTION_ROLE) {
-    await updateLinearConnectionMetadata({
+    await storeLinearConnection({
       connection: input.connection,
+      tokens: input.tokens,
       linearOrganizationId: organization.id,
       linearOrganizationName: organization.name,
       linearOrganizationUrlKey: organization.urlKey ?? null,
@@ -213,8 +258,22 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
   }
 
   if (input.connection.connectionRole === LINEAR_USER_CONNECTION_ROLE) {
-    await updateLinearConnectionMetadata({
+    if (input.replayToken) {
+      const replay = await getMcpOauthReplay(input.replayToken);
+      if (
+        !replay ||
+        !replayMatchesLinearIdentity(replay, {
+          linearOrganizationId: organization.id,
+          linearUserId: viewer.id,
+        })
+      ) {
+        throw new LinearReplayIdentityMismatchError();
+      }
+    }
+
+    await storeLinearConnection({
       connection: input.connection,
+      tokens: input.tokens,
       linearOrganizationId: organization.id,
       linearUserId: viewer.id,
     });
@@ -223,6 +282,8 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
       await resumeLinearReplay({
         replayToken: input.replayToken,
         userId: input.connection.userId,
+        linearOrganizationId: organization.id,
+        linearUserId: viewer.id,
       });
     }
   }
