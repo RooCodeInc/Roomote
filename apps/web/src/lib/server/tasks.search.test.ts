@@ -35,9 +35,31 @@ describe('searchTasks', () => {
     expect(results.map((task) => task.id)).toEqual([myTask.id]);
   });
 
-  it('still includes explicit includeIds even when another user initiated them', async () => {
+  it('only includes explicit includeIds initiated by the current user', async () => {
     const me = await userFactory.create({});
     const other = await userFactory.create({});
+
+    const myRecentTask = await taskFactory.create({
+      title: 'Recent task',
+      initiatorUserId: me.id,
+      activityAt: 5_000,
+      timestamp: 5_000,
+    });
+    await runFactory.create({
+      taskId: myRecentTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+    });
+
+    const myIncludedTask = await taskFactory.create({
+      title: 'Pinned task',
+      initiatorUserId: me.id,
+      activityAt: 3_000,
+      timestamp: 3_000,
+    });
+    await runFactory.create({
+      taskId: myIncludedTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+    });
 
     const theirTask = await taskFactory.create({
       title: 'Shared review',
@@ -52,11 +74,14 @@ describe('searchTasks', () => {
 
     const results = await searchTasks({
       userId: me.id,
-      limit: 20,
-      includeIds: [theirTask.id],
+      limit: 1,
+      includeIds: [myIncludedTask.id, theirTask.id],
     });
 
-    expect(results.map((task) => task.id)).toEqual([theirTask.id]);
+    expect(results.map((task) => task.id)).toEqual([
+      myRecentTask.id,
+      myIncludedTask.id,
+    ]);
   });
 
   it('filters title ILIKE search to the current user', async () => {
