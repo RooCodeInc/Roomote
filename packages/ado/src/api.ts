@@ -25,7 +25,9 @@ const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 export const ADO_API_VERSION = '7.1';
 const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
-const ADO_ERROR_MESSAGE_MAX_CHARS = 200;
+// Fits the whole TF401444 sentence (~204 chars with its three GUIDs) while
+// still keeping pathological provider messages toast-sized.
+const ADO_ERROR_MESSAGE_MAX_CHARS = 240;
 const ADO_ENTRA_TOKEN_SCOPE = 'https://app.vssps.visualstudio.com/.default';
 const ADO_ENTRA_RESOURCE_SCOPE =
   '499b84ac-1321-427f-aa17-267ca6975798/.default';
