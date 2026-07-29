@@ -582,10 +582,6 @@ export function getMcpIntegrationAuthorizationParameters(
   }
 
   if (integration.id === 'linear') {
-    if (role === 'linear_user_link') {
-      return [{ name: 'actor', value: 'user' }];
-    }
-
     return [{ name: 'actor', value: 'app' }];
   }
 
@@ -611,7 +607,7 @@ export function getMcpIntegrationOauthScopes(
 
   if (integration.id === 'linear') {
     return role === 'linear_user_link'
-      ? ['read']
+      ? ['read', 'write']
       : [...LINEAR_APP_OAUTH_SCOPES];
   }
 

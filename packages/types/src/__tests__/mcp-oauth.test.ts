@@ -1,4 +1,5 @@
 import {
+  getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationOauthScopes,
   LINEAR_APP_OAUTH_SCOPES,
 } from '../mcp-oauth';
@@ -10,9 +11,16 @@ describe('Linear OAuth scopes', () => {
     ).toEqual(LINEAR_APP_OAUTH_SCOPES);
   });
 
-  it('keeps personal account links read-only', () => {
+  it('allows personal account links to report agent activity', () => {
     expect(getMcpIntegrationOauthScopes('linear', 'linear_user_link')).toEqual([
       'read',
+      'write',
     ]);
+  });
+
+  it('uses the OAuth app actor for personal account links', () => {
+    expect(
+      getMcpIntegrationAuthorizationParameters('linear', 'linear_user_link'),
+    ).toEqual([{ name: 'actor', value: 'app' }]);
   });
 });
