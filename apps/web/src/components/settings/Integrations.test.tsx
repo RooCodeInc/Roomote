@@ -335,9 +335,12 @@ vi.mock('@/components/system', () => ({
   ExternalLink: () => <svg aria-hidden="true" />,
   Info: () => <svg aria-hidden="true" />,
   InfoTooltip: ({ content }: { content: string }) => <span>{content}</span>,
-  Input: ({ ...props }: InputHTMLAttributes<HTMLInputElement>) => (
-    <input {...props} />
-  ),
+  Input: ({
+    secret: _secret,
+    ...props
+  }: InputHTMLAttributes<HTMLInputElement> & {
+    secret?: boolean;
+  }) => <input {...props} />,
   Label: ({ children, ...props }: LabelHTMLAttributes<HTMLLabelElement>) => (
     <label {...props}>{children}</label>
   ),

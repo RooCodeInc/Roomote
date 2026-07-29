@@ -82,11 +82,14 @@ function CredentialField({
 
   return (
     <div className="space-y-1.5">
-      <div className="md:grid md:grid-cols-[8em_1fr] max-w-lg">
-        <Label htmlFor={id}>{label}</Label>
+      <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center max-w-xl">
+        <Label className="text-sm font-medium" htmlFor={id}>
+          {label}
+        </Label>
         <Input
           id={id}
-          type={secret ? 'password' : 'text'}
+          secret={secret && !status.managedByEnvironment ? true : undefined}
+          className="font-mono"
           value={status.managedByEnvironment ? '' : value}
           placeholder={
             status.managedByEnvironment
@@ -100,7 +103,6 @@ function CredentialField({
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
-          data-1p-ignore
         />
       </div>
       <p className="text-xs text-muted-foreground">{helperText}</p>
@@ -286,10 +288,10 @@ export function LinearOauthSetupDialog({
                     <p className="text-sm text-muted-foreground">
                       {hasConfiguredCredentials
                         ? 'Paste updated values from your Linear app. Leave a saved value blank to keep it.'
-                        : 'In the new app’s settings, copy the values below.'}
+                        : "After saving, from the new app's settings, copy the values below."}
                     </p>
                   </div>
-                  <div className="grid gap-4">
+                  <div className="grid gap-2">
                     <CredentialField
                       id="linear-client-id"
                       label="Client ID"
