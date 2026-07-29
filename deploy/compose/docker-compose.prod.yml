@@ -134,6 +134,7 @@ x-roomote-web-env: &roomote-web-env
   AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
   AZURE_SANDBOX_REGISTRY_USERNAME: ${AZURE_SANDBOX_REGISTRY_USERNAME:-}
   AZURE_SANDBOX_REGISTRY_TOKEN: ${AZURE_SANDBOX_REGISTRY_TOKEN:-}
+  AZURE_HTTP_DEBUG: ${AZURE_HTTP_DEBUG:-}
 
 x-roomote-api-env: &roomote-api-env
   <<: *roomote-inference-env

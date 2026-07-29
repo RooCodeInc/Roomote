@@ -54,6 +54,16 @@ const RETRY_MAX_ATTEMPTS = 8;
 const RETRY_INITIAL_DELAY_MS = 1_000;
 const RETRY_MAX_DELAY_MS = 10_000;
 
+const HTTP_DEBUG =
+  process.env.AZURE_HTTP_DEBUG === '1' ||
+  process.env.AZURE_HTTP_DEBUG === 'true';
+
+function logHttp(message: string, fields: Record<string, unknown>): void {
+  if (HTTP_DEBUG) {
+    console.log(`[AzureClient:http] ${message} ${JSON.stringify(fields)}`);
+  }
+}
+
 /**
  * Root for detached-command state inside the sandbox. Mirrors the shared
  * `/sandbox` worker layout; logs + exit sentinels for detached commands live
@@ -819,6 +829,7 @@ export class AzureClient implements ComputeProviderClient {
           `Azure sandbox ${sandboxId} did not reach [${targetStates.join(', ')}] within ${RUNNING_POLL_TIMEOUT_MS}ms (last state: '${state}')`,
         );
       }
+      logHttp('waitForState poll', { sandboxId, state });
       await sleepWithSignal(RUNNING_POLL_INTERVAL_MS, signal);
     }
   }
@@ -988,7 +999,15 @@ export class AzureClient implements ComputeProviderClient {
       return this.cachedToken.token;
     }
 
+    const tokenStart = Date.now();
     if (!this.credentialPromise) {
+      logHttp('credential init', {
+        kind: this.config.servicePrincipal
+          ? 'service-principal'
+          : this.config.managedIdentityClientId
+            ? 'user-assigned-mi'
+            : 'default-chain',
+      });
       this.credentialPromise = import('@azure/identity').then(
         ({
           ClientSecretCredential,
@@ -1013,6 +1032,7 @@ export class AzureClient implements ComputeProviderClient {
     throwIfAborted(signal);
     const token = await credential.getToken(DATA_PLANE_SCOPE);
     this.cachedToken = token;
+    logHttp('token acquired', { durationMs: Date.now() - tokenStart });
     return token.token;
   }
 
@@ -1054,6 +1074,9 @@ export class AzureClient implements ComputeProviderClient {
       attempt += 1;
       throwIfAborted(options.signal, options.abortMessage);
 
+      const attemptStart = Date.now();
+      logHttp('request start', { method, url, attempt });
+
       const token = await this.getToken(options.signal);
       const headers: Record<string, string> = {
         authorization: `Bearer ${token}`,
@@ -1081,6 +1104,13 @@ export class AzureClient implements ComputeProviderClient {
           abortMessage: options.abortMessage,
         });
       } catch (error) {
+        logHttp('request error', {
+          method,
+          url,
+          attempt,
+          durationMs: Date.now() - attemptStart,
+          error: error instanceof Error ? error.message : String(error),
+        });
         if (attempt < RETRY_MAX_ATTEMPTS && !isAbortLike(error)) {
           await sleepWithSignal(delayMs, options.signal);
           delayMs = Math.min(delayMs * 2, RETRY_MAX_DELAY_MS);
@@ -1088,6 +1118,14 @@ export class AzureClient implements ComputeProviderClient {
         }
         throw error;
       }
+
+      logHttp('request end', {
+        method,
+        url,
+        attempt,
+        status: response.status,
+        durationMs: Date.now() - attemptStart,
+      });
 
       if (response.status < 400) {
         if (options.rawResponse) {
@@ -1113,6 +1151,13 @@ export class AzureClient implements ComputeProviderClient {
         response.status === 429 ||
         (response.status >= 500 && (method === 'GET' || method === 'DELETE'));
       if (retriableStatus && attempt < RETRY_MAX_ATTEMPTS) {
+        logHttp('request retry', {
+          method,
+          url,
+          attempt,
+          status: response.status,
+          delayMs,
+        });
         await sleepWithSignal(delayMs, options.signal);
         delayMs = Math.min(delayMs * 2, RETRY_MAX_DELAY_MS);
         continue;
