@@ -67,9 +67,9 @@ describe('validateTeamsBotCredentials', () => {
 
     expect(error.code).toBe('invalid_app_password');
     expect(error.field).toBe('app_password');
-    expect(error.detail).toBe(
-      'AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID.',
-    );
+    // Entra's advice sentence is dropped; the field guidance layered on top by
+    // the web save path restates it.
+    expect(error.detail).toBe('AADSTS7000215: Invalid client secret provided.');
   });
 
   it('blames the app id for AADSTS700016', async () => {
@@ -90,6 +90,34 @@ describe('validateTeamsBotCredentials', () => {
 
     expect(error.code).toBe('invalid_app_id');
     expect(error.field).toBe('app_id');
+  });
+
+  it('strips inline trace ids from the detail (live AADSTS90002 shape)', async () => {
+    // Real Entra responses sometimes carry the diagnostics tail on the same
+    // line as the message instead of after \r\n.
+    const error = await expectValidationError(
+      validateTeamsBotCredentials({
+        appId: 'app-id',
+        appPassword: 'app-password',
+        tenantId: '00000000-0000-0000-0000-000000000002',
+        fetch: (async () =>
+          buildTokenErrorResponse(
+            {
+              error: 'invalid_request',
+              error_description:
+                "AADSTS90002: Tenant '00000000-0000-0000-0000-000000000002' not found. Check to make sure you have the correct tenant ID and are signing into the correct cloud. Check with your subscription administrator, this may happen if there are no active subscriptions for the tenant. Trace ID: bcea6d9d-1541-483f-a604-cc63ae9e6300 Correlation ID: 01af5574-834a-4b0d-8e1c-f7a3019567f1 Timestamp: 2026-07-29 16:22:35Z",
+              error_codes: [90002],
+            },
+            400,
+          )) as unknown as typeof fetch,
+      }),
+    );
+
+    expect(error.code).toBe('invalid_tenant_id');
+    expect(error.detail).toBe(
+      "AADSTS90002: Tenant '00000000-0000-0000-0000-000000000002' not found.",
+    );
+    expect(error.detail).not.toMatch(/Trace ID|Correlation ID|Timestamp/);
   });
 
   it('blames the tenant for AADSTS90002', async () => {

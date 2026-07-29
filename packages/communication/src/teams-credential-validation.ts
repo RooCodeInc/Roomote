@@ -21,7 +21,10 @@ export class TeamsBotCredentialValidationError extends Error {
     message: string,
     /** Which configured value Microsoft blamed, when it is unambiguous. */
     readonly field: TeamsBotCredentialField | null = null,
-    /** Microsoft's own explanation, trimmed to its first line. */
+    /**
+     * Microsoft's own explanation, stripped of trace/correlation diagnostics
+     * and, when the field is identified, trimmed to its first sentence.
+     */
     readonly detail: string | null = null,
   ) {
     super(message);
@@ -108,13 +111,33 @@ function parseTokenErrorBody(responseBody: string | null): {
   return { error, description, codes };
 }
 
-/** Entra descriptions append trace/correlation ids on later lines. */
-function firstLine(value: string | null): string | null {
+/**
+ * Entra descriptions append trace/correlation ids and a timestamp — sometimes
+ * on later lines, sometimes inline on the same line. Keep the human-facing
+ * message and drop the diagnostics tail; server logs still carry the full
+ * response body when needed.
+ */
+function trimEntraDetail(value: string | null): string | null {
   if (!value) {
     return null;
   }
 
-  return value.split(/\r?\n/u)[0]?.trim() || null;
+  const line = value.split(/\r?\n/u)[0]?.trim() ?? '';
+
+  return (
+    line
+      .replace(/\s*\b(?:Trace ID|Correlation ID|Timestamp):.*$/isu, '')
+      .trim() || null
+  );
+}
+
+/**
+ * When the field is identified, our own guidance carries the fix, so keep only
+ * Entra's core fact ("AADSTSxxxxx: Tenant 'x' not found.") and drop its
+ * generic advice sentences.
+ */
+function firstSentence(value: string): string {
+  return value.match(/^.*?[.!?](?=\s|$)/su)?.[0] ?? value;
 }
 
 function classifyTokenError(
@@ -122,9 +145,10 @@ function classifyTokenError(
 ): TeamsBotCredentialValidationError {
   const parsed = parseTokenErrorBody(error.responseBody);
   const detail =
-    firstLine(parsed.description) ??
-    firstLine(error.responseBody) ??
-    firstLine(error.message);
+    trimEntraDetail(parsed.description) ??
+    trimEntraDetail(error.responseBody) ??
+    trimEntraDetail(error.message);
+  const fieldDetail = detail === null ? null : firstSentence(detail);
 
   for (const code of parsed.codes) {
     const failure = AADSTS_FAILURES[code];
@@ -134,7 +158,7 @@ function classifyTokenError(
         failure.code,
         `Microsoft rejected the ${FIELD_LABELS[failure.field]}.`,
         failure.field,
-        detail,
+        fieldDetail,
       );
     }
   }
@@ -144,7 +168,7 @@ function classifyTokenError(
       'invalid_app_password',
       `Microsoft rejected the ${FIELD_LABELS.app_password}.`,
       'app_password',
-      detail,
+      fieldDetail,
     );
   }
 
