@@ -279,14 +279,19 @@ export function SourceControlConfigForm({
       ) : null}
       {isAdo && adoAuthMode !== 'pat' ? (
         <p className="max-w-xl text-sm text-muted-foreground">
-          The Microsoft Entra app registration needs the Azure DevOps API
-          permissions{' '}
+          The Microsoft Entra app registration needs the{' '}
           <span className="font-medium text-foreground">
             {ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT}
-          </span>
-          , saved in the Azure portal and admin-consented for the tenant.
-          Permissions that were added but never saved do not apply, and Azure
-          DevOps answers every call with a 401.
+          </span>{' '}
+          API permissions, saved and admin-consented.{' '}
+          <a
+            href="https://docs.roomote.dev/providers/source-control/azure-devops#required-api-permissions"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-foreground underline"
+          >
+            Setup guide
+          </a>
         </p>
       ) : null}
       {isAdo && adoAuthMode === 'delegated' ? (

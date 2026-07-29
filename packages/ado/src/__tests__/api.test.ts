@@ -98,7 +98,7 @@ import {
 } from '../api';
 
 const ENTRA_PERMISSION_GUIDANCE =
-  'Code, Graph, and User Delegation / Impersonation API permissions (saved and admin-consented)';
+  'likely missing API permissions or was not added to the organization';
 
 /**
  * Mocks the two hops an Entra credential makes: the Microsoft tenant token
@@ -491,7 +491,7 @@ describe('Azure DevOps API helpers', () => {
         new Response(
           JSON.stringify({
             message:
-              'TF401444: Please sign-in at least once as tenant\\tenant\\object-id in a web browser to enable access.',
+              'TF401444: Please sign-in at least once as 11111111-2222-3333-4444-555555555555\\\\11111111-2222-3333-4444-555555555555\\\\66666666-7777-8888-9999-000000000000 in a web browser to enable access.',
           }),
           { status: 401 },
         ),
@@ -510,6 +510,14 @@ describe('Azure DevOps API helpers', () => {
     expect(result.status === 'invalid' && result.error).toContain('TF401444');
     expect(result.status === 'invalid' && result.error).toContain(
       ENTRA_PERMISSION_GUIDANCE,
+    );
+    // The GUID chain is collapsed for the toast; the raw message stays on
+    // the thrown AdoApiError for logs.
+    expect(result.status === 'invalid' && result.error).not.toContain(
+      '11111111-2222-3333-4444-555555555555',
+    );
+    expect(result.status === 'invalid' && result.error).toContain(
+      'sign-in at least once as …',
     );
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
       'https://dev.azure.com/acme/_apis/git/repositories?api-version=7.1&%24top=1',

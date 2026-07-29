@@ -585,6 +585,22 @@ function isAdoAuthorizationFailureStatus(status: number): boolean {
   return status === 203 || status === 401 || status === 403;
 }
 
+const GUID_PATTERN =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/**
+ * Provider messages like TF401444 embed `tenant\tenant\objectId` GUID chains
+ * that dominate a toast without helping anyone read it. Collapse them to a
+ * single ellipsis for display; the untrimmed message stays on the thrown
+ * {@link AdoApiError} for logs.
+ */
+function compactAdoProviderMessage(message: string): string {
+  return message
+    .replace(GUID_PATTERN, '…')
+    .replace(/…(\\+…)+/g, '…')
+    .replace(/\s{2,}/g, ' ');
+}
+
 /**
  * What an admin should actually do about a rejected credential. Entra tokens
  * are minted from the `.default` scope, so an app registration that was never
@@ -592,10 +608,10 @@ function isAdoAuthorizationFailureStatus(status: number): boolean {
  * were never saved in the Azure portal, or that was never added to the
  * organization — authenticates fine and fails on every API call instead.
  *
- * Azure DevOps usually names the specific problem in the response body, so
- * that leads when present and one compact remediation sentence follows it.
- * This surfaces as a toast, so the full add-save-consent walkthrough stays in
- * the setup/Settings guidance and the docs rather than being repeated here.
+ * This surfaces as a toast, so it stays at one line of diagnosis plus Azure
+ * DevOps' own (GUID-compacted) explanation. The permission names and the
+ * add-save-consent walkthrough live in the setup/Settings guidance and the
+ * docs, which the guidance links to.
  */
 function buildAdoCredentialRejectionMessage({
   authMode,
@@ -608,14 +624,14 @@ function buildAdoCredentialRejectionMessage({
 }): string {
   const suffix = status === undefined ? '' : ` (status ${status})`;
   const detail = providerMessage
-    ? ` Azure DevOps said: “${providerMessage}”`
+    ? ` Azure DevOps said: “${compactAdoProviderMessage(providerMessage)}”`
     : '';
 
   if (authMode === 'pat') {
     return `Azure DevOps rejected the access token${suffix}.${detail} Confirm it is active, belongs to the organization, and has Code read access.`;
   }
 
-  return `Azure DevOps rejected the Microsoft Entra credential${suffix}.${detail} Check that the app registration has the ${ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT} API permissions (saved and admin-consented) and that its service principal was added to the Azure DevOps organization.`;
+  return `Azure DevOps rejected the Microsoft Entra credential${suffix} — the app registration is likely missing API permissions or was not added to the organization.${detail}`;
 }
 
 /**
