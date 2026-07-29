@@ -17,12 +17,11 @@ import {
   getSetupEffectiveFieldValue,
   getSetupSubmitValues,
   getSetupVisibleFields,
+  getTeamsAppPackageUnavailableReason,
+  MICROSOFT_APP_ID_PATTERN,
   ProviderSetupExperience,
 } from './ProviderSetupExperience';
 
-/** Microsoft app (client) IDs are GUIDs. */
-const MICROSOFT_APP_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BOOTSTRAP_SIGN_IN_CALLBACK_PATH = '/setup';
 
 function getOAuth2ProviderId(
@@ -270,6 +269,9 @@ export function StepAuthEnvVars({
     : !bootstrapMode && teamsBotAppIdStored
       ? '/api/teams/app-package'
       : null;
+  const teamsAppPackageUnavailableReason = isMicrosoftProvider
+    ? getTeamsAppPackageUnavailableReason(enteredTeamsBotAppId)
+    : null;
   useEffect(() => {
     setCreatedSlackAppSettingsUrl(null);
     setCreatedSlackAppIconSet(null);
@@ -336,6 +338,7 @@ export function StepAuthEnvVars({
           editingSavedValues={editingSavedValues}
           clearedSavedValues={clearedSavedValues}
           teamsAppPackageHref={teamsAppPackageHref}
+          teamsAppPackageUnavailableReason={teamsAppPackageUnavailableReason}
           createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
           createdSlackAppIconSet={createdSlackAppIconSet}
           createSlackAppPending={

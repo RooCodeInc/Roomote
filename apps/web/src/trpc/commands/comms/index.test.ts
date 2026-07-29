@@ -17,6 +17,7 @@ const {
   mockTelegramRegisterWebhook,
   mockResolveDiscordRuntimeCredentials,
   mockValidateDiscordBotToken,
+  mockValidateTeamsBotCredentials,
   mockDiscordRegisterCommands,
   mockDiscordListGuilds,
   mockDiscordListGuildChannels,
@@ -55,6 +56,7 @@ const {
     identityErrorCode: null,
   })),
   mockValidateDiscordBotToken: vi.fn(),
+  mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockDiscordRegisterCommands: vi.fn(),
   mockDiscordListGuilds: vi.fn(
     async () =>
@@ -175,6 +177,21 @@ vi.mock('@roomote/communication/discord-provider', () => ({
     'Discord requires a tag for new posts in this forum, but no tag is available for Roomote to select.',
 }));
 
+vi.mock('@roomote/communication/teams-credential-validation', () => ({
+  validateTeamsBotCredentials: mockValidateTeamsBotCredentials,
+  TeamsBotCredentialValidationError: class TeamsBotCredentialValidationError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+      readonly field: string | null = null,
+      readonly detail: string | null = null,
+    ) {
+      super(message);
+      this.name = 'TeamsBotCredentialValidationError';
+    }
+  },
+}));
+
 vi.mock('@/lib/server/env', () => ({
   Env: { R_APP_URL: 'https://app.example.com' },
 }));
@@ -192,6 +209,8 @@ vi.mock('../environment-variables', () => ({
   upsertDeploymentEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
 }));
+
+import { TeamsBotCredentialValidationError } from '@roomote/communication/teams-credential-validation';
 
 import {
   classifyTelegramWebhookCheckError,
@@ -241,6 +260,7 @@ describe('comms commands', () => {
       botUsername: null,
     });
     mockTelegramGetWebhookInfo.mockReset();
+    mockValidateTeamsBotCredentials.mockResolvedValue(undefined);
     mockDiscordListGuilds.mockResolvedValue([]);
     mockDiscordListGuildChannels.mockResolvedValue([]);
     mockDiscordDiagnoseChannelPermissions.mockReset();
@@ -923,6 +943,119 @@ describe('comms commands', () => {
           'R_TEAMS_BOT_TENANT_ID',
         ]),
       );
+    });
+
+    it('verifies the Teams bot credentials a Microsoft save will produce', async () => {
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({} as never);
+      });
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'microsoft',
+        values: {
+          R_MICROSOFT_CLIENT_ID: 'ms-client-id',
+          R_MICROSOFT_CLIENT_SECRET: 'ms-client-secret',
+          R_MICROSOFT_TENANT_ID: 'ms-tenant-id',
+        },
+      });
+
+      expect(mockValidateTeamsBotCredentials).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appId: 'ms-client-id',
+          appPassword: 'ms-client-secret',
+          tenantId: 'ms-tenant-id',
+        }),
+      );
+    });
+
+    it('rejects a Microsoft save when Microsoft rejects the credentials', async () => {
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({} as never);
+      });
+      mockValidateTeamsBotCredentials.mockRejectedValue(
+        new TeamsBotCredentialValidationError(
+          'invalid_app_password',
+          'Microsoft rejected the client secret.',
+          'app_password',
+          'AADSTS7000215: Invalid client secret provided.',
+        ),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'microsoft',
+          values: {
+            R_MICROSOFT_CLIENT_ID: '00000000-0000-0000-0000-000000000001',
+            R_MICROSOFT_CLIENT_SECRET: 'not-a-real-secret',
+            R_MICROSOFT_TENANT_ID: '00000000-0000-0000-0000-000000000002',
+          },
+        }),
+      ).rejects.toThrow(
+        /Client Secret Value \(R_MICROSOFT_CLIENT_SECRET\).*AADSTS7000215/su,
+      );
+
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    });
+
+    it('names the dedicated Teams bot field when that credential pair is in use', async () => {
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({} as never);
+      });
+      mockValidateTeamsBotCredentials.mockRejectedValue(
+        new TeamsBotCredentialValidationError(
+          'invalid_app_id',
+          'Microsoft rejected the app (client) id.',
+          'app_id',
+          "AADSTS700016: Application with identifier 'bot-app-id' was not found in the directory.",
+        ),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'microsoft',
+          values: {
+            R_MICROSOFT_CLIENT_ID: 'ms-client-id',
+            R_MICROSOFT_CLIENT_SECRET: 'ms-client-secret',
+            R_MICROSOFT_TENANT_ID: 'ms-tenant-id',
+            R_TEAMS_BOT_APP_ID: 'bot-app-id',
+            R_TEAMS_BOT_APP_PASSWORD: 'bot-secret',
+          },
+        }),
+      ).rejects.toThrow(/Teams Bot App ID \(R_TEAMS_BOT_APP_ID\)/u);
+
+      expect(mockValidateTeamsBotCredentials).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appId: 'bot-app-id',
+          appPassword: 'bot-secret',
+        }),
+      );
+    });
+
+    it('keeps a Microsoft save blocked when Microsoft cannot be reached', async () => {
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({} as never);
+      });
+      mockValidateTeamsBotCredentials.mockRejectedValue(
+        new TeamsBotCredentialValidationError(
+          'unreachable',
+          'Could not reach Microsoft to verify the Teams bot credentials (timed out).',
+          null,
+          'The operation timed out.',
+        ),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'microsoft',
+          values: {
+            R_MICROSOFT_CLIENT_ID: 'ms-client-id',
+            R_MICROSOFT_CLIENT_SECRET: 'ms-client-secret',
+            R_MICROSOFT_TENANT_ID: 'ms-tenant-id',
+          },
+        }),
+      ).rejects.toThrow(/login\.microsoftonline\.com/u);
+
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
     });
   });
 });

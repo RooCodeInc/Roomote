@@ -47,6 +47,7 @@ const state = vi.hoisted(() => ({
   connectSlackUrl: 'https://slack.com/install' as string | null,
   teamsStatus: {
     botConfigured: false,
+    botCredentialCheck: { status: 'unchecked', message: null },
     botUsesTenantSpecificTokenFlow: false,
     microsoftAuthConfigured: false,
     webhookUrl: 'https://roomote.dev/api/webhooks/teams',
@@ -55,6 +56,10 @@ const state = vi.hoisted(() => ({
     primaryConversationType: null as string | null,
   } as null | {
     botConfigured: boolean;
+    botCredentialCheck: {
+      status: 'ok' | 'failed' | 'unchecked';
+      message: string | null;
+    };
     botUsesTenantSpecificTokenFlow: boolean;
     microsoftAuthConfigured: boolean;
     webhookUrl: string;
@@ -546,6 +551,7 @@ describe('CommsProviderSection', () => {
     state.connectSlackUrl = 'https://slack.com/install';
     state.teamsStatus = {
       botConfigured: false,
+      botCredentialCheck: { status: 'unchecked', message: null },
       botUsesTenantSpecificTokenFlow: false,
       microsoftAuthConfigured: false,
       webhookUrl: 'https://roomote.dev/api/webhooks/teams',
@@ -1103,6 +1109,7 @@ describe('CommsProviderSection', () => {
     it('renders bot status and Open in Teams link when configured', () => {
       state.teamsStatus = {
         botConfigured: true,
+        botCredentialCheck: { status: 'ok', message: null },
         botUsesTenantSpecificTokenFlow: true,
         microsoftAuthConfigured: true,
         webhookUrl: 'https://roomote.dev/api/webhooks/teams',
@@ -1156,6 +1163,7 @@ describe('CommsProviderSection', () => {
     it('shows bot status and app-package download when only R_TEAMS_BOT_* is configured (no Microsoft sign-in)', () => {
       state.teamsStatus = {
         botConfigured: true,
+        botCredentialCheck: { status: 'ok', message: null },
         botUsesTenantSpecificTokenFlow: true,
         microsoftAuthConfigured: false,
         webhookUrl: 'https://roomote.dev/api/webhooks/teams',
@@ -1192,6 +1200,7 @@ describe('CommsProviderSection', () => {
     it('nudges to send a first Teams message when the bot is configured but no conversation was captured', () => {
       state.teamsStatus = {
         botConfigured: true,
+        botCredentialCheck: { status: 'ok', message: null },
         botUsesTenantSpecificTokenFlow: true,
         microsoftAuthConfigured: true,
         webhookUrl: 'https://roomote.dev/api/webhooks/teams',
@@ -1224,6 +1233,7 @@ describe('CommsProviderSection', () => {
     it('hides the capture nudge once a primary Teams conversation exists', () => {
       state.teamsStatus = {
         botConfigured: true,
+        botCredentialCheck: { status: 'ok', message: null },
         botUsesTenantSpecificTokenFlow: true,
         microsoftAuthConfigured: true,
         webhookUrl: 'https://roomote.dev/api/webhooks/teams',
@@ -1247,6 +1257,64 @@ describe('CommsProviderSection', () => {
 
       expect(
         screen.queryByText(/has not captured a Teams conversation yet/),
+      ).not.toBeInTheDocument();
+    });
+
+    it('reports rejected credentials instead of claiming the bot is configured', () => {
+      state.teamsStatus = {
+        botConfigured: true,
+        botCredentialCheck: {
+          status: 'failed',
+          message:
+            'Microsoft rejected Client Secret Value (R_MICROSOFT_CLIENT_SECRET). AADSTS7000215: Invalid client secret provided.',
+        },
+        botUsesTenantSpecificTokenFlow: true,
+        microsoftAuthConfigured: true,
+        webhookUrl: 'https://roomote.dev/api/webhooks/teams',
+        openInTeamsUrl: 'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot',
+        primaryConversationReady: false,
+        primaryConversationType: null,
+      };
+
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByText(/AADSTS7000215/)).toBeInTheDocument();
+      expect(screen.queryByText(/^Bot configured\./)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/has not captured a Teams conversation yet/),
+      ).not.toBeInTheDocument();
+    });
+
+    it('explains why the Teams app package cannot be pre-filled from a malformed app id', () => {
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
+        target: { value: 'not-a-guid' },
+      });
+
+      expect(screen.getByText(/not a valid GUID/)).toBeInTheDocument();
+      expect(
+        screen.queryByRole('link', { name: /Download Teams app package/ }),
       ).not.toBeInTheDocument();
     });
   });

@@ -53,6 +53,26 @@ const TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
   'R_TELEGRAM_WEBHOOK_SECRET',
 ]);
 
+export const MICROSOFT_APP_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The Teams app package embeds the bot app id, so a value that is not a GUID
+ * cannot produce a usable package. Explain that instead of leaving the
+ * download button dead with no reason.
+ */
+export function getTeamsAppPackageUnavailableReason(
+  enteredAppId: string,
+): string | null {
+  const appId = enteredAppId.trim();
+
+  if (!appId || MICROSOFT_APP_ID_PATTERN.test(appId)) {
+    return null;
+  }
+
+  return 'That App (Client) ID is not a valid GUID, so Roomote cannot pre-fill the Teams app package. Copy the Application (client) ID from the Entra app registration overview — it looks like 00000000-0000-0000-0000-000000000000.';
+}
+
 export function getSetupVisibleFields(
   provider: ProviderStatus | null,
   options: { showMicrosoftAdvancedConfig?: boolean } = {},
@@ -292,6 +312,12 @@ type ProviderSetupExperienceProps = {
   editingSavedValues: Record<string, boolean>;
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
+  /**
+   * Why the pre-filled package cannot be built yet (e.g. the entered App
+   * (Client) ID is not a GUID). Without it the download button just goes dead
+   * with nothing to act on.
+   */
+  teamsAppPackageUnavailableReason?: string | null;
   createdSlackAppSettingsUrl?: string | null;
   createdSlackAppIconSet?: boolean | null;
   createSlackAppPending?: boolean;
@@ -687,11 +713,17 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled>
-                <Download />
-                Download Teams app package
-              </Button>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled>
+                  <Download />
+                  Download Teams app package
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {props.teamsAppPackageUnavailableReason ??
+                  'Enter the values above to build a pre-filled package.'}
+              </p>
             </div>
           )}
         </div>

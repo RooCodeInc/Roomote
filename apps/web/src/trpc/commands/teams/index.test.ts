@@ -1,4 +1,7 @@
+import { TeamsBotCredentialValidationError } from '@roomote/communication/teams-credential-validation';
+
 import { getTeamsIntegrationStatusCommand } from './index';
+import { invalidateTeamsBotCredentialCheckCache } from './bot-credential-check';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -6,10 +9,27 @@ const {
   mockResolveTeamsBotRuntimeCredentials,
   mockFindTeamsPrimaryConversation,
   mockResolveAuthProviderConfig,
+  mockValidateTeamsBotCredentials,
 } = vi.hoisted(() => ({
   mockResolveTeamsBotRuntimeCredentials: vi.fn(),
   mockFindTeamsPrimaryConversation: vi.fn(),
   mockResolveAuthProviderConfig: vi.fn(),
+  mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
+}));
+
+vi.mock('@roomote/communication/teams-credential-validation', () => ({
+  validateTeamsBotCredentials: mockValidateTeamsBotCredentials,
+  TeamsBotCredentialValidationError: class TeamsBotCredentialValidationError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+      readonly field: string | null = null,
+      readonly detail: string | null = null,
+    ) {
+      super(message);
+      this.name = 'TeamsBotCredentialValidationError';
+    }
+  },
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -56,6 +76,8 @@ function buildCredentials(
 describe('getTeamsIntegrationStatusCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateTeamsBotCredentialCheckCache();
+    mockValidateTeamsBotCredentials.mockResolvedValue(undefined);
     mockResolveTeamsBotRuntimeCredentials.mockResolvedValue(buildCredentials());
     mockFindTeamsPrimaryConversation.mockResolvedValue(null);
     mockResolveAuthProviderConfig.mockResolvedValue({
@@ -69,6 +91,7 @@ describe('getTeamsIntegrationStatusCommand', () => {
     const status = await getTeamsIntegrationStatusCommand(mockAuth);
 
     expect(status.botConfigured).toBe(true);
+    expect(status.botCredentialCheck).toEqual({ status: 'ok', message: null });
     expect(status.microsoftAuthConfigured).toBe(true);
     expect(status.primaryConversationReady).toBe(false);
     expect(status.primaryConversationType).toBeNull();
@@ -106,8 +129,58 @@ describe('getTeamsIntegrationStatusCommand', () => {
     const status = await getTeamsIntegrationStatusCommand(mockAuth);
 
     expect(status.botConfigured).toBe(false);
+    expect(status.botCredentialCheck).toEqual({
+      status: 'unchecked',
+      message: null,
+    });
     expect(status.openInTeamsUrl).toBeNull();
     expect(status.primaryConversationReady).toBe(false);
     expect(status.primaryConversationType).toBeNull();
+    expect(mockValidateTeamsBotCredentials).not.toHaveBeenCalled();
+  });
+
+  it('reports credentials that never authenticated as failed, not configured', async () => {
+    mockValidateTeamsBotCredentials.mockRejectedValue(
+      new TeamsBotCredentialValidationError(
+        'invalid_app_id',
+        'Microsoft rejected the app (client) id.',
+        'app_id',
+        "AADSTS700016: Application with identifier 'bot-app-id' was not found in the directory.",
+      ),
+    );
+
+    const status = await getTeamsIntegrationStatusCommand(mockAuth);
+
+    expect(status.botConfigured).toBe(true);
+    expect(status.botCredentialCheck.status).toBe('failed');
+    expect(status.botCredentialCheck.message).toContain(
+      'Teams Bot App ID (R_TEAMS_BOT_APP_ID)',
+    );
+    expect(status.botCredentialCheck.message).toContain('AADSTS700016');
+  });
+
+  it('treats an unreachable Microsoft as unchecked, not as a credential failure', async () => {
+    mockValidateTeamsBotCredentials.mockRejectedValue(
+      new TeamsBotCredentialValidationError(
+        'unreachable',
+        'Could not reach Microsoft to verify the Teams bot credentials (timed out).',
+        null,
+        'The operation timed out.',
+      ),
+    );
+
+    const status = await getTeamsIntegrationStatusCommand(mockAuth);
+
+    expect(status.botCredentialCheck.status).toBe('unchecked');
+    expect(status.botCredentialCheck.message).toContain(
+      'login.microsoftonline.com',
+    );
+  });
+
+  it('caches the credential verdict so status polling does not hammer Microsoft', async () => {
+    await getTeamsIntegrationStatusCommand(mockAuth);
+    await getTeamsIntegrationStatusCommand(mockAuth);
+
+    expect(mockValidateTeamsBotCredentials).toHaveBeenCalledTimes(1);
   });
 });

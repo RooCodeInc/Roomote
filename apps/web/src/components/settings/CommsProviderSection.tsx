@@ -18,6 +18,8 @@ import {
   getSetupEffectiveFieldValue,
   getSetupSubmitValues,
   getSetupVisibleFields,
+  getTeamsAppPackageUnavailableReason,
+  MICROSOFT_APP_ID_PATTERN,
   ProviderSetupExperience,
 } from '@/app/(onboarding)/setup/ProviderSetupExperience';
 
@@ -84,9 +86,6 @@ import {
 import { Section } from './Section';
 import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
 import { DiscordSetupStatus } from './DiscordSetupStatus';
-
-const MICROSOFT_APP_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function getProviderIconId(providerId: CommsProviderId): string {
   return providerId === 'microsoft' ? 'teams' : providerId;
@@ -178,8 +177,13 @@ function TeamsBotStatus() {
   const teamsPrimaryConversationReady = Boolean(
     teamsStatus?.primaryConversationReady,
   );
+  const teamsCredentialCheck = teamsStatus?.botCredentialCheck ?? null;
+  const teamsCredentialsRejected = teamsCredentialCheck?.status === 'failed';
 
-  const statusCopy = teamsBotConfigured ? (
+  const statusCopy = teamsCredentialsRejected ? (
+    (teamsCredentialCheck?.message ??
+    'Microsoft rejected the saved Teams bot credentials.')
+  ) : teamsBotConfigured ? (
     teamsStatus?.microsoftAuthConfigured ? (
       <>
         Bot configured. Team members can link Microsoft Teams accounts from{' '}
@@ -208,14 +212,25 @@ function TeamsBotStatus() {
   return (
     <div className="space-y-2 mt-4">
       <div className="flex items-start gap-2">
-        {!teamsBotConfigured ? (
+        {!teamsBotConfigured || teamsCredentialsRejected ? (
           <TriangleAlert className="size-4 mt-0.5 shrink-0 text-amber-600" />
         ) : (
           <Info className="size-4 mt-0.5 shrink-0" />
         )}
         <p className="text-sm text-muted-foreground">{statusCopy}</p>
       </div>
-      {teamsBotConfigured && !teamsPrimaryConversationReady ? (
+      {teamsCredentialCheck?.status === 'unchecked' &&
+      teamsCredentialCheck.message ? (
+        <div className="flex items-start gap-2">
+          <Info className="size-4 mt-0.5 shrink-0" />
+          <p className="text-sm text-muted-foreground">
+            {teamsCredentialCheck.message}
+          </p>
+        </div>
+      ) : null}
+      {teamsBotConfigured &&
+      !teamsCredentialsRejected &&
+      !teamsPrimaryConversationReady ? (
         <div className="flex items-start gap-2">
           <TriangleAlert className="size-4 mt-0.5 shrink-0 text-amber-600" />
           <p className="text-sm text-muted-foreground">
@@ -497,6 +512,9 @@ export function CommsProviderSection({
     : teamsBotAppIdStored || teamsBotConfigured
       ? '/api/teams/app-package'
       : null;
+  const teamsAppPackageUnavailableReason = isMicrosoftProvider
+    ? getTeamsAppPackageUnavailableReason(enteredTeamsBotAppId)
+    : null;
 
   const handleSave = () => {
     onSave(provider.id, getSetupSubmitValues({ provider, values }));
@@ -544,6 +562,9 @@ export function CommsProviderSection({
               editingSavedValues={editingSavedValues}
               clearedSavedValues={clearedSavedValues}
               teamsAppPackageHref={teamsAppPackageHref}
+              teamsAppPackageUnavailableReason={
+                teamsAppPackageUnavailableReason
+              }
               createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
               createdSlackAppIconSet={createdSlackAppIconSet}
               createSlackAppPending={createSlackApp.isPending}

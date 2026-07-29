@@ -142,6 +142,10 @@ import {
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
+  assertTeamsBotCredentialsAuthenticate,
+  invalidateTeamsBotCredentialCheckCache,
+} from '../teams/bot-credential-check';
+import {
   getPersistedRuntimeComputeConfig,
   savePersistedRuntimeComputeConfig,
 } from '../compute';
@@ -2085,6 +2089,13 @@ async function saveSetupAuthConfig(input: {
     await assertSetupBootstrapOpen();
   }
   const provider = getSetupAuthProvider(input.provider);
+
+  // Runs before the transaction: it talks to Microsoft, and onboarding must
+  // not report a configured Teams bot for credentials that never authenticated.
+  if (input.provider === 'microsoft') {
+    await assertTeamsBotCredentialsAuthenticate(input.values);
+    invalidateTeamsBotCredentialCheckCache();
+  }
 
   return db.transaction(async (tx) => {
     const [currentState, persistedEnvVarNames] = await Promise.all([
