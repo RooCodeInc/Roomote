@@ -2,8 +2,9 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 import {
-  clearLatestUserMessageForReplyQuoteIfId,
-  getLatestUserMessageForReplyQuote,
+  claimLatestUserMessageForReplyQuote,
+  completeClaimedLatestUserMessageForReplyQuote,
+  restoreClaimedLatestUserMessageForReplyQuote,
 } from '@roomote/communication/messages';
 import { resolveSourceControlProviderFromPayload } from '@roomote/types';
 
@@ -101,9 +102,10 @@ export async function manageSourceControl(
         input.action === 'create_pull_request_comment' ||
         input.action === 'create_issue_comment') &&
       typeof bodyInput?.body === 'string';
-    const pendingQuote = shouldQuote
-      ? await getLatestUserMessageForReplyQuote('github', taskRun.id)
+    const pendingQuoteClaim = shouldQuote
+      ? await claimLatestUserMessageForReplyQuote('github', taskRun.id)
       : null;
+    const pendingQuote = pendingQuoteClaim?.message ?? null;
 
     if (pendingQuote && typeof bodyInput?.body === 'string') {
       const quote = formatGitHubReplyQuote(pendingQuote);
@@ -112,13 +114,34 @@ export async function manageSourceControl(
       }
     }
 
-    const clearQuoteAfterSuccess = async () => {
-      if (pendingQuote) {
-        await clearLatestUserMessageForReplyQuoteIfId(
+    const restoreQuoteAfterFailure = async () => {
+      if (pendingQuoteClaim) {
+        await restoreClaimedLatestUserMessageForReplyQuote(
           'github',
           taskRun.id,
-          pendingQuote.id,
+          pendingQuoteClaim,
         );
+      }
+    };
+
+    const completeQuoteAfterSuccess = async () => {
+      if (pendingQuoteClaim) {
+        await completeClaimedLatestUserMessageForReplyQuote(
+          'github',
+          taskRun.id,
+          pendingQuoteClaim,
+        );
+      }
+    };
+
+    const runWithQuoteRestorationOnFailure = async <T>(
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      try {
+        return await operation();
+      } catch (error) {
+        await restoreQuoteAfterFailure();
+        throw error;
       }
     };
 
@@ -144,21 +167,25 @@ export async function manageSourceControl(
       case 'resolve_pull_request_thread':
       case 'submit_pull_request_review':
       case 'update_pull_request_comment': {
-        const writeResult = await writeSourceControlPullRequestForTaskRun({
-          taskRun,
-          input,
-        });
-        await clearQuoteAfterSuccess();
+        const writeResult = await runWithQuoteRestorationOnFailure(() =>
+          writeSourceControlPullRequestForTaskRun({
+            taskRun,
+            input,
+          }),
+        );
+        await completeQuoteAfterSuccess();
         return c.json(writeResult);
       }
       case 'get_issue':
       case 'list_issue_comments':
       case 'create_issue_comment': {
-        const issueResult = await manageSourceControlIssueForTaskRun({
-          taskRun,
-          input,
-        });
-        await clearQuoteAfterSuccess();
+        const issueResult = await runWithQuoteRestorationOnFailure(() =>
+          manageSourceControlIssueForTaskRun({
+            taskRun,
+            input,
+          }),
+        );
+        await completeQuoteAfterSuccess();
         return c.json(issueResult);
       }
     }

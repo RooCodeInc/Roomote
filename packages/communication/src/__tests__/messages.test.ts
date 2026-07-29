@@ -51,8 +51,10 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 import {
+  claimLatestUserMessageForReplyQuote,
   clearLatestUserMessageForReplyQuote,
   clearLatestUserMessageForReplyQuoteIfId,
+  completeClaimedLatestUserMessageForReplyQuote,
   getCommunicationMessages,
   getLatestInboundMessageId,
   getLatestUserMessageForReplyQuote,
@@ -62,6 +64,7 @@ import {
   setLatestInboundMessageId,
   setLatestUserMessageForReplyQuote,
   trackLatestUserMessageForReplyQuote,
+  restoreClaimedLatestUserMessageForReplyQuote,
 } from '../messages';
 
 describe('communication message queues', () => {
@@ -360,6 +363,78 @@ describe('communication message queues', () => {
       await expect(
         getLatestUserMessageForReplyQuote('discord', 44),
       ).resolves.toBeNull();
+    });
+
+    it('claims a message with a replay-safe attempt token', async () => {
+      const message = {
+        id: 'quote-1',
+        text: 'hello',
+        userName: 'Bob',
+      };
+      evalMock.mockResolvedValueOnce(JSON.stringify(message));
+
+      await expect(
+        claimLatestUserMessageForReplyQuote('github', 44),
+      ).resolves.toEqual({
+        claimToken: 'quote-id-fixed',
+        message,
+      });
+
+      expect(evalMock).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /claimed\.claimToken == ARGV\[1\][\s\S]*return claimed\.message/,
+        ),
+        2,
+        'github:latest_user_message:44',
+        'github:latest_user_message_claim:44',
+        'quote-id-fixed',
+        30 * 24 * 60 * 60,
+      );
+    });
+
+    it('restores only the matching claim token', async () => {
+      const claim = {
+        claimToken: 'claim-1',
+        message: {
+          id: 'quote-1',
+          text: 'hello',
+          userName: 'Bob',
+        },
+      };
+
+      await restoreClaimedLatestUserMessageForReplyQuote('github', 44, claim);
+
+      expect(evalMock).toHaveBeenCalledWith(
+        expect.stringContaining('claimed.claimToken ~= ARGV[1]'),
+        2,
+        'github:latest_user_message:44',
+        'github:latest_user_message_claim:44',
+        'claim-1',
+        JSON.stringify(claim.message),
+        30 * 24 * 60 * 60,
+      );
+    });
+
+    it('completes only the matching claim token', async () => {
+      const claim = {
+        claimToken: 'claim-1',
+        message: {
+          id: 'quote-1',
+          text: 'hello',
+          userName: 'Bob',
+        },
+      };
+
+      await expect(
+        completeClaimedLatestUserMessageForReplyQuote('github', 44, claim),
+      ).resolves.toBe(true);
+
+      expect(evalMock).toHaveBeenCalledWith(
+        expect.stringContaining('claimed.claimToken ~= ARGV[1]'),
+        1,
+        'github:latest_user_message_claim:44',
+        'claim-1',
+      );
     });
 
     it('clears the latest user message', async () => {
