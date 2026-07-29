@@ -199,12 +199,12 @@ export class AzureClient implements ComputeProviderClient {
   ): Promise<GetInstanceStatusResult> {
     throwIfAborted(input.signal);
     const sandbox = await this.getSandbox(input.instanceId, input.signal);
-    const summary = this.summarize(sandbox);
+    const timeoutRemainingMs = this.timeoutRemainingMs(sandbox);
     return {
-      status: summary.status,
-      ...(summary.timeoutRemainingMs !== undefined
-        ? { timeoutRemainingMs: summary.timeoutRemainingMs }
-        : {}),
+      status: this.mapState(sandbox.state),
+      // Omit when the sandbox has no auto-delete policy: sleep-check's
+      // provider-timeout backstop must only see real provider-side deadlines.
+      ...(timeoutRemainingMs !== undefined ? { timeoutRemainingMs } : {}),
     };
   }
 
@@ -953,19 +953,33 @@ export class AzureClient implements ComputeProviderClient {
   }
 
   private summarize(sandbox: AzureSandbox): InstanceSummary {
-    const summary: InstanceSummary = {
+    return {
       instanceId: sandbox.id,
       status: this.mapState(sandbox.state),
-      timeoutRemainingMs: this.timeoutRemainingMs(sandbox),
+      // InstanceSummary requires a number; "no policy" reads as far-future.
+      timeoutRemainingMs:
+        this.timeoutRemainingMs(sandbox) ?? Number.MAX_SAFE_INTEGER,
       ...(sandbox.createdAt ? { createdAt: new Date(sandbox.createdAt) } : {}),
     };
-    return summary;
   }
 
-  private timeoutRemainingMs(sandbox: AzureSandbox): number {
-    if (!this.config.timeoutMs || !sandbox.createdAt) return 0;
-    const elapsed = Date.now() - new Date(sandbox.createdAt).getTime();
-    return Math.max(0, this.config.timeoutMs - elapsed);
+  /**
+   * Remaining lifetime from the sandbox's own auto-delete lifecycle policy
+   * (server-side truth, set at create from the configured timeout). Returns
+   * undefined when the sandbox has no auto-delete deadline — regardless of
+   * what this particular client is configured with (sleep-check clients
+   * carry no timeoutMs and must not see a phantom expiry).
+   */
+  private timeoutRemainingMs(sandbox: AzureSandbox): number | undefined {
+    const autoDelete = sandbox.lifecycle?.autoDeletePolicy;
+    if (!autoDelete?.enabled || !autoDelete.deleteIntervalInSeconds) {
+      return undefined;
+    }
+    if (!sandbox.createdAt) return undefined;
+    const deadlineMs =
+      new Date(sandbox.createdAt).getTime() +
+      autoDelete.deleteIntervalInSeconds * 1_000;
+    return Math.max(0, deadlineMs - Date.now());
   }
 
   private mapState(state: string | undefined): ComputeInstanceStatus {
