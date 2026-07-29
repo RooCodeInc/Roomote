@@ -79,14 +79,14 @@ const CARD_ANIMATION = {
   exit: { opacity: 0, y: -20, transition: CARD_EXIT_TRANSITION },
 } as const;
 
-export const COMMUNICATION_PROVIDER_ORDER = [
+const COMMUNICATION_PROVIDER_ORDER = [
   'slack',
   'microsoft',
   'telegram',
   'discord',
 ] as const;
 
-export const SOURCE_CONTROL_PROVIDER_ORDER = [
+const SOURCE_CONTROL_PROVIDER_ORDER = [
   'github',
   'gitlab',
   'gitea',

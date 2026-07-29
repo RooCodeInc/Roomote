@@ -1643,7 +1643,6 @@ export function Integrations() {
     grafanaConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
-    linearOauthSetup.data,
     linearOauthSetup.isPending,
     linearOauthStatus,
     linearOauthUnavailable,
