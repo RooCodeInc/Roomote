@@ -36,11 +36,16 @@ export interface RegisterAzureDiskImageOptions {
   region: string;
   /**
    * Registry-qualified worker image reference (e.g. `ghcr.io/...:tag`).
-   * Azure pulls this from the registry when baking the disk image, so the
-   * image must be public — disk image registration has no per-call registry
-   * credentials.
+   * Azure pulls this from the registry when baking the disk image; private
+   * registries require `registryCredentials`.
    */
   imageRef: string;
+  /**
+   * Registry credentials for pulling private container images during the
+   * bake (`registryCredentials` on the data-plane PUT). For GHCR: the GitHub
+   * username that owns the token, and a PAT with `read:packages`.
+   */
+  registryCredentials?: { username: string; token: string };
   /** Overrides `roomote-worker-<image-tag>-r<schema>`. */
   name?: string;
   /**
@@ -91,6 +96,7 @@ export async function registerAzureDiskImage(
     region,
     imageRef,
     managedIdentityClientId,
+    registryCredentials,
   } = options;
 
   if (!imageRef.includes('/')) {
@@ -195,6 +201,14 @@ export async function registerAzureDiskImage(
   const created = (await request('PUT', collectionPath, {
     image: { base: imageRef },
     labels: { name },
+    ...(registryCredentials
+      ? {
+          registryCredentials: {
+            username: registryCredentials.username,
+            token: registryCredentials.token,
+          },
+        }
+      : {}),
   })) as AzureDiskImage;
 
   if (!created.id) {

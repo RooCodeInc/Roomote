@@ -564,6 +564,24 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'credential',
         advanced: true,
       },
+      {
+        // Pull credentials for baking the worker disk image from a private
+        // registry (GHCR: token owner's GitHub username + PAT with
+        // read:packages). Only needed when the worker image is not public.
+        envVarName: 'AZURE_SANDBOX_REGISTRY_USERNAME',
+        label: 'Worker Registry Username',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+      },
+      {
+        envVarName: 'AZURE_SANDBOX_REGISTRY_TOKEN',
+        label: 'Worker Registry Token',
+        required: false,
+        secret: true,
+        category: 'infrastructure',
+        advanced: true,
+      },
     ],
   },
   {

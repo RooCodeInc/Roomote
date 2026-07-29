@@ -725,11 +725,21 @@ export class AzureClient implements ComputeProviderClient {
 
     const autoSuspendSeconds = this.config.autoSuspendSeconds ?? 0;
 
+    // ACA tiers cap memory at cores × 2Gi (e.g. 1000m → max 2048Mi;
+    // verified live: 400 InvalidResourceTier otherwise). Scale CPU up to fit
+    // the requested memory rather than failing.
+    const memoryMiB = this.config.memoryMiB ?? DEFAULT_MEMORY_MIB;
+    const minCpuMillicores = Math.ceil(memoryMiB / 2048) * 1000;
+    const cpuMillicores = Math.max(
+      this.config.cpuMillicores ?? DEFAULT_CPU_MILLICORES,
+      minCpuMillicores,
+    );
+
     return {
       sourcesRef: { diskImage },
       resources: {
-        cpu: `${this.config.cpuMillicores ?? DEFAULT_CPU_MILLICORES}m`,
-        memory: `${this.config.memoryMiB ?? DEFAULT_MEMORY_MIB}Mi`,
+        cpu: `${cpuMillicores}m`,
+        memory: `${memoryMiB}Mi`,
       },
       lifecycle: {
         autoSuspendPolicy: {

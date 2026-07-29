@@ -162,8 +162,19 @@ const PROVISIONING_PROVIDERS: Record<
         throw new Error('AZURE_SANDBOX_REGION is not configured');
       }
 
-      // Azure disk image registration has no per-call registry credentials:
-      // the worker image must be public.
+      // Private registries need pull credentials for the bake (GHCR: the
+      // token owner's GitHub username + a PAT with read:packages).
+      const registryUsername = resolvedEnv.AZURE_SANDBOX_REGISTRY_USERNAME;
+      const registryToken = resolvedEnv.AZURE_SANDBOX_REGISTRY_TOKEN;
+      if (
+        (registryUsername && !registryToken) ||
+        (!registryUsername && registryToken)
+      ) {
+        throw new Error(
+          'AZURE_SANDBOX_REGISTRY_USERNAME and AZURE_SANDBOX_REGISTRY_TOKEN must be set together',
+        );
+      }
+
       const spTenantId = resolvedEnv.AZURE_TENANT_ID;
       const spClientId = resolvedEnv.AZURE_CLIENT_ID;
       const spClientSecret = resolvedEnv.AZURE_CLIENT_SECRET;
@@ -181,6 +192,14 @@ const PROVISIONING_PROVIDERS: Record<
               },
             }
           : { managedIdentityClientId: resolvedEnv.AZURE_CLIENT_ID }),
+        ...(registryUsername && registryToken
+          ? {
+              registryCredentials: {
+                username: registryUsername,
+                token: registryToken,
+              },
+            }
+          : {}),
         imageRef,
         name: templateRef,
       });

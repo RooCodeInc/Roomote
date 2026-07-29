@@ -251,6 +251,8 @@ as per-task auth tokens or workspace paths.
 | `AZURE_CLIENT_ID`                    | Optional          | User-assigned managed identity client ID — or the service principal's app ID when paired with `AZURE_TENANT_ID` + `AZURE_CLIENT_SECRET`. Unset uses `az login` locally or the system-assigned identity when deployed.                     |
 | `AZURE_TENANT_ID`                    | Optional          | Service principal tenant ID (with `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET`). Recommended for containerized installs.                     |
 | `AZURE_CLIENT_SECRET`                | Optional          | Service principal client secret (with `AZURE_TENANT_ID` + `AZURE_CLIENT_ID`).                     |
+| `AZURE_SANDBOX_REGISTRY_USERNAME`    | Optional          | Username for pulling a private worker image during disk-image provisioning (GHCR: token owner's GitHub username).                     |
+| `AZURE_SANDBOX_REGISTRY_TOKEN`       | Optional          | Token for pulling a private worker image during disk-image provisioning (GHCR: PAT with `read:packages`).                     |
 | `WORKER_RELEASE_CHANNEL`             | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                                      |
 | `WORKER_RELEASE_VERSION`             | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                             |
 | `LOCAL_SANDBOX_FILES_DIR`            | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                          |
