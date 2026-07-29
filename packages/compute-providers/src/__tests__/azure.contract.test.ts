@@ -378,7 +378,8 @@ describe('azure adapter contract', () => {
 
   it('enters standby via stop and resumes via resume', async () => {
     const { fetchImpl, requests } = createFetchMock({
-      states: ['Stopped', 'Running'],
+      // stop-poll, resume pre-check, post-resume poll
+      states: ['Stopped', 'Stopped', 'Running'],
     });
     const client = createClient(fetchImpl);
 

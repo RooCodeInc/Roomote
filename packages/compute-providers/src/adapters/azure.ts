@@ -666,15 +666,20 @@ export class AzureClient implements ComputeProviderClient {
   ): Promise<CreatedInstance> {
     throwIfAborted(input.signal);
 
-    await this.request(
-      'POST',
-      `${this.sandboxPath(input.resumeHandle)}/resume`,
-      {
-        signal: input.signal,
-        abortMessage: `Resuming Azure sandbox ${input.resumeHandle} was aborted`,
-      },
-    );
-    await this.waitForState(input.resumeHandle, ['Running'], input.signal);
+    // No-op when already Running (double-wake race): resuming a Running
+    // sandbox is rejected by the service.
+    const current = await this.getSandbox(input.resumeHandle, input.signal);
+    if (current.state !== 'Running') {
+      await this.request(
+        'POST',
+        `${this.sandboxPath(input.resumeHandle)}/resume`,
+        {
+          signal: input.signal,
+          abortMessage: `Resuming Azure sandbox ${input.resumeHandle} was aborted`,
+        },
+      );
+      await this.waitForState(input.resumeHandle, ['Running'], input.signal);
+    }
 
     // Ports persist through stop/resume (measured); ensure anyway so callers
     // always get domains back.

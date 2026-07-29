@@ -19,6 +19,7 @@ import {
   createAzureMachine,
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
+  type ComputeProviderClient,
 } from '@roomote/compute-providers';
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
@@ -75,6 +76,27 @@ function buildDetachedWorkerExitError(
     ...(stdout ? { stdout } : {}),
     ...(stderr ? { stderr } : {}),
   });
+}
+
+async function resolveAzureResumeLaunchOptions(
+  snapshotId: string,
+  computeClient: Pick<ComputeProviderClient, 'getInstanceStatus'>,
+): Promise<
+  | { launchMode: 'task_standby'; resumeHandle: string }
+  | { launchMode: 'task_snapshot'; sourceSnapshotId: string }
+> {
+  try {
+    const status = await computeClient.getInstanceStatus({
+      instanceId: snapshotId,
+    });
+    if (status.status === 'stopped' || status.status === 'running') {
+      return { launchMode: 'task_standby', resumeHandle: snapshotId };
+    }
+  } catch {
+    // Not a live sandbox — treat as a genuine snapshot id.
+  }
+
+  return { launchMode: 'task_snapshot', sourceSnapshotId: snapshotId };
 }
 
 function getWorkerLaunchCommand(
@@ -161,10 +183,40 @@ export async function spawnAzureWorker(
     ? resolveAuthBypassHeaderName(environmentConfig)
     : undefined;
 
+  // Service principal auth only kicks in with the full triple; a lone
+  // AZURE_CLIENT_ID means user-assigned managed identity.
+  const azureServicePrincipal =
+    azureTenantId && azureClientId && azureClientSecret
+      ? {
+          tenantId: azureTenantId,
+          clientId: azureClientId,
+          clientSecret: azureClientSecret,
+        }
+      : undefined;
+
+  const computeClient = createComputeProviderClient({
+    provider: 'azure',
+    config: {
+      subscriptionId: azureSubscriptionId,
+      resourceGroup: azureResourceGroup,
+      sandboxGroup: azureSandboxGroup,
+      region: azureRegion,
+      diskImage: azureDiskImage,
+      ...(azureServicePrincipal
+        ? { servicePrincipal: azureServicePrincipal }
+        : azureClientId
+          ? { managedIdentityClientId: azureClientId }
+          : {}),
+      memoryMiB: sandboxResources.memoryMiB,
+      timeoutMs: azureTimeoutMs,
+    },
+  });
+
   let launchOptions:
     | { launchMode: 'fresh' }
     | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
-    | { launchMode: 'task_snapshot'; sourceSnapshotId: string };
+    | { launchMode: 'task_snapshot'; sourceSnapshotId: string }
+    | { launchMode: 'task_standby'; resumeHandle: string };
 
   if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
     const snapshotId = taskRun.sourceSnapshotId;
@@ -175,10 +227,15 @@ export async function spawnAzureWorker(
       );
     }
 
-    launchOptions = {
-      launchMode: 'task_snapshot',
-      sourceSnapshotId: snapshotId,
-    };
+    // Azure is dual-capable: task sleeps always use standby (the sleep-check
+    // pipeline prefers standby for standby-capable vendors), so a
+    // SnapshotResume's id is usually a suspended-sandbox handle, not a
+    // snapshot. Discriminate by probing whether the id is a live sandbox;
+    // manual task snapshots land in the snapshot branch instead.
+    launchOptions = await resolveAzureResumeLaunchOptions(
+      snapshotId,
+      computeClient,
+    );
   } else if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
     // Environment snapshot refreshes must rebuild from the configured base
     // worker disk image instead of inheriting the previous environment snapshot.
@@ -215,9 +272,11 @@ export async function spawnAzureWorker(
   const mutationContext = {
     launchMode: launchOptions.launchMode,
     sourceSnapshotId:
-      'sourceSnapshotId' in launchOptions
-        ? launchOptions.sourceSnapshotId
-        : null,
+      'resumeHandle' in launchOptions
+        ? launchOptions.resumeHandle
+        : 'sourceSnapshotId' in launchOptions
+          ? launchOptions.sourceSnapshotId
+          : null,
     ports: namedPorts.map(({ port }) => port),
   } as const;
 
@@ -229,35 +288,6 @@ export async function spawnAzureWorker(
     },
     { logPrefix: 'spawnAzureWorker', logger: console },
   );
-
-  // Service principal auth only kicks in with the full triple; a lone
-  // AZURE_CLIENT_ID means user-assigned managed identity.
-  const azureServicePrincipal =
-    azureTenantId && azureClientId && azureClientSecret
-      ? {
-          tenantId: azureTenantId,
-          clientId: azureClientId,
-          clientSecret: azureClientSecret,
-        }
-      : undefined;
-
-  const computeClient = createComputeProviderClient({
-    provider: 'azure',
-    config: {
-      subscriptionId: azureSubscriptionId,
-      resourceGroup: azureResourceGroup,
-      sandboxGroup: azureSandboxGroup,
-      region: azureRegion,
-      diskImage: azureDiskImage,
-      ...(azureServicePrincipal
-        ? { servicePrincipal: azureServicePrincipal }
-        : azureClientId
-          ? { managedIdentityClientId: azureClientId }
-          : {}),
-      memoryMiB: sandboxResources.memoryMiB,
-      timeoutMs: azureTimeoutMs,
-    },
-  });
 
   // Stamp provisionStartedAt + launchMode before the Azure API call. Only-if-
   // null semantics preserve the earliest provision timestamp.

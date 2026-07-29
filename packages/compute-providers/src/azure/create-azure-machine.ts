@@ -36,6 +36,7 @@ type AzureLifecycleClient = Pick<
   | 'vendor'
   | 'createInstance'
   | 'resumeFromSnapshot'
+  | 'resumeFromStandby'
   | 'writeFiles'
   | 'runCommand'
   | 'destroyInstance'
@@ -81,7 +82,8 @@ export interface CreateAzureMachineOptions {
 export type AzureLaunchOptions =
   | { launchMode: 'fresh'; sourceSnapshotId?: undefined }
   | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
-  | { launchMode: 'task_snapshot'; sourceSnapshotId: string };
+  | { launchMode: 'task_snapshot'; sourceSnapshotId: string }
+  | { launchMode: 'task_standby'; resumeHandle: string };
 
 export type CreateAzureMachineParams = CreateAzureMachineOptions &
   AzureLaunchOptions;
@@ -111,13 +113,16 @@ export async function createAzureMachine(
     proxyPorts: proxyPortsOverride,
     localTarballPath,
     launchMode,
-    sourceSnapshotId,
     createInstanceTimeoutMs,
     bootstrapTimeoutMs,
     tags,
     signal: legacySignal,
     onMutation,
   } = options;
+
+  // The task_standby variant carries resumeHandle instead of sourceSnapshotId.
+  const sourceSnapshotId =
+    'sourceSnapshotId' in options ? options.sourceSnapshotId : undefined;
 
   const createInstanceSignal =
     createInstanceTimeoutMs != null
@@ -214,49 +219,62 @@ export async function createAzureMachine(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     throwIfAborted(createInstanceSignal);
 
+    const resumeHandle =
+      'resumeHandle' in options ? options.resumeHandle : undefined;
+
     console.log(
-      `[createAzureMachine] Attempt ${attempt}/${MAX_RETRIES}: ${sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'}`,
+      `[createAzureMachine] Attempt ${attempt}/${MAX_RETRIES}: ${resumeHandle ? 'resumeFromStandby' : sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'}`,
     );
 
     try {
-      const operation = sourceSnapshotId
-        ? 'resume_from_snapshot'
-        : 'create_instance';
+      const operation = resumeHandle
+        ? 'resume_from_standby'
+        : sourceSnapshotId
+          ? 'resume_from_snapshot'
+          : 'create_instance';
 
       await onMutation?.({
         provider: 'azure',
         operation,
         eventType: 'started',
         message:
-          operation === 'resume_from_snapshot'
-            ? `Calling resumeFromSnapshot for Azure instance from snapshot ${sourceSnapshotId}.`
-            : 'Calling createInstance for Azure instance.',
+          operation === 'resume_from_standby'
+            ? `Calling resumeFromStandby for Azure instance from standby handle ${resumeHandle}.`
+            : operation === 'resume_from_snapshot'
+              ? `Calling resumeFromSnapshot for Azure instance from snapshot ${sourceSnapshotId}.`
+              : 'Calling createInstance for Azure instance.',
         details: buildComputeProviderMutationDetails(
           { ...mutationContext, attempt },
           {},
         ),
       });
 
-      const instance = sourceSnapshotId
-        ? await computeClient.resumeFromSnapshot({
-            sourceSnapshotId,
+      const instance = resumeHandle
+        ? await computeClient.resumeFromStandby!({
+            resumeHandle,
             ports: effectivePorts,
-            tags,
-            metadata: {
-              ...(workerReleaseTag ? { workerReleaseTag } : {}),
-              ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
-            },
             signal: createInstanceSignal,
           })
-        : await computeClient.createInstance({
-            ports: effectivePorts,
-            tags,
-            metadata: {
-              ...(workerReleaseTag ? { workerReleaseTag } : {}),
-              ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
-            },
-            signal: createInstanceSignal,
-          });
+        : sourceSnapshotId
+          ? await computeClient.resumeFromSnapshot({
+              sourceSnapshotId,
+              ports: effectivePorts,
+              tags,
+              metadata: {
+                ...(workerReleaseTag ? { workerReleaseTag } : {}),
+                ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
+              },
+              signal: createInstanceSignal,
+            })
+          : await computeClient.createInstance({
+              ports: effectivePorts,
+              tags,
+              metadata: {
+                ...(workerReleaseTag ? { workerReleaseTag } : {}),
+                ...(timeoutMs ? { timeoutMs: String(timeoutMs) } : {}),
+              },
+              signal: createInstanceSignal,
+            });
 
       await onMutation?.({
         provider: 'azure',
@@ -264,9 +282,11 @@ export async function createAzureMachine(
         eventType: 'completed',
         instanceId: instance.instanceId,
         message: `${
-          operation === 'resume_from_snapshot'
-            ? 'resumeFromSnapshot'
-            : 'createInstance'
+          operation === 'resume_from_standby'
+            ? 'resumeFromStandby'
+            : operation === 'resume_from_snapshot'
+              ? 'resumeFromSnapshot'
+              : 'createInstance'
         } completed for Azure instance ${instance.instanceId}.`,
         details: buildComputeProviderMutationDetails(
           { ...mutationContext, attempt },
@@ -291,12 +311,18 @@ export async function createAzureMachine(
     } catch (error) {
       await onMutation?.({
         provider: 'azure',
-        operation: sourceSnapshotId
-          ? 'resume_from_snapshot'
-          : 'create_instance',
+        operation: resumeHandle
+          ? 'resume_from_standby'
+          : sourceSnapshotId
+            ? 'resume_from_snapshot'
+            : 'create_instance',
         eventType: 'failed',
         message: `${
-          sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'
+          resumeHandle
+            ? 'resumeFromStandby'
+            : sourceSnapshotId
+              ? 'resumeFromSnapshot'
+              : 'createInstance'
         } failed for Azure instance.`,
         details: buildComputeProviderMutationDetails(
           { ...mutationContext, attempt },
@@ -508,7 +534,11 @@ export async function createAzureMachine(
   return {
     machineId: createdMachine.instanceId,
     proxyPorts,
-    ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
+    ...(sourceSnapshotId
+      ? { sourceSnapshotId }
+      : 'resumeHandle' in options
+        ? { sourceSnapshotId: options.resumeHandle }
+        : {}),
     domain: (port: number) => {
       const fromResponse = createdMachine.domains?.[port.toString()];
 
