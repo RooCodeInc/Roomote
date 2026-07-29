@@ -20,6 +20,8 @@ import {
 } from '../../server';
 import {
   bucketPullRequestStatus,
+  collectConfiguredInferenceProviders,
+  collectConfiguredRuntimeEnvVarNames,
   collectInstanceReportStats,
   dedupeAuthoredPullRequests,
   median,
@@ -27,6 +29,27 @@ import {
 } from '../instance-report';
 
 describe('instance-report pure helpers', () => {
+  it('reports configured inference providers without reading secret values', () => {
+    expect(
+      collectConfiguredInferenceProviders({
+        persistedEnvVarNames: ['ANTHROPIC_API_KEY'],
+        runtimeEnvVarNames: ['OPENAI_API_KEY'],
+        chatgptConnected: true,
+        githubCopilotConnected: false,
+        xaiSubscriptionConnected: true,
+      }),
+    ).toEqual(['anthropic', 'chatgpt', 'openai', 'xai', 'xai-subscription']);
+  });
+
+  it('only includes runtime configuration names with non-blank values', () => {
+    expect(
+      collectConfiguredRuntimeEnvVarNames({
+        ANTHROPIC_API_KEY: 'secret-value',
+        OPENAI_API_KEY: ' ',
+      }),
+    ).toEqual(['ANTHROPIC_API_KEY']);
+  });
+
   it('buckets draft and null into open, closed and merged distinctly', () => {
     expect(bucketPullRequestStatus('draft')).toBe('open');
     expect(bucketPullRequestStatus('open')).toBe('open');
