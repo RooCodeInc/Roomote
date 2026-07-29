@@ -34,7 +34,6 @@ vi.mock('@/components/system', () => ({
   ChartColumnIncreasing: Icon,
   CircleDollarSign: Icon,
   Download: Icon,
-  GitPullRequest: Icon,
   Spinner: Icon,
   Button: ({
     children,
@@ -55,7 +54,7 @@ import {
 } from './AnalyticsShell';
 
 describe('AnalyticsShell', () => {
-  it('renders Tasks before PRs in the navigation', () => {
+  it('omits PRs from the navigation while rendering the PR analytics page', () => {
     render(
       <AnalyticsShell
         activeItemId="pullRequests"
@@ -67,12 +66,12 @@ describe('AnalyticsShell', () => {
     );
 
     const nav = screen.getByRole('navigation');
-    const navItems = within(nav).getAllByText(/^(Tasks|PRs|Costs)$/);
+    const navItems = within(nav).getAllByText(/^(Tasks|Costs)$/);
 
     expect(screen.getByRole('heading', { name: 'PRs' })).toBeInTheDocument();
+    expect(within(nav).queryByText('PRs')).not.toBeInTheDocument();
     expect(navItems.map((item) => item.textContent)).toEqual([
       'Tasks',
-      'PRs',
       'Costs',
     ]);
   });

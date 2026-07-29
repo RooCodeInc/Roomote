@@ -7,7 +7,6 @@ import {
   ChartColumnIncreasing,
   CircleDollarSign,
   Download,
-  GitPullRequest,
   Button,
   Spinner,
 } from '@/components/system';
@@ -28,7 +27,6 @@ export function getAnalyticsHref(itemId: AnalyticsShellItemId) {
 
 const ANALYTICS_SHELL_ITEMS = [
   { id: 'tasks', label: 'Tasks', icon: ChartColumnIncreasing },
-  { id: 'pullRequests', label: 'PRs', icon: GitPullRequest },
   { id: 'costs', label: 'Costs', icon: CircleDollarSign },
 ] as const satisfies Array<{
   id: AnalyticsObject;
