@@ -552,7 +552,7 @@ describe('Integrations settings', () => {
     expect(screen.queryByText('Webhook URL')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Client ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Client secret')).toBeInTheDocument();
-    expect(screen.getByLabelText('Webhook secret')).toBeInTheDocument();
+    expect(screen.getByLabelText('Webhook signing secret')).toBeInTheDocument();
   });
 
   it('offers administrators configuration access after Linear is configured', () => {
@@ -771,7 +771,7 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('renders connected, configured, and available sections with compact action buttons', () => {
+  it('renders connected and available sections with compact action buttons', () => {
     render(<Integrations />);
 
     const connectedSection = screen
@@ -780,13 +780,11 @@ describe('Integrations settings', () => {
     const availableSection = screen
       .getByRole('heading', { name: 'Available' })
       .closest('section');
-    const configuredSection = screen
-      .getByRole('heading', { name: 'Configured' })
-      .closest('section');
-
     expect(connectedSection).not.toBeNull();
     expect(availableSection).not.toBeNull();
-    expect(configuredSection).not.toBeNull();
+    expect(
+      screen.queryByRole('heading', { name: 'Configured' }),
+    ).not.toBeInTheDocument();
 
     expect(
       within(connectedSection as HTMLElement)
