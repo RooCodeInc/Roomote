@@ -14,6 +14,7 @@ import {
   ROOMOTE_GITHUB_REPO,
 } from '@/lib/release-links';
 import {
+  isParsableProductVersion,
   isProductVersionNewer,
   normalizeProductVersion,
   toReleaseTag,
@@ -25,6 +26,7 @@ const PRODUCT_VERSION_PATTERN = /^v?\d+\.\d+\.\d+(?:-[\w.]+)?$/i;
 
 type ReleaseStatus = {
   runningVersion: string | null;
+  displayVersion: string | null;
   latestKnownVersion: string | null;
   latestVersionCheckedAt: string | null;
   updateAvailable: boolean;
@@ -50,6 +52,21 @@ function getRunningVersion(): string | null {
   );
 }
 
+function getDisplayVersion(): string | null {
+  const releaseVersion = Env.RELEASE_VERSION?.trim();
+  if (releaseVersion) {
+    if (isParsableProductVersion(releaseVersion)) {
+      return toReleaseTag(releaseVersion);
+    }
+
+    // Channel builds include their commit after the final dash.
+    return releaseVersion.match(/[a-f0-9]{7,40}$/i)?.[0] ?? releaseVersion;
+  }
+
+  const productVersion = normalizeProductVersion(Env.RELEASE_PRODUCT_VERSION);
+  return productVersion ? toReleaseTag(productVersion) : null;
+}
+
 function canSeeUpdateStatus(auth: UserAuthSuccess): boolean {
   return auth.isAdmin && !isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
 }
@@ -62,10 +79,12 @@ export async function getReleaseStatusCommand(
   auth: UserAuthSuccess,
 ): Promise<ReleaseStatus> {
   const runningVersion = getRunningVersion();
+  const displayVersion = getDisplayVersion();
 
   if (!canSeeUpdateStatus(auth)) {
     return {
       runningVersion,
+      displayVersion,
       latestKnownVersion: null,
       latestVersionCheckedAt: null,
       updateAvailable: false,
@@ -88,6 +107,7 @@ export async function getReleaseStatusCommand(
 
   return {
     runningVersion,
+    displayVersion,
     latestKnownVersion,
     latestVersionCheckedAt,
     updateAvailable: isProductVersionNewer(latestKnownVersion, runningVersion),

@@ -1,12 +1,30 @@
 'use client';
 
-import { BookMarked, LogOut, Avatar } from '@/components/system';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+
+import {
+  Avatar,
+  BookMarked,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  ExternalLink,
+  LogOut,
+} from '@/components/system';
 
 import { useUser } from '@/hooks/useUser';
 import { authClient } from '@/lib/auth-client';
 import { DOCS_BASE_URL } from '@/lib/docs';
+import { isParsableProductVersion, toReleaseTag } from '@/lib/product-version';
+import { GITHUB_RELEASES_BASE_URL } from '@/lib/release-links';
 import { PERSONAL_THEME_STORAGE_KEY } from '@/types/preferences';
 import { cn } from '@/lib/utils';
+import { useTRPC } from '@/trpc/client';
 
 import {
   DropdownMenu,
@@ -56,6 +74,14 @@ function SignedInUserMenu({
   switchOrgRedirectPath?: string;
   user: NonNullable<ReturnType<typeof useUser>['user']>;
 }) {
+  const trpc = useTRPC();
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const statusQuery = useQuery(
+    trpc.releases.status.queryOptions(undefined, {
+      staleTime: 30 * 60 * 1000,
+      refetchOnWindowFocus: false,
+    }),
+  );
   const handleSignOut = async () => {
     window.localStorage.removeItem(PERSONAL_THEME_STORAGE_KEY);
     await authClient.signOut({
@@ -69,6 +95,11 @@ function SignedInUserMenu({
 
   const userDisplayName = user.name ?? 'You';
   const userEmail = user.resource.primaryEmailAddress?.emailAddress;
+  const displayVersion = statusQuery.data?.displayVersion ?? null;
+  const isReleaseVersion = isParsableProductVersion(displayVersion);
+  const releaseUrl = displayVersion
+    ? `${GITHUB_RELEASES_BASE_URL}/#release-${toReleaseTag(displayVersion)}`
+    : null;
 
   return (
     <>
@@ -121,6 +152,14 @@ function SignedInUserMenu({
           </div>
 
           <DropdownMenuSeparator />
+          {displayVersion ? (
+            <>
+              <DropdownMenuItem onClick={() => setIsAboutOpen(true)}>
+                Roomote version {displayVersion}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
           <DropdownMenuItem asChild>
             <a
               href={DOCS_BASE_URL}
@@ -140,6 +179,48 @@ function SignedInUserMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <Dialog open={isAboutOpen} onOpenChange={setIsAboutOpen}>
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>About Roomote</DialogTitle>
+            <DialogDescription>
+              Made with care by humans and robots.
+            </DialogDescription>
+          </DialogHeader>
+          {displayVersion ? (
+            <p>
+              Roomote version{' '}
+              {isReleaseVersion && releaseUrl ? (
+                <a
+                  href={releaseUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  {displayVersion}
+                </a>
+              ) : (
+                displayVersion
+              )}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" asChild>
+              <a
+                href={GITHUB_RELEASES_BASE_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                See all releases
+                <ExternalLink />
+              </a>
+            </Button>
+            <Button type="button" onClick={() => setIsAboutOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
