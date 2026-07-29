@@ -26,6 +26,7 @@ import {
   Spinner,
   TriangleAlert,
 } from '@/components/system';
+import { NumberedStep } from '@/app/(onboarding)/setup/NumberedStep';
 
 type SetupFieldStatus = {
   configured: boolean;
@@ -77,29 +78,31 @@ function CredentialField({
       : 'Managed by the deployment environment.'
     : status.configured
       ? 'Already saved. Leave blank to keep the current value.'
-      : 'Required.';
+      : null;
 
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        type={secret ? 'password' : 'text'}
-        value={status.managedByEnvironment ? '' : value}
-        placeholder={
-          status.managedByEnvironment
-            ? 'Managed by environment'
-            : status.configured
-              ? 'Saved'
-              : undefined
-        }
-        disabled={status.managedByEnvironment}
-        onChange={(event) => onChange(event.target.value)}
-        autoCapitalize="off"
-        autoCorrect="off"
-        spellCheck={false}
-        data-1p-ignore
-      />
+      <div className="md:grid md:grid-cols-[8em_1fr] max-w-lg">
+        <Label htmlFor={id}>{label}</Label>
+        <Input
+          id={id}
+          type={secret ? 'password' : 'text'}
+          value={status.managedByEnvironment ? '' : value}
+          placeholder={
+            status.managedByEnvironment
+              ? 'Managed by environment'
+              : status.configured
+                ? 'Saved'
+                : undefined
+          }
+          disabled={status.managedByEnvironment}
+          onChange={(event) => onChange(event.target.value)}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+      </div>
       <p className="text-xs text-muted-foreground">{helperText}</p>
     </div>
   );
@@ -181,7 +184,7 @@ export function LinearOauthSetupDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size={removeConfirmationOpen ? 'sm' : 'lg'}>
+      <DialogContent size={removeConfirmationOpen ? 'sm' : '2xl'}>
         {removeConfirmationOpen ? (
           <>
             <DialogHeader>
@@ -221,8 +224,8 @@ export function LinearOauthSetupDialog({
               </DialogTitle>
               <DialogDescription>
                 {hasConfiguredCredentials
-                  ? 'Update or remove the Linear app credentials saved for this deployment.'
-                  : 'Create a Linear app for this deployment, then connect it to your workspace.'}
+                  ? 'Update the Linear app credentials saved for this deployment.'
+                  : "Roomote is self-hosted, so we need you to create a Linear app for this deployment. It's easy."}
               </DialogDescription>
             </DialogHeader>
 
@@ -233,7 +236,7 @@ export function LinearOauthSetupDialog({
               </div>
             ) : (
               <div className="space-y-6 py-2">
-                {!publicUrlUsesHttps ? (
+                {!hasConfiguredCredentials && !publicUrlUsesHttps ? (
                   <Alert variant="destructive">
                     <TriangleAlert className="size-4" />
                     <AlertDescription>
@@ -244,44 +247,49 @@ export function LinearOauthSetupDialog({
                   </Alert>
                 ) : null}
 
-                <section className="space-y-3">
+                {!hasConfiguredCredentials ? (
+                  <NumberedStep number={1}>
+                    <div>
+                      <h3 className="font-medium">Create a Linear app.</h3>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Roomote uses a dedicated Linear app for this deployment.
+                        Log into Linear, use the pre-filled manifest, review the
+                        settings in Linear, then create the app.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!publicUrlUsesHttps}
+                      onClick={() =>
+                        window.open(
+                          setup.manifestUrl,
+                          '_blank',
+                          'noopener,noreferrer',
+                        )
+                      }
+                    >
+                      Create the app
+                      <ExternalLink />
+                    </Button>
+                  </NumberedStep>
+                ) : null}
+
+                <NumberedStep number={hasConfiguredCredentials ? 1 : 2}>
                   <div>
                     <h3 className="font-medium">
-                      Create a Linear app for this deployment.
+                      {hasConfiguredCredentials
+                        ? 'Update the app credentials.'
+                        : 'Copy the app credentials.'}
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                      Roomote needs its own Linear app. The manifest pre-fills
-                      the callback, webhook, and agent event settings. Review it
-                      in Linear, then create the app.
+                      {hasConfiguredCredentials
+                        ? 'Paste updated values from your Linear app. Leave a saved value blank to keep it.'
+                        : 'In the new app’s settings, copy the values below.'}
                     </p>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={!publicUrlUsesHttps}
-                    onClick={() =>
-                      window.open(
-                        setup.manifestUrl,
-                        '_blank',
-                        'noopener,noreferrer',
-                      )
-                    }
-                  >
-                    Create Linear app
-                    <ExternalLink />
-                  </Button>
-                </section>
-
-                <section className="space-y-3">
-                  <div>
-                    <h3 className="font-medium">Then save the credentials.</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Copy these values from the new app&apos;s settings.
-                      Roomote encrypts values saved here. After they are saved,
-                      Enable Linear connects the app to your workspace.
-                    </p>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-4">
                     <CredentialField
                       id="linear-client-id"
                       label="Client ID"
@@ -309,13 +317,13 @@ export function LinearOauthSetupDialog({
                   {formError ? (
                     <p className="text-sm text-destructive">{formError}</p>
                   ) : null}
-                </section>
+                </NumberedStep>
               </div>
             )}
 
-            <DialogFooter className="gap-2 sm:justify-between">
-              <div className="flex flex-wrap gap-2">
-                <Button variant="ghost" asChild>
+            <DialogFooter className="gap-2 justify-between">
+              <div className="flex flex-wrap gap-2 just">
+                <Button variant="ghost" size="sm" asChild>
                   <Link
                     href={DOCS_LINEAR_INTEGRATION_URL}
                     target="_blank"
@@ -335,7 +343,7 @@ export function LinearOauthSetupDialog({
                   </Button>
                 ) : null}
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="flex justify-end gap-2 ml-auto">
                 <Button
                   type="button"
                   variant="outline"
