@@ -4,7 +4,6 @@ const {
   persistedEnvVarNamesState,
   deleteDeploymentEnvironmentVariablesMock,
   getPersistedEnvironmentVariableNamesMock,
-  githubInstallationFindFirstMock,
   resolveDeploymentEnvVarMock,
   upsertDeploymentEnvironmentVariablesMock,
 } = vi.hoisted(() => ({
@@ -13,7 +12,6 @@ const {
   persistedEnvVarNamesState: [] as string[],
   deleteDeploymentEnvironmentVariablesMock: vi.fn(),
   getPersistedEnvironmentVariableNamesMock: vi.fn(),
-  githubInstallationFindFirstMock: vi.fn(),
   resolveDeploymentEnvVarMock: vi.fn(),
   upsertDeploymentEnvironmentVariablesMock: vi.fn(),
 }));
@@ -32,11 +30,6 @@ vi.mock('../environment-variables', () => ({
 }));
 vi.mock('@roomote/db/server', () => ({
   db: {
-    query: {
-      githubInstallations: {
-        findFirst: githubInstallationFindFirstMock,
-      },
-    },
     transaction: async (operation: (tx: unknown) => Promise<unknown>) =>
       operation({
         delete: () => ({
@@ -62,7 +55,6 @@ vi.mock('@roomote/db/server', () => ({
     userId: 'userId',
   },
   deploymentMcpEnablements: { mcpId: 'mcpId' },
-  githubInstallations: { suspendedAt: 'suspendedAt' },
 }));
 vi.mock('@roomote/sdk/server', () => ({
   findLinearDeploymentMcpConnection: vi.fn(),
@@ -93,7 +85,6 @@ describe('Linear OAuth setup', () => {
       async () => persistedEnvVarNamesState,
     );
     resolveDeploymentEnvVarMock.mockResolvedValue(null);
-    githubInstallationFindFirstMock.mockResolvedValue(null);
   });
 
   it('builds a private Linear app manifest for this deployment', async () => {
@@ -125,19 +116,6 @@ describe('Linear OAuth setup', () => {
         resourceTypes: ['AgentSessionEvent'],
       },
     });
-  });
-
-  it('uses the active GitHub installation account as the Linear developer', async () => {
-    githubInstallationFindFirstMock.mockResolvedValue({
-      accountLogin: 'roomote-app',
-    });
-
-    const setup = await getLinearOauthSetupCommand(ADMIN);
-    const manifest = JSON.parse(
-      new URL(setup.manifestUrl).searchParams.get('manifest')!,
-    );
-
-    expect(manifest.developer).toEqual({ name: 'roomote-app[bot]' });
   });
 
   it('identifies credentials saved in Roomote separately from runtime values', async () => {
