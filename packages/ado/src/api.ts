@@ -603,9 +603,9 @@ function compactAdoProviderMessage(message: string): string {
 /**
  * What an admin should actually do about a rejected credential. Entra tokens
  * are minted from the `.default` scope, so an app registration that was never
- * granted the Azure DevOps API permissions — or whose newly added permissions
+ * granted the Azure DevOps API permissions, or whose newly added permissions
  * were never saved in the Azure portal, or that was never added to the
- * organization — authenticates fine and fails on every API call instead.
+ * organization, authenticates fine and fails on every API call instead.
  *
  * This surfaces as a toast: a short lead-in, then Azure DevOps' own
  * (GUID-compacted) explanation, then one clipped action. The permission names
@@ -993,7 +993,7 @@ export async function validateAdoToken(params: {
 /**
  * Verifies a Microsoft Entra service principal end to end: the tenant issues a
  * client-credentials token, then that token makes a real Azure DevOps call.
- * The token request only proves the client id/secret/tenant are right — the
+ * The token request only proves the client id/secret/tenant are right; the
  * `.default` scope succeeds no matter which API permissions were consented, so
  * the second step is the one that catches a permission-less app registration.
  */

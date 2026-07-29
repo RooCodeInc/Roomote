@@ -868,7 +868,7 @@ export async function assertValidSourceControlConfigInput(params: {
   // `||`, not `??`, on every resolution above and below: the Settings form
   // submits an empty string for each field already satisfied by a runtime env
   // var, and `??` would keep that empty string instead of falling back to the
-  // configured value — which silently skipped the whole probe.
+  // configured value, which silently skipped the whole probe.
   const nextAdoOrganization =
     params.values?.['ADO_ORGANIZATION']?.trim() ||
     (await Ado.resolveAdoOrganization());
@@ -889,7 +889,7 @@ export async function assertValidSourceControlConfigInput(params: {
   // Every mode is verified with one real Azure DevOps call before the values
   // are persisted. Both Entra modes request the `.default` scope, so a token
   // is issued regardless of which API permissions the app registration was
-  // granted — without this probe a permission-less registration saves cleanly
+  // granted. Without this probe a permission-less registration saves cleanly
   // and 401s on every later call.
   if (nextAdoAuthMode === 'pat') {
     if (nextAdoToken) {

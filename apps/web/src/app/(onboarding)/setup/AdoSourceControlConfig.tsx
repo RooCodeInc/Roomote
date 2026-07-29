@@ -127,9 +127,9 @@ export function AdoSourceControlInstructions({
         <span className="font-semibold text-foreground">
           save the permissions
         </span>{' '}
-        and grant admin consent for the tenant — Azure does not apply
-        permissions until they are saved, and a missing one only shows up later
-        as a 401 when Roomote syncs repositories.
+        and grant admin consent for the tenant. Azure does not apply permissions
+        until they are saved, and a missing one only shows up later as a 401
+        when Roomote syncs repositories.
       </p>
       {authMode === 'delegated' && (
         <>

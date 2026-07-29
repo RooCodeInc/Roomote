@@ -571,7 +571,7 @@ describe('source-control commands', () => {
   it('probes runtime-configured Entra credentials the form submits as blank', async () => {
     // The Settings form sends an empty string for every field already
     // satisfied by a runtime env var. Falling back on those blanks is what
-    // makes the probe run at all — otherwise the whole check is skipped and
+    // makes the probe run at all; otherwise the whole check is skipped and
     // an unusable credential saves cleanly.
     mockResolveAdoOrganization.mockResolvedValue('acme');
     mockResolveDeploymentEnvVar.mockImplementation(
