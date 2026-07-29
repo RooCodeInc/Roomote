@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import {
   TeamsBotCredentialValidationError,
   validateTeamsBotCredentials,
@@ -166,26 +164,38 @@ export type TeamsBotCredentialCheck = {
   message: string | null;
 };
 
+type TeamsBotCredentialIdentity = Pick<
+  TeamsBotRuntimeCredentials,
+  | 'botAppId'
+  | 'botAppPassword'
+  | 'botTenantId'
+  | 'botTokenEndpoint'
+  | 'botOauthScope'
+>;
+
 let cachedStatusCheck: {
-  key: string;
+  credentials: TeamsBotCredentialIdentity;
   value: TeamsBotCredentialCheck;
   expiresAtMs: number;
 } | null = null;
 
-function getCredentialCacheKey(
-  credentials: TeamsBotRuntimeCredentials,
-): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify([
-        credentials.botAppId,
-        credentials.botAppPassword,
-        credentials.botTenantId,
-        credentials.botTokenEndpoint,
-        credentials.botOauthScope,
-      ]),
-    )
-    .digest('hex');
+/**
+ * Compare the resolved tuple directly instead of digesting it. A fast hash
+ * over a client secret is indistinguishable from insecure password hashing,
+ * and an exact comparison answers "are these the same credentials?" without
+ * the collision surface a digest would add.
+ */
+function isSameCredentialIdentity(
+  a: TeamsBotCredentialIdentity,
+  b: TeamsBotCredentialIdentity,
+): boolean {
+  return (
+    a.botAppId === b.botAppId &&
+    a.botAppPassword === b.botAppPassword &&
+    a.botTenantId === b.botTenantId &&
+    a.botTokenEndpoint === b.botTokenEndpoint &&
+    a.botOauthScope === b.botOauthScope
+  );
 }
 
 /**
@@ -201,10 +211,13 @@ export async function checkTeamsBotCredentials(
     return { status: 'unchecked', message: null };
   }
 
-  const key = getCredentialCacheKey(credentials);
   const nowMs = Date.now();
 
-  if (cachedStatusCheck?.key === key && cachedStatusCheck.expiresAtMs > nowMs) {
+  if (
+    cachedStatusCheck &&
+    cachedStatusCheck.expiresAtMs > nowMs &&
+    isSameCredentialIdentity(cachedStatusCheck.credentials, credentials)
+  ) {
     return cachedStatusCheck.value;
   }
 
@@ -239,7 +252,13 @@ export async function checkTeamsBotCredentials(
   }
 
   cachedStatusCheck = {
-    key,
+    credentials: {
+      botAppId: credentials.botAppId,
+      botAppPassword: credentials.botAppPassword,
+      botTenantId: credentials.botTenantId,
+      botTokenEndpoint: credentials.botTokenEndpoint,
+      botOauthScope: credentials.botOauthScope,
+    },
     value,
     expiresAtMs: nowMs + STATUS_CHECK_CACHE_TTL_MS,
   };

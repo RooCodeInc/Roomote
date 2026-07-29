@@ -183,4 +183,15 @@ describe('getTeamsIntegrationStatusCommand', () => {
 
     expect(mockValidateTeamsBotCredentials).toHaveBeenCalledTimes(1);
   });
+
+  it('re-checks when only the client secret changed', async () => {
+    await getTeamsIntegrationStatusCommand(mockAuth);
+    mockResolveTeamsBotRuntimeCredentials.mockResolvedValue(
+      buildCredentials({ botAppPassword: 'rotated-app-password' }),
+    );
+
+    await getTeamsIntegrationStatusCommand(mockAuth);
+
+    expect(mockValidateTeamsBotCredentials).toHaveBeenCalledTimes(2);
+  });
 });
