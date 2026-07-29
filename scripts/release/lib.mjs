@@ -185,7 +185,6 @@ export function extractChangelogSection(changelogMarkdown, version) {
 const DISCORD_EMBED_TITLE_LIMIT = 256;
 const DISCORD_EMBED_DESCRIPTION_LIMIT = 4096;
 const ROOMOTE_BRAND_COLOR = 0xb0cd26;
-const ROOMOTE_DEVELOPMENT_COLOR = 0x20bbc9;
 
 function truncateDiscordText(value, limit) {
   if (value.length <= limit) return value;
@@ -249,74 +248,6 @@ export function buildDiscordReleasePayload(release) {
 
   return {
     username: 'Roomote Releases',
-    allowed_mentions: { parse: [] },
-    embeds: [embed],
-  };
-}
-
-/**
- * Build the Discord webhook payload for a successful branch image publish.
- *
- * @param {{
- *   branch: 'develop' | 'main',
- *   commitMessage?: string | null,
- *   committedAt?: string | null,
- *   repository: string,
- *   sha: string,
- *   version: string
- * }} build
- */
-export function buildDiscordBuildPayload(build) {
-  if (!build || typeof build !== 'object') {
-    throw new TypeError('Build data is required');
-  }
-
-  const branch = build.branch;
-  const repository =
-    typeof build.repository === 'string' ? build.repository.trim() : '';
-  const sha = typeof build.sha === 'string' ? build.sha.trim() : '';
-  const version =
-    typeof build.version === 'string' ? build.version.trim() : '';
-  if (
-    (branch !== 'develop' && branch !== 'main') ||
-    !repository ||
-    !sha ||
-    !version
-  ) {
-    throw new TypeError(
-      'Build branch, repository, sha, and version are required',
-    );
-  }
-
-  const environment = branch === 'develop' ? 'Development' : 'Main';
-  const commitUrl = `https://github.com/${repository}/commit/${sha}`;
-  const commitMessage =
-    typeof build.commitMessage === 'string' && build.commitMessage.trim()
-      ? build.commitMessage.trim()
-      : 'Published from the latest branch commit.';
-  const description = truncateDiscordText(
-    commitMessage,
-    DISCORD_EMBED_DESCRIPTION_LIMIT,
-  );
-  const embed = {
-    title: `${environment} build is ready`,
-    url: commitUrl,
-    description,
-    color:
-      branch === 'develop' ? ROOMOTE_DEVELOPMENT_COLOR : ROOMOTE_BRAND_COLOR,
-    fields: [
-      { name: 'Branch', value: `\`${branch}\``, inline: true },
-      { name: 'Image tag', value: `\`${version}\``, inline: true },
-      { name: 'Commit', value: `[${sha.slice(0, 8)}](${commitUrl})`, inline: true },
-    ],
-    footer: { text: 'RooCodeInc/Roomote • GHCR Publish' },
-  };
-  if (typeof build.committedAt === 'string' && build.committedAt.trim()) {
-    embed.timestamp = build.committedAt;
-  }
-
-  return {
-    username: 'Roomote Builds',
     allowed_mentions: { parse: [] },
     embeds: [embed],
   };
