@@ -35,13 +35,19 @@ export type SetupComputeFieldDescriptor = {
    */
   advanced?: boolean;
   /** Optional presentation and validation metadata for operator inputs. */
-  input?: {
-    type: 'number';
-    min?: number;
-    max?: number;
-    step?: number;
-    placeholder?: string;
-  };
+  input?:
+    | {
+        type: 'number';
+        min?: number;
+        max?: number;
+        step?: number;
+        placeholder?: string;
+      }
+    | {
+        type: 'select';
+        options: readonly { value: string; label?: string }[];
+        placeholder?: string;
+      };
   /** Short guidance displayed with advanced provider settings. */
   helpText?: string;
 };
@@ -52,6 +58,12 @@ export function getComputeFieldValidationError(
 ): string | null {
   if (!field.input || value.length === 0) {
     return null;
+  }
+
+  if (field.input.type === 'select') {
+    return field.input.options.some((option) => option.value === value)
+      ? null
+      : `${field.label} must be one of: ${field.input.options.map((option) => option.value).join(', ')}.`;
   }
 
   const parsed = Number(value);
@@ -506,7 +518,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     provider: 'azure',
     label: 'Azure Container Apps',
     description:
-      'Azure Container Apps sandboxes (preview) with memory+disk snapshots and sub-second suspend/resume standby. Auth uses the ambient Azure login (az) or a managed identity — no API key. Requires an Azure sandbox group.',
+      'Azure Container Apps sandboxes (preview) with memory+disk snapshots and sub-second suspend/resume standby. Auth via service principal, managed identity, or ambient az login — no API key. Requires an Azure sandbox group.',
     supportsSnapshots: true,
     fields: [
       {
@@ -563,6 +575,56 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         secret: true,
         category: 'credential',
         advanced: true,
+      },
+      {
+        // Default sandbox size. Per-task memory sizing may override the
+        // memory side; CPU always scales up to satisfy ACA's cores×2Gi tier cap.
+        envVarName: 'AZURE_SANDBOX_SIZE',
+        label: 'Sandbox Size',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: {
+          type: 'select',
+          options: [
+            { value: 'S', label: 'S — 0.5 vCPU / 1 GiB' },
+            { value: 'M', label: 'M — 1 vCPU / 2 GiB (default)' },
+            { value: 'L', label: 'L — 2 vCPU / 4 GiB' },
+          ],
+        },
+        helpText:
+          'Default size for new sandboxes. ACA caps memory at cores × 2Gi, so CPU is raised automatically when a task requests more memory.',
+      },
+      {
+        // Egress proxy TLS inspection mode (ACA portal exposes the same
+        // setting). Partial = only rule-matching traffic inspected — with no
+        // egress rules configured, nothing is TLS-resigned (Java/npm trust
+        // stores work) and non-HTTP traffic (SSH git) flows.
+        envVarName: 'AZURE_SANDBOX_EGRESS_INSPECTION',
+        label: 'Egress TLS Inspection',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: {
+          type: 'select',
+          options: [
+            {
+              value: 'Partial',
+              label: 'Partial — inspect rule-matched only (default)',
+            },
+            {
+              value: 'Full',
+              label: 'Full — inspect everything (TLS resign, no non-HTTP)',
+            },
+            {
+              value: 'Legacy',
+              label: 'Legacy — inspect all, non-HTTP allowed',
+            },
+            { value: 'None', label: 'None — no egress rules applied' },
+          ],
+        },
+        helpText:
+          'Use Full only when wiring deny-default egress rules or header transforms; it TLS-resigns all traffic and blocks non-HTTP (SSH).',
       },
       {
         // Pull credentials for baking the worker disk image from a private

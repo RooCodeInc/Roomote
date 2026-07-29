@@ -29,6 +29,32 @@ import {
 
 const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
 
+/** ACA sandbox size presets (Azure docs: S 0.5 vCPU/1 GiB, M 1/2, L 2/4). */
+const AZURE_SIZE_PRESETS = {
+  S: { cpuMillicores: 500, memoryMiB: 1024 },
+  M: { cpuMillicores: 1000, memoryMiB: 2048 },
+  L: { cpuMillicores: 2000, memoryMiB: 4096 },
+} as const;
+
+type AzureSizePreset = keyof typeof AZURE_SIZE_PRESETS;
+
+function parseAzureSizePreset(
+  value: string | undefined,
+): AzureSizePreset | undefined {
+  return value === 'S' || value === 'M' || value === 'L' ? value : undefined;
+}
+
+function parseAzureEgressInspection(
+  value: string | undefined,
+): 'Legacy' | 'Full' | 'Partial' | 'None' | undefined {
+  return value === 'Legacy' ||
+    value === 'Full' ||
+    value === 'Partial' ||
+    value === 'None'
+    ? value
+    : undefined;
+}
+
 export { getComputeProviderCapabilities } from '@roomote/types';
 
 /**
@@ -352,6 +378,12 @@ export function createComputeProviderClient(
             }
           : undefined);
 
+      // Size preset only fills values the caller didn't set explicitly.
+      const sizePreset = parseAzureSizePreset(envValue('AZURE_SANDBOX_SIZE'));
+      const egressInspection =
+        options.config?.egressTrafficInspection ??
+        parseAzureEgressInspection(envValue('AZURE_SANDBOX_EGRESS_INSPECTION'));
+
       const config: AzureConfig = {
         ...(options.config ?? {}),
         subscriptionId,
@@ -365,6 +397,16 @@ export function createComputeProviderClient(
               managedIdentityClientId
             ? { managedIdentityClientId }
             : {}),
+        ...(sizePreset && options.config?.cpuMillicores === undefined
+          ? { cpuMillicores: AZURE_SIZE_PRESETS[sizePreset].cpuMillicores }
+          : {}),
+        ...(sizePreset && options.config?.memoryMiB === undefined
+          ? { memoryMiB: AZURE_SIZE_PRESETS[sizePreset].memoryMiB }
+          : {}),
+        ...(egressInspection &&
+        options.config?.egressTrafficInspection === undefined
+          ? { egressTrafficInspection: egressInspection }
+          : {}),
       };
 
       return new AzureClient(config);

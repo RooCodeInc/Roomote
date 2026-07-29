@@ -775,6 +775,12 @@ export class AzureClient implements ComputeProviderClient {
             }
           : {}),
       },
+      // Default Partial inspection: no rules configured means no TLS
+      // resigning at all (clean trust stores, SSH allowed). See AzureConfig.
+      egressPolicy: {
+        defaultAction: 'Allow',
+        trafficInspection: this.config.egressTrafficInspection ?? 'Partial',
+      },
       ...(options.labels ? { labels: options.labels } : {}),
     };
   }

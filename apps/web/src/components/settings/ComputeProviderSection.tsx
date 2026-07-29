@@ -307,54 +307,85 @@ export function ComputeProviderSection({
           {field.required === false ? ' (optional)' : ''}
         </label>
         <div className="flex items-center gap-2">
-          <Input
-            id={`${provider.provider}-${field.envVarName}`}
-            secret={isSecretField && !field.runtimeSatisfied}
-            type={isSecretField ? undefined : (field.input?.type ?? 'text')}
-            min={field.input?.min}
-            max={field.input?.max}
-            step={field.input?.step}
-            className="font-mono"
-            value={
-              isSecretField && field.runtimeSatisfied
-                ? MASKED_VALUE
-                : shouldShowSavedValueMask
+          {field.input?.type === 'select' ? (
+            <select
+              id={`${provider.provider}-${field.envVarName}`}
+              className="font-mono flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+              value={field.runtimeSatisfied ? '' : value}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setValues((current) => ({
+                  ...current,
+                  [field.envVarName]: nextValue,
+                }));
+              }}
+              disabled={savePending || field.runtimeSatisfied}
+            >
+              <option value="">
+                {field.runtimeSatisfied
+                  ? 'Managed by environment variable'
+                  : (field.input.placeholder ?? 'Default')}
+              </option>
+              {field.input.options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label ?? option.value}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              id={`${provider.provider}-${field.envVarName}`}
+              secret={isSecretField && !field.runtimeSatisfied}
+              type={isSecretField ? undefined : (field.input?.type ?? 'text')}
+              min={field.input?.min}
+              max={field.input?.max}
+              step={field.input?.step}
+              className="font-mono"
+              value={
+                isSecretField && field.runtimeSatisfied
                   ? MASKED_VALUE
-                  : field.runtimeSatisfied && !isSecretField
-                    ? (field.savedValue ?? value)
-                    : value
-            }
-            onFocus={() => {
-              if (shouldShowSavedValueMask) {
-                setEditingSavedValues((current) => ({
-                  ...current,
-                  [field.envVarName]: true,
-                }));
+                  : shouldShowSavedValueMask
+                    ? MASKED_VALUE
+                    : field.runtimeSatisfied && !isSecretField
+                      ? (field.savedValue ?? value)
+                      : value
               }
-            }}
-            onBlur={() => {
-              if (isSecretField && field.savedSatisfied && value.length === 0) {
-                setEditingSavedValues((current) => ({
+              onFocus={() => {
+                if (shouldShowSavedValueMask) {
+                  setEditingSavedValues((current) => ({
+                    ...current,
+                    [field.envVarName]: true,
+                  }));
+                }
+              }}
+              onBlur={() => {
+                if (
+                  isSecretField &&
+                  field.savedSatisfied &&
+                  value.length === 0
+                ) {
+                  setEditingSavedValues((current) => ({
+                    ...current,
+                    [field.envVarName]: false,
+                  }));
+                }
+              }}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setValues((current) => ({
                   ...current,
-                  [field.envVarName]: false,
+                  [field.envVarName]: nextValue,
                 }));
+              }}
+              placeholder={
+                field.runtimeSatisfied
+                  ? 'Managed by environment variable'
+                  : (field.input?.placeholder ?? field.label)
               }
-            }}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              setValues((current) => ({
-                ...current,
-                [field.envVarName]: nextValue,
-              }));
-            }}
-            placeholder={
-              field.runtimeSatisfied
-                ? 'Managed by environment variable'
-                : (field.input?.placeholder ?? field.label)
-            }
-            disabled={savePending || field.runtimeSatisfied}
-            data-1p-ignore
-          />
+              disabled={savePending || field.runtimeSatisfied}
+              data-1p-ignore
+            />
+          )}
           {(field.runtimeSatisfied || field.savedSatisfied) && <Check />}
         </div>
         {field.helpText ? (

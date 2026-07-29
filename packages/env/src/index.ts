@@ -268,6 +268,10 @@ const serverSchema = {
   AZURE_CLIENT_SECRET: z.string().optional(),
   AZURE_SANDBOX_REGISTRY_USERNAME: z.string().optional(),
   AZURE_SANDBOX_REGISTRY_TOKEN: z.string().optional(),
+  AZURE_SANDBOX_SIZE: z.enum(['S', 'M', 'L']).optional(),
+  AZURE_SANDBOX_EGRESS_INSPECTION: z
+    .enum(['Legacy', 'Full', 'Partial', 'None'])
+    .optional(),
   // E2B caps sandbox lifetime per plan (1 hour on Hobby, 24 hours on Pro);
   // requesting more fails sandbox creation with a 400, so the controller
   // clamps the provider-side timeout to this ceiling. Raise it only when the
@@ -503,6 +507,8 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'AZURE_CLIENT_SECRET',
   'AZURE_SANDBOX_REGISTRY_USERNAME',
   'AZURE_SANDBOX_REGISTRY_TOKEN',
+  'AZURE_SANDBOX_SIZE',
+  'AZURE_SANDBOX_EGRESS_INSPECTION',
   'DOCKER_WORKER_NETWORK',
   'DOCKER_WORKER_RELEASE_PATH',
   'GITHUB_AUTOMATED_SKIP_REPOS',

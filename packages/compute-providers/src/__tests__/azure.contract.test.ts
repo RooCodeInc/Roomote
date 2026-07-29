@@ -157,6 +157,7 @@ describe('azure adapter contract', () => {
         autoSuspendPolicy: { enabled: false, interval: 0, mode: 'Memory' },
         autoDeletePolicy: { enabled: true, deleteIntervalInSeconds: 3600 },
       },
+      egressPolicy: { defaultAction: 'Allow', trafficInspection: 'Partial' },
       labels: { app_environment: 'env-1' },
     });
 

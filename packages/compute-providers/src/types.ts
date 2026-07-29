@@ -390,6 +390,15 @@ export interface AzureConfig {
   cpuMillicores?: number;
   /** Memory request in MiB (default 2048). */
   memoryMiB?: number;
+  /**
+   * Egress proxy TLS inspection mode for new sandboxes. Defaults to
+   * `Partial`: Roomote configures no egress rules, and with the service
+   * default (`Full`) the proxy TLS-resigns ALL outbound traffic (breaking
+   * language-specific trust stores such as Java's cacerts) and blocks
+   * non-HTTP traffic (breaking SSH git). Set `Full` when wiring deny-default
+   * egress rules or header transforms.
+   */
+  egressTrafficInspection?: 'Legacy' | 'Full' | 'Partial' | 'None';
   /** Test seam: token provider override (scope `https://dynamicsessions.io/.default`). */
   tokenProvider?: { getToken(): Promise<string> };
   /** Test seam; defaults to global fetch. */

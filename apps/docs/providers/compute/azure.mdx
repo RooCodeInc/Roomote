@@ -64,13 +64,17 @@ AZURE_CLIENT_SECRET=...
 # Worker image registry pull credentials (only for private images)
 AZURE_SANDBOX_REGISTRY_USERNAME=...
 AZURE_SANDBOX_REGISTRY_TOKEN=...
+# Sandbox size (S/M/L, default M) and egress TLS inspection (default Partial)
+AZURE_SANDBOX_SIZE=...
+AZURE_SANDBOX_EGRESS_INSPECTION=...
 ```
 
 `AZURE_SANDBOX_DISK_IMAGE` selects the worker disk image. Leave it unset to
 let Roomote provision it automatically: the setup wizard and the Settings >
 Sandboxes page bake a disk image from the published worker OCI image after
-the Azure settings are saved (the image must be publicly pullable — disk
-image registration has no per-call registry credentials).
+the Azure settings are saved. Private registries (e.g. a private GHCR
+worker image) need `AZURE_SANDBOX_REGISTRY_USERNAME` +
+`AZURE_SANDBOX_REGISTRY_TOKEN`.
 
 ## Snapshots and standby
 
@@ -79,6 +83,19 @@ sub-second time with processes still alive. Task standby uses the same
 memory-preserving suspend/resume, and sandboxes bill storage-only while
 suspended. Preview port URLs do not survive a snapshot restore; Roomote
 re-adds ports after resume.
+
+## Egress TLS inspection
+
+The ACA egress proxy can TLS-inspect (MITM) outbound traffic. Roomote creates
+sandboxes with `trafficInspection: Partial`, so with no egress rules
+configured nothing is inspected: package managers (npm, Maven/Gradle, pip)
+see normal public certificate chains, and non-HTTP traffic such as SSH git
+works. The service default (`Full`) resigns all TLS traffic with the proxy CA
+(`/etc/ssl/certs/adc-egress-proxy-ca.crt`, preinstalled in the system store
+and referenced by `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE`) and blocks non-HTTP
+traffic; choose `Full` only when wiring deny-default egress rules or header
+transforms, and note Java's per-JDK cacerts still needs a manual import in
+that mode.
 
 ## Verify setup
 
