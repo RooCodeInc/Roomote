@@ -13,6 +13,7 @@ import {
   Alert,
   AlertDescription,
   Button,
+  Check,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -24,6 +25,7 @@ import {
   Label,
   Skeleton,
   Spinner,
+  Trash,
   TriangleAlert,
 } from '@/components/system';
 import { NumberedStep } from '@/app/(onboarding)/setup/NumberedStep';
@@ -76,9 +78,7 @@ function CredentialField({
     ? status.savedInRoomote
       ? 'Managed by the deployment environment. A saved fallback is also stored in Roomote.'
       : 'Managed by the deployment environment.'
-    : status.configured
-      ? 'Already saved. Leave blank to keep the current value.'
-      : null;
+    : null;
 
   return (
     <div className="space-y-1.5">
@@ -278,7 +278,7 @@ export function LinearOauthSetupDialog({
                   </NumberedStep>
                 ) : null}
 
-                <NumberedStep number={hasConfiguredCredentials ? 1 : 2}>
+                <NumberedStep number={hasConfiguredCredentials ? -1 : 2}>
                   <div>
                     <h3 className="font-medium">
                       {hasConfiguredCredentials
@@ -325,25 +325,27 @@ export function LinearOauthSetupDialog({
 
             <DialogFooter className="gap-2 justify-between">
               <div className="flex flex-wrap gap-2 just">
-                <Button variant="ghost" size="sm" asChild>
-                  <Link
-                    href={DOCS_LINEAR_INTEGRATION_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Setup guide
-                    <ExternalLink />
-                  </Link>
-                </Button>
                 {hasSavedCredentials ? (
                   <Button
                     type="button"
                     variant="destructive"
                     onClick={() => setRemoveConfirmationOpen(true)}
                   >
+                    <Trash />
                     Remove saved credentials
                   </Button>
-                ) : null}
+                ) : (
+                  <Button variant="ghost" size="sm" asChild>
+                    <Link
+                      href={DOCS_LINEAR_INTEGRATION_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Setup guide
+                      <ExternalLink />
+                    </Link>
+                  </Button>
+                )}
               </div>
               <div className="flex justify-end gap-2 ml-auto">
                 <Button
@@ -358,8 +360,8 @@ export function LinearOauthSetupDialog({
                   disabled={!setup || saveSetup.isPending}
                   onClick={save}
                 >
-                  {saveSetup.isPending ? <Spinner size="sm" /> : null}
-                  Save credentials
+                  {saveSetup.isPending ? <Spinner size="sm" /> : <Check />}
+                  Finish
                 </Button>
               </div>
             </DialogFooter>
