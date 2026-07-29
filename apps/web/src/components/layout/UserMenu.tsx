@@ -158,7 +158,7 @@ function SignedInUserMenu({
             <span className="grow">About Roomote</span>
             {displayVersion && (
               <span className="text-muted-foreground text-xs">
-                v{displayVersion}
+                {displayVersion}
               </span>
             )}
           </DropdownMenuItem>
