@@ -34,7 +34,6 @@ import {
   HandMetal,
   Info,
   Loader2,
-  Plus,
   Textarea,
 } from '@/components/system';
 
@@ -359,7 +358,7 @@ function AgentRepositorySelectionSubview({
   return (
     <>
       <p className="text-sm text-muted-foreground">
-        Pick the repos needed for the first environment you want to set up.
+        Pick the repo(s) needed for the environment you want to set up.
       </p>
 
       <Card>
@@ -377,15 +376,14 @@ function AgentRepositorySelectionSubview({
                 </AlertDescription>
               </Alert>
               <UpdateGitHubReposHint />
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                onClick={onOpenCreateRepo}
-              >
-                <Plus className="size-3" />
-                Create a new repository
-              </Button>
+              <EnvironmentRepositorySelector
+                repositories={repositories}
+                selectedRepositoryIds={selectedRepositoryIds}
+                onToggleRepository={onToggleRepository}
+                onCreateRepository={onOpenCreateRepo}
+                inputPrefix="create-environment-repository"
+                heightClassName="max-h-[calc(var(--effective-viewport-height)-17rem)] overflow-auto"
+              />
             </div>
           ) : (
             <div className="space-y-4">
@@ -393,21 +391,13 @@ function AgentRepositorySelectionSubview({
                 repositories={repositories}
                 selectedRepositoryIds={selectedRepositoryIds}
                 onToggleRepository={onToggleRepository}
+                onCreateRepository={onOpenCreateRepo}
                 inputPrefix="create-environment-repository"
                 heightClassName="max-h-[calc(var(--effective-viewport-height)-17rem)] overflow-auto"
               />
 
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <UpdateGitHubReposHint />
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  onClick={onOpenCreateRepo}
-                >
-                  <Plus className="size-3" />
-                  Create a new repository
-                </Button>
               </div>
 
               {allSelectedRepositoriesAreEmpty ? (

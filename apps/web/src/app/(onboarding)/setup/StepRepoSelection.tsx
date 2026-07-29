@@ -40,7 +40,7 @@ import {
   X,
 } from '@/components/system';
 import {
-  CreateGitHubRepoButton,
+  CreateGitHubRepoDialog,
   type DetectedRepository,
 } from '@/components/github/CreateGitHubRepoDialog';
 import { EnvironmentRepositorySelector } from '@/components/settings/environments/EnvironmentRepositorySelector';
@@ -110,6 +110,7 @@ export function StepRepoSelection({
     initialSelectedModelId ?? undefined,
   );
   const [repositoryFilter, setRepositoryFilter] = useState('');
+  const [createRepoDialogOpen, setCreateRepoDialogOpen] = useState(false);
   const [setupGuidance, setSetupGuidance] = useState(initialSetupGuidance);
   const [isRefreshPending, setIsRefreshPending] = useState(false);
   const refreshPromiseRef = useRef<Promise<unknown> | null>(null);
@@ -297,62 +298,72 @@ export function StepRepoSelection({
 
   if (sortedRepositories.length === 0) {
     return (
-      <div className="relative w-full max-w-3xl space-y-6 py-2 md:py-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <StepTitle text={REPO_SELECTION_STEP.title} />
-        </div>
-        <div className="space-y-2">
-          <p className="font-semibold">No repositories available yet.</p>
-          <p>
-            {PRODUCT_NAME} is connected to GitHub, but this deployment does not
-            currently have any accessible repositories to use for setup.
-          </p>
-          <div className="flex flex-col md:flex-row gap-2 items-center mt-6">
-            <Button
-              type="button"
-              variant="default"
-              className="w-full md:w-auto"
-              onClick={() => void refreshRepositories()}
-              disabled={isRefreshingRepositories}
-            >
-              {isRefreshingRepositories ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <RefreshCcw />
-              )}
-              Refresh
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full md:w-auto"
-              onClick={handleManageGitHubAccess}
-              disabled={connectGitHub.isPending}
-            >
-              {connectGitHub.isPending ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <Github />
-              )}
-              Edit GitHub Access
-            </Button>
-            <CreateGitHubRepoButton
-              size="default"
-              className="w-full md:w-auto"
-              onRepositoryDetected={selectDetectedRepository}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full md:w-auto"
-              onClick={onSkip}
-            >
-              Skip
-            </Button>
+      <>
+        <div className="relative w-full max-w-3xl space-y-6 py-2 md:py-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <StepTitle text={REPO_SELECTION_STEP.title} />
           </div>
-          <p className="text-sm text-muted-foreground">Not recommended</p>
+          <div className="space-y-2">
+            <p className="font-semibold">No repositories available yet.</p>
+            <p>
+              {PRODUCT_NAME} is connected to GitHub, but this deployment does
+              not currently have any accessible repositories to use for setup.
+            </p>
+            <EnvironmentRepositorySelector
+              repositories={[]}
+              selectedRepositoryIds={selectedRepositoryIds}
+              onToggleRepository={toggleRepository}
+              onCreateRepository={() => setCreateRepoDialogOpen(true)}
+              inputPrefix="setup-repository"
+              heightClassName="h-auto"
+            />
+            <div className="flex flex-col md:flex-row gap-2 items-center mt-6">
+              <Button
+                type="button"
+                variant="default"
+                className="w-full md:w-auto"
+                onClick={() => void refreshRepositories()}
+                disabled={isRefreshingRepositories}
+              >
+                {isRefreshingRepositories ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <RefreshCcw />
+                )}
+                Refresh
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full md:w-auto"
+                onClick={handleManageGitHubAccess}
+                disabled={connectGitHub.isPending}
+              >
+                {connectGitHub.isPending ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Github />
+                )}
+                Edit GitHub Access
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full md:w-auto"
+                onClick={onSkip}
+              >
+                Skip
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">Not recommended</p>
+          </div>
         </div>
-      </div>
+        <CreateGitHubRepoDialog
+          open={createRepoDialogOpen}
+          onOpenChange={setCreateRepoDialogOpen}
+          onRepositoryDetected={selectDetectedRepository}
+        />
+      </>
     );
   }
 
@@ -369,250 +380,257 @@ export function StepRepoSelection({
     .join(', ');
 
   return (
-    <div className="relative w-full max-w-4xl space-y-6 py-2 md:py-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <StepTitle text={REPO_SELECTION_STEP.title} />
-      </div>
-      <div className="space-y-3 text-foreground">
-        {!showForm && (
-          <div className="space-y-2 flex gap-2 items-start">
-            <Info className="size-4 shrink-0 mt-1" />
-            <p>
-              <span className="font-semibold">
-                {PRODUCT_NAME} needs environments to verify its work.
-              </span>
-              <br />
-              That lets it run your app locally, click around, make API calls,
-              take screenshots.
-            </p>
-          </div>
-        )}
-        <p className={`text-foreground ${!showForm && 'ml-6'}`}>
-          Pick the repo(s) needed for the first env to set up.
-          <br />
-          Roomote will install dependencies and figure it all out on its own.
-        </p>
-      </div>
+    <>
+      <div className="relative w-full max-w-4xl space-y-6 py-2 md:py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <StepTitle text={REPO_SELECTION_STEP.title} />
+        </div>
+        <div className="space-y-3 text-foreground">
+          {!showForm && (
+            <div className="space-y-2 flex gap-2 items-start">
+              <Info className="size-4 shrink-0 mt-1" />
+              <p>
+                <span className="font-semibold">
+                  {PRODUCT_NAME} needs environments to verify its work.
+                </span>
+                <br />
+                That lets it run your app locally, click around, make API calls,
+                take screenshots.
+              </p>
+            </div>
+          )}
+          <p className={`text-foreground ${!showForm && 'ml-6'}`}>
+            Pick the repo(s) needed for the first env to set up.
+            <br />
+            Roomote will install dependencies and figure it all out on its own.
+          </p>
+        </div>
 
-      {retryCopy ? (
-        <Alert variant="warning">
-          <AlertTriangle className="size-4" />
-          <AlertDescription>
-            {/* Single child: AlertDescription lays out its children with
+        {retryCopy ? (
+          <Alert variant="warning">
+            <AlertTriangle className="size-4" />
+            <AlertDescription>
+              {/* Single child: AlertDescription lays out its children with
                 flex, which would split loose text and the button apart. */}
-            <p>
-              {retryCopy}
-              {retryReason === 'task-failed' && onReviewComputeProvider ? (
-                <>
-                  {' '}
-                  If the run failed before doing any work, you can also{' '}
+              <p>
+                {retryCopy}
+                {retryReason === 'task-failed' && onReviewComputeProvider ? (
+                  <>
+                    {' '}
+                    If the run failed before doing any work, you can also{' '}
+                    <button
+                      type="button"
+                      className="underline underline-offset-4"
+                      onClick={onReviewComputeProvider}
+                    >
+                      review your sandbox provider
+                    </button>
+                    .
+                  </>
+                ) : null}
+              </p>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {computeProvisioningError ? (
+          <Alert variant="destructive">
+            <AlertTriangle className="size-4" />
+            <AlertDescription>
+              <p>
+                Sandbox provider provisioning failed: {computeProvisioningError}{' '}
+                {onRetryComputeProvisioning ? (
                   <button
                     type="button"
-                    className="underline underline-offset-4"
-                    onClick={onReviewComputeProvider}
+                    className="font-medium underline underline-offset-4"
+                    onClick={onRetryComputeProvisioning}
                   >
-                    review your sandbox provider
-                  </button>
-                  .
-                </>
-              ) : null}
-            </p>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {computeProvisioningError ? (
-        <Alert variant="destructive">
-          <AlertTriangle className="size-4" />
-          <AlertDescription>
-            <p>
-              Sandbox provider provisioning failed: {computeProvisioningError}{' '}
-              {onRetryComputeProvisioning ? (
-                <button
-                  type="button"
-                  className="font-medium underline underline-offset-4"
-                  onClick={onRetryComputeProvisioning}
-                >
-                  Retry provisioning
-                </button>
-              ) : null}
-            </p>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Card className="p-3">
-        <CardContent>
-          <div className="space-y-3">
-            {showRepositoryFilter ? (
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="text"
-                  value={repositoryFilter}
-                  onChange={(event) =>
-                    setRepositoryFilter(event.currentTarget.value)
-                  }
-                  placeholder="Filter repositories"
-                  aria-label="Filter repositories"
-                  className="pr-9 pl-9"
-                />
-                {repositoryFilter ? (
-                  <button
-                    type="button"
-                    onClick={() => setRepositoryFilter('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
-                    aria-label="Clear repository filter"
-                  >
-                    <X className="size-4" />
+                    Retry provisioning
                   </button>
                 ) : null}
-              </div>
-            ) : null}
+              </p>
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
-            {filteredRepositories.length > 0 ? (
+        <Card className="p-3">
+          <CardContent>
+            <div className="space-y-3">
+              {showRepositoryFilter ? (
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    value={repositoryFilter}
+                    onChange={(event) =>
+                      setRepositoryFilter(event.currentTarget.value)
+                    }
+                    placeholder="Filter repositories"
+                    aria-label="Filter repositories"
+                    className="pr-9 pl-9"
+                  />
+                  {repositoryFilter ? (
+                    <button
+                      type="button"
+                      onClick={() => setRepositoryFilter('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
+                      aria-label="Clear repository filter"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+
               <EnvironmentRepositorySelector
                 repositories={filteredRepositories}
                 selectedRepositoryIds={selectedRepositoryIds}
                 onToggleRepository={toggleRepository}
+                onCreateRepository={() => setCreateRepoDialogOpen(true)}
                 inputPrefix="setup-repository"
                 heightClassName="max-h-[calc(var(--effective-viewport-height)-40rem)] md:h-[18.75rem]"
               />
-            ) : (
-              <div className="rounded-md border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                No repositories match that filter.
-              </div>
-            )}
-          </div>
-          {allSelectedRepositoriesAreEmpty ? (
-            <Alert>
-              <Info className="size-4" />
-              <AlertDescription className="flex-col items-start gap-1">
-                <p>
-                  {emptyRepositoryWarningCopy} {PRODUCT_NAME} will push an
-                  initial commit and set up a basic environment — then you can
-                  start building with your first task.
-                </p>
-                <p className="font-medium text-foreground">
-                  {selectedEmptyRepositoryNames}
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void refreshRepositories()}
-                  disabled={connectGitHub.isPending || isRefreshingRepositories}
-                >
-                  {isRefreshingRepositories ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <RotateCw />
-                  )}
-                  Refresh list
-                </Button>
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {showForm ? (
-            <div className="space-y-2 flex flex-col items-start">
-              <Textarea
-                value={setupGuidance}
-                onChange={(event) => setSetupGuidance(event.target.value)}
-                placeholder={ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_PLACEHOLDER}
-                maxLength={ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH}
-                disabled={isBusy}
-                className="h-20 min-h-20 resize-none"
-              />
-              <p
-                className={cn(
-                  'text-muted-foreground self-stretch text-right text-xs',
-                  setupGuidanceLength > SETUP_GUIDANCE_WARNING_THRESHOLD &&
-                    'text-warning-foreground',
-                )}
-              >
-                {setupGuidanceLength >
-                  ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH * 0.8 &&
-                  charCounter}
-              </p>
-              <SetupFooter
-                onBack={onBack}
-                backDisabled={isBusy}
-                className="w-full flex-wrap"
-              >
-                <ModelSelect
-                  value={effectiveSelectedModelId}
-                  onValueChange={setSelectedModelId}
-                  disabled={isBusy}
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => void handleContinue()}
-                  disabled={isBusy}
-                >
-                  {isBusy && <Loader2 className="animate-spin" />}
-                  Continue
-                  <ArrowRight />
-                </Button>
-                <p className="text-sm text-muted-foreground ml-auto">
-                  Or, if you must,
-                </p>
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className="p-0! -ml-1"
-                  onClick={onSkip}
-                >
-                  do this later
-                </Button>
-              </SetupFooter>
+              {filteredRepositories.length === 0 ? (
+                <div className="rounded-md border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                  No repositories match that filter.
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </CardContent>
-      </Card>
-      {!showForm ? (
-        <SetupFooter onBack={onBack} className="flex-wrap">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => void refreshRepositories()}
-            disabled={connectGitHub.isPending || isRefreshingRepositories}
-          >
-            {isRefreshingRepositories ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <RotateCw />
-            )}
-            Refresh list
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleManageGitHubAccess}
-            disabled={connectGitHub.isPending}
-          >
-            {connectGitHub.isPending ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <Github />
-            )}
-            Edit GitHub Access
-          </Button>
-          <CreateGitHubRepoButton
-            size="sm"
-            onRepositoryDetected={selectDetectedRepository}
-          />
-          <Button type="button" variant="outline" size="sm" onClick={onSkip}>
-            Skip
-          </Button>
-          <p className="self-center text-sm text-muted-foreground">
-            Not recommended
-          </p>
-        </SetupFooter>
-      ) : null}
-    </div>
+            {allSelectedRepositoriesAreEmpty ? (
+              <Alert>
+                <Info className="size-4" />
+                <AlertDescription className="flex-col items-start gap-1">
+                  <p>
+                    {emptyRepositoryWarningCopy} {PRODUCT_NAME} will push an
+                    initial commit and set up a basic environment — then you can
+                    start building with your first task.
+                  </p>
+                  <p className="font-medium text-foreground">
+                    {selectedEmptyRepositoryNames}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void refreshRepositories()}
+                    disabled={
+                      connectGitHub.isPending || isRefreshingRepositories
+                    }
+                  >
+                    {isRefreshingRepositories ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <RotateCw />
+                    )}
+                    Refresh list
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {showForm ? (
+              <div className="space-y-2 flex flex-col items-start">
+                <Textarea
+                  value={setupGuidance}
+                  onChange={(event) => setSetupGuidance(event.target.value)}
+                  placeholder={
+                    ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_PLACEHOLDER
+                  }
+                  maxLength={ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH}
+                  disabled={isBusy}
+                  className="h-20 min-h-20 resize-none"
+                />
+                <p
+                  className={cn(
+                    'text-muted-foreground self-stretch text-right text-xs',
+                    setupGuidanceLength > SETUP_GUIDANCE_WARNING_THRESHOLD &&
+                      'text-warning-foreground',
+                  )}
+                >
+                  {setupGuidanceLength >
+                    ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH * 0.8 &&
+                    charCounter}
+                </p>
+                <SetupFooter
+                  onBack={onBack}
+                  backDisabled={isBusy}
+                  className="w-full flex-wrap"
+                >
+                  <ModelSelect
+                    value={effectiveSelectedModelId}
+                    onValueChange={setSelectedModelId}
+                    disabled={isBusy}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void handleContinue()}
+                    disabled={isBusy}
+                  >
+                    {isBusy && <Loader2 className="animate-spin" />}
+                    Continue
+                    <ArrowRight />
+                  </Button>
+                  <p className="text-sm text-muted-foreground ml-auto">
+                    Or, if you must,
+                  </p>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="p-0! -ml-1"
+                    onClick={onSkip}
+                  >
+                    do this later
+                  </Button>
+                </SetupFooter>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+        {!showForm ? (
+          <SetupFooter onBack={onBack} className="flex-wrap">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void refreshRepositories()}
+              disabled={connectGitHub.isPending || isRefreshingRepositories}
+            >
+              {isRefreshingRepositories ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <RotateCw />
+              )}
+              Refresh list
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleManageGitHubAccess}
+              disabled={connectGitHub.isPending}
+            >
+              {connectGitHub.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Github />
+              )}
+              Edit GitHub Access
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={onSkip}>
+              Skip
+            </Button>
+            <p className="self-center text-sm text-muted-foreground">
+              Not recommended
+            </p>
+          </SetupFooter>
+        ) : null}
+      </div>
+      <CreateGitHubRepoDialog
+        open={createRepoDialogOpen}
+        onOpenChange={setCreateRepoDialogOpen}
+        onRepositoryDetected={selectDetectedRepository}
+      />
+    </>
   );
 }

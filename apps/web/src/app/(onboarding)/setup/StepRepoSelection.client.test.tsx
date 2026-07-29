@@ -113,28 +113,31 @@ vi.mock('@/hooks/source-control', () => ({
 }));
 
 vi.mock('@/components/github/CreateGitHubRepoDialog', () => ({
-  CreateGitHubRepoButton: ({
+  CreateGitHubRepoDialog: ({
+    open,
     onRepositoryDetected,
   }: {
+    open: boolean;
     onRepositoryDetected?: (repository: {
       id: string;
       fullName: string;
       isEmpty?: boolean;
     }) => void;
-  }) => (
-    <button
-      type="button"
-      onClick={() =>
-        onRepositoryDetected?.({
-          id: 'repo-created',
-          fullName: 'acme/created',
-          isEmpty: true,
-        })
-      }
-    >
-      Create a new repository
-    </button>
-  ),
+  }) =>
+    open ? (
+      <button
+        type="button"
+        onClick={() =>
+          onRepositoryDetected?.({
+            id: 'repo-created',
+            fullName: 'acme/created',
+            isEmpty: true,
+          })
+        }
+      >
+        Detect created repository
+      </button>
+    ) : null,
 }));
 
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
@@ -243,6 +246,7 @@ vi.mock('@/components/system', () => ({
   Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Loader2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   RefreshCcw: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   RotateCw: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Search: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
@@ -740,8 +744,35 @@ describe('StepRepoSelection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Create a new repository' }),
     );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Detect created repository' }),
+    );
 
     expect(screen.getByLabelText('acme/created')).toBeChecked();
+  });
+
+  it('keeps the create-repository item visible when the list is filtered to no matches', async () => {
+    mockRepositories.push(
+      ...Array.from({ length: 4 }, (_, index) => ({
+        id: `repo-extra-${index}`,
+        fullName: `acme/extra-${index}`,
+        private: true,
+        defaultBranch: 'main',
+      })),
+    );
+
+    await renderStepRepoSelection();
+
+    fireEvent.change(screen.getByLabelText('Filter repositories'), {
+      target: { value: 'does-not-exist' },
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'Create a new repository' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('No repositories match that filter.'),
+    ).toBeInTheDocument();
   });
 
   it('renders the empty-repository warning below the repository list', async () => {
