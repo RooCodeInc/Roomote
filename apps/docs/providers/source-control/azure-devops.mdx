@@ -61,6 +61,19 @@ Service hook webhook secrets are generated automatically when Roomote
 configures service hooks. Advanced values remain editable later in Settings →
 Source Control.
 
+#### Required API permissions
+
+Under the app registration's **API permissions**, add the Azure DevOps
+permissions **Code**, **Graph**, and **User Delegation / Impersonation**, save
+them, and grant admin consent for the tenant.
+
+Roomote requests the `.default` scope, so Microsoft Entra issues a token
+covering whatever the app registration was already consented for. An app
+registration missing these permissions still authenticates, and Azure DevOps
+then rejects every API call with `401 Unauthorized`. Permissions added in the
+Azure portal but not saved behave the same way, so re-check that the change was
+saved before retrying a sync.
+
 ### Connect with your Microsoft account
 
 Choose **Connect with your Microsoft account** in setup or Settings to authorize the Azure
@@ -68,6 +81,9 @@ DevOps account that should own the deployment connection. Roomote stores the
 linked account reference with the deployment and refreshes its short-lived
 Entra access token as needed. The Entra client ID, client secret, and tenant ID
 are still required so Roomote can refresh the connection in background jobs.
+
+This mode uses the same app registration, so it needs the same
+[API permissions](#required-api-permissions) as the service principal.
 
 The linked account can be reconnected or replaced later in Settings. Switching
 to PAT or service-principal mode removes the inactive credential path from the
@@ -84,6 +100,10 @@ https://dev.azure.com/<organization>/_apis/git/repositories?api-version=7.1
 ```
 
 Roomote stores the results as Azure DevOps repository rows.
+
+If the sync reports that Azure DevOps rejected the credential, the usual cause
+in either Entra mode is a missing or unsaved
+[API permission](#required-api-permissions) on the app registration.
 
 Azure DevOps-backed tasks clone from the synced repository row, so sync must
 run before launching an Azure DevOps-backed task. Worker tasks write

@@ -108,6 +108,17 @@ export const sourceControlProviderDescriptors = {
   }
 >;
 
+/**
+ * Azure DevOps API permissions a Microsoft Entra app registration must be
+ * granted — and admin-consented — before Roomote can read repositories and
+ * manage service hooks. Both Entra modes request the `.default` scope, so a
+ * registration with none of these still mints a token and every subsequent
+ * Azure DevOps call answers 401. Shared so the setup instructions and the
+ * rejected-credential guidance name the same list.
+ */
+export const ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT =
+  'Code, Graph, and User Delegation / Impersonation';
+
 export const sourceControlTokenBackedProviders = sourceControlProviders.filter(
   (provider): provider is SourceControlTokenBackedProvider =>
     sourceControlProviderDescriptors[provider].connectionMode === 'token',

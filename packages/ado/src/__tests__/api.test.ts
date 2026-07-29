@@ -74,12 +74,14 @@ vi.mock('@roomote/db/encryption', () => ({
 }));
 
 import {
+  AdoApiError,
   buildAdoOrganizationApiBaseUrl,
   buildAdoRepositoryValues,
   clearAdoDeploymentUserCache,
   clearAdoEntraTokenCache,
   createAdoPullRequestComment,
   createTaskRunAdoCredentials,
+  describeAdoApiError,
   ensureAdoServiceHooksForRepositories,
   removeAdoServiceHooksForRepositories,
   getAdoBuildFailureEvidence,
@@ -89,9 +91,34 @@ import {
   normalizeAdoLinkedAccountKey,
   resolveAdoToken,
   selectInnermostFailedAdoTimelineRecords,
+  validateAdoDelegatedCredentials,
+  validateAdoEntraCredentials,
   validateAdoToken,
   type AdoRepository,
 } from '../api';
+
+const ENTRA_PERMISSION_GUIDANCE =
+  'add Code, Graph, and User Delegation / Impersonation';
+
+/**
+ * Mocks the two hops an Entra credential makes: the Microsoft tenant token
+ * request, then the Azure DevOps call that the token is used for.
+ */
+function mockEntraThenAdo(adoResponse: () => Response) {
+  return vi.fn<typeof fetch>().mockImplementation(async (url) => {
+    if (String(url).includes('login.microsoftonline.com')) {
+      return new Response(
+        JSON.stringify({
+          access_token: 'header.payload.signature',
+          expires_in: 3600,
+        }),
+        { status: 200 },
+      );
+    }
+
+    return adoResponse();
+  });
+}
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
@@ -455,6 +482,152 @@ describe('Azure DevOps API helpers', () => {
       error:
         'Azure DevOps rejected the access token. Confirm it is active, belongs to the organization, and has Code read access.',
     });
+  });
+
+  it('rejects a Microsoft Entra app registration that has no Azure DevOps API permissions', async () => {
+    // The `.default` scope issues a token regardless of what was consented,
+    // so only the Azure DevOps call reveals the missing permissions.
+    const fetchMock = mockEntraThenAdo(
+      () => new Response('{}', { status: 401 }),
+    );
+
+    const result = await validateAdoEntraCredentials({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
+      fetchImpl: fetchMock,
+    });
+
+    expect(result.status).toBe('invalid');
+    expect(result.status === 'invalid' && result.error).toContain(
+      ENTRA_PERMISSION_GUIDANCE,
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1',
+    );
+  });
+
+  it('accepts a Microsoft Entra service principal that can reach Azure DevOps', async () => {
+    const fetchMock = mockEntraThenAdo(
+      () =>
+        new Response(
+          JSON.stringify({
+            authenticatedUser: {
+              id: 'user-guid',
+              providerDisplayName: 'Roomote Service Principal',
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(
+      validateAdoEntraCredentials({
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        tenantId: 'tenant-id',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+        fetchImpl: fetchMock,
+      }),
+    ).resolves.toEqual({
+      status: 'valid',
+      displayName: 'Roomote Service Principal',
+    });
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: 'Bearer header.payload.signature',
+      }),
+    });
+  });
+
+  it('rejects Microsoft Entra credentials the tenant will not issue a token for', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('{}', { status: 401 }));
+
+    const result = await validateAdoEntraCredentials({
+      clientId: 'client-id',
+      clientSecret: 'wrong-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
+      fetchImpl: fetchMock,
+    });
+
+    expect(result).toEqual({
+      status: 'invalid',
+      error: expect.stringContaining(
+        'Microsoft Entra did not issue an Azure DevOps token',
+      ),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('validates the delegated account with its stored access token', async () => {
+    mockAuthAccountsFindFirst.mockResolvedValue({
+      id: 'account-1',
+      accountId: 'ado-user@example.com',
+      accessToken: 'header.payload.signature',
+      refreshToken: 'refresh-token',
+      accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('{}', { status: 401 }));
+
+    const result = await validateAdoDelegatedCredentials({
+      linkedAccountId: 'ado-user@example.com',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
+      fetchImpl: fetchMock,
+    });
+
+    expect(result.status).toBe('invalid');
+    expect(result.status === 'invalid' && result.error).toContain(
+      ENTRA_PERMISSION_GUIDANCE,
+    );
+  });
+
+  it('reports a delegated connection that was never completed', async () => {
+    mockAuthAccountsFindFirst.mockResolvedValue(null);
+
+    await expect(
+      validateAdoDelegatedCredentials({
+        linkedAccountId: 'ado-user@example.com',
+        organization: 'acme',
+        baseUrl: 'https://dev.azure.com',
+      }),
+    ).resolves.toEqual({
+      status: 'invalid',
+      error:
+        'No Azure DevOps account is connected. Connect with Microsoft again, then save.',
+    });
+  });
+
+  it('explains a rejected Entra credential instead of echoing the raw status', async () => {
+    delete process.env.ADO_TOKEN;
+    process.env.ADO_AUTH_MODE = 'entra';
+
+    const message = await describeAdoApiError(
+      new AdoApiError(401, 'Unauthorized'),
+    );
+
+    expect(message).toContain('(status 401)');
+    expect(message).toContain(ENTRA_PERMISSION_GUIDANCE);
+  });
+
+  it('keeps non-authorization Azure DevOps failures verbatim', async () => {
+    await expect(
+      describeAdoApiError(new AdoApiError(500, 'Internal Server Error')),
+    ).resolves.toBe(
+      'Azure DevOps API request failed: 500 Internal Server Error',
+    );
+    await expect(
+      describeAdoApiError(new Error('socket hang up')),
+    ).resolves.toBe('socket hang up');
   });
 
   it('returns unknown when Azure DevOps token validation cannot complete', async () => {

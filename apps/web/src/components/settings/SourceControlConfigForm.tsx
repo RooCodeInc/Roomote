@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import type { SetupSourceControlStatus } from '@roomote/types';
+import {
+  ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT,
+  type SetupSourceControlStatus,
+} from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { Button, Check, Input, Spinner } from '@/components/system';
@@ -273,6 +276,18 @@ export function SourceControlConfigForm({
             </span>
           </button>
         </div>
+      ) : null}
+      {isAdo && adoAuthMode !== 'pat' ? (
+        <p className="max-w-xl text-sm text-muted-foreground">
+          The Microsoft Entra app registration needs the Azure DevOps API
+          permissions{' '}
+          <span className="font-medium text-foreground">
+            {ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT}
+          </span>
+          , saved in the Azure portal and admin-consented for the tenant.
+          Permissions that were added but never saved do not apply, and Azure
+          DevOps answers every call with a 401.
+        </p>
       ) : null}
       {isAdo && adoAuthMode === 'delegated' ? (
         <div className="max-w-xl rounded-md border p-3 text-sm">

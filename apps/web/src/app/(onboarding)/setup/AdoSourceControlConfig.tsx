@@ -1,4 +1,6 @@
 import { Blocks, Cog, PlugZap, UserCog, UserKey } from 'lucide-react';
+import { ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT } from '@roomote/types';
+
 import { InstructionUrl } from './ProviderSetupInstructions';
 
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
@@ -113,6 +115,21 @@ export function AdoSourceControlInstructions({
         </a>{' '}
         → New registration → Create an app in the Microsoft tenant that can
         access your Azure DevOps organization.
+      </p>
+      <p className="text-sm">
+        Open the app&apos;s{' '}
+        <span className="font-semibold text-foreground">API permissions</span> →
+        Add a permission → Azure DevOps, and grant{' '}
+        <span className="font-semibold text-foreground">
+          {ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT}
+        </span>
+        . Then{' '}
+        <span className="font-semibold text-foreground">
+          save the permissions
+        </span>{' '}
+        and grant admin consent for the tenant — Azure does not apply
+        permissions until they are saved, and a missing one only shows up later
+        as a 401 when Roomote syncs repositories.
       </p>
       {authMode === 'delegated' && (
         <>
