@@ -174,6 +174,41 @@ function makeSlackAppMentionRun(
   } as RunWithTask;
 }
 
+function makeLinearAgentSessionRun(
+  overrides: Partial<RunWithTask> = {},
+): RunWithTask {
+  return {
+    id: 303,
+    harness: 'opencode-server',
+    status: RunStatus.Dequeued,
+    kind: 'fresh',
+    payloadKind: TaskPayloadKind.LinearAgentSession,
+    taskId: 'task-303',
+    actingUserId: 'user-1',
+    sourceRunId: null,
+    sourceSnapshotId: null,
+    task: makeTaskRow({
+      id: 'task-303',
+      surface: 'linear',
+      linearSessionId: 'linear-session-1',
+      linearIssueId: 'linear-issue-1',
+      linearOrganizationId: 'linear-organization-1',
+    }),
+    payload: {
+      repo: 'owner/repo',
+      sessionId: 'linear-session-1',
+      organizationId: 'linear-organization-1',
+      action: 'created',
+      issueId: 'linear-issue-1',
+      issueIdentifier: 'ROO-37',
+      issueTitle: 'Change the background to red',
+      issueUrl: 'https://linear.app/acme/issue/ROO-37',
+    },
+    result: null,
+    ...overrides,
+  } as RunWithTask;
+}
+
 describe('dequeueTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -607,6 +642,33 @@ describe('dequeueTaskRun', () => {
         taskRun,
         taskSpec: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
+        }),
+      }),
+    );
+    expect(mockCancelTaskRun).not.toHaveBeenCalledWith(
+      expect.anything(),
+      taskRun.id,
+      'Task run is not valid.',
+    );
+  });
+
+  it('keeps Linear agent session jobs runnable during dequeue', async () => {
+    const taskRun = makeLinearAgentSessionRun();
+
+    mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
+    mockTxFindFirstTaskRuns.mockResolvedValue(taskRun);
+
+    await dequeueTaskRun({ orgId: 'org-1' } as never, {
+      runId: taskRun.id,
+    });
+
+    expect(mockGeneratePrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskSpec: expect.objectContaining({
+          type: TaskPayloadKind.LinearAgentSession,
+          linearSessionId: 'linear-session-1',
+          linearIssueId: 'linear-issue-1',
+          linearOrganizationId: 'linear-organization-1',
         }),
       }),
     );

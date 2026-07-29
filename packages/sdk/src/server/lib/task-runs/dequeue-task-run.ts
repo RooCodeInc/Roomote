@@ -119,13 +119,19 @@ export function shouldInitializeWithoutPrompt(taskSpec: TaskSpec): boolean {
  * discriminated union re-keys on `type`, which is stored as
  * `task_runs.payload_kind`.
  */
-function buildTaskSpecCandidate(run: TaskRun): Record<string, unknown> {
+function buildTaskSpecCandidate(
+  run: TaskRun,
+  task: Task,
+): Record<string, unknown> {
   return {
     type: run.payloadKind,
     harness: run.harness,
     payload: run.payload,
     sourceSnapshotId: run.sourceSnapshotId,
     sourceRunId: run.sourceRunId,
+    linearSessionId: task.linearSessionId,
+    linearIssueId: task.linearIssueId,
+    linearOrganizationId: task.linearOrganizationId,
   };
 }
 
@@ -314,7 +320,9 @@ export const dequeueTaskRun = async (
         },
       });
 
-      const parsed = taskSpecSchema.safeParse(buildTaskSpecCandidate(taskRun));
+      const parsed = taskSpecSchema.safeParse(
+        buildTaskSpecCandidate(taskRun, task),
+      );
 
       if (!parsed.success) {
         console.error(

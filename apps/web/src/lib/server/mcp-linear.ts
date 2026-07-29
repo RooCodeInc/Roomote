@@ -9,6 +9,7 @@ import {
 import {
   consumeMcpOauthReplay,
   findLinearDeploymentMcpConnection,
+  getMcpOauthReplay,
   getLinearDeploymentMetadata,
   LINEAR_ORG_CONNECTION_ROLE,
   LINEAR_USER_CONNECTION_ROLE,
@@ -23,6 +24,19 @@ import {
 type McpConnectionRecord = Awaited<
   ReturnType<typeof db.query.mcpConnections.findFirst>
 >;
+
+export function getReplayLinearUserId(
+  replay: Awaited<ReturnType<typeof getMcpOauthReplay>> | undefined,
+): string | undefined {
+  if (!replay?.metadata || typeof replay.metadata !== 'object') {
+    return undefined;
+  }
+
+  const linearUserId = (replay.metadata as Record<string, unknown>)
+    .linearUserId;
+
+  return typeof linearUserId === 'string' ? linearUserId : undefined;
+}
 
 async function updateLinearConnectionMetadata(input: {
   connection: NonNullable<McpConnectionRecord>;
@@ -166,10 +180,17 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
   }
 
   if (input.connection.connectionRole === LINEAR_USER_CONNECTION_ROLE) {
+    const replay = input.replayToken
+      ? await getMcpOauthReplay(input.replayToken)
+      : undefined;
+
     await updateLinearConnectionMetadata({
       connection: input.connection,
       linearOrganizationId: organization.id,
-      linearUserId: viewer.id,
+      // actor=app makes the OAuth viewer the Linear app identity. The replay
+      // carries the human identity that initiated the webhook, which is the
+      // identity subsequent Linear events use for account lookup.
+      linearUserId: getReplayLinearUserId(replay) ?? viewer.id,
     });
 
     if (input.replayToken && input.connection.userId) {
