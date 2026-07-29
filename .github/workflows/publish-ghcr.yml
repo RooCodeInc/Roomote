@@ -367,6 +367,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish GitHub Release for product tag
+        id: publish_release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -394,6 +395,7 @@ jobs:
 
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "GitHub Release $tag already exists; skip."
+            echo "created=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -410,7 +412,49 @@ jobs:
             --latest
 
           rm -f "$notes_file"
+          echo "created=true" >> "$GITHUB_OUTPUT"
           echo "Published GitHub Release $tag (images ready)"
+
+      - name: Announce GitHub Release in Discord
+        if: ${{ steps.publish_release.outputs.created == 'true' }}
+        continue-on-error: true
+        env:
+          DISCORD_MAIN_WEBHOOK_URL: ${{ secrets.DISCORD_MAIN_WEBHOOK_URL }}
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DISCORD_MAIN_WEBHOOK_URL:-}" ]; then
+            echo "::notice::DISCORD_MAIN_WEBHOOK_URL is not configured; skipping the Discord release announcement."
+            exit 0
+          fi
+
+          # Custom Discord payloads use the base webhook endpoint. Also accept
+          # URLs copied from the native GitHub integration setup for convenience.
+          webhook_url="${DISCORD_MAIN_WEBHOOK_URL%/github}"
+          payload_file="$(mktemp)"
+          trap 'rm -f "$payload_file"' EXIT
+
+          gh release view "$VERSION" \
+            --json name,body,url,publishedAt,tagName \
+            | node scripts/release/build-discord-release-payload.mjs \
+            > "$payload_file"
+
+          curl \
+            --fail-with-body \
+            --silent \
+            --show-error \
+            --retry 3 \
+            --retry-all-errors \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$payload_file" \
+            "$webhook_url"
+
+          echo "Announced GitHub Release $VERSION in Discord"
 
   notify-ops:
     name: Notify ops repository

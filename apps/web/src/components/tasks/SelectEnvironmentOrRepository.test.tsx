@@ -114,12 +114,14 @@ const SelectEnvironmentOrRepositoryHarness = ({
   repositoryFilter,
   defaultValues,
   onValuesChange,
+  onCreateRepository,
 }: {
   allowAuto?: boolean;
   /** Omit for no filter (homepage Auto). Pass a repo full name to filter. */
   repositoryFilter?: string;
   defaultValues: Partial<CreateTaskFormValues>;
   onValuesChange: (values: WorkspaceSelectionValues) => void;
+  onCreateRepository?: () => void;
 }) => {
   const form = useForm<CreateTaskFormValues>({
     defaultValues: {
@@ -135,6 +137,7 @@ const SelectEnvironmentOrRepositoryHarness = ({
         repositoryFilter={repositoryFilter}
         allowAuto={allowAuto}
         onCreate={vi.fn()}
+        onCreateRepository={onCreateRepository}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
       />
@@ -512,5 +515,54 @@ describe('SelectEnvironmentOrRepository', () => {
       '__separator__',
       'Auto',
     ]);
+  });
+
+  it('offers the New GitHub repository item to admins when wired up', async () => {
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        defaultValues={{}}
+        onValuesChange={vi.fn()}
+        onCreateRepository={vi.fn()}
+      />,
+    );
+
+    const menuItems = Array.from(
+      document.querySelectorAll('[data-slot="dropdown-menu-item"]'),
+    ).map((node) => node.textContent?.trim());
+
+    expect(menuItems).toContain('Create environment');
+    expect(menuItems).toContain('New GitHub repository');
+  });
+
+  it('hides the New GitHub repository item without a handler or admin rights', async () => {
+    const { unmount } = render(
+      <SelectEnvironmentOrRepositoryHarness
+        defaultValues={{}}
+        onValuesChange={vi.fn()}
+      />,
+    );
+
+    const menuItemsWithoutHandler = Array.from(
+      document.querySelectorAll('[data-slot="dropdown-menu-item"]'),
+    ).map((node) => node.textContent?.trim());
+    expect(menuItemsWithoutHandler).not.toContain('New GitHub repository');
+    unmount();
+
+    mockedUseAuthorizedUser.mockReturnValue({
+      isAdmin: false,
+    } as ReturnType<typeof useAuthorizedUser>);
+
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        defaultValues={{}}
+        onValuesChange={vi.fn()}
+        onCreateRepository={vi.fn()}
+      />,
+    );
+
+    const menuItemsAsMember = Array.from(
+      document.querySelectorAll('[data-slot="dropdown-menu-item"]'),
+    ).map((node) => node.textContent?.trim());
+    expect(menuItemsAsMember).not.toContain('New GitHub repository');
   });
 });

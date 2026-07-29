@@ -264,7 +264,8 @@ export function OnboardingCard() {
         })();
       },
       disabled: connectSlack.isPending,
-      visible: !slackPending && !slackInstallation,
+      // slack.connectApp is admin-gated server-side.
+      visible: isAdmin && !slackPending && !slackInstallation,
     },
     {
       id: 'linear',
@@ -290,7 +291,8 @@ export function OnboardingCard() {
         })();
       },
       disabled: connectLinear.isPending,
-      visible: !linearPending && !linearInstallation,
+      // linear.connectApp is admin-gated server-side.
+      visible: isAdmin && !linearPending && !linearInstallation,
     },
     {
       id: 'github-account',

@@ -3,6 +3,7 @@ const {
   mockDbSelect,
   mockEnqueueTask,
   mockGetBranches,
+  mockGetRepositoryEmptyStates,
   mockGetRepositories,
   mockBeginEnvironmentVerification,
   mockActiveVerificationRuns,
@@ -14,6 +15,7 @@ const {
     id: 'run-env-definition-1',
   }),
   mockGetBranches: vi.fn(),
+  mockGetRepositoryEmptyStates: vi.fn(async () => new Map<string, boolean>()),
   mockGetRepositories: vi.fn().mockResolvedValue([
     {
       id: 'repo-1',
@@ -38,6 +40,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/github', () => ({
   getBranches: mockGetBranches,
+  getRepositoryEmptyStates: mockGetRepositoryEmptyStates,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -183,6 +186,45 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
           }),
         }),
       }),
+    );
+  });
+
+  it('flags empty repositories in the kickoff prompt instead of blocking', async () => {
+    mockGetRepositoryEmptyStates.mockResolvedValueOnce(
+      new Map([
+        ['repo-1', true],
+        ['repo-2', false],
+      ]),
+    );
+
+    await startEnvironmentDefinitionTaskCommand(buildMockAuth(), {
+      repositoryIds: ['repo-2', 'repo-1'],
+    });
+
+    expect(mockGetRepositoryEmptyStates).toHaveBeenCalledWith({
+      repositoryIds: ['repo-1', 'repo-2'],
+    });
+
+    const enqueueInput = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { payload: { description: string } };
+    };
+    // Only the empty repo appears in the bootstrap list; acme/web has
+    // commits, so the list ends right after acme/api.
+    expect(enqueueInput.task.payload.description).toContain(
+      'These repositories are brand new and have no commits yet:\n- acme/api\n\nFor each empty repository',
+    );
+  });
+
+  it('keeps the kickoff prompt unchanged when no selected repository is empty', async () => {
+    await startEnvironmentDefinitionTaskCommand(buildMockAuth(), {
+      repositoryIds: ['repo-1'],
+    });
+
+    const enqueueInput = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { payload: { description: string } };
+    };
+    expect(enqueueInput.task.payload.description).not.toContain(
+      'brand new and have no commits',
     );
   });
 });

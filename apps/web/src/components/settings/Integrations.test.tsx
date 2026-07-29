@@ -62,9 +62,21 @@ const state = vi.hoisted(() => ({
     webhookUrl: 'https://roomote.example/api/webhooks/linear',
     manifestUrl: 'https://linear.app/settings/api/applications/new?manifest=x',
     fields: {
-      clientId: { configured: false, managedByEnvironment: false },
-      clientSecret: { configured: false, managedByEnvironment: false },
-      webhookSecret: { configured: false, managedByEnvironment: false },
+      clientId: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+      clientSecret: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+      webhookSecret: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
     },
   },
   linearRedirectPath: '',
@@ -84,6 +96,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
     saveLinearOauthSetup: vi.fn(),
+    removeLinearOauthSetup: vi.fn(),
   },
   selectMock: {
     latestOnValueChange: null as null | ((value: string) => void),
@@ -174,6 +187,10 @@ vi.mock('@/hooks/linear', () => ({
   useSaveLinearOauthSetup: () => ({
     isPending: false,
     mutate: mutations.saveLinearOauthSetup,
+  }),
+  useRemoveLinearOauthSetup: () => ({
+    isPending: false,
+    mutate: mutations.removeLinearOauthSetup,
   }),
 }));
 
@@ -426,6 +443,23 @@ describe('Integrations settings', () => {
     state.featureFlags = {};
     state.snowflakeConnection = null;
     state.searchParams = '';
+    state.linearOauthSetup.fields = {
+      clientId: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+      clientSecret: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+      webhookSecret: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+    };
   });
 
   it('returns Linear OAuth to a service-specific integrations URL', () => {
@@ -503,7 +537,7 @@ describe('Integrations settings', () => {
     expect(screen.getByLabelText('Webhook secret')).toBeInTheDocument();
   });
 
-  it('only offers app creation while Linear is unconfigured', () => {
+  it('offers administrators configuration access after Linear is configured', () => {
     state.linearInstallation = null;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
 
@@ -512,9 +546,101 @@ describe('Integrations settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Set up Linear' }),
     ).not.toBeInTheDocument();
+    const configureButton = screen.getByRole('button', {
+      name: 'Configure Linear',
+    });
+    expect(configureButton).toBeInTheDocument();
+    expect(configureButton).not.toHaveTextContent('Configure');
     expect(
       screen.getByRole('button', { name: 'Enable Linear' }),
     ).toBeInTheDocument();
+  });
+
+  it('does not offer Linear credential configuration to non-admins', () => {
+    state.isAdmin = false;
+
+    render(<Integrations />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Configure Linear' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('removes saved Linear credentials after confirmation', () => {
+    state.linearInstallation = null;
+    state.linearOauthSetup.fields = {
+      clientId: {
+        configured: true,
+        managedByEnvironment: false,
+        savedInRoomote: true,
+      },
+      clientSecret: {
+        configured: true,
+        managedByEnvironment: false,
+        savedInRoomote: true,
+      },
+      webhookSecret: {
+        configured: true,
+        managedByEnvironment: false,
+        savedInRoomote: true,
+      },
+    };
+    mutations.removeLinearOauthSetup.mockImplementation((_variables, options) =>
+      options?.onSuccess?.({ success: true }),
+    );
+
+    render(<Integrations />);
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Linear' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Configure Linear' }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove saved credentials' }),
+    );
+    expect(
+      screen.getByRole('heading', {
+        name: 'Remove saved Linear credentials?',
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove credentials' }));
+
+    expect(mutations.removeLinearOauthSetup).toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith(
+      'Saved Linear OAuth credentials removed.',
+    );
+  });
+
+  it('does not offer to remove environment-managed Linear credentials', () => {
+    state.linearInstallation = null;
+    state.linearOauthSetup.fields = {
+      clientId: {
+        configured: true,
+        managedByEnvironment: true,
+        savedInRoomote: false,
+      },
+      clientSecret: {
+        configured: true,
+        managedByEnvironment: true,
+        savedInRoomote: false,
+      },
+      webhookSecret: {
+        configured: true,
+        managedByEnvironment: true,
+        savedInRoomote: false,
+      },
+    };
+
+    render(<Integrations />);
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Linear' }));
+
+    expect(
+      screen.queryByRole('button', { name: 'Remove saved credentials' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText('Managed by the deployment environment.'),
+    ).toHaveLength(3);
   });
 
   it('offers setup for a legacy workspace when deployment credentials are missing', () => {
@@ -529,6 +655,20 @@ describe('Integrations settings', () => {
     expect(
       screen.queryByRole('button', { name: 'Disable Linear' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('lets administrators reconnect a configured Linear workspace', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect Linear' }));
+
+    expect(mutations.connectLinear).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
   });
 
   it('surfaces the server error when starting Linear fails', () => {

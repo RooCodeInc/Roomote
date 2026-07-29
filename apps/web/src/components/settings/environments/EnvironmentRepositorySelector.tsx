@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 
 import { Checkbox, ScrollArea } from '@/components/system';
+import { PackagePlus } from 'lucide-react';
 
 type RepositorySummary = {
   id: string;
@@ -13,12 +14,14 @@ export function EnvironmentRepositorySelector({
   repositories,
   selectedRepositoryIds,
   onToggleRepository,
+  onCreateRepository,
   inputPrefix = 'environment-repository',
   heightClassName = 'max-h-[11.5rem] md:h-[18.75rem]',
 }: {
   repositories: RepositorySummary[];
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
+  onCreateRepository?: () => void;
   inputPrefix?: string;
   heightClassName?: string;
 }) {
@@ -33,6 +36,18 @@ export function EnvironmentRepositorySelector({
   return (
     <ScrollArea className={`overflow-auto ${heightClassName}`}>
       <div className="space-y-1">
+        {onCreateRepository ? (
+          <p className="border-b border-dotted pb-1">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 py-1 text-left hover:text-accent-foreground"
+              onClick={onCreateRepository}
+            >
+              <PackagePlus className="size-4 mx-0.5" />
+              Create a new repository
+            </button>
+          </p>
+        ) : null}
         {sortedRepositories.map((repository) => (
           <label
             key={repository.id}

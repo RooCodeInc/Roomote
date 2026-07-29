@@ -97,6 +97,34 @@ describe('isFromKnownInstallation', () => {
     ).resolves.toBe(false);
   });
 
+  it('allows installation_repositories events from a known installation', async () => {
+    mockFindFirst.mockResolvedValue({ id: 'installation-row' });
+
+    const payload = JSON.stringify({
+      action: 'added',
+      installation: { id: 456 },
+      repositories_added: [{ id: 1, full_name: 'acme/new-repo' }],
+    });
+
+    await expect(
+      isFromKnownInstallation('installation_repositories', payload),
+    ).resolves.toBe(true);
+  });
+
+  it('rejects repository.created events from an unknown installation', async () => {
+    mockFindFirst.mockResolvedValue(undefined);
+
+    const payload = JSON.stringify({
+      action: 'created',
+      installation: { id: 789 },
+      repository: { id: 1, full_name: 'acme/new-repo' },
+    });
+
+    await expect(isFromKnownInstallation('repository', payload)).resolves.toBe(
+      false,
+    );
+  });
+
   it('rejects non-created installation events from an unknown installation', async () => {
     mockFindFirst.mockResolvedValue(undefined);
 

@@ -142,7 +142,7 @@ export function isParsableProductVersion(
   if (!normalized) {
     return false;
   }
-  return parseProductVersion(normalized).segments !== null;
+  return /^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(normalized);
 }
 
 export function isProductVersionNewer(

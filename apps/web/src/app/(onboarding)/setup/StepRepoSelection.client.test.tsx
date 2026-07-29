@@ -112,6 +112,34 @@ vi.mock('@/hooks/source-control', () => ({
   useRepositories: mockUseRepositories,
 }));
 
+vi.mock('@/components/github/CreateGitHubRepoDialog', () => ({
+  CreateGitHubRepoDialog: ({
+    open,
+    onRepositoryDetected,
+  }: {
+    open: boolean;
+    onRepositoryDetected?: (repository: {
+      id: string;
+      fullName: string;
+      isEmpty?: boolean;
+    }) => void;
+  }) =>
+    open ? (
+      <button
+        type="button"
+        onClick={() =>
+          onRepositoryDetected?.({
+            id: 'repo-created',
+            fullName: 'acme/created',
+            isEmpty: true,
+          })
+        }
+      >
+        Detect created repository
+      </button>
+    ) : null,
+}));
+
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: () => ({
     data: {
@@ -218,6 +246,7 @@ vi.mock('@/components/system', () => ({
   Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Loader2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   RefreshCcw: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   RotateCw: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Search: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
@@ -633,7 +662,7 @@ describe('StepRepoSelection', () => {
     expect(onReviewComputeProvider).toHaveBeenCalled();
   });
 
-  it('shows a warning and disables Continue only when all selected repositories are empty', async () => {
+  it('explains the bootstrap and keeps Continue enabled when all selected repositories are empty', async () => {
     mockRepositories.splice(
       0,
       mockRepositories.length,
@@ -661,9 +690,11 @@ describe('StepRepoSelection', () => {
       screen.getByText(/all selected repositories have no commits yet/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/push an initial commit before continuing/i),
+      screen.getByText(
+        /will push an initial commit and set up a basic environment/i,
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
   });
 
   it('keeps Continue enabled and hides the warning for mixed empty and non-empty selections', async () => {
@@ -692,9 +723,56 @@ describe('StepRepoSelection', () => {
     fireEvent.click(screen.getByLabelText(/acme\/empty/i));
 
     expect(
-      screen.queryByText(/push an initial commit before continuing/i),
+      screen.queryByText(
+        /will push an initial commit and set up a basic environment/i,
+      ),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
+  });
+
+  it('offers the create-repo affordance and selects the repository it detects', async () => {
+    mockRepositories.splice(0, mockRepositories.length, {
+      id: 'repo-created',
+      fullName: 'acme/created',
+      private: true,
+      defaultBranch: 'main',
+      isEmpty: true,
+    });
+
+    await renderStepRepoSelection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create a new repository' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Detect created repository' }),
+    );
+
+    expect(screen.getByLabelText('acme/created')).toBeChecked();
+  });
+
+  it('keeps the create-repository item visible when the list is filtered to no matches', async () => {
+    mockRepositories.push(
+      ...Array.from({ length: 4 }, (_, index) => ({
+        id: `repo-extra-${index}`,
+        fullName: `acme/extra-${index}`,
+        private: true,
+        defaultBranch: 'main',
+      })),
+    );
+
+    await renderStepRepoSelection();
+
+    fireEvent.change(screen.getByLabelText('Filter repositories'), {
+      target: { value: 'does-not-exist' },
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'Create a new repository' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('No repositories match that filter.'),
+    ).toBeInTheDocument();
   });
 
   it('renders the empty-repository warning below the repository list', async () => {

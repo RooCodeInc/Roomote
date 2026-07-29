@@ -117,7 +117,6 @@ import {
   isSetupTokenRequired,
   isSetupTokenValid,
 } from '@/lib/server';
-import { areAllRepositoriesEmpty } from '@/lib/repositories';
 import {
   appendEnvironmentDefinitionGuidance,
   buildSetupEnvironmentTaskTitle,
@@ -310,23 +309,17 @@ async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
   };
 }
 
-async function assertHasCommittedRepositorySelection(repositoryIds: string[]) {
-  const emptyStates = await GitHub.getRepositoryEmptyStates({
-    repositoryIds,
-  });
-
-  if (
-    emptyStates.size === repositoryIds.length &&
-    areAllRepositoriesEmpty(
-      [...emptyStates.values()].map((isEmpty) => ({ isEmpty })),
-    )
-  ) {
-    throw new Error(
-      emptyStates.size === 1
-        ? 'The selected repository has no commits yet. Push an initial commit first, or choose a different repository.'
-        : 'All selected repositories have no commits yet. Push an initial commit first, or choose different repositories.',
-    );
-  }
+/**
+ * Look up which selected repositories have no commits yet. Empty repos are a
+ * supported onboarding target (the environment-setup agent bootstraps them
+ * with an initial commit), so this only informs the kickoff prompt — it never
+ * blocks the selection. Non-GitHub repos are absent from the returned map and
+ * treated as non-empty.
+ */
+async function resolveRepositorySelectionEmptyStates(
+  repositoryIds: string[],
+): Promise<Map<string, boolean>> {
+  return GitHub.getRepositoryEmptyStates({ repositoryIds });
 }
 
 async function clearTaskSuggestions(
@@ -2382,7 +2375,6 @@ export async function saveSetupNewSelectionCommand(
   const { normalizedRepositoryIds } = await resolveSelectedRepositories(
     input.repositoryIds,
   );
-  await assertHasCommittedRepositorySelection(normalizedRepositoryIds);
   const nextSetupGuidance = input.setupGuidance?.trim() || null;
   const nextSelectedModelId = input.selectedModelId?.trim() || null;
 
@@ -2463,7 +2455,9 @@ export async function startSetupNewOnboardingTaskCommand(
 
     const { normalizedRepositoryIds, selectedRepositories } =
       await resolveSelectedRepositories(currentState.selectedRepositoryIds);
-    await assertHasCommittedRepositorySelection(normalizedRepositoryIds);
+    const repositoryEmptyStates = await resolveRepositorySelectionEmptyStates(
+      selectedRepositories.map((repository) => repository.id),
+    );
 
     if (selectedRepositories.length === 0) {
       throw new Error('Select at least one repository before starting setup.');
@@ -2485,8 +2479,16 @@ export async function startSetupNewOnboardingTaskCommand(
         (repository) => repository.sourceControlProvider,
       ),
     );
+    const emptyRepositoryFullNames = selectedRepositories
+      .filter((repository) => repositoryEmptyStates.get(repository.id) === true)
+      .map((repository) => repository.fullName);
     const prompt = appendEnvironmentDefinitionGuidance(
-      buildSetupNewKickoffPrompt(selectedRepositoryFullNames),
+      buildSetupNewKickoffPrompt(
+        selectedRepositoryFullNames,
+        emptyRepositoryFullNames.length > 0
+          ? { emptyRepositoryFullNames }
+          : undefined,
+      ),
       currentState.setupGuidance,
     );
     const modelSelection = resolveEvalHarnessSelection({
