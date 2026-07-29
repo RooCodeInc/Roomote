@@ -181,6 +181,9 @@ export function CreateGitHubRepoDialog({
     activeInstallations[0]?.accountLogin ??
     null;
   const owner = selectedOwner ?? defaultOwner;
+  const newRepoUrl = owner
+    ? `https://github.com/new?owner=${encodeURIComponent(owner)}`
+    : 'https://github.com/new';
 
   const forkTarget = parseGitHubRepoReference(forkReference);
   const forkUrl = forkTarget
@@ -247,6 +250,12 @@ export function CreateGitHubRepoDialog({
                 <p className="text-sm text-muted-foreground grow">
                   Please create it now on Github and come back here when done.
                 </p>
+                <Button asChild size="sm">
+                  <a href={newRepoUrl} target="_blank" rel="noreferrer">
+                    Go
+                    <ExternalLink />
+                  </a>
+                </Button>
               </div>
               {activeInstallations.length > 1 ? (
                 <div className="space-y-1.5">
@@ -376,9 +385,9 @@ export function CreateGitHubRepoDialog({
                 Update GitHub
               </Button>
             ) : (
-              <p className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 Ask an admin to update the connected GitHub repositories.
-              </p>
+              </span>
             )}
           </p>
         </div>

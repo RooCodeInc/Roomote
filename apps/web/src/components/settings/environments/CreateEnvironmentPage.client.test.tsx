@@ -378,6 +378,7 @@ describe('CreateEnvironmentPage', () => {
     expect(mockStartDefinitionTask.mock.calls[0]?.[0]).toEqual({
       repositoryIds: ['repo-1'],
       changeRequest: 'Use the API service from the first repo set.',
+      selectedModelId: 'openrouter/openai/gpt-5.4',
     });
     expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
   });

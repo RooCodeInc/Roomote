@@ -36,6 +36,10 @@ const {
   mockToast: { error: vi.fn(), success: vi.fn() },
 }));
 
+const mockRadioGroupState = vi.hoisted(() => ({
+  onValueChange: undefined as undefined | ((value: string) => void),
+}));
+
 vi.mock('next/navigation', () => ({
   usePathname: () => '/settings/environments/new',
   useSearchParams: () => new URLSearchParams(''),
@@ -128,20 +132,19 @@ vi.mock('@/components/system', () => {
     }: {
       children: ReactNode;
       onValueChange?: (value: string) => void;
-    }) => (
-      <fieldset
-        {...props}
-        onChange={(event) => {
-          if (event.target instanceof HTMLInputElement) {
-            onValueChange?.(event.target.value);
-          }
-        }}
-      >
-        {children}
-      </fieldset>
-    ),
+    }) => {
+      mockRadioGroupState.onValueChange = onValueChange;
+
+      return <fieldset {...props}>{children}</fieldset>;
+    },
     RadioGroupItem: (props: InputHTMLAttributes<HTMLInputElement>) => (
-      <input type="radio" {...props} />
+      <input
+        type="radio"
+        {...props}
+        onChange={(event) =>
+          mockRadioGroupState.onValueChange?.(event.currentTarget.value)
+        }
+      />
     ),
   };
 });
@@ -214,7 +217,7 @@ describe('CreateGitHubRepoDialog', () => {
       target: { value: 'https://github.com/RooCodeInc/Roomote' },
     });
 
-    expect(findLinkByText(/Open GitHub fork page/).getAttribute('href')).toBe(
+    expect(findLinkByText(/^Go$/).getAttribute('href')).toBe(
       'https://github.com/RooCodeInc/Roomote/fork',
     );
   });
@@ -265,11 +268,9 @@ describe('CreateGitHubRepoDialog', () => {
       />,
     );
 
-    expect(screen.getByText('Found acme/new-repo')).toBeInTheDocument();
+    expect(screen.getByText('acme/new-repo')).toBeInTheDocument();
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Use this repository' }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use it' }));
 
     expect(onRepositoryDetected).toHaveBeenCalledWith({
       id: 'repo-2',

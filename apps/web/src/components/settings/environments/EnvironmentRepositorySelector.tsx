@@ -38,13 +38,14 @@ export function EnvironmentRepositorySelector({
       <div className="space-y-1">
         {onCreateRepository ? (
           <p className="border-b border-dotted pb-1">
-            <span
-              className="w-full justify-start flex items-center gap-2 cursor-pointer hover:text-accent-foreground py-1"
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 py-1 text-left hover:text-accent-foreground"
               onClick={onCreateRepository}
             >
               <PackagePlus className="size-4 mx-0.5" />
               Create a new repository
-            </span>
+            </button>
           </p>
         ) : null}
         {sortedRepositories.map((repository) => (
