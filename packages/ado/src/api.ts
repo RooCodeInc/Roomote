@@ -25,6 +25,7 @@ const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 export const ADO_API_VERSION = '7.1';
 const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
+const ADO_ERROR_MESSAGE_MAX_CHARS = 300;
 const ADO_ENTRA_TOKEN_SCOPE = 'https://app.vssps.visualstudio.com/.default';
 const ADO_ENTRA_RESOURCE_SCOPE =
   '499b84ac-1321-427f-aa17-267ca6975798/.default';
@@ -559,11 +560,18 @@ function buildAdoBasicAuthHeader(token: string): string {
  */
 export class AdoApiError extends Error {
   readonly status: number;
+  /** Azure DevOps' own explanation, when the response body carried one. */
+  readonly providerMessage: string | null;
 
-  constructor(status: number, statusText: string) {
+  constructor(
+    status: number,
+    statusText: string,
+    providerMessage: string | null = null,
+  ) {
     super(`Azure DevOps API request failed: ${status} ${statusText}`);
     this.name = 'AdoApiError';
     this.status = status;
+    this.providerMessage = providerMessage;
   }
 }
 
@@ -579,23 +587,31 @@ function isAdoAuthorizationFailureStatus(status: number): boolean {
  * What an admin should actually do about a rejected credential. Entra tokens
  * are minted from the `.default` scope, so an app registration that was never
  * granted the Azure DevOps API permissions — or whose newly added permissions
- * were never saved in the Azure portal — authenticates fine and fails on every
- * API call instead.
+ * were never saved in the Azure portal, or that was never added to the
+ * organization — authenticates fine and fails on every API call instead.
+ *
+ * Azure DevOps usually names the specific problem in the response body, so
+ * that leads when present and the remediation follows it.
  */
 function buildAdoCredentialRejectionMessage({
   authMode,
   status,
+  providerMessage,
 }: {
   authMode: AdoAuthMode;
   status?: number;
+  providerMessage?: string | null;
 }): string {
   const suffix = status === undefined ? '' : ` (status ${status})`;
+  const detail = providerMessage
+    ? ` Azure DevOps said: “${providerMessage}”`
+    : '';
 
   if (authMode === 'pat') {
-    return `Azure DevOps rejected the access token${suffix}. Confirm it is active, belongs to the organization, and has Code read access.`;
+    return `Azure DevOps rejected the access token${suffix}.${detail} Confirm it is active, belongs to the organization, and has Code read access.`;
   }
 
-  return `Azure DevOps rejected the Microsoft Entra credential${suffix}. The app registration is most likely missing Azure DevOps API permissions: add ${ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT}, save them in the Azure portal (newly added permissions do not apply until they are saved), grant admin consent, then try again.`;
+  return `Azure DevOps rejected the Microsoft Entra credential${suffix}.${detail} Check that the app registration has the Azure DevOps API permissions ${ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT} — added, saved in the Azure portal (newly added permissions do not apply until they are saved) and admin-consented — and that its service principal was added to the Azure DevOps organization.`;
 }
 
 /**
@@ -613,6 +629,7 @@ export async function describeAdoApiError(error: unknown): Promise<string> {
   return buildAdoCredentialRejectionMessage({
     authMode: await resolveAdoAuthMode(),
     status: error.status,
+    providerMessage: error.providerMessage,
   });
 }
 
@@ -649,7 +666,11 @@ async function requestAdoJson<T>({
   );
 
   if (![200, 201].includes(response.status)) {
-    throw new AdoApiError(response.status, response.statusText);
+    throw new AdoApiError(
+      response.status,
+      response.statusText,
+      readAdoErrorMessage(await response.text().catch(() => '')),
+    );
   }
 
   return {
@@ -833,17 +854,48 @@ export async function getAdoPullRequest({
 }
 
 export type AdoTokenValidationResult =
-  | { status: 'valid'; displayName: string }
+  | { status: 'valid' }
   | { status: 'invalid'; error: string }
   | { status: 'unknown'; error: string };
 
 /**
- * Single real Azure DevOps call every credential must be able to make. Used to
- * verify a credential before it is persisted, so a PAT without Code access or
- * an Entra app registration without API permissions fails at save time with
- * remediation instead of at the first sync with a bare 401.
+ * Azure DevOps explains most rejections in the response body
+ * (`{"message": "TF401444: Please sign-in at least once as …"}`), which is
+ * more specific than anything we can infer from the status alone. Pull it out
+ * so the admin sees the provider's own diagnosis next to the remediation.
  */
-async function probeAdoConnectionData({
+function readAdoErrorMessage(body: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const message =
+      typeof parsed === 'object' && parsed !== null
+        ? (parsed as { message?: unknown }).message
+        : null;
+
+    if (typeof message !== 'string' || !message.trim()) {
+      return null;
+    }
+
+    const collapsed = message.trim().replace(/\s+/g, ' ');
+    return collapsed.length > ADO_ERROR_MESSAGE_MAX_CHARS
+      ? `${collapsed.slice(0, ADO_ERROR_MESSAGE_MAX_CHARS)}…`
+      : collapsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Single real Azure DevOps call every credential must be able to make. This is
+ * the same repository listing the sync performs, so a PAT without Code access
+ * or an Entra app registration that cannot reach the organization fails at
+ * save time with remediation instead of at the first sync with a bare 401.
+ *
+ * Deliberately not `/_apis/connectionData`: that resource is preview-only and
+ * answers 400 unless the api-version carries a `-preview` suffix, which would
+ * make a working credential look unverifiable rather than valid.
+ */
+async function probeAdoCredential({
   token,
   authMode,
   organization,
@@ -867,8 +919,9 @@ async function probeAdoConnectionData({
       organization,
     });
     const response = await fetchImpl(
-      buildAdoApiUrl(organizationApiBaseUrl, '/_apis/connectionData', {
+      buildAdoApiUrl(organizationApiBaseUrl, '/_apis/git/repositories', {
         'api-version': ADO_API_VERSION,
+        $top: 1,
       }),
       {
         method: 'GET',
@@ -883,33 +936,25 @@ async function probeAdoConnectionData({
     if (isAdoAuthorizationFailureStatus(response.status)) {
       return {
         status: 'invalid',
-        error: buildAdoCredentialRejectionMessage({ authMode }),
+        error: buildAdoCredentialRejectionMessage({
+          authMode,
+          providerMessage: readAdoErrorMessage(await response.text()),
+        }),
       };
     }
 
     if (response.status !== 200) {
       return {
         status: 'unknown',
-        error: `Could not verify the Azure DevOps token: ${response.status} ${response.statusText}`,
+        error: `Could not verify the Azure DevOps credential: ${response.status} ${response.statusText}`,
       };
     }
 
-    const { authenticatedUser } = adoConnectionDataSchema.parse(
-      await response.json(),
-    );
-
-    return {
-      status: 'valid',
-      displayName:
-        authenticatedUser.providerDisplayName ??
-        authenticatedUser.displayName ??
-        authenticatedUser.uniqueName ??
-        authenticatedUser.id,
-    };
+    return { status: 'valid' };
   } catch (error) {
     return {
       status: 'unknown',
-      error: `Could not verify the Azure DevOps token: ${
+      error: `Could not verify the Azure DevOps credential: ${
         error instanceof Error ? error.message : String(error)
       }`,
     };
@@ -923,7 +968,7 @@ export async function validateAdoToken(params: {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }): Promise<AdoTokenValidationResult> {
-  return probeAdoConnectionData({ ...params, authMode: 'pat' });
+  return probeAdoCredential({ ...params, authMode: 'pat' });
 }
 
 /**
@@ -969,7 +1014,7 @@ export async function validateAdoEntraCredentials({
     };
   }
 
-  return probeAdoConnectionData({
+  return probeAdoCredential({
     token,
     authMode: 'entra',
     organization,
@@ -1027,7 +1072,7 @@ export async function validateAdoDelegatedCredentials({
     };
   }
 
-  return probeAdoConnectionData({
+  return probeAdoCredential({
     token,
     authMode: 'delegated',
     organization,

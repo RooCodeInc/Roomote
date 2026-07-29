@@ -98,7 +98,7 @@ import {
 } from '../api';
 
 const ENTRA_PERMISSION_GUIDANCE =
-  'add Code, Graph, and User Delegation / Impersonation';
+  'Azure DevOps API permissions Code, Graph, and User Delegation / Impersonation';
 
 /**
  * Mocks the two hops an Entra credential makes: the Microsoft tenant token
@@ -430,19 +430,15 @@ describe('Azure DevOps API helpers', () => {
     });
   });
 
-  it('validates Azure DevOps tokens against the connection data API', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          authenticatedUser: {
-            id: 'user-guid',
-            uniqueName: 'roomote-bot@acme.example',
-            providerDisplayName: 'Roomote Bot',
-          },
-        }),
-        { status: 200 },
-      ),
-    );
+  it('validates Azure DevOps tokens against the repository listing the sync uses', async () => {
+    // Not /_apis/connectionData: that resource is preview-only and answers 400
+    // unless the api-version carries `-preview`, which made every valid
+    // credential look unverifiable.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ count: 1, value: [] }), { status: 200 }),
+      );
 
     await expect(
       validateAdoToken({
@@ -451,10 +447,10 @@ describe('Azure DevOps API helpers', () => {
         baseUrl: 'https://dev.azure.com',
         fetchImpl: fetchMock,
       }),
-    ).resolves.toEqual({ status: 'valid', displayName: 'Roomote Bot' });
+    ).resolves.toEqual({ status: 'valid' });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1',
+      'https://dev.azure.com/acme/_apis/git/repositories?api-version=7.1&%24top=1',
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
@@ -484,11 +480,19 @@ describe('Azure DevOps API helpers', () => {
     });
   });
 
-  it('rejects a Microsoft Entra app registration that has no Azure DevOps API permissions', async () => {
+  it('rejects a Microsoft Entra app registration that cannot reach Azure DevOps', async () => {
     // The `.default` scope issues a token regardless of what was consented,
-    // so only the Azure DevOps call reveals the missing permissions.
+    // so only the Azure DevOps call reveals the problem. Azure DevOps names it
+    // in the body, which is more specific than anything the status implies.
     const fetchMock = mockEntraThenAdo(
-      () => new Response('{}', { status: 401 }),
+      () =>
+        new Response(
+          JSON.stringify({
+            message:
+              'TF401444: Please sign-in at least once as tenant\\tenant\\object-id in a web browser to enable access.',
+          }),
+          { status: 401 },
+        ),
     );
 
     const result = await validateAdoEntraCredentials({
@@ -501,26 +505,19 @@ describe('Azure DevOps API helpers', () => {
     });
 
     expect(result.status).toBe('invalid');
+    expect(result.status === 'invalid' && result.error).toContain('TF401444');
     expect(result.status === 'invalid' && result.error).toContain(
       ENTRA_PERMISSION_GUIDANCE,
     );
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
-      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1',
+      'https://dev.azure.com/acme/_apis/git/repositories?api-version=7.1&%24top=1',
     );
   });
 
   it('accepts a Microsoft Entra service principal that can reach Azure DevOps', async () => {
     const fetchMock = mockEntraThenAdo(
       () =>
-        new Response(
-          JSON.stringify({
-            authenticatedUser: {
-              id: 'user-guid',
-              providerDisplayName: 'Roomote Service Principal',
-            },
-          }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ count: 1, value: [] }), { status: 200 }),
     );
 
     await expect(
@@ -532,10 +529,7 @@ describe('Azure DevOps API helpers', () => {
         baseUrl: 'https://dev.azure.com',
         fetchImpl: fetchMock,
       }),
-    ).resolves.toEqual({
-      status: 'valid',
-      displayName: 'Roomote Service Principal',
-    });
+    ).resolves.toEqual({ status: 'valid' });
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
       headers: expect.objectContaining({
         Authorization: 'Bearer header.payload.signature',
@@ -619,6 +613,31 @@ describe('Azure DevOps API helpers', () => {
     expect(message).toContain(ENTRA_PERMISSION_GUIDANCE);
   });
 
+  it('surfaces the Azure DevOps explanation captured from a failed request', async () => {
+    delete process.env.ADO_TOKEN;
+    process.env.ADO_AUTH_MODE = 'entra';
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          message:
+            'TF401444: Please sign-in at least once as tenant\\tenant\\object-id in a web browser to enable access.',
+        }),
+        { status: 401, statusText: 'Unauthorized' },
+      ),
+    );
+
+    // The repository sync fails here, so this is the error an admin sees.
+    const error = await listAdoRepositories({
+      token: 'header.payload.signature',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
+      fetchImpl: fetchMock,
+    }).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(AdoApiError);
+    await expect(describeAdoApiError(error)).resolves.toContain('TF401444');
+  });
+
   it('keeps non-authorization Azure DevOps failures verbatim', async () => {
     await expect(
       describeAdoApiError(new AdoApiError(500, 'Internal Server Error')),
@@ -644,7 +663,8 @@ describe('Azure DevOps API helpers', () => {
       }),
     ).resolves.toEqual({
       status: 'unknown',
-      error: 'Could not verify the Azure DevOps token: network unreachable',
+      error:
+        'Could not verify the Azure DevOps credential: network unreachable',
     });
   });
 
