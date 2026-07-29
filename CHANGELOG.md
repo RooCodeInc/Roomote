@@ -2,6 +2,33 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.26.0 (2026-07-29)
+
+This release expands Linear and GitHub workflows, makes release information easier to find, and improves setup and task reliability.
+
+### Highlights
+
+- Set up and manage Linear, link user accounts, and start app-mention, issue-delegation, scheduled, and direct Linear tasks.
+- Create or fork a GitHub repository from Roomote, then bootstrap an empty repository and configure its environment automatically.
+- Manage GitHub labels, milestones, and project status values safely from Roomote tasks.
+- Find the running Roomote version easily, verify Teams credentials during setup, and start sandboxes more reliably through transient broker failures.
+
+### Minor changes
+
+- Announce newly published Roomote releases in Discord with the release title, notes, link, timestamp, and Roomote branding when a main-channel webhook is configured.
+- Set up and manage Linear from onboarding or Settings, link user accounts, and start app-mention, issue-delegation, scheduled, and direct Linear tasks with the correct workspace and account context.
+- Create a new GitHub repository or fork an existing one from Roomote, then automatically detect empty repositories, add their initial commit, and configure a working environment.
+- Manage GitHub labels, milestones, and project status values from Roomote tasks with scoped credentials, confirmation for destructive changes, and read-back verification.
+- See the running Roomote version from the signed-in user menu, open release details, and revisit the latest What's New notice without administrator access.
+
+### Patch changes
+
+- Hide self-hosted license controls from cloud deployments while keeping license management available to self-hosted administrators.
+- Make task conversations easier to follow by showing request-input questions as distinct quoted context, refining mobile task chrome, quoting web follow-ups in GitHub replies, and keeping internal routing context out of Slack and Discord quotes.
+- Retry transient compute-broker upload failures during sandbox startup so momentary upstream errors no longer prevent task environments from starting.
+- Choose the model used by the Onboarding Agent when editing an existing environment, matching the model selection already available when creating one.
+- Verify Microsoft Teams bot credentials with Microsoft before saving them, so a wrong app id, client secret, or tenant id fails the save with a message naming the field instead of reporting a configured bot that cannot authenticate. Teams settings now also reports when the saved credentials stop authenticating, and explains why the Teams app package cannot be pre-filled from a malformed App (Client) ID.
+
 ## 0.25.0 (2026-07-28)
 
 This release expands account and diagnostics configuration while making task execution and Slack automation more reliable.
