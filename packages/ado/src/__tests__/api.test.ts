@@ -106,7 +106,9 @@ const ENTRA_PERMISSION_GUIDANCE =
  */
 function mockEntraThenAdo(adoResponse: () => Response) {
   return vi.fn<typeof fetch>().mockImplementation(async (url) => {
-    if (String(url).includes('login.microsoftonline.com')) {
+    // Match on the exact host: a substring check would also match a URL that
+    // merely contains the tenant host somewhere in its path or query.
+    if (new URL(String(url)).hostname === 'login.microsoftonline.com') {
       return new Response(
         JSON.stringify({
           access_token: 'header.payload.signature',
