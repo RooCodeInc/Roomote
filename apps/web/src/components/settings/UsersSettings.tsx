@@ -71,7 +71,7 @@ function formatRelative(value: Date | string | null): string {
 export function UsersSettings() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const { userId: currentUserId } = useAuthorizedUser();
+  const { userId: currentUserId, cloudEnabled } = useAuthorizedUser();
   const settingsQueryKey = trpc.accessPolicy.get.queryKey();
   const settingsQuery = useQuery(trpc.accessPolicy.get.queryOptions());
   const [label, setLabel] = useState('');
@@ -289,88 +289,90 @@ export function UsersSettings() {
 
   return (
     <div className="space-y-6">
-      <Section icon={ScrollText} title="License">
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 text-sm">
-            {licenseBadge}
-            <p>
-              {license.seatsUsed} of {license.seatLimit} seats used
-              {license.licensee ? (
-                <span className="text-muted-foreground">
-                  {' '}
-                  · Licensed to {license.licensee}
-                  {license.expiresAt
-                    ? ` · Expires ${formatJoinedDate(license.expiresAt)}`
-                    : ''}
-                </span>
-              ) : null}
-            </p>
-          </div>
-
-          {seatsRemaining <= 0 ? (
-            <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+      {cloudEnabled ? null : (
+        <Section icon={ScrollText} title="License">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm">
+              {licenseBadge}
               <p>
-                All seats are in use. New users cannot sign in until a seat is
-                freed or a license key with more seats is added.
+                {license.seatsUsed} of {license.seatLimit} seats used
+                {license.licensee ? (
+                  <span className="text-muted-foreground">
+                    {' '}
+                    · Licensed to {license.licensee}
+                    {license.expiresAt
+                      ? ` · Expires ${formatJoinedDate(license.expiresAt)}`
+                      : ''}
+                  </span>
+                ) : null}
               </p>
             </div>
-          ) : seatsRemaining === 1 ? (
-            <p className="text-sm text-muted-foreground">
-              One seat remaining. Add a license key to raise the limit before
-              inviting more users.
-            </p>
-          ) : null}
 
-          {license.fromEnv ? (
-            <p className="text-sm text-muted-foreground">
-              License key is provided by the{' '}
-              <span className="font-mono">R_LICENSE_KEY</span> environment
-              variable. Update or remove that env var and restart the deployment
-              to change it.
-            </p>
-          ) : (
-            <form
-              className="flex flex-col gap-3 md:flex-row md:items-end items-start max-w-2xl"
-              onSubmit={handleSaveLicenseKey}
-            >
-              <div className="flex-1 space-y-2">
-                <Label htmlFor="license-key">License key</Label>
-                <Input
-                  id="license-key"
-                  value={licenseKeyInput}
-                  placeholder="RMLK1.…"
-                  onChange={(event) => setLicenseKeyInput(event.target.value)}
-                  disabled={setLicenseKey.isPending}
-                />
+            {seatsRemaining <= 0 ? (
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                <p>
+                  All seats are in use. New users cannot sign in until a seat is
+                  freed or a license key with more seats is added.
+                </p>
               </div>
-              <Button
-                type="submit"
-                disabled={setLicenseKey.isPending || !licenseKeyInput.trim()}
+            ) : seatsRemaining === 1 ? (
+              <p className="text-sm text-muted-foreground">
+                One seat remaining. Add a license key to raise the limit before
+                inviting more users.
+              </p>
+            ) : null}
+
+            {license.fromEnv ? (
+              <p className="text-sm text-muted-foreground">
+                License key is provided by the{' '}
+                <span className="font-mono">R_LICENSE_KEY</span> environment
+                variable. Update or remove that env var and restart the
+                deployment to change it.
+              </p>
+            ) : (
+              <form
+                className="flex flex-col gap-3 md:flex-row md:items-end items-start max-w-2xl"
+                onSubmit={handleSaveLicenseKey}
               >
-                {setLicenseKey.isPending ? <Spinner /> : null}
-                Save key
-              </Button>
-              {license.status !== 'unlicensed' ? (
+                <div className="flex-1 space-y-2">
+                  <Label htmlFor="license-key">License key</Label>
+                  <Input
+                    id="license-key"
+                    value={licenseKeyInput}
+                    placeholder="RMLK1.…"
+                    onChange={(event) => setLicenseKeyInput(event.target.value)}
+                    disabled={setLicenseKey.isPending}
+                  />
+                </div>
                 <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setLicenseKey.mutate({ licenseKey: null })}
-                  disabled={setLicenseKey.isPending}
+                  type="submit"
+                  disabled={setLicenseKey.isPending || !licenseKeyInput.trim()}
                 >
-                  Remove key
+                  {setLicenseKey.isPending ? <Spinner /> : null}
+                  Save key
                 </Button>
-              ) : null}
-            </form>
-          )}
-          <p className="text-sm text-muted-foreground">
-            Deployments are free for up to {license.freeSeatLimit} users. A
-            license key from the Roomote maintainers unlocks more seats. You can
-            also set <span className="font-mono">R_LICENSE_KEY</span> in the
-            deployment environment.
-          </p>
-        </div>
-      </Section>
+                {license.status !== 'unlicensed' ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setLicenseKey.mutate({ licenseKey: null })}
+                    disabled={setLicenseKey.isPending}
+                  >
+                    Remove key
+                  </Button>
+                ) : null}
+              </form>
+            )}
+            <p className="text-sm text-muted-foreground">
+              Deployments are free for up to {license.freeSeatLimit} users. A
+              license key from the Roomote maintainers unlocks more seats. You
+              can also set <span className="font-mono">R_LICENSE_KEY</span> in
+              the deployment environment.
+            </p>
+          </div>
+        </Section>
+      )}
 
       <Section icon={Mails} title="Invites">
         <div className="space-y-2">
