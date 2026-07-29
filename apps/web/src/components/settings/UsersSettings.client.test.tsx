@@ -67,6 +67,7 @@ function createDeferred<T>() {
 }
 
 const {
+  mockAuthorizedUser,
   mockSettingsState,
   mockCreateInvite,
   mockRevokeInvite,
@@ -76,6 +77,9 @@ const {
   mockSetLicenseKey,
   mockClipboardWriteText,
 } = vi.hoisted(() => ({
+  mockAuthorizedUser: {
+    current: { userId: 'user-1', cloudEnabled: false },
+  },
   mockSettingsState: {
     current: {
       slackTeamId: null as string | null,
@@ -162,7 +166,7 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({ userId: 'user-1' }),
+  useAuthorizedUser: () => mockAuthorizedUser.current,
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -241,6 +245,7 @@ describe('UsersSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockClipboardWriteText.mockResolvedValue(undefined);
+    mockAuthorizedUser.current = { userId: 'user-1', cloudEnabled: false };
     mockSettingsState.current = {
       slackTeamId: null,
       hasSlackSignIn: false,
@@ -639,6 +644,17 @@ describe('UsersSettings', () => {
       });
     });
     expect(toast.success).toHaveBeenCalledWith('License key saved.');
+  });
+
+  it('hides the license section for cloud-enabled deployments', async () => {
+    mockAuthorizedUser.current = { userId: 'user-1', cloudEnabled: true };
+
+    renderUsersSettings();
+
+    expect(await screen.findByText('Invites')).toBeInTheDocument();
+    expect(screen.getByText('Users')).toBeInTheDocument();
+    expect(screen.queryByText('License')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('License key')).not.toBeInTheDocument();
   });
 
   it('shows licensed state, at-limit warning, and removes the key', async () => {
