@@ -222,6 +222,7 @@ describe('sendMessageToTask', () => {
     ).toBeLessThan(mockSendPromptMutate.mock.invocationCallOrder[0]!);
     expect(mockSendPromptMutate).toHaveBeenCalledWith({
       prompt: 'Continue as the new sender.',
+      quoteText: 'Continue as the new sender.',
       autoSteerWhenQueued: true,
     });
   });
@@ -362,6 +363,7 @@ describe('sendMessageToTask', () => {
     });
     expect(mockSendPromptMutate).toHaveBeenCalledWith({
       prompt: 'Please keep the existing payout logic.',
+      quoteText: 'Please keep the existing payout logic.',
       source: 'web',
       clientMessageId: 'client-1',
     });
@@ -394,6 +396,7 @@ describe('sendMessageToTask', () => {
     expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
     expect(mockSendPromptMutate).toHaveBeenCalledWith({
       prompt: 'This stays in the web UI only.',
+      quoteText: 'This stays in the web UI only.',
     });
   });
 
@@ -495,6 +498,7 @@ describe('sendMessageToTask', () => {
     expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
     expect(mockSendPromptMutate).toHaveBeenCalledWith({
       prompt: 'Please keep the existing payout logic.',
+      quoteText: 'Please keep the existing payout logic.',
     });
   });
 
@@ -519,6 +523,8 @@ describe('sendMessageToTask', () => {
     expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
     expect(mockSendPromptMutate).toHaveBeenCalledWith({
       prompt: '<github-pr-follow-up>Route this through the existing PR task.',
+      quoteText:
+        '<github-pr-follow-up>Route this through the existing PR task.',
       userName: 'Ada Lovelace',
     });
   });
@@ -550,6 +556,7 @@ describe('sendMessageToTask', () => {
     });
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: 'Pause the implementation and inspect the failing test.',
+      quoteText: 'Pause the implementation and inspect the failing test.',
     });
   });
 
@@ -608,6 +615,8 @@ describe('sendMessageToTask', () => {
     expect(mockUserFindFirst).toHaveBeenCalledWith(expect.anything());
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: '<github-pr-follow-up>Route this through the existing PR task.',
+      quoteText:
+        '<github-pr-follow-up>Route this through the existing PR task.',
       userName: 'Ada Lovelace',
     });
   });
@@ -630,6 +639,8 @@ describe('sendMessageToTask', () => {
     expect(mockUserFindFirst).not.toHaveBeenCalled();
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: '<github-pr-follow-up>Route this through the existing PR task.',
+      quoteText:
+        '<github-pr-follow-up>Route this through the existing PR task.',
       userName: 'octocat',
     });
   });
@@ -651,6 +662,8 @@ describe('sendMessageToTask', () => {
     });
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: '<github-pr-follow-up>Route this through the existing PR task.',
+      quoteText:
+        '<github-pr-follow-up>Route this through the existing PR task.',
     });
   });
 

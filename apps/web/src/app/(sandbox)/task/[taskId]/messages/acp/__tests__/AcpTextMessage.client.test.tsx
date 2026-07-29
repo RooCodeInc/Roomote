@@ -630,7 +630,13 @@ describe('AcpTextMessage', () => {
     expect(plainText).toHaveTextContent('Pick one option for the third test.');
     expect(plainText).toHaveTextContent('Gamma');
     expect(plainText).not.toHaveTextContent('Responded to requested input');
-    expect(plainText.querySelectorAll('span')).toHaveLength(2);
+    expect(plainText.querySelectorAll('p')).toHaveLength(1);
+    expect(plainText.querySelector('p')).toHaveClass(
+      'mt-1',
+      'border-l-2',
+      'pl-2',
+      'text-muted-foreground',
+    );
     expect(
       screen.getByRole('button', {
         name: /copy:/,

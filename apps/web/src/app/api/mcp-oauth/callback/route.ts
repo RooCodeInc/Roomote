@@ -9,6 +9,7 @@ import {
 } from '@roomote/db/server';
 import {
   getMcpIntegration,
+  getMcpIntegrationOauthEndpoints,
   isDeploymentScopedMcpIntegration,
   isSelfServeMcpIntegration,
 } from '@roomote/types';
@@ -24,7 +25,10 @@ import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
-import { hydrateLinearMcpConnectionAfterOauth } from '@/lib/server/mcp-linear';
+import {
+  hydrateLinearMcpConnectionAfterOauth,
+  LinearReplayIdentityMismatchError,
+} from '@/lib/server/mcp-linear';
 import type {
   McpOAuthErrorReason,
   McpOAuthResult,
@@ -302,29 +306,31 @@ export async function GET(request: NextRequest) {
     }
 
     failureStage = 'provider_discovery';
-    const serverMetadata = await discoverOAuthEndpoints(integration.url);
+    const tokenEndpoint =
+      getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
+      (await discoverOAuthEndpoints(integration.url)).token_endpoint;
     const redirectUri = new URL(CALLBACK_PATH, webUrl).toString();
 
     failureStage = 'token_exchange';
     const tokens = await exchangeCodeForTokens(
-      serverMetadata.token_endpoint,
+      tokenEndpoint,
       code,
       oauthState.codeVerifier,
       clientInfo,
       redirectUri,
     );
 
-    failureStage = 'token_storage';
-    await storeTokens(resolvedConnectionId, tokens);
-
     if (integration.id === 'linear') {
       failureStage = 'linear_metadata';
       await hydrateLinearMcpConnectionAfterOauth({
         connection,
-        accessToken: tokens.access_token,
+        tokens,
         replayToken: oauthState.replayToken,
         enabledByUserId: userId,
       });
+    } else {
+      failureStage = 'token_storage';
+      await storeTokens(resolvedConnectionId, tokens);
     }
 
     if (requiresOrgAdmin) {
@@ -362,7 +368,7 @@ export async function GET(request: NextRequest) {
       'MCP OAuth callback failed',
     );
 
-    if (connectionId) {
+    if (connectionId && !(error instanceof LinearReplayIdentityMismatchError)) {
       try {
         await updateAuthStatus(connectionId, 'error');
       } catch (statusError) {

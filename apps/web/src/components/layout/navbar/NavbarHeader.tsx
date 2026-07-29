@@ -24,7 +24,7 @@ export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
   return (
     <div
       className={cn(
-        'flex items-center justify-between gap-2 h-(--header-height) mx-auto px-1 pr-5',
+        'flex items-center justify-between gap-2 h-(--header-height) mx-auto px-1 pr-2 md:pr-5',
         className,
       )}
       {...props}

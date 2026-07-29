@@ -16,8 +16,10 @@ import {
   useValidateEnvironmentConfig,
 } from '@/hooks/environments';
 import { useRepositories } from '@/hooks/source-control';
+import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { useTRPC } from '@/trpc/client';
+import { ModelSelect } from '@/components/tasks';
 
 import {
   Alert,
@@ -75,6 +77,7 @@ export function EditEnvironmentPage({
   );
   const updateEnvironment = useUpdateEnvironment();
   const validateConfig = useValidateEnvironmentConfig();
+  const launchTaskModels = useLaunchTaskModels();
   const [activeView, setActiveView] = useState<MasterView>('yaml');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [pendingConfig, setPendingConfig] = useState<EnvironmentConfig | null>(
@@ -91,7 +94,10 @@ export function EditEnvironmentPage({
     [],
   );
   const [agentChangeRequest, setAgentChangeRequest] = useState('');
+  const [selectedModelId, setSelectedModelId] = useState<string>();
   const [isLoadingVersion, setIsLoadingVersion] = useState(false);
+  const effectiveSelectedModelId =
+    selectedModelId ?? launchTaskModels.data?.defaultModelId;
 
   const startDefinitionTask = useMutation(
     trpc.environments.startDefinitionTask.mutationOptions({
@@ -113,6 +119,7 @@ export function EditEnvironmentPage({
     setSelectedVersionValue(CURRENT_VERSION_VALUE);
     setSelectedRepositoryIds([]);
     setAgentChangeRequest('');
+    setSelectedModelId(undefined);
     setIsLoadingVersion(false);
   }, [environmentId]);
 
@@ -140,6 +147,7 @@ export function EditEnvironmentPage({
     setSelectedVersionValue(CURRENT_VERSION_VALUE);
     setSelectedRepositoryIds([]);
     setAgentChangeRequest('');
+    setSelectedModelId(undefined);
     setActiveView('yaml');
   };
 
@@ -291,6 +299,9 @@ export function EditEnvironmentPage({
       repositoryIds: selectedRepositoryIds,
       environmentId: environment.id,
       changeRequest: agentChangeRequest.trim() || undefined,
+      ...(effectiveSelectedModelId
+        ? { selectedModelId: effectiveSelectedModelId }
+        : {}),
     });
   };
 
@@ -415,6 +426,8 @@ export function EditEnvironmentPage({
                 onSwitchToYaml={handleSwitchToYaml}
                 changeRequest={agentChangeRequest}
                 onChangeRequest={setAgentChangeRequest}
+                selectedModelId={effectiveSelectedModelId}
+                onSelectedModelIdChange={setSelectedModelId}
                 isStartAgentPending={startDefinitionTask.isPending}
                 isBusy={isBusy}
               />
@@ -554,6 +567,8 @@ function AgentMasterView({
   onSwitchToYaml,
   changeRequest,
   onChangeRequest,
+  selectedModelId,
+  onSelectedModelIdChange,
   isStartAgentPending,
   isBusy,
 }: {
@@ -566,6 +581,8 @@ function AgentMasterView({
   onSwitchToYaml: () => void;
   changeRequest: string;
   onChangeRequest: (value: string) => void;
+  selectedModelId?: string;
+  onSelectedModelIdChange: (value: string) => void;
   isStartAgentPending: boolean;
   isBusy: boolean;
 }) {
@@ -580,6 +597,8 @@ function AgentMasterView({
       onSwitchToYaml={onSwitchToYaml}
       changeRequest={changeRequest}
       onChangeRequest={onChangeRequest}
+      selectedModelId={selectedModelId}
+      onSelectedModelIdChange={onSelectedModelIdChange}
       isStartAgentPending={isStartAgentPending}
       isBusy={isBusy}
     />
@@ -596,6 +615,8 @@ function AgentRepositorySelectionSubview({
   onSwitchToYaml,
   changeRequest,
   onChangeRequest,
+  selectedModelId,
+  onSelectedModelIdChange,
   isStartAgentPending,
   isBusy,
 }: {
@@ -608,6 +629,8 @@ function AgentRepositorySelectionSubview({
   onSwitchToYaml: () => void;
   changeRequest: string;
   onChangeRequest: (value: string) => void;
+  selectedModelId?: string;
+  onSelectedModelIdChange: (value: string) => void;
   isStartAgentPending: boolean;
   isBusy: boolean;
 }) {
@@ -715,6 +738,12 @@ function AgentRepositorySelectionSubview({
           Start Agent
           <ArrowRight />
         </Button>
+        <ModelSelect
+          value={selectedModelId}
+          onValueChange={onSelectedModelIdChange}
+          disabled={isBusy}
+          ariaLabel="Environment edit model"
+        />
       </div>
     </>
   );

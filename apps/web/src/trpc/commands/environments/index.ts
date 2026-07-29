@@ -828,11 +828,28 @@ export async function startEnvironmentDefinitionTaskCommand(
     throw new Error(modelSelection.error);
   }
 
-  let prompt = buildCreateEnvironmentDefinitionPrompt(
-    selectedRepositoryFullNames,
-  );
+  let prompt: string;
 
-  if (input.environmentId) {
+  if (!input.environmentId) {
+    // Brand-new repos with no commits are a supported setup target: the
+    // environment-setup skill bootstraps them with an initial commit, so the
+    // prompt flags which selected repositories are empty. Non-GitHub repos
+    // never appear in the empty-state map and are treated as non-empty.
+    const emptyStates = await GitHub.getRepositoryEmptyStates({
+      repositoryIds: selectedRepositories.map((repository) => repository.id),
+    });
+
+    const emptyRepositoryFullNames = selectedRepositories
+      .filter((repository) => emptyStates.get(repository.id) === true)
+      .map((repository) => repository.fullName);
+
+    prompt = buildCreateEnvironmentDefinitionPrompt(
+      selectedRepositoryFullNames,
+      emptyRepositoryFullNames.length > 0
+        ? { emptyRepositoryFullNames }
+        : undefined,
+    );
+  } else {
     const [environment] = await db
       .select({
         id: environments.id,

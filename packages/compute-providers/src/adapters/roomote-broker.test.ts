@@ -395,6 +395,73 @@ describe('RoomoteBrokerClient', () => {
     });
   });
 
+  it('retries transient file upload failures', async () => {
+    let attempts = 0;
+    const { client, requests } = harness(() => {
+      attempts += 1;
+      return attempts < 3 ? jsonResponse({}, 502) : jsonResponse({});
+    });
+
+    vi.useFakeTimers();
+    try {
+      const pending = client.writeFiles({
+        instanceId: 'sb-1',
+        files: [
+          { path: '/sandbox/install.sh', content: Buffer.from('echo hi') },
+        ],
+      });
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expect(pending).resolves.toBeUndefined();
+      expect(requests).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not retry deterministic file upload failures', async () => {
+    const { client, requests } = harness(() =>
+      jsonResponse({ error: 'invalid file path' }, 400),
+    );
+
+    await expect(
+      client.writeFiles({
+        instanceId: 'sb-1',
+        files: [
+          { path: '/sandbox/install.sh', content: Buffer.from('echo hi') },
+        ],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('stops retrying file uploads when aborted during backoff', async () => {
+    const { client, requests } = harness(() => jsonResponse({}, 502));
+    const controller = new AbortController();
+
+    vi.useFakeTimers();
+    try {
+      const pending = client.writeFiles({
+        instanceId: 'sb-1',
+        files: [
+          { path: '/sandbox/install.sh', content: Buffer.from('echo hi') },
+        ],
+        signal: controller.signal,
+      });
+      const assertion = expect(pending).rejects.toMatchObject({
+        name: 'AbortError',
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort();
+
+      await assertion;
+      expect(requests).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('polls snapshot operations to completion', async () => {
     let polls = 0;
     const { client } = harness((request) => {

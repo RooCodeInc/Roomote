@@ -19,6 +19,8 @@ import { getFollowUpWorkflowPhase } from '../../run-task/workflow-phase';
 const sendPromptInputSchema = z
   .object({
     prompt: z.string().optional(),
+    /** Original user text before trusted platform context is prepended. */
+    quoteText: z.string().optional(),
     taskTool: taskToolDispatchPayloadSchema.optional(),
     images: z.array(z.string()).optional(),
     /** Where this prompt originated from (e.g., 'web', 'slack'). */
@@ -64,6 +66,18 @@ const sendPromptInputSchema = z
         path: ['prompt'],
       });
     }
+
+    if (
+      data.source === 'web' &&
+      !data.taskTool &&
+      typeof data.quoteText !== 'string'
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Web prompts must include the original text for reply quotes',
+        path: ['quoteText'],
+      });
+    }
   });
 
 /**
@@ -86,6 +100,7 @@ export const sendPrompt = publicProcedure
     const resolvedPrompt = input.taskTool
       ? getTaskToolInvocation(input.taskTool.actionId, ctx.codingHarness)
       : (input.prompt ?? '');
+    const resolvedQuoteText = input.quoteText ?? resolvedPrompt;
     const workflowPhase = input.taskTool
       ? input.taskTool.actionId
       : getFollowUpWorkflowPhase(resolvedPrompt);
@@ -121,7 +136,7 @@ export const sendPrompt = publicProcedure
         if (input.source === 'web') {
           trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
-            text: resolvedPrompt,
+            text: resolvedQuoteText,
             userName: input.userName,
             logPrefix: 'sendPrompt',
             warn: (message) => ctx.harnessLogger?.warn(message),
@@ -180,7 +195,7 @@ export const sendPrompt = publicProcedure
       if (input.source === 'web') {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
-          text: resolvedPrompt,
+          text: resolvedQuoteText,
           userName: input.userName,
           logPrefix: 'sendPrompt',
           warn: (message) => ctx.harnessLogger?.warn(message),

@@ -156,6 +156,7 @@ describe('steerTask procedure', () => {
 
     const result = await caller.commands.steerTask({
       prompt: 'Switch to fixing tests first',
+      quoteText: 'Switch to fixing tests first',
       images: ['data:image/png;base64,abc'],
     });
 
@@ -204,6 +205,7 @@ describe('steerTask procedure', () => {
 
     const result = await caller.commands.steerTask({
       prompt: 'Steer this into the current turn',
+      quoteText: 'Steer this into the current turn',
       images: ['data:image/png;base64,abc'],
     });
 
@@ -227,6 +229,7 @@ describe('steerTask procedure', () => {
 
     const result = await caller.commands.steerTask({
       prompt: '/review-code inspect the latest diff',
+      quoteText: '/review-code inspect the latest diff',
     });
 
     expect(result).toEqual({ success: true });
@@ -243,7 +246,10 @@ describe('steerTask procedure', () => {
     const { caller } = createCaller({ harnessManagerAvailable: false });
 
     await expect(
-      caller.commands.steerTask({ prompt: 'Switch directions' }),
+      caller.commands.steerTask({
+        prompt: 'Switch directions',
+        quoteText: 'Switch directions',
+      }),
     ).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
     });
@@ -255,6 +261,7 @@ describe('steerTask procedure', () => {
 
     const result = await caller.commands.steerTask({
       prompt: '   ',
+      quoteText: '   ',
       images: ['data:image/png;base64,abc'],
     });
 
@@ -283,6 +290,7 @@ describe('steerTask procedure', () => {
 
     const result = await caller.commands.steerTask({
       prompt: 'Continue from the queued follow-up',
+      quoteText: 'Continue from the queued follow-up',
     });
 
     expect(result).toEqual({ success: true });
@@ -310,6 +318,7 @@ describe('steerTask procedure', () => {
 
     const result = await caller.commands.steerTask({
       prompt: 'Switch directions',
+      quoteText: 'Switch directions',
     });
 
     expect(result).toEqual({ success: true });
@@ -328,7 +337,10 @@ describe('steerTask procedure', () => {
       });
 
     await expect(
-      caller.commands.steerTask({ prompt: 'Switch directions' }),
+      caller.commands.steerTask({
+        prompt: 'Switch directions',
+        quoteText: 'Switch directions',
+      }),
     ).rejects.toMatchObject({
       code: 'INTERNAL_SERVER_ERROR',
     });
@@ -358,7 +370,10 @@ describe('steerTask procedure', () => {
     });
 
     await expect(
-      caller.commands.steerTask({ prompt: 'Switch directions' }),
+      caller.commands.steerTask({
+        prompt: 'Switch directions',
+        quoteText: 'Switch directions',
+      }),
     ).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
     });
@@ -371,7 +386,7 @@ describe('steerTask procedure', () => {
     const { caller } = createCaller();
 
     await expect(
-      caller.commands.steerTask({ prompt: '   ' }),
+      caller.commands.steerTask({ prompt: '   ', quoteText: '   ' }),
     ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
     });
@@ -382,7 +397,10 @@ describe('steerTask procedure', () => {
     const { caller, sendFollowUpPrompt } = createCaller();
 
     await expect(
-      caller.commands.steerTask({ prompt: 'Switch directions' }),
+      caller.commands.steerTask({
+        prompt: 'Switch directions',
+        quoteText: 'Switch directions',
+      }),
     ).rejects.toMatchObject({
       code: 'PRECONDITION_FAILED',
     });

@@ -1,4 +1,4 @@
-import type { McpIntegration } from '@roomote/types';
+import { MCP_INTEGRATIONS, type McpIntegration } from '@roomote/types';
 
 type StaticOauthClientEnv = NonNullable<McpIntegration['oauthClientEnv']>;
 type StaticOauthPairResolution =
@@ -10,12 +10,37 @@ type StaticOauthPairResolution =
       status: 'missing' | 'partial';
     };
 
+export type StaticOauthReadiness =
+  | 'not_required'
+  | 'ready'
+  | 'missing'
+  | 'partial';
+
 const STATIC_OAUTH_FALLBACKS: Partial<Record<string, StaticOauthClientEnv[]>> =
   {};
 
-const STATIC_OAUTH_ENV_KEYS = new Set<string>();
+const STATIC_OAUTH_ENV_PAIRS = MCP_INTEGRATIONS.flatMap((integration) => {
+  const clientIdEnv = integration.oauthClientEnv?.clientIdEnv;
+  const clientSecretEnv = integration.oauthClientEnv?.clientSecretEnv;
 
-const STATIC_OAUTH_ENV_PARTNERS: Record<string, string> = {};
+  return clientIdEnv && clientSecretEnv
+    ? [[clientIdEnv, clientSecretEnv] as const]
+    : [];
+});
+
+const STATIC_OAUTH_ENV_KEYS = new Set(
+  STATIC_OAUTH_ENV_PAIRS.flatMap(([clientIdEnv, clientSecretEnv]) => [
+    clientIdEnv,
+    clientSecretEnv,
+  ]),
+);
+
+const STATIC_OAUTH_ENV_PARTNERS = Object.fromEntries(
+  STATIC_OAUTH_ENV_PAIRS.flatMap(([clientIdEnv, clientSecretEnv]) => [
+    [clientIdEnv, clientSecretEnv],
+    [clientSecretEnv, clientIdEnv],
+  ]),
+);
 
 export function getStaticOauthEnvPartnerKey(key: string): string | undefined {
   return STATIC_OAUTH_ENV_PARTNERS[key];
@@ -117,7 +142,7 @@ function resolveStaticOauthCandidateInformation(
   };
 }
 
-export function getStaticOauthEnvCandidates(
+function getStaticOauthEnvCandidates(
   integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
 ): StaticOauthClientEnv[] {
   if (!integration.oauthClientEnv) {
@@ -130,7 +155,20 @@ export function getStaticOauthEnvCandidates(
   ];
 }
 
-export function resolveStaticOauthClientInformation(
+export function getStaticOauthEnvKeys(
+  integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
+): string[] {
+  return Array.from(
+    new Set(
+      getStaticOauthEnvCandidates(integration).flatMap((candidate) => [
+        candidate.clientIdEnv,
+        ...(candidate.clientSecretEnv ? [candidate.clientSecretEnv] : []),
+      ]),
+    ),
+  );
+}
+
+function resolveStaticOauthIntegration(
   env: unknown,
   integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
 ) {
@@ -141,18 +179,45 @@ export function resolveStaticOauthClientInformation(
     );
 
     if (candidateInformation.status === 'configured') {
-      return {
-        client_id: candidateInformation.client_id,
-        client_secret: candidateInformation.client_secret,
-        token_endpoint_auth_method:
-          candidateInformation.token_endpoint_auth_method,
-      };
+      return candidateInformation;
     }
 
     if (candidateInformation.status === 'partial') {
-      return undefined;
+      return candidateInformation;
     }
   }
 
-  return undefined;
+  return { status: 'missing' as const };
+}
+
+export function resolveStaticOauthClientInformation(
+  env: unknown,
+  integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
+) {
+  const resolution = resolveStaticOauthIntegration(env, integration);
+
+  if (resolution.status !== 'configured') {
+    return undefined;
+  }
+
+  return {
+    client_id: resolution.client_id,
+    client_secret: resolution.client_secret,
+    token_endpoint_auth_method: resolution.token_endpoint_auth_method,
+  };
+}
+
+export function getStaticOauthReadiness(
+  env: unknown,
+  integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
+): StaticOauthReadiness {
+  const candidates = getStaticOauthEnvCandidates(integration);
+
+  if (candidates.length === 0) {
+    return 'not_required';
+  }
+
+  const resolution = resolveStaticOauthIntegration(env, integration);
+
+  return resolution.status === 'configured' ? 'ready' : resolution.status;
 }

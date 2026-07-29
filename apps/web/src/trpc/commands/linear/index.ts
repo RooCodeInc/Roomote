@@ -1,18 +1,18 @@
-import {
-  and,
-  db,
-  eq,
-  isNull,
-  mcpConnections,
-  deploymentMcpEnablements,
-} from '@roomote/db/server';
+import { db } from '@roomote/db/server';
 import {
   findLinearDeploymentMcpConnection,
   getLinearDeploymentMetadata,
-  LINEAR_ORG_CONNECTION_ROLE,
 } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
+
+import { clearLinearDeploymentConnection } from './oauth-setup';
+
+export {
+  getLinearOauthSetupCommand,
+  removeLinearOauthSetupCommand,
+  saveLinearOauthSetupCommand,
+} from './oauth-setup';
 
 type LinearInstallationSummary = {
   id: string;
@@ -55,31 +55,7 @@ export async function disconnectLinearAppCommand(
       };
     }
 
-    await db
-      .delete(mcpConnections)
-      .where(
-        and(
-          eq(mcpConnections.mcpId, 'linear'),
-          eq(mcpConnections.connectionRole, LINEAR_ORG_CONNECTION_ROLE),
-          isNull(mcpConnections.userId),
-        ),
-      );
-
-    await db
-      .insert(deploymentMcpEnablements)
-      .values({
-        mcpId: 'linear',
-        enabled: false,
-        enabledByUserId: auth.userId,
-      })
-      .onConflictDoUpdate({
-        target: deploymentMcpEnablements.mcpId,
-        set: {
-          enabled: false,
-          enabledByUserId: auth.userId,
-          updatedAt: new Date(),
-        },
-      });
+    await clearLinearDeploymentConnection(db, auth.userId);
 
     return { success: true };
   } catch (error) {

@@ -60,6 +60,10 @@ export const SelectWorkspace = ({
     router.push(SETTINGS_PATHS.newEnvironment);
   }, [router]);
 
+  const handleCreateRepository = useCallback(() => {
+    router.push(`${SETTINGS_PATHS.newEnvironment}?create-repo=1`);
+  }, [router]);
+
   const handleUpdateEnvironment = useCallback(
     (e: React.MouseEvent, envId: string) => {
       e.preventDefault();
@@ -106,6 +110,7 @@ export const SelectWorkspace = ({
           lockedBranch={lockedBranch}
           allowAuto={allowAuto}
           onCreate={handleCreateEnvironment}
+          onCreateRepository={handleCreateRepository}
           onEdit={handleUpdateEnvironment}
           onDelete={handleDeleteEnvironment}
         />

@@ -27,7 +27,7 @@ import type {
   WriteFileInput,
 } from '../types';
 import { unsupported } from '../errors';
-import { throwIfAborted, toAbortError } from '../modal/abort';
+import { sleepWithSignal, throwIfAborted, toAbortError } from '../modal/abort';
 import { RoomoteBrokerExec } from './roomote-broker-exec';
 import {
   BrokerRequestError,
@@ -40,6 +40,8 @@ const SNAPSHOT_POLL_INTERVAL_MS = 5_000;
 const SNAPSHOT_POLL_TIMEOUT_MS = 25 * 60_000;
 // Keep each request's decoded file payload under the broker's 24 MiB cap.
 const FILE_BATCH_MAX_BYTES = 16 * 1024 * 1024;
+const FILE_WRITE_MAX_ATTEMPTS = 3;
+const FILE_WRITE_RETRY_DELAY_MS = 1_000;
 
 /**
  * Broker-backed engine for the deployment-managed `roomote` provider. The
@@ -196,12 +198,34 @@ export class RoomoteBrokerClient implements ComputeProviderClient {
     }
 
     for (const files of batches) {
-      await this.requestJson({
-        method: 'PUT',
-        path: `/v1/sandboxes/${encodeURIComponent(input.instanceId)}/files`,
-        body: JSON.stringify({ files }),
-        signal: input.signal,
-      });
+      const path = `/v1/sandboxes/${encodeURIComponent(input.instanceId)}/files`;
+      const body = JSON.stringify({ files });
+
+      for (let attempt = 1; attempt <= FILE_WRITE_MAX_ATTEMPTS; attempt++) {
+        try {
+          await this.requestJson({
+            method: 'PUT',
+            path,
+            body,
+            signal: input.signal,
+          });
+          break;
+        } catch (error) {
+          if (
+            !(error instanceof BrokerRequestError) ||
+            error.status < 500 ||
+            attempt === FILE_WRITE_MAX_ATTEMPTS
+          ) {
+            throw error;
+          }
+
+          const delayMs = FILE_WRITE_RETRY_DELAY_MS * 2 ** (attempt - 1);
+          console.warn(
+            `[RoomoteBrokerClient] File upload attempt ${attempt}/${FILE_WRITE_MAX_ATTEMPTS} failed with HTTP ${error.status}; retrying in ${delayMs}ms`,
+          );
+          await sleepWithSignal(delayMs, input.signal);
+        }
+      }
     }
   }
 

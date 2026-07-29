@@ -19,6 +19,10 @@ import type {
   McpConnectionOAuthConfig,
   McpConnectionRole,
 } from '@roomote/types';
+import {
+  getMcpIntegrationOauthEndpoints,
+  MCP_INTEGRATIONS,
+} from '@roomote/types';
 
 // Minimum base64 length for an AES-256-GCM encrypted value (salt+iv+tag = 64 bytes → 88 base64 chars)
 const MIN_ENCRYPTED_LENGTH = 88;
@@ -192,7 +196,7 @@ export async function storeTokens(
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token || null,
       tokenExpiresAt,
-      scopes: tokens.scope ? tokens.scope.split(' ') : [],
+      scopes: tokens.scope ? tokens.scope.split(/[\s,]+/).filter(Boolean) : [],
       authStatus: 'authenticated',
       enabled: true,
       updatedAt: new Date(),
@@ -373,20 +377,6 @@ export async function getClientInformation(
     };
   }
 
-  if (
-    connection.mcpId === 'linear' &&
-    typeof process.env.R_LINEAR_CLIENT_ID === 'string' &&
-    process.env.R_LINEAR_CLIENT_ID &&
-    typeof process.env.R_LINEAR_CLIENT_SECRET === 'string' &&
-    process.env.R_LINEAR_CLIENT_SECRET
-  ) {
-    return {
-      client_id: process.env.R_LINEAR_CLIENT_ID,
-      client_secret: process.env.R_LINEAR_CLIENT_SECRET,
-      token_endpoint_auth_method: 'client_secret_post',
-    };
-  }
-
   return undefined;
 }
 
@@ -430,9 +420,14 @@ export async function getValidAccessToken(
       try {
         const clientInfo = await getClientInformation(connectionId);
         if (clientInfo) {
-          const serverMetadata = await discoverOAuthEndpoints(mcpUrl);
+          const integration = MCP_INTEGRATIONS.find(
+            (candidate) => candidate.url === mcpUrl,
+          );
+          const tokenEndpoint =
+            getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
+            (await discoverOAuthEndpoints(mcpUrl)).token_endpoint;
           const newTokens = await refreshOAuthToken(
-            serverMetadata.token_endpoint,
+            tokenEndpoint,
             clientInfo,
             storedTokens.refresh_token,
           );

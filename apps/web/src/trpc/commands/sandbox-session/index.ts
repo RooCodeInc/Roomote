@@ -5,9 +5,11 @@ import {
   getEnvironmentDefinitionIdFromPayload,
   isBootingRunStatus,
   isExitedRunStatus,
+  resolveSourceControlProviderFromPayload,
   taskToolDispatchPayloadSchema,
 } from '@roomote/types';
 import { createRunToken } from '@roomote/auth';
+import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
 import {
   and,
   compareAndSetTrustedRunActingUser,
@@ -296,11 +298,12 @@ export async function sendSandboxPromptCommand(
       ],
     });
 
-    return await client.commands.sendPrompt.mutate({
+    const result = await client.commands.sendPrompt.mutate({
       prompt:
         outOfBandContext && typeof parsed.prompt === 'string'
           ? withOutOfBandContext(outOfBandContext, parsed.prompt)
           : parsed.prompt,
+      quoteText: parsed.prompt,
       taskTool: parsed.taskTool,
       images: parsed.images,
       source: parsed.source,
@@ -313,6 +316,21 @@ export async function sendSandboxPromptCommand(
         ? true
         : parsed.autoSteerWhenQueued,
     });
+
+    if (
+      parsed.source === 'web' &&
+      typeof parsed.prompt === 'string' &&
+      resolveSourceControlProviderFromPayload(taskRun.payload) === 'github'
+    ) {
+      await trackLatestUserMessageForReplyQuote({
+        provider: 'github',
+        runId: taskRun.id,
+        text: parsed.prompt,
+        userName: getAuthenticatedPromptUserName(auth) ?? 'Someone',
+      });
+    }
+
+    return result;
   } catch (error) {
     await releaseOutOfBandContext(outOfBandContext);
 

@@ -1,7 +1,4 @@
-import {
-  getSlackThreadTsFromTaskPayload,
-  normalizeTranscriptUserText,
-} from '@roomote/types';
+import { getSlackThreadTsFromTaskPayload } from '@roomote/types';
 import { sdk } from '@roomote/sdk/client';
 import { hasSlackThreadReplyContext } from '@roomote/slack/client';
 import { getRoomoteConfig } from '../../mcp/roomote-mcp-server/config';
@@ -9,30 +6,6 @@ import {
   clearSlackReplyQuote,
   trackSlackReplyQuote,
 } from '../../mcp/roomote-mcp-server/slack-api-client';
-
-/**
- * Extract the user-visible comment body when the tracked text is wrapped in a
- * GitHub PR follow-up envelope so the `<github-pr-follow-up>` routing marker
- * never leaks into the stored Slack reply quote.
- */
-function normalizeSlackQuoteText(text: string): string {
-  const trimmed = text.trim();
-
-  if (!trimmed.startsWith('<github-pr-follow-up>')) {
-    return text;
-  }
-
-  const normalized = normalizeTranscriptUserText(trimmed);
-
-  if (normalized && normalized !== trimmed) {
-    return normalized;
-  }
-
-  // Malformed envelope: the full extraction did not match. Strip the leading
-  // marker so it never leaks into the stored quote. The canonical builder
-  // always emits a well-formed envelope, so this branch is purely defensive.
-  return trimmed.replace(/^<github-pr-follow-up>\s*/, '');
-}
 
 async function getSlackQuoteTrackingConfig(params: {
   runId: number;
@@ -93,7 +66,7 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
 
     await trackSlackReplyQuote(roomoteConfig, {
       runId,
-      text: normalizeSlackQuoteText(text),
+      text,
       userName: userName?.trim() || 'Someone',
     });
     return true;

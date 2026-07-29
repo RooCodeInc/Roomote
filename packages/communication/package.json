@@ -17,6 +17,7 @@
     "./task-thread-title": "./src/task-thread-title.ts",
     "./teams-activity": "./src/teams-activity.ts",
     "./teams-bot-framework-client": "./src/teams-bot-framework-client.ts",
+    "./teams-credential-validation": "./src/teams-credential-validation.ts",
     "./teams-graph-client": "./src/teams-graph-client.ts",
     "./teams-provider": "./src/teams-provider.ts",
     "./telegram-provider": "./src/telegram-provider.ts",

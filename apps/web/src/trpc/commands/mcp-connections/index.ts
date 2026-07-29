@@ -32,10 +32,9 @@ import { encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
-import {
-  getStaticOauthEnvCandidates,
-  resolveStaticOauthClientInformation,
-} from '@/lib/server/mcp-static-oauth';
+import type { StaticOauthReadiness } from '@/lib/server/mcp-static-oauth';
+import { getDeploymentStaticOauthReadiness } from '@/lib/server/deployment-static-oauth';
+import { Env } from '@/lib/server/env';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import type {
   SaveAsanaConnectionInput,
@@ -71,23 +70,30 @@ function assertAdmin(auth: UserAuthSuccess) {
   }
 }
 
-function getMissingStaticOauthEnvNames(
-  integration: Pick<McpIntegration, 'id' | 'oauthClientEnv'>,
-): string[] {
-  const candidates = getStaticOauthEnvCandidates(integration);
-
-  if (candidates.length === 0) {
-    return [];
+function getStaticOauthSetupError(
+  integration: Pick<McpIntegration, 'name'>,
+  readiness: StaticOauthReadiness,
+): string | null {
+  if (readiness === 'ready' || readiness === 'not_required') {
+    return null;
   }
 
-  if (resolveStaticOauthClientInformation(process.env, integration)) {
-    return [];
+  if (readiness === 'partial') {
+    return `${integration.name} OAuth setup is incomplete on this Roomote deployment. Ask the team managing this deployment to finish configuring it before connecting.`;
   }
 
-  return [
-    integration.oauthClientEnv?.clientIdEnv,
-    integration.oauthClientEnv?.clientSecretEnv,
-  ].filter((envName): envName is string => Boolean(envName));
+  return `${integration.name} isn't available on this Roomote deployment yet. Ask the team managing this deployment to configure OAuth before connecting.`;
+}
+
+async function assertStaticOauthReady(
+  integration: McpIntegration,
+): Promise<void> {
+  const readiness = await getDeploymentStaticOauthReadiness(Env, integration);
+  const error = getStaticOauthSetupError(integration, readiness);
+
+  if (error) {
+    throw new Error(error);
+  }
 }
 
 const ALL_DEPLOYMENT_CONTROLLED_APP_IDS = new Set([
@@ -516,6 +522,29 @@ export async function getDeploymentMcpEnablementsCommand(
 }
 
 /**
+ * Return public-safe OAuth setup status for integrations that require a
+ * deployment-configured client. Credential names and values never leave the
+ * server.
+ */
+export async function getMcpOauthReadinessCommand(_auth: UserAuthSuccess) {
+  const readiness = await Promise.all(
+    MCP_INTEGRATIONS.map(async (integration) => ({
+      mcpId: integration.id,
+      status: await getDeploymentStaticOauthReadiness(Env, integration),
+    })),
+  );
+
+  return readiness.filter(
+    (
+      entry,
+    ): entry is {
+      mcpId: string;
+      status: Exclude<StaticOauthReadiness, 'not_required'>;
+    } => entry.status !== 'not_required',
+  );
+}
+
+/**
  * Admin: enable or disable a curated MCP for the deployment
  */
 export async function setDeploymentMcpEnabledCommand(
@@ -560,13 +589,7 @@ export async function setDeploymentMcpEnabledCommand(
     integration?.oauthClientEnv &&
     !isDeploymentScopedMcpIntegration(input.mcpId)
   ) {
-    const missingEnvNames = getMissingStaticOauthEnvNames(integration);
-
-    if (missingEnvNames.length > 0) {
-      throw new Error(
-        `${integration.name} isn't available on this Roomote deployment yet. Ask the team managing this Roomote deployment to finish the required OAuth setup before enabling it.`,
-      );
-    }
+    await assertStaticOauthReady(integration);
   }
 
   const [result] = await db
@@ -1248,6 +1271,8 @@ export async function connectMcpCommand(
       `${integration.name} is configured by an admin-managed connection flow and cannot be linked from this screen yet.`,
     );
   }
+
+  await assertStaticOauthReady(integration);
 
   if (
     input.redirectTo &&

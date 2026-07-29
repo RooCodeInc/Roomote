@@ -2,7 +2,6 @@
 
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -17,6 +16,7 @@ import {
   useConnectLinear,
   useDisconnectLinear,
   useLinearInstallation,
+  useLinearOauthSetup,
 } from '@/hooks/linear';
 import {
   useAsanaConnection,
@@ -24,6 +24,7 @@ import {
   useDisconnectMcp,
   useGrafanaConnection,
   useDeploymentMcpEnablements,
+  useMcpOauthReadiness,
   useSaveAsanaConnection,
   useSaveGrafanaConnection,
   useSaveSnowflakeConnection,
@@ -34,7 +35,6 @@ import {
   useVercelConnection,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { SETTINGS_PATHS } from '@/lib/settings';
 import {
   saveAsanaConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -43,8 +43,6 @@ import {
 } from '@/types';
 
 import {
-  Alert,
-  AlertDescription,
   BasicTooltip,
   Button,
   Card,
@@ -75,6 +73,7 @@ import {
 } from '@/components/system';
 import { McpToolManagementDialog } from './McpToolManagementDialog';
 import { McpIcon } from './McpIcon';
+import { LinearOauthSetupDialog } from './LinearOauthSetupDialog';
 
 const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   asana:
@@ -114,6 +113,8 @@ type IntegrationItem = {
   description: string;
   icon: ReactNode;
   enabled: boolean;
+  configured?: boolean;
+  needsConfiguration?: boolean;
   isMcpBased: boolean;
   onAction?: () => void;
   isPending: boolean;
@@ -144,7 +145,20 @@ type IntegrationItem = {
   highlighted?: boolean;
 };
 
+type OauthReadinessStatus = 'ready' | 'missing' | 'partial';
+
 type McpIntegrationDefinition = (typeof MCP_INTEGRATIONS)[number];
+
+function getLinearOauthSetupStatus(
+  status: Exclude<OauthReadinessStatus, 'ready'>,
+  isAdmin: boolean,
+): ReactNode {
+  if (!isAdmin) {
+    return 'Not configured. Ask an administrator to set it up.';
+  }
+
+  return status === 'partial' ? 'Configuration incomplete.' : null;
+}
 
 type AdminConfiguredIntegrationItemOptions = {
   integration: McpIntegrationDefinition;
@@ -355,12 +369,13 @@ export function sortIntegrationItems<T extends { id: string; name: string }>(
   });
 }
 
-export function splitIntegrationItems<T extends { enabled: boolean }>(
-  items: T[],
-) {
+export function splitIntegrationItems<
+  T extends { enabled: boolean; configured?: boolean },
+>(items: T[]) {
   return {
     installed: items.filter((item) => item.enabled),
-    available: items.filter((item) => !item.enabled),
+    configured: items.filter((item) => !item.enabled && item.configured),
+    available: items.filter((item) => !item.enabled && !item.configured),
   };
 }
 
@@ -508,6 +523,8 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
                   >
                     {item.isPending ? (
                       <Spinner size="sm" />
+                    ) : item.needsConfiguration ? (
+                      <Settings2 />
                     ) : item.enabled ? (
                       <X />
                     ) : (
@@ -522,7 +539,7 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
       </CardHeader>
 
       {item.status || footerActions.length > 0 ? (
-        <CardContent className="p-">
+        <CardContent>
           <div className="flex gap-3 p-0">
             <div
               className={`mt-0.5 ${iconColumnWidthClass} shrink-0`}
@@ -540,7 +557,7 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
                 </div>
               )}
               {footerActions.length > 0 ? (
-                <div className="flex gap-2">
+                <div className="-ml-4 flex gap-2">
                   {footerActions.map((action) => (
                     <Button
                       key={action.ariaLabel}
@@ -569,10 +586,12 @@ function IntegrationSection({
   id,
   title,
   items,
+  emptyState,
 }: {
   id: string;
   title: string;
   items: IntegrationItem[];
+  emptyState?: ReactNode;
 }) {
   return (
     <section aria-labelledby={id} className="space-y-3">
@@ -580,11 +599,15 @@ function IntegrationSection({
         {title}
       </h2>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {items.map((item) => (
-          <IntegrationCard key={item.id} item={item} />
-        ))}
-      </div>
+      {items.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {items.map((item) => (
+            <IntegrationCard key={item.id} item={item} />
+          ))}
+        </div>
+      ) : (
+        emptyState
+      )}
     </section>
   );
 }
@@ -1116,12 +1139,22 @@ export function Integrations() {
     mcpId: string;
     integrationName: string;
   } | null>(null);
+  const [isLinearOauthSetupOpen, setIsLinearOauthSetupOpen] = useState(false);
 
   const linearInstallation = useLinearInstallation();
   const connectLinear = useConnectLinear(`${pathname}?service=linear`);
   const disconnectLinear = useDisconnectLinear();
 
   const deploymentEnablements = useDeploymentMcpEnablements();
+  const oauthReadiness = useMcpOauthReadiness();
+  const linearOauthStatus = oauthReadiness.data?.find(
+    (entry) => entry.mcpId === 'linear',
+  )?.status;
+  const linearOauthUnavailable =
+    linearOauthStatus === 'missing' || linearOauthStatus === 'partial';
+  const linearOauthSetup = useLinearOauthSetup(
+    isAdmin && (linearOauthUnavailable || isLinearOauthSetupOpen),
+  );
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
   const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
@@ -1263,6 +1296,23 @@ export function Integrations() {
     const userConnectionMap = new Map(
       (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
     );
+    const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
+    const canConfigureLinearOauth = isAdmin && !linearOauthUnavailable;
+    const canReconnectLinear =
+      isAdmin && Boolean(linearInstallation.data) && !linearOauthUnavailable;
+    const startLinearConnection = () => {
+      connectLinear.mutate(undefined, {
+        onSuccess: (url) => {
+          window.location.href = url;
+        },
+        onError: (error) =>
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : 'Failed to enable Linear. Please try again.',
+          ),
+      });
+    };
     const openMcpToolDialog = (integration: McpIntegrationDefinition) =>
       setToolDialogState({
         mcpId: integration.id,
@@ -1296,32 +1346,67 @@ export function Integrations() {
         description:
           'Enable Linear so this deployment can route issue context and task entry through it.',
         icon: <LinearLogo className="size-5" />,
-        enabled: Boolean(linearInstallation.data),
+        enabled: Boolean(linearInstallation.data) && !linearOauthUnavailable,
+        configured: linearOauthStatus === 'ready',
+        needsConfiguration: linearOauthUnavailable,
         highlighted: highlightedIntegrationId === 'linear',
         isMcpBased: false,
         isPending:
           linearInstallation.isPending ||
+          (!linearInstallation.data && oauthReadiness.isPending) ||
           connectLinear.isPending ||
           disconnectLinear.isPending,
-        onAction: () => {
-          if (linearInstallation.data) {
-            disconnectLinear.mutate(undefined, {
-              onSuccess: () =>
-                toast.success('Linear disabled for this deployment.'),
-              onError: () =>
-                toast.error('Failed to disable Linear. Please try again.'),
-            });
-            return;
-          }
+        status: linearOauthUnavailable
+          ? getLinearOauthSetupStatus(linearOauthStatus, isAdmin)
+          : undefined,
+        statusIcon: linearOauthUnavailable ? (
+          <TriangleAlert className="size-4" />
+        ) : undefined,
+        actionLabel:
+          linearOauthUnavailable && canSetUpLinearOauth
+            ? 'Set up Linear'
+            : !linearInstallation.data && linearOauthStatus === 'ready'
+              ? 'Connect Linear'
+              : undefined,
+        headerAction: canReconnectLinear
+          ? {
+              label: 'Reconnect',
+              ariaLabel: 'Reconnect Linear',
+              onAction: startLinearConnection,
+              isPending: connectLinear.isPending,
+              icon: <RefreshCw />,
+            }
+          : undefined,
+        utilityAction: canConfigureLinearOauth
+          ? {
+              label: 'Configure credentials',
+              ariaLabel: 'Configure Linear',
+              onAction: () => setIsLinearOauthSetupOpen(true),
+              isPending: isLinearOauthSetupOpen && linearOauthSetup.isPending,
+              icon: <Settings2 />,
+            }
+          : undefined,
+        onAction: linearOauthUnavailable
+          ? canSetUpLinearOauth
+            ? () => setIsLinearOauthSetupOpen(true)
+            : undefined
+          : () => {
+              if (linearInstallation.data) {
+                disconnectLinear.mutate(undefined, {
+                  onSuccess: () =>
+                    toast.success('Linear disabled for this deployment.'),
+                  onError: (error) =>
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : 'Failed to disable Linear. Please try again.',
+                    ),
+                });
+                return;
+              }
 
-          connectLinear.mutate(undefined, {
-            onSuccess: (url) => {
-              window.location.href = url;
+              startLinearConnection();
             },
-            onError: () =>
-              toast.error('Failed to enable Linear. Please try again.'),
-          });
-        },
       },
       ...visibleMcpIntegrations
         .filter((integration) => {
@@ -1558,8 +1643,13 @@ export function Integrations() {
     grafanaConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
+    linearOauthSetup.isPending,
+    linearOauthStatus,
+    linearOauthUnavailable,
+    oauthReadiness.isPending,
     isAdmin,
     isGrafanaDialogOpen,
+    isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveGrafanaConnection.isPending,
     saveVercelConnection.isPending,
@@ -1577,13 +1667,7 @@ export function Integrations() {
     userMcpConnections.data,
   ]);
 
-  const { installed, available } = splitIntegrationItems(items);
-  const visibleMcpIntegrationIds = new Set(
-    MCP_INTEGRATIONS.map((integration) => integration.id),
-  );
-  const hasEnabledMcpIntegration = (deploymentEnablements.data ?? []).some(
-    (entry) => entry.enabled && visibleMcpIntegrationIds.has(entry.mcpId),
-  );
+  const { installed, configured, available } = splitIntegrationItems(items);
   const highlightedItem =
     items.find((item) => item.id === highlightedIntegrationId) ?? null;
   const deepLinkDialogItem =
@@ -1914,6 +1998,11 @@ export function Integrations() {
           }
         }}
       />
+      <LinearOauthSetupDialog
+        open={isLinearOauthSetupOpen}
+        onOpenChange={setIsLinearOauthSetupOpen}
+        setup={linearOauthSetup.data}
+      />
       <AdminConfiguredIntegrationDialog
         integrationName="Asana"
         open={isAsanaDialogOpen}
@@ -2022,28 +2111,23 @@ export function Integrations() {
           deepLinkDialogItem.onAction?.();
         }}
       />
-      {hasEnabledMcpIntegration ? (
-        <Alert variant="light">
-          <Info />
-          <AlertDescription>
-            <p>
-              User-linked MCP integrations appear in{' '}
-              <Link
-                href={SETTINGS_PATHS.personal}
-                className="inline text-primary underline hover:no-underline"
-              >
-                personal settings.
-              </Link>{' '}
-              Workspace-scoped integrations connect and turn on from this page.
-            </p>
-          </AlertDescription>
-        </Alert>
-      ) : null}
       <IntegrationSection
         id="installed-integrations"
-        title="Enabled"
+        title="Connected"
         items={installed}
+        emptyState={
+          <p className="text-sm text-muted-foreground">
+            You haven&apos;t connected any integrations yet.
+          </p>
+        }
       />
+      {configured.length > 0 && (
+        <IntegrationSection
+          id="configured-integrations"
+          title="Configured"
+          items={configured}
+        />
+      )}
       <IntegrationSection
         id="available-integrations"
         title="Available"

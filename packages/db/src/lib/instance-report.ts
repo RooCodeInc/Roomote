@@ -16,7 +16,9 @@ import {
 import {
   RunStatus,
   SOURCE_CONTROL_AUTOMATION_WORKFLOWS,
+  buildSetupModelStatus,
   getMcpIntegration,
+  isConfiguredEnvValue,
   type PullRequestStatus,
 } from '@roomote/types';
 
@@ -25,6 +27,7 @@ import {
   taskRuns,
   deploymentMcpEnablements,
   deploymentSettings,
+  environmentVariables,
   environments,
   mcpConnections,
   pullRequestFacts,
@@ -35,14 +38,62 @@ import {
   tasks,
   teamsInstallations,
   telegramUserMappings,
-  userApiKeys,
   users,
 } from '../schema';
+import { isChatGptSubscriptionConnected } from './chatgpt-subscription';
+import { listConfiguredComputeProviders } from './compute-runtime-config';
+import { isGitHubCopilotSubscriptionConnected } from './github-copilot-subscription';
+import { isXaiSubscriptionConnected } from './xai-subscription';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
 const REPORT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PR_REPORT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Resolves connected model providers from configuration names only. The report
+ * never includes environment-variable values.
+ */
+export function collectConfiguredInferenceProviders(options: {
+  persistedEnvVarNames: Iterable<string>;
+  runtimeEnvVarNames: Iterable<string>;
+  chatgptConnected: boolean;
+  githubCopilotConnected: boolean;
+  xaiSubscriptionConnected: boolean;
+}): string[] {
+  const runtimeEnv = Object.fromEntries(
+    [...options.runtimeEnvVarNames].map((name) => [name, 'configured']),
+  );
+  const providerStatus = buildSetupModelStatus({
+    runtimeEnv,
+    persistedEnvVarNames: options.persistedEnvVarNames,
+    chatgptConnected: options.chatgptConnected,
+    githubCopilotConnected: options.githubCopilotConnected,
+    xaiSubscriptionConnected: options.xaiSubscriptionConnected,
+  });
+
+  return [
+    ...new Set([
+      ...providerStatus.providers
+        .filter(
+          (provider) =>
+            provider.runtimeApiKeySatisfied || provider.savedApiKeySatisfied,
+        )
+        .map((provider) => provider.id),
+      // Subscription providers also enable their API-compatible model ids.
+      ...(options.chatgptConnected ? ['openai'] : []),
+      ...(options.xaiSubscriptionConnected ? ['xai'] : []),
+    ]),
+  ].sort();
+}
+
+export function collectConfiguredRuntimeEnvVarNames(
+  environment: NodeJS.ProcessEnv,
+): string[] {
+  return Object.entries(environment)
+    .filter(([, value]) => isConfiguredEnvValue(value))
+    .map(([name]) => name);
+}
 
 /**
  * Workflows that attach to an existing PR rather than opening one. Derived from
@@ -118,6 +169,7 @@ export type InstanceReportStats = {
     comms: string[];
     sourceControl: string[];
     compute: string | null;
+    computeConfigured: string[];
     inference: string[];
   };
   mcp: {
@@ -592,7 +644,11 @@ export async function collectInstanceReportStats(
     slackActive,
     teamsActive,
     telegramMappings,
-    inferenceProviders,
+    configuredComputeProviders,
+    persistedEnvVars,
+    chatgptConnected,
+    githubCopilotConnected,
+    xaiSubscriptionConnected,
     mcpEnablements,
     mcpConnectionIds,
     pullRequests7d,
@@ -697,7 +753,11 @@ export async function collectInstanceReportStats(
       .from(teamsInstallations)
       .where(eq(teamsInstallations.isActive, true)),
     db.select({ total: count() }).from(telegramUserMappings),
-    db.selectDistinct({ provider: userApiKeys.provider }).from(userApiKeys),
+    listConfiguredComputeProviders(),
+    db.select({ name: environmentVariables.name }).from(environmentVariables),
+    isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
+    isXaiSubscriptionConnected(),
     db
       .select({ mcpId: deploymentMcpEnablements.mcpId })
       .from(deploymentMcpEnablements)
@@ -781,7 +841,14 @@ export async function collectInstanceReportStats(
       comms,
       sourceControl: Object.keys(repositoriesByProviderRecord).sort(),
       compute: settingsRow?.runtimeComputeConfig?.defaultProvider ?? null,
-      inference: inferenceProviders.map((row) => row.provider).sort(),
+      computeConfigured: configuredComputeProviders,
+      inference: collectConfiguredInferenceProviders({
+        persistedEnvVarNames: persistedEnvVars.map((row) => row.name),
+        runtimeEnvVarNames: collectConfiguredRuntimeEnvVarNames(process.env),
+        chatgptConnected,
+        githubCopilotConnected,
+        xaiSubscriptionConnected,
+      }),
     },
     mcp: {
       enabled: mcpEnabled,

@@ -40,6 +40,10 @@ const nextConfig: NextConfig = {
     '/*': [...webEnvFiles, '../docs/**/*'],
   },
   experimental: {
+    // Next 16 enables Turbopack's persistent dev cache by default. In this
+    // monorepo its periodic writes and compactions can monopolize a CPU core,
+    // so keep the cache in memory for the current dev-server session instead.
+    turbopackFileSystemCacheForDev: false,
     serverActions: {
       bodySizeLimit: '20mb', // Increase body size limit for image uploads.
     },

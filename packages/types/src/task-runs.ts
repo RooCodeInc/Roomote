@@ -1446,6 +1446,8 @@ export const snapshotResumeSchema = sharedTaskSchema.extend({
      * resumed worker once the harness session is ready.
      */
     resumePrompt: z.string().optional(),
+    /** Original user text for the deferred prompt's reply quote. */
+    resumeQuoteText: z.string().optional(),
     /**
      * Optional logical source label for the deferred follow-up prompt.
      */

@@ -70,6 +70,8 @@ export async function findLinearDeploymentMcpConnection() {
       eq(mcpConnections.mcpId, 'linear'),
       eq(mcpConnections.connectionRole, LINEAR_ORG_CONNECTION_ROLE),
       isNull(mcpConnections.userId),
+      eq(mcpConnections.enabled, true),
+      eq(mcpConnections.authStatus, 'authenticated'),
     ),
   });
 }
@@ -82,6 +84,8 @@ export async function findLinearDeploymentMcpConnectionByIdentity(input: {
       eq(mcpConnections.mcpId, 'linear'),
       eq(mcpConnections.connectionRole, LINEAR_ORG_CONNECTION_ROLE),
       isNull(mcpConnections.userId),
+      eq(mcpConnections.enabled, true),
+      eq(mcpConnections.authStatus, 'authenticated'),
     ),
   });
 

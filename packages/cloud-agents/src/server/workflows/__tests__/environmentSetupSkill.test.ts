@@ -34,6 +34,30 @@ describe('environment-setup guidance', () => {
     );
   });
 
+  it('bootstraps empty repositories with a minimal initial commit only', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Bootstrap an empty repository before analysis',
+    );
+    expect(skillContent).toContain(
+      'create exactly one bootstrap commit containing only a `README.md`',
+    );
+    expect(skillContent).toContain(
+      'Do not scaffold application code, frameworks, package manifests, CI config, or anything beyond those two files',
+    );
+    expect(skillContent).toContain('Never force-push.');
+    expect(skillContent).toContain(
+      'If the repository has any commits, skip this step entirely and continue with normal analysis.',
+    );
+    expect(skillContent).toContain(
+      'Do not invent install, dev, or test commands for code that does not exist.',
+    );
+    expect(skillContent).toContain(
+      'it should confirm the workspace clones and environment setup completes cleanly, not expect a running service, test suite, or localhost surface',
+    );
+  });
+
   it('allows revising an existing environment instead of always creating a new one', () => {
     const skillContent = readSkillContent();
 

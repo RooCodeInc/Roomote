@@ -9,6 +9,8 @@ import {
 import { getMcpOauthReplay, updateMcpOauthReplay } from '@roomote/sdk/server';
 
 import { authorize } from '@/lib/server';
+import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 
 export const runtime = 'nodejs';
 
@@ -19,21 +21,23 @@ function buildReplayReturnPath(token: string) {
 }
 
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
+  const webEnv = await bootstrapWebRuntimeEnv();
+  const webUrl = getPublicAppUrl(webEnv);
   const { token } = await params;
   const replay = await getMcpOauthReplay(token);
 
   if (!replay) {
     return NextResponse.redirect(
-      new URL('/error?message=Invalid or expired auth token', request.url),
+      new URL('/error?message=Invalid or expired auth token', webUrl),
     );
   }
 
   const authResult = await authorize();
   if (!authResult.success) {
-    const signInUrl = new URL('/sign-in', request.url);
+    const signInUrl = new URL('/sign-in', webUrl);
     signInUrl.searchParams.set('redirect_url', buildReplayReturnPath(token));
     return NextResponse.redirect(signInUrl);
   }
@@ -41,7 +45,7 @@ export async function GET(
   const integration = getMcpIntegration(replay.mcpId);
   if (!integration) {
     return NextResponse.redirect(
-      new URL('/error?message=Unknown MCP integration', request.url),
+      new URL('/error?message=Unknown MCP integration', webUrl),
     );
   }
 
@@ -72,10 +76,6 @@ export async function GET(
         mcpConnections.connectionRole,
       ],
       set: {
-        userId: targetUserId,
-        authConfig: null,
-        enabled: false,
-        authStatus: 'pending',
         updatedAt: new Date(),
       },
     })
@@ -83,10 +83,7 @@ export async function GET(
 
   if (!connection) {
     return NextResponse.redirect(
-      new URL(
-        '/error?message=Failed to prepare linked account flow',
-        request.url,
-      ),
+      new URL('/error?message=Failed to prepare linked account flow', webUrl),
     );
   }
 
@@ -105,7 +102,7 @@ export async function GET(
       `/api/mcp-oauth/initiate/${connection.id}?redirectTo=${encodeURIComponent(
         redirectTo,
       )}&replayToken=${encodeURIComponent(token)}`,
-      request.url,
+      webUrl,
     ),
   );
 }

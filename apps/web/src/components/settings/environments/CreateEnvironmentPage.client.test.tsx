@@ -48,11 +48,23 @@ const {
   };
 });
 
+const { mockNavigationState, mockRepositoriesState, mockCreateRepoDialog } =
+  vi.hoisted(() => ({
+    mockNavigationState: { search: '' as string },
+    mockRepositoriesState: {
+      data: [
+        { id: 'repo-1', fullName: 'acme/api' },
+        { id: 'repo-2', fullName: 'acme/web' },
+      ] as Array<{ id: string; fullName: string; isEmpty?: boolean }>,
+    },
+    mockCreateRepoDialog: vi.fn(),
+  }));
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
     push: mockRouterPush,
   }),
-  useSearchParams: () => new URLSearchParams(''),
+  useSearchParams: () => new URLSearchParams(mockNavigationState.search),
 }));
 
 vi.mock('sonner', () => ({
@@ -74,16 +86,7 @@ vi.mock('@/hooks/environments', () => ({
 
 vi.mock('@/hooks/source-control', () => ({
   useRepositories: () => ({
-    data: [
-      {
-        id: 'repo-1',
-        fullName: 'acme/api',
-      },
-      {
-        id: 'repo-2',
-        fullName: 'acme/web',
-      },
-    ],
+    data: mockRepositoriesState.data,
     isPending: false,
   }),
 }));
@@ -113,6 +116,21 @@ vi.mock('@/components/tasks', () => ({
       <option value="openrouter/z-ai/glm-5.2">GLM 5.2</option>
     </select>
   ),
+}));
+
+vi.mock('@/components/github/CreateGitHubRepoDialog', () => ({
+  CreateGitHubRepoDialog: (props: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onRepositoryDetected?: (repository: {
+      id: string;
+      fullName: string;
+      isEmpty?: boolean;
+    }) => void;
+  }) => {
+    mockCreateRepoDialog(props);
+    return props.open ? <div data-testid="create-repo-dialog" /> : null;
+  },
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -170,8 +188,8 @@ vi.mock('@/components/system', () => ({
   AlertDescription: ({
     children,
     ...props
-  }: { children: ReactNode } & HTMLAttributes<HTMLParagraphElement>) => (
-    <p {...props}>{children}</p>
+  }: { children: ReactNode } & HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>{children}</div>
   ),
   ArrowLeft: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
@@ -244,7 +262,9 @@ vi.mock('@/components/system', () => ({
     <h2 {...props}>{children}</h2>
   ),
   HandMetal: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Info: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Loader2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ScrollArea: ({
     children,
     ...props
@@ -262,6 +282,78 @@ describe('CreateEnvironmentPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockYamlEditorState.reset();
+    mockNavigationState.search = '';
+    mockRepositoriesState.data = [
+      { id: 'repo-1', fullName: 'acme/api' },
+      { id: 'repo-2', fullName: 'acme/web' },
+    ];
+  });
+
+  it('renders the create-repo affordance and opens the dialog', () => {
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByTestId('create-repo-dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Create a new repository/i }),
+    );
+
+    expect(screen.getByTestId('create-repo-dialog')).toBeInTheDocument();
+  });
+
+  it('opens the create-repo dialog from the create-repo search param', () => {
+    mockNavigationState.search = 'create-repo=1';
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('create-repo-dialog')).toBeInTheDocument();
+  });
+
+  it('selects a detected repository and explains the empty-repo bootstrap', async () => {
+    mockRepositoriesState.data = [
+      { id: 'repo-1', fullName: 'acme/api' },
+      { id: 'repo-new', fullName: 'acme/new-repo', isEmpty: true },
+    ];
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+
+    const dialogProps = mockCreateRepoDialog.mock.calls.at(-1)?.[0] as {
+      onRepositoryDetected?: (repository: {
+        id: string;
+        fullName: string;
+        isEmpty?: boolean;
+      }) => void;
+    };
+
+    dialogProps.onRepositoryDetected?.({
+      id: 'repo-new',
+      fullName: 'acme/new-repo',
+      isEmpty: true,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/acme\/new-repo/i)).toBeChecked();
+    });
+    expect(
+      screen.getByText(/will push an initial commit and set up a basic/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Agent' })).toBeEnabled();
   });
 
   it('starts an environment definition task and opens it in the task view', async () => {
@@ -277,10 +369,6 @@ describe('CreateEnvironmentPage', () => {
     fireEvent.change(screen.getByPlaceholderText(/Optional agent guidance/i), {
       target: { value: 'Use the API service from the first repo set.' },
     });
-    fireEvent.change(
-      screen.getByRole('combobox', { name: /environment setup model/i }),
-      { target: { value: 'openrouter/z-ai/glm-5.2' } },
-    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Start Agent' }));
 
@@ -290,7 +378,7 @@ describe('CreateEnvironmentPage', () => {
     expect(mockStartDefinitionTask.mock.calls[0]?.[0]).toEqual({
       repositoryIds: ['repo-1'],
       changeRequest: 'Use the API service from the first repo set.',
-      selectedModelId: 'openrouter/z-ai/glm-5.2',
+      selectedModelId: 'openrouter/openai/gpt-5.4',
     });
     expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
   });

@@ -13,6 +13,7 @@ const {
   findLinearUserMcpConnectionByIdentityMock,
   getValidAccessTokenMock,
   createMcpOauthReplayMock,
+  resolveDeploymentEnvVarMock,
 } = vi.hoisted(() => ({
   redisMock: {
     eval: vi.fn().mockResolvedValue(null),
@@ -31,6 +32,7 @@ const {
   findLinearUserMcpConnectionByIdentityMock: vi.fn(),
   getValidAccessTokenMock: vi.fn(),
   createMcpOauthReplayMock: vi.fn(),
+  resolveDeploymentEnvVarMock: vi.fn().mockResolvedValue('test-linear-secret'),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -154,6 +156,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     },
     linearAuthTokens: {},
     webhooks: { id: 'id', deliveryId: 'deliveryId' },
+    resolveDeploymentEnvVar: resolveDeploymentEnvVarMock,
     eq: vi.fn(),
     and: vi.fn(),
   };
@@ -293,6 +296,11 @@ describe('linear routed task startup', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(resolveDeploymentEnvVarMock).toHaveBeenCalledWith(
+      'R_LINEAR_WEBHOOK_SECRET',
+      db,
+      { R_LINEAR_WEBHOOK_SECRET: 'test-linear-secret' },
+    );
     expect(emitThought).toHaveBeenCalledWith(
       'session-1',
       'Getting started...',
@@ -318,5 +326,156 @@ describe('linear routed task startup', () => {
     ]);
     expect(emitElicitation).not.toHaveBeenCalled();
     expect(redisMock.set).not.toHaveBeenCalled();
+  });
+
+  it('uses the session user when a direct delegation has no creator', async () => {
+    vi.mocked(routeTask).mockResolvedValue({
+      status: 'routed',
+      result: {
+        workspace: { type: 'all_repositories' },
+        reasoning: 'Best fit for review work',
+      },
+    });
+
+    const payload = makePayload({
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: { id: 'linear-user-1', name: 'Linear User' },
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(findLinearUserMcpConnectionByIdentityMock).toHaveBeenCalledWith({
+      linearUserId: 'linear-user-1',
+      linearOrganizationId: 'linear-org-1',
+    });
+    expect(createLinearAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+    );
+  });
+
+  it('starts a trusted Linear automation without a human identity', async () => {
+    vi.mocked(routeTask).mockResolvedValue({
+      status: 'routed',
+      result: {
+        workspace: { type: 'all_repositories' },
+        reasoning: 'Best fit for review work',
+      },
+    });
+
+    const payload = makePayload({
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: undefined,
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(findLinearUserMcpConnectionByIdentityMock).not.toHaveBeenCalled();
+    expect(createLinearAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: undefined }),
+    );
+  });
+
+  it('uses all repositories when automation routing fails', async () => {
+    vi.mocked(routeTask).mockRejectedValue(new Error('routing unavailable'));
+
+    const payload = makePayload({
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: undefined,
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createLinearAgentRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: undefined,
+        repo: ALL_REPOSITORIES,
+      }),
+    );
+  });
+
+  it('rejects an unidentified prompted session', async () => {
+    const payload = makePayload({
+      action: 'prompted',
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: undefined,
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(findLinearUserMcpConnectionByIdentityMock).not.toHaveBeenCalled();
+    expect(createLinearAgentRun).not.toHaveBeenCalled();
+  });
+
+  it('requires account linking when a direct delegation user is unlinked', async () => {
+    findLinearUserMcpConnectionByIdentityMock.mockResolvedValue(null);
+
+    const payload = makePayload({
+      agentSession: {
+        ...makePayload().agentSession,
+        creator: undefined,
+        user: { id: 'linear-user-2', name: 'Unlinked User' },
+      },
+    });
+    const { rawBody, headers } = createSignedRequest(payload);
+
+    const response = await app.request(
+      new Request('http://localhost/linear', {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(emitElicitation).toHaveBeenCalledWith(
+      'session-1',
+      'Please link your Roomote account to continue.',
+      expect.objectContaining({ signal: 'auth' }),
+    );
+    expect(createLinearAgentRun).not.toHaveBeenCalled();
   });
 });

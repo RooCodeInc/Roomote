@@ -7,6 +7,8 @@ import {
   queuedCommunicationMessageSchema,
 } from '@roomote/types';
 
+type ReplyQuoteProvider = CommunicationProvider | 'github';
+
 const COMMUNICATION_MESSAGE_TTL_SECONDS = 60 * 60;
 const COMMUNICATION_MESSAGE_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
 const LATEST_INBOUND_MESSAGE_ID_TTL_SECONDS = 60 * 60 * 24;
@@ -19,8 +21,13 @@ export interface LatestUserMessageForReplyQuote {
   userName: string;
 }
 
+export interface ClaimedLatestUserMessageForReplyQuote {
+  claimToken: string;
+  message: LatestUserMessageForReplyQuote;
+}
+
 type TrackLatestUserMessageForReplyQuoteParams = {
-  provider: CommunicationProvider;
+  provider: ReplyQuoteProvider;
   runId: number;
   text: string;
   userName: string;
@@ -44,6 +51,40 @@ end
 if data.id ~= ARGV[1] then
   return 0
 end
+return redis.call('DEL', KEYS[1])
+`;
+const CLAIM_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT = `
+local claimedRaw = redis.call('GET', KEYS[2])
+if claimedRaw then
+  local claimedOk, claimed = pcall(cjson.decode, claimedRaw)
+  if claimedOk and type(claimed) == 'table' and claimed.claimToken == ARGV[1] and type(claimed.message) == 'string' then
+    return claimed.message
+  end
+end
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+local ok, data = pcall(cjson.decode, raw)
+if not ok or type(data) ~= 'table' or type(data.id) ~= 'string' then return nil end
+redis.call('SET', KEYS[2], cjson.encode({ claimToken = ARGV[1], message = raw }), 'EX', ARGV[2])
+redis.call('DEL', KEYS[1])
+return raw
+`;
+const RESTORE_CLAIMED_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT = `
+if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+local claimedRaw = redis.call('GET', KEYS[2])
+if not claimedRaw then return 0 end
+local ok, claimed = pcall(cjson.decode, claimedRaw)
+if not ok or type(claimed) ~= 'table' or claimed.claimToken ~= ARGV[1] then return 0 end
+local restored = redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3], 'NX')
+if not restored then return 0 end
+redis.call('DEL', KEYS[2])
+return 1
+`;
+const COMPLETE_CLAIMED_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT = `
+local claimedRaw = redis.call('GET', KEYS[1])
+if not claimedRaw then return 0 end
+local ok, claimed = pcall(cjson.decode, claimedRaw)
+if not ok or type(claimed) ~= 'table' or claimed.claimToken ~= ARGV[1] then return 0 end
 return redis.call('DEL', KEYS[1])
 `;
 
@@ -72,10 +113,17 @@ function getLatestInboundMessageIdKey(
 }
 
 function getLatestUserMessageForReplyQuoteKey(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
 ): string {
   return `${provider}:latest_user_message:${runId}`;
+}
+
+function getLatestUserMessageClaimKey(
+  provider: ReplyQuoteProvider,
+  runId: number,
+): string {
+  return `${provider}:latest_user_message_claim:${runId}`;
 }
 
 function parseLatestUserMessageForReplyQuote(
@@ -108,7 +156,7 @@ function parseLatestUserMessageForReplyQuote(
 }
 
 function getCommunicationMessageDedupeKey(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
   messageId: string,
 ): string {
@@ -350,7 +398,7 @@ export async function getLatestInboundMessageId(
  * quote it back into the originating chat thread (Discord parity with Slack).
  */
 export async function setLatestUserMessageForReplyQuote(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
   message: Omit<LatestUserMessageForReplyQuote, 'id'> & { id?: string },
 ): Promise<LatestUserMessageForReplyQuote> {
@@ -399,7 +447,7 @@ export async function trackLatestUserMessageForReplyQuote({
 }
 
 export async function getLatestUserMessageForReplyQuote(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
 ): Promise<LatestUserMessageForReplyQuote | null> {
   const redis = getRedis();
@@ -409,8 +457,67 @@ export async function getLatestUserMessageForReplyQuote(
   return parseLatestUserMessageForReplyQuote(raw);
 }
 
+export async function claimLatestUserMessageForReplyQuote(
+  provider: ReplyQuoteProvider,
+  runId: number,
+): Promise<ClaimedLatestUserMessageForReplyQuote | null> {
+  const claimToken = randomUUID();
+  const raw = await getRedis().eval(
+    CLAIM_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT,
+    2,
+    getLatestUserMessageForReplyQuoteKey(provider, runId),
+    getLatestUserMessageClaimKey(provider, runId),
+    claimToken,
+    LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS,
+  );
+  const message = parseLatestUserMessageForReplyQuote(
+    typeof raw === 'string' ? raw : null,
+  );
+
+  return message ? { claimToken, message } : null;
+}
+
+export async function restoreClaimedLatestUserMessageForReplyQuote(
+  provider: ReplyQuoteProvider,
+  runId: number,
+  claim: ClaimedLatestUserMessageForReplyQuote,
+): Promise<void> {
+  await getRedis().eval(
+    RESTORE_CLAIMED_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT,
+    2,
+    getLatestUserMessageForReplyQuoteKey(provider, runId),
+    getLatestUserMessageClaimKey(provider, runId),
+    claim.claimToken,
+    JSON.stringify(claim.message),
+    LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS,
+  );
+}
+
+export async function completeClaimedLatestUserMessageForReplyQuote(
+  provider: ReplyQuoteProvider,
+  runId: number,
+  claim: ClaimedLatestUserMessageForReplyQuote,
+): Promise<boolean> {
+  try {
+    const result = await getRedis().eval(
+      COMPLETE_CLAIMED_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT,
+      1,
+      getLatestUserMessageClaimKey(provider, runId),
+      claim.claimToken,
+    );
+    return typeof result === 'number' ? result > 0 : Number(result) > 0;
+  } catch (error) {
+    console.error(
+      `[completeClaimedLatestUserMessageForReplyQuote] Failed to complete latest user message claim for ${provider} task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return false;
+  }
+}
+
 export async function clearLatestUserMessageForReplyQuote(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
 ): Promise<void> {
   try {
@@ -430,7 +537,7 @@ export async function clearLatestUserMessageForReplyQuote(
  * was quoted on this delivery. Prevents clearing a newer same-text follow-up.
  */
 export async function clearLatestUserMessageForReplyQuoteIfId(
-  provider: CommunicationProvider,
+  provider: ReplyQuoteProvider,
   runId: number,
   id: string,
 ): Promise<boolean> {

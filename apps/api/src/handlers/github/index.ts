@@ -38,6 +38,7 @@ import { handleWorkflowRunCompleted } from './handleWorkflowRunCompleted';
 
 // Repository metadata sync:
 import { handleRepositoryEdited } from './handleRepositoryEdited';
+import { handleInstallationRepositoriesChange } from './handleInstallationRepositoriesChange';
 
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
@@ -460,6 +461,26 @@ github.post('/', async (c) => {
       recordWebhook(id, `${name}.${payload.action}`, payload, () =>
         handleRepositoryEdited(payload),
       ),
+    );
+
+    // Keep the stored repository list in sync as repos appear, disappear, or
+    // change access. Selected-repos installs emit `installation_repositories`;
+    // all-repos installs emit `repository.created/deleted` instead. Not gated
+    // on isRepoSkipped: the row must exist even for skipped repos.
+    webhooks.on(
+      ['installation_repositories.added', 'installation_repositories.removed'],
+      ({ id, name, payload }) =>
+        recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+          handleInstallationRepositoriesChange(payload),
+        ),
+    );
+
+    webhooks.on(
+      ['repository.created', 'repository.deleted', 'repository.renamed'],
+      ({ id, name, payload }) =>
+        recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+          handleInstallationRepositoriesChange(payload),
+        ),
     );
 
     webhooks.on('workflow_run.completed', ({ id, name, payload }) =>

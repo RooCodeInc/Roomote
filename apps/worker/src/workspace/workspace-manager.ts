@@ -862,12 +862,33 @@ export class WorkspaceManager {
       }),
     );
 
-    const checkoutBranch = await this.resolveCheckoutBranch({
-      executor,
-      repoFullName,
-      targetBranch,
-      allowRemoteHeadFallback,
-    });
+    let checkoutBranch: string;
+
+    try {
+      checkoutBranch = await this.resolveCheckoutBranch({
+        executor,
+        repoFullName,
+        targetBranch,
+        allowRemoteHeadFallback,
+      });
+    } catch (error) {
+      // A branch that cannot be resolved is usually a real error, but a
+      // brand-new repository legitimately has no branches yet (for example
+      // one just created through github.com/new without a README). Only that
+      // confirmed-empty case is handled specially; anything else rethrows.
+      if (await this.remoteHasNoBranches(executor)) {
+        await this.prepareEmptyRepositoryWorktree({
+          executor,
+          repoFullName,
+          targetBranch,
+          sha,
+          setDefaultRemote,
+        });
+        return;
+      }
+
+      throw error;
+    }
 
     if (
       allowRemoteHeadFallback &&
@@ -944,6 +965,85 @@ export class WorkspaceManager {
             ]
           : []),
       ]),
+    );
+  }
+
+  /**
+   * A brand-new repository can have no branches at all (for example one just
+   * created through github.com/new without a README). An errorless
+   * `git ls-remote --heads` with no output is the ground truth for that
+   * state; a failed lookup is treated as non-empty so real errors surface
+   * through the normal checkout path.
+   */
+  private async remoteHasNoBranches(
+    executor: CommandExecutor,
+  ): Promise<boolean> {
+    const result = await executor.execute({
+      name: 'Git check remote branches',
+      run: 'git ls-remote --heads origin',
+      timeout: 60,
+      retries: 1,
+      continue_on_error: true,
+    });
+
+    return result.success && (result.stdout ?? '').trim() === '';
+  }
+
+  /**
+   * Prepare a worktree for a repository whose remote has no commits. The
+   * checkout/reset command block requires `origin/<branch>` refs that do not
+   * exist yet, so it is skipped entirely; the unborn local branch is instead
+   * pointed at the stored default branch (GitHub reports `default_branch`
+   * even for empty repositories) so the first commit lands where the remote
+   * expects it. Local commits are preserved: a reused workspace mid-bootstrap
+   * may hold work that has not been pushed yet.
+   */
+  private async prepareEmptyRepositoryWorktree({
+    executor,
+    repoFullName,
+    targetBranch,
+    sha,
+    setDefaultRemote,
+  }: {
+    executor: CommandExecutor;
+    repoFullName: string;
+    targetBranch: string;
+    sha?: string;
+    setDefaultRemote: boolean;
+  }): Promise<void> {
+    if (sha) {
+      throw new Error(
+        `Cannot pin ${repoFullName} to ${sha}: the remote repository has no commits.`,
+      );
+    }
+
+    const localHead = await executor.execute({
+      name: 'Git check local commits',
+      run: 'git rev-parse --verify --quiet HEAD',
+      timeout: 60,
+      continue_on_error: true,
+    });
+
+    if (!localHead.success) {
+      await executor.execute({
+        name: 'Git point unborn HEAD at default branch',
+        run: `git symbolic-ref HEAD 'refs/heads/${shellEscape(targetBranch)}'`,
+        timeout: 60,
+        continue_on_error: false,
+      });
+    }
+
+    if (setDefaultRemote) {
+      await executor.execute({
+        name: 'Set default remote repo.',
+        run: `gh repo set-default '${shellEscape(repoFullName)}'`,
+        timeout: 60,
+        continue_on_error: true,
+      });
+    }
+
+    console.log(
+      `Remote for ${repoFullName} has no commits yet; prepared an empty-repository worktree on branch ${targetBranch}.`,
     );
   }
 

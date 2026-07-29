@@ -1,6 +1,12 @@
 import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
+import {
+  claimLatestUserMessageForReplyQuote,
+  completeClaimedLatestUserMessageForReplyQuote,
+  restoreClaimedLatestUserMessageForReplyQuote,
+} from '@roomote/communication/messages';
+import { resolveSourceControlProviderFromPayload } from '@roomote/types';
 
 import {
   createOrUpdateSourceControlPullRequestForTaskRun,
@@ -26,6 +32,27 @@ import {
   McpProxyError,
 } from '../mcp/proxy-utils';
 import { logHandlerError } from '../utils';
+
+const GITHUB_REPLY_QUOTE_MAX_LENGTH = 280;
+
+function formatGitHubReplyQuote(params: {
+  userName: string;
+  text: string;
+}): string | null {
+  const userName = params.userName.replace(/\s+/g, ' ').trim();
+  const text = params.text.trim();
+
+  if (!userName || !text) {
+    return null;
+  }
+
+  const truncated =
+    text.length <= GITHUB_REPLY_QUOTE_MAX_LENGTH
+      ? text
+      : `${text.slice(0, GITHUB_REPLY_QUOTE_MAX_LENGTH - 3).trimEnd()}...`;
+
+  return `> **${userName}:** ${truncated.replaceAll('\n', '\n> ')}`;
+}
 
 /**
  * POST /api/mcp/tasks/:taskId/source_control
@@ -66,6 +93,57 @@ export async function manageSourceControl(
       runId: auth.authContext.runId,
       taskId,
     });
+    const isGitHubTask =
+      resolveSourceControlProviderFromPayload(taskRun.payload) === 'github';
+    const bodyInput = 'body' in input ? input : null;
+    const shouldQuote =
+      isGitHubTask &&
+      (input.action === 'reply_to_pull_request_comment' ||
+        input.action === 'create_pull_request_comment' ||
+        input.action === 'create_issue_comment') &&
+      typeof bodyInput?.body === 'string';
+    const pendingQuoteClaim = shouldQuote
+      ? await claimLatestUserMessageForReplyQuote('github', taskRun.id)
+      : null;
+    const pendingQuote = pendingQuoteClaim?.message ?? null;
+
+    if (pendingQuote && typeof bodyInput?.body === 'string') {
+      const quote = formatGitHubReplyQuote(pendingQuote);
+      if (quote) {
+        bodyInput.body = `${quote}\n\n${bodyInput.body}`;
+      }
+    }
+
+    const restoreQuoteAfterFailure = async () => {
+      if (pendingQuoteClaim) {
+        await restoreClaimedLatestUserMessageForReplyQuote(
+          'github',
+          taskRun.id,
+          pendingQuoteClaim,
+        );
+      }
+    };
+
+    const completeQuoteAfterSuccess = async () => {
+      if (pendingQuoteClaim) {
+        await completeClaimedLatestUserMessageForReplyQuote(
+          'github',
+          taskRun.id,
+          pendingQuoteClaim,
+        );
+      }
+    };
+
+    const runWithQuoteRestorationOnFailure = async <T>(
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      try {
+        return await operation();
+      } catch (error) {
+        await restoreQuoteAfterFailure();
+        throw error;
+      }
+    };
 
     switch (input.action) {
       case 'create_or_update_pull_request':
@@ -88,22 +166,28 @@ export async function manageSourceControl(
       case 'create_pull_request_comment':
       case 'resolve_pull_request_thread':
       case 'submit_pull_request_review':
-      case 'update_pull_request_comment':
-        return c.json(
-          await writeSourceControlPullRequestForTaskRun({
+      case 'update_pull_request_comment': {
+        const writeResult = await runWithQuoteRestorationOnFailure(() =>
+          writeSourceControlPullRequestForTaskRun({
             taskRun,
             input,
           }),
         );
+        await completeQuoteAfterSuccess();
+        return c.json(writeResult);
+      }
       case 'get_issue':
       case 'list_issue_comments':
-      case 'create_issue_comment':
-        return c.json(
-          await manageSourceControlIssueForTaskRun({
+      case 'create_issue_comment': {
+        const issueResult = await runWithQuoteRestorationOnFailure(() =>
+          manageSourceControlIssueForTaskRun({
             taskRun,
             input,
           }),
         );
+        await completeQuoteAfterSuccess();
+        return c.json(issueResult);
+      }
     }
   } catch (error) {
     if (error instanceof z.ZodError) {

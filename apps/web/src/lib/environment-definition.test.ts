@@ -58,6 +58,36 @@ describe('environment definition helpers', () => {
     );
   });
 
+  it('flags empty repositories in the create prompt with bootstrap instructions', () => {
+    const prompt = buildCreateEnvironmentDefinitionPrompt(
+      ['acme/web', 'acme/new-repo'],
+      { emptyRepositoryFullNames: ['acme/new-repo'] },
+    );
+
+    expect(prompt).toContain(
+      'These repositories are brand new and have no commits yet:\n- acme/new-repo',
+    );
+    expect(prompt).toContain(
+      "follow the skill's empty-repository bootstrap: push exactly one initial commit containing only a README.md and a minimal .gitignore",
+    );
+    expect(prompt).toContain('Do not scaffold application code');
+  });
+
+  it('ignores empty-repository flags outside the selected repository set', () => {
+    const basePrompt = buildCreateEnvironmentDefinitionPrompt(['acme/web']);
+
+    expect(
+      buildCreateEnvironmentDefinitionPrompt(['acme/web'], {
+        emptyRepositoryFullNames: ['acme/other'],
+      }),
+    ).toBe(basePrompt);
+    expect(
+      buildCreateEnvironmentDefinitionPrompt(['acme/web'], {
+        emptyRepositoryFullNames: [],
+      }),
+    ).toBe(basePrompt);
+  });
+
   it('appends setup guidance only when the user provided it', () => {
     const basePrompt = buildCreateEnvironmentDefinitionPrompt(['acme/web']);
 

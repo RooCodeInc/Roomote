@@ -14,6 +14,10 @@ import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-er
 
 const state = vi.hoisted(() => ({
   deploymentEnablements: [] as Array<{ mcpId: string; enabled: boolean }>,
+  oauthReadiness: [{ mcpId: 'linear', status: 'ready' as const }] as Array<{
+    mcpId: string;
+    status: 'ready' | 'missing' | 'partial';
+  }>,
   userConnections: [] as Array<{
     id?: string;
     mcpId: string;
@@ -53,6 +57,28 @@ const state = vi.hoisted(() => ({
   linearInstallation: {
     linearOrganizationName: 'Roomote',
   } as null | { linearOrganizationName?: string },
+  linearOauthSetup: {
+    callbackUrl: 'https://roomote.example/api/mcp-oauth/callback',
+    webhookUrl: 'https://roomote.example/api/webhooks/linear',
+    manifestUrl: 'https://linear.app/settings/api/applications/new?manifest=x',
+    fields: {
+      clientId: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+      clientSecret: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+      webhookSecret: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+    },
+  },
   linearRedirectPath: '',
   searchParams: '',
 }));
@@ -69,6 +95,8 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
+    saveLinearOauthSetup: vi.fn(),
+    removeLinearOauthSetup: vi.fn(),
   },
   selectMock: {
     latestOnValueChange: null as null | ((value: string) => void),
@@ -152,11 +180,27 @@ vi.mock('@/hooks/linear', () => ({
     isPending: false,
     mutate: mutations.disconnectLinear,
   }),
+  useLinearOauthSetup: () => ({
+    data: state.linearOauthSetup,
+    isPending: false,
+  }),
+  useSaveLinearOauthSetup: () => ({
+    isPending: false,
+    mutate: mutations.saveLinearOauthSetup,
+  }),
+  useRemoveLinearOauthSetup: () => ({
+    isPending: false,
+    mutate: mutations.removeLinearOauthSetup,
+  }),
 }));
 
 vi.mock('@/hooks/mcp-connections', () => ({
   useDeploymentMcpEnablements: () => ({
     data: state.deploymentEnablements,
+  }),
+  useMcpOauthReadiness: () => ({
+    data: state.oauthReadiness,
+    isPending: false,
   }),
   useUserMcpConnections: () => ({
     data: state.userConnections,
@@ -246,11 +290,18 @@ vi.mock('@/components/system', () => ({
   BrandIcon: ({ name }: { name: string }) => (
     <svg aria-label={name} role="img" />
   ),
-  Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
-  ),
+  Button: ({
+    children,
+    asChild,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean }) =>
+    asChild ? (
+      children
+    ) : (
+      <button type="button" {...props}>
+        {children}
+      </button>
+    ),
   Card: ({
     children,
     ...props
@@ -262,6 +313,7 @@ vi.mock('@/components/system', () => ({
   CardHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CardTitle: ({ children }: { children: ReactNode }) => <h3>{children}</h3>,
   Check: () => <svg aria-hidden="true" />,
+  Copy: () => <svg aria-hidden="true" />,
   Dialog: ({ open, children }: { open: boolean; children: ReactNode }) =>
     open ? <div>{children}</div> : null,
   DialogContent: ({ children }: { children: ReactNode }) => (
@@ -280,17 +332,21 @@ vi.mock('@/components/system', () => ({
   Eye: () => <svg aria-hidden="true" />,
   EyeOff: () => <svg aria-hidden="true" />,
   EthernetPort: () => <svg aria-hidden="true" />,
+  ExternalLink: () => <svg aria-hidden="true" />,
   Info: () => <svg aria-hidden="true" />,
   InfoTooltip: ({ content }: { content: string }) => <span>{content}</span>,
-  Input: ({ ...props }: InputHTMLAttributes<HTMLInputElement>) => (
-    <input {...props} />
-  ),
+  Input: ({
+    secret: _secret,
+    ...props
+  }: InputHTMLAttributes<HTMLInputElement> & {
+    secret?: boolean;
+  }) => <input {...props} />,
   Label: ({ children, ...props }: LabelHTMLAttributes<HTMLLabelElement>) => (
     <label {...props}>{children}</label>
   ),
   LinearLogo: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
-  Plus: () => <svg aria-hidden="true" />,
+  Plus: () => <svg aria-hidden="true" data-icon="plus" />,
   PlugIcon: () => <svg aria-hidden="true" />,
   RefreshCw: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="refresh-cw" />
@@ -333,12 +389,13 @@ vi.mock('@/components/system', () => ({
       {children}
     </button>
   ),
-  Settings2: () => <svg aria-hidden="true" />,
+  Settings2: () => <svg aria-hidden="true" data-icon="settings-2" />,
   Skeleton: ({ className }: { className?: string }) => (
     <div className={className}>loading</div>
   ),
   Spinner: () => <span>loading</span>,
   Star: () => <svg aria-hidden="true" />,
+  Trash: () => <svg aria-hidden="true" />,
   Switch: ({
     checked,
     onCheckedChange,
@@ -375,6 +432,7 @@ describe('Integrations settings', () => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
     state.deploymentEnablements = [];
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
     state.userConnections = [];
     state.mcpTools = null;
     state.mcpToolsError = null;
@@ -389,6 +447,23 @@ describe('Integrations settings', () => {
     state.featureFlags = {};
     state.snowflakeConnection = null;
     state.searchParams = '';
+    state.linearOauthSetup.fields = {
+      clientId: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+      clientSecret: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+      webhookSecret: {
+        configured: false,
+        managedByEnvironment: false,
+        savedInRoomote: false,
+      },
+    };
   });
 
   it('returns Linear OAuth to a service-specific integrations URL', () => {
@@ -399,21 +474,284 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('sorts integrations alphabetically and splits installed vs available', () => {
+  it('uses the settings action for missing Linear OAuth setup', () => {
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(<Integrations />);
+
+    const linearCard = screen
+      .getByRole('heading', { name: 'Linear' })
+      .closest('[id="integration-linear"]');
+
+    expect(linearCard).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole('button', { name: 'Set up Linear' })
+        .querySelector('[data-icon="settings-2"]'),
+    ).toBeInTheDocument();
+  });
+
+  it('distinguishes incomplete Linear OAuth setup for admins', () => {
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'partial' }];
+
+    render(<Integrations />);
+
+    const linearCard = screen
+      .getByRole('heading', { name: 'Linear' })
+      .closest('[id="integration-linear"]');
+
+    expect(linearCard).toHaveTextContent('Configuration incomplete.');
+  });
+
+  it('asks non-admins to contact an administrator when OAuth is unavailable', () => {
+    state.isAdmin = false;
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText('Not configured. Ask an administrator to set it up.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Set up Linear' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens the guided Linear OAuth setup for admins', () => {
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(<Integrations />);
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Linear' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create the app' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('1', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('2', { exact: true })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', {
+        name: 'Create a Linear app.',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', {
+        name: 'Copy the app credentials.',
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Callback URL')).not.toBeInTheDocument();
+    expect(screen.queryByText('Webhook URL')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Client ID')).toBeInTheDocument();
+    expect(screen.getByLabelText('Client secret')).toBeInTheDocument();
+    expect(screen.getByLabelText('Webhook signing secret')).toBeInTheDocument();
+  });
+
+  it('offers administrators configuration access after Linear is configured', () => {
+    state.linearInstallation = null;
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Set up Linear' }),
+    ).not.toBeInTheDocument();
+    const configureButton = screen.getByRole('button', {
+      name: 'Configure Linear',
+    });
+    expect(configureButton).toBeInTheDocument();
+    expect(configureButton).not.toHaveTextContent('Configure');
+    expect(
+      screen.getByRole('button', { name: 'Connect Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole('button', { name: 'Connect Linear' })
+        .querySelector('[data-icon="plus"]'),
+    ).toBeInTheDocument();
+  });
+
+  it('does not offer Linear credential configuration to non-admins', () => {
+    state.isAdmin = false;
+
+    render(<Integrations />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Configure Linear' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('removes saved Linear credentials after confirmation', () => {
+    state.linearInstallation = null;
+    state.linearOauthSetup.fields = {
+      clientId: {
+        configured: true,
+        managedByEnvironment: false,
+        savedInRoomote: true,
+      },
+      clientSecret: {
+        configured: true,
+        managedByEnvironment: false,
+        savedInRoomote: true,
+      },
+      webhookSecret: {
+        configured: true,
+        managedByEnvironment: false,
+        savedInRoomote: true,
+      },
+    };
+    mutations.removeLinearOauthSetup.mockImplementation((_variables, options) =>
+      options?.onSuccess?.({ success: true }),
+    );
+
+    render(<Integrations />);
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Linear' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Configure Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Update the app credentials.' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Open Linear app creation' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Remove saved credentials' }),
+    );
+    expect(
+      screen.getByRole('heading', {
+        name: 'Remove saved Linear credentials?',
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove credentials' }));
+
+    expect(mutations.removeLinearOauthSetup).toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith(
+      'Saved Linear OAuth credentials removed.',
+    );
+  });
+
+  it('does not offer to remove environment-managed Linear credentials', () => {
+    state.linearInstallation = null;
+    state.linearOauthSetup.fields = {
+      clientId: {
+        configured: true,
+        managedByEnvironment: true,
+        savedInRoomote: false,
+      },
+      clientSecret: {
+        configured: true,
+        managedByEnvironment: true,
+        savedInRoomote: false,
+      },
+      webhookSecret: {
+        configured: true,
+        managedByEnvironment: true,
+        savedInRoomote: false,
+      },
+    };
+
+    render(<Integrations />);
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Linear' }));
+
+    expect(
+      screen.queryByRole('button', { name: 'Remove saved credentials' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText('Managed by the deployment environment.'),
+    ).toHaveLength(3);
+  });
+
+  it('offers setup for a legacy workspace when deployment credentials are missing', () => {
+    state.linearInstallation = { linearOrganizationName: 'Legacy workspace' };
+    state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByRole('button', { name: 'Set up Linear' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disable Linear' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('lets administrators reconnect a configured Linear workspace', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect Linear' }));
+
+    expect(mutations.connectLinear).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it('surfaces the server error when starting Linear fails', () => {
+    state.linearInstallation = null;
+    mutations.connectLinear.mockImplementation((_variables, options) => {
+      options?.onError?.(new Error('Linear OAuth setup changed. Try again.'));
+    });
+
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Linear' }));
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Linear OAuth setup changed. Try again.',
+    );
+  });
+
+  it('sorts integrations alphabetically and splits enabled, configured, and available', () => {
     const sorted = sortIntegrationItems([
       { id: 'sentry', name: 'Sentry', enabled: false },
       { id: 'linear', name: 'Linear', enabled: true },
-      { id: 'notion', name: 'Notion', enabled: false },
+      { id: 'notion', name: 'Notion', enabled: false, configured: true },
       { id: 'asana', name: 'Asana', enabled: false },
     ]);
     const grouped = splitIntegrationItems(sorted);
 
     expect(grouped.installed.map((item) => item.name)).toEqual(['Linear']);
+    expect(grouped.configured.map((item) => item.name)).toEqual(['Notion']);
     expect(grouped.available.map((item) => item.name)).toEqual([
       'Asana',
-      'Notion',
       'Sentry',
     ]);
+  });
+
+  it('shows configured integrations separately and an empty connected state', () => {
+    state.linearInstallation = null;
+
+    render(<Integrations />);
+
+    const connectedSection = screen
+      .getByRole('heading', { name: 'Connected' })
+      .closest('section');
+    const configuredSection = screen
+      .getByRole('heading', { name: 'Configured' })
+      .closest('section');
+
+    expect(connectedSection).toHaveTextContent(
+      "You haven't connected any integrations yet.",
+    );
+    expect(
+      within(configuredSection as HTMLElement).getByRole('heading', {
+        name: 'Linear',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('highlights a selected integration above alphabetical order', () => {
@@ -433,21 +771,23 @@ describe('Integrations settings', () => {
     ]);
   });
 
-  it('renders enabled and available sections with compact action buttons', () => {
+  it('renders connected and available sections with compact action buttons', () => {
     render(<Integrations />);
 
-    const enabledSection = screen
-      .getByRole('heading', { name: 'Enabled' })
+    const connectedSection = screen
+      .getByRole('heading', { name: 'Connected' })
       .closest('section');
     const availableSection = screen
       .getByRole('heading', { name: 'Available' })
       .closest('section');
-
-    expect(enabledSection).not.toBeNull();
+    expect(connectedSection).not.toBeNull();
     expect(availableSection).not.toBeNull();
+    expect(
+      screen.queryByRole('heading', { name: 'Configured' }),
+    ).not.toBeInTheDocument();
 
     expect(
-      within(enabledSection as HTMLElement)
+      within(connectedSection as HTMLElement)
         .getAllByRole('heading', { level: 3 })
         .map((heading) => heading.textContent),
     ).toEqual(['Linear']);

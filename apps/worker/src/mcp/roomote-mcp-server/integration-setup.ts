@@ -21,7 +21,7 @@ An admin connects Linear from Settings > Integrations. This uses OAuth to link t
 
 # GitHub
 
-GitHub is connected via a GitHub App installation. An admin installs the Roomote GitHub App on the relevant GitHub organization/repos from Settings > Integrations. Once installed, I can access repo context through the GitHub App installation. Automatic PR review and direct PR @roomote follow-up or re-review requests also require Code Reviewer to be enabled. Automatic review still follows the current reviewer gate, while direct PR mentions are manual requests in the PR thread rather than part of that proactive gate. No per-user OAuth is needed since access goes through the GitHub App installation.
+GitHub is connected via a GitHub App installation. An admin installs the Roomote GitHub App on the relevant GitHub organization/repos from Settings > Integrations. Once installed, I can access repo context through the GitHub App installation. Tasks can manage repository labels and milestones, and can inspect or update accessible GitHub Projects V2 Status fields after confirming mutations. Projects require the GitHub App's Organization projects permission and installation-owner approval. Native GitHub saved views are not available until their API and installation-token compatibility are verified. Automatic PR review and direct PR @roomote follow-up or re-review requests also require Code Reviewer to be enabled. Automatic review still follows the current reviewer gate, while direct PR mentions are manual requests in the PR thread rather than part of that proactive gate. No per-user OAuth is needed since access goes through the GitHub App installation.
 
 # Notion
 

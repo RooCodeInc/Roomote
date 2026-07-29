@@ -20,6 +20,7 @@ describe('product-version', () => {
     expect(isParsableProductVersion('v0.16.0')).toBe(true);
     expect(isParsableProductVersion('0.16.0-rc.1')).toBe(true);
     expect(isParsableProductVersion('main-037146ca')).toBe(false);
+    expect(isParsableProductVersion('037146ca')).toBe(false);
     expect(isParsableProductVersion('develop-abc12345')).toBe(false);
     expect(isParsableProductVersion('self-host-production')).toBe(false);
     expect(isParsableProductVersion(null)).toBe(false);

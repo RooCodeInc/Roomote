@@ -47,6 +47,51 @@ const GIT_RESOLVE_REMOTE_HEAD_COMMAND = {
   continue_on_error: true,
 } as const;
 
+const GIT_CHECK_REMOTE_BRANCHES_COMMAND = {
+  name: 'Git check remote branches',
+  run: 'git ls-remote --heads origin',
+  timeout: 60,
+  retries: 1,
+  continue_on_error: true,
+} as const;
+
+const GIT_CHECK_LOCAL_COMMITS_COMMAND = {
+  name: 'Git check local commits',
+  run: 'git rev-parse --verify --quiet HEAD',
+  timeout: 60,
+  continue_on_error: true,
+} as const;
+
+function buildPointUnbornHeadCommand(branch: string) {
+  return {
+    name: 'Git point unborn HEAD at default branch',
+    run: `git symbolic-ref HEAD 'refs/heads/${branch}'`,
+    timeout: 60,
+    continue_on_error: false,
+  };
+}
+
+/**
+ * Mock sequence for an empty remote reached through the stored-default-branch
+ * path: fetch succeeds, every origin/HEAD resolution fails, the stored branch
+ * does not exist remotely, and the empty check confirms zero remote heads.
+ */
+function mockEmptyRemoteResolution(executeMock: ReturnType<typeof vi.fn>) {
+  executeMock
+    .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+    .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+    .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+    .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+    .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+    .mockResolvedValueOnce({
+      command: GIT_CHECK_REMOTE_BRANCHES_COMMAND,
+      success: true,
+      duration: 5,
+      stdout: '',
+      stderr: '',
+    });
+}
+
 function buildVerifyRemoteBranchCommand(branch: string) {
   return {
     name: 'Git verify remote branch',
@@ -543,7 +588,17 @@ describe('WorkspaceManager git synchronization', () => {
       .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
       .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' });
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      // The remote has branches, so this is a real error and not an
+      // empty-repository bootstrap case.
+      .mockResolvedValueOnce({
+        command: GIT_CHECK_REMOTE_BRANCHES_COMMAND,
+        success: true,
+        duration: 5,
+        stdout:
+          '0123456789abcdef0123456789abcdef01234567\trefs/heads/develop\n',
+        stderr: '',
+      });
 
     await expect(
       syncRepositoryGitState({
@@ -556,6 +611,153 @@ describe('WorkspaceManager git synchronization', () => {
       }),
     ).rejects.toThrow(
       'Could not determine the default branch for acme/backend: origin/HEAD was unavailable and stored branch origin/main does not exist.',
+    );
+
+    expect(executor.executeAll).not.toHaveBeenCalled();
+  });
+
+  it('bootstraps an unborn branch instead of failing when the remote has no commits', async () => {
+    mockEmptyRemoteResolution(executor.execute);
+    executor.execute
+      // No local commits either: the workspace is a fresh clone.
+      .mockResolvedValueOnce({
+        command: GIT_CHECK_LOCAL_COMMITS_COMMAND,
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/new-repo',
+      targetBranch: 'main',
+      repositoryId: 'repo-1',
+      allowRemoteHeadFallback: true,
+      setDefaultRemote: false,
+    });
+
+    expect(executor.execute).toHaveBeenNthCalledWith(
+      6,
+      GIT_CHECK_REMOTE_BRANCHES_COMMAND,
+    );
+    expect(executor.execute).toHaveBeenNthCalledWith(
+      7,
+      GIT_CHECK_LOCAL_COMMITS_COMMAND,
+    );
+    expect(executor.execute).toHaveBeenNthCalledWith(
+      8,
+      buildPointUnbornHeadCommand('main'),
+    );
+    expect(executor.executeAll).not.toHaveBeenCalled();
+  });
+
+  it('still sets the default remote repo when bootstrapping an empty repository', async () => {
+    mockEmptyRemoteResolution(executor.execute);
+    executor.execute
+      .mockResolvedValueOnce({
+        command: GIT_CHECK_LOCAL_COMMITS_COMMAND,
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: '',
+      })
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/new-repo',
+      targetBranch: 'main',
+      repositoryId: 'repo-1',
+      allowRemoteHeadFallback: true,
+      setDefaultRemote: true,
+    });
+
+    expect(executor.execute).toHaveBeenLastCalledWith({
+      name: 'Set default remote repo.',
+      run: "gh repo set-default 'acme/new-repo'",
+      timeout: 60,
+      continue_on_error: true,
+    });
+  });
+
+  it('preserves local commits when the remote is empty in a reused workspace', async () => {
+    mockEmptyRemoteResolution(executor.execute);
+    executor.execute
+      // Local commits exist: an earlier bootstrap attempt committed work
+      // that has not been pushed yet.
+      .mockResolvedValueOnce({
+        command: GIT_CHECK_LOCAL_COMMITS_COMMAND,
+        success: true,
+        duration: 5,
+        stdout: '0123456789abcdef0123456789abcdef01234567\n',
+        stderr: '',
+      });
+
+    await syncRepositoryGitState({
+      executor,
+      repoFullName: 'acme/new-repo',
+      targetBranch: 'main',
+      repositoryId: 'repo-1',
+      allowRemoteHeadFallback: true,
+      setDefaultRemote: false,
+    });
+
+    expect(executor.execute).toHaveBeenCalledTimes(7);
+    expect(executor.execute).not.toHaveBeenCalledWith(
+      buildPointUnbornHeadCommand('main'),
+    );
+    expect(executor.executeAll).not.toHaveBeenCalled();
+  });
+
+  it('rejects sha pins against an empty remote with a clear error', async () => {
+    mockEmptyRemoteResolution(executor.execute);
+
+    await expect(
+      syncRepositoryGitState({
+        executor,
+        repoFullName: 'acme/new-repo',
+        targetBranch: 'main',
+        sha: '0123456789abcdef0123456789abcdef01234567',
+        repositoryId: 'repo-1',
+        allowRemoteHeadFallback: true,
+        setDefaultRemote: false,
+      }),
+    ).rejects.toThrow(
+      'Cannot pin acme/new-repo to 0123456789abcdef0123456789abcdef01234567: the remote repository has no commits.',
+    );
+
+    expect(executor.executeAll).not.toHaveBeenCalled();
+  });
+
+  it('rethrows the branch resolution error when the empty-remote check itself fails', async () => {
+    executor.execute
+      .mockResolvedValueOnce({ success: true, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({ success: false, stdout: '', stderr: '' })
+      .mockResolvedValueOnce({
+        command: GIT_CHECK_REMOTE_BRANCHES_COMMAND,
+        success: false,
+        duration: 5,
+        stdout: '',
+        stderr: 'fatal: could not query remote',
+      });
+
+    await expect(
+      syncRepositoryGitState({
+        executor,
+        repoFullName: 'acme/backend',
+        targetBranch: 'main',
+        repositoryId: 'repo-1',
+        allowRemoteHeadFallback: true,
+        setDefaultRemote: false,
+      }),
+    ).rejects.toThrow(
+      'Could not determine the default branch for acme/backend',
     );
 
     expect(executor.executeAll).not.toHaveBeenCalled();

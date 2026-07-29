@@ -80,6 +80,7 @@ Grant these repository permissions:
 - **Code scanning alerts**: Read-only
 - **Issues**: Read and write
 - **Metadata**: Read-only
+- **Organization projects**: Read and write
 - **Pull requests**: Read and write
 - **Workflows**: Read and write
 
@@ -127,6 +128,12 @@ Subscribe to these events:
 GitHub Apps also receive `installation` and `installation_repositories`
 events automatically; you do not need to subscribe to them in the app form.
 
+Roomote uses the **Repository** and `installation_repositories` events to
+pick up newly created or newly granted repositories without a manual refresh.
+If your app was created before the **Repository** event was part of the
+manifest, confirm it is enabled under the app's **Permissions & events** page
+— GitHub has no API to update an app's event subscriptions.
+
 ## Save credentials
 
 Copy these values into the `/setup` manual form, deployment env vars, or your
@@ -154,6 +161,34 @@ awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' ~/Downloads/<your-key>.private-key.
 Install the GitHub App on the repositories Roomote should use. Then sign in,
 complete the GitHub step in `/setup`, and confirm repository sync sees the
 expected repositories.
+
+If you add Organization projects permission to an existing app, an organization
+owner must approve the updated permission before Roomote can manage project
+items.
+
+## Daily GitHub management
+
+Roomote tasks can manage routine repository work through the GitHub App
+installation. Requests default to the repository mapped to the task:
+
+- list, create, edit, delete, and apply labels to issues or pull requests
+- create, update, delete, and report progress for milestones; assign issues to milestones
+- list accessible GitHub Projects V2, inspect an issue or pull request's Status,
+  and update an existing project item's single-select Status field
+
+Read-only requests, creations, and additive label actions run directly. Before
+editing, replacing, assigning, clearing, moving, or deleting an item, Roomote
+shows the proposed change and asks for confirmation. Deletions name the resource
+and URL in that confirmation. After a write, Roomote reads the result back and
+shares its GitHub URL.
+
+Projects V2 operations require the **Organization projects** permission above.
+If a project or Status field is ambiguous, Roomote asks you to choose one. An
+issue or pull request that is not already on a project is reported as such;
+Roomote does not add it automatically.
+
+Native GitHub saved views are not currently supported. Roomote can share an
+issue-search URL, but it does not represent that URL as a saved GitHub view.
 
 ## Start work from issues and pull requests
 

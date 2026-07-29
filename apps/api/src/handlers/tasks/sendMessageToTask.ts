@@ -462,6 +462,7 @@ async function resumeTaskFromSnapshot({
   taskId,
   userId,
   message,
+  quoteText,
   images,
   source,
   clientMessageId,
@@ -472,6 +473,7 @@ async function resumeTaskFromSnapshot({
   taskId: string;
   userId: string;
   message: string;
+  quoteText: string;
   images?: string[];
   source?: string;
   clientMessageId?: string;
@@ -567,7 +569,7 @@ async function resumeTaskFromSnapshot({
     payload,
     slackThreadTs: channelBindings?.slackThreadTs ?? null,
     userId,
-    message,
+    message: quoteText,
     senderMode,
   });
 
@@ -720,6 +722,7 @@ export async function sendMessageToTask({
   userId,
   authContext,
   message,
+  quoteText = message,
   images,
   source,
   clientMessageId,
@@ -730,6 +733,7 @@ export async function sendMessageToTask({
   userId: string;
   authContext?: AuthTokenContext | RunTokenContext;
   message: string;
+  quoteText?: string;
   images?: string[];
   source?: string;
   clientMessageId?: string;
@@ -787,6 +791,7 @@ export async function sendMessageToTask({
         taskId,
         userId: linkedReviewHandoff.senderUserId,
         message,
+        quoteText,
         images,
         source,
         clientMessageId,
@@ -829,7 +834,7 @@ export async function sendMessageToTask({
         payload: run.payload as Record<string, unknown> | null,
         slackThreadTs: channelBindings?.slackThreadTs ?? null,
         userId: senderUserId,
-        message,
+        message: quoteText,
         senderMode,
       });
 
@@ -861,6 +866,7 @@ export async function sendMessageToTask({
         call: (client) =>
           client.commands.sendPrompt.mutate({
             prompt: message,
+            quoteText,
             ...(followUpPromptSource ? { source: followUpPromptSource } : {}),
             ...(normalizedClientMessageId
               ? { clientMessageId: normalizedClientMessageId }
@@ -927,6 +933,7 @@ export async function steerMessageToTask({
   taskId,
   userId,
   message,
+  quoteText = message,
   images,
   senderMode,
   workerQuoteUserName,
@@ -934,6 +941,7 @@ export async function steerMessageToTask({
   taskId: string;
   userId: string;
   message: string;
+  quoteText?: string;
   images?: string[];
   senderMode?: SendMessageSenderMode;
   /**
@@ -967,6 +975,7 @@ export async function steerMessageToTask({
         taskId,
         userId,
         message,
+        quoteText,
         images,
         sourceRun: run as LatestTaskRun,
         channelBindings,
@@ -1000,7 +1009,7 @@ export async function steerMessageToTask({
         payload: run.payload as Record<string, unknown> | null,
         slackThreadTs: channelBindings?.slackThreadTs ?? null,
         userId,
-        message,
+        message: quoteText,
         senderMode,
       });
 
@@ -1026,6 +1035,7 @@ export async function steerMessageToTask({
         call: (client) =>
           client.commands.steerTask.mutate({
             prompt: message,
+            quoteText,
             ...(resolvedQuoteUserName
               ? { userName: resolvedQuoteUserName }
               : {}),

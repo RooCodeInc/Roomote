@@ -166,6 +166,13 @@ export type McpConnectionRole =
   | 'linear_org_install'
   | 'linear_user_link';
 
+export const LINEAR_APP_OAUTH_SCOPES = [
+  'read',
+  'write',
+  'app:assignable',
+  'app:mentionable',
+] as const;
+
 /**
  * MCP Server Configuration
  * This is what gets written to .roomote/mcp.json in the workspace
@@ -221,6 +228,11 @@ export type McpIntegrationOAuthClientEnv = {
   tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod;
 };
 
+export type McpIntegrationOAuthEndpoints = {
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
+};
+
 export type McpIntegrationAuthorizationParameter = {
   name: string;
   value: string;
@@ -243,15 +255,12 @@ export type McpIntegration = {
   connectionScope?: 'user' | 'deployment';
   authorizationParameters?: McpIntegrationAuthorizationParameter[];
   oauthClientEnv?: McpIntegrationOAuthClientEnv;
+  oauthEndpoints?: McpIntegrationOAuthEndpoints;
   oauthScopes?: string[];
+  oauthScopeSeparator?: ' ' | ',';
   oauthScopeMode?: McpIntegrationOauthScopeMode;
   connectionMode?: McpIntegrationConnectionMode;
   serverMode?: McpIntegrationServerMode;
-  homepageCard?: {
-    priority: number;
-    label?: string;
-    buttonLabel?: string;
-  };
 };
 
 export const MCP_INTEGRATIONS: McpIntegration[] = [
@@ -261,11 +270,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.notion.com/mcp',
     description: `Access your Notion pages, databases, and content within ${PRODUCT_NAME} tasks`,
     icon: 'notion',
-    homepageCard: {
-      priority: 200,
-      label: 'Connect Notion so Roomote can access your docs',
-      buttonLabel: 'Connect',
-    },
   },
   {
     id: 'jira',
@@ -291,6 +295,16 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     connectionScope: 'deployment',
     connectionMode: 'oauth',
     serverMode: 'upstream_proxy',
+    oauthClientEnv: {
+      clientIdEnv: 'R_LINEAR_CLIENT_ID',
+      clientSecretEnv: 'R_LINEAR_CLIENT_SECRET',
+      tokenEndpointAuthMethod: 'client_secret_post',
+    },
+    oauthEndpoints: {
+      authorizationEndpoint: 'https://linear.app/oauth/authorize',
+      tokenEndpoint: 'https://api.linear.app/oauth/token',
+    },
+    oauthScopeSeparator: ',',
   },
   {
     id: 'sentry',
@@ -316,11 +330,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     icon: 'posthog',
     connectionScope: 'deployment',
     oauthScopeMode: 'read-only',
-    homepageCard: {
-      priority: 90,
-      label: 'Connect PostHog to use it with your agents',
-      buttonLabel: 'Connect',
-    },
   },
   {
     id: 'neon',
@@ -362,11 +371,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
     serverMode: 'native',
-    homepageCard: {
-      priority: 80,
-      label: 'Connect Vercel so Roomote can inspect deployments and logs',
-      buttonLabel: 'Connect',
-    },
   },
   {
     id: 'grafana',
@@ -393,11 +397,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     icon: 'railway',
     connectionScope: 'deployment',
     serverMode: 'upstream_proxy',
-    homepageCard: {
-      priority: 85,
-      label: 'Connect Railway so Roomote can inspect your projects',
-      buttonLabel: 'Connect',
-    },
   },
   {
     id: 'braintrust',
@@ -446,11 +445,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'sessions:create',
       'wallet:spend',
     ],
-    homepageCard: {
-      priority: 70,
-      label: 'Connect Zero so agents can discover paid capabilities',
-      buttonLabel: 'Connect',
-    },
     instructions: [
       'Zero is available because a deployment operator connected it: the `zero` CLI and skill are installed for this task, and the Zero MCP connector handles authentication and funding.',
       '',
@@ -588,11 +582,12 @@ export function getMcpIntegrationAuthorizationParameters(
   }
 
   if (integration.id === 'linear') {
-    if (role === 'linear_user_link') {
-      return [{ name: 'actor', value: 'user' }];
-    }
-
-    return [{ name: 'actor', value: 'app' }];
+    return [
+      {
+        name: 'actor',
+        value: role === 'linear_user_link' ? 'user' : 'app',
+      },
+    ];
   }
 
   return integration.authorizationParameters ?? [];
@@ -616,10 +611,42 @@ export function getMcpIntegrationOauthScopes(
   }
 
   if (integration.id === 'linear') {
-    return role === 'linear_user_link' ? ['read'] : ['read', 'write'];
+    return role === 'linear_user_link'
+      ? ['read']
+      : [...LINEAR_APP_OAUTH_SCOPES];
   }
 
   return integration.oauthScopes;
+}
+
+export function getMcpIntegrationOauthEndpoints(
+  integrationOrId: McpIntegration | string | undefined,
+): McpIntegrationOAuthEndpoints | undefined {
+  if (!integrationOrId) {
+    return undefined;
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.oauthEndpoints;
+}
+
+export function getMcpIntegrationOauthScopeSeparator(
+  integrationOrId: McpIntegration | string | undefined,
+): ' ' | ',' {
+  if (!integrationOrId) {
+    return ' ';
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.oauthScopeSeparator ?? ' ';
 }
 
 export function getMcpIntegrationOauthScopeMode(

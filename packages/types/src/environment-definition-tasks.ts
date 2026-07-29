@@ -50,6 +50,7 @@ export function normalizeRepositorySelection(
 
 export function buildCreateEnvironmentDefinitionPrompt(
   repositoryFullNames: string[],
+  options?: { emptyRepositoryFullNames?: string[] },
 ): string {
   const sortedRepositories = [...repositoryFullNames].sort((left, right) =>
     left.localeCompare(right),
@@ -59,10 +60,25 @@ export function buildCreateEnvironmentDefinitionPrompt(
     .map((repositoryFullName) => `- ${repositoryFullName}`)
     .join('\n');
 
+  const emptyRepositories = [...(options?.emptyRepositoryFullNames ?? [])]
+    .filter((fullName) => repositoryFullNames.includes(fullName))
+    .sort((left, right) => left.localeCompare(right));
+
+  // Restate the skill's empty-repository bootstrap rules inline so a worker
+  // whose packaged environment-setup skill predates the bootstrap section
+  // still degrades gracefully instead of failing on the empty checkout.
+  const emptyRepositorySection =
+    emptyRepositories.length > 0
+      ? `\n\nThese repositories are brand new and have no commits yet:
+${emptyRepositories.map((fullName) => `- ${fullName}`).join('\n')}
+
+For each empty repository, follow the skill's empty-repository bootstrap: push exactly one initial commit containing only a README.md and a minimal .gitignore to its default branch (never force-push), then define the smallest valid environment for it — typically the repository mapping alone, with no commands, services, or ports. Do not scaffold application code, frameworks, package manifests, or CI config; building the actual project is the user's next task.`
+      : '';
+
   return `$environment-setup
 
 Set up a ${PRODUCT_NAME} environment for this repository set:
-${repositoryLines}
+${repositoryLines}${emptyRepositorySection}
 
 Focus on the smallest correct environment that gets this setup target running locally.
 Use a plain, stable environment name based on the product or repository name. Do not append qualifiers like "Localhost", "Minimal", or similar unless the user explicitly asked for that distinction.

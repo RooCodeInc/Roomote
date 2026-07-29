@@ -8,8 +8,19 @@ import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
 import { resolveAuthProviderConfig } from '@/lib/server/auth-provider-config';
 
+import {
+  checkTeamsBotCredentials,
+  type TeamsBotCredentialCheck,
+} from './bot-credential-check';
+
 type TeamsIntegrationStatus = {
   botConfigured: boolean;
+  /**
+   * Whether the configured credentials actually authenticate with Microsoft.
+   * `botConfigured` only reports that values are present, which cannot
+   * distinguish a typo or an expired secret from a working bot.
+   */
+  botCredentialCheck: TeamsBotCredentialCheck;
   botUsesTenantSpecificTokenFlow: boolean;
   botUsesMicrosoftAuthFallback: boolean;
   microsoftAuthConfigured: boolean;
@@ -46,16 +57,18 @@ export async function getTeamsIntegrationStatusCommand(
 ): Promise<TeamsIntegrationStatus> {
   void auth;
 
-  const [credentials, authProviderConfig, primaryConversation, botName] =
+  const credentials = await resolveTeamsBotRuntimeCredentials();
+  const [authProviderConfig, primaryConversation, botName, botCredentialCheck] =
     await Promise.all([
-      resolveTeamsBotRuntimeCredentials(),
       resolveAuthProviderConfig(),
       findTeamsPrimaryConversation(),
       resolveTeamsInvocationBotName(),
+      checkTeamsBotCredentials(credentials),
     ]);
 
   return {
     botConfigured: Boolean(credentials.botAppId && credentials.botAppPassword),
+    botCredentialCheck,
     botUsesTenantSpecificTokenFlow: Boolean(credentials.botTenantId),
     botUsesMicrosoftAuthFallback: false,
     microsoftAuthConfigured: Boolean(

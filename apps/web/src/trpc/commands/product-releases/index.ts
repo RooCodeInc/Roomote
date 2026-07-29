@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import { db, deploymentSettings, eq } from '@roomote/db/server';
 import {
   getRedis,
@@ -14,6 +16,7 @@ import {
   ROOMOTE_GITHUB_REPO,
 } from '@/lib/release-links';
 import {
+  isParsableProductVersion,
   isProductVersionNewer,
   normalizeProductVersion,
   toReleaseTag,
@@ -25,6 +28,7 @@ const PRODUCT_VERSION_PATTERN = /^v?\d+\.\d+\.\d+(?:-[\w.]+)?$/i;
 
 type ReleaseStatus = {
   runningVersion: string | null;
+  displayVersion: string | null;
   latestKnownVersion: string | null;
   latestVersionCheckedAt: string | null;
   updateAvailable: boolean;
@@ -50,6 +54,53 @@ function getRunningVersion(): string | null {
   );
 }
 
+function getDisplayVersion(): string | null {
+  const releaseVersion = Env.RELEASE_VERSION?.trim();
+  if (releaseVersion) {
+    if (isParsableProductVersion(releaseVersion)) {
+      return toReleaseTag(releaseVersion);
+    }
+
+    // Channel builds include their commit after the final dash.
+    const commitFromRelease = releaseVersion.match(/[a-f0-9]{7,40}$/i)?.[0];
+    if (commitFromRelease) {
+      return commitFromRelease;
+    }
+  }
+
+  // Channel image builds receive their commit from GitHub Actions. A source
+  // checkout (the normal development path) has neither build metadata value,
+  // so resolve HEAD directly instead.
+  const commit = process.env.GITHUB_SHA?.trim() || getLocalGitCommit();
+  if (commit) {
+    return commit;
+  }
+
+  const productVersion = normalizeProductVersion(Env.RELEASE_PRODUCT_VERSION);
+  if (productVersion) {
+    return toReleaseTag(productVersion);
+  }
+
+  // Keep a useful identifier for deployments that do not expose commit
+  // metadata (for example a locally built self-hosted image).
+  return releaseVersion ?? null;
+}
+
+function getLocalGitCommit(): string | null {
+  try {
+    const commit = execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return commit || null;
+  } catch {
+    // Release images do not include .git. They always have RELEASE_VERSION,
+    // but keep this fallback safe for custom and detached deployments.
+    return null;
+  }
+}
+
 function canSeeUpdateStatus(auth: UserAuthSuccess): boolean {
   return auth.isAdmin && !isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
 }
@@ -62,10 +113,12 @@ export async function getReleaseStatusCommand(
   auth: UserAuthSuccess,
 ): Promise<ReleaseStatus> {
   const runningVersion = getRunningVersion();
+  const displayVersion = getDisplayVersion();
 
   if (!canSeeUpdateStatus(auth)) {
     return {
       runningVersion,
+      displayVersion,
       latestKnownVersion: null,
       latestVersionCheckedAt: null,
       updateAvailable: false,
@@ -88,6 +141,7 @@ export async function getReleaseStatusCommand(
 
   return {
     runningVersion,
+    displayVersion,
     latestKnownVersion,
     latestVersionCheckedAt,
     updateAvailable: isProductVersionNewer(latestKnownVersion, runningVersion),

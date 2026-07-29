@@ -1,16 +1,11 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
-import {
-  getMcpIntegrationConnectionScope,
-  isSelfServeMcpIntegration,
-  isDeploymentScopedMcpIntegration,
-  MCP_INTEGRATIONS,
-  PRODUCT_NAME,
-} from '@roomote/types';
+import { MCP_INTEGRATIONS } from '@roomote/types';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
@@ -18,17 +13,26 @@ import {
   useUserMcpConnections,
   useConnectMcp,
 } from '@/hooks/mcp-connections';
+import { useAuthenticateGitHubAccount } from '@/hooks/github';
+import { useAuthenticateSlackAccount } from '@/hooks/slack';
+import { useAuthenticateLinearAccount } from '@/hooks/linear';
 import {
-  useGitHubInstallations,
-  useAuthenticateGitHubAccount,
-} from '@/hooks/github';
-import { useSlackInstallation, useConnectSlack } from '@/hooks/slack';
-import { useLinearInstallation, useConnectLinear } from '@/hooks/linear';
-import { useGitHubLinkedAccount } from '@/hooks/linked-accounts';
+  useAuthenticateAdoAccount,
+  useAuthenticateBitbucketAccount,
+  useAuthenticateGiteaAccount,
+  useAuthenticateGitLabAccount,
+  useAuthenticateMicrosoftTeamsAccount,
+} from '@/hooks/linked-accounts';
 import { useTRPC } from '@/trpc/client';
 import { SETTINGS_PATHS } from '@/lib/settings';
 
 import {
+  BrandIcon,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   Github,
   LinearLogo,
   Slack,
@@ -38,12 +42,61 @@ import {
   Zap,
 } from '@/components/system';
 import { McpIcon } from '@/components/settings/McpIcon';
+import { DiscordLinkAccountStep } from '@/components/settings/DiscordLinkAccountStep';
+import { TelegramLinkAccountStep } from '@/components/settings/TelegramLinkAccountStep';
 
 const DISMISSED_KEY = 'OnboardingCardsDismissedByOrg';
+const DISMISSED_DEPLOYMENT_KEY = 'deployment';
+
+const ADMIN_INTEGRATION_ORDER = [
+  'notion',
+  'sentry',
+  'linear',
+  'jira',
+  'vercel',
+  'supabase',
+  'posthog',
+  'grafana',
+  'asana',
+] as const;
+
+const PERSONAL_MCP_INTEGRATION_ORDER = ['notion', 'supabase'] as const;
+
+const CARD_EXIT_TRANSITION = {
+  duration: 0.4,
+  ease: 'easeOut',
+} as const;
+
+const CARD_ENTER_TRANSITION = {
+  duration: 0.4,
+  delay: 0.25,
+  ease: 'easeOut',
+} as const;
+
+const CARD_ANIMATION = {
+  initial: { opacity: 0, y: 20 },
+  animate: { opacity: 1, y: 0, transition: CARD_ENTER_TRANSITION },
+  exit: { opacity: 0, y: -20, transition: CARD_EXIT_TRANSITION },
+} as const;
+
+const COMMUNICATION_PROVIDER_ORDER = [
+  'slack',
+  'microsoft',
+  'telegram',
+  'discord',
+] as const;
+
+const SOURCE_CONTROL_PROVIDER_ORDER = [
+  'github',
+  'gitlab',
+  'gitea',
+  'bitbucket',
+  'ado',
+] as const;
 
 type CardConfig = {
   id: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   buttonLabel: string;
   onClick: () => void;
@@ -52,24 +105,27 @@ type CardConfig = {
   visible: boolean;
 };
 
-const DISMISSED_DEPLOYMENT_KEY = 'deployment';
+type LinkableProviderId =
+  | 'slack'
+  | 'microsoft'
+  | 'telegram'
+  | 'discord'
+  | 'github'
+  | 'gitlab'
+  | 'gitea'
+  | 'bitbucket'
+  | 'ado';
 
 function readDismissedCardIds(): string[] {
   try {
     const raw = localStorage.getItem(DISMISSED_KEY);
-    if (!raw) {
-      return [];
-    }
+    if (!raw) return [];
 
     const parsed = JSON.parse(raw) as Record<string, string[]>;
     const dismissed = parsed[DISMISSED_DEPLOYMENT_KEY];
-    if (!Array.isArray(dismissed)) {
-      return [];
-    }
-
-    return dismissed.filter(
-      (value): value is string => typeof value === 'string',
-    );
+    return Array.isArray(dismissed)
+      ? dismissed.filter((value): value is string => typeof value === 'string')
+      : [];
   } catch {
     return [];
   }
@@ -79,7 +135,6 @@ function writeDismissedCardIds(ids: string[]): void {
   try {
     const raw = localStorage.getItem(DISMISSED_KEY);
     const parsed = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
-
     parsed[DISMISSED_DEPLOYMENT_KEY] = ids;
     localStorage.setItem(DISMISSED_KEY, JSON.stringify(parsed));
   } catch {
@@ -87,9 +142,13 @@ function writeDismissedCardIds(ids: string[]): void {
   }
 }
 
-/**
- * Shows at most one onboarding guidance card at a time, in priority order.
- */
+function getMcpIntegration(id: string) {
+  const integration = MCP_INTEGRATIONS.find((entry) => entry.id === id);
+  if (!integration) throw new Error(`Unknown MCP integration: ${id}`);
+  return integration;
+}
+
+/** Shows at most one onboarding guidance card at a time, in priority order. */
 export function OnboardingCard() {
   const { isAdmin } = useAuthorizedUser();
   const searchParams = useSearchParams();
@@ -97,114 +156,44 @@ export function OnboardingCard() {
   const trpc = useTRPC();
   const shouldShowSuggestedTasksCard =
     searchParams.get('link_suggested') === 'true';
-
-  const { data: githubInstallations = [], isPending: githubPending } =
-    useGitHubInstallations();
-  const { data: slackInstallation, isPending: slackPending } =
-    useSlackInstallation();
-  const { data: linearInstallation, isPending: linearPending } =
-    useLinearInstallation();
-  const { data: githubLinkedAccount, isPending: githubAccountPending } =
-    useGitHubLinkedAccount();
+  const onboarding = useQuery(trpc.onboarding.status.queryOptions());
   const enablements = useDeploymentMcpEnablements();
   const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
-  const mcpPending = enablements.isPending || userMcpConnections.isPending;
   const { data: automationOnboardingStatus, isPending: automationsPending } =
     useQuery(trpc.automations.onboardingStatus.queryOptions());
 
-  const promotedMcpIntegrations = mcpPending
-    ? []
-    : MCP_INTEGRATIONS.filter((integration) =>
-        isSelfServeMcpIntegration(integration),
-      )
-        .map((integration, index) => ({ integration, index }))
-        .filter(({ integration }) => Boolean(integration.homepageCard))
-        .filter(({ integration }) =>
-          isDeploymentScopedMcpIntegration(integration)
-            ? isAdmin
-            : (enablements.data ?? []).some(
-                (entry) => entry.mcpId === integration.id && entry.enabled,
-              ),
-        )
-        .filter(
-          ({ integration }) =>
-            !isDeploymentScopedMcpIntegration(integration) || isAdmin,
-        )
-        .filter(
-          ({ integration }) =>
-            !(userMcpConnections.data ?? []).some(
-              (connection) =>
-                connection.mcpId === integration.id &&
-                connection.authStatus === 'authenticated',
-            ),
-        )
-        .sort((left, right) => {
-          const leftPriority = left.integration.homepageCard?.priority ?? 0;
-          const rightPriority = right.integration.homepageCard?.priority ?? 0;
-
-          if (leftPriority === rightPriority) {
-            return left.index - right.index;
-          }
-
-          return rightPriority - leftPriority;
-        })
-        .map(({ integration }) => integration);
-
+  const authenticateSlackAccount = useAuthenticateSlackAccount();
+  const authenticateGitHubAccount = useAuthenticateGitHubAccount();
+  const authenticateLinearAccount = useAuthenticateLinearAccount();
+  const authenticateMicrosoftTeamsAccount =
+    useAuthenticateMicrosoftTeamsAccount();
+  const authenticateGitLabAccount = useAuthenticateGitLabAccount();
+  const authenticateGiteaAccount = useAuthenticateGiteaAccount();
+  const authenticateBitbucketAccount = useAuthenticateBitbucketAccount();
+  const authenticateAdoAccount = useAuthenticateAdoAccount();
+  const [linkDialog, setLinkDialog] = useState<'telegram' | 'discord' | null>(
+    null,
+  );
   const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
-
-  const connectSlack = useConnectSlack('/', {
-    onError: () => {
-      toast.error('Failed to connect Slack. Please try again.');
-    },
-  });
-
-  const connectLinear = useConnectLinear('/', {
-    onError: () => {
-      toast.error('Failed to connect Linear. Please try again.');
-    },
-  });
-
-  const authenticateGitHubAccount = useAuthenticateGitHubAccount({
-    onSuccess: (result) => {
-      if (result.success) {
-        window.location.href = result.url;
-      } else {
-        toast.error(result.error);
-      }
-    },
-    onError: () =>
-      toast.error('Failed to link GitHub account. Please try again.'),
-  });
-
   const connectionToastedRef = useRef(false);
 
   useEffect(() => {
-    if (connectionToastedRef.current) {
-      return;
-    }
+    if (connectionToastedRef.current) return;
 
     const slackConnected = searchParams.get('slack') === 'connected';
     const linearConnected = searchParams.get('linear') === 'connected';
+    if (!slackConnected && !linearConnected) return;
 
-    if (slackConnected || linearConnected) {
-      connectionToastedRef.current = true;
+    connectionToastedRef.current = true;
+    if (slackConnected) toast.success('Slack account linked successfully');
+    if (linearConnected) toast.success('Linear account linked successfully');
 
-      if (slackConnected) {
-        toast.success('Slack connected successfully');
-      }
-
-      if (linearConnected) {
-        toast.success('Linear connected successfully');
-      }
-
-      // Remove the query params from the URL without a full navigation
-      const url = new URL(window.location.href);
-      url.searchParams.delete('slack');
-      url.searchParams.delete('linear');
-      router.replace(url.pathname + url.search, { scroll: false });
-    }
-  }, [searchParams, router]);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('slack');
+    url.searchParams.delete('linear');
+    router.replace(url.pathname + url.search, { scroll: false });
+  }, [router, searchParams]);
 
   useEffect(() => {
     const dismissedIds = readDismissedCardIds();
@@ -214,18 +203,224 @@ export function OnboardingCard() {
   }, []);
 
   const dismiss = (cardId: string) => {
-    const nextDismissed = {
-      ...dismissed,
-      [cardId]: true,
-    };
-
+    const nextDismissed = { ...dismissed, [cardId]: true };
     setDismissed(nextDismissed);
+    writeDismissedCardIds(
+      Object.entries(nextDismissed)
+        .filter(([, isDismissed]) => isDismissed)
+        .map(([id]) => id),
+    );
+  };
 
-    const nextDismissedIds = Object.entries(nextDismissed)
-      .filter(([, isDismissed]) => isDismissed)
-      .map(([id]) => id);
+  const startOAuthLink = (
+    name: string,
+    mutation: {
+      mutate: (redirect: string, options?: { onError: () => void }) => void;
+    },
+  ) => {
+    mutation.mutate('/', {
+      onError: () => toast.error(`Failed to link ${name}. Please try again.`),
+    });
+  };
 
-    writeDismissedCardIds(nextDismissedIds);
+  const linkProvider = (providerId: LinkableProviderId) => {
+    switch (providerId) {
+      case 'slack':
+        authenticateSlackAccount.mutate('/', {
+          onSuccess: (result) => {
+            if (result.success) window.location.href = result.url;
+            else toast.error(result.error);
+          },
+          onError: () => toast.error('Failed to link Slack. Please try again.'),
+        });
+        return;
+      case 'github':
+        authenticateGitHubAccount.mutate(
+          { redirect: '/', callbackBackground: 'background' },
+          {
+            onSuccess: (result) => {
+              if (result.success) window.location.href = result.url;
+              else toast.error(result.error);
+            },
+            onError: () =>
+              toast.error('Failed to link GitHub. Please try again.'),
+          },
+        );
+        return;
+      case 'microsoft':
+        startOAuthLink('Microsoft Teams', authenticateMicrosoftTeamsAccount);
+        return;
+      case 'gitlab':
+        startOAuthLink('GitLab', authenticateGitLabAccount);
+        return;
+      case 'gitea':
+        startOAuthLink('Gitea', authenticateGiteaAccount);
+        return;
+      case 'bitbucket':
+        startOAuthLink('Bitbucket Cloud', authenticateBitbucketAccount);
+        return;
+      case 'ado':
+        startOAuthLink('Azure DevOps', authenticateAdoAccount);
+        return;
+      case 'telegram':
+      case 'discord':
+        setLinkDialog(providerId);
+    }
+  };
+
+  const isProviderLinkPending = (providerId: LinkableProviderId) => {
+    switch (providerId) {
+      case 'slack':
+        return authenticateSlackAccount.isPending;
+      case 'github':
+        return authenticateGitHubAccount.isPending;
+      case 'microsoft':
+        return authenticateMicrosoftTeamsAccount.isPending;
+      case 'gitlab':
+        return authenticateGitLabAccount.isPending;
+      case 'gitea':
+        return authenticateGiteaAccount.isPending;
+      case 'bitbucket':
+        return authenticateBitbucketAccount.isPending;
+      case 'ado':
+        return authenticateAdoAccount.isPending;
+      default:
+        return false;
+    }
+  };
+
+  const status = onboarding.data;
+  const isIntegrationsPending =
+    onboarding.isPending ||
+    enablements.isPending ||
+    userMcpConnections.isPending;
+  const enabledMcpIds = new Set(
+    (enablements.data ?? [])
+      .filter((entry) => entry.enabled)
+      .map((entry) => entry.mcpId),
+  );
+  const authenticatedMcpIds = new Set(
+    (userMcpConnections.data ?? [])
+      .filter((connection) => connection.authStatus === 'authenticated')
+      .map((connection) => connection.mcpId),
+  );
+
+  const providerIcon = (providerId: LinkableProviderId) => {
+    switch (providerId) {
+      case 'slack':
+        return (
+          <Slack
+            className="size-4 shrink-0 text-muted-foreground"
+            strokeWidth={1}
+          />
+        );
+      case 'github':
+        return (
+          <Github
+            className="size-4 shrink-0 text-muted-foreground"
+            strokeWidth={1}
+          />
+        );
+      case 'microsoft':
+        return (
+          <BrandIcon icon="teams" name="Microsoft Teams" className="size-4" />
+        );
+      default: {
+        const icon = providerId === 'ado' ? 'ado' : providerId;
+        const name =
+          providerId === 'bitbucket' ? 'Bitbucket Cloud' : providerId;
+        return <BrandIcon icon={icon} name={name} className="size-4" />;
+      }
+    }
+  };
+
+  const providerCards: CardConfig[] = (status?.linkableProviders ?? []).map(
+    (provider) => ({
+      id: `link-${provider.id}`,
+      icon: providerIcon(provider.id as LinkableProviderId),
+      label: `Link your ${provider.label} account`,
+      buttonLabel: 'Link',
+      onClick: () => linkProvider(provider.id as LinkableProviderId),
+      disabled: isProviderLinkPending(provider.id as LinkableProviderId),
+      visible:
+        !isIntegrationsPending && provider.configured && !provider.linked,
+    }),
+  );
+
+  const adminIntegrationCards: CardConfig[] = ADMIN_INTEGRATION_ORDER.map(
+    (integrationId) => {
+      const integration = getMcpIntegration(integrationId);
+      const enabled =
+        integrationId === 'linear'
+          ? Boolean(status?.orgHasLinear)
+          : enabledMcpIds.has(integrationId);
+      const settingsId =
+        integrationId === 'sentry' ? 'sentry-mcp' : integrationId;
+      return {
+        id: `enable-${integrationId}`,
+        icon:
+          integrationId === 'linear' ? (
+            <LinearLogo className="size-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <McpIcon icon={integration.icon} name={integration.name} />
+          ),
+        label: `Enable ${integration.name} for your workspace`,
+        buttonLabel: 'Set it up',
+        onClick: () =>
+          router.push(`${SETTINGS_PATHS.integrations}?highlight=${settingsId}`),
+        visible: isAdmin && !isIntegrationsPending && !enabled,
+      };
+    },
+  );
+
+  const personalMcpCards: CardConfig[] = PERSONAL_MCP_INTEGRATION_ORDER.map(
+    (integrationId) => {
+      const integration = getMcpIntegration(integrationId);
+      const isConnected = authenticatedMcpIds.has(integrationId);
+      const isPending =
+        connectMcp.isPending && connectMcp.variables?.mcpId === integrationId;
+      return {
+        id: `link-${integrationId}`,
+        icon: <McpIcon icon={integration.icon} name={integration.name} />,
+        label: `Link your ${integration.name} account`,
+        buttonLabel: 'Link',
+        onClick: () => {
+          connectMcp.mutate(
+            { mcpId: integrationId, redirectTo: '/' },
+            {
+              onSuccess: (url) => {
+                window.location.href = url;
+              },
+              onError: () =>
+                toast.error(
+                  `Failed to link ${integration.name}. Please try again.`,
+                ),
+            },
+          );
+        },
+        disabled: isPending,
+        visible:
+          !isIntegrationsPending &&
+          enabledMcpIds.has(integrationId) &&
+          !isConnected,
+      };
+    },
+  );
+
+  const linearPersonalCard: CardConfig = {
+    id: 'link-linear',
+    icon: <LinearLogo className="size-4 shrink-0 text-muted-foreground" />,
+    label: 'Link your Linear account',
+    buttonLabel: 'Link',
+    onClick: () =>
+      authenticateLinearAccount.mutate('/', {
+        onError: () => toast.error('Failed to link Linear. Please try again.'),
+      }),
+    disabled: authenticateLinearAccount.isPending,
+    visible:
+      !isIntegrationsPending &&
+      Boolean(status?.orgHasLinear) &&
+      !status?.userHasLinkedLinear,
   };
 
   const cards: CardConfig[] = [
@@ -234,196 +429,124 @@ export function OnboardingCard() {
       icon: <Spinner />,
       label: 'Your selected tasks have started.',
       buttonLabel: 'Check their progress',
-      onClick: () => {
-        router.push('/tasks');
-      },
+      onClick: () => router.push('/tasks'),
       dismissible: false,
       visible: shouldShowSuggestedTasksCard,
     },
+    ...COMMUNICATION_PROVIDER_ORDER.flatMap((providerId) =>
+      providerCards.filter((card) => card.id === `link-${providerId}`),
+    ),
+    ...SOURCE_CONTROL_PROVIDER_ORDER.flatMap((providerId) =>
+      providerCards.filter((card) => card.id === `link-${providerId}`),
+    ),
+    ...adminIntegrationCards,
+    ...personalMcpCards,
+    linearPersonalCard,
     {
-      id: 'slack',
+      id: 'automations',
       icon: (
-        <Slack
+        <Zap
           className="size-4 shrink-0 text-muted-foreground"
           strokeWidth={1}
         />
       ),
-      label: 'Chat with Roomote on Slack',
-      buttonLabel: 'Do it',
-      onClick: () => {
-        void (async () => {
-          try {
-            const url = await connectSlack.mutateAsync();
-
-            if (url) {
-              window.location.href = url;
-            }
-          } catch {
-            // Error handled by onError.
-          }
-        })();
-      },
-      disabled: connectSlack.isPending,
-      visible: !slackPending && !slackInstallation,
-    },
-    {
-      id: 'linear',
-      icon: (
-        <LinearLogo
-          className="size-4 shrink-0 text-muted-foreground"
-          strokeWidth={1}
-        />
-      ),
-      label: 'Assign tasks to agents from Linear',
-      buttonLabel: 'Do it',
-      onClick: () => {
-        void (async () => {
-          try {
-            const url = await connectLinear.mutateAsync();
-
-            if (url) {
-              window.location.href = url;
-            }
-          } catch {
-            // Error handled by onError.
-          }
-        })();
-      },
-      disabled: connectLinear.isPending,
-      visible: !linearPending && !linearInstallation,
-    },
-    {
-      id: 'github-account',
-      icon: (
-        <Github
-          className="size-4 shrink-0 text-muted-foreground"
-          strokeWidth={1}
-        />
-      ),
-      label: `Link your GitHub so ${PRODUCT_NAME} acts as you`,
-      buttonLabel: 'Do it',
-      onClick: () => {
-        void (async () => {
-          try {
-            const result = await authenticateGitHubAccount.mutateAsync({
-              redirect: '/',
-              callbackBackground: 'background',
-            });
-
-            if (result.success) {
-              window.location.href = result.url;
-            }
-          } catch {
-            // Error handled by onError.
-          }
-        })();
-      },
-      disabled: authenticateGitHubAccount.isPending,
+      label: 'Automations keep your repos moving in the background',
+      buttonLabel: 'Set them up',
+      onClick: () => router.push(SETTINGS_PATHS.automations),
       visible:
-        !githubPending &&
-        !githubAccountPending &&
-        githubInstallations.length > 0 &&
-        !githubLinkedAccount,
+        !automationsPending &&
+        Boolean(automationOnboardingStatus) &&
+        !automationOnboardingStatus?.hasEnabledAutomations,
     },
   ];
 
-  cards.push(
-    ...promotedMcpIntegrations.map((integration) => ({
-      id: `${integration.id}-connect`,
-      icon: <McpIcon icon={integration.icon} name={integration.name} />,
-      label:
-        integration.homepageCard?.label ??
-        (getMcpIntegrationConnectionScope(integration) === 'deployment'
-          ? `Connect ${integration.name} so Roomote can access it`
-          : `Connect ${integration.name} so Roomote can access it`),
-      buttonLabel: integration.homepageCard?.buttonLabel ?? 'Connect',
-      onClick: () => {
-        connectMcp.mutate(
-          { mcpId: integration.id, redirectTo: '/' },
-          {
-            onSuccess: (url) => {
-              window.location.href = url;
-            },
-            onError: () => {
-              toast.error(
-                `Failed to connect ${integration.name}. Please try again.`,
-              );
-            },
-          },
-        );
-      },
-      disabled: connectMcp.isPending,
-      visible: true,
-    })),
-  );
-
-  cards.push({
-    id: 'automations',
-    icon: (
-      <Zap className="size-4 shrink-0 text-muted-foreground" strokeWidth={1} />
-    ),
-    label: 'Automations keep your repos moving in the background',
-    buttonLabel: 'Set them up',
-    onClick: () => {
-      router.push(SETTINGS_PATHS.automations);
-    },
-    visible:
-      !automationsPending &&
-      Boolean(automationOnboardingStatus) &&
-      !automationOnboardingStatus?.hasEnabledAutomations,
-  });
-
   const activeCard = cards.find((card) => card.visible && !dismissed[card.id]);
-
-  if (!activeCard) {
-    return null;
-  }
+  if (!activeCard) return null;
 
   return (
     <>
-      <div className="flex  md:w-fit md:items-center gap-2 py-1 pl-1 md:pr-5 text-sm">
-        <span className="mt-1 md:mt-0">{activeCard.icon}</span>
-        <div className="flex gap-1 flex-col items-start md:flex-row md:items-center md:gap-2 grow">
-          <span className="flex gap-1 items-start flex-nowrap w-full">
-            <span className="cursor-default font-medium text-muted-foreground grow">
-              {activeCard.label}
-            </span>
-            {activeCard.dismissible !== false && (
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                className="md:hidden ml-auto text-muted-foreground hover:text-foreground"
-                onClick={() => dismiss(activeCard.id)}
-                aria-label="Dismiss"
-              >
-                <X className="size-3.5" />
-              </Button>
-            )}
-          </span>
-          <Button
-            variant="default"
-            size="xs"
-            type="button"
-            onClick={activeCard.onClick}
-            disabled={activeCard.disabled}
+      <div className="relative overflow-clip">
+        <AnimatePresence initial={false} mode="popLayout">
+          <motion.div
+            key={activeCard.id}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            variants={CARD_ANIMATION}
+            className="flex md:w-fit md:items-center gap-2 py-1 pl-1 md:pr-5 text-sm"
           >
-            {activeCard.buttonLabel}
-          </Button>
-          {activeCard.dismissible !== false && (
-            <Button
-              variant="ghost"
-              size="icon"
-              type="button"
-              className="hidden md:inline-flex ml-auto text-muted-foreground hover:text-foreground"
-              onClick={() => dismiss(activeCard.id)}
-              aria-label="Dismiss"
-            >
-              <X className="size-3.5" />
-            </Button>
-          )}
-        </div>
+            <span className="mt-0.5 md:mt-0">{activeCard.icon}</span>
+            <div className="flex gap-1 flex-col items-start md:flex-row md:items-center md:gap-2 grow">
+              <span className="flex gap-1 items-start flex-nowrap w-full">
+                <span className="cursor-default font-medium text-muted-foreground grow">
+                  {activeCard.label}
+                </span>
+                {activeCard.dismissible !== false && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="md:hidden ml-auto text-muted-foreground hover:text-foreground"
+                    onClick={() => dismiss(activeCard.id)}
+                    aria-label="Dismiss"
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                )}
+              </span>
+              <Button
+                variant="default"
+                size="xs"
+                type="button"
+                onClick={activeCard.onClick}
+                disabled={activeCard.disabled}
+              >
+                {activeCard.buttonLabel}
+              </Button>
+              {activeCard.dismissible !== false && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  type="button"
+                  className="hidden md:inline-flex ml-auto text-muted-foreground hover:text-foreground"
+                  onClick={() => dismiss(activeCard.id)}
+                  aria-label="Dismiss"
+                >
+                  <X className="size-3.5" />
+                </Button>
+              )}
+            </div>
+          </motion.div>
+        </AnimatePresence>
       </div>
+      <Dialog
+        open={linkDialog === 'telegram'}
+        onOpenChange={(open) => !open && setLinkDialog(null)}
+      >
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>Link your Telegram account</DialogTitle>
+            <DialogDescription>
+              Connect your Telegram identity to Roomote.
+            </DialogDescription>
+          </DialogHeader>
+          <TelegramLinkAccountStep autoGenerate pollUntilLinked />
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={linkDialog === 'discord'}
+        onOpenChange={(open) => !open && setLinkDialog(null)}
+      >
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>Link your Discord account</DialogTitle>
+            <DialogDescription>
+              Connect your Discord identity to Roomote.
+            </DialogDescription>
+          </DialogHeader>
+          <DiscordLinkAccountStep autoGenerate pollUntilLinked />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

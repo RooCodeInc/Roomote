@@ -34,7 +34,7 @@ export function UpdateGitHubReposHint() {
       <Button
         type="button"
         size="xs"
-        variant="outline"
+        variant="link"
         disabled={enableGitHubApp.isPending}
         onClick={() => {
           enableGitHubApp.mutate(

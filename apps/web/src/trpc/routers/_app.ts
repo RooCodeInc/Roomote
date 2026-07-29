@@ -112,6 +112,9 @@ import {
 import {
   getLinearInstallationCommand,
   disconnectLinearAppCommand,
+  getLinearOauthSetupCommand,
+  removeLinearOauthSetupCommand,
+  saveLinearOauthSetupCommand,
 } from '../commands/linear';
 import { getTeamsIntegrationStatusCommand } from '../commands/teams';
 import {
@@ -184,6 +187,7 @@ import {
 } from '../commands/sandbox-session';
 import {
   getDeploymentMcpEnablementsCommand,
+  getMcpOauthReadinessCommand,
   setDeploymentMcpEnabledCommand,
   getUserMcpConnectionsCommand,
   getAsanaConnectionCommand,
@@ -1145,6 +1149,26 @@ export const appRouter = createRouter({
     disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectLinearAppCommand(auth),
     ),
+
+    oauthSetup: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinearOauthSetupCommand(auth),
+    ),
+
+    removeOauthSetup: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      removeLinearOauthSetupCommand(auth),
+    ),
+
+    saveOauthSetup: protectedProcedure
+      .input(
+        z.object({
+          clientId: z.string().max(1_000),
+          clientSecret: z.string().max(10_000),
+          webhookSecret: z.string().max(10_000),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        saveLinearOauthSetupCommand(auth, input),
+      ),
   }),
 
   teams: createRouter({
@@ -1468,6 +1492,10 @@ export const appRouter = createRouter({
   mcpConnections: createRouter({
     deploymentEnablements: protectedProcedure.query(({ ctx: { auth } }) =>
       getDeploymentMcpEnablementsCommand(auth),
+    ),
+
+    oauthReadiness: protectedProcedure.query(({ ctx: { auth } }) =>
+      getMcpOauthReadinessCommand(auth),
     ),
 
     setDeploymentEnabled: protectedProcedure

@@ -113,6 +113,16 @@ describe('Standard Task explicit invocation routing', () => {
     expect(prompt.startsWith('$agent-browser\n<request>')).toBe(true);
   });
 
+  it('treats GitHub management invocations as packaged-skill entry', () => {
+    const { prompt } = standardTask({
+      description: '$github-management\n\nCreate a priority label.',
+      repo: 'Roomote/example-app',
+      requestFormat: 'structured',
+    });
+
+    expect(prompt.startsWith('$github-management\n<request>')).toBe(true);
+  });
+
   it('treats productized Sentry triage invocations as packaged-skill entry in customer repos', () => {
     const { prompt } = standardTask({
       description:
