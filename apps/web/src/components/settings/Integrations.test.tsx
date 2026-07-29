@@ -470,7 +470,7 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('explains missing Linear OAuth setup to admins before they connect', () => {
+  it('uses the standard add action for missing Linear OAuth setup', () => {
     state.linearInstallation = null;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
 
@@ -480,12 +480,9 @@ describe('Integrations settings', () => {
       .getByRole('heading', { name: 'Linear' })
       .closest('[id="integration-linear"]');
 
-    expect(linearCard).toHaveTextContent('Not configured.');
+    expect(linearCard).not.toBeNull();
     expect(
-      screen.queryByRole('button', { name: 'Enable Linear' }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Set up Linear' }),
+      screen.getByRole('button', { name: 'Enable Linear' }),
     ).toBeInTheDocument();
   });
 
@@ -513,7 +510,7 @@ describe('Integrations settings', () => {
       screen.getByText('Not configured. Ask an administrator to set it up.'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Set up Linear' }),
+      screen.queryByRole('button', { name: 'Enable Linear' }),
     ).not.toBeInTheDocument();
   });
 
@@ -522,13 +519,13 @@ describe('Integrations settings', () => {
     state.oauthReadiness = [{ mcpId: 'linear', status: 'missing' }];
 
     render(<Integrations />);
-    fireEvent.click(screen.getByRole('button', { name: 'Set up Linear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Enable Linear' }));
 
     expect(
       screen.getByRole('heading', { name: 'Set up Linear' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Open Linear app creation' }),
+      screen.getByRole('button', { name: 'Create the app' }),
     ).toBeInTheDocument();
     expect(screen.getByText('1', { exact: true })).toBeInTheDocument();
     expect(screen.getByText('2', { exact: true })).toBeInTheDocument();
@@ -668,7 +665,7 @@ describe('Integrations settings', () => {
     render(<Integrations />);
 
     expect(
-      screen.getByRole('button', { name: 'Set up Linear' }),
+      screen.getByRole('button', { name: 'Enable Linear' }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Disable Linear' }),

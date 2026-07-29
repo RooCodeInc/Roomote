@@ -159,7 +159,7 @@ function getLinearOauthSetupStatus(
     return 'Not configured. Ask an administrator to set it up.';
   }
 
-  return status === 'partial' ? 'Configuration incomplete.' : 'Not configured.';
+  return status === 'partial' ? 'Configuration incomplete.' : null;
 }
 
 type AdminConfiguredIntegrationItemOptions = {
@@ -1353,24 +1353,19 @@ export function Integrations() {
         statusIcon: linearOauthUnavailable ? (
           <TriangleAlert className="size-4" />
         ) : undefined,
-        headerAction: canSetUpLinearOauth
-          ? {
-              label: 'Set it up',
-              ariaLabel: 'Set up Linear',
-              onAction: () => setIsLinearOauthSetupOpen(true),
-              isPending:
-                linearOauthSetup.isPending || linearOauthSetup.data == null,
-              icon: <Settings2 />,
-            }
-          : canReconnectLinear
-            ? {
-                label: 'Reconnect',
-                ariaLabel: 'Reconnect Linear',
-                onAction: startLinearConnection,
-                isPending: connectLinear.isPending,
-                icon: <RefreshCw />,
-              }
+        actionLabel:
+          linearOauthUnavailable && canSetUpLinearOauth
+            ? 'Enable Linear'
             : undefined,
+        headerAction: canReconnectLinear
+          ? {
+              label: 'Reconnect',
+              ariaLabel: 'Reconnect Linear',
+              onAction: startLinearConnection,
+              isPending: connectLinear.isPending,
+              icon: <RefreshCw />,
+            }
+          : undefined,
         utilityAction: canConfigureLinearOauth
           ? {
               label: 'Configure credentials',
@@ -1381,7 +1376,9 @@ export function Integrations() {
             }
           : undefined,
         onAction: linearOauthUnavailable
-          ? undefined
+          ? canSetUpLinearOauth
+            ? () => setIsLinearOauthSetupOpen(true)
+            : undefined
           : () => {
               if (linearInstallation.data) {
                 disconnectLinear.mutate(undefined, {
