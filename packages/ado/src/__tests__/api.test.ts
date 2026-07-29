@@ -98,7 +98,7 @@ import {
 } from '../api';
 
 const ENTRA_PERMISSION_GUIDANCE =
-  'likely missing API permissions or was not added to the organization';
+  'Check API permissions and organization membership.';
 
 /**
  * Mocks the two hops an Entra credential makes: the Microsoft tenant token

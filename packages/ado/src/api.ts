@@ -607,10 +607,10 @@ function compactAdoProviderMessage(message: string): string {
  * were never saved in the Azure portal, or that was never added to the
  * organization — authenticates fine and fails on every API call instead.
  *
- * This surfaces as a toast, so it stays at one line of diagnosis plus Azure
- * DevOps' own (GUID-compacted) explanation. The permission names and the
- * add-save-consent walkthrough live in the setup/Settings guidance and the
- * docs, which the guidance links to.
+ * This surfaces as a toast: a short lead-in, then Azure DevOps' own
+ * (GUID-compacted) explanation, then one clipped action. The permission names
+ * and the add-save-consent walkthrough live in the setup/Settings guidance
+ * and the docs, which the guidance links to.
  */
 function buildAdoCredentialRejectionMessage({
   authMode,
@@ -622,15 +622,15 @@ function buildAdoCredentialRejectionMessage({
   providerMessage?: string | null;
 }): string {
   const suffix = status === undefined ? '' : ` (status ${status})`;
-  const detail = providerMessage
-    ? ` Azure DevOps said: “${compactAdoProviderMessage(providerMessage)}”`
-    : '';
+  const quote = providerMessage
+    ? `: “${compactAdoProviderMessage(providerMessage)}”`
+    : '.';
 
   if (authMode === 'pat') {
-    return `Azure DevOps rejected the access token${suffix}.${detail} Confirm it is active, belongs to the organization, and has Code read access.`;
+    return `Azure DevOps rejected the access token${suffix}${quote} Confirm it is active, belongs to the organization, and has Code read access.`;
   }
 
-  return `Azure DevOps rejected the Microsoft Entra credential${suffix} — the app registration is likely missing API permissions or was not added to the organization.${detail}`;
+  return `Azure DevOps rejected the Microsoft Entra credential${suffix}${quote} Check API permissions and organization membership.`;
 }
 
 /**
