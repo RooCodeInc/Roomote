@@ -81,6 +81,7 @@ const memberAuth = {
 describe('releases commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
     mockEnv.RELEASE_VERSION = 'v0.14.0';
     delete mockEnv.RELEASE_PRODUCT_VERSION;
     mockIsRoomoteCloudEnabled.mockReturnValue(false);
@@ -96,6 +97,7 @@ describe('releases commands', () => {
   it('exposes update status only to self-host admins', async () => {
     await expect(getReleaseStatusCommand(adminAuth)).resolves.toEqual({
       runningVersion: '0.14.0',
+      displayVersion: 'v0.14.0',
       latestKnownVersion: '0.15.0',
       latestVersionCheckedAt: '2026-07-20T00:00:00.000Z',
       updateAvailable: true,
@@ -103,6 +105,7 @@ describe('releases commands', () => {
 
     await expect(getReleaseStatusCommand(memberAuth)).resolves.toEqual({
       runningVersion: '0.14.0',
+      displayVersion: 'v0.14.0',
       latestKnownVersion: null,
       latestVersionCheckedAt: null,
       updateAvailable: false,
@@ -115,12 +118,13 @@ describe('releases commands', () => {
     });
   });
 
-  it('prefers the baked product version over a channel build tag', async () => {
+  it('uses the commit for display while preserving the baked product version for notices', async () => {
     mockEnv.RELEASE_VERSION = 'main-037146ca';
     mockEnv.RELEASE_PRODUCT_VERSION = '0.14.0';
 
     await expect(getReleaseStatusCommand(adminAuth)).resolves.toMatchObject({
       runningVersion: '0.14.0',
+      displayVersion: '037146ca',
       updateAvailable: true,
     });
   });
@@ -130,7 +134,17 @@ describe('releases commands', () => {
 
     await expect(getReleaseStatusCommand(adminAuth)).resolves.toMatchObject({
       runningVersion: 'main-037146ca',
+      displayVersion: '037146ca',
       updateAvailable: false,
+    });
+  });
+
+  it('uses the GitHub build commit when a branch build has no named version', async () => {
+    mockEnv.RELEASE_VERSION = 'main';
+    vi.stubEnv('GITHUB_SHA', '037146ca');
+
+    await expect(getReleaseStatusCommand(memberAuth)).resolves.toMatchObject({
+      displayVersion: '037146ca',
     });
   });
 
