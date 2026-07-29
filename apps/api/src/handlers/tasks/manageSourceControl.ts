@@ -2,8 +2,8 @@ import type { Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 import {
-  clearLatestUserMessageForReplyQuoteIfId,
-  getLatestUserMessageForReplyQuote,
+  claimLatestUserMessageForReplyQuote,
+  restoreClaimedLatestUserMessageForReplyQuote,
 } from '@roomote/communication/messages';
 import { resolveSourceControlProviderFromPayload } from '@roomote/types';
 
@@ -102,7 +102,7 @@ export async function manageSourceControl(
         input.action === 'create_issue_comment') &&
       typeof bodyInput?.body === 'string';
     const pendingQuote = shouldQuote
-      ? await getLatestUserMessageForReplyQuote('github', taskRun.id)
+      ? await claimLatestUserMessageForReplyQuote('github', taskRun.id)
       : null;
 
     if (pendingQuote && typeof bodyInput?.body === 'string') {
@@ -112,12 +112,12 @@ export async function manageSourceControl(
       }
     }
 
-    const clearQuoteAfterSuccess = async () => {
+    const restoreQuoteAfterFailure = async () => {
       if (pendingQuote) {
-        await clearLatestUserMessageForReplyQuoteIfId(
+        await restoreClaimedLatestUserMessageForReplyQuote(
           'github',
           taskRun.id,
-          pendingQuote.id,
+          pendingQuote,
         );
       }
     };
@@ -144,22 +144,26 @@ export async function manageSourceControl(
       case 'resolve_pull_request_thread':
       case 'submit_pull_request_review':
       case 'update_pull_request_comment': {
-        const writeResult = await writeSourceControlPullRequestForTaskRun({
-          taskRun,
-          input,
-        });
-        await clearQuoteAfterSuccess();
-        return c.json(writeResult);
+        try {
+          return c.json(
+            await writeSourceControlPullRequestForTaskRun({ taskRun, input }),
+          );
+        } catch (error) {
+          await restoreQuoteAfterFailure();
+          throw error;
+        }
       }
       case 'get_issue':
       case 'list_issue_comments':
       case 'create_issue_comment': {
-        const issueResult = await manageSourceControlIssueForTaskRun({
-          taskRun,
-          input,
-        });
-        await clearQuoteAfterSuccess();
-        return c.json(issueResult);
+        try {
+          return c.json(
+            await manageSourceControlIssueForTaskRun({ taskRun, input }),
+          );
+        } catch (error) {
+          await restoreQuoteAfterFailure();
+          throw error;
+        }
       }
     }
   } catch (error) {

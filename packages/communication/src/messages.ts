@@ -48,6 +48,12 @@ if data.id ~= ARGV[1] then
 end
 return redis.call('DEL', KEYS[1])
 `;
+const CLAIM_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+redis.call('DEL', KEYS[1])
+return raw
+`;
 
 const QUEUE_COMMUNICATION_MESSAGE_ONCE_SCRIPT = `
 if redis.call('EXISTS', KEYS[2]) == 1 then
@@ -409,6 +415,34 @@ export async function getLatestUserMessageForReplyQuote(
     getLatestUserMessageForReplyQuoteKey(provider, runId),
   );
   return parseLatestUserMessageForReplyQuote(raw);
+}
+
+export async function claimLatestUserMessageForReplyQuote(
+  provider: ReplyQuoteProvider,
+  runId: number,
+): Promise<LatestUserMessageForReplyQuote | null> {
+  const raw = await getRedis().eval(
+    CLAIM_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT,
+    1,
+    getLatestUserMessageForReplyQuoteKey(provider, runId),
+  );
+  return parseLatestUserMessageForReplyQuote(
+    typeof raw === 'string' ? raw : null,
+  );
+}
+
+export async function restoreClaimedLatestUserMessageForReplyQuote(
+  provider: ReplyQuoteProvider,
+  runId: number,
+  message: LatestUserMessageForReplyQuote,
+): Promise<void> {
+  await getRedis().set(
+    getLatestUserMessageForReplyQuoteKey(provider, runId),
+    JSON.stringify(message),
+    'EX',
+    LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS,
+    'NX',
+  );
 }
 
 export async function clearLatestUserMessageForReplyQuote(
