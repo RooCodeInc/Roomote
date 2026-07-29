@@ -1312,9 +1312,35 @@ describe('CommsProviderSection', () => {
         target: { value: 'not-a-guid' },
       });
 
+      // Inline, next to the field where the value was typed…
+      expect(
+        screen.getByText(/doesn't look like an Entra app ID/),
+      ).toBeInTheDocument();
+      // …and again at the download button it disables further down.
       expect(screen.getByText(/not a valid GUID/)).toBeInTheDocument();
       expect(
         screen.queryByRole('link', { name: /Download Teams app package/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not warn about a well-formed App (Client) ID', () => {
+      render(
+        <CommsProviderSection
+          provider={buildMicrosoftProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
+        target: { value: '00000000-0000-0000-0000-000000000001' },
+      });
+
+      expect(
+        screen.queryByText(/doesn't look like an Entra app ID/),
       ).not.toBeInTheDocument();
     });
   });

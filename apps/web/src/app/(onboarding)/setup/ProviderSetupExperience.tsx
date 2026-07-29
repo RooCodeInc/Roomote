@@ -56,6 +56,37 @@ const TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
 export const MICROSOFT_APP_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const MICROSOFT_APP_ID_FIELD_ENV_VAR_NAMES = new Set([
+  'R_MICROSOFT_CLIENT_ID',
+  'R_TEAMS_BOT_APP_ID',
+]);
+
+/**
+ * Inline warning shown directly under an app-id input whose value cannot be an
+ * Entra client id. The package-download note further down explains the same
+ * problem, but the feedback belongs at the field where the value was typed.
+ */
+export function getMicrosoftAppIdFormatWarning(
+  providerId: string,
+  envVarName: string,
+  value: string,
+): string | null {
+  if (
+    providerId !== 'microsoft' ||
+    !MICROSOFT_APP_ID_FIELD_ENV_VAR_NAMES.has(envVarName)
+  ) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed || MICROSOFT_APP_ID_PATTERN.test(trimmed)) {
+    return null;
+  }
+
+  return "This doesn't look like an Entra app ID — expected a GUID like 00000000-0000-0000-0000-000000000000.";
+}
+
 /**
  * The Teams app package embeds the bot app id, so a value that is not a GUID
  * cannot produce a usable package. Explain that instead of leaving the
@@ -243,6 +274,14 @@ function ProviderFields({
           explicitValue.length === 0 &&
           !clearedSavedValues[field.envVarName] &&
           !editingSavedValues[field.envVarName];
+        const formatWarning =
+          !isSecretField && !field.runtimeSatisfied
+            ? getMicrosoftAppIdFormatWarning(
+                provider.id,
+                field.envVarName,
+                value,
+              )
+            : null;
 
         return (
           <div
@@ -296,6 +335,9 @@ function ProviderFields({
                 />
                 {(field.runtimeSatisfied || field.savedSatisfied) && <Check />}
               </div>
+              {formatWarning ? (
+                <p className="mt-1 text-sm text-amber-600">{formatWarning}</p>
+              ) : null}
             </div>
           </div>
         );
