@@ -568,6 +568,48 @@ describe('source-control commands', () => {
     expect(mockValidateAdoToken).not.toHaveBeenCalled();
   });
 
+  it('probes runtime-configured Entra credentials the form submits as blank', async () => {
+    // The Settings form sends an empty string for every field already
+    // satisfied by a runtime env var. Falling back on those blanks is what
+    // makes the probe run at all — otherwise the whole check is skipped and
+    // an unusable credential saves cleanly.
+    mockResolveAdoOrganization.mockResolvedValue('acme');
+    mockResolveDeploymentEnvVar.mockImplementation(
+      async (name: string) =>
+        ({
+          ADO_CLIENT_ID: 'runtime-client-id',
+          ADO_CLIENT_SECRET: 'runtime-client-secret',
+          ADO_TENANT_ID: 'runtime-tenant-id',
+        })[name] ?? null,
+    );
+    mockValidateAdoEntraCredentials.mockResolvedValue({
+      status: 'invalid',
+      error: 'Azure DevOps rejected the Microsoft Entra credential.',
+    });
+
+    await expect(
+      assertValidSourceControlConfigInput({
+        provider: 'ado',
+        values: {
+          ADO_ORGANIZATION: '',
+          ADO_CLIENT_ID: '',
+          ADO_CLIENT_SECRET: '',
+          ADO_TENANT_ID: '',
+          ADO_AUTH_MODE: 'entra',
+          ADO_LINKED_ACCOUNT_ID: '',
+        },
+      }),
+    ).rejects.toThrow('Azure DevOps rejected the Microsoft Entra credential.');
+
+    expect(mockValidateAdoEntraCredentials).toHaveBeenCalledWith({
+      clientId: 'runtime-client-id',
+      clientSecret: 'runtime-client-secret',
+      tenantId: 'runtime-tenant-id',
+      organization: 'acme',
+      baseUrl: undefined,
+    });
+  });
+
   it('probes the delegated Azure DevOps account once it is linked', async () => {
     await assertValidSourceControlConfigInput({
       provider: 'ado',

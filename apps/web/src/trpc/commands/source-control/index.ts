@@ -791,35 +791,35 @@ export async function assertValidSourceControlConfigInput(params: {
       : undefined;
   const nextAdoToken =
     params.provider === 'ado'
-      ? (params.values?.['ADO_TOKEN']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_TOKEN')))
+      ? params.values?.['ADO_TOKEN']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_TOKEN'))
       : undefined;
   const nextAdoClientId =
     params.provider === 'ado'
-      ? (params.values?.['ADO_CLIENT_ID']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_CLIENT_ID')))
+      ? params.values?.['ADO_CLIENT_ID']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_CLIENT_ID'))
       : undefined;
   const nextAdoClientSecret =
     params.provider === 'ado'
-      ? (params.values?.['ADO_CLIENT_SECRET']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_CLIENT_SECRET')))
+      ? params.values?.['ADO_CLIENT_SECRET']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_CLIENT_SECRET'))
       : undefined;
   const nextAdoTenantId =
     params.provider === 'ado'
-      ? (params.values?.['ADO_TENANT_ID']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ??
-        (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID')))
+      ? params.values?.['ADO_TENANT_ID']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ||
+        (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID'))
       : undefined;
   const nextAdoAuthMode =
     params.provider === 'ado'
-      ? (params.values?.['ADO_AUTH_MODE']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_AUTH_MODE')) ??
-        (nextAdoToken ? 'pat' : 'entra'))
+      ? params.values?.['ADO_AUTH_MODE']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_AUTH_MODE')) ||
+        (nextAdoToken ? 'pat' : 'entra')
       : undefined;
   const nextAdoLinkedAccountId =
     params.provider === 'ado'
-      ? (params.values?.['ADO_LINKED_ACCOUNT_ID']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_LINKED_ACCOUNT_ID')))
+      ? params.values?.['ADO_LINKED_ACCOUNT_ID']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_LINKED_ACCOUNT_ID'))
       : undefined;
 
   if (
@@ -865,8 +865,12 @@ export async function assertValidSourceControlConfigInput(params: {
     return;
   }
 
+  // `||`, not `??`, on every resolution above and below: the Settings form
+  // submits an empty string for each field already satisfied by a runtime env
+  // var, and `??` would keep that empty string instead of falling back to the
+  // configured value — which silently skipped the whole probe.
   const nextAdoOrganization =
-    params.values?.['ADO_ORGANIZATION']?.trim() ??
+    params.values?.['ADO_ORGANIZATION']?.trim() ||
     (await Ado.resolveAdoOrganization());
 
   // Without an organization there is nothing to make a real API call against;
