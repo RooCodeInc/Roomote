@@ -11,16 +11,15 @@ describe('Linear OAuth scopes', () => {
     ).toEqual(LINEAR_APP_OAUTH_SCOPES);
   });
 
-  it('allows personal account links to report agent activity', () => {
+  it('keeps personal account links read-only', () => {
     expect(getMcpIntegrationOauthScopes('linear', 'linear_user_link')).toEqual([
       'read',
-      'write',
     ]);
   });
 
-  it('uses the OAuth app actor for personal account links', () => {
+  it('uses the OAuth user actor for personal account links', () => {
     expect(
       getMcpIntegrationAuthorizationParameters('linear', 'linear_user_link'),
-    ).toEqual([{ name: 'actor', value: 'app' }]);
+    ).toEqual([{ name: 'actor', value: 'user' }]);
   });
 });

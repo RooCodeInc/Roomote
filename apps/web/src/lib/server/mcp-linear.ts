@@ -9,7 +9,7 @@ import {
 import {
   consumeMcpOauthReplay,
   findLinearDeploymentMcpConnection,
-  getMcpOauthReplay,
+  getValidAccessToken,
   getLinearDeploymentMetadata,
   LINEAR_ORG_CONNECTION_ROLE,
   LINEAR_USER_CONNECTION_ROLE,
@@ -24,19 +24,6 @@ import {
 type McpConnectionRecord = Awaited<
   ReturnType<typeof db.query.mcpConnections.findFirst>
 >;
-
-export function getReplayLinearUserId(
-  replay: Awaited<ReturnType<typeof getMcpOauthReplay>> | undefined,
-): string | undefined {
-  if (!replay?.metadata || typeof replay.metadata !== 'object') {
-    return undefined;
-  }
-
-  const linearUserId = (replay.metadata as Record<string, unknown>)
-    .linearUserId;
-
-  return typeof linearUserId === 'string' ? linearUserId : undefined;
-}
 
 async function updateLinearConnectionMetadata(input: {
   connection: NonNullable<McpConnectionRecord>;
@@ -70,9 +57,7 @@ async function updateLinearConnectionMetadata(input: {
 
 async function resumeLinearReplay(input: {
   replayToken: string;
-  connection: NonNullable<McpConnectionRecord>;
   userId: string;
-  accessToken: string;
 }) {
   const replay = await consumeMcpOauthReplay(input.replayToken);
   if (!replay) {
@@ -100,7 +85,15 @@ async function resumeLinearReplay(input: {
     return;
   }
 
-  const linearClient = createLinearClient(input.accessToken);
+  const deploymentAccessToken = await getValidAccessToken(
+    deploymentConnection.id,
+    'https://mcp.linear.app/mcp',
+  );
+  if (!deploymentAccessToken) {
+    throw new Error('Failed to resolve the Linear app access token');
+  }
+
+  const linearClient = createLinearClient(deploymentAccessToken);
   const payload = parseResult.data;
   const sessionId = payload.agentSession.id;
 
@@ -180,25 +173,16 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
   }
 
   if (input.connection.connectionRole === LINEAR_USER_CONNECTION_ROLE) {
-    const replay = input.replayToken
-      ? await getMcpOauthReplay(input.replayToken)
-      : undefined;
-
     await updateLinearConnectionMetadata({
       connection: input.connection,
       linearOrganizationId: organization.id,
-      // actor=app makes the OAuth viewer the Linear app identity. The replay
-      // carries the human identity that initiated the webhook, which is the
-      // identity subsequent Linear events use for account lookup.
-      linearUserId: getReplayLinearUserId(replay) ?? viewer.id,
+      linearUserId: viewer.id,
     });
 
     if (input.replayToken && input.connection.userId) {
       await resumeLinearReplay({
         replayToken: input.replayToken,
-        connection: input.connection,
         userId: input.connection.userId,
-        accessToken: input.accessToken,
       });
     }
   }

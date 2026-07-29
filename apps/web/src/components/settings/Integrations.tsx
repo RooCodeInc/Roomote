@@ -2121,11 +2121,13 @@ export function Integrations() {
           </p>
         }
       />
-      <IntegrationSection
-        id="configured-integrations"
-        title="Configured"
-        items={configured}
-      />
+      {configured.length > 0 && (
+        <IntegrationSection
+          id="configured-integrations"
+          title="Configured"
+          items={configured}
+        />
+      )}
       <IntegrationSection
         id="available-integrations"
         title="Available"

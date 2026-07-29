@@ -566,7 +566,7 @@ export function isDeploymentScopedMcpIntegration(
 
 export function getMcpIntegrationAuthorizationParameters(
   integrationOrId: McpIntegration | string | undefined,
-  _role: McpConnectionRole = 'default',
+  role: McpConnectionRole = 'default',
 ): McpIntegrationAuthorizationParameter[] {
   if (!integrationOrId) {
     return [];
@@ -582,7 +582,12 @@ export function getMcpIntegrationAuthorizationParameters(
   }
 
   if (integration.id === 'linear') {
-    return [{ name: 'actor', value: 'app' }];
+    return [
+      {
+        name: 'actor',
+        value: role === 'linear_user_link' ? 'user' : 'app',
+      },
+    ];
   }
 
   return integration.authorizationParameters ?? [];
@@ -607,7 +612,7 @@ export function getMcpIntegrationOauthScopes(
 
   if (integration.id === 'linear') {
     return role === 'linear_user_link'
-      ? ['read', 'write']
+      ? ['read']
       : [...LINEAR_APP_OAUTH_SCOPES];
   }
 
