@@ -325,7 +325,9 @@ If needed, re-run migrations:
 
 ```sh
 pnpm --filter @roomote/db db:migrate
-```### Reset local state
+```
+
+### Reset local state
 
 ```sh
 pnpm dev --reset
