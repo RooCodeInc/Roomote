@@ -353,6 +353,8 @@ export class RoomoteController extends BaseController {
           azureRegion,
           azureDiskImage,
           azureClientId: resolvedEnv.AZURE_CLIENT_ID,
+          azureTenantId: resolvedEnv.AZURE_TENANT_ID,
+          azureClientSecret: resolvedEnv.AZURE_CLIENT_SECRET,
           azureTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
         });

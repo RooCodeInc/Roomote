@@ -52,6 +52,10 @@ export interface CreateAzureMachineOptions {
    * auth falls back to the ambient Azure credential chain.
    */
   azureClientId?: string;
+  /** Service principal tenant ID (with `azureClientId` + `azureClientSecret`). */
+  azureTenantId?: string;
+  /** Service principal client secret (with `azureTenantId` + `azureClientId`). */
+  azureClientSecret?: string;
   ports?: number[];
   namedPorts?: NamedPort[];
   /**
@@ -99,6 +103,8 @@ export async function createAzureMachine(
     azureRegion,
     azureDiskImage,
     azureClientId,
+    azureTenantId,
+    azureClientSecret,
     ports,
     namedPorts,
     timeoutMs,
@@ -167,6 +173,17 @@ export async function createAzureMachine(
     })}`,
   );
 
+  // Service principal auth only kicks in with the full triple; a lone
+  // AZURE_CLIENT_ID means user-assigned managed identity.
+  const azureServicePrincipal =
+    azureTenantId && azureClientId && azureClientSecret
+      ? {
+          tenantId: azureTenantId,
+          clientId: azureClientId,
+          clientSecret: azureClientSecret,
+        }
+      : undefined;
+
   const computeClient =
     options.computeClient ??
     createComputeProviderClient({
@@ -177,7 +194,11 @@ export async function createAzureMachine(
         sandboxGroup: azureSandboxGroup,
         region: azureRegion,
         diskImage: azureDiskImage,
-        ...(azureClientId ? { managedIdentityClientId: azureClientId } : {}),
+        ...(azureServicePrincipal
+          ? { servicePrincipal: azureServicePrincipal }
+          : azureClientId
+            ? { managedIdentityClientId: azureClientId }
+            : {}),
         ...(timeoutMs ? { timeoutMs } : {}),
       },
     });

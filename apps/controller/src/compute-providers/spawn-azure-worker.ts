@@ -113,6 +113,8 @@ export async function spawnAzureWorker(
     azureRegion: string;
     azureDiskImage: string;
     azureClientId?: string;
+    azureTenantId?: string;
+    azureClientSecret?: string;
     azureTimeoutMs: number;
     localTarballPath?: string;
     deploymentSlug?: string;
@@ -129,6 +131,8 @@ export async function spawnAzureWorker(
     azureRegion,
     azureDiskImage,
     azureClientId,
+    azureTenantId,
+    azureClientSecret,
     azureTimeoutMs,
     localTarballPath,
     deploymentSlug,
@@ -226,6 +230,17 @@ export async function spawnAzureWorker(
     { logPrefix: 'spawnAzureWorker', logger: console },
   );
 
+  // Service principal auth only kicks in with the full triple; a lone
+  // AZURE_CLIENT_ID means user-assigned managed identity.
+  const azureServicePrincipal =
+    azureTenantId && azureClientId && azureClientSecret
+      ? {
+          tenantId: azureTenantId,
+          clientId: azureClientId,
+          clientSecret: azureClientSecret,
+        }
+      : undefined;
+
   const computeClient = createComputeProviderClient({
     provider: 'azure',
     config: {
@@ -234,7 +249,11 @@ export async function spawnAzureWorker(
       sandboxGroup: azureSandboxGroup,
       region: azureRegion,
       diskImage: azureDiskImage,
-      ...(azureClientId ? { managedIdentityClientId: azureClientId } : {}),
+      ...(azureServicePrincipal
+        ? { servicePrincipal: azureServicePrincipal }
+        : azureClientId
+          ? { managedIdentityClientId: azureClientId }
+          : {}),
       memoryMiB: sandboxResources.memoryMiB,
       timeoutMs: azureTimeoutMs,
     },
@@ -259,6 +278,8 @@ export async function spawnAzureWorker(
     azureRegion,
     azureDiskImage,
     azureClientId,
+    azureTenantId,
+    azureClientSecret,
     namedPorts,
     tags: azureTags,
     timeoutMs: azureTimeoutMs,

@@ -54,6 +54,8 @@ const RETRY_MAX_ATTEMPTS = 8;
 const RETRY_INITIAL_DELAY_MS = 1_000;
 const RETRY_MAX_DELAY_MS = 10_000;
 
+const CREDENTIAL_TIMEOUT_MS = 15_000;
+
 const HTTP_DEBUG =
   process.env.AZURE_HTTP_DEBUG === '1' ||
   process.env.AZURE_HTTP_DEBUG === 'true';
@@ -1030,7 +1032,18 @@ export class AzureClient implements ComputeProviderClient {
     }
     const credential = await this.credentialPromise;
     throwIfAborted(signal);
-    const token = await credential.getToken(DATA_PLANE_SCOPE);
+    // Fail fast with a readable error instead of hanging for minutes:
+    // ManagedIdentityCredential probes the IMDS endpoint (169.254.169.254),
+    // which silently blackholes on non-Azure hosts.
+    const token = await raceWithAbort({
+      promise: credential.getToken(DATA_PLANE_SCOPE),
+      signal: AbortSignal.timeout(CREDENTIAL_TIMEOUT_MS),
+      abortMessage:
+        `Azure credential acquisition timed out after ${CREDENTIAL_TIMEOUT_MS / 1_000}s. ` +
+        'If using managed identity, the controller must run in Azure with that identity assigned ' +
+        '(IMDS is unreachable outside Azure); otherwise configure the service principal triple ' +
+        '(AZURE_TENANT_ID + AZURE_CLIENT_ID + AZURE_CLIENT_SECRET).',
+    });
     this.cachedToken = token;
     logHttp('token acquired', { durationMs: Date.now() - tokenStart });
     return token.token;
