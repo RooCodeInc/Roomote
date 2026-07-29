@@ -82,7 +82,7 @@ function CredentialField({
 
   return (
     <div className="space-y-1.5">
-      <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center max-w-xl">
+      <div className="grid gap-2 md:grid-cols-[170px_minmax(0,1fr)] md:items-center max-w-xl">
         <Label className="text-sm font-medium" htmlFor={id}>
           {label}
         </Label>
@@ -309,7 +309,7 @@ export function LinearOauthSetupDialog({
                     />
                     <CredentialField
                       id="linear-webhook-secret"
-                      label="Webhook secret"
+                      label="Webhook signing secret"
                       value={form.webhookSecret}
                       status={setup.fields.webhookSecret}
                       secret
