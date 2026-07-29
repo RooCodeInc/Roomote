@@ -462,6 +462,7 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
 
     // Smoke: full collector still returns the new field shape under suite load.
     const report = await collectInstanceReportStats(now);
+    expect(report.providers.computeConfigured).toContain('docker');
     expect(report.pullRequests7d).toEqual(
       expect.objectContaining({
         opened: expect.any(Number),

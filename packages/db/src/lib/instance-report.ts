@@ -41,6 +41,7 @@ import {
   users,
 } from '../schema';
 import { isChatGptSubscriptionConnected } from './chatgpt-subscription';
+import { listConfiguredComputeProviders } from './compute-runtime-config';
 import { isGitHubCopilotSubscriptionConnected } from './github-copilot-subscription';
 import { isXaiSubscriptionConnected } from './xai-subscription';
 
@@ -168,6 +169,7 @@ export type InstanceReportStats = {
     comms: string[];
     sourceControl: string[];
     compute: string | null;
+    computeConfigured: string[];
     inference: string[];
   };
   mcp: {
@@ -642,6 +644,7 @@ export async function collectInstanceReportStats(
     slackActive,
     teamsActive,
     telegramMappings,
+    configuredComputeProviders,
     persistedEnvVars,
     chatgptConnected,
     githubCopilotConnected,
@@ -750,6 +753,7 @@ export async function collectInstanceReportStats(
       .from(teamsInstallations)
       .where(eq(teamsInstallations.isActive, true)),
     db.select({ total: count() }).from(telegramUserMappings),
+    listConfiguredComputeProviders(),
     db.select({ name: environmentVariables.name }).from(environmentVariables),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
@@ -837,6 +841,7 @@ export async function collectInstanceReportStats(
       comms,
       sourceControl: Object.keys(repositoriesByProviderRecord).sort(),
       compute: settingsRow?.runtimeComputeConfig?.defaultProvider ?? null,
+      computeConfigured: configuredComputeProviders,
       inference: collectConfiguredInferenceProviders({
         persistedEnvVarNames: persistedEnvVars.map((row) => row.name),
         runtimeEnvVarNames: collectConfiguredRuntimeEnvVarNames(process.env),
