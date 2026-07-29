@@ -9,6 +9,7 @@ import {
 import {
   consumeMcpOauthReplay,
   findLinearDeploymentMcpConnection,
+  getMcpOauthReplay,
   getValidAccessToken,
   getLinearDeploymentMetadata,
   LINEAR_ORG_CONNECTION_ROLE,
@@ -24,6 +25,25 @@ import {
 type McpConnectionRecord = Awaited<
   ReturnType<typeof db.query.mcpConnections.findFirst>
 >;
+
+function replayMatchesLinearIdentity(
+  replay: { mcpId: string; metadata: unknown },
+  identity: { linearOrganizationId: string; linearUserId: string },
+) {
+  if (
+    replay.mcpId !== 'linear' ||
+    !replay.metadata ||
+    typeof replay.metadata !== 'object'
+  ) {
+    return false;
+  }
+
+  const metadata = replay.metadata as Record<string, unknown>;
+  return (
+    metadata.linearOrganizationId === identity.linearOrganizationId &&
+    metadata.linearUserId === identity.linearUserId
+  );
+}
 
 async function updateLinearConnectionMetadata(input: {
   connection: NonNullable<McpConnectionRecord>;
@@ -58,13 +78,15 @@ async function updateLinearConnectionMetadata(input: {
 async function resumeLinearReplay(input: {
   replayToken: string;
   userId: string;
+  linearOrganizationId: string;
+  linearUserId: string;
 }) {
   const replay = await consumeMcpOauthReplay(input.replayToken);
   if (!replay) {
     return;
   }
 
-  if (replay.mcpId !== 'linear') {
+  if (!replayMatchesLinearIdentity(replay, input)) {
     return;
   }
 
@@ -173,6 +195,21 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
   }
 
   if (input.connection.connectionRole === LINEAR_USER_CONNECTION_ROLE) {
+    if (input.replayToken) {
+      const replay = await getMcpOauthReplay(input.replayToken);
+      if (
+        !replay ||
+        !replayMatchesLinearIdentity(replay, {
+          linearOrganizationId: organization.id,
+          linearUserId: viewer.id,
+        })
+      ) {
+        throw new Error(
+          'The authorized Linear account does not match the requested session',
+        );
+      }
+    }
+
     await updateLinearConnectionMetadata({
       connection: input.connection,
       linearOrganizationId: organization.id,
@@ -183,6 +220,8 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
       await resumeLinearReplay({
         replayToken: input.replayToken,
         userId: input.connection.userId,
+        linearOrganizationId: organization.id,
+        linearUserId: viewer.id,
       });
     }
   }

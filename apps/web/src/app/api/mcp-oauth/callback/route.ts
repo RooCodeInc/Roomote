@@ -317,9 +317,6 @@ export async function GET(request: NextRequest) {
       redirectUri,
     );
 
-    failureStage = 'token_storage';
-    await storeTokens(resolvedConnectionId, tokens);
-
     if (integration.id === 'linear') {
       failureStage = 'linear_metadata';
       await hydrateLinearMcpConnectionAfterOauth({
@@ -329,6 +326,9 @@ export async function GET(request: NextRequest) {
         enabledByUserId: userId,
       });
     }
+
+    failureStage = 'token_storage';
+    await storeTokens(resolvedConnectionId, tokens);
 
     if (requiresOrgAdmin) {
       failureStage = 'deployment_enablement';

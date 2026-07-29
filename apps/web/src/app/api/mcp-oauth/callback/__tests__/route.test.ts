@@ -293,17 +293,14 @@ describe('GET /api/mcp-oauth/callback', () => {
     );
   });
 
-  it('distinguishes Linear workspace metadata failures after token storage', async () => {
+  it('does not store Linear tokens when identity metadata validation fails', async () => {
     hydrateLinearMcpConnectionAfterOauthMock.mockRejectedValueOnce(
       new Error('viewer lookup failed'),
     );
 
     const response = await GET(buildRequest('?code=auth-code&state=state-1'));
 
-    expect(storeTokensMock).toHaveBeenCalledWith(CONNECTION_ID, {
-      access_token: 'access-token',
-      refresh_token: 'refresh-token',
-    });
+    expect(storeTokensMock).not.toHaveBeenCalled();
     expect(response.headers.get('location')).toBe(
       'https://customer.example/settings?mcp=error&reason=linear_metadata_failed',
     );
