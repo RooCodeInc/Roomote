@@ -12,12 +12,16 @@ function readGitHubManagementSkill(): string {
 }
 
 describe('github-management skill', () => {
-  it('requires confirmation and read-back for GitHub mutations', () => {
+  it('requires confirmation for destructive GitHub mutations and reads back every write', () => {
     const skill = readGitHubManagementSkill();
 
+    expect(skill).toContain('Creations and additive actions run directly');
+    expect(skill).toContain('Before a destructive change');
     expect(skill).toContain('use `request_user_input`');
     expect(skill).toContain('After a write, read back');
-    expect(skill).toContain('separate explicit confirmation');
+    expect(skill).toContain(
+      'Before deletion, show the exact resource name and URL',
+    );
   });
 
   it('uses the scoped GitHub CLI contract and gates native saved views', () => {

@@ -170,10 +170,11 @@ installation. Requests default to the repository mapped to the task:
 - list accessible GitHub Projects V2, inspect an issue or pull request's Status,
   and update an existing project item's single-select Status field
 
-Read-only requests run directly. Before creating, editing, assigning, or moving
-an item, Roomote shows the proposed change and asks for confirmation. Deletes
-require a separate explicit confirmation that names the resource. After a write,
-Roomote reads the result back and shares its GitHub URL.
+Read-only requests, creations, and additive label actions run directly. Before
+editing, replacing, assigning, clearing, moving, or deleting an item, Roomote
+shows the proposed change and asks for confirmation. Deletions name the resource
+and URL in that confirmation. After a write, Roomote reads the result back and
+shares its GitHub URL.
 
 Projects V2 operations require the **Organization projects** permission above.
 If a project or Status field is ambiguous, Roomote asks you to choose one. An
