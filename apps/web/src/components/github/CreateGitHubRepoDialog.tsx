@@ -32,16 +32,15 @@ import {
   Loader2,
   Pencil,
   Plus,
+  RadioGroup,
+  RadioGroupItem,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
 } from '@/components/system';
+import { ArrowRight, BookPlus, Check, GitFork } from 'lucide-react';
 
 export type DetectedRepository = {
   id: string;
@@ -65,6 +64,9 @@ export function CreateGitHubRepoDialog({
   const { isAdmin } = useAuthorizedUser();
 
   const [selectedOwner, setSelectedOwner] = useState<string | null>(null);
+  const [repositoryAction, setRepositoryAction] = useState<'new' | 'fork'>(
+    'new',
+  );
   const [forkReference, setForkReference] = useState('');
 
   const installations = useGitHubInstallations();
@@ -222,139 +224,131 @@ export function CreateGitHubRepoDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="md">
+      <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>Add a GitHub repository</DialogTitle>
+          <DialogTitle>Create environment from new repo</DialogTitle>
           <DialogDescription>
-            Create the repository on GitHub — Roomote picks it up here
-            automatically.
+            Create the repo on Github first, and Roomote will pick it up here.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="new">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="new">New repository</TabsTrigger>
-            <TabsTrigger value="fork">Fork existing</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="new" className="space-y-3 pt-2">
-            <p className="text-sm text-muted-foreground">
-              Create the repository on github.com. An empty repository is fine —
-              Roomote pushes the initial commit and sets up a basic environment
-              for it.
-            </p>
-            {activeInstallations.length > 1 ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="create-repo-owner">Owner</Label>
-                <Select
-                  value={owner ?? undefined}
-                  onValueChange={setSelectedOwner}
-                >
-                  <SelectTrigger id="create-repo-owner">
-                    <SelectValue placeholder="Choose an owner" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {activeInstallations.map((installation) => (
-                      <SelectItem
-                        key={installation.id}
-                        value={installation.accountLogin}
-                      >
-                        {installation.accountLogin}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+        <RadioGroup
+          value={repositoryAction}
+          onValueChange={(value) =>
+            setRepositoryAction(value === 'fork' ? 'fork' : 'new')
+          }
+          className="space-y-0"
+          aria-label="Repository action"
+        >
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="new" id="create-repo-new" />
+            <Label htmlFor="create-repo-new" className="cursor-pointer">
+              <BookPlus className="size-4 text-muted-foreground" />
+              New repository
+            </Label>
+          </div>
+          {repositoryAction === 'new' && (
+            <div className="space-y-2 pl-6 mb-4">
+              <div className="flex gap-2 items-center">
+                <p className="text-sm text-muted-foreground grow">
+                  Please create it now on Github and come back here when done.
+                </p>
               </div>
-            ) : null}
-            <Button asChild className="w-full">
-              <a href={newRepoUrl} target="_blank" rel="noreferrer">
-                Open GitHub
-                <ExternalLink />
-              </a>
-            </Button>
-          </TabsContent>
-
-          <TabsContent value="fork" className="space-y-3 pt-2">
-            <p className="text-sm text-muted-foreground">
-              Paste the repository you want to fork — a GitHub URL or
-              owner/repo.
-            </p>
-            <Input
-              value={forkReference}
-              onChange={(event) => setForkReference(event.target.value)}
-              placeholder="https://github.com/owner/repo"
-              aria-label="Repository to fork"
-            />
-            {forkReference.trim() && !forkTarget ? (
-              <p className="text-xs text-destructive">
-                Enter a GitHub repository URL or owner/repo.
-              </p>
-            ) : null}
-            <Button asChild className="w-full" disabled={!forkUrl}>
-              <a
-                href={forkUrl ?? undefined}
-                target="_blank"
-                rel="noreferrer"
-                aria-disabled={!forkUrl}
-                onClick={(event) => {
-                  if (!forkUrl) event.preventDefault();
-                }}
-              >
-                Open GitHub fork page
-                <ExternalLink />
-              </a>
-            </Button>
-          </TabsContent>
-        </Tabs>
-
-        <div className="space-y-2 border-t pt-3">
-          <p className="text-xs text-muted-foreground">
-            If the GitHub App only has access to selected repositories, also
-            grant it access to the new one.
-          </p>
-          {isAdmin ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              disabled={enableGitHubApp.isPending}
-              onClick={updateGitHubAccess}
-            >
-              <Pencil className="size-3" />
-              Update GitHub
-            </Button>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Ask an admin to update the connected GitHub repositories.
-            </p>
+              {activeInstallations.length > 1 ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="create-repo-owner">Owner</Label>
+                  <Select
+                    value={owner ?? undefined}
+                    onValueChange={setSelectedOwner}
+                  >
+                    <SelectTrigger id="create-repo-owner">
+                      <SelectValue placeholder="Choose an owner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {activeInstallations.map((installation) => (
+                        <SelectItem
+                          key={installation.id}
+                          value={installation.accountLogin}
+                        >
+                          {installation.accountLogin}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+            </div>
           )}
-        </div>
+          <div className="flex items-center gap-2">
+            <RadioGroupItem value="fork" id="create-repo-fork" />
+            <Label htmlFor="create-repo-fork" className="cursor-pointer">
+              <GitFork className="size-4 text-muted-foreground" />
+              Fork existing
+            </Label>
+          </div>
+          {repositoryAction === 'fork' && (
+            <div className="space-y-2 pl-6 mb-4">
+              <p className="text-sm text-muted-foreground">
+                Enter the repo you want to fork, then fork it and come back here
+                when done.
+              </p>
+              <div className="flex gap-2 items-center">
+                <Input
+                  value={forkReference}
+                  onChange={(event) => setForkReference(event.target.value)}
+                  placeholder="https://github.com/owner/repo"
+                  aria-label="Repository to fork"
+                />
+                <Button asChild size="sm" disabled={!forkUrl}>
+                  <a
+                    href={forkUrl ?? undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-disabled={!forkUrl}
+                    onClick={(event) => {
+                      if (!forkUrl) event.preventDefault();
+                    }}
+                  >
+                    Go
+                    <ExternalLink />
+                  </a>
+                </Button>
+              </div>
+              {forkReference.trim() && !forkTarget ? (
+                <p className="text-xs text-destructive">
+                  Enter a GitHub repository URL or owner/repo.
+                </p>
+              ) : null}
+            </div>
+          )}
+        </RadioGroup>
 
         {detectedRepositories.length > 0 ? (
           <div className="space-y-2">
             {detectedRepositories.map((repository) => (
-              <Alert key={repository.id}>
-                <CircleCheck className="size-4" />
-                <AlertTitle>Found {repository.fullName}</AlertTitle>
-                <AlertDescription className="flex items-center justify-between gap-2">
-                  <span>
-                    {repository.isEmpty
-                      ? 'Brand new — Roomote will initialize it during setup.'
-                      : 'Ready to use.'}
+              <Alert variant="notice" key={repository.id}>
+                <Check className="size-4" />
+                <AlertTitle>
+                  Found{' '}
+                  <span className="font-mono font-medium text-[0.9em]">
+                    {repository.fullName}
                   </span>
+                </AlertTitle>
+                <AlertDescription className="flex items-center justify-between gap-2">
                   <Button
                     type="button"
                     size="xs"
                     onClick={() => onRepositoryDetected?.(repository)}
                   >
-                    Use this repository
+                    Use it
+                    <ArrowRight />
                   </Button>
                 </AlertDescription>
               </Alert>
             ))}
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-sm text-foreground mt-4">
             <Loader2 className="size-3.5 animate-spin" />
             <span>Watching for new repositories…</span>
             <Button
@@ -369,6 +363,31 @@ export function CreateGitHubRepoDialog({
             </Button>
           </div>
         )}
+
+        <div className="space-y-2 mt-4">
+          <p className="text-xs text-muted-foreground">
+            If the your GitHub integration doesn't have access to "all repos" by
+            default, make sure to grant it access to the new one, otherwise it
+            won't be detected.
+            {isAdmin ? (
+              <Button
+                type="button"
+                size="xs"
+                variant="link"
+                className="relative top-0.5"
+                disabled={enableGitHubApp.isPending}
+                onClick={updateGitHubAccess}
+              >
+                <Pencil className="size-3" />
+                Update GitHub
+              </Button>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Ask an admin to update the connected GitHub repositories.
+              </p>
+            )}
+          </p>
+        </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

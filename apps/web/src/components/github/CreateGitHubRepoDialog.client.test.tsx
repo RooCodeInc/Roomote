@@ -73,7 +73,7 @@ vi.mock('@/hooks/useUser', () => ({
 }));
 
 vi.mock('@/components/system', () => {
-  const passthrough = (Tag: 'div' | 'p' | 'span' = 'div') => {
+  const passthrough = (Tag: 'div' | 'p' | 'span' | 'label' = 'div') => {
     const Passthrough = ({ children, ...props }: { children?: ReactNode }) => (
       <Tag {...props}>{children}</Tag>
     );
@@ -112,7 +112,7 @@ vi.mock('@/components/system', () => {
     Input: (props: InputHTMLAttributes<HTMLInputElement>) => (
       <input {...props} />
     ),
-    Label: passthrough('span'),
+    Label: passthrough('label'),
     Loader2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
     Pencil: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
     Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
@@ -121,11 +121,27 @@ vi.mock('@/components/system', () => {
     SelectItem: passthrough(),
     SelectTrigger: passthrough(),
     SelectValue: passthrough('span'),
-    Tabs: passthrough(),
-    TabsContent: passthrough(),
-    TabsList: passthrough(),
-    TabsTrigger: ({ children }: { children: ReactNode }) => (
-      <button type="button">{children}</button>
+    RadioGroup: ({
+      children,
+      onValueChange,
+      ...props
+    }: {
+      children: ReactNode;
+      onValueChange?: (value: string) => void;
+    }) => (
+      <fieldset
+        {...props}
+        onChange={(event) => {
+          if (event.target instanceof HTMLInputElement) {
+            onValueChange?.(event.target.value);
+          }
+        }}
+      >
+        {children}
+      </fieldset>
+    ),
+    RadioGroupItem: (props: InputHTMLAttributes<HTMLInputElement>) => (
+      <input type="radio" {...props} />
     ),
   };
 });
@@ -170,7 +186,7 @@ describe('CreateGitHubRepoDialog', () => {
       <CreateGitHubRepoDialog open={true} onOpenChange={() => undefined} />,
     );
 
-    expect(findLinkByText(/Open GitHub$/).getAttribute('href')).toBe(
+    expect(findLinkByText(/^Go$/).getAttribute('href')).toBe(
       'https://github.com/new?owner=acme',
     );
   });
@@ -182,7 +198,7 @@ describe('CreateGitHubRepoDialog', () => {
       <CreateGitHubRepoDialog open={true} onOpenChange={() => undefined} />,
     );
 
-    expect(findLinkByText(/Open GitHub$/).getAttribute('href')).toBe(
+    expect(findLinkByText(/^Go$/).getAttribute('href')).toBe(
       'https://github.com/new',
     );
   });
@@ -191,6 +207,8 @@ describe('CreateGitHubRepoDialog', () => {
     render(
       <CreateGitHubRepoDialog open={true} onOpenChange={() => undefined} />,
     );
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Fork existing' }));
 
     fireEvent.change(screen.getByLabelText('Repository to fork'), {
       target: { value: 'https://github.com/RooCodeInc/Roomote' },
@@ -205,6 +223,8 @@ describe('CreateGitHubRepoDialog', () => {
     render(
       <CreateGitHubRepoDialog open={true} onOpenChange={() => undefined} />,
     );
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Fork existing' }));
 
     fireEvent.change(screen.getByLabelText('Repository to fork'), {
       target: { value: 'https://gitlab.com/acme/repo' },
