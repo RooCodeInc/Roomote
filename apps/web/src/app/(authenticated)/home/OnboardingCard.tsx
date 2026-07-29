@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import { MCP_INTEGRATIONS } from '@roomote/types';
 
@@ -60,6 +61,23 @@ const ADMIN_INTEGRATION_ORDER = [
 ] as const;
 
 const PERSONAL_MCP_INTEGRATION_ORDER = ['notion', 'supabase'] as const;
+
+const CARD_EXIT_TRANSITION = {
+  duration: 0.4,
+  ease: 'easeOut',
+} as const;
+
+const CARD_ENTER_TRANSITION = {
+  duration: 0.4,
+  delay: 0.25,
+  ease: 'easeOut',
+} as const;
+
+const CARD_ANIMATION = {
+  initial: { opacity: 0, y: 20 },
+  animate: { opacity: 1, y: 0, transition: CARD_ENTER_TRANSITION },
+  exit: { opacity: 0, y: -20, transition: CARD_EXIT_TRANSITION },
+} as const;
 
 export const COMMUNICATION_PROVIDER_ORDER = [
   'slack',
@@ -447,48 +465,59 @@ export function OnboardingCard() {
 
   return (
     <>
-      <div className="flex md:w-fit md:items-center gap-2 py-1 pl-1 md:pr-5 text-sm">
-        <span className="mt-1 md:mt-0">{activeCard.icon}</span>
-        <div className="flex gap-1 flex-col items-start md:flex-row md:items-center md:gap-2 grow">
-          <span className="flex gap-1 items-start flex-nowrap w-full">
-            <span className="cursor-default font-medium text-muted-foreground grow">
-              {activeCard.label}
-            </span>
-            {activeCard.dismissible !== false && (
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                className="md:hidden ml-auto text-muted-foreground hover:text-foreground"
-                onClick={() => dismiss(activeCard.id)}
-                aria-label="Dismiss"
-              >
-                <X className="size-3.5" />
-              </Button>
-            )}
-          </span>
-          <Button
-            variant="default"
-            size="xs"
-            type="button"
-            onClick={activeCard.onClick}
-            disabled={activeCard.disabled}
+      <div className="relative overflow-clip">
+        <AnimatePresence initial={false} mode="popLayout">
+          <motion.div
+            key={activeCard.id}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            variants={CARD_ANIMATION}
+            className="flex md:w-fit md:items-center gap-2 py-1 pl-1 md:pr-5 text-sm"
           >
-            {activeCard.buttonLabel}
-          </Button>
-          {activeCard.dismissible !== false && (
-            <Button
-              variant="ghost"
-              size="icon"
-              type="button"
-              className="hidden md:inline-flex ml-auto text-muted-foreground hover:text-foreground"
-              onClick={() => dismiss(activeCard.id)}
-              aria-label="Dismiss"
-            >
-              <X className="size-3.5" />
-            </Button>
-          )}
-        </div>
+            <span className="mt-0.5 md:mt-0">{activeCard.icon}</span>
+            <div className="flex gap-1 flex-col items-start md:flex-row md:items-center md:gap-2 grow">
+              <span className="flex gap-1 items-start flex-nowrap w-full">
+                <span className="cursor-default font-medium text-muted-foreground grow">
+                  {activeCard.label}
+                </span>
+                {activeCard.dismissible !== false && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="md:hidden ml-auto text-muted-foreground hover:text-foreground"
+                    onClick={() => dismiss(activeCard.id)}
+                    aria-label="Dismiss"
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                )}
+              </span>
+              <Button
+                variant="default"
+                size="xs"
+                type="button"
+                onClick={activeCard.onClick}
+                disabled={activeCard.disabled}
+              >
+                {activeCard.buttonLabel}
+              </Button>
+              {activeCard.dismissible !== false && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  type="button"
+                  className="hidden md:inline-flex ml-auto text-muted-foreground hover:text-foreground"
+                  onClick={() => dismiss(activeCard.id)}
+                  aria-label="Dismiss"
+                >
+                  <X className="size-3.5" />
+                </Button>
+              )}
+            </div>
+          </motion.div>
+        </AnimatePresence>
       </div>
       <Dialog
         open={linkDialog === 'telegram'}

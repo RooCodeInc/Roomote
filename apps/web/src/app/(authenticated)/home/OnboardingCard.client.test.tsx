@@ -106,6 +106,28 @@ vi.mock('@tanstack/react-query', () => ({
       : { data: { hasEnabledAutomations: true }, isPending: false },
 }));
 
+vi.mock('motion/react', async () => {
+  const { forwardRef } = await import('react');
+
+  return {
+    AnimatePresence: ({ children }: { children: React.ReactNode }) => children,
+    motion: {
+      div: forwardRef<
+        HTMLDivElement,
+        React.ComponentPropsWithoutRef<'div'> & {
+          initial?: unknown;
+          animate?: unknown;
+          exit?: unknown;
+          variants?: unknown;
+          transition?: unknown;
+        }
+      >(({ initial, animate, exit, variants, transition, ...props }, ref) => (
+        <div ref={ref} {...props} />
+      )),
+    },
+  };
+});
+
 vi.mock('@/components/settings/McpIcon', () => ({
   McpIcon: ({ name }: { name: string }) => <span>{name}</span>,
 }));
