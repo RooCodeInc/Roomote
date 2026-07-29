@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
