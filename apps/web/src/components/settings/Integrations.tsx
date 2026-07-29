@@ -2,7 +2,6 @@
 
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -36,7 +35,6 @@ import {
   useVercelConnection,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { SETTINGS_PATHS } from '@/lib/settings';
 import {
   saveAsanaConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -45,8 +43,6 @@ import {
 } from '@/types';
 
 import {
-  Alert,
-  AlertDescription,
   BasicTooltip,
   Button,
   Card,
@@ -117,6 +113,8 @@ type IntegrationItem = {
   description: string;
   icon: ReactNode;
   enabled: boolean;
+  configured?: boolean;
+  needsConfiguration?: boolean;
   isMcpBased: boolean;
   onAction?: () => void;
   isPending: boolean;
@@ -159,7 +157,7 @@ function getLinearOauthSetupStatus(
     return 'Not configured. Ask an administrator to set it up.';
   }
 
-  return status === 'partial' ? 'Configuration incomplete.' : 'Not configured.';
+  return status === 'partial' ? 'Configuration incomplete.' : null;
 }
 
 type AdminConfiguredIntegrationItemOptions = {
@@ -371,12 +369,13 @@ export function sortIntegrationItems<T extends { id: string; name: string }>(
   });
 }
 
-export function splitIntegrationItems<T extends { enabled: boolean }>(
-  items: T[],
-) {
+export function splitIntegrationItems<
+  T extends { enabled: boolean; configured?: boolean },
+>(items: T[]) {
   return {
     installed: items.filter((item) => item.enabled),
-    available: items.filter((item) => !item.enabled),
+    configured: items.filter((item) => !item.enabled && item.configured),
+    available: items.filter((item) => !item.enabled && !item.configured),
   };
 }
 
@@ -524,6 +523,8 @@ function IntegrationCard({ item }: { item: IntegrationItem }) {
                   >
                     {item.isPending ? (
                       <Spinner size="sm" />
+                    ) : item.needsConfiguration ? (
+                      <Settings2 />
                     ) : item.enabled ? (
                       <X />
                     ) : (
@@ -585,10 +586,12 @@ function IntegrationSection({
   id,
   title,
   items,
+  emptyState,
 }: {
   id: string;
   title: string;
   items: IntegrationItem[];
+  emptyState?: ReactNode;
 }) {
   return (
     <section aria-labelledby={id} className="space-y-3">
@@ -596,11 +599,15 @@ function IntegrationSection({
         {title}
       </h2>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {items.map((item) => (
-          <IntegrationCard key={item.id} item={item} />
-        ))}
-      </div>
+      {items.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {items.map((item) => (
+            <IntegrationCard key={item.id} item={item} />
+          ))}
+        </div>
+      ) : (
+        emptyState
+      )}
     </section>
   );
 }
@@ -1339,7 +1346,9 @@ export function Integrations() {
         description:
           'Enable Linear so this deployment can route issue context and task entry through it.',
         icon: <LinearLogo className="size-5" />,
-        enabled: Boolean(linearInstallation.data),
+        enabled: Boolean(linearInstallation.data) && !linearOauthUnavailable,
+        configured: linearOauthStatus === 'ready',
+        needsConfiguration: linearOauthUnavailable,
         highlighted: highlightedIntegrationId === 'linear',
         isMcpBased: false,
         isPending:
@@ -1353,24 +1362,21 @@ export function Integrations() {
         statusIcon: linearOauthUnavailable ? (
           <TriangleAlert className="size-4" />
         ) : undefined,
-        headerAction: canSetUpLinearOauth
+        actionLabel:
+          linearOauthUnavailable && canSetUpLinearOauth
+            ? 'Set up Linear'
+            : !linearInstallation.data && linearOauthStatus === 'ready'
+              ? 'Connect Linear'
+              : undefined,
+        headerAction: canReconnectLinear
           ? {
-              label: 'Set it up',
-              ariaLabel: 'Set up Linear',
-              onAction: () => setIsLinearOauthSetupOpen(true),
-              isPending:
-                linearOauthSetup.isPending || linearOauthSetup.data == null,
-              icon: <Settings2 />,
+              label: 'Reconnect',
+              ariaLabel: 'Reconnect Linear',
+              onAction: startLinearConnection,
+              isPending: connectLinear.isPending,
+              icon: <RefreshCw />,
             }
-          : canReconnectLinear
-            ? {
-                label: 'Reconnect',
-                ariaLabel: 'Reconnect Linear',
-                onAction: startLinearConnection,
-                isPending: connectLinear.isPending,
-                icon: <RefreshCw />,
-              }
-            : undefined,
+          : undefined,
         utilityAction: canConfigureLinearOauth
           ? {
               label: 'Configure credentials',
@@ -1381,7 +1387,9 @@ export function Integrations() {
             }
           : undefined,
         onAction: linearOauthUnavailable
-          ? undefined
+          ? canSetUpLinearOauth
+            ? () => setIsLinearOauthSetupOpen(true)
+            : undefined
           : () => {
               if (linearInstallation.data) {
                 disconnectLinear.mutate(undefined, {
@@ -1635,7 +1643,6 @@ export function Integrations() {
     grafanaConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
-    linearOauthSetup.data,
     linearOauthSetup.isPending,
     linearOauthStatus,
     linearOauthUnavailable,
@@ -1660,13 +1667,7 @@ export function Integrations() {
     userMcpConnections.data,
   ]);
 
-  const { installed, available } = splitIntegrationItems(items);
-  const visibleMcpIntegrationIds = new Set(
-    MCP_INTEGRATIONS.map((integration) => integration.id),
-  );
-  const hasEnabledMcpIntegration = (deploymentEnablements.data ?? []).some(
-    (entry) => entry.enabled && visibleMcpIntegrationIds.has(entry.mcpId),
-  );
+  const { installed, configured, available } = splitIntegrationItems(items);
   const highlightedItem =
     items.find((item) => item.id === highlightedIntegrationId) ?? null;
   const deepLinkDialogItem =
@@ -2110,28 +2111,23 @@ export function Integrations() {
           deepLinkDialogItem.onAction?.();
         }}
       />
-      {hasEnabledMcpIntegration ? (
-        <Alert variant="light">
-          <Info />
-          <AlertDescription>
-            <p>
-              User-linked MCP integrations appear in{' '}
-              <Link
-                href={SETTINGS_PATHS.personal}
-                className="inline text-primary underline hover:no-underline"
-              >
-                personal settings.
-              </Link>{' '}
-              Workspace-scoped integrations connect and turn on from this page.
-            </p>
-          </AlertDescription>
-        </Alert>
-      ) : null}
       <IntegrationSection
         id="installed-integrations"
-        title="Enabled"
+        title="Connected"
         items={installed}
+        emptyState={
+          <p className="text-sm text-muted-foreground">
+            You haven&apos;t connected any integrations yet.
+          </p>
+        }
       />
+      {configured.length > 0 && (
+        <IntegrationSection
+          id="configured-integrations"
+          title="Configured"
+          items={configured}
+        />
+      )}
       <IntegrationSection
         id="available-integrations"
         title="Available"

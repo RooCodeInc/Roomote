@@ -1,4 +1,5 @@
 import {
+  getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationOauthScopes,
   LINEAR_APP_OAUTH_SCOPES,
 } from '../mcp-oauth';
@@ -14,5 +15,11 @@ describe('Linear OAuth scopes', () => {
     expect(getMcpIntegrationOauthScopes('linear', 'linear_user_link')).toEqual([
       'read',
     ]);
+  });
+
+  it('uses the OAuth user actor for personal account links', () => {
+    expect(
+      getMcpIntegrationAuthorizationParameters('linear', 'linear_user_link'),
+    ).toEqual([{ name: 'actor', value: 'user' }]);
   });
 });

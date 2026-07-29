@@ -261,11 +261,6 @@ export type McpIntegration = {
   oauthScopeMode?: McpIntegrationOauthScopeMode;
   connectionMode?: McpIntegrationConnectionMode;
   serverMode?: McpIntegrationServerMode;
-  homepageCard?: {
-    priority: number;
-    label?: string;
-    buttonLabel?: string;
-  };
 };
 
 export const MCP_INTEGRATIONS: McpIntegration[] = [
@@ -275,11 +270,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.notion.com/mcp',
     description: `Access your Notion pages, databases, and content within ${PRODUCT_NAME} tasks`,
     icon: 'notion',
-    homepageCard: {
-      priority: 200,
-      label: 'Connect Notion so Roomote can access your docs',
-      buttonLabel: 'Connect',
-    },
   },
   {
     id: 'jira',
@@ -340,11 +330,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     icon: 'posthog',
     connectionScope: 'deployment',
     oauthScopeMode: 'read-only',
-    homepageCard: {
-      priority: 90,
-      label: 'Connect PostHog to use it with your agents',
-      buttonLabel: 'Connect',
-    },
   },
   {
     id: 'neon',
@@ -386,11 +371,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
     serverMode: 'native',
-    homepageCard: {
-      priority: 80,
-      label: 'Connect Vercel so Roomote can inspect deployments and logs',
-      buttonLabel: 'Connect',
-    },
   },
   {
     id: 'grafana',
@@ -417,11 +397,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     icon: 'railway',
     connectionScope: 'deployment',
     serverMode: 'upstream_proxy',
-    homepageCard: {
-      priority: 85,
-      label: 'Connect Railway so Roomote can inspect your projects',
-      buttonLabel: 'Connect',
-    },
   },
   {
     id: 'braintrust',
@@ -470,11 +445,6 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'sessions:create',
       'wallet:spend',
     ],
-    homepageCard: {
-      priority: 70,
-      label: 'Connect Zero so agents can discover paid capabilities',
-      buttonLabel: 'Connect',
-    },
     instructions: [
       'Zero is available because a deployment operator connected it: the `zero` CLI and skill are installed for this task, and the Zero MCP connector handles authentication and funding.',
       '',
@@ -612,11 +582,12 @@ export function getMcpIntegrationAuthorizationParameters(
   }
 
   if (integration.id === 'linear') {
-    if (role === 'linear_user_link') {
-      return [{ name: 'actor', value: 'user' }];
-    }
-
-    return [{ name: 'actor', value: 'app' }];
+    return [
+      {
+        name: 'actor',
+        value: role === 'linear_user_link' ? 'user' : 'app',
+      },
+    ];
   }
 
   return integration.authorizationParameters ?? [];

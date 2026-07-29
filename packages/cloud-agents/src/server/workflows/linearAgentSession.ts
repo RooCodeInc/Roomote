@@ -10,7 +10,7 @@ import { standardTask } from './standardTask';
 /**
  * Format Linear issue and comments into context string
  */
-function formatLinearIssueContext({
+export function formatLinearIssueContext({
   issueDescription,
   commentBody,
   previousComments,
@@ -21,6 +21,7 @@ function formatLinearIssueContext({
     id: string;
     body: string;
     username?: string;
+    userId?: string;
     createdAt?: string;
   }>;
 }): string {
@@ -32,9 +33,13 @@ function formatLinearIssueContext({
   }
 
   // Add previous comments for context
-  if (previousComments && previousComments.length > 0) {
+  const humanComments = previousComments?.filter(
+    (comment) => !comment.userId?.startsWith('bot:'),
+  );
+
+  if (humanComments && humanComments.length > 0) {
     context += '\n\n## Previous Comments\n\n';
-    for (const comment of previousComments) {
+    for (const comment of humanComments) {
       const author = comment.username || 'User';
       const date = comment.createdAt
         ? new Date(comment.createdAt).toLocaleString()

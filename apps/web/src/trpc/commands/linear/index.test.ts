@@ -102,11 +102,12 @@ describe('Linear OAuth setup', () => {
       schemaVersion: '1.0.0',
       distribution: 'private',
       display: {
-        description: 'Cloud coding agents for all',
+        description: 'Work from Linear with your own coding agent',
         iconUrl: 'https://roomote.example/roomote-logo.png',
       },
+      developer: { name: 'Roomote' },
       oauth: {
-        client_name: 'roomote-example',
+        client_name: 'Roomote',
         redirect_uris: [setup.callbackUrl],
       },
       webhook: {

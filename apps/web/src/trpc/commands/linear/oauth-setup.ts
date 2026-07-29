@@ -11,10 +11,6 @@ import {
 import { LINEAR_ORG_CONNECTION_ROLE } from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
-import {
-  buildDeploymentAppName,
-  DEPLOYMENT_APP_DESCRIPTION,
-} from '@/lib/server/deployment-app-name';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import type { UserAuthSuccess } from '@/types';
 
@@ -70,12 +66,12 @@ function buildLinearOauthSetup(publicOrigin: string) {
     schemaVersion: '1.0.0',
     distribution: 'private',
     display: {
-      description: DEPLOYMENT_APP_DESCRIPTION,
+      description: 'Work from Linear with your own coding agent',
       iconUrl: new URL('/roomote-logo.png', publicOrigin).toString(),
     },
     developer: { name: 'Roomote' },
     oauth: {
-      client_name: buildDeploymentAppName(publicOrigin),
+      client_name: 'Roomote',
       client_uri: publicOrigin,
       redirect_uris: [callbackUrl],
       grant_types: ['authorization_code'],
@@ -135,9 +131,8 @@ export async function getLinearOauthSetupCommand(auth: UserAuthSuccess) {
   const publicOrigin = getPublicAppUrl(Env);
   const runtimeEnv = getLinearRuntimeEnv();
   const urls = buildLinearOauthSetup(publicOrigin);
-  const persistedEnvVarNames = new Set(
-    await getPersistedEnvironmentVariableNames(),
-  );
+  const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
+  const savedEnvVarNames = new Set(persistedEnvVarNames);
   const fieldEntries = await Promise.all(
     Object.entries(LINEAR_OAUTH_ENV_FIELDS).map(async ([field, envName]) => {
       const runtimeValue = getRuntimeEnvValue(envName);
@@ -152,7 +147,7 @@ export async function getLinearOauthSetupCommand(auth: UserAuthSuccess) {
         {
           configured: Boolean(effectiveValue),
           managedByEnvironment: Boolean(runtimeValue),
-          savedInRoomote: persistedEnvVarNames.has(envName),
+          savedInRoomote: savedEnvVarNames.has(envName),
         },
       ] as const;
     }),

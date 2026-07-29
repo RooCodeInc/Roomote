@@ -9,6 +9,7 @@ import {
 import {
   consumeMcpOauthReplay,
   findLinearDeploymentMcpConnection,
+  getValidAccessToken,
   getLinearDeploymentMetadata,
   LINEAR_ORG_CONNECTION_ROLE,
   LINEAR_USER_CONNECTION_ROLE,
@@ -56,9 +57,7 @@ async function updateLinearConnectionMetadata(input: {
 
 async function resumeLinearReplay(input: {
   replayToken: string;
-  connection: NonNullable<McpConnectionRecord>;
   userId: string;
-  accessToken: string;
 }) {
   const replay = await consumeMcpOauthReplay(input.replayToken);
   if (!replay) {
@@ -86,7 +85,15 @@ async function resumeLinearReplay(input: {
     return;
   }
 
-  const linearClient = createLinearClient(input.accessToken);
+  const deploymentAccessToken = await getValidAccessToken(
+    deploymentConnection.id,
+    'https://mcp.linear.app/mcp',
+  );
+  if (!deploymentAccessToken) {
+    throw new Error('Failed to resolve the Linear app access token');
+  }
+
+  const linearClient = createLinearClient(deploymentAccessToken);
   const payload = parseResult.data;
   const sessionId = payload.agentSession.id;
 
@@ -175,9 +182,7 @@ export async function hydrateLinearMcpConnectionAfterOauth(input: {
     if (input.replayToken && input.connection.userId) {
       await resumeLinearReplay({
         replayToken: input.replayToken,
-        connection: input.connection,
         userId: input.connection.userId,
-        accessToken: input.accessToken,
       });
     }
   }
