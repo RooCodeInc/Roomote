@@ -98,7 +98,7 @@ import {
 } from '../api';
 
 const ENTRA_PERMISSION_GUIDANCE =
-  'Azure DevOps API permissions Code, Graph, and User Delegation / Impersonation';
+  'Code, Graph, and User Delegation / Impersonation API permissions (saved and admin-consented)';
 
 /**
  * Mocks the two hops an Entra credential makes: the Microsoft tenant token

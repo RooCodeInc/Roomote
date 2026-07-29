@@ -25,7 +25,7 @@ const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 export const ADO_API_VERSION = '7.1';
 const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
-const ADO_ERROR_MESSAGE_MAX_CHARS = 300;
+const ADO_ERROR_MESSAGE_MAX_CHARS = 200;
 const ADO_ENTRA_TOKEN_SCOPE = 'https://app.vssps.visualstudio.com/.default';
 const ADO_ENTRA_RESOURCE_SCOPE =
   '499b84ac-1321-427f-aa17-267ca6975798/.default';
@@ -591,7 +591,9 @@ function isAdoAuthorizationFailureStatus(status: number): boolean {
  * organization — authenticates fine and fails on every API call instead.
  *
  * Azure DevOps usually names the specific problem in the response body, so
- * that leads when present and the remediation follows it.
+ * that leads when present and one compact remediation sentence follows it.
+ * This surfaces as a toast, so the full add-save-consent walkthrough stays in
+ * the setup/Settings guidance and the docs rather than being repeated here.
  */
 function buildAdoCredentialRejectionMessage({
   authMode,
@@ -611,7 +613,7 @@ function buildAdoCredentialRejectionMessage({
     return `Azure DevOps rejected the access token${suffix}.${detail} Confirm it is active, belongs to the organization, and has Code read access.`;
   }
 
-  return `Azure DevOps rejected the Microsoft Entra credential${suffix}.${detail} Check that the app registration has the Azure DevOps API permissions ${ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT} — added, saved in the Azure portal (newly added permissions do not apply until they are saved) and admin-consented — and that its service principal was added to the Azure DevOps organization.`;
+  return `Azure DevOps rejected the Microsoft Entra credential${suffix}.${detail} Check that the app registration has the ${ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT} API permissions (saved and admin-consented) and that its service principal was added to the Azure DevOps organization.`;
 }
 
 /**
