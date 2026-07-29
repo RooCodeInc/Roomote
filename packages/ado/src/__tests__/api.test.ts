@@ -570,6 +570,75 @@ describe('Azure DevOps API helpers', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('returns unknown when the Entra token endpoint is unreachable or failing', async () => {
+    // A Microsoft outage or network blip must not block saving; only a
+    // definitive rejection may.
+    const outage = await validateAdoEntraCredentials({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
+      fetchImpl: vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response('{}', { status: 503 })),
+    });
+    expect(outage.status).toBe('unknown');
+
+    const network = await validateAdoEntraCredentials({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
+      fetchImpl: vi
+        .fn<typeof fetch>()
+        .mockRejectedValue(new TypeError('fetch failed')),
+    });
+    expect(network.status).toBe('unknown');
+  });
+
+  it('rejects a delegated connection whose refresh grant was refused', async () => {
+    mockAuthAccountsFindFirst.mockResolvedValue({
+      id: 'account-1',
+      accountId: 'ado-user@example.com',
+      accessToken: 'expired.token.value',
+      refreshToken: 'refresh-token',
+      accessTokenExpiresAt: new Date(Date.now() - 60_000),
+    });
+
+    // 400 invalid_grant: the refresh token is expired or revoked.
+    const refused = await validateAdoDelegatedCredentials({
+      linkedAccountId: 'ado-user@example.com',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
+      fetchImpl: vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response('{}', { status: 400 })),
+    });
+    expect(refused).toEqual({
+      status: 'invalid',
+      error: 'Azure DevOps delegated token refresh failed: 400 ',
+    });
+
+    // A refresh blocked by a network failure is unverifiable, not invalid.
+    const network = await validateAdoDelegatedCredentials({
+      linkedAccountId: 'ado-user@example.com',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
+      fetchImpl: vi
+        .fn<typeof fetch>()
+        .mockRejectedValue(new TypeError('fetch failed')),
+    });
+    expect(network.status).toBe('unknown');
+  });
+
   it('validates the delegated account with its stored access token', async () => {
     mockAuthAccountsFindFirst.mockResolvedValue({
       id: 'account-1',

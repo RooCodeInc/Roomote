@@ -257,6 +257,27 @@ async function resolveAdoAuthMode(): Promise<AdoAuthMode> {
   return (await resolveDeploymentEnvVar('ADO_TOKEN'))?.trim() ? 'pat' : 'entra';
 }
 
+/**
+ * Thrown while acquiring a Microsoft Entra token. `definitive` separates a
+ * rejected credential (bad client id/secret/tenant, revoked refresh token:
+ * the token endpoint answers 400/401) from an unverifiable failure (network,
+ * timeout, 5xx). The validate* helpers map definitive failures to `invalid`,
+ * which blocks saving, and everything else to `unknown`, which does not.
+ */
+class AdoTokenAcquisitionError extends Error {
+  readonly definitive: boolean;
+
+  constructor(message: string, definitive: boolean) {
+    super(message);
+    this.name = 'AdoTokenAcquisitionError';
+    this.definitive = definitive;
+  }
+}
+
+function isDefinitiveTokenEndpointStatus(status: number): boolean {
+  return status === 400 || status === 401;
+}
+
 async function requestAdoEntraClientCredentialsToken({
   clientId,
   clientSecret,
@@ -288,8 +309,9 @@ async function requestAdoEntraClientCredentialsToken({
   );
 
   if (!response.ok) {
-    throw new Error(
+    throw new AdoTokenAcquisitionError(
       `Azure DevOps Microsoft Entra token request failed: ${response.status} ${response.statusText}`,
+      isDefinitiveTokenEndpointStatus(response.status),
     );
   }
 
@@ -361,6 +383,7 @@ async function resolveAdoDelegatedToken(overrides?: {
   clientSecret?: string;
   tenantId?: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }): Promise<string | null> {
   const linkedAccountId =
     overrides?.linkedAccountId ??
@@ -422,8 +445,9 @@ async function resolveAdoDelegatedToken(overrides?: {
     !clientSecret?.trim() ||
     !tenantId?.trim()
   ) {
-    throw new Error(
+    throw new AdoTokenAcquisitionError(
       'Azure DevOps delegated connection needs to be reconnected. Open Settings and connect with Microsoft again.',
+      true,
     );
   }
 
@@ -439,12 +463,18 @@ async function resolveAdoDelegatedToken(overrides?: {
         refresh_token: account.refreshToken,
         scope: ADO_ENTRA_RESOURCE_SCOPE,
       }),
+      ...(overrides?.timeoutMs === undefined
+        ? {}
+        : { signal: AbortSignal.timeout(overrides.timeoutMs) }),
     },
   );
 
   if (!response.ok) {
-    throw new Error(
+    // 400 means Entra rejected the grant itself (expired or revoked refresh
+    // token, bad client secret); anything else is unverifiable.
+    throw new AdoTokenAcquisitionError(
       `Azure DevOps delegated token refresh failed: ${response.status} ${response.statusText}`,
+      isDefinitiveTokenEndpointStatus(response.status),
     );
   }
 
@@ -1025,11 +1055,21 @@ export async function validateAdoEntraCredentials({
       timeoutMs,
     }));
   } catch (error) {
+    // Only a definitive rejection by the token endpoint blocks saving.
+    // Network trouble, timeouts, and 5xx answers are unverifiable, matching
+    // how an unreachable Azure DevOps is treated below.
+    if (error instanceof AdoTokenAcquisitionError && error.definitive) {
+      return {
+        status: 'invalid',
+        error: `Microsoft Entra did not issue an Azure DevOps token. Confirm the client ID, client secret, and tenant ID are correct and the client secret has not expired. (${error.message})`,
+      };
+    }
+
     return {
-      status: 'invalid',
-      error: `Microsoft Entra did not issue an Azure DevOps token. Confirm the client ID, client secret, and tenant ID are correct and the client secret has not expired. (${
+      status: 'unknown',
+      error: `Could not verify the Microsoft Entra credential: ${
         error instanceof Error ? error.message : String(error)
-      })`,
+      }`,
     };
   }
 
@@ -1075,11 +1115,24 @@ export async function validateAdoDelegatedCredentials({
       clientSecret,
       tenantId,
       fetchImpl,
+      timeoutMs,
     });
   } catch (error) {
+    // Only a definitive rejection blocks saving: a missing refresh token
+    // (reconnect needed) or the token endpoint refusing the grant. A network
+    // failure or 5xx during refresh is unverifiable.
+    if (error instanceof AdoTokenAcquisitionError && error.definitive) {
+      return {
+        status: 'invalid',
+        error: error.message,
+      };
+    }
+
     return {
-      status: 'invalid',
-      error: error instanceof Error ? error.message : String(error),
+      status: 'unknown',
+      error: `Could not verify the delegated Azure DevOps connection: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     };
   }
 
