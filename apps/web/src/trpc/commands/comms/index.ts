@@ -59,6 +59,10 @@ import {
   getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
+import {
+  assertTeamsBotCredentialsAuthenticate,
+  invalidateTeamsBotCredentialCheckCache,
+} from '../teams/bot-credential-check';
 
 type AdditionalCommsProviderId = 'telegram' | 'discord';
 type CommsProviderId = SetupAuthProviderId | AdditionalCommsProviderId;
@@ -930,6 +934,13 @@ export async function saveCommsAuthConfigCommand(
     }
   }
 
+  // Prove the Teams bot credentials authenticate before storing them; a wrong
+  // app id or secret otherwise only surfaces as unexplained 401s on the
+  // messaging endpoint, long after setup reported success.
+  if (input.provider === 'microsoft') {
+    await assertTeamsBotCredentialsAuthenticate(input.values);
+  }
+
   await db.transaction(async (tx) => {
     const persistedEnvVarNames = await getPersistedEnvironmentVariableNames(tx);
     const authSetup = buildSetupAuthStatus({
@@ -1101,6 +1112,7 @@ export async function saveCommsAuthConfigCommand(
 
   if (input.provider === 'microsoft') {
     invalidateTeamsBotRuntimeCredentialsCache();
+    invalidateTeamsBotCredentialCheckCache();
   }
 
   if (input.provider === 'discord') {
@@ -1159,6 +1171,7 @@ export async function clearCommsAuthConfigCommand(
 
   if (input.provider === 'microsoft') {
     invalidateTeamsBotRuntimeCredentialsCache();
+    invalidateTeamsBotCredentialCheckCache();
   }
 
   if (input.provider === 'discord') {

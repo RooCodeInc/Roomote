@@ -151,6 +151,22 @@ async function readResponseText(response: Response): Promise<string> {
   }
 }
 
+/**
+ * Raised when the client-credentials token request itself fails. Carries the
+ * raw status and body so callers can turn Entra's `AADSTS…` codes into copy
+ * that names the field an operator got wrong.
+ */
+export class TeamsOAuthTokenError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null,
+    readonly responseBody: string | null,
+  ) {
+    super(message);
+    this.name = 'TeamsOAuthTokenError';
+  }
+}
+
 export class TeamsBotFrameworkClient {
   private readonly fetchImpl: FetchLike;
   private cachedToken: CachedToken | undefined;
@@ -394,6 +410,15 @@ export class TeamsBotFrameworkClient {
     };
   }
 
+  /**
+   * Runs the client-credentials token request and discards the token. Callers
+   * use it to prove the configured app id / secret / tenant actually
+   * authenticate instead of assuming that non-empty values are working ones.
+   */
+  async verifyCredentials(): Promise<void> {
+    await this.getAccessToken();
+  }
+
   private async getAccessToken(): Promise<string> {
     const now = Date.now();
 
@@ -420,23 +445,31 @@ export class TeamsBotFrameworkClient {
 
     if (!response.ok) {
       const responseBody = await readResponseText(response);
-      throw new Error(
+      throw new TeamsOAuthTokenError(
         `Teams OAuth token request failed with ${response.status}: ${responseBody}`,
+        response.status,
+        responseBody,
       );
     }
 
     const tokenResponse = (await response.json()) as unknown;
 
     if (!tokenResponse || typeof tokenResponse !== 'object') {
-      throw new Error('Teams OAuth token request returned a non-object body.');
+      throw new TeamsOAuthTokenError(
+        'Teams OAuth token request returned a non-object body.',
+        null,
+        null,
+      );
     }
 
     const tokenData = tokenResponse as Record<string, unknown>;
     const accessToken = readStringProperty(tokenData, 'access_token');
 
     if (!accessToken) {
-      throw new Error(
+      throw new TeamsOAuthTokenError(
         'Teams OAuth token response did not include access_token.',
+        null,
+        null,
       );
     }
 

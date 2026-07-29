@@ -8,6 +8,7 @@ const {
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
   mockGetPersistedEnvironmentVariableValues,
+  mockValidateTeamsBotCredentials,
   mockGetSetupBootstrapState,
   mockSetupTokenState,
   mockRunComputeProvisioning,
@@ -16,6 +17,7 @@ const {
   mockResolveGiteaBaseUrl,
   mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
+  mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockTxSelect: vi.fn(),
   mockDbTransaction: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
@@ -122,6 +124,7 @@ vi.mock('@roomote/db/server', () => ({
     identitySource: null,
     identityErrorCode: null,
   })),
+  invalidateTeamsBotRuntimeCredentialsCache: vi.fn(),
   slackInstallations: {},
   slackUserMappings: {},
   sql: vi.fn(),
@@ -185,6 +188,21 @@ vi.mock('../environment-variables', () => ({
     mockGetPersistedEnvironmentVariableValues,
 }));
 
+vi.mock('@roomote/communication/teams-credential-validation', () => ({
+  validateTeamsBotCredentials: mockValidateTeamsBotCredentials,
+  TeamsBotCredentialValidationError: class TeamsBotCredentialValidationError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+      readonly field: string | null = null,
+      readonly detail: string | null = null,
+    ) {
+      super(message);
+      this.name = 'TeamsBotCredentialValidationError';
+    }
+  },
+}));
+
 vi.mock('../task-suggestions', () => ({
   triggerTaskSuggestionsCommand: vi.fn(),
 }));
@@ -220,9 +238,11 @@ import { enqueueTask } from '@roomote/cloud-agents/server';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import {
+  invalidateTeamsBotRuntimeCredentialsCache,
   resolveDiscordRuntimeCredentials,
   resolveTelegramRuntimeCredentials,
 } from '@roomote/db/server';
+import { TeamsBotCredentialValidationError } from '@roomote/communication/teams-credential-validation';
 import {
   createTeamsCommunicationProviderFromRuntimeCredentials,
   findTelegramPrimaryChatId,
@@ -286,6 +306,7 @@ describe('setup-new auth config commands', () => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+    mockValidateTeamsBotCredentials.mockResolvedValue(undefined);
     process.env.E2B_TEMPLATE_ID = '';
     process.env.DAYTONA_SNAPSHOT_NAME = '';
     process.env.BLAXEL_IMAGE = '';
@@ -333,6 +354,56 @@ describe('setup-new auth config commands', () => {
         ]),
       }),
     );
+  });
+
+  it('verifies Teams bot credentials and drops both caches after the commit', async () => {
+    mockGetSetupBootstrapState.mockResolvedValue({ setupOpen: false });
+
+    await saveSetupNewAuthConfigCommand(buildMockAuth(), {
+      provider: 'microsoft',
+      values: {
+        R_MICROSOFT_CLIENT_ID: 'ms-client-id',
+        R_MICROSOFT_CLIENT_SECRET: 'ms-client-secret',
+        R_MICROSOFT_TENANT_ID: 'ms-tenant-id',
+      },
+    });
+
+    expect(mockValidateTeamsBotCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'ms-client-id',
+        appPassword: 'ms-client-secret',
+        tenantId: 'ms-tenant-id',
+      }),
+    );
+    // A stale 30s runtime cache would make the next status refresh report the
+    // credentials that were replaced, not the ones just verified.
+    expect(invalidateTeamsBotRuntimeCredentialsCache).toHaveBeenCalled();
+  });
+
+  it('does not save Teams credentials Microsoft rejects', async () => {
+    mockGetSetupBootstrapState.mockResolvedValue({ setupOpen: false });
+    mockValidateTeamsBotCredentials.mockRejectedValue(
+      new TeamsBotCredentialValidationError(
+        'invalid_app_password',
+        'Microsoft rejected the client secret.',
+        'app_password',
+        'AADSTS7000215: Invalid client secret provided.',
+      ),
+    );
+
+    await expect(
+      saveSetupNewAuthConfigCommand(buildMockAuth(), {
+        provider: 'microsoft',
+        values: {
+          R_MICROSOFT_CLIENT_ID: 'ms-client-id',
+          R_MICROSOFT_CLIENT_SECRET: 'wrong-secret',
+          R_MICROSOFT_TENANT_ID: 'ms-tenant-id',
+        },
+      }),
+    ).rejects.toThrow(/AADSTS7000215/u);
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    expect(invalidateTeamsBotRuntimeCredentialsCache).not.toHaveBeenCalled();
   });
 
   it('records bootstrap auth config without manufacturing a user', async () => {

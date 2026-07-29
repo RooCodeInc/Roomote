@@ -35,6 +35,7 @@ import {
   purgeSavedDeploymentWorkerImage,
   resolveTelegramRuntimeCredentials,
   resolveDiscordRuntimeCredentials,
+  invalidateTeamsBotRuntimeCredentialsCache,
   isChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected,
@@ -141,6 +142,10 @@ import {
   getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
+import {
+  assertTeamsBotCredentialsAuthenticate,
+  invalidateTeamsBotCredentialCheckCache,
+} from '../teams/bot-credential-check';
 import {
   getPersistedRuntimeComputeConfig,
   savePersistedRuntimeComputeConfig,
@@ -2086,7 +2091,13 @@ async function saveSetupAuthConfig(input: {
   }
   const provider = getSetupAuthProvider(input.provider);
 
-  return db.transaction(async (tx) => {
+  // Runs before the transaction: it talks to Microsoft, and onboarding must
+  // not report a configured Teams bot for credentials that never authenticated.
+  if (input.provider === 'microsoft') {
+    await assertTeamsBotCredentialsAuthenticate(input.values);
+  }
+
+  const result = await db.transaction(async (tx) => {
     const [currentState, persistedEnvVarNames] = await Promise.all([
       getPersistedSetupNewState(tx),
       getPersistedEnvironmentVariableNames(tx),
@@ -2180,6 +2191,16 @@ async function saveSetupAuthConfig(input: {
       setupNewState,
     };
   });
+
+  // After the commit, or the 30s runtime credential cache keeps serving the
+  // pre-save tuple and the next status refresh reports the old credentials
+  // instead of the ones that were just verified and stored.
+  if (input.provider === 'microsoft') {
+    invalidateTeamsBotRuntimeCredentialsCache();
+    invalidateTeamsBotCredentialCheckCache();
+  }
+
+  return result;
 }
 
 export async function saveSetupNewSourceControlProviderChoiceCommand(

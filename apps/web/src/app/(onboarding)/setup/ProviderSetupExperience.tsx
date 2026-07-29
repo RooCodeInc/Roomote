@@ -53,6 +53,57 @@ const TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
   'R_TELEGRAM_WEBHOOK_SECRET',
 ]);
 
+export const MICROSOFT_APP_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const MICROSOFT_APP_ID_FIELD_ENV_VAR_NAMES = new Set([
+  'R_MICROSOFT_CLIENT_ID',
+  'R_TEAMS_BOT_APP_ID',
+]);
+
+/**
+ * Inline warning shown directly under an app-id input whose value cannot be an
+ * Entra client id. The package-download note further down explains the same
+ * problem, but the feedback belongs at the field where the value was typed.
+ */
+function getMicrosoftAppIdFormatWarning(
+  providerId: string,
+  envVarName: string,
+  value: string,
+): string | null {
+  if (
+    providerId !== 'microsoft' ||
+    !MICROSOFT_APP_ID_FIELD_ENV_VAR_NAMES.has(envVarName)
+  ) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed || MICROSOFT_APP_ID_PATTERN.test(trimmed)) {
+    return null;
+  }
+
+  return "This doesn't look like an Entra app ID — expected a GUID like 00000000-0000-0000-0000-000000000000.";
+}
+
+/**
+ * The Teams app package embeds the bot app id, so a value that is not a GUID
+ * cannot produce a usable package. Explain that instead of leaving the
+ * download button dead with no reason.
+ */
+export function getTeamsAppPackageUnavailableReason(
+  enteredAppId: string,
+): string | null {
+  const appId = enteredAppId.trim();
+
+  if (!appId || MICROSOFT_APP_ID_PATTERN.test(appId)) {
+    return null;
+  }
+
+  return 'That App (Client) ID is not a valid GUID, so Roomote cannot pre-fill the Teams app package. Copy the Application (client) ID from the Entra app registration overview — it looks like 00000000-0000-0000-0000-000000000000.';
+}
+
 export function getSetupVisibleFields(
   provider: ProviderStatus | null,
   options: { showMicrosoftAdvancedConfig?: boolean } = {},
@@ -223,6 +274,14 @@ function ProviderFields({
           explicitValue.length === 0 &&
           !clearedSavedValues[field.envVarName] &&
           !editingSavedValues[field.envVarName];
+        const formatWarning =
+          !isSecretField && !field.runtimeSatisfied
+            ? getMicrosoftAppIdFormatWarning(
+                provider.id,
+                field.envVarName,
+                value,
+              )
+            : null;
 
         return (
           <div
@@ -276,6 +335,9 @@ function ProviderFields({
                 />
                 {(field.runtimeSatisfied || field.savedSatisfied) && <Check />}
               </div>
+              {formatWarning ? (
+                <p className="mt-1 text-sm text-amber-600">{formatWarning}</p>
+              ) : null}
             </div>
           </div>
         );
@@ -292,6 +354,12 @@ type ProviderSetupExperienceProps = {
   editingSavedValues: Record<string, boolean>;
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
+  /**
+   * Why the pre-filled package cannot be built yet (e.g. the entered App
+   * (Client) ID is not a GUID). Without it the download button just goes dead
+   * with nothing to act on.
+   */
+  teamsAppPackageUnavailableReason?: string | null;
   createdSlackAppSettingsUrl?: string | null;
   createdSlackAppIconSet?: boolean | null;
   createSlackAppPending?: boolean;
@@ -687,11 +755,17 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" disabled>
-                <Download />
-                Download Teams app package
-              </Button>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled>
+                  <Download />
+                  Download Teams app package
+                </Button>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {props.teamsAppPackageUnavailableReason ??
+                  'Enter the values above to build a pre-filled package.'}
+              </p>
             </div>
           )}
         </div>
