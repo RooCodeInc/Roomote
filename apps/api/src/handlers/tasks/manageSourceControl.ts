@@ -3,6 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 import {
   claimLatestUserMessageForReplyQuote,
+  completeClaimedLatestUserMessageForReplyQuote,
   restoreClaimedLatestUserMessageForReplyQuote,
 } from '@roomote/communication/messages';
 import { resolveSourceControlProviderFromPayload } from '@roomote/types';
@@ -101,9 +102,10 @@ export async function manageSourceControl(
         input.action === 'create_pull_request_comment' ||
         input.action === 'create_issue_comment') &&
       typeof bodyInput?.body === 'string';
-    const pendingQuote = shouldQuote
+    const pendingQuoteClaim = shouldQuote
       ? await claimLatestUserMessageForReplyQuote('github', taskRun.id)
       : null;
+    const pendingQuote = pendingQuoteClaim?.message ?? null;
 
     if (pendingQuote && typeof bodyInput?.body === 'string') {
       const quote = formatGitHubReplyQuote(pendingQuote);
@@ -113,12 +115,33 @@ export async function manageSourceControl(
     }
 
     const restoreQuoteAfterFailure = async () => {
-      if (pendingQuote) {
+      if (pendingQuoteClaim) {
         await restoreClaimedLatestUserMessageForReplyQuote(
           'github',
           taskRun.id,
-          pendingQuote,
+          pendingQuoteClaim,
         );
+      }
+    };
+
+    const completeQuoteAfterSuccess = async () => {
+      if (pendingQuoteClaim) {
+        await completeClaimedLatestUserMessageForReplyQuote(
+          'github',
+          taskRun.id,
+          pendingQuoteClaim,
+        );
+      }
+    };
+
+    const runWithQuoteRestorationOnFailure = async <T>(
+      operation: () => Promise<T>,
+    ): Promise<T> => {
+      try {
+        return await operation();
+      } catch (error) {
+        await restoreQuoteAfterFailure();
+        throw error;
       }
     };
 
@@ -144,26 +167,26 @@ export async function manageSourceControl(
       case 'resolve_pull_request_thread':
       case 'submit_pull_request_review':
       case 'update_pull_request_comment': {
-        try {
-          return c.json(
-            await writeSourceControlPullRequestForTaskRun({ taskRun, input }),
-          );
-        } catch (error) {
-          await restoreQuoteAfterFailure();
-          throw error;
-        }
+        const writeResult = await runWithQuoteRestorationOnFailure(() =>
+          writeSourceControlPullRequestForTaskRun({
+            taskRun,
+            input,
+          }),
+        );
+        await completeQuoteAfterSuccess();
+        return c.json(writeResult);
       }
       case 'get_issue':
       case 'list_issue_comments':
       case 'create_issue_comment': {
-        try {
-          return c.json(
-            await manageSourceControlIssueForTaskRun({ taskRun, input }),
-          );
-        } catch (error) {
-          await restoreQuoteAfterFailure();
-          throw error;
-        }
+        const issueResult = await runWithQuoteRestorationOnFailure(() =>
+          manageSourceControlIssueForTaskRun({
+            taskRun,
+            input,
+          }),
+        );
+        await completeQuoteAfterSuccess();
+        return c.json(issueResult);
       }
     }
   } catch (error) {
