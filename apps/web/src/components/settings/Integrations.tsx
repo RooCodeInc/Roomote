@@ -2,7 +2,6 @@
 
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -36,7 +35,6 @@ import {
   useVercelConnection,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { SETTINGS_PATHS } from '@/lib/settings';
 import {
   saveAsanaConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -45,8 +43,6 @@ import {
 } from '@/types';
 
 import {
-  Alert,
-  AlertDescription,
   BasicTooltip,
   Button,
   Card,
@@ -1673,12 +1669,6 @@ export function Integrations() {
   ]);
 
   const { installed, configured, available } = splitIntegrationItems(items);
-  const visibleMcpIntegrationIds = new Set(
-    MCP_INTEGRATIONS.map((integration) => integration.id),
-  );
-  const hasEnabledMcpIntegration = (deploymentEnablements.data ?? []).some(
-    (entry) => entry.enabled && visibleMcpIntegrationIds.has(entry.mcpId),
-  );
   const highlightedItem =
     items.find((item) => item.id === highlightedIntegrationId) ?? null;
   const deepLinkDialogItem =

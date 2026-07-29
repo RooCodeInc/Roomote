@@ -566,7 +566,7 @@ export function isDeploymentScopedMcpIntegration(
 
 export function getMcpIntegrationAuthorizationParameters(
   integrationOrId: McpIntegration | string | undefined,
-  role: McpConnectionRole = 'default',
+  _role: McpConnectionRole = 'default',
 ): McpIntegrationAuthorizationParameter[] {
   if (!integrationOrId) {
     return [];

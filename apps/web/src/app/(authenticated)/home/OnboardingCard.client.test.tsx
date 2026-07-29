@@ -121,9 +121,19 @@ vi.mock('motion/react', async () => {
           variants?: unknown;
           transition?: unknown;
         }
-      >(({ initial, animate, exit, variants, transition, ...props }, ref) => (
-        <div ref={ref} {...props} />
-      )),
+      >(
+        (
+          {
+            initial: _initial,
+            animate: _animate,
+            exit: _exit,
+            variants: _variants,
+            transition: _transition,
+            ...props
+          },
+          ref,
+        ) => <div ref={ref} {...props} />,
+      ),
     },
   };
 });
