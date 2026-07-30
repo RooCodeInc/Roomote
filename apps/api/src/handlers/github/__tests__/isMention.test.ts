@@ -140,13 +140,32 @@ describe('isMention', () => {
       ).toBe(true);
     });
 
-    it('ignores mentions of the default slug when another slug is configured', () => {
+    it('detects the @roomote shorthand when another slug is configured', () => {
+      expect(
+        isMention({
+          body: 'Hey @roomote can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('only detects the configured slug after opting out', () => {
+      setGitHubRoomoteMentionSettingCache({
+        value: false,
+      });
+
       expect(
         isMention({
           body: 'Hey @roomote can you take a look?',
           user: { login: 'testuser' },
         }),
       ).toBe(false);
+      expect(
+        isMention({
+          body: 'Hey @acme can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
     });
 
     it('returns false for comments authored by the configured bot', () => {

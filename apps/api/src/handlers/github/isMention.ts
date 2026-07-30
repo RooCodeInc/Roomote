@@ -19,11 +19,9 @@ export const isMention = (comment: {
   // substring check would also fire on longer logins (`@<slug>-fan`) and on
   // email addresses (`grace@<slug>.example.com`).
   const appSlug = getEffectiveGitHubAppSlug();
-  const acceptedSlugs =
-    isGitHubRoomoteMentionEnabled() &&
-    appSlug.toLowerCase().startsWith('roomote-')
-      ? [appSlug, 'roomote']
-      : [appSlug];
+  const acceptedSlugs = isGitHubRoomoteMentionEnabled()
+    ? [appSlug, 'roomote']
+    : [appSlug];
   const mentionPattern = new RegExp(
     `(^|[^\\w.-])@(?:${acceptedSlugs.map(escapeRegExp).join('|')})(?![\\w-])`,
     'i',

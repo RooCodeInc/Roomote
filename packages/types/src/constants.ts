@@ -82,9 +82,7 @@ export function getGitHubFollowUpMention(
   slug: string,
   roomoteMentionEnabled: boolean,
 ): string {
-  return roomoteMentionEnabled && slug.toLowerCase().startsWith('roomote-')
-    ? '@roomote'
-    : getGitHubAppMention(slug);
+  return roomoteMentionEnabled ? '@roomote' : getGitHubAppMention(slug);
 }
 
 /**

@@ -65,16 +65,17 @@ describe('findReusableReviewSummaryComment', () => {
 });
 
 describe('getPrBodyAttributionLine', () => {
-  it('mentions the process-env app slug by default', () => {
+  it('mentions @roomote by default', () => {
     const line = getPrBodyAttributionLine({
       attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
       taskUrl: 'https://app.roomote.dev/tasks/123',
     });
 
-    expect(line).toContain('@octomote');
+    expect(line).toContain('@roomote');
+    expect(line).not.toContain('@octomote');
   });
 
-  it('mentions the database-configured app slug once cached', () => {
+  it('mentions @roomote with a database-configured app slug', () => {
     setConfiguredGitHubAppSlugCache({
       value: 'acme',
       expiresAt: Date.now() + 60_000,
@@ -85,7 +86,8 @@ describe('getPrBodyAttributionLine', () => {
       taskUrl: 'https://app.roomote.dev/tasks/123',
     });
 
-    expect(line).toContain('@acme');
+    expect(line).toContain('@roomote');
+    expect(line).not.toContain('@acme');
     expect(line).not.toContain('@octomote');
   });
 
@@ -104,9 +106,9 @@ describe('getPrBodyAttributionLine', () => {
     expect(line).not.toContain('@roomote-roomote');
   });
 
-  it('uses the full Roomote app mention when disabled', () => {
+  it('uses the full configured app mention when disabled', () => {
     setConfiguredGitHubAppSlugCache({
-      value: 'roomote-roomote',
+      value: 'acme',
       expiresAt: Date.now() + 60_000,
     });
     setGitHubRoomoteMentionSettingCache({
@@ -118,6 +120,7 @@ describe('getPrBodyAttributionLine', () => {
       taskUrl: 'https://app.roomote.dev/tasks/123',
     });
 
-    expect(line).toContain('@roomote-roomote');
+    expect(line).toContain('@acme');
+    expect(line).not.toContain('@roomote');
   });
 });
