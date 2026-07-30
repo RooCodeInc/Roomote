@@ -423,6 +423,39 @@ describe('createComputeProviderClient', () => {
     }
   });
 
+  it('does not let ambient SP env vars override explicit Azure managed-identity config', () => {
+    process.env.AZURE_TENANT_ID = 'tenant-env';
+    process.env.AZURE_CLIENT_ID = 'client-env';
+    process.env.AZURE_CLIENT_SECRET = 'secret-env';
+
+    try {
+      createComputeProviderClient({
+        provider: 'azure',
+        config: {
+          subscriptionId: 'sub-1',
+          resourceGroup: 'rg-1',
+          sandboxGroup: 'group-1',
+          region: 'canadacentral',
+          diskImage: 'disk-1',
+          managedIdentityClientId: 'mi-1',
+        },
+      });
+
+      expect(azureClientMock).toHaveBeenCalledWith(
+        expect.objectContaining({ managedIdentityClientId: 'mi-1' }),
+      );
+      expect(azureClientMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          servicePrincipal: expect.anything(),
+        }),
+      );
+    } finally {
+      delete process.env.AZURE_TENANT_ID;
+      delete process.env.AZURE_CLIENT_ID;
+      delete process.env.AZURE_CLIENT_SECRET;
+    }
+  });
+
   it('prefers explicit Azure cpu/memory/disk config over the size preset', () => {
     process.env.AZURE_SANDBOX_SIZE = 'XL';
 

@@ -512,6 +512,22 @@ export class AzureClient implements ComputeProviderClient {
     const snapshotName = deriveAzureProductSnapshotName(input.instanceId);
     const usageObservation = await this.readUsageObservation(input.instanceId);
 
+    // ACA snapshots capture memory+disk and get restored into future
+    // sandboxes — purge detached-command logs and exit sentinels first so
+    // stale worker logs (and anything they contain) don't ride into every
+    // restored sandbox. Best effort; the snapshot is still valid with them.
+    await this.request(
+      'POST',
+      `${this.sandboxPath(input.instanceId)}/executeShellCommand`,
+      {
+        body: { command: `rm -rf ${shellQuote(DETACHED_LOG_ROOT)}` },
+        signal: input.signal,
+        abortMessage: `Purging detached logs before snapshotting Azure sandbox ${input.instanceId} was aborted`,
+      },
+    ).catch(() => {
+      // Continue; stale logs are a hygiene issue, not a correctness one.
+    });
+
     // The dataplane snapshot endpoint is synchronous: the returned body
     // already carries the snapshot id.
     const snapshot = (await this.request(

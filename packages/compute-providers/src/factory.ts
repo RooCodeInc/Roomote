@@ -362,29 +362,44 @@ export function createComputeProviderClient(
       const region = options.config?.region ?? envValue('AZURE_SANDBOX_REGION');
       const diskImage =
         options.config?.diskImage ?? envValue('AZURE_SANDBOX_DISK_IMAGE');
+      // Each SP component follows the same config-then-env precedence as
+      // every other Azure field, so an explicit config never loses to
+      // ambient env.
+      const spTenantId =
+        options.config?.servicePrincipal?.tenantId ??
+        envValue('AZURE_TENANT_ID');
+      const spClientId =
+        options.config?.servicePrincipal?.clientId ??
+        envValue('AZURE_CLIENT_ID');
+      const spClientSecret =
+        options.config?.servicePrincipal?.clientSecret ??
+        envValue('AZURE_CLIENT_SECRET');
+
+      // An explicit managedIdentityClientId is a deliberate choice of auth
+      // mode; ambient SP env vars must not silently override it. Service
+      // principal auth only kicks in when the full triple is present — a
+      // lone AZURE_CLIENT_ID still means user-assigned managed identity.
+      const callerChoseManagedIdentity =
+        options.config?.managedIdentityClientId !== undefined;
+      const servicePrincipal =
+        !callerChoseManagedIdentity &&
+        spTenantId &&
+        spClientId &&
+        spClientSecret
+          ? {
+              tenantId: spTenantId,
+              clientId: spClientId,
+              clientSecret: spClientSecret,
+            }
+          : undefined;
       const managedIdentityClientId =
         options.config?.managedIdentityClientId ?? envValue('AZURE_CLIENT_ID');
-      const spTenantId = envValue('AZURE_TENANT_ID');
-      const spClientId = envValue('AZURE_CLIENT_ID');
-      const spClientSecret = envValue('AZURE_CLIENT_SECRET');
 
       assertDefined(subscriptionId, 'Missing AZURE_SUBSCRIPTION_ID');
       assertDefined(resourceGroup, 'Missing AZURE_RESOURCE_GROUP');
       assertDefined(sandboxGroup, 'Missing AZURE_SANDBOX_GROUP');
       assertDefined(region, 'Missing AZURE_SANDBOX_REGION');
       assertDefined(diskImage, 'Missing AZURE_SANDBOX_DISK_IMAGE');
-
-      // Service principal auth only kicks in when the full triple is present;
-      // a lone AZURE_CLIENT_ID still means user-assigned managed identity.
-      const servicePrincipal =
-        options.config?.servicePrincipal ??
-        (spTenantId && spClientId && spClientSecret
-          ? {
-              tenantId: spTenantId,
-              clientId: spClientId,
-              clientSecret: spClientSecret,
-            }
-          : undefined);
 
       // Size preset only fills values the caller didn't set explicitly.
       const sizePreset = parseAzureSizePreset(envValue('AZURE_SANDBOX_SIZE'));
@@ -401,8 +416,7 @@ export function createComputeProviderClient(
         diskImage,
         ...(servicePrincipal
           ? { servicePrincipal }
-          : options.config?.managedIdentityClientId === undefined &&
-              managedIdentityClientId
+          : managedIdentityClientId
             ? { managedIdentityClientId }
             : {}),
         ...(sizePreset && options.config?.cpuMillicores === undefined

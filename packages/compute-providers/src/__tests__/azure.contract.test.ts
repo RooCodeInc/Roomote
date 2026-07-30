@@ -342,6 +342,20 @@ describe('azure adapter contract', () => {
       ingress: 1000,
       egress: 2000,
     });
+
+    // Detached logs are purged before the snapshot is taken so they don't
+    // ride into restored sandboxes.
+    const execIndex = requests.findIndex((r) =>
+      r.url.includes('/executeShellCommand'),
+    );
+    const snapshotIndex = requests.findIndex((r) =>
+      r.url.includes('/snapshot'),
+    );
+    expect(execIndex).toBeGreaterThanOrEqual(0);
+    expect(snapshotIndex).toBeGreaterThan(execIndex);
+    expect(
+      (requests[execIndex]?.body as { command: string }).command,
+    ).toContain('rm -rf');
   });
 
   it('finds snapshots by source instance', async () => {

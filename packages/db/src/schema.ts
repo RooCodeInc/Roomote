@@ -1066,17 +1066,17 @@ export const taskRuns = pgTable(
     index('task_runs_snapshot_id_idx').on(table.snapshotId),
     index('task_runs_sleep_at_idx').on(table.sleepAt),
     index('task_runs_worker_heartbeat_at_idx').on(table.workerHeartbeatAt),
-    index('task_runs_sleep_check_due_idx')
+    index('task_runs_sleep_check_due_v2_idx')
       .using('btree', table.sleepAt, table.createdAt, table.vendor)
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
       ),
-    index('task_runs_sleep_check_stale_worker_idx')
+    index('task_runs_sleep_check_stale_worker_v2_idx')
       .using('btree', table.workerHeartbeatAt, table.createdAt, table.vendor)
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
       ),
-    index('task_runs_sleep_check_active_idx')
+    index('task_runs_sleep_check_active_v2_idx')
       .using('btree', table.vendor, table.createdAt.desc())
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
