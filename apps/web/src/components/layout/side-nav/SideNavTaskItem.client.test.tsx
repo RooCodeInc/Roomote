@@ -394,7 +394,9 @@ describe('SideNavTaskItem', () => {
       />,
     );
 
-    expect(spinnerMock).toHaveBeenCalledWith('size-4 shrink-0 animate-spin');
+    expect(spinnerMock).toHaveBeenCalledWith(
+      'size-4 shrink-0 animate-spin border-current/30 border-t-current',
+    );
     expect(taskStatusIndicatorMock).not.toHaveBeenCalled();
     expect(
       screen.getByRole('link', { name: 'Expanded live running task' })
