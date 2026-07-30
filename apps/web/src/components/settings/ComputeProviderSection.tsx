@@ -296,11 +296,11 @@ export function ComputeProviderSection({
     return (
       <div
         key={field.envVarName}
-        className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center max-w-xl"
+        className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-start max-w-xl"
       >
         <label
           htmlFor={`${provider.provider}-${field.envVarName}`}
-          className="text-sm font-medium"
+          className="text-sm font-medium md:pt-2"
         >
           {field.label}
           {field.required === false ? ' (optional)' : ''}
