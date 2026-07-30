@@ -393,6 +393,34 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('enables ChatGPT fast mode on supported models without replacing reasoning options', () => {
+    const runtimeEnv = {
+      R_MODEL: 'openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openai/gpt-5.6-luna',
+      R_MODEL_REASONING_EFFORT: 'high',
+      R_CHATGPT_FAST_MODE: '1',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models?: Record<string, { options?: Record<string, unknown> }> }
+      >;
+    };
+
+    expect(config.provider.openai?.models?.['gpt-5.6-terra']?.options).toEqual({
+      reasoningEffort: 'high',
+      serviceTier: 'fast',
+    });
+    expect(config.provider.openai?.models?.['gpt-5.6-luna']?.options).toEqual({
+      serviceTier: 'fast',
+    });
+    expect(runtimeEnv).not.toHaveProperty('R_CHATGPT_FAST_MODE');
+  });
+
   it('rebases GitHub Copilot onto its OAuth-backed gateway segment', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

@@ -7,6 +7,7 @@ describe('buildOpenCodeHarnessEnv', () => {
       R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
       R_MODEL_REASONING_EFFORT: 'medium',
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_CHATGPT_FAST_MODE: '1',
       OPENROUTER_API_KEY: 'openrouter-key',
     });
 
@@ -15,6 +16,7 @@ describe('buildOpenCodeHarnessEnv', () => {
       R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
       R_MODEL_REASONING_EFFORT: 'medium',
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
+      R_CHATGPT_FAST_MODE: '1',
       OPENROUTER_API_KEY: 'openrouter-key',
     });
   });

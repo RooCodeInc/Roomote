@@ -332,6 +332,7 @@ import {
   isChatGptSubscriptionConnectedCommand,
   pollChatGptDeviceAuthCommand,
   startChatGptDeviceAuthCommand,
+  updateChatGptSubscriptionFastModeCommand,
 } from '../commands/chatgpt-subscription';
 import {
   disconnectGitHubCopilotSubscriptionCommand,
@@ -2069,6 +2070,12 @@ export const appRouter = createRouter({
     disconnect: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectChatGptSubscriptionCommand(auth),
     ),
+
+    updateFastMode: protectedProcedure
+      .input(z.object({ fastMode: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        updateChatGptSubscriptionFastModeCommand(auth, input),
+      ),
   }),
 
   githubCopilotSubscription: createRouter({

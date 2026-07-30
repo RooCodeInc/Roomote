@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import {
   applyImplicitLiteLlmModelPrefix,
+  CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
@@ -22,7 +23,10 @@ import {
 } from '@roomote/types';
 
 import { decryptSecrets } from '../encryption';
-import { resolveOpenCodeAuthContent } from './chatgpt-subscription';
+import {
+  isChatGptSubscriptionFastModeEnabled,
+  resolveOpenCodeAuthContent,
+} from './chatgpt-subscription';
 import { resolveGitHubCopilotOpenCodeAuthContent } from './github-copilot-subscription';
 import { getFreshXaiAccessToken } from './xai-subscription';
 
@@ -429,6 +433,9 @@ async function resolveModelRuntimeEnv(
     : null;
   const routeChatGptThroughGateway =
     inferenceGateway && injectedOpenCodeAuthContent != null;
+  const chatGptFastMode = injectedOpenCodeAuthContent
+    ? await isChatGptSubscriptionFastModeEnabled(executor)
+    : false;
   const usesGitHubCopilotModel = [
     ...resolvedRoleModels,
     ...gatewaySwitchableModelIds,
@@ -532,6 +539,7 @@ async function resolveModelRuntimeEnv(
     ...(routeChatGptThroughGateway
       ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }
       : {}),
+    ...(chatGptFastMode ? { [CHATGPT_FAST_MODE_ENV_VAR_NAME]: '1' } : {}),
     ...(routeGitHubCopilotThroughGateway
       ? { [INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME]: '1' }
       : {}),

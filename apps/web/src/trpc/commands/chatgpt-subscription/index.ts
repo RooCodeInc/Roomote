@@ -4,6 +4,7 @@ import {
   isChatGptSubscriptionConnected,
   pollChatGptDeviceAuth,
   startChatGptDeviceAuth,
+  updateChatGptSubscriptionFastMode,
   type ChatGptSubscriptionPublicStatus,
 } from '@roomote/db/server';
 
@@ -66,5 +67,14 @@ export async function disconnectChatGptSubscriptionCommand(
 ): Promise<{ success: true }> {
   assertAdmin(auth);
   await disconnectChatGptSubscription();
+  return { success: true };
+}
+
+export async function updateChatGptSubscriptionFastModeCommand(
+  auth: UserAuthSuccess,
+  input: { fastMode: boolean },
+): Promise<{ success: true }> {
+  assertAdmin(auth);
+  await updateChatGptSubscriptionFastMode(input.fastMode);
   return { success: true };
 }
