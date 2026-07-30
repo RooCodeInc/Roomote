@@ -228,6 +228,7 @@ it('uses the requested admin integration setup order', () => {
     'Sentry',
     'Linear',
     'Jira',
+    'monday.com',
     'Vercel',
     'Supabase',
     'PostHog',
