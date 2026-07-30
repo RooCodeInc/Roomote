@@ -8,6 +8,7 @@ import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockFinishRun,
+  mockReportTaskPlatformIssue,
   mockCaptureControllerException,
   mockCaptureControllerMessage,
   mockTaskRunsFindFirst,
@@ -23,6 +24,7 @@ const {
   mockSyncTaskStateFromRuns,
 } = vi.hoisted(() => ({
   mockFinishRun: vi.fn().mockResolvedValue(undefined),
+  mockReportTaskPlatformIssue: vi.fn().mockResolvedValue(undefined),
   mockCaptureControllerException: vi.fn(),
   mockCaptureControllerMessage: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
@@ -49,6 +51,8 @@ const {
 
 vi.mock('@roomote/sdk/server', () => ({
   finishRun: (...args: unknown[]) => mockFinishRun(...args),
+  reportTaskPlatformIssue: (...args: unknown[]) =>
+    mockReportTaskPlatformIssue(...args),
 }));
 
 const mockDbUpdateSet = vi.fn().mockReturnValue({
@@ -129,6 +133,7 @@ vi.mock('../monitoring/sentry', () => ({
 // ── Import after mocks ──────────────────────────────────────────────────────
 
 import { BaseController } from '../BaseController';
+import { ModalRpcError } from '@roomote/compute-providers';
 import { DockerBootError } from '../compute-providers/docker-sandbox-security';
 
 // Create a concrete subclass for testing the abstract BaseController.
@@ -388,6 +393,98 @@ describe('BaseController.handleSpawnTaskRunError', () => {
         errorCode: TaskRunErrorCode.DockerImageMissing,
       }),
     );
+  });
+
+  it('reports a platform issue when Modal rejects a start at the concurrent sandbox limit', async () => {
+    const job = makeTaskRun({
+      id: 13,
+      taskId: 'task-capacity',
+      vendor: 'modal',
+    });
+    const error = new ModalRpcError(
+      'Concurrent sandbox limit exceeded for this workspace',
+      {
+        grpcStatus: 'RESOURCE_EXHAUSTED',
+        operation: 'create_instance',
+        rpcMethod: 'SandboxCreate',
+        rpcPath: '/modal.client.ModalClient/SandboxCreate',
+        rpcService: 'modal.client.ModalClient',
+      },
+    );
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(job, error),
+    ).rejects.toThrow('Concurrent sandbox limit exceeded');
+
+    expect(mockReportTaskPlatformIssue).toHaveBeenCalledWith({
+      taskId: 'task-capacity',
+      runId: 13,
+      report: {
+        title: 'Concurrent sandbox limit reached',
+        summary:
+          'A task could not start because the Modal workspace reached its concurrent sandbox limit.',
+      },
+    });
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 13,
+      status: RunStatus.Failed,
+      error: 'Concurrent sandbox limit exceeded for this workspace',
+    });
+  });
+
+  it('still finalizes the failed start when the platform alert callback fails', async () => {
+    const job = makeTaskRun({
+      id: 14,
+      taskId: 'task-capacity',
+      vendor: 'modal',
+    });
+    const error = new ModalRpcError(
+      'You have reached the maximum number of running Sandboxes',
+      {
+        grpcStatus: 'RESOURCE_EXHAUSTED',
+        operation: 'create_instance',
+        rpcMethod: 'SandboxCreate',
+        rpcPath: '/modal.client.ModalClient/SandboxCreate',
+        rpcService: 'modal.client.ModalClient',
+      },
+    );
+    mockReportTaskPlatformIssue.mockRejectedValueOnce(
+      new Error('Slack unavailable'),
+    );
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(job, error),
+    ).rejects.toThrow('maximum number of running Sandboxes');
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 14,
+      status: RunStatus.Failed,
+      error: 'You have reached the maximum number of running Sandboxes',
+    });
+    expect(mockCaptureControllerException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        runId: 14,
+        phase: 'concurrent_sandbox_limit_alert',
+      }),
+    );
+  });
+
+  it('does not report unrelated Modal resource exhaustion as a sandbox limit', async () => {
+    const job = makeTaskRun({ id: 15, vendor: 'modal' });
+    const error = new ModalRpcError('GPU quota exhausted', {
+      grpcStatus: 'RESOURCE_EXHAUSTED',
+      operation: 'create_instance',
+      rpcMethod: 'SandboxCreate',
+      rpcPath: '/modal.client.ModalClient/SandboxCreate',
+      rpcService: 'modal.client.ModalClient',
+    });
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(job, error),
+    ).rejects.toThrow('GPU quota exhausted');
+
+    expect(mockReportTaskPlatformIssue).not.toHaveBeenCalled();
   });
 
   it('classifies untyped docker failures from the formatted message', async () => {

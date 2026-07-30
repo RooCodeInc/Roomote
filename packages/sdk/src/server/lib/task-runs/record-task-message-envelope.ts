@@ -291,6 +291,50 @@ async function maybeNotifyPlatformIssue(params: {
   await markPlatformIssueReportPosted(params.reportRowId);
 }
 
+export async function reportTaskPlatformIssue(params: {
+  taskId: string;
+  runId: number;
+  taskMessageId?: string;
+  report: { title: string; summary: string };
+}): Promise<void> {
+  const values = {
+    taskId: params.taskId,
+    runId: params.runId,
+    taskMessageId: params.taskMessageId ?? null,
+    report: params.report,
+  };
+  const returning = {
+    id: taskPlatformIssueReports.id,
+    taskId: taskPlatformIssueReports.taskId,
+    report: taskPlatformIssueReports.report,
+    slackPostedAt: taskPlatformIssueReports.slackPostedAt,
+  };
+  const [insertedRow] = params.taskMessageId
+    ? await db
+        .insert(taskPlatformIssueReports)
+        .values(values)
+        .onConflictDoUpdate({
+          target: taskPlatformIssueReports.taskMessageId,
+          set: values,
+        })
+        .returning(returning)
+    : await db
+        .insert(taskPlatformIssueReports)
+        .values(values)
+        .returning(returning);
+
+  if (!insertedRow) {
+    return;
+  }
+
+  await maybeNotifyPlatformIssue({
+    reportRowId: insertedRow.id,
+    taskId: insertedRow.taskId,
+    report: insertedRow.report,
+    slackPostedAt: insertedRow.slackPostedAt,
+  });
+}
+
 async function maybePersistPlatformIssueReport(params: {
   input: RecordTaskMessageEnvelopeInput;
   taskMessageId: string;
@@ -303,50 +347,11 @@ async function maybePersistPlatformIssueReport(params: {
     return;
   }
 
-  const [insertedRow] = await db
-    .insert(taskPlatformIssueReports)
-    .values({
-      taskId: params.input.taskId,
-      runId: params.input.runId,
-      taskMessageId: params.taskMessageId,
-      report,
-    })
-    .onConflictDoUpdate({
-      target: taskPlatformIssueReports.taskMessageId,
-      set: {
-        taskId: params.input.taskId,
-        runId: params.input.runId,
-        report,
-      },
-    })
-    .returning({
-      id: taskPlatformIssueReports.id,
-      taskId: taskPlatformIssueReports.taskId,
-      report: taskPlatformIssueReports.report,
-      slackPostedAt: taskPlatformIssueReports.slackPostedAt,
-    });
-
-  const reportRow =
-    insertedRow ??
-    (await db.query.taskPlatformIssueReports.findFirst({
-      where: eq(taskPlatformIssueReports.taskMessageId, params.taskMessageId),
-      columns: {
-        id: true,
-        taskId: true,
-        report: true,
-        slackPostedAt: true,
-      },
-    }));
-
-  if (!reportRow) {
-    return;
-  }
-
-  await maybeNotifyPlatformIssue({
-    reportRowId: reportRow.id,
-    taskId: reportRow.taskId,
-    report: reportRow.report,
-    slackPostedAt: reportRow.slackPostedAt,
+  await reportTaskPlatformIssue({
+    taskId: params.input.taskId,
+    runId: params.input.runId,
+    taskMessageId: params.taskMessageId,
+    report,
   });
 }
 

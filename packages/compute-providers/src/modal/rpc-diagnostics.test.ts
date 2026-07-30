@@ -1,6 +1,7 @@
 import { ModalRpcError } from '../errors';
 import {
   buildModalRpcErrorEnrichment,
+  isModalConcurrentSandboxLimitError,
   normalizeModalRpcError,
   parseModalRpcErrorMetadata,
   resolveModalRpcErrorEnrichment,
@@ -95,6 +96,52 @@ describe('Modal RPC diagnostics', () => {
       });
 
       expect(normalizeModalRpcError(original, 'command_exec')).toBe(original);
+    });
+  });
+
+  describe('isModalConcurrentSandboxLimitError', () => {
+    it.each([
+      'Concurrent sandbox limit exceeded for this workspace',
+      'You have reached the maximum number of running Sandboxes',
+      'Active sandboxes are at the workspace limit',
+    ])('recognizes sandbox capacity errors: %s', (message) => {
+      const error = new ModalRpcError(message, {
+        grpcStatus: 'RESOURCE_EXHAUSTED',
+        operation: 'create_instance',
+        rpcMethod: 'SandboxCreate',
+        rpcPath: '/modal.client.ModalClient/SandboxCreate',
+        rpcService: 'modal.client.ModalClient',
+      });
+
+      expect(isModalConcurrentSandboxLimitError(error)).toBe(true);
+    });
+
+    it.each([
+      {
+        grpcStatus: 'RESOURCE_EXHAUSTED',
+        message: 'GPU quota exhausted',
+        operation: 'create_instance',
+      },
+      {
+        grpcStatus: 'RESOURCE_EXHAUSTED',
+        message: 'Concurrent sandbox limit exceeded for this workspace',
+        operation: 'secret_resolve',
+      },
+      {
+        grpcStatus: 'UNAVAILABLE',
+        message: 'Concurrent sandbox limit exceeded for this workspace',
+        operation: 'create_instance',
+      },
+    ])('rejects unrelated resource errors: $message', (input) => {
+      const error = new ModalRpcError(input.message, {
+        grpcStatus: input.grpcStatus,
+        operation: input.operation,
+        rpcMethod: 'SandboxCreate',
+        rpcPath: '/modal.client.ModalClient/SandboxCreate',
+        rpcService: 'modal.client.ModalClient',
+      });
+
+      expect(isModalConcurrentSandboxLimitError(error)).toBe(false);
     });
   });
 
