@@ -419,21 +419,21 @@ jobs:
         if: ${{ steps.publish_release.outputs.created == 'true' }}
         continue-on-error: true
         env:
-          DISCORD_ANNOUNCEMENTS_WEBHOOK_URL: ${{ secrets.DISCORD_ANNOUNCEMENTS_WEBHOOK_URL }}
+          DISCORD_MAIN_WEBHOOK_URL: ${{ secrets.DISCORD_MAIN_WEBHOOK_URL }}
           GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ -z "${DISCORD_ANNOUNCEMENTS_WEBHOOK_URL:-}" ]; then
-            echo "::notice::DISCORD_ANNOUNCEMENTS_WEBHOOK_URL is not configured; skipping the Discord release announcement."
+          if [ -z "${DISCORD_MAIN_WEBHOOK_URL:-}" ]; then
+            echo "::notice::DISCORD_MAIN_WEBHOOK_URL is not configured; skipping the Discord release announcement."
             exit 0
           fi
 
           # Custom Discord payloads use the base webhook endpoint. Also accept
           # URLs copied from the native GitHub integration setup for convenience.
-          webhook_url="${DISCORD_ANNOUNCEMENTS_WEBHOOK_URL%/github}"
+          webhook_url="${DISCORD_MAIN_WEBHOOK_URL%/github}"
           payload_file="$(mktemp)"
           trap 'rm -f "$payload_file"' EXIT
 
