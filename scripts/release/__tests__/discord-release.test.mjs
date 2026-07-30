@@ -3,30 +3,48 @@ import { describe, it } from 'node:test';
 import { buildDiscordReleasePayload } from '../lib.mjs';
 
 describe('Discord release announcement', () => {
-  it('creates a branded release payload', () => {
+  it('creates a regular announcement without patch changes', () => {
+    const url = 'https://github.com/RooCodeInc/Roomote/releases/tag/v0.24.1';
     const payload = buildDiscordReleasePayload({
-      name: 'Roomote v0.24.1',
-      body: '### Highlights\n\n- A useful new capability',
-      url: 'https://github.com/RooCodeInc/Roomote/releases/tag/v0.24.1',
+      name: '0.24.1 (2026-07-29)',
+      body: [
+        'A useful release.',
+        '',
+        '### Highlights',
+        '',
+        '- A useful new capability',
+        '',
+        '### Patch changes',
+        '',
+        '- Internal patch details',
+      ].join('\n'),
+      url,
       publishedAt: '2026-07-29T18:00:00Z',
       tagName: 'v0.24.1',
     });
 
     assert.equal(payload.username, 'Roomote Releases');
-    assert.deepEqual(payload.allowed_mentions, { parse: [] });
-    assert.deepEqual(payload.embeds, [
-      {
-        title: 'Roomote v0.24.1 is now available',
-        url: 'https://github.com/RooCodeInc/Roomote/releases/tag/v0.24.1',
-        description: '### Highlights\n\n- A useful new capability',
-        color: 0xb0cd26,
-        footer: { text: 'RooCodeInc/Roomote • GitHub Release' },
-        timestamp: '2026-07-29T18:00:00Z',
-      },
-    ]);
+    assert.deepEqual(payload.allowed_mentions, { parse: ['everyone'] });
+    assert.equal(
+      payload.content,
+      [
+        '@everyone',
+        '',
+        '# Roomote 0.24.1 is out!',
+        '',
+        'A useful release.',
+        '',
+        '### Highlights',
+        '',
+        '- A useful new capability',
+        '',
+        `See the full release notes [v0.24.1](${url}). Let us know what you think!`,
+      ].join('\n'),
+    );
+    assert.equal('embeds' in payload, false);
   });
 
-  it('truncates long notes with a release link', () => {
+  it('truncates long notes while keeping the release link', () => {
     const url = 'https://github.com/RooCodeInc/Roomote/releases/tag/v0.24.1';
     const payload = buildDiscordReleasePayload({
       name: '',
@@ -34,14 +52,12 @@ describe('Discord release announcement', () => {
       url,
       tagName: 'v0.24.1',
     });
-    const [embed] = payload.embeds;
-
-    assert.equal(embed.title, 'Roomote v0.24.1 is now available');
-    assert.ok(embed.description.length <= 4096);
+    assert.ok(payload.content.length <= 2000);
     assert.match(
-      embed.description,
-      new RegExp(`…\\n\\n\\[Read the full release notes\\]\\(${url}\\)$`),
+      payload.content,
+      new RegExp(
+        `…\\n\\nSee the full release notes \\[v0\\.24\\.1\\]\\(${url}\\)\\. Let us know what you think!$`,
+      ),
     );
-    assert.equal('timestamp' in embed, false);
   });
 });

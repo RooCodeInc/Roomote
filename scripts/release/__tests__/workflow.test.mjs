@@ -41,8 +41,8 @@ test('GHCR release workflow announces only newly created releases in Discord', (
   );
   assert.equal(announceRelease['continue-on-error'], true);
   assert.equal(
-    announceRelease.env.DISCORD_MAIN_WEBHOOK_URL,
-    '${{ secrets.DISCORD_MAIN_WEBHOOK_URL }}',
+    announceRelease.env.DISCORD_ANNOUNCEMENTS_WEBHOOK_URL,
+    '${{ secrets.DISCORD_ANNOUNCEMENTS_WEBHOOK_URL }}',
   );
   assert.match(announceRelease.run, /build-discord-release-payload\.mjs/);
   assert.match(announceRelease.run, /--retry-all-errors/);
