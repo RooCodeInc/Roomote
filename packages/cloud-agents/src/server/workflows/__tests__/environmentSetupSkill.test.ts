@@ -14,6 +14,38 @@ function readSkillContent() {
 }
 
 describe('environment-setup guidance', () => {
+  it('follows repo-local agent guidance and codified setup configuration', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'read the applicable repo-local `AGENTS.md` guidance',
+    );
+    expect(skillContent).toContain(
+      "git -C <repo-dir> ls-files -- AGENTS.md '**/AGENTS.md'",
+    );
+    expect(skillContent).toContain(
+      'read the repo root `AGENTS.md` through the nearest ancestor file',
+    );
+    expect(skillContent).toContain(
+      'Inspect package-manager policy and configuration files such as `.npmrc`, `.yarnrc*`, pnpm config, and ecosystem equivalents.',
+    );
+    expect(skillContent).toContain(
+      'including declared package-manager and engine requirements such as `packageManager`, Corepack configuration, and `engines`',
+    );
+    expect(skillContent).toContain(
+      'Inspect tool version and toolchain files such as `.tool-versions`, `mise.toml`, `.mise.toml`, `.nvmrc`, `.node-version`, `.python-version`, and ecosystem equivalents.',
+    );
+    expect(skillContent).toContain(
+      "represent clearly discovered pins in `tool_versions` when the runtime would not otherwise install them from the repository's native file",
+    );
+    expect(skillContent).toContain(
+      'Only map unambiguous exact versions to known Mise tool names; do not copy version ranges, aliases, integrity-suffixed package-manager descriptors, or unsupported native syntax into `tool_versions` without a validated mapping.',
+    );
+    expect(skillContent).toContain(
+      'Never expose credentials or tokens found in those files.',
+    );
+  });
+
   it('requests known-required environment variables proactively', () => {
     const skillContent = readSkillContent();
 
