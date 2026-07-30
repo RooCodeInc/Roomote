@@ -1,0 +1,50 @@
+---
+title: Together AI
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/together-color.svg'
+description: Use Together AI's hosted open-model catalog for Roomote tasks.
+---
+
+Together AI hosts a broad catalog of open and specialized models behind one
+inference API. Roomote's direct provider exposes a curated subset suited to
+coding and agent work.
+
+## Get an API key
+
+Create a key from [Together AI API key settings](https://api.together.ai/settings/api-keys).
+Make sure the account has credits or billing enabled for the models you select.
+
+## Configuration
+
+Add **Together AI** in **Settings > Models** and paste the key, or configure:
+
+```sh
+TOGETHER_API_KEY=...
+```
+
+Roomote adds supported models with the `togetherai/` prefix. Enable the models
+you want and assign the default coding and specialized roles. Provider model
+names are case-sensitive, so use the IDs shown in Roomote rather than typing a
+similar slug from another gateway.
+
+## Cost behavior
+
+Together AI charges the connected account according to the selected serverless
+model or dedicated endpoint. Roomote records usage and estimates cost when model
+metadata includes pricing; Together AI billing and the [pricing page](https://www.together.ai/pricing)
+are authoritative.
+
+## Verify setup
+
+1. save `TOGETHER_API_KEY`
+2. confirm Together AI models appear in **Settings > Models**
+3. enable one model and assign it as the coding model
+4. run a small task and confirm the request appears in Together AI usage
+
+## Common issues
+
+- **Authentication or balance errors occur.** Confirm the key is active and the
+  account has enough credit.
+- **A model ID is rejected.** Use the exact `togetherai/...` ID shown in Roomote;
+  IDs from OpenRouter or another provider are not interchangeable.
+- **Requests are queued or throttled.** Check the model's serverless limits or
+  dedicated endpoint capacity and reduce concurrent Roomote tasks.

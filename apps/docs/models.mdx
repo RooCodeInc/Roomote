@@ -15,11 +15,8 @@ Configure models from **Settings > Models**.
 ## Inference providers
 
 An inference provider is the service that hosts or routes model calls. Roomote
-supports providers such as OpenRouter, Vercel AI Gateway, Baseten,
-Together AI, OpenAI, Anthropic, Moonshot AI, Kimi for Coding, MiniMax, Z.AI,
-Z.AI Coding Plan, OpenCode, Amazon Bedrock, Google Gemini, xAI (API key or
-Grok subscription), GitHub Copilot, ChatGPT subscriptions, and
-OpenAI-compatible endpoints such as LiteLLM, Ollama, and vLLM.
+supports direct model APIs, multi-provider gateways, coding subscriptions, and
+self-hosted OpenAI-compatible endpoints.
 
 You can connect more than one inference provider in the same deployment. That
 lets you mix and match models by provider instead of betting the whole
@@ -39,6 +36,43 @@ in the setup wizard and from **Settings > Models**. You stay in control: you
 can disable or remove any of the added models, add more later, and reconnecting
 a provider never re-adds models you removed.
 
+### API and gateway providers
+
+These connections use metered API billing or a provider-managed gateway:
+
+| Provider | Credential | Cost source |
+| --- | --- | --- |
+| [Amazon Bedrock](/providers/inference/amazon-bedrock) | Mantle API key and optional AWS region | AWS account |
+| [Anthropic](/providers/inference/anthropic) | Anthropic API key | Anthropic API organization |
+| [Baseten](/providers/inference/baseten) | Baseten API key | Baseten workspace |
+| [Google Gemini](/providers/inference/google-gemini) | Google AI Studio key | Google Cloud project |
+| [MiniMax](/providers/inference/minimax) | MiniMax API key | MiniMax account |
+| [Moonshot AI (Kimi)](/providers/inference/moonshot-ai) | Kimi Open Platform key | Moonshot Open Platform balance |
+| [OpenAI](/providers/inference/openai) | OpenAI API key | OpenAI API project |
+| [OpenCode Zen / Go](/providers/inference/opencode) | OpenCode API key | OpenCode account |
+| [OpenRouter](/providers/inference/openrouter) | OpenRouter API key | OpenRouter balance and key limit |
+| [Together AI](/providers/inference/together-ai) | Together AI API key | Together AI account |
+| [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) | AI Gateway API key | Vercel team |
+| [xAI](/providers/inference/xai) | xAI API key | xAI API team |
+| [Z.AI](/providers/inference/zai) | Regional Z.AI platform key | Z.AI or BigModel API balance |
+
+### Subscription providers
+
+Subscription connections consume an included plan allowance instead of a
+general API balance:
+
+| Provider | Connection | Usage behavior |
+| --- | --- | --- |
+| [ChatGPT Subscription](/providers/inference/chatgpt) | OpenAI device authorization | ChatGPT plan windows |
+| [GitHub Copilot](/providers/inference/github-copilot) | GitHub device authorization | Copilot plan and premium requests |
+| [Kimi for Coding](/providers/inference/kimi-for-coding) | Kimi membership key | Coding membership allowance |
+| [xAI Grok Subscription](/providers/inference/xai-subscription) | xAI account authorization | SuperGrok or eligible X plan allowance |
+| [Z.AI Coding Plan](/providers/inference/zai-coding-plan) | Regional Coding Plan key | Coding Plan quota windows |
+
+Roomote shows plan usage for subscription providers when the provider returns
+usable quota data. These usage endpoints are not always documented or stable,
+so a missing usage line does not by itself mean the connection is broken.
+
 ### Self-hosted and gateway providers
 
 OpenAI-compatible endpoints let you bring any server that speaks the OpenAI
@@ -50,9 +84,9 @@ deployment.
 
 | Provider | Best for | Setup |
 | --- | --- | --- |
-| [OpenAI-compatible](/providers/inference/openai-compatible) | Any OpenAI API endpoint (LiteLLM, vLLM, custom proxies, local servers); multiple named connections supported | Connection name, endpoint URL, and optional API key |
 | [LiteLLM](/providers/inference/litellm) | A single gateway that routes to one or more model vendors | Endpoint URL and required API key |
 | [Ollama](/providers/inference/ollama) | Local or private model serving without provider API keys | Endpoint URL |
+| [OpenAI-compatible](/providers/inference/openai-compatible) | Any OpenAI API endpoint (LiteLLM, vLLM, custom proxies, local servers); multiple named connections supported | Connection name, endpoint URL, and optional API key |
 | [vLLM](/providers/inference/vllm) | Serving OpenAI-compatible models on your own GPU infrastructure | Endpoint URL and optional API key |
 
 These endpoints must be reachable from the Roomote deployment, not merely from

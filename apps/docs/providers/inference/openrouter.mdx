@@ -1,0 +1,51 @@
+---
+title: OpenRouter
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/openrouter-color.svg'
+description: Access models from many vendors through one OpenRouter account and key.
+---
+
+OpenRouter is a multi-provider inference gateway with a broad model catalog and
+provider routing controls. It is Roomote's default inference option because one
+connection can cover many recommended models.
+
+## Get an API key
+
+Create a key on the [OpenRouter keys page](https://openrouter.ai/settings/keys).
+Add credits or configure the account's billing and set an optional key spending
+limit before connecting it to Roomote.
+
+## Configuration
+
+Add **OpenRouter** in **Settings > Models** and paste the key, or configure:
+
+```sh
+OPENROUTER_API_KEY=...
+```
+
+Models use the `openrouter/<vendor>/<model>` form. Roomote adds its full curated
+recommended set and offers balanced and quick-turnaround mapping presets. You
+can still disable recommendations or add another OpenRouter model by slug.
+
+## Cost behavior
+
+OpenRouter deducts model and provider-route usage from the account balance. Its
+model catalog shows current pricing and any route-specific differences. Roomote
+records usage, estimates model cost, and displays the remaining key limit when
+OpenRouter returns one. The [OpenRouter activity page](https://openrouter.ai/activity)
+and account balance are authoritative.
+
+## Verify setup
+
+1. save `OPENROUTER_API_KEY`
+2. confirm the recommended model list appears
+3. apply a mapping preset or select a default coding model
+4. run a small task and confirm the request appears in OpenRouter activity
+5. check that Roomote shows a remaining key limit when the key has one
+
+## Common issues
+
+- **The key has no usable balance.** Add credits or raise its spending limit.
+- **A model has no available route.** Check provider routing, privacy settings,
+  and model availability in OpenRouter, or select a fallback model.
+- **The credit line is absent.** Roomote only shows it when OpenRouter returns a
+  numeric remaining limit; uncapped keys may not display one.

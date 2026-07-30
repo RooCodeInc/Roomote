@@ -1,0 +1,50 @@
+---
+title: Vercel AI Gateway
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/vercel.svg'
+description: Route Roomote model calls through Vercel AI Gateway.
+---
+
+Vercel AI Gateway provides one endpoint for models from multiple vendors, with
+centralized usage, budgets, and routing. Use it when your team already manages
+AI access through a Vercel team or project.
+
+## Get an API key
+
+Follow Vercel's [AI Gateway authentication guide](https://vercel.com/docs/ai-gateway/authentication)
+to create an AI Gateway API key for the intended team. Configure billing or
+provider credentials in Vercel as required by the models you plan to use.
+
+## Configuration
+
+Add **Vercel AI Gateway** in **Settings > Models** and paste the key, or set:
+
+```sh
+AI_GATEWAY_API_KEY=...
+```
+
+Roomote exposes supported models under the `vercel/<vendor>/<model>` prefix and
+adds a recommended cross-vendor set. Apply the recommended mapping or choose
+models individually for each role.
+
+## Cost behavior
+
+Vercel records gateway usage and applies the billing terms, budgets, and
+upstream provider pricing configured for the team. Roomote records token usage
+and estimates model cost from metadata; Vercel's AI Gateway usage and invoice
+are authoritative. See [AI Gateway pricing](https://vercel.com/docs/ai-gateway/pricing).
+
+## Verify setup
+
+1. save `AI_GATEWAY_API_KEY`
+2. confirm Vercel models appear in **Settings > Models**
+3. enable a model and assign it to the coding role
+4. run a small task and confirm it appears in Vercel AI Gateway usage
+
+## Common issues
+
+- **The key is rejected.** Confirm it is an AI Gateway key for the intended
+  Vercel team, not an unrelated Vercel access token.
+- **A model cannot be routed.** Check model availability, provider credentials,
+  budgets, and routing policy in Vercel.
+- **A budget blocks tasks.** Raise the applicable Vercel budget or select a model
+  and provider route with available capacity.

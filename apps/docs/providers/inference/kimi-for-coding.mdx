@@ -1,0 +1,52 @@
+---
+title: Kimi for Coding
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/kimi-color.svg'
+description: Connect a Kimi for Coding membership key and use its included coding models.
+---
+
+Kimi for Coding is Moonshot AI's membership-based coding service. Its keys use a
+dedicated coding endpoint and are not interchangeable with Moonshot Open
+Platform API keys.
+
+## Get a membership key
+
+Activate a Kimi for Coding membership, then create a key in the
+[Kimi Code console](https://www.kimi.com/code/console). Use the separate
+[Moonshot AI provider](/providers/inference/moonshot-ai) for keys created at
+`platform.kimi.ai`.
+
+## Configuration
+
+Add **Kimi for Coding** in **Settings > Models** and paste the membership key,
+or configure:
+
+```sh
+KIMI_API_KEY=...
+```
+
+Roomote exposes supported models under the `kimi-for-coding/` prefix. The
+recommended mappings can use Kimi's stronger model for coding, vision, planning,
+and review while assigning its faster coding model to helper and explore work.
+
+## Cost behavior
+
+Requests consume the allowance included with the Kimi for Coding membership,
+not a Moonshot Open Platform API balance. Roomote displays the provider-reported
+usage window when the Kimi service returns it. Plan limits and renewal behavior
+in the Kimi Code console are authoritative.
+
+## Verify setup
+
+1. save `KIMI_API_KEY`
+2. confirm Kimi for Coding models appear in **Settings > Models**
+3. apply a recommended mapping or assign one model manually
+4. run a small task and confirm the membership usage display updates
+
+## Common issues
+
+- **The key is rejected.** Confirm it came from the Kimi Code console after
+  membership activation, not the Moonshot Open Platform.
+- **The allowance is exhausted.** Wait for the plan window to reset or change
+  to a separately billed inference provider.
+- **Usage is missing.** Kimi's usage endpoint can change or be unavailable;
+  model requests may still work normally.

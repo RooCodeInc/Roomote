@@ -1,0 +1,50 @@
+---
+title: Google Gemini
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/gemini-color.svg'
+description: Use Google Gemini API models directly through an AI Studio key.
+---
+
+Google Gemini provides direct API access to Gemini models. Use it when you want
+Google-managed inference without routing through another gateway.
+
+## Get an API key
+
+Create a key in [Google AI Studio](https://aistudio.google.com/app/apikey). The
+key's Google Cloud project must have the Gemini API available and any required
+billing configured.
+
+## Configuration
+
+Add **Google Gemini** in **Settings > Models** and paste the key, or configure:
+
+```sh
+GEMINI_API_KEY=...
+```
+
+Roomote adds recommended Gemini models under the `google/` prefix. A practical
+mapping uses a Pro model for coding and planning and a Flash model for helper
+and explore work. Refresh model metadata after Google changes preview model IDs.
+
+## Cost behavior
+
+Google applies model-specific input, output, caching, and context pricing. Some
+projects may have free-tier quotas, but production workloads should not assume
+free capacity. Roomote records usage and estimates model cost; Google Cloud
+billing and [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing)
+remain authoritative.
+
+## Verify setup
+
+1. save `GEMINI_API_KEY`
+2. confirm Gemini models appear in **Settings > Models**
+3. enable a model and assign it to the coding or another role
+4. run a small task and confirm usage reaches the key's Google Cloud project
+
+## Common issues
+
+- **The key is rejected.** Confirm it came from AI Studio and that the Gemini
+  API is available in the associated project.
+- **A preview model stops resolving.** Refresh model metadata and select its
+  current replacement; Google periodically retires preview IDs.
+- **Quota errors occur.** Check project quota and billing in Google AI Studio or
+  Google Cloud, then reduce concurrency or request more quota.
