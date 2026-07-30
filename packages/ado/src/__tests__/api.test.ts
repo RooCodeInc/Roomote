@@ -89,7 +89,6 @@ import {
   getLatestAdoBuild,
   listAdoRepositories,
   normalizeAdoLinkedAccountKey,
-  resolveAdoToken,
   selectInnermostFailedAdoTimelineRecords,
   validateAdoDelegatedCredentials,
   validateAdoEntraCredentials,
