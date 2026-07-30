@@ -54,6 +54,46 @@ describe('inference gateway URL builders', () => {
     );
   });
 
+  it.each([
+    [
+      'azure',
+      'AZURE_API_KEY',
+      'AZURE_RESOURCE_NAME',
+      'https://{resource}.openai.azure.com/openai',
+    ],
+    [
+      'azure-cognitive-services',
+      'AZURE_COGNITIVE_SERVICES_API_KEY',
+      'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
+      'https://{resource}.cognitiveservices.azure.com/openai',
+    ],
+  ] as const)(
+    'registers %s with a resource-templated Azure upstream',
+    (providerId, apiKeyEnvVarName, resourceEnvVarName, upstreamBaseUrl) => {
+      const provider = getInferenceGatewayProvider(providerId);
+
+      expect(provider).toMatchObject({
+        envVarNames: [apiKeyEnvVarName],
+        upstreamBaseUrl,
+        resource: { envVarName: resourceEnvVarName },
+        authHeader: { name: 'api-key' },
+        openCodeBaseUrlSuffix: '',
+      });
+      expect(provider?.allowedPaths).toEqual(
+        expect.arrayContaining(['/v1/chat/completions', '/v1/responses']),
+      );
+      expect(
+        getInferenceGatewayProviderByEnvVarName(apiKeyEnvVarName)?.id,
+      ).toBe(providerId);
+      expect(
+        buildInferenceGatewayOpenCodeBaseUrl(
+          'https://api.example.com/api/inference',
+          provider!,
+        ),
+      ).toBe(`https://api.example.com/api/inference/${providerId}`);
+    },
+  );
+
   it('registers Z.AI providers with v4 bases and empty OpenCode suffix', () => {
     const zai = getInferenceGatewayProvider('zai');
     expect(zai).toMatchObject({

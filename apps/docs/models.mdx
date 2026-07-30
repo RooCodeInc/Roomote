@@ -44,6 +44,8 @@ These connections use metered API billing or a provider-managed gateway:
 | --- | --- | --- |
 | [Amazon Bedrock](/providers/inference/amazon-bedrock) | Mantle API key and optional AWS region | AWS account |
 | [Anthropic](/providers/inference/anthropic) | Anthropic API key | Anthropic API organization |
+| [Azure AI Foundry](/providers/inference/azure-foundry) | Azure AI Services API key and resource name | Azure subscription |
+| [Azure OpenAI](/providers/inference/azure-openai) | Azure OpenAI API key and resource name | Azure subscription |
 | [Baseten](/providers/inference/baseten) | Baseten API key | Baseten workspace |
 | [Google Gemini](/providers/inference/google-gemini) | Google AI Studio key | Google Cloud project |
 | [MiniMax](/providers/inference/minimax) | MiniMax API key | MiniMax account |
@@ -150,8 +152,9 @@ R_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
 R_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
-Roomote automatically forwards common provider keys to task workers, including
-OpenRouter, Vercel AI Gateway, OpenAI, Anthropic, Google Gemini,
+Roomote automatically forwards common provider configuration to task workers,
+including OpenRouter, Vercel AI Gateway, OpenAI, Azure OpenAI, Azure AI Foundry,
+Anthropic, Google Gemini,
 Moonshot, Kimi for Coding, MiniMax, Z.AI, OpenCode, Amazon Bedrock, xAI, and
 GitHub Copilot keys.
 Use `R_MODEL_ENV_KEYS` when a provider key uses a custom env var name:

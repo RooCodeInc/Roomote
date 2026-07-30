@@ -22,6 +22,8 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'baseten',
   'togetherai',
   'openai',
+  'azure',
+  'azure-cognitive-services',
   'anthropic',
   'moonshotai',
   'kimi-for-coding',
