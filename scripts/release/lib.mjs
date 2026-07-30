@@ -231,7 +231,7 @@ export function buildDiscordReleasePayload(release) {
 
   const version = tagName.replace(/^v/i, '');
   const versionTag = `v${version}`;
-  const prefix = `@everyone\n\n# Roomote ${version} is out!`;
+  const prefix = `# Roomote ${version} is out!`;
   const suffix = `See the full release notes [${versionTag}](${url}). Let us know what you think!`;
   const body =
     typeof release.body === 'string'
@@ -246,7 +246,7 @@ export function buildDiscordReleasePayload(release) {
   return {
     username: 'Roomote Releases',
     content,
-    allowed_mentions: { parse: ['everyone'] },
+    allowed_mentions: { parse: [] },
   };
 }
 
