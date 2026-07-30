@@ -409,6 +409,15 @@ describe('azure adapter contract', () => {
     expect(resumed?.instanceId).toBe(SANDBOX_ID);
     expect(resumed?.status).toBe('running');
     expect(requests.some((r) => r.url.includes('/resume'))).toBe(true);
+
+    // Resume refreshes the auto-delete window so the provider deadline
+    // realigns with the worker's fresh Roomote timeout.
+    const lifecyclePost = requests.find(
+      (r) => r.method === 'POST' && r.url.includes('/lifecycle'),
+    );
+    expect(lifecyclePost?.body).toMatchObject({
+      autoDeletePolicy: { enabled: true, deleteIntervalInSeconds: 3600 },
+    });
   });
 
   it('destroys an instance and reports usage', async () => {

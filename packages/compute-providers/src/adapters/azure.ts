@@ -6,6 +6,11 @@ import {
 } from '@roomote/types';
 
 import { raceWithAbort, sleepWithSignal, throwIfAborted } from '../modal/abort';
+import {
+  acquireAzureToken,
+  createAzureCredential,
+  type AzureTokenCredential,
+} from '../azure/credentials';
 import type {
   AzureConfig,
   CommandOutputEvent,
@@ -53,8 +58,6 @@ const DETACHED_EXIT_POLL_MAX_MS = 12 * 60 * 60 * 1_000;
 const RETRY_MAX_ATTEMPTS = 8;
 const RETRY_INITIAL_DELAY_MS = 1_000;
 const RETRY_MAX_DELAY_MS = 10_000;
-
-const CREDENTIAL_TIMEOUT_MS = 15_000;
 
 const HTTP_DEBUG =
   process.env.AZURE_HTTP_DEBUG === '1' ||
@@ -143,11 +146,7 @@ export class AzureClient implements ComputeProviderClient {
   private readonly endpoint: string;
   private readonly groupPath: string;
   private readonly fetchImpl: typeof fetch;
-  private credentialPromise?: Promise<{
-    getToken(
-      scope: string,
-    ): Promise<{ token: string; expiresOnTimestamp: number }>;
-  }>;
+  private credentialPromise?: Promise<AzureTokenCredential>;
   private cachedToken?: { token: string; expiresOnTimestamp: number };
 
   public constructor(private readonly config: AzureConfig) {
@@ -704,6 +703,31 @@ export class AzureClient implements ComputeProviderClient {
       await this.waitForState(input.resumeHandle, ['Running'], input.signal);
     }
 
+    // Refresh the auto-delete window: the policy interval is measured from
+    // sandbox creation, so without this a resumed worker's fresh Roomote
+    // timeout would outlive the provider-side deadline (and standby
+    // retention beyond one timeout window would be unreachable). Preserves
+    // the sandbox's existing auto-suspend policy.
+    if (this.config.timeoutMs) {
+      await this.request(
+        'POST',
+        `${this.sandboxPath(input.resumeHandle)}/lifecycle`,
+        {
+          body: {
+            autoSuspendPolicy: current.lifecycle?.autoSuspendPolicy ?? {
+              enabled: false,
+            },
+            autoDeletePolicy: {
+              enabled: true,
+              deleteIntervalInSeconds: Math.ceil(this.config.timeoutMs / 1_000),
+            },
+          },
+          signal: input.signal,
+          abortMessage: `Refreshing auto-delete policy for Azure sandbox ${input.resumeHandle} was aborted`,
+        },
+      );
+    }
+
     // Ports persist through stop/resume (measured); ensure anyway so callers
     // always get domains back.
     const domains = await this.ensurePorts(
@@ -1059,40 +1083,18 @@ export class AzureClient implements ComputeProviderClient {
             ? 'user-assigned-mi'
             : 'default-chain',
       });
-      this.credentialPromise = import('@azure/identity').then(
-        ({
-          ClientSecretCredential,
-          DefaultAzureCredential,
-          ManagedIdentityCredential,
-        }) => {
-          // Deterministic order: explicit service principal (container
-          // deployments) > user-assigned MI > ambient chain (az login,
-          // system-assigned MI).
-          if (this.config.servicePrincipal) {
-            const { tenantId, clientId, clientSecret } =
-              this.config.servicePrincipal;
-            return new ClientSecretCredential(tenantId, clientId, clientSecret);
-          }
-          return this.config.managedIdentityClientId
-            ? new ManagedIdentityCredential(this.config.managedIdentityClientId)
-            : new DefaultAzureCredential();
-        },
-      );
+      this.credentialPromise = createAzureCredential({
+        ...(this.config.servicePrincipal
+          ? { servicePrincipal: this.config.servicePrincipal }
+          : {}),
+        ...(this.config.managedIdentityClientId
+          ? { managedIdentityClientId: this.config.managedIdentityClientId }
+          : {}),
+      });
     }
     const credential = await this.credentialPromise;
     throwIfAborted(signal);
-    // Fail fast with a readable error instead of hanging for minutes:
-    // ManagedIdentityCredential probes the IMDS endpoint (169.254.169.254),
-    // which silently blackholes on non-Azure hosts.
-    const token = await raceWithAbort({
-      promise: credential.getToken(DATA_PLANE_SCOPE),
-      signal: AbortSignal.timeout(CREDENTIAL_TIMEOUT_MS),
-      abortMessage:
-        `Azure credential acquisition timed out after ${CREDENTIAL_TIMEOUT_MS / 1_000}s. ` +
-        'If using managed identity, the controller must run in Azure with that identity assigned ' +
-        '(IMDS is unreachable outside Azure); otherwise configure the service principal triple ' +
-        '(AZURE_TENANT_ID + AZURE_CLIENT_ID + AZURE_CLIENT_SECRET).',
-    });
+    const token = await acquireAzureToken(credential, DATA_PLANE_SCOPE);
     this.cachedToken = token;
     logHttp('token acquired', { durationMs: Date.now() - tokenStart });
     return token.token;

@@ -19,6 +19,8 @@ import {
   createAzureMachine,
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
+  parseAzureSizePreset,
+  AZURE_SIZE_PRESETS,
   type ComputeProviderClient,
 } from '@roomote/compute-providers';
 
@@ -137,6 +139,8 @@ export async function spawnAzureWorker(
     azureClientId?: string;
     azureTenantId?: string;
     azureClientSecret?: string;
+    /** ACA size tier (S/M/L/XL...); sets the default sandbox size. */
+    azureSize?: string;
     azureTimeoutMs: number;
     localTarballPath?: string;
     deploymentSlug?: string;
@@ -155,6 +159,7 @@ export async function spawnAzureWorker(
     azureClientId,
     azureTenantId,
     azureClientSecret,
+    azureSize,
     azureTimeoutMs,
     localTarballPath,
     deploymentSlug,
@@ -194,6 +199,23 @@ export async function spawnAzureWorker(
         }
       : undefined;
 
+  // Size handling: the operator's AZURE_SANDBOX_SIZE picks the default
+  // tier (cpu/memory/disk). The task-side memory constant is only a
+  // platform default — not a user preference — so the provider size wins,
+  // except for nested-Docker tasks whose 8 GiB requirement is hard.
+  const azureSizePreset = parseAzureSizePreset(azureSize);
+  const memoryMiB =
+    sandboxResources.needsNestedDocker || !azureSizePreset
+      ? sandboxResources.memoryMiB
+      : undefined;
+  // Record the size the provider will actually provision (preset when the
+  // override is omitted), not the task-side platform default.
+  const effectiveMemoryMiB =
+    memoryMiB ??
+    (azureSizePreset
+      ? AZURE_SIZE_PRESETS[azureSizePreset].memoryMiB
+      : sandboxResources.memoryMiB);
+
   const computeClient = createComputeProviderClient({
     provider: 'azure',
     config: {
@@ -207,7 +229,8 @@ export async function spawnAzureWorker(
         : azureClientId
           ? { managedIdentityClientId: azureClientId }
           : {}),
-      memoryMiB: sandboxResources.memoryMiB,
+      ...(azureSizePreset ? { size: azureSizePreset } : {}),
+      ...(memoryMiB !== undefined ? { memoryMiB } : {}),
       timeoutMs: azureTimeoutMs,
     },
   });
@@ -338,7 +361,7 @@ export async function spawnAzureWorker(
       sourceSnapshotId: mutationContext.sourceSnapshotId,
       authBypassValue,
       authBypassHeaderName,
-      configuredMemoryMiB: sandboxResources.memoryMiB,
+      configuredMemoryMiB: effectiveMemoryMiB,
     });
 
     // Infrastructure is usable; worker.js hand-off follows.

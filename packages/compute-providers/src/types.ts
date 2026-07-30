@@ -386,6 +386,11 @@ export interface AzureConfig {
    * suspend underneath the controller.
    */
   autoSuspendSeconds?: number;
+  /**
+   * ACA size tier (`AZURE_SANDBOX_SIZE`). Sets cpu/memory/disk defaults;
+   * explicit cpuMillicores/memoryMiB/diskSize fields win over the preset.
+   */
+  size?: 'XS' | 'S' | 'M' | 'L' | 'XL';
   /** CPU request in millicores (default 1000 = 1 vCPU). */
   cpuMillicores?: number;
   /** Memory request in MiB (default 2048). */

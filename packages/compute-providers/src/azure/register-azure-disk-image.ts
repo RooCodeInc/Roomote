@@ -1,9 +1,14 @@
 import { WORKER_RUNTIME_SCHEMA_TAG } from '@roomote/types';
 
 import { AzureDataPlaneError } from '../adapters/azure';
+import {
+  acquireAzureToken,
+  createAzureCredential,
+  type AzureTokenCredential,
+} from './credentials';
 
-const API_VERSION = '2026-02-01-preview';
 const DATA_PLANE_SCOPE = 'https://dynamicsessions.io/.default';
+const API_VERSION = '2026-02-01-preview';
 
 const DISK_IMAGE_POLL_INTERVAL_MS = 5_000;
 const DISK_IMAGE_POLL_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -125,14 +130,7 @@ export async function registerAzureDiskImage(
     })}`,
   );
 
-  let credentialPromise:
-    | Promise<{
-        getToken(scope: string): Promise<{
-          token: string;
-          expiresOnTimestamp: number;
-        }>;
-      }>
-    | undefined;
+  let credentialPromise: Promise<AzureTokenCredential> | undefined;
   let cachedToken: { token: string; expiresOnTimestamp: number } | undefined;
 
   const getToken = async (): Promise<string> => {
@@ -142,27 +140,15 @@ export async function registerAzureDiskImage(
     }
 
     if (!credentialPromise) {
-      credentialPromise = import('@azure/identity').then(
-        ({
-          ClientSecretCredential,
-          DefaultAzureCredential,
-          ManagedIdentityCredential,
-        }) => {
-          // Same deterministic order as the adapter: explicit service
-          // principal > user-assigned MI > ambient chain.
-          if (options.servicePrincipal) {
-            const { tenantId, clientId, clientSecret } =
-              options.servicePrincipal;
-            return new ClientSecretCredential(tenantId, clientId, clientSecret);
-          }
-          return managedIdentityClientId
-            ? new ManagedIdentityCredential(managedIdentityClientId)
-            : new DefaultAzureCredential();
-        },
-      );
+      credentialPromise = createAzureCredential({
+        ...(options.servicePrincipal
+          ? { servicePrincipal: options.servicePrincipal }
+          : {}),
+        ...(managedIdentityClientId ? { managedIdentityClientId } : {}),
+      });
     }
     const credential = await credentialPromise;
-    cachedToken = await credential.getToken(DATA_PLANE_SCOPE);
+    cachedToken = await acquireAzureToken(credential, DATA_PLANE_SCOPE);
     return cachedToken.token;
   };
 

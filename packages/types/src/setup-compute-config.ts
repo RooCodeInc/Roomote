@@ -595,7 +595,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
           ],
         },
         helpText:
-          'Default size for new sandboxes. ACA caps memory at cores × 2Gi, so CPU is raised automatically when a task requests more memory.',
+          "Default size for new sandboxes. Nested-Docker tasks always get 8 GiB; CPU is raised automatically when memory exceeds ACA's cores × 2Gi tier cap.",
       },
       {
         // Egress proxy TLS inspection mode (ACA portal exposes the same

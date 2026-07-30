@@ -81,7 +81,9 @@ export function resolveStandbyRetentionPolicy(
     env[`${prefix}_STANDBY_MAX_AGE_HOURS`],
     defaults.maxAgeHours,
     1,
-    168,
+    // Providers with a higher default keep their ceiling (azure: 720h);
+    // others stay capped at 168h as before.
+    Math.max(168, defaults.maxAgeHours),
   );
 
   return { maxCount, maxAgeMs: maxAgeHours * MS_PER_HOUR };

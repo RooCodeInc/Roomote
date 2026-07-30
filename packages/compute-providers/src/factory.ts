@@ -30,7 +30,7 @@ import {
 const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
 
 /** ACA sandbox size presets (Azure docs tier table, incl. disk). */
-const AZURE_SIZE_PRESETS = {
+export const AZURE_SIZE_PRESETS = {
   XS: { cpuMillicores: 250, memoryMiB: 512, diskSize: '20Gi' },
   S: { cpuMillicores: 500, memoryMiB: 1024, diskSize: '20Gi' },
   M: { cpuMillicores: 1000, memoryMiB: 2048, diskSize: '20Gi' },
@@ -38,9 +38,9 @@ const AZURE_SIZE_PRESETS = {
   XL: { cpuMillicores: 4000, memoryMiB: 8192, diskSize: '80Gi' },
 } as const;
 
-type AzureSizePreset = keyof typeof AZURE_SIZE_PRESETS;
+export type AzureSizePreset = keyof typeof AZURE_SIZE_PRESETS;
 
-function parseAzureSizePreset(
+export function parseAzureSizePreset(
   value: string | undefined,
 ): AzureSizePreset | undefined {
   return value === 'XS' ||
@@ -402,7 +402,9 @@ export function createComputeProviderClient(
       assertDefined(diskImage, 'Missing AZURE_SANDBOX_DISK_IMAGE');
 
       // Size preset only fills values the caller didn't set explicitly.
-      const sizePreset = parseAzureSizePreset(envValue('AZURE_SANDBOX_SIZE'));
+      const sizePreset =
+        options.config?.size ??
+        parseAzureSizePreset(envValue('AZURE_SANDBOX_SIZE'));
       const egressInspection =
         options.config?.egressTrafficInspection ??
         parseAzureEgressInspection(envValue('AZURE_SANDBOX_EGRESS_INSPECTION'));
