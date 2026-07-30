@@ -167,14 +167,14 @@
       "idx": 23,
       "version": "7",
       "when": 1785265875140,
-      "tag": "0023_azure-sleep-check-indexes",
+      "tag": "0023_azure_sleep_check_indexes",
       "breakpoints": true
     },
     {
       "idx": 24,
       "version": "7",
       "when": 1785378813830,
-      "tag": "0024_azure-sleep-check-index-rename",
+      "tag": "0024_azure_sleep_check_index_rename",
       "breakpoints": true
     }
   ]
