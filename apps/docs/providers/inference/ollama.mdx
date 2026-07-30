@@ -27,10 +27,12 @@ models you need and select them using `ollama/<model-name>`, for example
 
 ## Connectivity and security
 
-The Ollama endpoint must be reachable from the Roomote deployment. It does not
-need to be exposed to every Roomote task sandbox. When Roomote and Ollama run in
-separate containers, `127.0.0.1` points to the Roomote container, not the
-Ollama container; use a shared network and service DNS instead.
+<Warning>
+  The Ollama endpoint must be reachable from the Roomote deployment. It does
+  not need to be exposed to every Roomote task sandbox. When Roomote and Ollama
+  run in separate containers, `127.0.0.1` points to the Roomote container, not
+  the Ollama container; use a shared network and service DNS instead.
+</Warning>
 
 Ollama normally accepts unauthenticated requests. Keep it bound to loopback or
 a private network, and do not publish it directly to the internet. If traffic
