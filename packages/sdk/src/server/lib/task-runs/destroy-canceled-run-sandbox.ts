@@ -15,10 +15,7 @@ import {
 } from '@roomote/db/server';
 import { createComputeProviderClient } from '@roomote/compute-providers';
 
-import {
-  claimMachineDestroy,
-  releaseMachineDestroyClaim,
-} from './machine-destroy-claim';
+import { claimMachineDestroy } from './machine-destroy-claim';
 import { recordComputeProviderUsage } from './record-compute-provider-usage';
 
 type DestroyCanceledTaskRunSandboxResult = 'destroyed' | 'skipped' | 'failed';
@@ -101,23 +98,8 @@ export async function destroyCanceledTaskRunSandbox(params: {
 
     const provider: ComputeProvider = run.vendor ?? 'docker';
 
-    // The usage-record check above is only a fast path; it cannot arbitrate a
-    // live race because every destroyer records usage after the provider call
-    // returns. The redis claim is the atomic gate: exactly one caller owns the
-    // provider delete for this machine.
-    const claim = await claimMachineDestroy({
-      provider,
-      machineId: run.machineId,
-      owner: logPrefix,
-    });
-
-    if (claim === 'held') {
-      console.log(
-        `[${logPrefix}] Skipping sandbox teardown for canceled task run #${run.id}: another destroyer holds the claim for ${run.machineId}`,
-      );
-      return 'skipped';
-    }
-
+    // Build the client (which can throw on a misconfigured provider) before
+    // taking the claim, so an early failure never leaves an armed lease.
     const client = await createCancelTeardownClient(provider);
 
     const recordMutation = createComputeProviderMutationEventRecorder(
@@ -128,6 +110,23 @@ export async function destroyCanceledTaskRunSandbox(params: {
       },
       { logPrefix, logger: console },
     );
+
+    // The usage-record check above is only a fast path; it cannot arbitrate a
+    // live race because every destroyer records usage after the provider call
+    // returns. The redis claim is the atomic gate: exactly one caller owns the
+    // provider delete for this machine, and the lease renews until settled.
+    const claim = await claimMachineDestroy({
+      provider,
+      machineId: run.machineId,
+      owner: logPrefix,
+    });
+
+    if (claim.outcome === 'held') {
+      console.log(
+        `[${logPrefix}] Skipping sandbox teardown for canceled task run #${run.id}: another destroyer holds the claim for ${run.machineId}`,
+      );
+      return 'skipped';
+    }
 
     const details = {
       phase: 'destroy_after_cancel',
@@ -150,14 +149,13 @@ export async function destroyCanceledTaskRunSandbox(params: {
       ({ usageObservation } = await client.destroyInstance({
         instanceId: run.machineId,
       }));
+      // Success: stop renewing and let the claim expire naturally — the
+      // residual TTL keeps guarding against a duplicate delete.
+      claim.finish();
     } catch (error) {
-      // Give the claim back so sleep-check or a later cancel path can retry.
-      if (claim === 'claimed') {
-        await releaseMachineDestroyClaim({
-          provider,
-          machineId: run.machineId,
-        });
-      }
+      // Give the claim back (token-conditional, so a successor that took over
+      // after a lapsed lease is unaffected) so teardown can be retried.
+      await claim.release();
       await recordMutation({
         provider,
         operation: 'destroy_instance',

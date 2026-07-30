@@ -14,10 +14,7 @@ export {
 
 export { finishRun } from './lib/task-runs/finish-run';
 export { destroyCanceledTaskRunSandbox } from './lib/task-runs/destroy-canceled-run-sandbox';
-export {
-  claimMachineDestroy,
-  releaseMachineDestroyClaim,
-} from './lib/task-runs/machine-destroy-claim';
+export { claimMachineDestroy } from './lib/task-runs/machine-destroy-claim';
 export {
   recordLlmUsage,
   type RecordLlmUsageInput,

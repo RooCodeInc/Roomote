@@ -39,7 +39,6 @@ import {
   createSnapshot,
   finishRun,
   refreshTaskTitleOnCompletion,
-  releaseMachineDestroyClaim,
 } from '@roomote/sdk/server';
 
 import { tryRecordComputeProviderUsage } from '../compute-provider-usage';
@@ -1437,13 +1436,15 @@ async function destroyInstanceWithAudit(
   // Serialize with the cancel-finalization teardown path: both destroyers
   // record their final usage row only after the provider call returns, so the
   // redis claim is the only atomic arbiter for a live race on this machine.
+  // The lease renews until settled below, so a slow provider delete cannot
+  // outlive it.
   const claim = await claimMachineDestroy({
     provider: job.vendor ?? 'docker',
     machineId: job.machineId!,
     owner: logPrefix,
   });
 
-  if (claim === 'held') {
+  if (claim.outcome === 'held') {
     console.log(
       `[${logPrefix}] Skipping destroyInstance for ${job.machineId}: another destroyer holds the teardown claim`,
     );
@@ -1471,6 +1472,10 @@ async function destroyInstanceWithAudit(
   try {
     const result = await client.destroyInstance({ instanceId: job.machineId! });
 
+    // Success: stop renewing and let the claim expire naturally — the
+    // residual TTL keeps guarding against a duplicate delete.
+    claim.finish();
+
     await tryRecordComputeProviderUsage({
       runId: job.id,
       lifecycleAction: 'destroy',
@@ -1483,13 +1488,9 @@ async function destroyInstanceWithAudit(
       logPrefix,
     });
   } catch (error) {
-    // Give the claim back so a later sweep or cancel finalization can retry.
-    if (claim === 'claimed') {
-      await releaseMachineDestroyClaim({
-        provider: job.vendor ?? 'docker',
-        machineId: job.machineId!,
-      });
-    }
+    // Give the claim back (token-conditional, so a successor that took over
+    // after a lapsed lease is unaffected) so teardown can be retried.
+    await claim.release();
     await recordMutation({
       provider: job.vendor ?? 'docker',
       operation: 'destroy_instance',

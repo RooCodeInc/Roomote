@@ -50,7 +50,7 @@ vi.mock('@roomote/db/server', async () => {
 });
 
 const mockRedisSet = vi.fn();
-const mockRedisDel = vi.fn().mockResolvedValue(1);
+const mockRedisEval = vi.fn().mockResolvedValue(1);
 
 vi.mock('@roomote/redis', async () => {
   const actual =
@@ -59,7 +59,7 @@ vi.mock('@roomote/redis', async () => {
     ...actual,
     getRedis: () => ({
       set: (...args: unknown[]) => mockRedisSet(...args),
-      del: (...args: unknown[]) => mockRedisDel(...args),
+      eval: (...args: unknown[]) => mockRedisEval(...args),
     }),
   };
 });
@@ -105,7 +105,7 @@ describe('destroyCanceledTaskRunSandbox', () => {
     vi.clearAllMocks();
     finalUsageRows = [];
     mockRedisSet.mockResolvedValue('OK');
-    mockRedisDel.mockResolvedValue(1);
+    mockRedisEval.mockResolvedValue(1);
     mockResolveComputeProviderEnvValues.mockResolvedValue({
       ROOMOTE_CLOUD_TOKEN_ID: 'tenant-1',
     });
@@ -252,14 +252,14 @@ describe('destroyCanceledTaskRunSandbox', () => {
     expect(mockRecordComputeProviderUsage).not.toHaveBeenCalled();
   });
 
-  it('claims the machine before the provider delete', async () => {
+  it('claims the machine with a unique token before the provider delete', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
 
     await destroyCanceledTaskRunSandbox({ runId: 42, logPrefix: 'test' });
 
     expect(mockRedisSet).toHaveBeenCalledWith(
       'compute:machine-destroy-claim:roomote:sb-42',
-      'test',
+      expect.stringMatching(/^test:/),
       'EX',
       expect.any(Number),
       'NX',
@@ -302,7 +302,7 @@ describe('destroyCanceledTaskRunSandbox', () => {
     expect(mockRecordMutation).not.toHaveBeenCalled();
   });
 
-  it('releases the claim when the provider delete fails', async () => {
+  it('conditionally releases its own token when the provider delete fails', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
     mockDestroyInstance.mockRejectedValue(new Error('provider down'));
 
@@ -312,9 +312,60 @@ describe('destroyCanceledTaskRunSandbox', () => {
     });
 
     expect(result).toBe('failed');
-    expect(mockRedisDel).toHaveBeenCalledWith(
+    // Token-conditional DEL: the release script compares the stored value to
+    // this caller's token so it can never delete a successor's claim.
+    const claimedToken = mockRedisSet.mock.calls[0]?.[1];
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining('del'),
+      1,
       'compute:machine-destroy-claim:roomote:sb-42',
+      claimedToken,
     );
+  });
+
+  it('renews the lease while a slow provider delete is in flight', async () => {
+    vi.useFakeTimers();
+    try {
+      mockFindFirstRun.mockResolvedValue(makeRun());
+
+      let resolveDestroy!: (value: unknown) => void;
+      mockDestroyInstance.mockReturnValue(
+        new Promise((resolve) => {
+          resolveDestroy = resolve;
+        }),
+      );
+
+      const pending = destroyCanceledTaskRunSandbox({
+        runId: 42,
+        logPrefix: 'test',
+      });
+
+      // Two renewal intervals elapse while destroyInstance is still pending.
+      await vi.advanceTimersByTimeAsync(11 * 60 * 1_000);
+
+      const claimedToken = mockRedisSet.mock.calls[0]?.[1];
+      const renewCalls = mockRedisEval.mock.calls.filter(([script]) =>
+        String(script).includes('expire'),
+      );
+      expect(renewCalls.length).toBeGreaterThanOrEqual(2);
+      expect(renewCalls[0]).toEqual([
+        expect.stringContaining('expire'),
+        1,
+        'compute:machine-destroy-claim:roomote:sb-42',
+        claimedToken,
+        expect.any(String),
+      ]);
+
+      resolveDestroy({});
+      await expect(pending).resolves.toBe('destroyed');
+
+      // Settling the claim stops renewal.
+      mockRedisEval.mockClear();
+      await vi.advanceTimersByTimeAsync(30 * 60 * 1_000);
+      expect(mockRedisEval).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('still destroys when redis is unavailable rather than leaking the machine', async () => {

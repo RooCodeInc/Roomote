@@ -11,7 +11,8 @@ const {
   mockCreateSnapshot,
   mockFinishRun,
   mockClaimMachineDestroy,
-  mockReleaseMachineDestroyClaim,
+  mockClaimRelease,
+  mockClaimFinish,
   mockRecordComputeProviderUsage,
   mockRecordMutation,
   mockCreateComputeProviderMutationEventRecorder,
@@ -77,7 +78,8 @@ const {
     mockCreateSnapshot: vi.fn() as AnyMock,
     mockFinishRun: vi.fn() as AnyMock,
     mockClaimMachineDestroy: vi.fn() as AnyMock,
-    mockReleaseMachineDestroyClaim: vi.fn() as AnyMock,
+    mockClaimRelease: vi.fn() as AnyMock,
+    mockClaimFinish: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
     mockRecordMutation: vi.fn() as AnyMock,
     mockCreateComputeProviderMutationEventRecorder: vi.fn() as AnyMock,
@@ -119,7 +121,6 @@ vi.mock('@roomote/sdk/server', () => ({
   createSnapshot: mockCreateSnapshot,
   finishRun: mockFinishRun,
   claimMachineDestroy: mockClaimMachineDestroy,
-  releaseMachineDestroyClaim: mockReleaseMachineDestroyClaim,
   recordComputeProviderUsage: mockRecordComputeProviderUsage,
 }));
 
@@ -348,8 +349,12 @@ describe('sleepCheckJob', () => {
     });
     returningFn.mockResolvedValue([]);
     mockFinishRun.mockResolvedValue(undefined);
-    mockClaimMachineDestroy.mockResolvedValue('claimed');
-    mockReleaseMachineDestroyClaim.mockResolvedValue(undefined);
+    mockClaimMachineDestroy.mockImplementation(async () => ({
+      outcome: 'claimed',
+      release: mockClaimRelease,
+      finish: mockClaimFinish,
+    }));
+    mockClaimRelease.mockResolvedValue(undefined);
     // No stop request persisted on the row unless a test opts in.
     mockDbQueryTaskRunsFindFirst.mockResolvedValue(undefined);
   });
@@ -879,7 +884,7 @@ describe('sleepCheckJob', () => {
     });
     returningFn.mockResolvedValue([{ id: 99 }]);
     // A concurrent cancel finalization already owns the teardown.
-    mockClaimMachineDestroy.mockResolvedValue('held');
+    mockClaimMachineDestroy.mockResolvedValue({ outcome: 'held' });
 
     await sleepCheckJob();
 
@@ -914,10 +919,8 @@ describe('sleepCheckJob', () => {
 
     await sleepCheckJob().catch(() => {});
 
-    expect(mockReleaseMachineDestroyClaim).toHaveBeenCalledWith({
-      provider: 'modal',
-      machineId: 'sb-2',
-    });
+    expect(mockClaimRelease).toHaveBeenCalled();
+    expect(mockClaimFinish).not.toHaveBeenCalled();
     expect(mockRecordComputeProviderUsage).not.toHaveBeenCalled();
   });
 
