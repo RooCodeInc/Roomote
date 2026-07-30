@@ -118,7 +118,12 @@ export const SideNavTaskItem = ({
               )}
             >
               {showsExpandedSpinner ? (
-                <Spinner className="size-4 shrink-0 animate-spin" />
+                <Spinner
+                  className={cn(
+                    'size-4 shrink-0 animate-spin',
+                    isActive && 'border-current/30 border-t-current',
+                  )}
+                />
               ) : null}
               <span className="min-w-0 flex-1 line-clamp-1 text-sm font-medium leading-5 wrap-break-word">
                 {taskTitle}
