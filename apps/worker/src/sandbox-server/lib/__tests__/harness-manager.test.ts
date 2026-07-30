@@ -2839,6 +2839,7 @@ describe('HarnessManager error status', () => {
         lastErrorMessage: 'The provider returned an error: API key is invalid.',
         taskAbortedAt: undefined,
       });
+      expect(manager.getSleepAt()).toBeNull();
     } finally {
       manager.dispose();
       harness.dispose();

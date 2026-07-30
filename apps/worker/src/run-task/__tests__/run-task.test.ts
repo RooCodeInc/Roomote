@@ -75,7 +75,7 @@ const {
   hasActiveInstallationMock: vi.fn().mockResolvedValue(false),
   isOrgEnabledMock: vi.fn().mockResolvedValue(false),
   resolvePackagedSkillsFolderMock: vi.fn(() => 'standard'),
-  resolveStatusMock: vi.fn(() => 'idle'),
+  resolveStatusMock: vi.fn(() => ({ status: 'idle' })),
   syncRuntimeGitAuthorMock: vi.fn().mockResolvedValue(undefined),
   startPollingMock: vi.fn(),
   stopPollingMock: vi.fn(),
@@ -290,7 +290,7 @@ describe('runTask', () => {
       taskFinishedAt: undefined,
       taskAbortedAt: undefined,
     });
-    resolveStatusMock.mockReturnValue(RunStatus.Idle);
+    resolveStatusMock.mockReturnValue({ status: RunStatus.Idle });
     waitForExternalSleepActionMock.mockResolvedValue({
       claimed: false,
       completed: false,
@@ -1557,6 +1557,56 @@ describe('runTask', () => {
       }),
       'utf8',
     );
+  });
+
+  it('skips external sleep handoff when the task resolves as failed', async () => {
+    resolveStatusMock.mockReturnValueOnce({ status: RunStatus.Failed });
+    waitForShutdownMock.mockResolvedValueOnce({
+      sessionId: 'failed-session',
+      cancelTriggeredAt: undefined,
+      lastMessageAt: Date.now(),
+      taskFinishedAt: undefined,
+      taskAbortedAt: undefined,
+      lastErrorMessage:
+        'The provider returned an error: Input exceeds context window.',
+    });
+
+    await runTask({
+      taskRun: {
+        id: 112,
+        taskId: 'task-112',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      harnessSessionId: undefined,
+      workerEnv: {
+        authToken: 'cloud-token',
+        roomoteAppUrl: 'https://api.example.test',
+        trpcUrl: 'https://web.example.test',
+        buildUserFacingEnv: vi.fn(() => ({
+          HOME: '/tmp/home',
+          PATH: '/usr/bin',
+        })),
+      } as never,
+    });
+
+    expect(waitForExternalSleepActionMock).not.toHaveBeenCalled();
   });
 
   it('checks Slack drain during sleep fallback when the worker started before thread ts was persisted', async () => {

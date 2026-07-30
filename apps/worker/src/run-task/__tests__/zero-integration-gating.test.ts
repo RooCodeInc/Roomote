@@ -60,7 +60,7 @@ const {
   isOrgEnabledMock: vi.fn().mockResolvedValue(false),
   mockEvaluateFeatureFlag: vi.fn().mockResolvedValue(false),
   resolvePackagedSkillsFolderMock: vi.fn(() => 'standard'),
-  resolveStatusMock: vi.fn(() => 'idle'),
+  resolveStatusMock: vi.fn(() => ({ status: 'idle' })),
   startPollingMock: vi.fn(),
   stopPollingMock: vi.fn(),
   waitForShutdownMock: vi.fn().mockResolvedValue({
