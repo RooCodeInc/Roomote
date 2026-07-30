@@ -9,8 +9,6 @@ const ENDPOINT = `https://management.${REGION}.azuredevcompute.io`;
 const GROUP_PATH =
   '/subscriptions/sub-1/resourceGroups/rg-1/sandboxGroups/group-1';
 
-type JsonBody = Record<string, unknown> | undefined;
-
 interface RecordedRequest {
   method: string;
   url: string;
