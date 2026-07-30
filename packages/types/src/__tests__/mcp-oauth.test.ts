@@ -40,5 +40,8 @@ describe('monday.com OAuth', () => {
     expect(getMcpIntegrationOauthScopes('monday')).toEqual(
       MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
     );
+    expect(getMcpIntegrationOauthScopes('monday')).not.toContain(
+      'webhooks:read',
+    );
   });
 });

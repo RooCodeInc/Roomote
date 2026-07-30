@@ -183,7 +183,6 @@ export const MONDAY_MCP_READ_ONLY_OAUTH_SCOPES = [
   'teams:read',
   'updates:read',
   'users:read',
-  'webhooks:read',
   'workspaces:read',
 ] as const;
 
