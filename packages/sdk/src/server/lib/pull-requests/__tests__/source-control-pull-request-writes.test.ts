@@ -300,7 +300,7 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
-      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1',
+      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1-preview',
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({

@@ -23,6 +23,9 @@ export * from './ci';
 const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 export const ADO_API_VERSION = '7.1';
+// `/_apis/connectionData` is a preview-only resource: Azure DevOps answers
+// plain `7.1` (and `7.0`) with a 400 demanding the `-preview` suffix.
+const ADO_CONNECTION_DATA_API_VERSION = '7.1-preview';
 const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
 // Fits the whole TF401444 sentence (~204 chars with its three GUIDs) while
 // still keeping pathological provider messages toast-sized.
@@ -807,7 +810,7 @@ export async function getAdoDeploymentUser(options?: {
     organizationApiBaseUrl,
     fetchImpl: options?.fetchImpl,
     path: '/_apis/connectionData',
-    params: { 'api-version': ADO_API_VERSION },
+    params: { 'api-version': ADO_CONNECTION_DATA_API_VERSION },
     token: adoToken,
     schema: adoConnectionDataSchema,
   });
