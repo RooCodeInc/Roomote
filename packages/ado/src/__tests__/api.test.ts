@@ -771,8 +771,10 @@ describe('Azure DevOps API helpers', () => {
     });
     expect(second).toEqual(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    // connectionData is preview-only: Azure DevOps 400s on api-version=7.1
+    // unless the -preview suffix is present.
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1',
+      'https://dev.azure.com/acme/_apis/connectionData?api-version=7.1-preview',
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({

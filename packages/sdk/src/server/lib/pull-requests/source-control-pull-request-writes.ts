@@ -34,6 +34,9 @@ import {
 } from './source-control-pull-request-shared';
 
 const ADO_API_VERSION = '7.1';
+// `/_apis/connectionData` is a preview-only resource: Azure DevOps answers
+// plain `7.1` (and `7.0`) with a 400 demanding the `-preview` suffix.
+const ADO_CONNECTION_DATA_API_VERSION = '7.1-preview';
 
 /**
  * Optional id fields from LLM/tool clients often arrive as `""` or whitespace
@@ -1351,7 +1354,7 @@ async function writeAdoPullRequest({
       const connectionData = await requestJson({
         fetchImpl,
         url: buildApiUrl(organizationApiBaseUrl, '/_apis/connectionData', {
-          'api-version': ADO_API_VERSION,
+          'api-version': ADO_CONNECTION_DATA_API_VERSION,
         }),
         tokenHeader,
         schema: adoConnectionDataSchema,
