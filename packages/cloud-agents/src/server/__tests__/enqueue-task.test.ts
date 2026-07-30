@@ -48,7 +48,9 @@ import {
   enqueueTaskRelaunch,
   DeploymentReadOnlyError,
   persistEarlyGeneratedTaskTitle,
+  PR_REVIEW_SYNC_DEBOUNCE_MS,
   resolveFreshTaskComputeProvider,
+  resolveQueueAvailableAt,
   resolveQueueScope,
   shouldCaptureActivationTaskCreatedEvent,
   shouldCaptureTaskCreatedEvent,
@@ -1352,6 +1354,17 @@ describe('pr_review queue scope dedup', () => {
 
     expect(first).toBe('acme/widgets:42');
     expect(second).toBe('acme/widgets:42');
+  });
+
+  it('debounces commit-triggered re-reviews without delaying initial reviews', () => {
+    const now = 1_000_000;
+
+    expect(
+      resolveQueueAvailableAt(TaskPayloadKind.GithubPrReviewSync, now),
+    ).toBe(now + PR_REVIEW_SYNC_DEBOUNCE_MS);
+    expect(
+      resolveQueueAvailableAt(TaskPayloadKind.GithubPrReview, now),
+    ).toBeUndefined();
   });
 
   it('gives non-pr-review launches unique scopes', () => {

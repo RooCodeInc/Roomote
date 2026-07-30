@@ -94,10 +94,15 @@ enum TaskRunQueueKeys {
   // Version the storage layout so old and new controllers can coexist during
   // a rolling deployment. Both versions still contend on the same scope lock.
   LegacyQueue = 'queue:cloud-jobs',
-  Queue = 'queue:cloud-jobs:v2',
-  Entries = 'queue:cloud-jobs:v2:entries',
-  EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
-  Scopes = 'queue:cloud-jobs:v2:scopes',
+  PreviousQueue = 'queue:cloud-jobs:v2',
+  PreviousEntries = 'queue:cloud-jobs:v2:entries',
+  PreviousEntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
+  PreviousScopes = 'queue:cloud-jobs:v2:scopes',
+  Queue = 'queue:cloud-jobs:v3',
+  Entries = 'queue:cloud-jobs:v3:entries',
+  EntryScopes = 'queue:cloud-jobs:v3:entry-scopes',
+  EntryAvailableAt = 'queue:cloud-jobs:v3:entry-available-at',
+  Scopes = 'queue:cloud-jobs:v3:scopes',
 }
 
 export function resolveFreshTaskComputeProvider(
@@ -137,28 +142,46 @@ const ATOMIC_ENQUEUE_SCRIPT = `
 local incomingId = ARGV[1]
 local incomingScope = ARGV[2]
 local incomingRaw = ARGV[3]
+local evictedIds = {}
+
+local previousId = redis.call('HGET', KEYS[7], incomingScope)
+if previousId then
+  redis.call('LREM', KEYS[6], 0, previousId)
+  redis.call('HDEL', KEYS[7], incomingScope)
+  redis.call('HDEL', KEYS[8], previousId)
+  redis.call('HDEL', KEYS[9], previousId)
+  if previousId ~= incomingId then
+    table.insert(evictedIds, previousId)
+  end
+end
+
 local existingId = redis.call('HGET', KEYS[2], incomingScope)
-local evictedId = ''
 
 if existingId then
   redis.call('LREM', KEYS[1], 0, existingId)
 
   if existingId ~= incomingId then
-    evictedId = existingId
+    table.insert(evictedIds, existingId)
     redis.call('HDEL', KEYS[3], existingId)
     redis.call('HDEL', KEYS[4], existingId)
+    redis.call('HDEL', KEYS[5], existingId)
   end
 end
 
 redis.call('HSET', KEYS[2], incomingScope, incomingId)
 redis.call('HSET', KEYS[3], incomingId, incomingRaw)
 redis.call('HSET', KEYS[4], incomingId, incomingScope)
+if ARGV[4] ~= '' then
+  redis.call('HSET', KEYS[5], incomingId, ARGV[4])
+else
+  redis.call('HDEL', KEYS[5], incomingId)
+end
 redis.call('RPUSH', KEYS[1], incomingId)
 
-return evictedId
+return evictedIds
 `;
 
-const ATOMIC_DEQUEUE_SCRIPT = `
+const ATOMIC_PREVIOUS_DEQUEUE_SCRIPT = `
 local queueLength = redis.call('LLEN', KEYS[1])
 local lockTtlSeconds = tonumber(ARGV[1])
 
@@ -201,6 +224,51 @@ end
 return nil
 `;
 
+const ATOMIC_DEQUEUE_SCRIPT = `
+local lockTtlSeconds = tonumber(ARGV[1])
+local nowMs = tonumber(ARGV[2])
+local queuedIds = redis.call('LRANGE', KEYS[1], 0, -1)
+
+for _, entryId in ipairs(queuedIds) do
+  local rawValue = redis.call('HGET', KEYS[3], entryId)
+  local entryScope = redis.call('HGET', KEYS[4], entryId)
+  local availableAt = tonumber(redis.call('HGET', KEYS[5], entryId)) or 0
+
+  if rawValue and entryScope then
+    if availableAt <= nowMs then
+      local acquired = redis.call(
+        'SET',
+        entryScope,
+        entryId,
+        'EX',
+        lockTtlSeconds,
+        'NX'
+      )
+
+      if acquired then
+        redis.call('LREM', KEYS[1], 1, entryId)
+        redis.call('HDEL', KEYS[3], entryId)
+        redis.call('HDEL', KEYS[4], entryId)
+        redis.call('HDEL', KEYS[5], entryId)
+
+        if redis.call('HGET', KEYS[2], entryScope) == entryId then
+          redis.call('HDEL', KEYS[2], entryScope)
+        end
+
+        return rawValue
+      end
+    end
+  else
+    redis.call('LREM', KEYS[1], 0, entryId)
+    redis.call('HDEL', KEYS[3], entryId)
+    redis.call('HDEL', KEYS[4], entryId)
+    redis.call('HDEL', KEYS[5], entryId)
+  end
+end
+
+return nil
+`;
+
 const RELEASE_OWNED_LOCK_SCRIPT = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('DEL', KEYS[1])
@@ -218,6 +286,7 @@ const DEQUEUE_POLL_INTERVAL_MS = 250;
 const taskRunQueueEntrySchema = z.object({
   id: z.number(),
   scope: z.string(),
+  availableAt: z.number().int().nonnegative().optional(),
 });
 
 export type TaskRunQueueEntry = z.infer<typeof taskRunQueueEntrySchema>;
@@ -473,22 +542,28 @@ export class TaskRunQueue {
 
     const result = await this.redis.eval(
       ATOMIC_ENQUEUE_SCRIPT,
-      4,
+      9,
       TaskRunQueueKeys.Queue,
       TaskRunQueueKeys.Scopes,
       TaskRunQueueKeys.Entries,
       TaskRunQueueKeys.EntryScopes,
+      TaskRunQueueKeys.EntryAvailableAt,
+      TaskRunQueueKeys.PreviousQueue,
+      TaskRunQueueKeys.PreviousScopes,
+      TaskRunQueueKeys.PreviousEntries,
+      TaskRunQueueKeys.PreviousEntryScopes,
       entry.id.toString(),
       entry.scope,
       JSON.stringify(entry),
+      entry.availableAt?.toString() ?? '',
     );
 
-    if (typeof result !== 'string') {
+    if (!Array.isArray(result)) {
       throw new Error('Atomic queue enqueue returned an invalid result.');
     }
 
-    if (result) {
-      evictedEntries.push({ id: Number(result), scope: entry.scope });
+    for (const evictedId of result) {
+      evictedEntries.push({ id: Number(evictedId), scope: entry.scope });
     }
 
     return evictedEntries;
@@ -528,14 +603,40 @@ export class TaskRunQueue {
         }
       }
 
+      const previousRawValue = await this.redis.eval(
+        ATOMIC_PREVIOUS_DEQUEUE_SCRIPT,
+        4,
+        TaskRunQueueKeys.PreviousQueue,
+        TaskRunQueueKeys.PreviousScopes,
+        TaskRunQueueKeys.PreviousEntries,
+        TaskRunQueueKeys.PreviousEntryScopes,
+        Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
+      );
+
+      if (previousRawValue) {
+        try {
+          const previousEntry = taskRunQueueEntrySchema.parse(
+            JSON.parse(String(previousRawValue)),
+          );
+          console.log(
+            `[TaskRunQueue] acquired lock for ${previousEntry.scope}`,
+          );
+          return previousEntry;
+        } catch {
+          continue;
+        }
+      }
+
       const rawValue = await this.redis.eval(
         ATOMIC_DEQUEUE_SCRIPT,
-        4,
+        5,
         TaskRunQueueKeys.Queue,
         TaskRunQueueKeys.Scopes,
         TaskRunQueueKeys.Entries,
         TaskRunQueueKeys.EntryScopes,
+        TaskRunQueueKeys.EntryAvailableAt,
         Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
+        Date.now().toString(),
       );
 
       if (!rawValue) {
@@ -999,6 +1100,17 @@ const PR_SCOPED_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set([
   TaskPayloadKind.GithubPrReviewSync,
 ]);
 
+export const PR_REVIEW_SYNC_DEBOUNCE_MS = 15_000;
+
+export function resolveQueueAvailableAt(
+  payloadKind: TaskPayloadKind,
+  now = Date.now(),
+): number | undefined {
+  return payloadKind === TaskPayloadKind.GithubPrReviewSync
+    ? now + PR_REVIEW_SYNC_DEBOUNCE_MS
+    : undefined;
+}
+
 /**
  * Computes the Redis queue scope for a fresh launch. PR review launches share
  * a `${repository}:${prNumber}` scope so a newer review of the same PR
@@ -1183,6 +1295,7 @@ async function pushRunOntoQueue(params: {
     const evictedEntries = await TaskRunQueue.getInstance().enqueue({
       id: taskRun.id,
       scope,
+      availableAt: resolveQueueAvailableAt(taskRun.payloadKind),
     });
 
     if (evictedEntries.length > 0) {

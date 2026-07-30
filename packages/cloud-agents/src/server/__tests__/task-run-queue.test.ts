@@ -5,7 +5,11 @@ import { TASK_TIMEOUT_MS } from '@roomote/types';
 
 import { TaskRunQueue, type TaskRunQueueEntry } from '../task-run-queue';
 
-const QUEUE_KEY = 'queue:cloud-jobs:v2';
+const QUEUE_KEY = 'queue:cloud-jobs:v3';
+const PREVIOUS_QUEUE_KEY = 'queue:cloud-jobs:v2';
+const PREVIOUS_SCOPES_KEY = 'queue:cloud-jobs:v2:scopes';
+const PREVIOUS_ENTRIES_KEY = 'queue:cloud-jobs:v2:entries';
+const PREVIOUS_ENTRY_SCOPES_KEY = 'queue:cloud-jobs:v2:entry-scopes';
 const LEGACY_QUEUE_KEY = 'queue:cloud-jobs';
 
 function createMockRedis() {
@@ -97,6 +101,43 @@ describe('TaskRunQueue - Basic Operations', () => {
       expect(result).toBeNull();
     });
 
+    it('leaves delayed entries queued while dequeuing ready work behind them', async () => {
+      const delayed = {
+        ...createTestEntry(1, 'delayed-scope'),
+        availableAt: Date.now() + 60_000,
+      };
+      const ready = createTestEntry(2, 'ready-scope');
+      await queue.enqueue(delayed);
+      await queue.enqueue(ready);
+
+      await expect(queue.dequeue(false)).resolves.toEqual(ready);
+      await expect(queue.dequeue(false)).resolves.toBeNull();
+      await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
+
+      const nowReady = { ...delayed, availableAt: Date.now() - 1 };
+      await queue.enqueue(nowReady);
+      await expect(queue.dequeue(false)).resolves.toEqual(nowReady);
+    });
+
+    it('resets a delayed scope to the newest debounce deadline', async () => {
+      const scope = 'debounced-scope';
+      const older = {
+        ...createTestEntry(1, scope),
+        availableAt: Date.now() - 1,
+      };
+      const newer = {
+        ...createTestEntry(2, scope),
+        availableAt: Date.now() + 60_000,
+      };
+
+      await queue.enqueue(older);
+      await expect(queue.enqueue(newer)).resolves.toEqual([
+        { id: older.id, scope },
+      ]);
+      await expect(queue.dequeue(false)).resolves.toBeNull();
+      await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
+    });
+
     it('should handle multiple enqueue/dequeue cycles', async () => {
       // Cycle 1
       await queue.enqueue(createTestEntry(1, 'scope-1'));
@@ -145,6 +186,49 @@ describe('TaskRunQueue - Rolling Deploy Compatibility', () => {
       queue.enqueue(createTestEntry(42, 'shared-scope')),
     ).resolves.toEqual([older]);
     await expect(redis.llen(LEGACY_QUEUE_KEY)).resolves.toBe(0);
+  });
+
+  it('drains entries written using the previous v2 queue layout', async () => {
+    const entry = createTestEntry(43, 'previous-scope');
+    await redis.rpush(PREVIOUS_QUEUE_KEY, entry.id.toString());
+    await redis.hset(PREVIOUS_SCOPES_KEY, entry.scope, entry.id.toString());
+    await redis.hset(
+      PREVIOUS_ENTRIES_KEY,
+      entry.id.toString(),
+      JSON.stringify(entry),
+    );
+    await redis.hset(
+      PREVIOUS_ENTRY_SCOPES_KEY,
+      entry.id.toString(),
+      entry.scope,
+    );
+
+    await expect(queue.dequeue(false)).resolves.toEqual(entry);
+  });
+
+  it('moves new delayed work out of reach of v2 consumers', async () => {
+    const older = createTestEntry(44, 'shared-v2-scope');
+    const newer = {
+      ...createTestEntry(45, older.scope),
+      availableAt: Date.now() + 60_000,
+    };
+    await redis.rpush(PREVIOUS_QUEUE_KEY, older.id.toString());
+    await redis.hset(PREVIOUS_SCOPES_KEY, older.scope, older.id.toString());
+    await redis.hset(
+      PREVIOUS_ENTRIES_KEY,
+      older.id.toString(),
+      JSON.stringify(older),
+    );
+    await redis.hset(
+      PREVIOUS_ENTRY_SCOPES_KEY,
+      older.id.toString(),
+      older.scope,
+    );
+
+    await expect(queue.enqueue(newer)).resolves.toEqual([older]);
+    await expect(redis.llen(PREVIOUS_QUEUE_KEY)).resolves.toBe(0);
+    await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
+    await expect(queue.dequeue(false)).resolves.toBeNull();
   });
 });
 
