@@ -290,9 +290,34 @@ describe('generateOpenCodeConfig provider support', () => {
         AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: 'foundry-resource',
       },
     });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
 
     expect(result.configContent).not.toContain('baseURL');
     expect(result.configContent).not.toContain('ROOMOTE_CLOUD_TOKEN');
+    expect(config.provider.azure).toBeUndefined();
+    expect(config.provider['azure-cognitive-services']?.options).toMatchObject({
+      apiKey: '{env:AZURE_COGNITIVE_SERVICES_API_KEY}',
+    });
+  });
+
+  it('binds the Foundry-specific API key when Azure OpenAI is not configured', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'azure-cognitive-services/gpt-5.6-terra',
+        AZURE_COGNITIVE_SERVICES_API_KEY: 'foundry-key',
+        AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: 'foundry-resource',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['azure-cognitive-services']?.options).toMatchObject({
+      apiKey: '{env:AZURE_COGNITIVE_SERVICES_API_KEY}',
+    });
   });
 
   it('rebases Bedrock Mantle onto the gateway while keeping its model config', () => {
