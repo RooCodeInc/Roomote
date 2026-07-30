@@ -344,6 +344,63 @@ describe('azure adapter contract', () => {
     expect(status.status).toBe('stopped');
   });
 
+  it('reports no provider deadline while a sandbox is Running', async () => {
+    const { fetchImpl } = createFetchMock({
+      states: ['Running'],
+      onRequest: (request) =>
+        request.method === 'GET' && request.url.includes(`${SANDBOX_ID}?`)
+          ? jsonResponse({
+              id: SANDBOX_ID,
+              state: 'Running',
+              createdAt: '2026-07-01T00:00:00Z',
+              lifecycle: {
+                autoDeletePolicy: {
+                  enabled: true,
+                  deleteIntervalInSeconds: 2_592_000,
+                },
+              },
+            })
+          : undefined,
+    });
+    const client = createClient(fetchImpl);
+
+    const status = await client.getInstanceStatus({ instanceId: SANDBOX_ID });
+    expect(status.status).toBe('running');
+    // Auto-delete never fires on Running sandboxes (suspension-anchored),
+    // so no deadline is reported — even with an auto-delete policy present.
+    expect(status.timeoutRemainingMs).toBeUndefined();
+  });
+
+  it('reports the suspension-anchored deadline for a stopped sandbox', async () => {
+    const stoppedAt = new Date(Date.now() - 60_000).toISOString();
+    const { fetchImpl } = createFetchMock({
+      onRequest: (request) =>
+        request.method === 'GET' && request.url.includes(`${SANDBOX_ID}?`)
+          ? jsonResponse({
+              id: SANDBOX_ID,
+              state: 'Stopped',
+              createdAt: '2026-07-01T00:00:00Z',
+              stateDetails: { stoppedReason: 'UserStopped', stoppedAt },
+              lifecycle: {
+                autoDeletePolicy: {
+                  enabled: true,
+                  deleteIntervalInSeconds: 2_592_000,
+                },
+              },
+            })
+          : undefined,
+    });
+    const client = createClient(fetchImpl);
+
+    const status = await client.getInstanceStatus({ instanceId: SANDBOX_ID });
+    expect(status.status).toBe('stopped');
+    // remaining = stoppedAt + 30d - now ≈ 30d - 60s
+    expect(status.timeoutRemainingMs).toBeGreaterThan(
+      2_592_000_000 - 5 * 60_000,
+    );
+    expect(status.timeoutRemainingMs).toBeLessThanOrEqual(2_592_000_000);
+  });
+
   it('creates a snapshot synchronously, persists the id before teardown, then deletes the sandbox', async () => {
     const { fetchImpl, requests } = createFetchMock({});
     const client = createClient(fetchImpl);

@@ -91,6 +91,7 @@ const PRODUCT_SNAPSHOT_NAME_PREFIX = 'roomote-task';
 interface AzureSandbox {
   id: string;
   state?: string;
+  stateDetails?: { stoppedReason?: string; stoppedAt?: string };
   labels?: Record<string, string>;
   lifecycle?: {
     autoSuspendPolicy?: { enabled?: boolean; interval?: number; mode?: string };
@@ -1024,21 +1025,30 @@ export class AzureClient implements ComputeProviderClient {
   }
 
   /**
-   * Remaining lifetime from the sandbox's own auto-delete lifecycle policy
-   * (server-side truth, set at create from the configured timeout). Returns
-   * undefined when the sandbox has no auto-delete deadline — regardless of
-   * what this particular client is configured with (sleep-check clients
-   * carry no timeoutMs and must not see a phantom expiry).
+   * Remaining lifetime from the sandbox's own auto-delete lifecycle policy,
+   * or undefined when there is no provider-side deadline. Measured semantics
+   * (2026-07-30): auto-delete is suspension-anchored — it fires at
+   * `stoppedAt + deleteInterval` and NEVER on Running sandboxes, so a
+   * Running sandbox has no provider deadline to report (returning a
+   * createdAt-derived value would feed sleep-check's hard_limit backstop a
+   * phantom expiry once a retained sandbox ages past the backstop interval).
    */
   private timeoutRemainingMs(sandbox: AzureSandbox): number | undefined {
     const autoDelete = sandbox.lifecycle?.autoDeletePolicy;
     if (!autoDelete?.enabled || !autoDelete.deleteIntervalInSeconds) {
       return undefined;
     }
-    if (!sandbox.createdAt) return undefined;
+    if (
+      sandbox.state !== 'Stopped' &&
+      sandbox.state !== 'Suspended' &&
+      sandbox.state !== 'Idle'
+    ) {
+      return undefined;
+    }
+    const anchor = sandbox.stateDetails?.stoppedAt ?? sandbox.createdAt;
+    if (!anchor) return undefined;
     const deadlineMs =
-      new Date(sandbox.createdAt).getTime() +
-      autoDelete.deleteIntervalInSeconds * 1_000;
+      new Date(anchor).getTime() + autoDelete.deleteIntervalInSeconds * 1_000;
     return Math.max(0, deadlineMs - Date.now());
   }
 
