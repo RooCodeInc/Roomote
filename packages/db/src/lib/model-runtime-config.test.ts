@@ -3,6 +3,7 @@ const {
   mockDeploymentSettingsFindFirst,
   mockEnvironmentVariablesFindMany,
   mockResolveOpenCodeAuthContent,
+  mockIsChatGptSubscriptionFastModeEnabled,
   mockResolveGitHubCopilotOpenCodeAuthContent,
   mockGetFreshXaiAccessToken,
 } = vi.hoisted(() => ({
@@ -10,6 +11,7 @@ const {
   mockDeploymentSettingsFindFirst: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockResolveOpenCodeAuthContent: vi.fn(),
+  mockIsChatGptSubscriptionFastModeEnabled: vi.fn(),
   mockResolveGitHubCopilotOpenCodeAuthContent: vi.fn(),
   mockGetFreshXaiAccessToken: vi.fn(),
 }));
@@ -40,6 +42,8 @@ vi.mock('./environment-variables', () => ({
 vi.mock('./chatgpt-subscription', () => ({
   resolveOpenCodeAuthContent: (...args: unknown[]) =>
     mockResolveOpenCodeAuthContent(...args),
+  isChatGptSubscriptionFastModeEnabled: (...args: unknown[]) =>
+    mockIsChatGptSubscriptionFastModeEnabled(...args),
 }));
 
 vi.mock('./github-copilot-subscription', () => ({
@@ -69,6 +73,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
     mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+    mockIsChatGptSubscriptionFastModeEnabled.mockResolvedValue(false);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
   });
 
@@ -635,6 +640,25 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(mockResolveOpenCodeAuthContent).toHaveBeenCalled();
     expect(env.OPENCODE_AUTH_CONTENT).toContain('"type":"oauth"');
+  });
+
+  it('emits the ChatGPT fast-mode marker when enabled on a connected subscription', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
+    });
+    mockResolveOpenCodeAuthContent.mockResolvedValue(
+      JSON.stringify({
+        openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 123 },
+      }),
+    );
+    mockIsChatGptSubscriptionFastModeEnabled.mockResolvedValue(true);
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env.R_CHATGPT_FAST_MODE).toBe('1');
   });
 
   it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT in gateway mode', async () => {

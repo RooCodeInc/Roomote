@@ -25,12 +25,68 @@ export const CHATGPT_OAUTH_DEVICE_CALLBACK_REDIRECT_URI = `${CHATGPT_OAUTH_ISSUE
  */
 export const OPENCODE_AUTH_CONTENT_ENV_VAR_NAME = 'OPENCODE_AUTH_CONTENT';
 
+/** Enables ChatGPT subscription fast mode in generated OpenCode config. */
+export const CHATGPT_FAST_MODE_ENV_VAR_NAME = 'R_CHATGPT_FAST_MODE';
+
 /**
  * opencode provider id under which ChatGPT subscription OAuth auth is
  * registered. opencode's Codex plugin rewrites `openai/` model requests to
  * the ChatGPT Codex backend when OAuth auth is present for this id.
  */
 export const CHATGPT_OPENCODE_PROVIDER_ID = 'openai';
+
+const CHATGPT_FAST_MODE_MODEL_IDS = new Set(['gpt-5.4', 'gpt-5.5', 'gpt-5.6']);
+
+/**
+ * Adds ChatGPT fast mode to supported OpenAI models while preserving any
+ * existing per-model options such as reasoning effort.
+ */
+export function mergeOpenCodeChatGptFastModeOptions(
+  providerConfig: Record<string, unknown>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  let merged = providerConfig;
+
+  for (const modelId of new Set(modelIds)) {
+    if (!modelId?.startsWith(`${CHATGPT_OPENCODE_PROVIDER_ID}/`)) {
+      continue;
+    }
+
+    const openCodeModelId = modelId.slice(
+      CHATGPT_OPENCODE_PROVIDER_ID.length + 1,
+    );
+    if (!CHATGPT_FAST_MODE_MODEL_IDS.has(openCodeModelId)) {
+      continue;
+    }
+
+    const providerEntry = asRecord(merged[CHATGPT_OPENCODE_PROVIDER_ID]);
+    const models = asRecord(providerEntry.models);
+    const model = asRecord(models[openCodeModelId]);
+    const options = asRecord(model.options);
+
+    merged = {
+      ...merged,
+      [CHATGPT_OPENCODE_PROVIDER_ID]: {
+        ...providerEntry,
+        models: {
+          ...models,
+          [openCodeModelId]: {
+            ...model,
+            options: { ...options, serviceTier: 'fast' },
+          },
+        },
+      },
+    };
+  }
+
+  return merged;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
 /**
  * Refresh an access token this many milliseconds before its stated expiry, to

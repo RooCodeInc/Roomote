@@ -8,6 +8,7 @@ import {
   buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenAiCompatibleProviderInstance,
   buildOpenCodeModelReasoningOptions,
+  CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
@@ -30,6 +31,7 @@ import {
   isTaskModelIdDisabled,
   listOpenAiCompatibleProviderInstancesFromEnvNames,
   mergeOpenCodeModelReasoningOptions,
+  mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -1607,6 +1609,8 @@ function resolveModelBackedOpenCodeConfig(
   const planningModelReasoningEffort = normalizeOptionalReasoningEffort(
     runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT?.trim(),
   );
+  const chatGptFastMode =
+    runtimeEnv[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1';
   validateRoomoteModelEnv('R_MODEL', rawModel);
 
   if (rawSmallModel) {
@@ -1693,6 +1697,7 @@ function resolveModelBackedOpenCodeConfig(
   delete runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_MODEL_ENV_KEYS;
+  delete runtimeEnv[CHATGPT_FAST_MODE_ENV_VAR_NAME];
 
   const visualAgent =
     visionModel && visionModel !== effectiveCodingModel
@@ -1843,13 +1848,19 @@ function resolveModelBackedOpenCodeConfig(
     exploreModel,
     planningModel,
   ];
+  const providerModelConfig = chatGptFastMode
+    ? mergeOpenCodeChatGptFastModeOptions(
+        providerReasoningConfig,
+        configuredModelIds,
+      )
+    : providerReasoningConfig;
   const providerConfig = mergeInferenceGatewayProviderConfig(
     mergeAzureCognitiveServicesProviderConfig(
       mergeBedrockMantleProviderConfig(
         mergeBedrockMantleOpenAiProviderConfig(
           mergeOpenAiCompatibleProviderConfig(
             mergeOpenRouterVariantAliasModels(
-              providerReasoningConfig,
+              providerModelConfig,
               variantAliases,
             ),
             runtimeEnv,

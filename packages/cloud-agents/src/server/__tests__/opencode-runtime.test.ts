@@ -19,6 +19,7 @@ describe('buildOpenCodeCliEnv', () => {
     'R_SMALL_MODEL',
     'R_MODEL_REASONING_EFFORT',
     'R_SMALL_MODEL_REASONING_EFFORT',
+    'R_CHATGPT_FAST_MODE',
     'GOOGLE_APPLICATION_CREDENTIALS',
     'MISTRAL_API_KEY',
     'BASH_ENV',
@@ -77,6 +78,33 @@ describe('buildOpenCodeCliEnv', () => {
             },
             'z-ai/glm-5.2': {
               options: { reasoning: { effort: 'low' } },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('applies ChatGPT fast mode to supported subscription models', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'openai/gpt-5.4',
+      R_SMALL_MODEL: 'openai/gpt-5.4-mini',
+      R_MODEL_REASONING_EFFORT: 'high',
+      R_CHATGPT_FAST_MODE: '1',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'openai/gpt-5.4',
+      small_model: 'openai/gpt-5.4-mini',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      provider: {
+        openai: {
+          models: {
+            'gpt-5.4': {
+              options: {
+                reasoningEffort: 'high',
+                serviceTier: 'fast',
+              },
             },
           },
         },

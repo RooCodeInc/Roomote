@@ -119,7 +119,11 @@ describe('getChatGptSubscriptionStatus', () => {
 
     const status = await getChatGptSubscriptionStatus(makeStatusExecutor(null));
 
-    expect(status).toEqual({ connected: false, status: 'disconnected' });
+    expect(status).toEqual({
+      connected: false,
+      status: 'disconnected',
+      fastMode: false,
+    });
   });
 
   it('reports connected when a connected record exists', async () => {
@@ -134,6 +138,7 @@ describe('getChatGptSubscriptionStatus', () => {
         status: 'connected',
         accountId: 'acct',
         email: 'a@b.com',
+        fastMode: true,
         connectedAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
       }),
@@ -144,6 +149,7 @@ describe('getChatGptSubscriptionStatus', () => {
       status: 'connected',
       accountId: 'acct',
       email: 'a@b.com',
+      fastMode: true,
     });
   });
 
@@ -171,17 +177,78 @@ describe('getChatGptSubscriptionStatus', () => {
   });
 });
 
+describe('updateChatGptSubscriptionFastMode', () => {
+  function makeExecutor(record: unknown) {
+    const limit = vi
+      .fn()
+      .mockResolvedValue(record ? [{ value: JSON.stringify(record) }] : []);
+    const where = vi.fn().mockReturnValue({ limit });
+    const from = vi.fn().mockReturnValue({ where });
+    const select = vi.fn().mockReturnValue({ from });
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    const insert = vi.fn().mockReturnValue({ values });
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const tx = { select, insert, execute };
+    const transaction = vi.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+
+    return {
+      executor: { select, insert, transaction } as never,
+      execute,
+      values,
+    };
+  }
+
+  it('persists fast mode alongside the existing subscription record', async () => {
+    const { executor, execute, values } = makeExecutor({
+      refresh: 'rt',
+      access: 'at',
+      expires: 1,
+      status: 'connected',
+      connectedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const { updateChatGptSubscriptionFastMode } =
+      await import('../chatgpt-subscription');
+
+    await updateChatGptSubscriptionFastMode(true, executor);
+
+    expect(execute).toHaveBeenCalled();
+    const persisted = JSON.parse(values.mock.calls[0]![0].value) as {
+      fastMode?: boolean;
+    };
+    expect(persisted.fastMode).toBe(true);
+  });
+
+  it('rejects updates when no subscription is connected', async () => {
+    const { executor } = makeExecutor(null);
+    const { updateChatGptSubscriptionFastMode } =
+      await import('../chatgpt-subscription');
+
+    await expect(
+      updateChatGptSubscriptionFastMode(true, executor),
+    ).rejects.toThrow('ChatGPT subscription is not connected.');
+  });
+});
+
 describe('getFreshChatGptAccessToken', () => {
   const mockRecord = {
     refresh: 'rt-old',
     access: 'at-old',
     expires: Date.now() + 1000,
     status: 'connected' as const,
+    fastMode: true,
     connectedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
 
-  function makeQueryChain(record: typeof mockRecord | null) {
+  function makeQueryChain(
+    record:
+      | (Omit<typeof mockRecord, 'fastMode'> & { fastMode?: boolean })
+      | null,
+  ) {
     const limit = vi
       .fn()
       .mockResolvedValue(record ? [{ value: JSON.stringify(record) }] : []);
@@ -194,7 +261,11 @@ describe('getFreshChatGptAccessToken', () => {
     return { select, insert, limit };
   }
 
-  function makeExecutor(record: typeof mockRecord | null) {
+  function makeExecutor(
+    record:
+      | (Omit<typeof mockRecord, 'fastMode'> & { fastMode?: boolean })
+      | null,
+  ) {
     const chain = makeQueryChain(record);
     const tx = {
       execute: vi.fn().mockResolvedValue(undefined),
@@ -248,10 +319,15 @@ describe('getFreshChatGptAccessToken', () => {
     expect(fetchImpl).toHaveBeenCalled();
     // The persisted record was updated inside the transaction.
     expect(chain.insert).toHaveBeenCalled();
+    const persisted = JSON.parse(
+      chain.insert.mock.results[0]!.value.values.mock.calls[0]![0].value,
+    ) as { fastMode?: boolean };
+    expect(persisted.fastMode).toBe(true);
   });
 
-  it('marks the record errored when refresh fails', async () => {
-    const { executor, chain } = makeExecutor(mockRecord);
+  it('marks a legacy record errored and persists disabled fast mode when refresh fails', async () => {
+    const { fastMode: _fastMode, ...legacyRecord } = mockRecord;
+    const { executor, chain } = makeExecutor(legacyRecord);
     const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 401 });
     const { getFreshChatGptAccessToken } =
       await import('../chatgpt-subscription');
@@ -264,6 +340,10 @@ describe('getFreshChatGptAccessToken', () => {
 
     expect(result).toBeNull();
     expect(chain.insert).toHaveBeenCalled();
+    const persisted = JSON.parse(
+      chain.insert.mock.results[0]!.value.values.mock.calls[0]![0].value,
+    ) as { fastMode?: boolean };
+    expect(persisted.fastMode).toBe(false);
   });
 });
 

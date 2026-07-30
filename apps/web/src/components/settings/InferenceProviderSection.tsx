@@ -44,6 +44,7 @@ import {
   SelectValue,
   Skeleton,
   Spinner,
+  Switch,
   Trash2,
 } from '@/components/system';
 import { Section } from '@/components/settings/Section';
@@ -582,6 +583,9 @@ function ChatGptSubscriptionRow({
   accountEmail,
   errorMessage,
   usage,
+  fastMode,
+  onFastModeChange,
+  isUpdatingFastMode,
   onReconnect,
   onDisconnect,
   isDisconnecting,
@@ -590,6 +594,9 @@ function ChatGptSubscriptionRow({
   accountEmail?: string;
   errorMessage?: string;
   usage?: SubscriptionProviderUsage;
+  fastMode: boolean;
+  onFastModeChange: (enabled: boolean) => Promise<void>;
+  isUpdatingFastMode: boolean;
   onReconnect: () => void;
   onDisconnect: () => Promise<void>;
   isDisconnecting: boolean;
@@ -630,6 +637,19 @@ function ChatGptSubscriptionRow({
             Reconnect
           </Button>
         ) : null}
+        <BasicTooltip content="Uses more ChatGPT credits for faster responses.">
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-sm text-muted-foreground">Fast mode</span>
+            <Switch
+              aria-label="ChatGPT fast mode"
+              checked={fastMode}
+              disabled={errored || isUpdatingFastMode}
+              onCheckedChange={(checked) =>
+                void onFastModeChange(checked === true)
+              }
+            />
+          </div>
+        </BasicTooltip>
         <Button
           size="sm"
           variant="outline"
@@ -942,6 +962,21 @@ export function InferenceProviderSection({
       },
     }),
   );
+  const updateChatGptFastMode = useMutation(
+    trpc.chatgptSubscription.updateFastMode.mutationOptions({
+      onSuccess: async (_result, variables) => {
+        toast.success(
+          variables.fastMode
+            ? 'Enabled ChatGPT fast mode.'
+            : 'Disabled ChatGPT fast mode.',
+        );
+        await queryClient.invalidateQueries({
+          queryKey: trpc.chatgptSubscription.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
   const disconnectGitHubCopilot = useMutation(
     trpc.githubCopilotSubscription.disconnect.mutationOptions({
       onSuccess: async () => {
@@ -1032,6 +1067,9 @@ export function InferenceProviderSection({
 
   const handleDisconnectChatGpt = async () => {
     await disconnectChatGpt.mutateAsync();
+  };
+  const handleChatGptFastModeChange = async (fastMode: boolean) => {
+    await updateChatGptFastMode.mutateAsync({ fastMode });
   };
   const handleDisconnectGitHubCopilot = async () => {
     await disconnectGitHubCopilot.mutateAsync();
@@ -1276,6 +1314,9 @@ export function InferenceProviderSection({
                 accountEmail={chatgptStatus?.email}
                 errorMessage={chatgptStatus?.error}
                 usage={usageByProvider.get(CHATGPT_SUBSCRIPTION_PROVIDER_ID)}
+                fastMode={chatgptStatus?.fastMode === true}
+                onFastModeChange={handleChatGptFastModeChange}
+                isUpdatingFastMode={updateChatGptFastMode.isPending}
                 onReconnect={() => setIsChatGptDialogOpen(true)}
                 onDisconnect={handleDisconnectChatGpt}
                 isDisconnecting={disconnectChatGpt.isPending}
