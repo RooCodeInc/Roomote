@@ -1,25 +1,12 @@
 /**
- * Turn stall / steer-pickup timer subsystem for OpenCodeServerHarness.
+ * Turn-stall timer subsystem for OpenCodeServerHarness.
  *
- * Owns the fire-and-arm/clear lifecycle for:
- * - mid-turn native-steer pickup timestamps
- * - unbounded in-flight turn silence recovery
+ * Owns unbounded in-flight turn silence recovery and retains native steers so
+ * a verified stalled turn can replay them after recovery.
  *
  * Recovery actions (abort, enqueue, transcript notices) stay on the harness via
  * callbacks so event ingest and prompt control do not move with the timers.
  */
-
-// A natively steered prompt (prompt_async into an active turn) is only read
-// by OpenCode between loop steps. When the turn's current LLM stream request
-// has silently stalled (observed live: `message=stream providerID=...` with
-// no further loop step, no session.idle, no session.error), the loop never
-// reaches another step boundary, so the injection call succeeds but the
-// prompt sits unseen forever. This window bounds how long a successful
-// injection may go with zero turn progress before the steer escalates to the
-// queue + abort-and-replay path that failed injections already take. Any
-// turn progress disarms it — a live turn reaches its next step boundary, and
-// with it the injected prompt, on its own.
-export const DEFAULT_OPENCODE_STEER_PICKUP_TIMEOUT_MS = 90_000;
 
 // Fail-safe for a turn wedged inside a single LLM stream request. A stalled
 // stream emits nothing — no message events, no session.idle, no
@@ -34,12 +21,11 @@ export const DEFAULT_OPENCODE_STEER_PICKUP_TIMEOUT_MS = 90_000;
 // running tool part or completes well inside this window.
 export const DEFAULT_OPENCODE_TURN_STALL_TIMEOUT_MS = 15 * 60_000;
 
-// A prompt natively injected into an active turn (prompt_async, no abort)
-// with no evidence yet that OpenCode's loop picked it up. Retained so a
-// pickup stall can replay the same content through the queued
-// abort-and-replay path. clientMessageId is deliberately not retained: the
-// injection already persisted the visible user prompt under that id, and the
-// invisible replay must not collide with it.
+// A prompt natively injected into an active turn (prompt_async, no abort).
+// Retained until the turn progresses so verified whole-turn stall recovery can
+// replay it. clientMessageId is deliberately omitted: the injection already
+// persisted the visible user prompt under that id, and an invisible replay
+// must not collide with it.
 export interface PendingSteerPickup {
   text: string;
   images?: string[];
@@ -69,7 +55,6 @@ interface OpenCodeStallWatchdogsLogger {
 }
 
 interface OpenCodeStallWatchdogsOptions {
-  steerPickupTimeoutMs: number;
   turnStallTimeoutMs: number;
   logger: OpenCodeStallWatchdogsLogger;
   isDisposed: () => boolean;
@@ -87,12 +72,13 @@ interface OpenCodeStallWatchdogsOptions {
   verifyNoRunningTool: (
     sessionId: string,
   ) => Promise<TurnStallVerificationResult>;
-  onSteerPickupStall: (pending: PendingSteerPickup[]) => Promise<void>;
-  onTurnStalled: (sessionId: string) => Promise<void>;
+  onTurnStalled: (
+    sessionId: string,
+    pendingSteers: PendingSteerPickup[],
+  ) => Promise<void>;
 }
 
 export class OpenCodeStallWatchdogs {
-  private readonly steerPickupTimeoutMs: number;
   private readonly turnStallTimeoutMs: number;
   private readonly logger: OpenCodeStallWatchdogsLogger;
   private readonly isDisposed: () => boolean;
@@ -102,18 +88,16 @@ export class OpenCodeStallWatchdogs {
   private readonly verifyNoRunningTool: (
     sessionId: string,
   ) => Promise<TurnStallVerificationResult>;
-  private readonly onSteerPickupStall: (
-    pending: PendingSteerPickup[],
+  private readonly onTurnStalled: (
+    sessionId: string,
+    pendingSteers: PendingSteerPickup[],
   ) => Promise<void>;
-  private readonly onTurnStalled: (sessionId: string) => Promise<void>;
 
-  private steerPickupTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingSteerPickups: PendingSteerPickup[] = [];
   private turnStallTimer: ReturnType<typeof setTimeout> | null = null;
   private lastTurnEventAtMs = 0;
 
   constructor(options: OpenCodeStallWatchdogsOptions) {
-    this.steerPickupTimeoutMs = options.steerPickupTimeoutMs;
     this.turnStallTimeoutMs = options.turnStallTimeoutMs;
     this.logger = options.logger;
     this.isDisposed = options.isDisposed;
@@ -121,7 +105,6 @@ export class OpenCodeStallWatchdogs {
     this.getSessionId = options.getSessionId;
     this.hasDeferringActivity = options.hasDeferringActivity;
     this.verifyNoRunningTool = options.verifyNoRunningTool;
-    this.onSteerPickupStall = options.onSteerPickupStall;
     this.onTurnStalled = options.onTurnStalled;
   }
 
@@ -129,36 +112,11 @@ export class OpenCodeStallWatchdogs {
     return this.turnStallTimeoutMs;
   }
 
-  armSteerPickup(steer: PendingSteerPickup): void {
+  trackNativeSteer(steer: PendingSteerPickup): void {
     this.pendingSteerPickups.push(steer);
-
-    this.scheduleSteerPickupCheck();
   }
 
-  private scheduleSteerPickupCheck(): void {
-    if (this.steerPickupTimer) {
-      clearTimeout(this.steerPickupTimer);
-    }
-
-    const timer = setTimeout(() => {
-      void this.handleSteerPickupStall().catch((error: unknown) => {
-        this.logger.error(
-          `OpenCode steer pickup escalation failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
-    }, this.steerPickupTimeoutMs);
-    timer.unref?.();
-    this.steerPickupTimer = timer;
-  }
-
-  clearSteerPickup(): void {
-    if (this.steerPickupTimer) {
-      clearTimeout(this.steerPickupTimer);
-      this.steerPickupTimer = null;
-    }
-
+  clearPendingNativeSteers(): void {
     if (this.pendingSteerPickups.length > 0) {
       this.pendingSteerPickups = [];
     }
@@ -171,14 +129,12 @@ export class OpenCodeStallWatchdogs {
 
   /**
    * Evidence the in-flight turn is actually advancing (assistant message or
-   * part activity, child-session activity). Beyond refreshing the stall
-   * window this disarms the steer-pickup watchdog: a turn that is making
-   * progress reaches its next loop step — and with it any injected prompt —
-   * on its own.
+   * part activity, child-session activity). A live turn reaches its next loop
+   * boundary and consumes any natively injected prompts on its own.
    */
   noteProgress(): void {
     this.noteActivity();
-    this.clearSteerPickup();
+    this.clearPendingNativeSteers();
   }
 
   armTurnStall(): void {
@@ -200,9 +156,9 @@ export class OpenCodeStallWatchdogs {
     }
   }
 
-  /** End of turn / dispose — disarm both watchdogs. */
+  /** End of turn / dispose — discard pending steers and disarm recovery. */
   clearAll(): void {
-    this.clearSteerPickup();
+    this.clearPendingNativeSteers();
     this.clearTurnStall();
   }
 
@@ -219,71 +175,6 @@ export class OpenCodeStallWatchdogs {
     }, delayMs);
     timer.unref?.();
     this.turnStallTimer = timer;
-  }
-
-  /**
-   * Fires when a successfully injected mid-turn steer saw no turn progress
-   * within the pickup window: the turn is presumed stalled inside a single
-   * LLM stream request only after local activity and server-side tool state
-   * rule out legitimate quiet work. Escalate via host callback so the harness
-   * can queue + prioritize + abort-and-replay; otherwise keep waiting for the
-   * next loop boundary to read the injection.
-   */
-  private async handleSteerPickupStall(): Promise<void> {
-    this.steerPickupTimer = null;
-    const pending = this.pendingSteerPickups;
-
-    if (this.isDisposed() || pending.length === 0 || !this.isInFlight()) {
-      this.pendingSteerPickups = [];
-      return;
-    }
-
-    if (this.hasDeferringActivity()) {
-      this.scheduleSteerPickupCheck();
-      return;
-    }
-
-    const sessionId = this.getSessionId();
-
-    if (!sessionId) {
-      this.scheduleSteerPickupCheck();
-      return;
-    }
-
-    let verification: TurnStallVerificationResult = 'unverified';
-
-    try {
-      verification = await this.verifyNoRunningTool(sessionId);
-    } catch (error) {
-      this.logger.warn(
-        `Could not verify OpenCode session ${sessionId} before escalating a stalled steer; leaving it running: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-
-    // Session progress or another steer may have replaced this pending batch
-    // while server-side tool state was being checked.
-    if (
-      this.isDisposed() ||
-      !this.isInFlight() ||
-      this.pendingSteerPickups !== pending
-    ) {
-      return;
-    }
-
-    if (verification !== 'no_running_tool') {
-      this.scheduleSteerPickupCheck();
-      return;
-    }
-
-    this.pendingSteerPickups = [];
-
-    this.logger.warn(
-      `OpenCode showed no turn progress within ${this.steerPickupTimeoutMs}ms of a native mid-turn steer injection; escalating ${pending.length} steer(s) to abort-and-replay so they land.`,
-    );
-
-    await this.onSteerPickupStall(pending);
   }
 
   /**
@@ -347,6 +238,11 @@ export class OpenCodeStallWatchdogs {
       return;
     }
 
+    if (this.hasDeferringActivity()) {
+      this.scheduleTurnStallCheck(this.turnStallTimeoutMs);
+      return;
+    }
+
     const idleAfterVerifyMs = Date.now() - this.lastTurnEventAtMs;
 
     if (idleAfterVerifyMs < this.turnStallTimeoutMs) {
@@ -354,6 +250,8 @@ export class OpenCodeStallWatchdogs {
       return;
     }
 
-    await this.onTurnStalled(sessionId);
+    const pendingSteers = this.pendingSteerPickups;
+    this.pendingSteerPickups = [];
+    await this.onTurnStalled(sessionId, pendingSteers);
   }
 }

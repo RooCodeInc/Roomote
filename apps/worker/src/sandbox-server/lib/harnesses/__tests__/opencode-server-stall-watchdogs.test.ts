@@ -14,7 +14,6 @@ import type {
 } from '../opencode-server/types';
 
 const TEST_OPENCODE_MODEL = 'test-provider/main-model';
-const STEER_PICKUP_TIMEOUT_MS = 5_000;
 const TURN_STALL_TIMEOUT_MS = 60_000;
 const STEER_TEXT = 'Use this newer instruction instead.';
 
@@ -77,7 +76,6 @@ function createHarness(client = new FakeOpenCodeServerClient()) {
     logger,
     model: TEST_OPENCODE_MODEL,
     eventStreamReadyTimeoutMs: 100,
-    steerPickupTimeoutMs: STEER_PICKUP_TIMEOUT_MS,
     turnStallTimeoutMs: TURN_STALL_TIMEOUT_MS,
   });
 
@@ -180,12 +178,12 @@ function suppressedAbortErrorEvent(): OpenCodeGlobalEvent {
   };
 }
 
-describe('OpenCode steer pickup watchdog', () => {
+describe('OpenCode turn stall watchdog', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('escalates a silently dropped native steer to abort-and-replay', async () => {
+  it('trusts native steering until verified whole-turn recovery replays it', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -198,18 +196,20 @@ describe('OpenCode steer pickup watchdog', () => {
       await connectHarness(harness, client);
       vi.useFakeTimers();
       await startTask(client, harness);
+      // Re-baseline the stall clock after startTask's waitFor advances fake
+      // time, then inject the steer so it remains pending for recovery.
+      await client.emit(assistantTextPartEvent());
       await injectSteer(client, harness);
 
-      // The injection succeeded, but the turn is wedged inside a stalled LLM
-      // stream: no events arrive at all, so OpenCode never reaches the loop
-      // step boundary that would read the injected prompt.
-      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
+      // Native steering gets substantially longer than the removed 5-second
+      // pickup window without any interrupt.
+      await vi.advanceTimersByTimeAsync(TURN_STALL_TIMEOUT_MS / 4);
+      expect(client.abort).not.toHaveBeenCalled();
 
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_1' }),
-      );
+      await vi.advanceTimersByTimeAsync(TURN_STALL_TIMEOUT_MS);
+
       await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
         expect(client.promptAsync).toHaveBeenCalledTimes(3);
       });
       expect(client.promptAsync.mock.calls[2]?.[0]).toMatchObject({
@@ -219,8 +219,6 @@ describe('OpenCode steer pickup watchdog', () => {
         },
       });
 
-      // The steer's user prompt was already persisted visibly at injection
-      // time; the escalated replay must not add a duplicate visible entry.
       const steerPrompts = persistedEnvelopes.filter(
         (envelope) =>
           envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt &&
@@ -235,8 +233,6 @@ describe('OpenCode steer pickup watchdog', () => {
         ),
       ).toHaveLength(1);
 
-      // The abort is the harness's own doing: the MessageAbortedError it
-      // provokes must not become a terminal abort.
       await client.emit(suppressedAbortErrorEvent());
       expect(
         taskEvents.some(
@@ -248,146 +244,106 @@ describe('OpenCode steer pickup watchdog', () => {
     }
   });
 
-  it('does not escalate a steer once the turn shows progress', async () => {
+  it('queues a steer that arrives while whole-turn recovery is aborting', async () => {
     const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    let resolveAbort: ((value: boolean) => void) | undefined;
+    client.abort.mockImplementationOnce(
+      async () =>
+        new Promise<boolean>((resolve) => {
+          resolveAbort = resolve;
+        }),
+    );
+    harness.subscribe((event) => taskEvents.push(event));
 
     try {
       await connectHarness(harness, client);
       vi.useFakeTimers();
       await startTask(client, harness);
-      await injectSteer(client, harness);
-
-      // Turn progress after the injection: the loop is alive and will reach
-      // the injected prompt at its next step boundary on its own.
       await client.emit(assistantTextPartEvent());
 
-      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS * 3);
+      await vi.advanceTimersByTimeAsync(TURN_STALL_TIMEOUT_MS);
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+      });
 
-      expect(client.abort).not.toHaveBeenCalled();
-      expect(client.promptAsync).toHaveBeenCalledTimes(2);
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('defers steer escalation while a tracked execute tool is running', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await startTask(client, harness);
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          info: { id: 'msg_a1', role: 'assistant' },
-          part: {
-            id: 'prt_bash_1',
-            sessionID: 'ses_1',
-            messageID: 'msg_a1',
-            type: 'tool',
-            tool: 'bash',
-            callID: 'call_bash_1',
-            state: { status: 'running', input: { command: 'pnpm build' } },
-          },
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: STEER_TEXT,
+          autoSteerWhenQueued: true,
+          visibleInTranscript: true,
         },
       });
-      await injectSteer(client, harness);
+      await vi.waitFor(() => {
+        expect(harness.getQueuedMessages()).toHaveLength(1);
+      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS * 3);
-
-      expect(client.abort).not.toHaveBeenCalled();
-      expect(client.messages).not.toHaveBeenCalled();
+      resolveAbort?.(true);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [{ type: 'text', text: STEER_TEXT }],
+        },
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
     } finally {
       harness.dispose();
     }
   });
 
-  it('defers steer escalation while a server-side tool is still running', async () => {
+  it('does not start stall recovery while native steer submission is pending', async () => {
     const { client, harness } = createHarness();
-    client.messages.mockResolvedValue([
-      assistantMessageWithParts([mcpToolPart('running')]),
-    ]);
+    let resolveSteer: ((value: undefined) => void) | undefined;
 
     try {
       await connectHarness(harness, client);
       vi.useFakeTimers();
       await startTask(client, harness);
-      await injectSteer(client, harness);
-
-      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
-
-      expect(client.messages).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_1' }),
+      await client.emit(assistantTextPartEvent());
+      client.promptAsync.mockImplementationOnce(
+        async () =>
+          new Promise<undefined>((resolve) => {
+            resolveSteer = resolve;
+          }),
       );
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: STEER_TEXT,
+          autoSteerWhenQueued: true,
+          visibleInTranscript: true,
+        },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      await vi.advanceTimersByTimeAsync(TURN_STALL_TIMEOUT_MS * 2);
       expect(client.abort).not.toHaveBeenCalled();
 
-      client.messages.mockResolvedValue([
-        assistantMessageWithParts([mcpToolPart('completed')]),
-      ]);
-      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
+      resolveSteer?.(undefined);
+      await vi.waitFor(() => {
+        expect(harness.getQueuedMessages()).toHaveLength(0);
+      });
+      await vi.advanceTimersByTimeAsync(TURN_STALL_TIMEOUT_MS);
 
       await vi.waitFor(() => {
         expect(client.abort).toHaveBeenCalledTimes(1);
-      });
-      expect(client.promptAsync).toHaveBeenCalledTimes(3);
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('defers steer escalation when server-side tool state cannot be verified', async () => {
-    const { client, harness } = createHarness();
-    client.messages.mockRejectedValueOnce(new Error('lookup unavailable'));
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await startTask(client, harness);
-      await injectSteer(client, harness);
-
-      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
-
-      expect(client.abort).not.toHaveBeenCalled();
-
-      client.messages.mockResolvedValue([]);
-      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
-
-      await vi.waitFor(() => {
-        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
       });
     } finally {
       harness.dispose();
     }
-  });
-
-  it('does not escalate a steer after the turn completes', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await startTask(client, harness);
-      await injectSteer(client, harness);
-
-      await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
-      });
-
-      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS * 3);
-
-      expect(client.abort).not.toHaveBeenCalled();
-      expect(client.promptAsync).toHaveBeenCalledTimes(2);
-    } finally {
-      harness.dispose();
-    }
-  });
-});
-
-describe('OpenCode turn stall watchdog', () => {
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   it('aborts a wedged turn, surfaces a retryable error, and ends the task', async () => {
