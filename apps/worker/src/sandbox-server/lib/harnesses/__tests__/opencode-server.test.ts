@@ -2245,7 +2245,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('terminates an OpenCode retry loop for provider billing suspension', async () => {
+  it('terminates an OpenCode retry loop from a structured billing code without a message', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -2289,8 +2289,7 @@ describe('OpenCodeServerHarness', () => {
           status: {
             type: 'retry',
             attempt: 1,
-            message:
-              'Your account org-redacted is suspended due to insufficient balance, please recharge your account.',
+            code: 'insufficient_balance',
             next: Date.now() + 2_000,
           },
         },
@@ -2312,7 +2311,7 @@ describe('OpenCodeServerHarness', () => {
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
             String(envelope.payload.text ?? '').includes(
-              'suspended due to insufficient balance',
+              'Provider request failed with a non-retryable error.',
             ),
         ),
       ).toBe(true);
@@ -2321,7 +2320,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('terminates an OpenCode retry loop for message-only payment required status', async () => {
+  it('terminates an OpenCode retry loop after its structured attempt budget without a message', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -2358,15 +2357,14 @@ describe('OpenCodeServerHarness', () => {
         }),
       ).toBe(true);
 
-      // Retry status only carries message; no statusCode/code fields.
+      // The decision uses the structured attempt count, not the provider prose.
       await client.emit({
         type: 'session.status',
         properties: {
           sessionID: 'ses_1',
           status: {
             type: 'retry',
-            attempt: 1,
-            message: 'Payment required',
+            attempt: 3,
             next: Date.now() + 2_000,
           },
         },
@@ -2387,7 +2385,9 @@ describe('OpenCodeServerHarness', () => {
         persistedEnvelopes.some(
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-            String(envelope.payload.text ?? '').includes('Payment required'),
+            String(envelope.payload.text ?? '').includes(
+              'Provider retry limit exceeded.',
+            ),
         ),
       ).toBe(true);
     } finally {

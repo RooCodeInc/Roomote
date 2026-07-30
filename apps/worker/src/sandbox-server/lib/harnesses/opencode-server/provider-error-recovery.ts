@@ -46,6 +46,8 @@ const TERMINAL_CODES = new Set([
   'unauthorized',
 ]);
 
+const TERMINAL_NAMES = new Set(['contextoverflowerror']);
+
 const TERMINAL_STATUS_CODES = new Set([400, 401, 402, 403, 404, 422]);
 
 function collectProviderErrorValues(error: unknown): unknown[] {
@@ -69,7 +71,7 @@ function collectProviderErrorValues(error: unknown): unknown[] {
       try {
         pending.push({ value: JSON.parse(value) as unknown, depth: depth + 1 });
       } catch {
-        // Not JSON; the raw text is still useful for marker detection below.
+        // Classification never depends on unstructured provider prose.
       }
       continue;
     }
@@ -88,33 +90,19 @@ function collectProviderErrorValues(error: unknown): unknown[] {
   return collected;
 }
 
-function normalizeCode(value: unknown): string | undefined {
-  const code = asString(value)?.trim().toLowerCase();
-  return code || undefined;
+function normalizeIdentifier(value: unknown): string | undefined {
+  const identifier = asString(value)?.trim().toLowerCase();
+  return identifier || undefined;
 }
 
 function isPolicyRefusal(values: unknown[]): boolean {
   for (const value of values) {
     const record = asRecord(value);
-    const code = normalizeCode(record?.code);
-    const name = normalizeCode(record?.name);
+    const code = normalizeIdentifier(record?.code);
+    const name = normalizeIdentifier(record?.name);
 
     if ((code && POLICY_CODES.has(code)) || name === 'contentfiltererror') {
       return true;
-    }
-
-    if (typeof value === 'string') {
-      const lower = value.toLowerCase();
-
-      if (
-        lower.includes('cyber_policy') ||
-        lower.includes('content_policy_violation') ||
-        lower.includes('flagged for possible cybersecurity risk') ||
-        lower.includes("blocked by the provider's content filter") ||
-        lower.includes('declined by the provider safety policy')
-      ) {
-        return true;
-      }
     }
   }
 
@@ -136,31 +124,14 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
       return true;
     }
 
-    const code = normalizeCode(record?.code);
+    const code = normalizeIdentifier(record?.code);
+    const name = normalizeIdentifier(record?.name);
 
-    if (code && TERMINAL_CODES.has(code)) {
+    if (
+      (code && TERMINAL_CODES.has(code)) ||
+      (name && TERMINAL_NAMES.has(name))
+    ) {
       return true;
-    }
-
-    if (typeof value === 'string') {
-      const lower = value.toLowerCase();
-
-      if (
-        lower.includes('api key is missing') ||
-        lower.includes('invalid api key') ||
-        lower.includes('api key is invalid') ||
-        lower.includes('authentication failed') ||
-        lower.includes('model is not available') ||
-        lower.includes('model not found') ||
-        lower.includes('maximum context length') ||
-        lower.includes('insufficient balance') ||
-        lower.includes('please recharge') ||
-        (lower.includes('account') && lower.includes('is suspended')) ||
-        lower.includes('payment required') ||
-        lower.includes('insufficient quota')
-      ) {
-        return true;
-      }
     }
   }
 

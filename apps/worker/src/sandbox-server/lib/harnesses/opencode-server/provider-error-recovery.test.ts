@@ -32,7 +32,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     );
   });
 
-  it('treats unknown provider errors as recoverable once', () => {
+  it('gives unknown provider errors a bounded retry budget', () => {
     expect(
       getOpenCodeProviderErrorRecovery({
         name: 'UnknownError',
@@ -66,34 +66,52 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     ).toBeNull();
   });
 
-  it('classifies API key is invalid wording as terminal without metadata', () => {
+  it('does not classify message wording as terminal without metadata', () => {
     expect(
       isOpenCodeTerminalProviderError({
         message: 'The provider returned an error: API key is invalid.',
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       getOpenCodeProviderErrorRecovery({
         message: 'The provider returned an error: API key is invalid.',
       }),
-    ).toBeNull();
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
   });
 
-  it.each([
-    'Your account org-redacted is suspended due to insufficient balance, please recharge your account or check your plan and billing details',
-    JSON.stringify({
+  it('classifies structured billing codes inside JSON strings as terminal', () => {
+    const error = JSON.stringify({
       error: {
         code: 'insufficient_balance',
         message: 'There is not enough credit to run this request.',
       },
-    }),
-  ])(
-    'classifies provider billing and suspension errors as terminal',
-    (error) => {
-      expect(isOpenCodeTerminalProviderError(error)).toBe(true);
-      expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+    });
+
+    expect(isOpenCodeTerminalProviderError(error)).toBe(true);
+    expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'ContextOverflowError',
+      data: { message: 'Input exceeds context window of this model' },
     },
-  );
+    {
+      cause: {
+        name: 'ContextOverflowError',
+        message: 'Input exceeds context window of this model',
+      },
+    },
+    JSON.stringify({
+      error: {
+        name: 'ContextOverflowError',
+        message: 'Input exceeds context window of this model',
+      },
+    }),
+  ])('classifies structured context overflow names as terminal', (error) => {
+    expect(isOpenCodeTerminalProviderError(error)).toBe(true);
+    expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+  });
 
   it('classifies payment-required responses as terminal', () => {
     expect(
@@ -108,14 +126,21 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     ).toBe(true);
   });
 
-  it('classifies message-only payment-required retry status as terminal', () => {
-    // handleSessionStatus only has the retry status message, not statusCode/code.
+  it('retries message-only payment errors without structured metadata', () => {
     expect(
       isOpenCodeTerminalProviderError({ message: 'Payment required' }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       getOpenCodeProviderErrorRecovery({ message: 'Payment required' }),
-    ).toBeNull();
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
+  });
+
+  it('does not classify policy-refusal prose without structured metadata', () => {
+    expect(
+      getOpenCodeProviderErrorRecovery({
+        message: 'This content was flagged for possible cybersecurity risk.',
+      }),
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
   });
 });
 

@@ -14,74 +14,61 @@ export const OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT = [
   'Resume from where you left off without restating the rate-limit error.',
 ].join(' ');
 
-function collectRateLimitCandidateStrings(error: unknown): string[] {
-  const record = asRecord(error);
-  const data = asRecord(record?.data);
-  const values: unknown[] = [
-    record?.message,
-    data?.message,
-    data?.responseBody,
-    data?.body,
-    // When OpenCode surfaces UnknownError, the message may already be a JSON
-    // string of the provider payload; also keep the whole error serialized
-    // as a final fallback for nested markers.
-    typeof error === 'string' ? error : undefined,
+const RATE_LIMIT_IDENTIFIERS = new Set([
+  '429',
+  'rate_limit',
+  'rate_limit_error',
+  'rate_limit_exceeded',
+  'too_many_requests',
+]);
+
+function normalizeIdentifier(value: unknown): string | undefined {
+  const identifier = asString(value)?.trim().toLowerCase();
+  return identifier || undefined;
+}
+
+function collectRateLimitValues(error: unknown): unknown[] {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
   ];
+  const collected: unknown[] = [];
+  const seen = new Set<object>();
 
-  const strings: string[] = [];
+  while (pending.length > 0) {
+    const current = pending.shift();
 
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim().length > 0) {
-      strings.push(value);
+    if (!current || current.depth > 4) {
+      continue;
+    }
+
+    const { value, depth } = current;
+    collected.push(value);
+
+    if (typeof value === 'string') {
+      try {
+        pending.push({ value: JSON.parse(value) as unknown, depth: depth + 1 });
+      } catch {
+        // Classification never depends on unstructured provider prose.
+      }
+      continue;
+    }
+
+    if (!value || typeof value !== 'object' || seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    for (const nested of Object.values(value)) {
+      pending.push({ value: nested, depth: depth + 1 });
     }
   }
 
-  return strings;
-}
-
-function objectIndicatesRateLimit(value: unknown): boolean {
-  const record = asRecord(value);
-
-  if (!record) {
-    return false;
-  }
-
-  const code = record.code;
-  if (code === 429 || code === '429') {
-    return true;
-  }
-
-  if (typeof code === 'string' && code.toLowerCase().includes('rate_limit')) {
-    return true;
-  }
-
-  const statusCode = asFiniteNumber(record.statusCode);
-  if (statusCode === 429) {
-    return true;
-  }
-
-  const metadata = asRecord(record.metadata);
-  const errorType =
-    asString(metadata?.error_type) ?? asString(record.error_type);
-  if (
-    errorType &&
-    (errorType.toLowerCase().includes('rate_limit') ||
-      errorType.toLowerCase() === 'too_many_requests')
-  ) {
-    return true;
-  }
-
-  const nestedError = asRecord(record.error);
-  if (nestedError && objectIndicatesRateLimit(nestedError)) {
-    return true;
-  }
-
-  return false;
+  return collected;
 }
 
 /**
  * True when an OpenCode session.error payload is a provider rate limit
- * (HTTP 429 / rate_limit_exceeded / "too many requests"), including the
+ * (HTTP 429 / rate_limit_exceeded), including the
  * UnknownError-wrapped OpenRouter shape:
  * `{"code":429,"message":"Provider returned error","metadata":{"error_type":"rate_limit_exceeded"}}`
  *
@@ -89,33 +76,29 @@ function objectIndicatesRateLimit(value: unknown): boolean {
  * that UnknownError payload falls through as a terminal session.error.
  */
 export function isOpenCodeProviderRateLimitError(error: unknown): boolean {
-  const record = asRecord(error);
-  const data = asRecord(record?.data) ?? record;
+  const values = collectRateLimitValues(error);
 
-  if (objectIndicatesRateLimit(data) || objectIndicatesRateLimit(record)) {
-    return true;
+  if (values.some((value) => asRecord(value)?.isRetryable === false)) {
+    return false;
   }
 
-  for (const text of collectRateLimitCandidateStrings(error)) {
-    const lower = text.toLowerCase();
-
-    if (
-      lower.includes('rate_limit') ||
-      lower.includes('rate limit') ||
-      lower.includes('too many requests') ||
-      lower.includes('"error_type":"rate_limit_exceeded"') ||
-      lower.includes('"code":429')
-    ) {
-      return true;
+  for (const value of values) {
+    const record = asRecord(value);
+    if (!record) {
+      continue;
     }
 
-    try {
-      const parsed: unknown = JSON.parse(text);
-      if (objectIndicatesRateLimit(parsed)) {
-        return true;
-      }
-    } catch {
-      // not JSON
+    const statusCode =
+      asFiniteNumber(record.statusCode) ?? asFiniteNumber(record.status);
+    const code = normalizeIdentifier(record.code);
+    const errorType = normalizeIdentifier(record.error_type);
+
+    if (
+      statusCode === 429 ||
+      (code && RATE_LIMIT_IDENTIFIERS.has(code)) ||
+      (errorType && RATE_LIMIT_IDENTIFIERS.has(errorType))
+    ) {
+      return true;
     }
   }
 
