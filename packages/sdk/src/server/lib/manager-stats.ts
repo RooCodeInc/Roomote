@@ -73,9 +73,10 @@ function getInitiatorLabel(row: TaskInitiatorRow): string {
  */
 export type PullRequestClassification = 'authored' | 'reviewed';
 
-type PullRequestMetadata = {
+export type PullRequestMetadata = {
   canonicalTaskId: string;
   userLabel: string;
+  initiatorKind: TaskInitiatorRow['initiatorKind'];
   classification: PullRequestClassification;
 };
 
@@ -192,6 +193,7 @@ export function buildRoomotePullRequestMetadata(
     metadataByKey.set(key, {
       canonicalTaskId: row.taskId,
       userLabel: getInitiatorLabel(row),
+      initiatorKind: row.initiatorKind,
       classification,
     });
   }
@@ -564,6 +566,46 @@ export function computeMostActiveRepo(
   );
 }
 
+export function computeTopUsers(
+  pullRequests: AnalyticsPullRequest[],
+  metadataByKey: Map<string, PullRequestMetadata>,
+): ManagerStatsDigest['topUsers'] {
+  const userCounts = new Map<string, number>();
+
+  for (const pullRequest of pullRequests) {
+    const metadata = metadataByKey.get(
+      getPullRequestKey(
+        pullRequest.sourceControlProvider,
+        pullRequest.repoFullName,
+        pullRequest.number,
+      ),
+    );
+
+    if (metadata?.initiatorKind !== 'user') {
+      continue;
+    }
+
+    userCounts.set(
+      metadata.userLabel,
+      (userCounts.get(metadata.userLabel) ?? 0) + 1,
+    );
+  }
+
+  return [...userCounts.entries()]
+    .map(([label, pullRequestCount]) => ({
+      label,
+      pullRequestCount,
+    }))
+    .sort((left, right) => {
+      if (right.pullRequestCount !== left.pullRequestCount) {
+        return right.pullRequestCount - left.pullRequestCount;
+      }
+
+      return left.label.localeCompare(right.label);
+    })
+    .slice(0, 5);
+}
+
 export async function buildManagerStatsDigest(params: {
   /**
    * User the GitHub API calls run as. Only needed for the GitHub data path;
@@ -678,37 +720,8 @@ export async function buildManagerStatsDigest(params: {
     }
   }
 
-  const userCounts = new Map<string, number>();
-
-  for (const pullRequest of roomotePullRequests) {
-    const metadata = metadataByKey.get(
-      getPullRequestKey(
-        pullRequest.sourceControlProvider,
-        pullRequest.repoFullName,
-        pullRequest.number,
-      ),
-    );
-    const label =
-      metadata?.userLabel ?? pullRequest.authorLogin ?? 'Unknown user';
-
-    userCounts.set(label, (userCounts.get(label) ?? 0) + 1);
-  }
-
   const mostActiveRepo = computeMostActiveRepo(roomotePullRequests);
-
-  const topUsers = [...userCounts.entries()]
-    .map(([label, pullRequestCount]) => ({
-      label,
-      pullRequestCount,
-    }))
-    .sort((left, right) => {
-      if (right.pullRequestCount !== left.pullRequestCount) {
-        return right.pullRequestCount - left.pullRequestCount;
-      }
-
-      return left.label.localeCompare(right.label);
-    })
-    .slice(0, 3);
+  const topUsers = computeTopUsers(roomotePullRequests, metadataByKey);
 
   return {
     activeUsers: await getActiveUserCount(params.since),

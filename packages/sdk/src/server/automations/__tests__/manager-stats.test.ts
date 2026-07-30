@@ -91,24 +91,40 @@ describe('formatManagerStatsMessage', () => {
 
   it('formats the compact Roomote PR lines with merged subset stats', () => {
     const message = formatManagerStatsMessage({
-      stats,
+      stats: {
+        ...stats,
+        activeUsers: 1234,
+        roomotePullRequests: 2345,
+        authoredPullRequests: 3456,
+        reviewedPullRequests: 4567,
+        totalPullRequests: 5678,
+        mergedRoomotePullRequests: 1234,
+        mostActiveRepo: {
+          ...stats.mostActiveRepo,
+          pullRequestCount: 6789,
+        },
+      },
     });
 
+    expect(message.text).toContain('· Active users: *1,234*');
     expect(message.text).toContain(
-      '· PRs opened with me: *4 (40% of 10)* — 3 authored, 1 reviewed',
+      '· PRs opened with me: *2,345 (40% of 5,678)* — 3,456 authored, 4,567 reviewed',
     );
     expect(message.text).toContain(
-      '· PR merged with me: *2 (67% of 3 authored)*',
+      '· PR merged with me: *1,234 (67% of 3,456 authored)*',
+    );
+    expect(message.text).toContain(
+      '· Most active repo: *acme/app* (6,789 PRs)',
     );
     expect(message.text).not.toContain('Share of total PRs');
   });
 
   it('includes the LOC line when all counted Roomote PRs are on GitHub', () => {
     const message = formatManagerStatsMessage({
-      stats,
+      stats: { ...stats, additions: 1234, deletions: 5678 },
     });
 
-    expect(message.text).toContain('· LOC added / removed: *+123 / -45*');
+    expect(message.text).toContain('· LOC added/removed: *+1,234 / -5,678*');
     expect(message.text).not.toContain('(GitHub PRs only)');
   });
 
@@ -117,7 +133,23 @@ describe('formatManagerStatsMessage', () => {
       stats: { ...stats, locScope: 'github_only' as const },
     });
 
-    expect(message.text).not.toContain('LOC added / removed');
+    expect(message.text).not.toContain('LOC added/removed');
+  });
+
+  it('formats counts for up to five top users', () => {
+    const message = formatManagerStatsMessage({
+      stats: {
+        ...stats,
+        topUsers: Array.from({ length: 5 }, (_, index) => ({
+          label: `User ${index + 1}`,
+          pullRequestCount: 1234 + index,
+        })),
+      },
+    });
+
+    expect(message.text).toContain(
+      '· Top users: User 1 (1,234), User 2 (1,235), User 3 (1,236), User 4 (1,237), User 5 (1,238)',
+    );
   });
 
   it('adds an automation-settings context footer', () => {
