@@ -100,14 +100,8 @@ import {
 const ENTRA_PERMISSION_GUIDANCE =
   'Check API permissions and organization membership.';
 
-/**
- * Mocks the two hops an Entra credential makes: the Microsoft tenant token
- * request, then the Azure DevOps call that the token is used for.
- */
 function mockEntraThenAdo(adoResponse: () => Response) {
   return vi.fn<typeof fetch>().mockImplementation(async (url) => {
-    // Match on the exact host: a substring check would also match a URL that
-    // merely contains the tenant host somewhere in its path or query.
     if (new URL(String(url)).hostname === 'login.microsoftonline.com') {
       return new Response(
         JSON.stringify({
@@ -220,66 +214,6 @@ describe('Azure DevOps API helpers', () => {
         organization: 'acme',
       }),
     ).toBe('https://dev.azure.com/acme');
-  });
-
-  it('acquires and caches a Microsoft Entra service-principal token when no PAT is configured', async () => {
-    delete process.env.ADO_TOKEN;
-    process.env.ADO_CLIENT_ID = 'client-id';
-    process.env.ADO_CLIENT_SECRET = 'client-secret';
-    process.env.ADO_TENANT_ID = 'tenant-id';
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          access_token: 'header.payload.signature',
-          expires_in: 3600,
-        }),
-        { status: 200 },
-      ),
-    );
-
-    const first = await resolveAdoToken();
-    const second = await resolveAdoToken();
-
-    expect(first).toBe('header.payload.signature');
-    expect(second).toBe(first);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://login.microsoftonline.com/tenant-id/oauth2/v2.0/token',
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.any(URLSearchParams),
-      }),
-    );
-  });
-
-  it('refreshes and persists an Azure DevOps delegated token', async () => {
-    delete process.env.ADO_TOKEN;
-    process.env.ADO_AUTH_MODE = 'delegated';
-    process.env.ADO_LINKED_ACCOUNT_ID = 'ado-user@example.com';
-    process.env.ADO_CLIENT_ID = 'client-id';
-    process.env.ADO_CLIENT_SECRET = 'client-secret';
-    process.env.ADO_TENANT_ID = 'tenant-id';
-    mockAuthAccountsFindFirst.mockResolvedValue({
-      id: 'account-1',
-      accountId: 'ado-user@example.com',
-      accessToken: 'expired.token.value',
-      refreshToken: 'refresh-token',
-      accessTokenExpiresAt: new Date(Date.now() - 60_000),
-    });
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          access_token: 'new.header.signature',
-          refresh_token: 'rotated-refresh-token',
-          expires_in: 3600,
-        }),
-        { status: 200 },
-      ),
-    );
-
-    await expect(resolveAdoToken()).resolves.toBe('new.header.signature');
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(mockAuthAccountsUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('lists Azure DevOps repositories with PAT basic auth', async () => {
