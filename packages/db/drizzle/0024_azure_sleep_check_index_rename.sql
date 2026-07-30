@@ -1,4 +1,4 @@
--- Rename the azure-inclusive sleep-check indexes to *_v2 so coverage is
+-- Replace the azure-inclusive sleep-check indexes with *_v2 so coverage is
 -- continuous: replacements are created BEFORE the originals are dropped
 -- (the original 0023 dropped-then-created, leaving a seq-scan window on
 -- task_runs). Each plain CREATE INDEX still takes a brief write lock on

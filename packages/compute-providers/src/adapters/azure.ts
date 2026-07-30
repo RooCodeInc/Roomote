@@ -780,9 +780,11 @@ export class AzureClient implements ComputeProviderClient {
 
     // ACA tiers cap BOTH memory (cores × 2Gi) and disk (cores × 20Gi) at
     // the CPU anchor (verified live: 400 InvalidResourceTier past either).
-    // Scale CPU up to fit the requested memory rather than failing.
+    // Scale CPU up to fit the requested memory rather than failing —
+    // millicores directly, so XS/S presets (250m/500m) are not rounded up
+    // to whole cores.
     const memoryMiB = this.config.memoryMiB ?? DEFAULT_MEMORY_MIB;
-    const minCpuMillicores = Math.ceil(memoryMiB / 2048) * 1000;
+    const minCpuMillicores = Math.ceil((memoryMiB / 2048) * 1000);
     const cpuMillicores = Math.max(
       this.config.cpuMillicores ?? DEFAULT_CPU_MILLICORES,
       minCpuMillicores,

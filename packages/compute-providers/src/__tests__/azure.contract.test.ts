@@ -169,6 +169,33 @@ describe('azure adapter contract', () => {
     });
   });
 
+  it('does not round small tier cpus up to whole cores', async () => {
+    const { fetchImpl, requests } = createFetchMock({});
+    const client = createComputeProviderClient({
+      provider: 'azure',
+      config: {
+        subscriptionId: 'sub-1',
+        resourceGroup: 'rg-1',
+        sandboxGroup: 'group-1',
+        region: REGION,
+        diskImage: 'disk-image-1',
+        cpuMillicores: 250,
+        memoryMiB: 512,
+        tokenProvider: { getToken: async () => 'test-token' },
+        fetchImpl,
+      },
+    });
+
+    await client.createInstance({});
+
+    const put = requests.find(
+      (r) => r.method === 'PUT' && r.url.includes('/sandboxes?'),
+    );
+    expect(put?.body).toMatchObject({
+      resources: { cpu: '250m', memory: '512Mi' },
+    });
+  });
+
   it('scales cpu to satisfy the ACA cores×2Gi memory tier cap', async () => {
     const { fetchImpl, requests } = createFetchMock({});
     const client = createComputeProviderClient({
