@@ -24,7 +24,8 @@ OPENAI_API_KEY=...
 Roomote adds recommended models under the `openai/` prefix. Apply a recommended
 mapping or choose separate models for coding, helper, planning, and review work.
 When both OpenAI API and ChatGPT Subscription are connected, they expose the
-same model prefix, so keep the intended connection active and monitor its usage.
+same model prefix and Roomote uses the subscription. Disconnect ChatGPT
+Subscription before using billed OpenAI API capacity.
 
 ## Cost behavior
 
@@ -47,4 +48,4 @@ and project bill are authoritative.
 - **Quota or rate-limit errors occur.** Check project spend limits, usage tier,
   and model-specific limits in the OpenAI Platform.
 - **The wrong connection is used.** If ChatGPT Subscription is also connected,
-  disconnect or reconnect the intended `openai/` credential path.
+  disconnect the subscription before using billed OpenAI API capacity.
