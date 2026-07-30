@@ -797,7 +797,7 @@ html[data-status-banner-visible='true'] {
 }
 
 .docs-content :not(pre) > code {
-  @apply rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8125rem];
+  @apply rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-[0.8125rem];
 }
 
 .docs-content pre {

@@ -54,6 +54,8 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect prompts, evaluations, and AI run history.',
   linear:
     'Roomote will be able to pull issue, project, and roadmap context into tasks.',
+  monday:
+    'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
   github:
     'Roomote will be able to inspect PRs, issues, and repository context.',
   slack:

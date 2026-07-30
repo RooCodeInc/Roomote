@@ -1,0 +1,50 @@
+---
+title: MiniMax
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/minimax.svg'
+description: Use MiniMax API models directly for Roomote coding tasks.
+---
+
+MiniMax provides hosted language models through its API platform. Roomote's
+direct provider is useful when you want MiniMax billing and model access without
+a multi-provider gateway.
+
+## Get an API key
+
+Create a key from the [MiniMax API platform](https://platform.minimax.io/user-center/basic-information/interface-key).
+Make sure the account has an active balance or plan for the models you intend to
+use.
+
+## Configuration
+
+Add **MiniMax** in **Settings > Models** and paste the key, or configure:
+
+```sh
+MINIMAX_API_KEY=...
+```
+
+Roomote adds supported models with the `minimax/` prefix. Enable the recommended
+coding model, assign it to the roles you want, and refresh metadata when MiniMax
+publishes a replacement model ID.
+
+## Cost behavior
+
+MiniMax charges the connected account according to its current API plan and
+model token pricing. Roomote records usage and estimates cost from model
+metadata; the MiniMax console balance and [pricing documentation](https://platform.minimax.io/docs/guides/pricing-paygo)
+are authoritative.
+
+## Verify setup
+
+1. save `MINIMAX_API_KEY`
+2. confirm MiniMax models appear in **Settings > Models**
+3. enable a model and assign it as the coding model
+4. run a small task and check usage in Roomote and the MiniMax console
+
+## Common issues
+
+- **Authentication fails.** Confirm the key belongs to the international API
+  platform expected by the provider and has not been revoked.
+- **Requests fail for insufficient balance.** Add credit or activate the required
+  plan in MiniMax.
+- **A model ID no longer works.** Refresh model metadata and select the current
+  supported MiniMax model.

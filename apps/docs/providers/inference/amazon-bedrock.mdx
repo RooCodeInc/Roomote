@@ -1,0 +1,52 @@
+---
+title: Amazon Bedrock
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/bedrock.svg'
+description: Connect Roomote to models served through the Amazon Bedrock Mantle API.
+---
+
+Amazon Bedrock provides managed access to models from multiple model developers
+inside AWS. Roomote uses Bedrock's Mantle API-key endpoint, so setup does not
+require long-lived IAM access-key and secret-key credentials.
+
+## Get a Mantle API key
+
+Open the [Bedrock API keys console](https://us-east-1.console.aws.amazon.com/bedrock-mantle/api-keys)
+and generate a key. Select the AWS region where you intend to use Bedrock before
+creating it; model availability and the key are region-dependent.
+
+## Configuration
+
+Add **Amazon Bedrock** in **Settings > Models**, enter the Mantle API key, and
+optionally specify its AWS region. Environment-variable configuration uses:
+
+```sh
+AWS_BEARER_TOKEN_BEDROCK=...
+AWS_REGION=us-east-1
+```
+
+Roomote exposes supported models with the `bedrock-mantle/` prefix. The region
+defaults to `us-east-1` when omitted. Enable the models your account and region
+can access, then choose the default and role mappings.
+
+## Cost behavior
+
+Bedrock bills the AWS account according to the selected model, request type,
+region, and any provisioned capacity. Roomote records model usage and estimates
+cost from model metadata; AWS billing remains authoritative. Review current
+rates on the [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
+
+## Verify setup
+
+1. save the Mantle API key and matching region
+2. confirm Amazon Bedrock models appear in **Settings > Models**
+3. enable a model available in that region and assign it to a role
+4. run a small task and confirm usage appears in the task and AWS account
+
+## Common issues
+
+- **The key is rejected.** Confirm it is a Bedrock Mantle API key, not an AWS
+  access key, and that it was created in the configured region.
+- **A model fails although it is listed.** Confirm the model is available to
+  your AWS account in `AWS_REGION` and that any required model access is enabled.
+- **Costs differ from Roomote's estimate.** AWS may apply regional, caching,
+  provisioned-throughput, or model-specific pricing that changes independently.

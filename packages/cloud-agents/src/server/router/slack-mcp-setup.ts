@@ -207,6 +207,10 @@ export function matchSlackMcpSetupService(
   const normalizedPathname = extractedUrl.pathname.toLowerCase();
 
   for (const service of SLACK_MCP_SETUP_SERVICES) {
+    if (service.excludedHostnames?.includes(extractedUrl.hostname)) {
+      continue;
+    }
+
     if (service.hostRules?.length) {
       const matchesHostRule = service.hostRules.some((rule) => {
         if (!hostMatchesService(extractedUrl.hostname, rule.hostSuffix)) {
