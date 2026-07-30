@@ -635,7 +635,7 @@ describe('Messages', () => {
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
   });
 
-  it('keeps todo section markers visible while collapsing following activity', () => {
+  it('uses todo section markers as collapse boundaries while keeping them visible', () => {
     mockBuildAcpRenderBlocks.mockReturnValue([
       {
         kind: 'message',
@@ -696,6 +696,7 @@ describe('Messages', () => {
       />,
     );
 
+    expect(screen.getByText('Worked for 1s')).toBeInTheDocument();
     expect(screen.getByText('Worked for 8s')).toBeInTheDocument();
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
     expect(screen.getByText('todo-1')).toBeInTheDocument();

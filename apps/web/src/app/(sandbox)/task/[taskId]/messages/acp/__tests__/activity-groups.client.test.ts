@@ -372,11 +372,17 @@ describe('buildAcpActivityRenderBlocks', () => {
 
     expect(entries.map((entry) => entry.kind)).toEqual([
       'message',
-      'message',
+      'activity_group',
       'message',
       'activity_group',
       'message',
     ]);
+
+    expect(entries[1]).toMatchObject({
+      kind: 'activity_group',
+      ts: 2_000,
+      endTs: 3_000,
+    });
 
     expect(entries[3]).toMatchObject({
       kind: 'activity_group',
@@ -506,11 +512,17 @@ describe('buildAcpActivityRenderBlocks', () => {
     ]);
 
     expect(entries.map((entry) => entry.kind)).toEqual([
-      'message',
+      'activity_group',
       'message',
       'activity_group',
       'message',
     ]);
+
+    expect(entries[0]).toMatchObject({
+      kind: 'activity_group',
+      ts: 1_000,
+      endTs: 1_500,
+    });
 
     expect(entries[2]).toMatchObject({
       kind: 'activity_group',
