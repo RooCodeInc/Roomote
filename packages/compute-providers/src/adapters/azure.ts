@@ -1047,8 +1047,11 @@ export class AzureClient implements ComputeProviderClient {
     }
     const anchor = sandbox.stateDetails?.stoppedAt ?? sandbox.createdAt;
     if (!anchor) return undefined;
-    const deadlineMs =
-      new Date(anchor).getTime() + autoDelete.deleteIntervalInSeconds * 1_000;
+    // Guard against malformed timestamps: Math.max(0, NaN) is NaN, which
+    // would otherwise propagate into InstanceSummary as a bogus number.
+    const anchorMs = Date.parse(anchor);
+    if (Number.isNaN(anchorMs)) return undefined;
+    const deadlineMs = anchorMs + autoDelete.deleteIntervalInSeconds * 1_000;
     return Math.max(0, deadlineMs - Date.now());
   }
 

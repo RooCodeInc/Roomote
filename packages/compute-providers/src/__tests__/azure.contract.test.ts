@@ -401,6 +401,34 @@ describe('azure adapter contract', () => {
     expect(status.timeoutRemainingMs).toBeLessThanOrEqual(2_592_000_000);
   });
 
+  it('omits the deadline when the timestamp is malformed instead of leaking NaN', async () => {
+    const { fetchImpl } = createFetchMock({
+      onRequest: (request) =>
+        request.method === 'GET' && request.url.includes(`${SANDBOX_ID}?`)
+          ? jsonResponse({
+              id: SANDBOX_ID,
+              state: 'Stopped',
+              createdAt: '2026-07-01T00:00:00Z',
+              stateDetails: {
+                stoppedReason: 'UserStopped',
+                stoppedAt: 'not-a-date',
+              },
+              lifecycle: {
+                autoDeletePolicy: {
+                  enabled: true,
+                  deleteIntervalInSeconds: 2_592_000,
+                },
+              },
+            })
+          : undefined,
+    });
+    const client = createClient(fetchImpl);
+
+    const status = await client.getInstanceStatus({ instanceId: SANDBOX_ID });
+    expect(status.status).toBe('stopped');
+    expect(status.timeoutRemainingMs).toBeUndefined();
+  });
+
   it('creates a snapshot synchronously, persists the id before teardown, then deletes the sandbox', async () => {
     const { fetchImpl, requests } = createFetchMock({});
     const client = createClient(fetchImpl);
