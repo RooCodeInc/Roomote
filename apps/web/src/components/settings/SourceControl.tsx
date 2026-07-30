@@ -16,8 +16,10 @@ import {
 
 import {
   usePrAction,
+  useGitHubRoomoteMention,
   useRepositories,
   useSetPrAction,
+  useSetGitHubRoomoteMention,
   useSourceControlConfigStatus,
   useSyncRepositories,
 } from '@/hooks/source-control';
@@ -52,6 +54,7 @@ import {
   SelectValue,
   Sparkles,
   Spinner,
+  Switch,
 } from '@/components/system';
 import { Section } from '@/components/settings';
 import { SourceControlConfigForm } from './SourceControlConfigForm';
@@ -421,7 +424,14 @@ export function SourceControl() {
         </Alert>
       ) : null}
       <Section icon={GitMerge} title="Source Control Settings">
-        <div className="space-y-4">{isAdmin ? <PrActionSetting /> : null}</div>
+        <div className="space-y-6">
+          {isAdmin ? (
+            <>
+              <PrActionSetting />
+              <GitHubRoomoteMentionSetting />
+            </>
+          ) : null}
+        </div>
       </Section>
       {providerBlocks.map((providerBlock) => (
         <SourceControlProviderBlock
@@ -479,6 +489,39 @@ function PrActionSetting() {
           ))}
         </SelectContent>
       </Select>
+    </div>
+  );
+}
+
+function GitHubRoomoteMentionSetting() {
+  const settingQuery = useGitHubRoomoteMention();
+  const setSetting = useSetGitHubRoomoteMention();
+  const enabled = settingQuery.data?.enabled ?? true;
+
+  return (
+    <div className="flex gap-3">
+      <Switch
+        aria-label="Also respond to @roomote"
+        checked={enabled}
+        disabled={settingQuery.isLoading || setSetting.isPending}
+        onCheckedChange={(checked) => {
+          setSetting.mutate(checked === true, {
+            onSuccess: () => toast.success('Source control settings saved.'),
+            onError: (error) =>
+              toast.error(
+                `Failed to update GitHub mention setting: ${error.message}`,
+              ),
+          });
+        }}
+      />
+      <div className="space-y-1">
+        <div className="text-sm font-medium">Also respond to @roomote</div>
+        <p className="text-sm text-muted-foreground">
+          Lets people use the shorter mention instead of this deployment&apos;s
+          full GitHub App handle. Turn this off if another Roomote deployment is
+          installed on the same repositories to prevent both from responding.
+        </p>
+      </div>
     </div>
   );
 }

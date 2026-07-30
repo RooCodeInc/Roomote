@@ -5,7 +5,7 @@ import {
   buildTeamsMessagePermalink,
   buildTelegramMessagePermalink,
   buildDiscordMessagePermalink,
-  getGitHubAppMention,
+  getGitHubFollowUpMention,
   resolveTaskWorkspace,
 } from '@roomote/types';
 import {
@@ -23,7 +23,11 @@ import {
   desc,
   asc,
 } from '@roomote/db/server';
-import { Schemas, getEffectiveGitHubAppSlug } from '@roomote/github';
+import {
+  Schemas,
+  getEffectiveGitHubAppSlug,
+  isGitHubRoomoteMentionEnabled,
+} from '@roomote/github';
 import { buildSlackThreadPromptBlocks } from '../../utils';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
@@ -201,8 +205,9 @@ function buildPrBodyAttributionLine({
   const safeSlackConversationUrl = resolvedSlackConversationUrl
     ? escapeValue(resolvedSlackConversationUrl)
     : undefined;
-  const appMention = getGitHubAppMention(
+  const appMention = getGitHubFollowUpMention(
     githubAppSlug?.trim() || DEFAULT_R_GITHUB_APP_SLUG,
+    isGitHubRoomoteMentionEnabled(),
   );
   const isChatSurface =
     taskSurface === 'slack' ||

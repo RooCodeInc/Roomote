@@ -78,6 +78,15 @@ export function getGitHubAppMention(slug: string): string {
   return `@${slug}`;
 }
 
+export function getGitHubFollowUpMention(
+  slug: string,
+  roomoteMentionEnabled: boolean,
+): string {
+  return roomoteMentionEnabled && slug.toLowerCase().startsWith('roomote-')
+    ? '@roomote'
+    : getGitHubAppMention(slug);
+}
+
 /**
  * Leading Roomote PR provenance blockquote:
  * `> Created by Roomote. ...` or `> Opened on behalf of <name>. ...`
@@ -171,9 +180,9 @@ function matchPrBodyAttributionLine(
 }
 
 /**
- * Rewrite follow-up app mentions in the Roomote PR-body attribution line so
- * they always use the deployment-configured GitHub App slug (for example
- * `@roomote-roomote`) instead of a stale hostname default like `@roomote`.
+ * Rewrite follow-up app mentions in the Roomote PR-body attribution line to
+ * the deployment's current follow-up handle: the configured GitHub App slug,
+ * or the shorter `@roomote` alias when that setting is enabled.
  *
  * Only the leading attribution blockquote is rewritten; other body text that
  * happens to mention `@roomote` is left unchanged.
@@ -181,6 +190,7 @@ function matchPrBodyAttributionLine(
 export function normalizePrBodyAttributionAppMention(
   body: string,
   githubAppSlug: string,
+  roomoteMentionEnabled = false,
 ): string {
   const normalizedSlug = githubAppSlug.trim();
 
@@ -188,7 +198,10 @@ export function normalizePrBodyAttributionAppMention(
     return body;
   }
 
-  const mention = getGitHubAppMention(normalizedSlug);
+  const mention = getGitHubFollowUpMention(
+    normalizedSlug,
+    roomoteMentionEnabled,
+  );
   const firstNewline = body.indexOf('\n');
   const firstLine = firstNewline === -1 ? body : body.slice(0, firstNewline);
   const remainder = firstNewline === -1 ? '' : body.slice(firstNewline);

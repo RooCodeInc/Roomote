@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { setGitHubRoomoteMentionSettingCache } from '@roomote/github';
 
 import { buildIssueFixerFixPrompt } from '../issue-fixer-prompt';
 
 describe('buildIssueFixerFixPrompt', () => {
+  afterEach(() => {
+    setGitHubRoomoteMentionSettingCache(null);
+  });
+
   it('injects the configured GitHub app mention into provider-neutral context', () => {
     const prompt = buildIssueFixerFixPrompt({
       repositoryFullName: 'acme/api',
@@ -25,11 +30,33 @@ describe('buildIssueFixerFixPrompt', () => {
     });
 
     expect(prompt.startsWith('$issue-fixer')).toBe(true);
+    expect(prompt).toContain('<continue_mention>@roomote</continue_mention>');
+    expect(prompt).not.toContain('<github_app_mention>');
+    expect(prompt).not.toContain('Comment formats');
+  });
+
+  it('uses the full GitHub app mention after opting out', () => {
+    setGitHubRoomoteMentionSettingCache({
+      value: false,
+    });
+
+    const prompt = buildIssueFixerFixPrompt({
+      repositoryFullName: 'acme/api',
+      environmentId: 'env-api',
+      trigger: 'webhook',
+      sourceControlProvider: 'github',
+      githubAppSlug: 'roomote-roomote',
+      issue: {
+        repositoryFullName: 'acme/api',
+        number: 12,
+        title: 'Broken checkout',
+        url: 'https://github.com/acme/api/issues/12',
+      },
+    });
+
     expect(prompt).toContain(
       '<continue_mention>@roomote-roomote</continue_mention>',
     );
-    expect(prompt).not.toContain('<github_app_mention>');
-    expect(prompt).not.toContain('Comment formats');
   });
 
   it('uses provider-neutral GitLab context without duplicating tool guidance', () => {

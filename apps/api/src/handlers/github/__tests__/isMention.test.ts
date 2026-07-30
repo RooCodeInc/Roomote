@@ -11,7 +11,10 @@ vi.mock('@roomote/env', async (importOriginal) => {
   };
 });
 
-import { setConfiguredGitHubAppSlugCache } from '@roomote/github';
+import {
+  setConfiguredGitHubAppSlugCache,
+  setGitHubRoomoteMentionSettingCache,
+} from '@roomote/github';
 
 import { isMention } from '../isMention';
 
@@ -125,6 +128,7 @@ describe('isMention', () => {
 
     afterEach(() => {
       setConfiguredGitHubAppSlugCache(null);
+      setGitHubRoomoteMentionSettingCache(null);
     });
 
     it('detects mentions of the configured slug', () => {
@@ -192,6 +196,25 @@ describe('isMention', () => {
           user: { login: 'testuser' },
         }),
       ).toBe(false);
+    });
+
+    it('only detects the full configured slug after opting out', () => {
+      setGitHubRoomoteMentionSettingCache({
+        value: false,
+      });
+
+      expect(
+        isMention({
+          body: '@Roomote please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(false);
+      expect(
+        isMention({
+          body: '@roomote-roomote please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
     });
   });
 });
