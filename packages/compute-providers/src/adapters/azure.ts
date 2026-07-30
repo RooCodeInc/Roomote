@@ -1045,7 +1045,10 @@ export class AzureClient implements ComputeProviderClient {
     ) {
       return undefined;
     }
-    const anchor = sandbox.stateDetails?.stoppedAt ?? sandbox.createdAt;
+    // stateDetails is only populated for stops recorded after the field
+    // shipped; legacy stopped documents have no trustworthy anchor, so omit
+    // rather than invent one from createdAt (suspension-anchored semantics).
+    const anchor = sandbox.stateDetails?.stoppedAt;
     if (!anchor) return undefined;
     // Guard against malformed timestamps: Math.max(0, NaN) is NaN, which
     // would otherwise propagate into InstanceSummary as a bogus number.
