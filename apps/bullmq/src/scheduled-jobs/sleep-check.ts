@@ -35,9 +35,11 @@ import {
   type ComputeProviderClient,
 } from '@roomote/compute-providers';
 import {
+  claimMachineDestroy,
   createSnapshot,
   finishRun,
   refreshTaskTitleOnCompletion,
+  releaseMachineDestroyClaim,
 } from '@roomote/sdk/server';
 
 import { tryRecordComputeProviderUsage } from '../compute-provider-usage';
@@ -1432,6 +1434,22 @@ async function destroyInstanceWithAudit(
     );
   }
 
+  // Serialize with the cancel-finalization teardown path: both destroyers
+  // record their final usage row only after the provider call returns, so the
+  // redis claim is the only atomic arbiter for a live race on this machine.
+  const claim = await claimMachineDestroy({
+    provider: job.vendor ?? 'docker',
+    machineId: job.machineId!,
+    owner: logPrefix,
+  });
+
+  if (claim === 'held') {
+    console.log(
+      `[${logPrefix}] Skipping destroyInstance for ${job.machineId}: another destroyer holds the teardown claim`,
+    );
+    return;
+  }
+
   const recordMutation = createComputeProviderMutationEventRecorder(
     db,
     {
@@ -1465,6 +1483,13 @@ async function destroyInstanceWithAudit(
       logPrefix,
     });
   } catch (error) {
+    // Give the claim back so a later sweep or cancel finalization can retry.
+    if (claim === 'claimed') {
+      await releaseMachineDestroyClaim({
+        provider: job.vendor ?? 'docker',
+        machineId: job.machineId!,
+      });
+    }
     await recordMutation({
       provider: job.vendor ?? 'docker',
       operation: 'destroy_instance',

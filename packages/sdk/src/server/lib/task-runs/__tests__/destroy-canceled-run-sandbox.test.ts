@@ -49,6 +49,21 @@ vi.mock('@roomote/db/server', async () => {
   };
 });
 
+const mockRedisSet = vi.fn();
+const mockRedisDel = vi.fn().mockResolvedValue(1);
+
+vi.mock('@roomote/redis', async () => {
+  const actual =
+    await vi.importActual<typeof import('@roomote/redis')>('@roomote/redis');
+  return {
+    ...actual,
+    getRedis: () => ({
+      set: (...args: unknown[]) => mockRedisSet(...args),
+      del: (...args: unknown[]) => mockRedisDel(...args),
+    }),
+  };
+});
+
 const mockDestroyInstance = vi.fn();
 const mockCreateComputeProviderClient = vi.fn().mockReturnValue({
   destroyInstance: (...args: unknown[]) => mockDestroyInstance(...args),
@@ -89,6 +104,8 @@ describe('destroyCanceledTaskRunSandbox', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     finalUsageRows = [];
+    mockRedisSet.mockResolvedValue('OK');
+    mockRedisDel.mockResolvedValue(1);
     mockResolveComputeProviderEnvValues.mockResolvedValue({
       ROOMOTE_CLOUD_TOKEN_ID: 'tenant-1',
     });
@@ -233,6 +250,84 @@ describe('destroyCanceledTaskRunSandbox', () => {
     expect(result).toBe('skipped');
     expect(mockDestroyInstance).not.toHaveBeenCalled();
     expect(mockRecordComputeProviderUsage).not.toHaveBeenCalled();
+  });
+
+  it('claims the machine before the provider delete', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+
+    await destroyCanceledTaskRunSandbox({ runId: 42, logPrefix: 'test' });
+
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      'compute:machine-destroy-claim:roomote:sb-42',
+      'test',
+      'EX',
+      expect.any(Number),
+      'NX',
+    );
+    expect(mockRedisSet.mock.invocationCallOrder[0]).toBeLessThan(
+      mockDestroyInstance.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('lets exactly one of two concurrent callers issue the provider delete', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    // First caller wins the SET NX; the second sees the claim held.
+    mockRedisSet.mockResolvedValueOnce('OK').mockResolvedValueOnce(null);
+
+    const [first, second] = await Promise.all([
+      destroyCanceledTaskRunSandbox({ runId: 42, logPrefix: 'finishRun' }),
+      destroyCanceledTaskRunSandbox({ runId: 42, logPrefix: 'cancelTask' }),
+    ]);
+
+    expect([first, second].sort()).toEqual(['destroyed', 'skipped']);
+    expect(mockDestroyInstance).toHaveBeenCalledTimes(1);
+    expect(mockRecordComputeProviderUsage).toHaveBeenCalledTimes(1);
+    // The loser must not record a failed destroy mutation.
+    expect(mockRecordMutation).not.toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: 'failed' }),
+    );
+  });
+
+  it('skips when another destroyer already holds the claim', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    mockRedisSet.mockResolvedValue(null);
+
+    const result = await destroyCanceledTaskRunSandbox({
+      runId: 42,
+      logPrefix: 'test',
+    });
+
+    expect(result).toBe('skipped');
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+    expect(mockRecordMutation).not.toHaveBeenCalled();
+  });
+
+  it('releases the claim when the provider delete fails', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    mockDestroyInstance.mockRejectedValue(new Error('provider down'));
+
+    const result = await destroyCanceledTaskRunSandbox({
+      runId: 42,
+      logPrefix: 'test',
+    });
+
+    expect(result).toBe('failed');
+    expect(mockRedisDel).toHaveBeenCalledWith(
+      'compute:machine-destroy-claim:roomote:sb-42',
+    );
+  });
+
+  it('still destroys when redis is unavailable rather than leaking the machine', async () => {
+    mockFindFirstRun.mockResolvedValue(makeRun());
+    mockRedisSet.mockRejectedValue(new Error('redis unavailable'));
+
+    const result = await destroyCanceledTaskRunSandbox({
+      runId: 42,
+      logPrefix: 'test',
+    });
+
+    expect(result).toBe('destroyed');
+    expect(mockDestroyInstance).toHaveBeenCalledTimes(1);
   });
 
   it('records a failed mutation event and reports failure when destroyInstance throws', async () => {

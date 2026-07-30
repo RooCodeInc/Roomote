@@ -7,6 +7,7 @@ export * from './dequeue-task-run';
 export * from './dequeue-resume-task-run';
 export * from './destroy-canceled-run-sandbox';
 export * from './finish-run';
+export * from './machine-destroy-claim';
 export * from './enqueue-snapshot';
 export * from './enqueue-sleep';
 export * from './revert-pr-commit';

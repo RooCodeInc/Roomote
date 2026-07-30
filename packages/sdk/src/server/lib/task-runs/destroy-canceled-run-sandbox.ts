@@ -15,6 +15,10 @@ import {
 } from '@roomote/db/server';
 import { createComputeProviderClient } from '@roomote/compute-providers';
 
+import {
+  claimMachineDestroy,
+  releaseMachineDestroyClaim,
+} from './machine-destroy-claim';
 import { recordComputeProviderUsage } from './record-compute-provider-usage';
 
 type DestroyCanceledTaskRunSandboxResult = 'destroyed' | 'skipped' | 'failed';
@@ -96,6 +100,24 @@ export async function destroyCanceledTaskRunSandbox(params: {
     }
 
     const provider: ComputeProvider = run.vendor ?? 'docker';
+
+    // The usage-record check above is only a fast path; it cannot arbitrate a
+    // live race because every destroyer records usage after the provider call
+    // returns. The redis claim is the atomic gate: exactly one caller owns the
+    // provider delete for this machine.
+    const claim = await claimMachineDestroy({
+      provider,
+      machineId: run.machineId,
+      owner: logPrefix,
+    });
+
+    if (claim === 'held') {
+      console.log(
+        `[${logPrefix}] Skipping sandbox teardown for canceled task run #${run.id}: another destroyer holds the claim for ${run.machineId}`,
+      );
+      return 'skipped';
+    }
+
     const client = await createCancelTeardownClient(provider);
 
     const recordMutation = createComputeProviderMutationEventRecorder(
@@ -129,6 +151,13 @@ export async function destroyCanceledTaskRunSandbox(params: {
         instanceId: run.machineId,
       }));
     } catch (error) {
+      // Give the claim back so sleep-check or a later cancel path can retry.
+      if (claim === 'claimed') {
+        await releaseMachineDestroyClaim({
+          provider,
+          machineId: run.machineId,
+        });
+      }
       await recordMutation({
         provider,
         operation: 'destroy_instance',
