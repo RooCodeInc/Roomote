@@ -50,13 +50,13 @@ function CookieConsentBanner({
       aria-hidden={visible ? 'false' : 'true'}
       aria-label="Cookie preferences"
       aria-live="polite"
-      className="border-foreground/10 bg-card fixed right-4 bottom-4 left-4 z-[1000] flex flex-wrap items-center justify-between gap-4 rounded-lg border p-5 font-semibold shadow-2xl md:right-8 md:left-8 md:p-6"
+      className="bg-card fixed right-4 bottom-5 left-4 z-[1000] flex flex-wrap items-center justify-between gap-4 rounded-2xl font-semibold p-6"
       hidden={!visible}
       role="dialog"
     >
       <div className="flex max-w-[44rem] flex-col gap-1">
         <p className="text-foreground text-base font-bold">
-          Like most of the internet, we use cookies.
+          Like any other app, we use cookies.
         </p>
         <p className="text-muted-foreground text-base font-normal">
           Some are essential, others are optional but help us improve your
