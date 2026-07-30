@@ -314,7 +314,11 @@ export function ComputeProviderSection({
         <div className="flex items-center gap-2">
           {field.input?.type === 'select' ? (
             <Select
-              value={field.runtimeSatisfied ? '' : value}
+              // Mirror the text/number inputs: show the effective configured
+              // value even when the field is managed by environment variable.
+              value={
+                field.runtimeSatisfied ? (field.savedValue ?? value) : value
+              }
               onValueChange={(nextValue) => {
                 setValues((current) => ({
                   ...current,
