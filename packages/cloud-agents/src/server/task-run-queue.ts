@@ -531,6 +531,12 @@ export class TaskRunQueue {
           continue;
         }
 
+        if (entry.preserveExisting) {
+          return legacyEntry.id === entry.id
+            ? []
+            : [{ id: entry.id, scope: entry.scope }];
+        }
+
         const removed = await this.redis.lrem(
           TaskRunQueueKeys.LegacyQueue,
           0,
