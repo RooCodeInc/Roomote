@@ -107,12 +107,16 @@ nav a[href='https://roomote.dev'] svg,
  * sidebar navigation icons (rendered as plain <img> with class `size-4`) and
  * the inline `IntegrationName` logos (class `integration-logo`).
  *
- * Iconify Simple Icons frontmatter icons are forced to `#111827` by Mintlify,
- * and the local `/logo/integrations/*.svg` files use `fill="#111827"`. In
- * production Mintlify rehosts the local logos under its S3 bucket, so match
- * with `*=` instead of `^=` to cover both dev and production URLs.
+ * Iconify Simple Icons frontmatter icons are forced to `#111827` by Mintlify.
+ * LobeHub and local integration SVGs use the browser's default black paint.
+ * In production Mintlify rehosts local logos under its S3 bucket, so match with
+ * `*=` instead of `^=` to cover both dev and production URLs.
  */
 .dark img[src^='https://api.iconify.design/simple-icons:'] {
+  filter: invert(1);
+}
+
+.dark img[src^='https://unpkg.com/@lobehub/icons-static-svg@'] {
   filter: invert(1);
 }
 

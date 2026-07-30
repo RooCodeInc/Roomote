@@ -43,30 +43,51 @@
           {
             "group": "Models and Inference",
             "root": "models",
-            "expanded": true,
+            "expanded": false,
             "pages": [
-              "providers/inference/openai-compatible",
+              "models",
+              "providers/inference/amazon-bedrock",
+              "providers/inference/anthropic",
+              "providers/inference/baseten",
+              "providers/inference/chatgpt",
+              "providers/inference/github-copilot",
+              "providers/inference/google-gemini",
+              "providers/inference/kimi-for-coding",
               "providers/inference/litellm",
+              "providers/inference/minimax",
+              "providers/inference/moonshot-ai",
               "providers/inference/ollama",
-              "providers/inference/vllm"
+              "providers/inference/openai",
+              "providers/inference/openai-compatible",
+              "providers/inference/opencode",
+              "providers/inference/openrouter",
+              "providers/inference/together-ai",
+              "providers/inference/vercel-ai-gateway",
+              "providers/inference/vllm",
+              "providers/inference/xai",
+              "providers/inference/xai-subscription",
+              "providers/inference/zai",
+              "providers/inference/zai-coding-plan"
             ]
           },
           {
             "group": "Communications",
             "root": "communications",
-            "expanded": true,
+            "expanded": false,
             "pages": [
+              "communications",
               "providers/communications/discord",
-              "providers/communications/slack",
               "providers/communications/microsoft-teams",
+              "providers/communications/slack",
               "providers/communications/telegram"
             ]
           },
           {
             "group": "Source Control",
             "root": "source-control",
-            "expanded": true,
+            "expanded": false,
             "pages": [
+              "source-control",
               "providers/source-control/azure-devops",
               "providers/source-control/bitbucket",
               "providers/source-control/gitea",
@@ -77,16 +98,16 @@
           {
             "group": "Sandboxes",
             "root": "compute",
-            "expanded": true,
+            "expanded": false,
             "pages": [
-              "providers/compute/docker",
-              "providers/compute/modal",
-              "providers/compute/e2b",
+              "compute",
+              "providers/compute/blaxel",
               "providers/compute/daytona",
-              "providers/compute/blaxel"
+              "providers/compute/docker",
+              "providers/compute/e2b",
+              "providers/compute/modal"
             ]
-          },
-          "environment-variables"
+          }
         ]
       },
       {
@@ -115,14 +136,15 @@
       {
         "group": "Roomote Configuration",
         "pages": [
-          "environments",
           "agent-guidance",
-          "skills",
+          "anonymous-analytics",
           "automations",
           "cost-analytics",
-          "users",
-          "anonymous-analytics",
-          "personal-settings"
+          "environment-variables",
+          "environments",
+          "personal-settings",
+          "skills",
+          "users"
         ]
       },
       {

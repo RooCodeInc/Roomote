@@ -64,6 +64,21 @@ or setup paths. For integration names in overview tables, use
 Icons slugs and add a manual monochrome fallback inside that snippet only when
 Iconify does not provide the logo.
 
+When adding or changing a selectable inference provider, keep its public and
+in-app setup help in sync in the same change:
+
+- add or update `providers/inference/<provider>.mdx`, including its provider
+  logo in frontmatter
+- update the Inference providers navigation in `docs.json` and the provider
+  table in `models.mdx`
+- map the setup provider id to that guide in
+  `apps/web/src/app/(onboarding)/setup/setup-docs.ts` so the `/setup` docs
+  panel changes when the user selects the provider
+
+Provider ids and documentation slugs can differ (for example, `google` maps to
+`google-gemini`), so make that mapping explicit and cover it with the setup
+docs tests.
+
 ## Working notes
 
 - `docs.json` is the navigation and branding source of truth. When you add,
