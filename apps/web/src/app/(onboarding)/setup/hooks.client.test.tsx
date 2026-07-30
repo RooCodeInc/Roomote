@@ -145,6 +145,7 @@ function mockStatus(overrides: Partial<Record<string, unknown>> = {}) {
             runtimeConfigSatisfied: false,
             savedConfigSatisfied: false,
             configSatisfied: false,
+            configStepSatisfied: false,
             configSatisfiedByRuntimeEnv: false,
             connected: false,
             repositoryCount: 0,
@@ -703,6 +704,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: false,
             savedConfigSatisfied: true,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: false,
             connected: false,
             repositoryCount: 0,
@@ -765,6 +767,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: false,
             savedConfigSatisfied: true,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: false,
             connected: false,
             repositoryCount: 0,
@@ -789,6 +792,100 @@ describe('useSetupFlow', () => {
 
     await waitFor(() => {
       expect(result.current.step).toBe('source-control-config');
+    });
+  });
+
+  it('keeps the Azure DevOps delegated user on source-control-connect when returning from the Microsoft OAuth round trip', async () => {
+    // Delegated ADO only reports configSatisfied once ADO_LINKED_ACCOUNT_ID is
+    // saved, and that save happens on the connect step. Returning from Microsoft
+    // must not bounce back to the config step, or the round trip looks like it
+    // never registered.
+    mockStatus({
+      hasSlack: true,
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: true,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: 'slack',
+        runtimeConfiguredProviders: ['slack'],
+        lockReason: 'runtime_env',
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: true,
+            savedSatisfied: true,
+            setupSatisfied: true,
+          },
+        ],
+      },
+      modelSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: true,
+        preselectedProvider: 'openrouter',
+      },
+      sourceControlSetup: {
+        setupSatisfied: false,
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'ado',
+        preselectedProvider: 'ado',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        connectedProvider: null,
+        providers: [
+          {
+            provider: 'ado',
+            label: 'Azure DevOps',
+            connectionMode: 'token',
+            fields: [
+              {
+                envVarName: 'ADO_AUTH_MODE',
+                label: 'Auth mode',
+                savedValue: 'delegated',
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+              },
+              {
+                envVarName: 'ADO_LINKED_ACCOUNT_ID',
+                label: 'Linked account',
+                savedValue: '',
+                runtimeSatisfied: false,
+                savedSatisfied: false,
+              },
+            ],
+            runtimeConfigSatisfied: false,
+            savedConfigSatisfied: false,
+            // The Entra app credentials are saved, so the config step has
+            // nothing left to collect; only the connect step's linked-account
+            // save is outstanding.
+            configSatisfied: false,
+            configStepSatisfied: true,
+            configSatisfiedByRuntimeEnv: false,
+            connected: false,
+            repositoryCount: 0,
+          },
+        ],
+      },
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: 'openrouter',
+        computeProvider: null,
+        sourceControlProvider: 'ado',
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+    setLocationSearch('?step=source-control-connect');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('source-control-connect');
     });
   });
 
@@ -979,6 +1076,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: true,
             savedConfigSatisfied: false,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: true,
             connected: false,
             repositoryCount: 0,
@@ -1093,6 +1191,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: true,
             savedConfigSatisfied: false,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: true,
             connected: true,
             repositoryCount: 1,
@@ -1172,6 +1271,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: true,
             savedConfigSatisfied: false,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: true,
             connected: true,
             repositoryCount: 1,
@@ -1309,6 +1409,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: false,
             savedConfigSatisfied: true,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: false,
             connected: false,
             repositoryCount: 0,
@@ -1486,6 +1587,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: false,
             savedConfigSatisfied: false,
             configSatisfied: false,
+            configStepSatisfied: false,
             configSatisfiedByRuntimeEnv: false,
             connected: false,
             repositoryCount: 0,
@@ -1574,6 +1676,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: true,
             savedConfigSatisfied: false,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: true,
             connected: false,
             repositoryCount: 0,
@@ -1802,6 +1905,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: false,
             savedConfigSatisfied: false,
             configSatisfied: false,
+            configStepSatisfied: false,
             configSatisfiedByRuntimeEnv: false,
             connected: false,
             repositoryCount: 0,
@@ -1998,6 +2102,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: false,
             savedConfigSatisfied: true,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: false,
             connected: false,
             repositoryCount: 0,
@@ -2054,6 +2159,7 @@ describe('useSetupFlow', () => {
               runtimeConfigSatisfied: false,
               savedConfigSatisfied: true,
               configSatisfied: true,
+              configStepSatisfied: true,
               configSatisfiedByRuntimeEnv: false,
               connected: false,
               repositoryCount: 0,
@@ -2250,6 +2356,7 @@ describe('useSetupFlow', () => {
             runtimeConfigSatisfied: false,
             savedConfigSatisfied: true,
             configSatisfied: true,
+            configStepSatisfied: true,
             configSatisfiedByRuntimeEnv: false,
             connected: false,
             repositoryCount: 0,

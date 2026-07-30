@@ -404,7 +404,11 @@ export function useSetupFlow(
             (provider) => provider.provider === selectedProvider,
           );
 
-          return providerStatus?.configSatisfied ?? false;
+          // `configStepSatisfied`, not `configSatisfied`: Azure DevOps
+          // delegated mode only reports `configSatisfied` after the connect
+          // step links a Microsoft account, so gating on it would send the user
+          // back here every time they returned from the OAuth round trip.
+          return providerStatus?.configStepSatisfied ?? false;
         }
         case 'source-control-connect':
           return status.sourceControlSetup.setupSatisfied;
