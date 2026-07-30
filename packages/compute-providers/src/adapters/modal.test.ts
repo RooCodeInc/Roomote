@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import { ModalRpcError } from '../errors';
 import { MODAL_GH_CLI_VERSION, ModalClient } from './modal';
 
-const DEFAULT_OPENCODE_CLI_VERSION = '1.17.18';
+const DEFAULT_OPENCODE_CLI_VERSION = '1.18.10';
 const ROOMOTE_BAKED_OPENCODE_CLI_VERSION_ENV =
   'ROOMOTE_BAKED_OPENCODE_CLI_VERSION';
 
