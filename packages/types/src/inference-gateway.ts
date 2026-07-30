@@ -38,6 +38,10 @@ export const BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID =
 export const INFERENCE_GATEWAY_REGION_PATTERN =
   /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/u;
 
+/** Matches one DNS label used as an upstream resource subdomain. */
+export const INFERENCE_GATEWAY_RESOURCE_PATTERN =
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
+
 /** Default AWS region for the Bedrock Mantle Anthropic-compatible endpoint. */
 export const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
 
@@ -120,8 +124,8 @@ export interface InferenceGatewayProvider {
   /** How the gateway authenticates upstream. Defaults to `api-key`. */
   authStrategy?: InferenceGatewayAuthStrategy;
   /**
-   * Upstream API base. May contain a `{region}` placeholder resolved
-   * per-request from `region` below.
+   * Upstream API base. May contain a `{region}` or `{resource}` placeholder
+   * resolved per-request from the matching configuration below.
    */
   upstreamBaseUrl?: string;
   /** Deployment env var holding an operator-configured upstream base URL. */
@@ -147,6 +151,10 @@ export interface InferenceGatewayProvider {
      * `region` is what makes "bases without a region env var" unrepresentable.
      */
     baseUrls?: Readonly<Record<string, string>>;
+  };
+  /** Resource resolution for `{resource}`-templated upstream hosts. */
+  resource?: {
+    envVarName: string;
   };
   /** How the upstream expects its API key when the gateway forwards. */
   authHeader?: InferenceGatewayAuthHeader;
@@ -242,6 +250,39 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
         '/v1/models',
       ],
       openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'azure',
+      name: 'Azure OpenAI',
+      envVarNames: ['AZURE_API_KEY'],
+      upstreamBaseUrl: 'https://{resource}.openai.azure.com/openai',
+      resource: { envVarName: 'AZURE_RESOURCE_NAME' },
+      authHeader: { name: 'api-key' },
+      allowedPaths: [
+        '/v1/chat/completions',
+        '/v1/responses',
+        '/v1/embeddings',
+        '/v1/models',
+      ],
+      // @ai-sdk/azure appends /v1 itself when baseURL is overridden.
+      openCodeBaseUrlSuffix: '',
+    },
+    {
+      id: 'azure-cognitive-services',
+      name: 'Azure AI Foundry',
+      envVarNames: ['AZURE_COGNITIVE_SERVICES_API_KEY'],
+      upstreamBaseUrl: 'https://{resource}.cognitiveservices.azure.com/openai',
+      resource: {
+        envVarName: 'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
+      },
+      authHeader: { name: 'api-key' },
+      allowedPaths: [
+        '/v1/chat/completions',
+        '/v1/responses',
+        '/v1/embeddings',
+        '/v1/models',
+      ],
+      openCodeBaseUrlSuffix: '',
     },
     {
       id: 'google',

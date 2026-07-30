@@ -38,6 +38,8 @@ describe('SetupDocs', () => {
   it.each([
     ['amazon-bedrock', 'amazon-bedrock'],
     ['anthropic', 'anthropic'],
+    ['azure', 'azure-openai'],
+    ['azure-cognitive-services', 'azure-foundry'],
     ['baseten', 'baseten'],
     ['chatgpt', 'chatgpt'],
     ['github-copilot', 'github-copilot'],

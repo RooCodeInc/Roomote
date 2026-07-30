@@ -355,6 +355,70 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     },
   },
   {
+    id: 'azure',
+    label: 'Azure OpenAI',
+    envVarName: 'AZURE_API_KEY',
+    defaultRoomoteModel: 'azure/gpt-5.6-terra',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Create an Azure OpenAI resource and deploy each model with a deployment name that exactly matches its model ID, such as gpt-5.6-terra.',
+      href: 'https://portal.azure.com/',
+      linkLabel: 'Open Azure portal',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'AZURE_RESOURCE_NAME',
+        label: 'Resource name',
+        secret: false,
+        required: true,
+        placeholder: 'my-resource',
+      },
+    ],
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'gpt-5-6-sol': 'azure/gpt-5.6-sol',
+      'gpt-5-6-terra': 'azure/gpt-5.6-terra',
+      'gpt-5-6-luna': 'azure/gpt-5.6-luna',
+    }),
+    recommendedRoleModels: {
+      helper: 'azure/gpt-5.6-luna',
+      codeReview: 'azure/gpt-5.6-sol',
+      explore: 'azure/gpt-5.6-luna',
+      planning: 'azure/gpt-5.6-sol',
+    },
+  },
+  {
+    id: 'azure-cognitive-services',
+    label: 'Azure AI Foundry',
+    envVarName: 'AZURE_COGNITIVE_SERVICES_API_KEY',
+    defaultRoomoteModel: 'azure-cognitive-services/gpt-5.6-terra',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Create an Azure AI Foundry resource and deploy each model with a deployment name that exactly matches its model ID, such as gpt-5.6-terra.',
+      href: 'https://portal.azure.com/',
+      linkLabel: 'Open Azure portal',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
+        label: 'Resource name',
+        secret: false,
+        required: true,
+        placeholder: 'my-resource',
+      },
+    ],
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'gpt-5-6-sol': 'azure-cognitive-services/gpt-5.6-sol',
+      'gpt-5-6-terra': 'azure-cognitive-services/gpt-5.6-terra',
+      'gpt-5-6-luna': 'azure-cognitive-services/gpt-5.6-luna',
+    }),
+    recommendedRoleModels: {
+      helper: 'azure-cognitive-services/gpt-5.6-luna',
+      codeReview: 'azure-cognitive-services/gpt-5.6-sol',
+      explore: 'azure-cognitive-services/gpt-5.6-luna',
+      planning: 'azure-cognitive-services/gpt-5.6-sol',
+    },
+  },
+  {
     id: 'anthropic',
     label: 'Anthropic',
     envVarName: 'ANTHROPIC_API_KEY',

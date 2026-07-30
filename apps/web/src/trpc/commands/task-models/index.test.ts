@@ -84,6 +84,10 @@ import {
 const PROVIDER_ENV_VAR_NAMES = [
   'OPENROUTER_API_KEY',
   'OPENAI_API_KEY',
+  'AZURE_API_KEY',
+  'AZURE_RESOURCE_NAME',
+  'AZURE_COGNITIVE_SERVICES_API_KEY',
+  'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
   'ANTHROPIC_API_KEY',
   'MOONSHOT_API_KEY',
   'KIMI_API_KEY',
@@ -1350,6 +1354,8 @@ describe('task model provider commands', () => {
     const result = await getTaskModelProviderSetupCommand(buildMockAuth());
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
+      'AZURE_RESOURCE_NAME',
+      'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
       'AWS_REGION',
       'ZAI_REGION',
       'ZAI_CODING_PLAN_REGION',

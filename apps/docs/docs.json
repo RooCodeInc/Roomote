@@ -48,6 +48,8 @@
               "models",
               "providers/inference/amazon-bedrock",
               "providers/inference/anthropic",
+              "providers/inference/azure-foundry",
+              "providers/inference/azure-openai",
               "providers/inference/baseten",
               "providers/inference/chatgpt",
               "providers/inference/github-copilot",

@@ -259,6 +259,102 @@ describe('inference gateway', () => {
     }
   });
 
+  it.each([
+    [
+      'azure',
+      'AZURE_RESOURCE_NAME',
+      'https://my-openai.openai.azure.com/openai/v1/responses?api-version=v1',
+    ],
+    [
+      'azure-cognitive-services',
+      'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
+      'https://my-foundry.cognitiveservices.azure.com/openai/v1/responses?api-version=v1',
+    ],
+  ] as const)(
+    'proxies %s through its resource host with api-key auth',
+    async (providerId, resourceEnvVarName, expectedUrl) => {
+      mockResolveModelProviderEnvValue.mockImplementation(
+        async (names: string | readonly string[]) => {
+          const nameList = typeof names === 'string' ? [names] : names;
+          if (nameList.includes(resourceEnvVarName)) {
+            return providerId === 'azure' ? 'my-openai' : 'my-foundry';
+          }
+          return 'provider-secret-key';
+        },
+      );
+      const fetchMock = stubUpstreamFetch();
+
+      const response = await postMessages(
+        createApp(createRunToken()),
+        `/api/inference/${providerId}/v1/responses?api-version=v1`,
+      );
+
+      expect(response.status).toBe(200);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(expectedUrl);
+      expect(new Headers(init.headers).get('api-key')).toBe(
+        'provider-secret-key',
+      );
+    },
+  );
+
+  it('rejects Azure paths outside the inference allowlist', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/azure/v1/deployments',
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when an Azure API key is not configured', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        return nameList.includes('AZURE_RESOURCE_NAME')
+          ? 'my-openai'
+          : undefined;
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/azure/v1/responses',
+    );
+
+    expect(response.status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://attacker.example',
+    'resource.attacker.example',
+    '-leading-hyphen',
+    'trailing-hyphen-',
+    'resource/path',
+  ])('rejects invalid Azure resource name %s', async (resourceName) => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        return nameList.includes('AZURE_RESOURCE_NAME')
+          ? resourceName
+          : 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/azure/v1/responses',
+    );
+
+    expect(response.status).toBe(500);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('proxies MiniMax through its Anthropic-compatible endpoint', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(
