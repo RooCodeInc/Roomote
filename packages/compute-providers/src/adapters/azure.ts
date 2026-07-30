@@ -757,6 +757,7 @@ export class AzureClient implements ComputeProviderClient {
       resources: {
         cpu: `${cpuMillicores}m`,
         memory: `${memoryMiB}Mi`,
+        ...(this.config.diskSize ? { disk: this.config.diskSize } : {}),
       },
       lifecycle: {
         autoSuspendPolicy: {

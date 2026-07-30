@@ -391,6 +391,11 @@ export interface AzureConfig {
   /** Memory request in MiB (default 2048). */
   memoryMiB?: number;
   /**
+   * Base disk size as a storage quantity (e.g. `"80Gi"`; default 20Gi).
+   * ACA tiers pair sizes with disks: XS/S/M = 20Gi, L = 40Gi, XL = 80Gi.
+   */
+  diskSize?: string;
+  /**
    * Egress proxy TLS inspection mode for new sandboxes. Defaults to
    * `Partial`: Roomote configures no egress rules, and with the service
    * default (`Full`) the proxy TLS-resigns ALL outbound traffic (breaking

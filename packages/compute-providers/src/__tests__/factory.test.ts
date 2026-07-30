@@ -8,6 +8,7 @@ const {
   daytonaClientMock,
   e2bClientMock,
   blaxelClientMock,
+  azureClientMock,
   dockerCapabilities,
   daytonaCapabilities,
   e2bCapabilities,
@@ -19,6 +20,7 @@ const {
   daytonaClientMock: vi.fn(),
   e2bClientMock: vi.fn(),
   blaxelClientMock: vi.fn(),
+  azureClientMock: vi.fn(),
   dockerCapabilities: {
     snapshots: false,
     detachedCommands: false,
@@ -48,6 +50,7 @@ vi.mock('../adapters', () => ({
   DaytonaClient: daytonaClientMock,
   E2bClient: e2bClientMock,
   BlaxelClient: blaxelClientMock,
+  AzureClient: azureClientMock,
   DOCKER_CAPABILITIES: dockerCapabilities,
   DAYTONA_CAPABILITIES: daytonaCapabilities,
   E2B_CAPABILITIES: e2bCapabilities,
@@ -381,6 +384,72 @@ describe('createComputeProviderClient', () => {
       delete process.env.DAYTONA_API_KEY;
       delete process.env.DAYTONA_SNAPSHOT_NAME;
       delete process.env.DAYTONA_TARGET;
+    }
+  });
+
+  it('resolves Azure credentials and size/egress presets from env', () => {
+    process.env.AZURE_SUBSCRIPTION_ID = 'sub-1';
+    process.env.AZURE_RESOURCE_GROUP = 'rg-1';
+    process.env.AZURE_SANDBOX_GROUP = 'group-1';
+    process.env.AZURE_SANDBOX_REGION = 'canadacentral';
+    process.env.AZURE_SANDBOX_DISK_IMAGE = 'disk-1';
+    process.env.AZURE_SANDBOX_SIZE = 'XL';
+    process.env.AZURE_SANDBOX_EGRESS_INSPECTION = 'Full';
+
+    try {
+      createComputeProviderClient({ provider: 'azure' });
+
+      expect(azureClientMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subscriptionId: 'sub-1',
+          resourceGroup: 'rg-1',
+          sandboxGroup: 'group-1',
+          region: 'canadacentral',
+          diskImage: 'disk-1',
+          cpuMillicores: 4000,
+          memoryMiB: 8192,
+          diskSize: '80Gi',
+          egressTrafficInspection: 'Full',
+        }),
+      );
+    } finally {
+      delete process.env.AZURE_SUBSCRIPTION_ID;
+      delete process.env.AZURE_RESOURCE_GROUP;
+      delete process.env.AZURE_SANDBOX_GROUP;
+      delete process.env.AZURE_SANDBOX_REGION;
+      delete process.env.AZURE_SANDBOX_DISK_IMAGE;
+      delete process.env.AZURE_SANDBOX_SIZE;
+      delete process.env.AZURE_SANDBOX_EGRESS_INSPECTION;
+    }
+  });
+
+  it('prefers explicit Azure cpu/memory/disk config over the size preset', () => {
+    process.env.AZURE_SANDBOX_SIZE = 'XL';
+
+    try {
+      createComputeProviderClient({
+        provider: 'azure',
+        config: {
+          subscriptionId: 'sub-1',
+          resourceGroup: 'rg-1',
+          sandboxGroup: 'group-1',
+          region: 'canadacentral',
+          diskImage: 'disk-1',
+          cpuMillicores: 1500,
+          memoryMiB: 3072,
+          diskSize: '30Gi',
+        },
+      });
+
+      expect(azureClientMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cpuMillicores: 1500,
+          memoryMiB: 3072,
+          diskSize: '30Gi',
+        }),
+      );
+    } finally {
+      delete process.env.AZURE_SANDBOX_SIZE;
     }
   });
 

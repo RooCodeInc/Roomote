@@ -268,7 +268,7 @@ const serverSchema = {
   AZURE_CLIENT_SECRET: z.string().optional(),
   AZURE_SANDBOX_REGISTRY_USERNAME: z.string().optional(),
   AZURE_SANDBOX_REGISTRY_TOKEN: z.string().optional(),
-  AZURE_SANDBOX_SIZE: z.enum(['S', 'M', 'L']).optional(),
+  AZURE_SANDBOX_SIZE: z.enum(['XS', 'S', 'M', 'L', 'XL']).optional(),
   AZURE_SANDBOX_EGRESS_INSPECTION: z
     .enum(['Legacy', 'Full', 'Partial', 'None'])
     .optional(),

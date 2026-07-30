@@ -29,11 +29,13 @@ import {
 
 const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
 
-/** ACA sandbox size presets (Azure docs: S 0.5 vCPU/1 GiB, M 1/2, L 2/4). */
+/** ACA sandbox size presets (Azure docs tier table, incl. disk). */
 const AZURE_SIZE_PRESETS = {
-  S: { cpuMillicores: 500, memoryMiB: 1024 },
-  M: { cpuMillicores: 1000, memoryMiB: 2048 },
-  L: { cpuMillicores: 2000, memoryMiB: 4096 },
+  XS: { cpuMillicores: 250, memoryMiB: 512, diskSize: '20Gi' },
+  S: { cpuMillicores: 500, memoryMiB: 1024, diskSize: '20Gi' },
+  M: { cpuMillicores: 1000, memoryMiB: 2048, diskSize: '20Gi' },
+  L: { cpuMillicores: 2000, memoryMiB: 4096, diskSize: '40Gi' },
+  XL: { cpuMillicores: 4000, memoryMiB: 8192, diskSize: '80Gi' },
 } as const;
 
 type AzureSizePreset = keyof typeof AZURE_SIZE_PRESETS;
@@ -41,7 +43,13 @@ type AzureSizePreset = keyof typeof AZURE_SIZE_PRESETS;
 function parseAzureSizePreset(
   value: string | undefined,
 ): AzureSizePreset | undefined {
-  return value === 'S' || value === 'M' || value === 'L' ? value : undefined;
+  return value === 'XS' ||
+    value === 'S' ||
+    value === 'M' ||
+    value === 'L' ||
+    value === 'XL'
+    ? value
+    : undefined;
 }
 
 function parseAzureEgressInspection(
@@ -402,6 +410,9 @@ export function createComputeProviderClient(
           : {}),
         ...(sizePreset && options.config?.memoryMiB === undefined
           ? { memoryMiB: AZURE_SIZE_PRESETS[sizePreset].memoryMiB }
+          : {}),
+        ...(sizePreset && options.config?.diskSize === undefined
+          ? { diskSize: AZURE_SIZE_PRESETS[sizePreset].diskSize }
           : {}),
         ...(egressInspection &&
         options.config?.egressTrafficInspection === undefined
