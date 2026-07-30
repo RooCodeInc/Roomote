@@ -32,6 +32,11 @@ const DOCKER_RELEASE_ARCHIVE_MISSING =
   /Docker worker release archive does not exist|Docker provider requires a local worker release archive/i;
 const DOCKER_FETCH_FAILED_IN_LOGS =
   /Job\s+<\s*unknown\s*>\s*failed:\s*fetch failed|❌[^\n]*failed:\s*fetch failed/i;
+// Roomote Cloud compute broker capacity rejection (code sandbox_limit_reached).
+const SANDBOX_LIMIT_REACHED =
+  /tenant sandbox limit was reached|sandbox_limit_reached/i;
+const SANDBOX_LIMIT_REACHED_MESSAGE =
+  "Roomote couldn't start a new sandbox because this deployment is already running its maximum number of concurrent sandboxes. Wait for an active task to finish, or stop one you no longer need, then try again.";
 
 function parseOpenAiAdminErrorBody(
   body: string,
@@ -220,6 +225,10 @@ export function getTaskRunErrorDisplayMessage(
 
   if (workspacePreparationMessage) {
     return workspacePreparationMessage;
+  }
+
+  if (SANDBOX_LIMIT_REACHED.test(stripped)) {
+    return SANDBOX_LIMIT_REACHED_MESSAGE;
   }
 
   // The persisted category is authoritative; text inference covers runs

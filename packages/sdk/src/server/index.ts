@@ -13,6 +13,7 @@ export {
 } from './trpc';
 
 export { finishRun } from './lib/task-runs/finish-run';
+export { destroyCanceledTaskRunSandbox } from './lib/task-runs/destroy-canceled-run-sandbox';
 export {
   recordLlmUsage,
   type RecordLlmUsageInput,

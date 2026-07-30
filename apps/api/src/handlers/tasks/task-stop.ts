@@ -1,5 +1,8 @@
 import { TRPCClientError } from '@trpc/client';
-import { withSandboxServerRpcClient } from '@roomote/sdk/server';
+import {
+  destroyCanceledTaskRunSandbox,
+  withSandboxServerRpcClient,
+} from '@roomote/sdk/server';
 import {
   and,
   cancelTaskRunDirect,
@@ -73,6 +76,14 @@ async function cancelTaskRunBeforeSandbox(runId: number): Promise<boolean> {
   const canceled = await cancelTaskRunDirect({ runId });
   if (canceled) {
     void captureTaskSettled(runId, 'canceled');
+
+    // Usually a no-op (pre-sandbox runs have no machine), but a spawn racing
+    // this cancel may already have stamped machineId without a reachable
+    // sandbox server — destroy it rather than leaking it until provider TTL.
+    await destroyCanceledTaskRunSandbox({
+      runId,
+      logPrefix: 'stopTaskRun',
+    });
   }
   return canceled;
 }

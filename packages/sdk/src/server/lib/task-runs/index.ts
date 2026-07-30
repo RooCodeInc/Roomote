@@ -5,6 +5,7 @@ export * from './update-runtime-state';
 export * from './touch-worker-heartbeat';
 export * from './dequeue-task-run';
 export * from './dequeue-resume-task-run';
+export * from './destroy-canceled-run-sandbox';
 export * from './finish-run';
 export * from './enqueue-snapshot';
 export * from './enqueue-sleep';

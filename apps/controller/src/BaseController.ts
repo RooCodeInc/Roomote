@@ -35,7 +35,7 @@ import {
   sql,
 } from '@roomote/db/server';
 import { dequeueTaskRun } from '@roomote/cloud-agents/server';
-import { finishRun } from '@roomote/sdk/server';
+import { destroyCanceledTaskRunSandbox, finishRun } from '@roomote/sdk/server';
 
 import { getOrphanedTaskRun } from './orphaned-task-runs';
 import {
@@ -399,8 +399,49 @@ export abstract class BaseController {
         sandboxTimeoutMs,
         provider,
       );
+
+      // A cancel that lands mid-provision beats the machine stamp: the run row
+      // is already terminal, so no later finalize path will tear the fresh
+      // sandbox down. Re-check once the spawn settled and destroy if so.
+      await this.destroySandboxIfCanceledDuringSpawn(taskRun.id);
     } catch (error) {
       await this.handleSpawnTaskRunError(taskRun, error);
+    }
+  }
+
+  private async destroySandboxIfCanceledDuringSpawn(
+    runId: number,
+  ): Promise<void> {
+    try {
+      const latestRun = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, runId),
+        columns: {
+          status: true,
+          canceledAt: true,
+        },
+      });
+
+      if (
+        !latestRun ||
+        (!latestRun.canceledAt && latestRun.status !== RunStatus.Canceled)
+      ) {
+        return;
+      }
+
+      console.warn(
+        `[BaseController] Task run #${runId} was canceled during spawn; destroying its sandbox`,
+      );
+
+      await destroyCanceledTaskRunSandbox({
+        runId,
+        logPrefix: 'BaseController',
+      });
+    } catch (error) {
+      console.warn(
+        `[BaseController] Failed post-spawn cancel check for task run #${runId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
