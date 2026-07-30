@@ -8,7 +8,9 @@ const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com';
 type PostHogOptions = {
   api_host: string;
   disable_session_recording: boolean;
-  maskInputOptions: boolean;
+  session_recording: {
+    maskAllInputs: boolean;
+  };
 };
 
 type PostHog = Array<[string, ...unknown[]]> & {
@@ -78,7 +80,7 @@ export function CloudAnalyticsProvider({
         {
           api_host: resolvedPosthogHost,
           disable_session_recording: false,
-          maskInputOptions: true,
+          session_recording: { maskAllInputs: true },
         },
       ]);
       posthog.identify ??= (id) => posthog.push(['identify', id]);

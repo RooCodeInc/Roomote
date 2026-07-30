@@ -55,7 +55,9 @@ describe('CloudAnalyticsProvider', () => {
     );
     expect(window.posthog?._i).toContainEqual([
       'posthog-project',
-      expect.objectContaining({ maskInputOptions: true }),
+      expect.objectContaining({
+        session_recording: { maskAllInputs: true },
+      }),
     ]);
   });
 
