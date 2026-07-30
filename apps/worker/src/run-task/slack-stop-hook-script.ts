@@ -6,6 +6,8 @@ const REMINDER = [
   'Before finalizing, post a terminal Slack-visible reply for the current turn:',
   'use send_chat_reply with purpose "closeout" for the answer, result, blocker, or handoff.',
   'Use request_user_input only when you genuinely require structured input from the user.',
+  'If repository files changed in this task, confirm the capture-visual-proof',
+  'handoff ran before closing out.',
   'Do not continue other work first.',
 ].join(' ');
 const AUTOMATION_CLOSEOUT_REMINDER = [

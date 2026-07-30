@@ -8,7 +8,7 @@ import { SLACK_STOP_HOOK_SCRIPT } from '../slack-stop-hook-script';
 describe('SLACK_STOP_HOOK_SCRIPT', () => {
   const tempDirs: string[] = [];
   const reminder =
-    'Before finalizing, post a terminal Slack-visible reply for the current turn: use send_chat_reply with purpose "closeout" for the answer, result, blocker, or handoff. Use request_user_input only when you genuinely require structured input from the user. Do not continue other work first.';
+    'Before finalizing, post a terminal Slack-visible reply for the current turn: use send_chat_reply with purpose "closeout" for the answer, result, blocker, or handoff. Use request_user_input only when you genuinely require structured input from the user. If repository files changed in this task, confirm the capture-visual-proof handoff ran before closing out. Do not continue other work first.';
 
   function writeHook(): string {
     const tempDir = fs.mkdtempSync(
