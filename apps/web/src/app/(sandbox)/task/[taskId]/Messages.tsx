@@ -414,7 +414,9 @@ const MessagesBase = ({
         className="min-h-0 flex-1"
         initial={hasAnchor ? false : initialScrollBehavior}
       >
-        <ConversationContent className={conversationClassName}>
+        <ConversationContent
+          className={cn('ph-no-capture', conversationClassName)}
+        >
           {shouldRenderSessionPrompt && sessionPrompt && (
             <AcpTextMessage msg={sessionPrompt} />
           )}

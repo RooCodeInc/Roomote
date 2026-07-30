@@ -1,4 +1,4 @@
-import { db, eq, users } from '@roomote/db/server';
+import { and, db, eq, isNull, users } from '@roomote/db/server';
 import { FeatureFlag } from '@roomote/feature-flags';
 import { headers } from 'next/headers';
 
@@ -84,6 +84,36 @@ export async function setPersonalPasswordCommand(
     body: { newPassword },
     headers: await headers(),
   });
+}
+
+export async function acceptCookieConsentCommand(
+  auth: UserAuthSuccess,
+): Promise<Date> {
+  if (!auth.cloudEnabled) {
+    throw new Error('Cookie consent is only available on Roomote Cloud.');
+  }
+
+  const now = new Date();
+  const [updatedUser] = await db
+    .update(users)
+    .set({ cookieConsentedAt: now, updatedAt: now })
+    .where(and(eq(users.id, auth.userId), isNull(users.cookieConsentedAt)))
+    .returning({ cookieConsentedAt: users.cookieConsentedAt });
+
+  if (updatedUser?.cookieConsentedAt) {
+    return updatedUser.cookieConsentedAt;
+  }
+
+  const existingUser = await db.query.users.findFirst({
+    where: eq(users.id, auth.userId),
+    columns: { cookieConsentedAt: true },
+  });
+
+  if (!existingUser?.cookieConsentedAt) {
+    throw new Error('Unable to record cookie consent for the active user.');
+  }
+
+  return existingUser.cookieConsentedAt;
 }
 
 export async function updatePersonalPreferencesCommand(

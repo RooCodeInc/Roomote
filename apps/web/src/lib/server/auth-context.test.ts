@@ -191,6 +191,35 @@ describe('authorize', () => {
     );
   });
 
+  it('exposes an existing cookie acceptance timestamp', async () => {
+    mockUsersFindFirst.mockResolvedValue({
+      id: 'user-1',
+      name: 'Jane Admin',
+      email: 'jane@example.com',
+      entity: {
+        id: 'user-1',
+        name: 'Jane Admin',
+        email: 'jane@example.com',
+        imageUrl: 'https://example.com/avatar.png',
+      },
+      role: 'admin',
+      createdAt: new Date('2025-01-01T00:00:00.000Z'),
+      imageUrl: 'https://example.com/avatar.png',
+      onboardingCompletedAt: new Date('2025-01-01T00:00:00.000Z'),
+      cookieConsentedAt: new Date('2026-07-30T12:00:00.000Z'),
+      deletedAt: null,
+    });
+
+    const result = await authorize();
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.cookieConsentedAt).toBe(
+        new Date('2026-07-30T12:00:00.000Z').getTime(),
+      );
+    }
+  });
+
   it('does not write an unchanged existing user during authorization', async () => {
     const result = await authorize();
 

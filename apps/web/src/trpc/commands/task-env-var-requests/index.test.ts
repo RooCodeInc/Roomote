@@ -23,6 +23,7 @@ function buildAdminAuth(userId: string): UserAuthSuccess {
     featureFlags: {} as UserAuthSuccess['featureFlags'],
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
+    cookieConsentedAt: null,
     resource: {
       username: null,
       fullName: 'Admin',

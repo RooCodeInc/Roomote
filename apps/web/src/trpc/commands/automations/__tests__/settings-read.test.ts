@@ -26,6 +26,7 @@ const adminAuth: UserAuthSuccess = {
   featureFlags: {} as Record<FeatureFlag, boolean>,
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
+  cookieConsentedAt: null,
   resource: {
     username: null,
     fullName: null,
