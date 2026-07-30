@@ -19,9 +19,11 @@ import {
   db,
   environmentRepositoryMappings,
   environmentVariables,
+  getDeploymentGitHubRoomoteMentionEnabled,
   getDeploymentPrAction,
   resolveDeploymentEnvVar,
   setDeploymentPrAction,
+  setDeploymentGitHubRoomoteMentionEnabled,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 
@@ -629,6 +631,25 @@ export async function setPrActionCommand(
   assertAdmin(auth);
 
   return { prAction: await setDeploymentPrAction(input.prAction) };
+}
+
+export async function getGitHubRoomoteMentionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  return {
+    enabled: await getDeploymentGitHubRoomoteMentionEnabled(),
+  };
+}
+
+export async function setGitHubRoomoteMentionCommand(
+  auth: UserAuthSuccess,
+  input: { enabled: boolean },
+) {
+  assertAdmin(auth);
+
+  return {
+    enabled: await setDeploymentGitHubRoomoteMentionEnabled(input.enabled),
+  };
 }
 
 async function getPersistedEnvironmentVariableNames(

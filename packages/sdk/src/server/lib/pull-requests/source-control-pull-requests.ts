@@ -11,6 +11,7 @@ import {
 import {
   db,
   eq,
+  getDeploymentGitHubRoomoteMentionEnabled,
   taskRuns,
   getDeploymentPrAction,
   taskPullRequests,
@@ -205,14 +206,13 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const prAction = await resolveEffectivePrAction(taskRun);
   const createDraft = prAction !== 'create';
 
-  // PR provenance mentions are injected into the agent prompt at task start
-  // via `getPrBodyAttributionLine`. When slug resolution at prompt-build time
-  // fell back to the schema default (`roomote`), the agent faithfully copies
-  // `@roomote` into the body. Repair that only when this process has a real
-  // configured slug — never rewrite with the default, or a correct custom
-  // handle (e.g. `@roomote-roomote`) could be downgraded.
-  const configuredGitHubAppSlug =
-    await resolveConfiguredGitHubAppSlugIfConfigured();
+  // PR provenance mentions are injected into the agent prompt at task start.
+  // Normalize them again at write time so setting changes and late app-slug
+  // resolution are reflected in the final PR body.
+  const [configuredGitHubAppSlug, roomoteMentionEnabled] = await Promise.all([
+    resolveConfiguredGitHubAppSlugIfConfigured(),
+    getDeploymentGitHubRoomoteMentionEnabled(),
+  ]);
   const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
     configuredGitHubAppSlug
       ? {
@@ -220,6 +220,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
           body: normalizePrBodyAttributionAppMention(
             input.body,
             configuredGitHubAppSlug,
+            roomoteMentionEnabled,
           ),
         }
       : input;

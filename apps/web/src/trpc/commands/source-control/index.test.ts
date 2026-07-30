@@ -9,6 +9,8 @@ const {
   mockRemoveGitLabWebhooksForProjects,
   mockEnvironmentMappingRows,
   mockResolveDeploymentEnvVar,
+  mockGetDeploymentGitHubRoomoteMentionEnabled,
+  mockSetDeploymentGitHubRoomoteMentionEnabled,
   mockSyncAdoRepositories,
   mockSyncGitLabRepositories,
   mockSyncGiteaRepositories,
@@ -29,6 +31,8 @@ const {
   mockRemoveGitLabWebhooksForProjects: vi.fn(),
   mockEnvironmentMappingRows: { rows: [] as { repositoryId: string }[] },
   mockResolveDeploymentEnvVar: vi.fn(),
+  mockGetDeploymentGitHubRoomoteMentionEnabled: vi.fn(),
+  mockSetDeploymentGitHubRoomoteMentionEnabled: vi.fn(),
   mockSyncAdoRepositories: vi.fn(),
   mockSyncGitLabRepositories: vi.fn(),
   mockSyncGiteaRepositories: vi.fn(),
@@ -93,8 +97,12 @@ vi.mock('@roomote/db/server', () => ({
     name: 'environment_variables.name',
   },
   getDeploymentPrAction: vi.fn(),
+  getDeploymentGitHubRoomoteMentionEnabled:
+    mockGetDeploymentGitHubRoomoteMentionEnabled,
   resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
   setDeploymentPrAction: vi.fn(),
+  setDeploymentGitHubRoomoteMentionEnabled:
+    mockSetDeploymentGitHubRoomoteMentionEnabled,
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -117,6 +125,8 @@ vi.mock('../environment-variables', () => ({
 
 import {
   assertValidSourceControlConfigInput,
+  getGitHubRoomoteMentionCommand,
+  setGitHubRoomoteMentionCommand,
   syncRepositoriesCommand,
 } from './index';
 
@@ -135,6 +145,35 @@ function buildMockAuth(
     ...overrides,
   } as UserAuthSuccess;
 }
+
+describe('GitHub Roomote mention setting commands', () => {
+  it('returns the deployment setting to admins', async () => {
+    mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValueOnce(true);
+
+    await expect(
+      getGitHubRoomoteMentionCommand(buildMockAuth()),
+    ).resolves.toEqual({ enabled: true });
+  });
+
+  it('persists an admin opt-out', async () => {
+    mockSetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValueOnce(false);
+
+    await expect(
+      setGitHubRoomoteMentionCommand(buildMockAuth(), { enabled: false }),
+    ).resolves.toEqual({ enabled: false });
+    expect(mockSetDeploymentGitHubRoomoteMentionEnabled).toHaveBeenCalledWith(
+      false,
+    );
+  });
+
+  it('rejects non-admin updates', async () => {
+    await expect(
+      setGitHubRoomoteMentionCommand(buildMockAuth({ isAdmin: false }), {
+        enabled: false,
+      }),
+    ).rejects.toThrow('Unauthorized');
+  });
+});
 
 describe('source-control commands', () => {
   beforeEach(() => {

@@ -1,8 +1,9 @@
 import {
-  getGitHubAppMention,
+  getGitHubFollowUpMention,
   getSourceControlProviderLabel,
   type SourceControlProvider,
 } from '@roomote/types';
+import { isGitHubRoomoteMentionEnabled } from '@roomote/github';
 
 import {
   formatRepositoryEnvironmentLines,
@@ -41,7 +42,10 @@ function resolveContinueMention({
   }
 
   if (sourceControlProvider === 'github') {
-    return getGitHubAppMention(githubAppSlug?.trim() || 'roomote');
+    return getGitHubFollowUpMention(
+      githubAppSlug?.trim() || 'roomote',
+      isGitHubRoomoteMentionEnabled(),
+    );
   }
 
   return '@roomote';

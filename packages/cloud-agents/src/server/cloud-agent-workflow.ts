@@ -30,7 +30,10 @@ import {
   resolveTelegramRuntimeCredentials,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
-import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
+import {
+  resolveConfiguredGitHubAppSlug,
+  resolveGitHubRoomoteMentionEnabled,
+} from '@roomote/github';
 import { getRedis } from '@roomote/redis';
 
 import { githubPrReview } from './workflows/githubPrReview';
@@ -122,7 +125,10 @@ export async function generatePrompt({
   // checks, review-summary comment reuse, PR attribution mentions); refresh
   // the configured app slug first so an app created through the /setup flow
   // is recognized as ourselves.
-  await resolveConfiguredGitHubAppSlug();
+  await Promise.all([
+    resolveConfiguredGitHubAppSlug(),
+    resolveGitHubRoomoteMentionEnabled(),
+  ]);
   const telegramBotUsername =
     getCommunicationProviderFromTaskPayload(taskSpec.payload) === 'telegram'
       ? (await resolveTelegramRuntimeCredentials()).botUsername
