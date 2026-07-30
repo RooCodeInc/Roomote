@@ -132,6 +132,10 @@ export class OpenCodeStallWatchdogs {
   armSteerPickup(steer: PendingSteerPickup): void {
     this.pendingSteerPickups.push(steer);
 
+    this.scheduleSteerPickupCheck();
+  }
+
+  private scheduleSteerPickupCheck(): void {
     if (this.steerPickupTimer) {
       clearTimeout(this.steerPickupTimer);
     }
@@ -220,18 +224,60 @@ export class OpenCodeStallWatchdogs {
   /**
    * Fires when a successfully injected mid-turn steer saw no turn progress
    * within the pickup window: the turn is presumed stalled inside a single
-   * LLM stream request, where OpenCode never reaches the loop step boundary
-   * that would read the injection. Escalate via host callback so the harness
-   * can queue + prioritize + abort-and-replay.
+   * LLM stream request only after local activity and server-side tool state
+   * rule out legitimate quiet work. Escalate via host callback so the harness
+   * can queue + prioritize + abort-and-replay; otherwise keep waiting for the
+   * next loop boundary to read the injection.
    */
   private async handleSteerPickupStall(): Promise<void> {
     this.steerPickupTimer = null;
     const pending = this.pendingSteerPickups;
-    this.pendingSteerPickups = [];
 
     if (this.isDisposed() || pending.length === 0 || !this.isInFlight()) {
+      this.pendingSteerPickups = [];
       return;
     }
+
+    if (this.hasDeferringActivity()) {
+      this.scheduleSteerPickupCheck();
+      return;
+    }
+
+    const sessionId = this.getSessionId();
+
+    if (!sessionId) {
+      this.scheduleSteerPickupCheck();
+      return;
+    }
+
+    let verification: TurnStallVerificationResult = 'unverified';
+
+    try {
+      verification = await this.verifyNoRunningTool(sessionId);
+    } catch (error) {
+      this.logger.warn(
+        `Could not verify OpenCode session ${sessionId} before escalating a stalled steer; leaving it running: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    // Session progress or another steer may have replaced this pending batch
+    // while server-side tool state was being checked.
+    if (
+      this.isDisposed() ||
+      !this.isInFlight() ||
+      this.pendingSteerPickups !== pending
+    ) {
+      return;
+    }
+
+    if (verification !== 'no_running_tool') {
+      this.scheduleSteerPickupCheck();
+      return;
+    }
+
+    this.pendingSteerPickups = [];
 
     this.logger.warn(
       `OpenCode showed no turn progress within ${this.steerPickupTimeoutMs}ms of a native mid-turn steer injection; escalating ${pending.length} steer(s) to abort-and-replay so they land.`,

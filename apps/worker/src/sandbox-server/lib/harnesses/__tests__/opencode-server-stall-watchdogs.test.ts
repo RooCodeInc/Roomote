@@ -270,6 +270,97 @@ describe('OpenCode steer pickup watchdog', () => {
     }
   });
 
+  it('defers steer escalation while a tracked execute tool is running', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await startTask(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          info: { id: 'msg_a1', role: 'assistant' },
+          part: {
+            id: 'prt_bash_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_a1',
+            type: 'tool',
+            tool: 'bash',
+            callID: 'call_bash_1',
+            state: { status: 'running', input: { command: 'pnpm build' } },
+          },
+        },
+      });
+      await injectSteer(client, harness);
+
+      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.messages).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('defers steer escalation while a server-side tool is still running', async () => {
+    const { client, harness } = createHarness();
+    client.messages.mockResolvedValue([
+      assistantMessageWithParts([mcpToolPart('running')]),
+    ]);
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await startTask(client, harness);
+      await injectSteer(client, harness);
+
+      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
+
+      expect(client.messages).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_1' }),
+      );
+      expect(client.abort).not.toHaveBeenCalled();
+
+      client.messages.mockResolvedValue([
+        assistantMessageWithParts([mcpToolPart('completed')]),
+      ]);
+      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
+
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(3);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('defers steer escalation when server-side tool state cannot be verified', async () => {
+    const { client, harness } = createHarness();
+    client.messages.mockRejectedValueOnce(new Error('lookup unavailable'));
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await startTask(client, harness);
+      await injectSteer(client, harness);
+
+      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
+
+      expect(client.abort).not.toHaveBeenCalled();
+
+      client.messages.mockResolvedValue([]);
+      await vi.advanceTimersByTimeAsync(STEER_PICKUP_TIMEOUT_MS);
+
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('does not escalate a steer after the turn completes', async () => {
     const { client, harness } = createHarness();
 
