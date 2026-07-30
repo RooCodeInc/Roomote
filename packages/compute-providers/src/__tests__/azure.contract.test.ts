@@ -343,8 +343,8 @@ describe('azure adapter contract', () => {
       egress: 2000,
     });
 
-    // Detached logs are purged before the snapshot is taken so they don't
-    // ride into restored sandboxes.
+    // Closed detached commands' logs are purged before the snapshot so they
+    // don't ride into restored sandboxes (in-flight command's files stay).
     const execIndex = requests.findIndex((r) =>
       r.url.includes('/executeShellCommand'),
     );
@@ -353,9 +353,10 @@ describe('azure adapter contract', () => {
     );
     expect(execIndex).toBeGreaterThanOrEqual(0);
     expect(snapshotIndex).toBeGreaterThan(execIndex);
-    expect(
-      (requests[execIndex]?.body as { command: string }).command,
-    ).toContain('rm -rf');
+    const purgeCommand = (requests[execIndex]?.body as { command: string })
+      .command;
+    expect(purgeCommand).toContain('find');
+    expect(purgeCommand).toContain("-name '*.exit'");
   });
 
   it('finds snapshots by source instance', async () => {

@@ -513,14 +513,21 @@ export class AzureClient implements ComputeProviderClient {
     const usageObservation = await this.readUsageObservation(input.instanceId);
 
     // ACA snapshots capture memory+disk and get restored into future
-    // sandboxes — purge detached-command logs and exit sentinels first so
-    // stale worker logs (and anything they contain) don't ride into every
-    // restored sandbox. Best effort; the snapshot is still valid with them.
+    // sandboxes — purge CLOSED detached-command logs first so stale output
+    // (and anything it contains) doesn't ride into every restored sandbox.
+    // Only triples with an exit sentinel are removed: the in-flight worker's
+    // own logs stay readable after restore, and its exit watcher keeps
+    // working. Best effort; the snapshot is still valid without the purge.
     await this.request(
       'POST',
       `${this.sandboxPath(input.instanceId)}/executeShellCommand`,
       {
-        body: { command: `rm -rf ${shellQuote(DETACHED_LOG_ROOT)}` },
+        body: {
+          command:
+            'find ' +
+            shellQuote(DETACHED_LOG_ROOT) +
+            ' -name \'*.exit\' -exec sh -c \'p=${1%.exit}; rm -f "$p.exit" "$p.stdout.log" "$p.stderr.log"\' _ {} \\;',
+        },
         signal: input.signal,
         abortMessage: `Purging detached logs before snapshotting Azure sandbox ${input.instanceId} was aborted`,
       },
