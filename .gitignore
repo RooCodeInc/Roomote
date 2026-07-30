@@ -69,8 +69,14 @@ AGENTS.local.md
 # claude skills (tracked via .agents/, not through .claude symlink)
 .claude/skills/
 
-# temporary agent worktree checkouts (.agents/skills stays tracked)
-.agents/worktrees/
+# temporary agent worktree checkouts (.agents/skills stays tracked). Anchored
+# because knip prefixes unanchored patterns with **/ and applies them to
+# absolute paths in some globs, which made every file inside a worktree nested
+# under .agents/worktrees/ match and flooded knip with phantom unused findings.
+# The .claude line covers the same worktrees reached through the tracked
+# .claude -> .agents symlink, which filesystem walkers follow but git does not.
+/.agents/worktrees/
+/.claude/worktrees/
 
 # e2e
 artifacts/ci-e2e/
