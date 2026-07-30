@@ -88,6 +88,10 @@ function isProgressBoundaryBlock(block: AcpRenderBlock): boolean {
   return block.kind === 'message' && block.msg.kind === 'todo_section';
 }
 
+function isActivityBoundaryBlock(block: AcpRenderBlock): boolean {
+  return isTextBoundaryBlock(block) || isProgressBoundaryBlock(block);
+}
+
 function getToolName(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
 ): string | null {
@@ -232,7 +236,7 @@ export function buildAcpActivityRenderBlocks(
     const activityBlocks = blocks.slice(activityStart, activityEnd);
     const next = blocks[activityEnd];
 
-    if (activityBlocks.length > 0 && next && isTextBoundaryBlock(next)) {
+    if (activityBlocks.length > 0 && next && isActivityBoundaryBlock(next)) {
       const firstActivity = activityBlocks[0]!;
 
       groupedBlocks.push({
