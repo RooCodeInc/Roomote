@@ -1,0 +1,51 @@
+---
+title: Z.AI
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/zai.svg'
+description: Use metered GLM API access from the international Z.AI or China BigModel platform.
+---
+
+Z.AI provides direct API access to GLM models. Roomote supports both the
+international Z.AI platform and the China BigModel platform; the key and region
+must match. General platform keys are separate from Coding Plan membership keys.
+
+## Get an API key
+
+Create an international key on the [Z.AI API keys page](https://z.ai/manage-apikey/apikey-list).
+For China, create the key in the Zhipu BigModel console. Use [Z.AI Coding
+Plan](/providers/inference/zai-coding-plan) for a Coding Plan membership key.
+
+## Configuration
+
+Add **Z.AI** in **Settings > Models**, paste the platform key, and select its
+region. Environment-variable configuration uses:
+
+```sh
+ZAI_API_KEY=...
+ZAI_REGION=global # or china
+```
+
+Both values are required. Models use the `zai/` prefix; Roomote can also map a
+supported GLM vision model to the vision role.
+
+## Cost behavior
+
+Requests consume the API balance of the matching regional platform. Roomote
+records usage and estimates cost from model metadata. The selected Z.AI or
+BigModel account's balance, pricing, and quota are authoritative; Coding Plan
+allowances do not fund this connection.
+
+## Verify setup
+
+1. save `ZAI_API_KEY` with the correct `ZAI_REGION`
+2. confirm Z.AI models appear in **Settings > Models**
+3. enable a `zai/...` model and assign it to a role
+4. run a small task and confirm usage in the matching regional console
+
+## Common issues
+
+- **Authentication fails.** International keys require `global`; BigModel keys
+  require `china`.
+- **A Coding Plan key is rejected.** Connect it through the separate Z.AI Coding
+  Plan provider.
+- **Quota display is missing.** Roomote uses an undocumented regional endpoint;
+  missing quota data does not necessarily mean inference is unavailable.

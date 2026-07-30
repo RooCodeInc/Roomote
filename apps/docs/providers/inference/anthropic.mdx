@@ -1,0 +1,51 @@
+---
+title: Anthropic
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/anthropic.svg'
+description: Use Anthropic API models directly for Roomote tasks and model roles.
+---
+
+Anthropic provides direct API access to Claude models. Choose this provider when
+you want Anthropic billing and rate limits without routing requests through a
+multi-provider gateway.
+
+## Get an API key
+
+Create a key in the [Anthropic Console](https://console.anthropic.com/settings/keys).
+The organization that owns the key must have billing and model access enabled.
+
+## Configuration
+
+Add **Anthropic** in **Settings > Models** and paste the key, or configure:
+
+```sh
+ANTHROPIC_API_KEY=...
+```
+
+Roomote adds a recommended Claude model set after the provider connects. Model
+IDs use the `anthropic/` prefix. You can keep one Claude model for every role or
+use a faster model for helper and explore work and a stronger model for coding,
+planning, and review.
+
+## Cost behavior
+
+Anthropic charges the account for input and output tokens, with model-specific
+pricing and possible differences for features such as prompt caching. Roomote
+records token usage and estimates cost from its current model metadata. The
+[Anthropic pricing page](https://www.anthropic.com/pricing#api) and console bill
+are the source of truth.
+
+## Verify setup
+
+1. save `ANTHROPIC_API_KEY`
+2. confirm recommended Anthropic models appear and enable at least one
+3. assign an `anthropic/...` model as the coding model or another role
+4. run a small task and check that it completes and reports token usage
+
+## Common issues
+
+- **Authentication fails.** Recreate the key and confirm it belongs to the
+  organization with active API billing.
+- **A model is unavailable.** Confirm the model is enabled for the key's region
+  and account, then refresh model metadata in Roomote.
+- **Requests are rate-limited.** Check the Anthropic Console limits and reduce
+  concurrent work or request a higher usage tier.

@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "cookie_consented_at" timestamp;

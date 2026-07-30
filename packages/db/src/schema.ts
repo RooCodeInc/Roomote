@@ -101,6 +101,9 @@ export const users = pgTable(
     // getUserAnalyticsId). Never derived from user data and never editable
     // through any user-facing mutation.
     analyticsId: text('analytics_id'),
+    // Acceptance is shared across devices. Refusal remains device-local, so
+    // null intentionally means either declined here or not answered yet.
+    cookieConsentedAt: timestamp('cookie_consented_at'),
     onboardingCompletedAt: timestamp('onboarding_completed_at'),
     // Soft reference to invites.id: the invite that admitted this user, or
     // null for org-membership sign-ins and pre-invite users.

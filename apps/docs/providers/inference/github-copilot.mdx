@@ -1,0 +1,43 @@
+---
+title: GitHub Copilot
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/githubcopilot.svg'
+description: Use models included with an eligible GitHub Copilot account in Roomote.
+---
+
+GitHub Copilot gives Roomote access to supported models through a user's active
+Copilot plan. This inference connection is independent of Roomote's [GitHub
+source-control app](/providers/source-control/github).
+
+## Connect GitHub Copilot
+
+Add **GitHub Copilot** in **Settings > Models** and follow the GitHub device-code
+flow. Sign in to a GitHub account with an active Copilot plan and approve the
+connection. See [GitHub Copilot plans and setup](https://docs.github.com/en/copilot)
+if the account does not have access yet.
+
+No API key or environment variable is required. Roomote stores the OAuth record
+and exposes supported models with the `github-copilot/` prefix.
+
+## Cost behavior
+
+Requests use the connected Copilot plan. Some models or requests may consume
+premium requests according to GitHub's current multipliers and allowance;
+Roomote shows the provider-reported remaining premium-request quota when GitHub
+returns it. GitHub billing and [Copilot plan details](https://github.com/features/copilot/plans)
+are authoritative.
+
+## Verify setup
+
+1. complete the GitHub device-code flow
+2. confirm GitHub Copilot shows as connected
+3. enable a `github-copilot/...` model and assign it to a role
+4. run a small task and check the premium-request usage line when available
+
+## Common issues
+
+- **GitHub authorizes but Roomote reports no Copilot access.** Confirm the signed-in
+  account has an active individual or organization-provided Copilot seat.
+- **A model is unavailable.** Model availability and premium multipliers vary by
+  plan; select another supported model or check the organization's Copilot policy.
+- **The connection stops working.** Reconnect if GitHub revoked or expired the
+  device authorization.

@@ -1,0 +1,50 @@
+---
+title: Baseten
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/baseten.svg'
+description: Route Roomote tasks to supported foundation models through Baseten.
+---
+
+Baseten is a hosted inference platform for deploying and serving open and custom
+models. Roomote's built-in provider exposes a curated set of Baseten-hosted
+models through the standard Models workflow.
+
+## Get an API key
+
+Create a key from [Baseten API key settings](https://app.baseten.co/settings/api_keys).
+Use a key from the workspace that has access to the models you plan to enable.
+
+## Configuration
+
+Add **Baseten** in **Settings > Models** and paste the key, or configure:
+
+```sh
+BASETEN_API_KEY=...
+```
+
+Roomote adds its recommended Baseten models after connection. Their IDs use the
+`baseten/` prefix. Enable only models available to the key's workspace and set
+the coding and specialized role mappings you want.
+
+## Cost behavior
+
+Baseten billing depends on the model endpoint and whether it uses serverless or
+dedicated deployment capacity. Roomote records model usage and estimates costs
+when catalog pricing is available, but the Baseten workspace bill is
+authoritative. See [Baseten pricing](https://www.baseten.co/pricing/) for current
+compute and inference terms.
+
+## Verify setup
+
+1. save `BASETEN_API_KEY`
+2. confirm Baseten models appear in **Settings > Models**
+3. enable one model and assign it as the coding model
+4. run a small task and confirm the request appears in Baseten observability
+
+## Common issues
+
+- **Authentication fails.** Confirm the key is active and belongs to the
+  intended Baseten workspace.
+- **A model cannot run.** Verify that the workspace can access that foundation
+  model or deployment and refresh Roomote's model metadata.
+- **Cold requests are slow.** Check the endpoint's autoscaling and minimum
+  replica settings in Baseten; Roomote does not control model replicas.

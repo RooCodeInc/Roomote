@@ -1,5 +1,5 @@
 {
-  "id": "1ee0690b-54a2-4fbe-85ab-c952fb9a0395",
+  "id": "0160cf6a-8185-4105-a4c4-76e8e1d120f1",
   "prevId": "93944ecb-cb8c-4147-b765-d70ea04dc709",
   "version": "7",
   "dialect": "postgresql",
@@ -7640,7 +7640,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"task_runs\".\"status\" IN ('running', 'idle') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"sleep_at\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')",
+          "where": "\"task_runs\".\"status\" IN ('running', 'idle') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"sleep_at\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -7668,7 +7668,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"task_runs\".\"status\" IN ('running', 'idle') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"worker_heartbeat_at\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')",
+          "where": "\"task_runs\".\"status\" IN ('running', 'idle') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"worker_heartbeat_at\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -7690,7 +7690,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"task_runs\".\"status\" IN ('running', 'idle') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')",
+          "where": "\"task_runs\".\"status\" IN ('running', 'idle') AND \"task_runs\".\"machine_id\" IS NOT NULL AND \"task_runs\".\"sleep_requested_at\" IS NULL AND \"task_runs\".\"snapshot_id\" IS NULL AND \"task_runs\".\"snapshot_requested_at\" IS NULL AND \"task_runs\".\"vendor\" IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -9285,6 +9285,12 @@
         "analytics_id": {
           "name": "analytics_id",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cookie_consented_at": {
+          "name": "cookie_consented_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },

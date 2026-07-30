@@ -89,6 +89,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
   linear:
     'Roomote will be able to pull issue, project, and roadmap context into tasks.',
+  monday:
+    'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
   neon: 'Roomote will get database access to inspect schemas and query data.',
   notion:
     'Roomote will be able to read Notion pages and databases for context.',

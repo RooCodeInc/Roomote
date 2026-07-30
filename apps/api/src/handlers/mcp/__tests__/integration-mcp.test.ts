@@ -172,14 +172,14 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(mockFindConnection).not.toHaveBeenCalled();
   });
 
-  it('resolves a user-scoped integration connection for the live acting user', async () => {
+  it('resolves a user-scoped monday.com connection for the live acting user', async () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: 'user-2' });
     mockFindConnection.mockResolvedValue({ id: 'conn-2', userId: 'user-2' });
     stubUpstreamFetch();
 
     const response = await postMcp(
       createApp(
-        'notion',
+        'monday',
         createRunToken({ userId: 'user-1', principal: 'user' }),
       ),
       createInitializeRequest(1),

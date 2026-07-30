@@ -57,6 +57,8 @@ describe('matchSlackMcpSetupService', () => {
   describe('other services stay unaffected', () => {
     it.each([
       ['https://linear.app/acme/issue/OPS-123', 'linear'],
+      ['https://acme.monday.com/boards/1234567890', 'monday'],
+      ['https://acme.monday.com/boards/1234567890/pulses/9876543210', 'monday'],
       ['https://www.notion.so/acme/spec-123', 'notion'],
       ['https://acme.atlassian.net/browse/OPS-1', 'jira'],
       ['https://my-app.vercel.app/anything', 'vercel'],
@@ -65,12 +67,16 @@ describe('matchSlackMcpSetupService', () => {
       expect(matchServiceIdForUrl(url)).toBe(serviceId);
     });
 
-    it.each(['https://vercel.com/pricing', 'https://example.com/zero.xyz'])(
-      'does not match %s',
-      (url) => {
-        expect(matchServiceIdForUrl(url)).toBeNull();
-      },
-    );
+    it.each([
+      'https://vercel.com/pricing',
+      'https://example.com/zero.xyz',
+      'https://monday.com/pricing',
+      'https://developer.monday.com/apps/docs/intro',
+      'https://developer.monday.com/boards/1234567890',
+      'https://mcp.monday.com/boards/1234567890',
+    ])('does not match %s', (url) => {
+      expect(matchServiceIdForUrl(url)).toBeNull();
+    });
   });
 });
 

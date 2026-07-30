@@ -39,6 +39,14 @@ Jira uses OAuth and requires both levels:
 
 Once connected, I can read Jira issues, project metadata, and JQL search results using the workspace's connected Atlassian account.
 
+# monday.com
+
+monday.com uses OAuth and requires both levels:
+1. A deployment operator enables monday.com from Settings > Integrations.
+2. Each user connects their own monday.com account via OAuth.
+
+Once connected, I can inspect the user's boards, items, updates, WorkDocs, workspaces, forms, automations, meetings, and sprint context. The built-in connection is read-only.
+
 # Sentry
 
 Sentry uses the workspace MCP integration:

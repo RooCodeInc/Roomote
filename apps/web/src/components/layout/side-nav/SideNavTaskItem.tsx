@@ -88,7 +88,7 @@ export const SideNavTaskItem = ({
       <HoverCard openDelay={120} closeDelay={180}>
         <HoverCardTrigger asChild>
           <div
-            className="relative w-full"
+            className="ph-no-capture relative w-full"
             onPointerOver={() => setIsExpandedRowActionVisible(true)}
             onPointerOut={(event) => {
               const nextTarget = event.relatedTarget as Node | null;
@@ -178,7 +178,7 @@ export const SideNavTaskItem = ({
           side="right"
           align="start"
           sideOffset={8}
-          className="-ml-1 w-fit max-w-md rounded-xl p-3"
+          className="ph-no-capture -ml-1 w-fit max-w-md rounded-xl p-3"
         >
           <div className="space-y-2">
             <p className="text-sm font-medium wrap-break-word line-clamp-4">
@@ -217,7 +217,7 @@ export const SideNavTaskItem = ({
           href={`/task/${task.id}`}
           aria-label={taskTitle}
           className={cn(
-            'group relative flex size-11 items-center justify-center',
+            'ph-no-capture group relative flex size-11 items-center justify-center',
             isActive ? 'text-accent-foreground' : 'text-muted-foreground',
           )}
         >
@@ -254,7 +254,7 @@ export const SideNavTaskItem = ({
         side="right"
         align="start"
         sideOffset={8}
-        className="-ml-1 w-80 rounded-xl p-3"
+        className="ph-no-capture -ml-1 w-80 rounded-xl p-3"
       >
         <div className="flex items-start gap-2">
           <Button

@@ -160,7 +160,7 @@ export function LogsSidePanel({ active, onClose }: LogsSidePanelProps) {
       />
 
       {selectedLogfile ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border/60">
+        <div className="ph-no-capture flex min-h-0 flex-1 flex-col overflow-hidden border-t border-border/60">
           {hasOpenedViewer ? (
             <TaskLogViewer
               key={selectedLogfile.filePath}

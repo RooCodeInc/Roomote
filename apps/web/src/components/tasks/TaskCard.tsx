@@ -65,11 +65,14 @@ export const TaskCard = ({
 
   return (
     <div
-      className={cn('relative flex items-start gap-3 w-full p-4', {
-        'bg-foreground/20': isSelected,
-        'cursor-pointer transition-colors hover:bg-accent-foreground/10':
-          !inSelectionMode,
-      })}
+      className={cn(
+        'ph-no-capture relative flex items-start gap-3 w-full p-4',
+        {
+          'bg-foreground/20': isSelected,
+          'cursor-pointer transition-colors hover:bg-accent-foreground/10':
+            !inSelectionMode,
+        },
+      )}
       onClick={() => {
         if (!inSelectionMode) {
           router.push(`/task/${task.id}`);

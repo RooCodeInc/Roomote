@@ -39,6 +39,11 @@ const LOG_PREFIX = '[managerStats]';
 const SCHEDULE_DAY_LOCAL = 5; // Friday.
 const SCHEDULE_HOUR_LOCAL = 16;
 const WINDOW_DAYS = 7;
+const numberFormatter = new Intl.NumberFormat('en-US');
+
+function formatNumber(value: number) {
+  return numberFormatter.format(value);
+}
 
 interface DeploymentContext {
   slackBotToken: string | null;
@@ -64,22 +69,26 @@ function formatManagerStatsText({
     stats.topUsers.length === 0
       ? '—'
       : stats.topUsers
-          .map((user) => `${user.label} (${user.pullRequestCount})`)
+          .map(
+            (user) => `${user.label} (${formatNumber(user.pullRequestCount)})`,
+          )
           .join(', ');
   const lines = [
     '*My weekly stats*',
-    `· Active users: *${stats.activeUsers}*`,
-    `· PRs opened with me: *${stats.roomotePullRequests} (${Math.round(stats.roomotePullRequestPercentage)}% of ${stats.totalPullRequests})* — ${stats.authoredPullRequests} authored, ${stats.reviewedPullRequests} reviewed`,
-    `· PR merged with me: *${stats.mergedRoomotePullRequests} (${Math.round(stats.mergedRoomotePullRequestPercentage)}% of ${stats.authoredPullRequests} authored)*`,
+    `· Active users: *${formatNumber(stats.activeUsers)}*`,
+    `· PRs opened with me: *${formatNumber(stats.roomotePullRequests)} (${formatNumber(Math.round(stats.roomotePullRequestPercentage))}% of ${formatNumber(stats.totalPullRequests)})* — ${formatNumber(stats.authoredPullRequests)} authored, ${formatNumber(stats.reviewedPullRequests)} reviewed`,
+    `· PR merged with me: *${formatNumber(stats.mergedRoomotePullRequests)} (${formatNumber(Math.round(stats.mergedRoomotePullRequestPercentage))}% of ${formatNumber(stats.authoredPullRequests)} authored)*`,
     // Line counts are only available from GitHub; when the digest includes
     // PRs from other providers the number would be partial, so omit the line
     // entirely rather than annotate it.
     ...(stats.locScope === 'all'
-      ? [`· LOC added / removed: *+${stats.additions} / -${stats.deletions}*`]
+      ? [
+          `· LOC added/removed: *+${formatNumber(stats.additions)} / -${formatNumber(stats.deletions)}*`,
+        ]
       : []),
     `· Most active repo: ${
       stats.mostActiveRepo
-        ? `*${stats.mostActiveRepo.fullName}* (${stats.mostActiveRepo.pullRequestCount} PRs)`
+        ? `*${stats.mostActiveRepo.fullName}* (${formatNumber(stats.mostActiveRepo.pullRequestCount)} PRs)`
         : '—'
     }`,
   ];

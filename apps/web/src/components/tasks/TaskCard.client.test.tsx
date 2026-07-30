@@ -162,6 +162,17 @@ describe('TaskCard', () => {
     vi.clearAllMocks();
   });
 
+  it('prevents task history metadata from being captured', () => {
+    const { container } = render(
+      <TaskCard
+        task={createTask()}
+        filterState={{ hasSpecificUserFilter: false }}
+      />,
+    );
+
+    expect(container.firstElementChild).toHaveClass('ph-no-capture');
+  });
+
   it('renders attribution label for a matched creator', () => {
     const { container } = render(
       <TaskCard

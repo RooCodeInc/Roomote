@@ -88,6 +88,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Use issue context when implementing or reviewing work',
     ],
   },
+  monday: {
+    capabilities: [
+      'Inspect monday.com boards, groups, columns, and items',
+      'Read item updates, WorkDocs, and workspace context',
+      'Review automations, forms, meetings, and sprint data',
+    ],
+  },
   sentry: {
     capabilities: [
       'Inspect Sentry issues and project context through MCP',

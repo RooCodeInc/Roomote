@@ -30,7 +30,7 @@ export function SetupDocs({
   return (
     <>
       <div
-        className={`absolute top-0 right-0 pr-2 pt-2 pb-3 z-40 hidden items-end min-[900px]:flex flex-col h-full`}
+        className={`absolute top-0 right-0 z-40 hidden items-end min-[900px]:flex flex-col h-full`}
       >
         {isOpen ? (
           <section className="h-full w-[min(30vw,30rem)] overflow-hidden rounded-r-2xl bg-card border-2 border-background border-l-4 border-l-card z-2">

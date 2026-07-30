@@ -139,6 +139,7 @@ import {
 import {
   getPersonalAccountCapabilitiesCommand,
   getPersonalPreferencesCommand,
+  acceptCookieConsentCommand,
   setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
 } from '../commands/preferences';
@@ -1248,6 +1249,9 @@ export const appRouter = createRouter({
   }),
 
   preferences: createRouter({
+    acceptCookieConsent: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      acceptCookieConsentCommand(auth),
+    ),
     accountCapabilities: protectedProcedure.query(({ ctx: { auth } }) =>
       getPersonalAccountCapabilitiesCommand(auth),
     ),
