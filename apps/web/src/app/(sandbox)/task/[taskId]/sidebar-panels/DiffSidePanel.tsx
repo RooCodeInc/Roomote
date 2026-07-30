@@ -133,7 +133,7 @@ export function DiffSidePanel({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <SidePanelHeader title="Files changed" onClose={onClose} />
-      <div className="@container h-full min-h-0 flex-1 w-full overflow-hidden p-3">
+      <div className="ph-no-capture @container h-full min-h-0 flex-1 w-full overflow-hidden p-3">
         {content}
       </div>
     </div>

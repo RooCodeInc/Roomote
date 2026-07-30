@@ -95,6 +95,7 @@ function buildAuth(user: typeof users.$inferSelect): UserAuthSuccess {
     featureFlags: {} as Record<FeatureFlag, boolean>,
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
+    cookieConsentedAt: null,
     resource: {
       username,
       fullName: name,

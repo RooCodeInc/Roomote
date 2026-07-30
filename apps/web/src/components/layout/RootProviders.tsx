@@ -15,7 +15,7 @@ import {
 import { DebugUiAttributeController } from './DebugUiAttributeController';
 import { UserAnalyticsContext } from './UserAnalyticsContext';
 import { TelemetryProvider } from './TelemetryProvider';
-import { CloudAnalyticsProvider } from './CloudAnalyticsProvider';
+import { CloudConsentGate } from './CloudConsentGate';
 import { StatusBanner } from './StatusBanner';
 
 export function RootProviders({
@@ -53,8 +53,8 @@ export function RootProviders({
           <UserAnalyticsContext />
           <TelemetryProvider />
           {cloudEnabled ? (
-            <CloudAnalyticsProvider
-              cloudEnabled
+            <CloudConsentGate
+              cookieConsentedAt={authUser?.cookieConsentedAt ?? null}
               intercomAppId={intercomAppId}
               posthogHost={posthogHost}
               posthogProjectKey={posthogProjectKey}

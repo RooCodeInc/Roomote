@@ -355,7 +355,7 @@ export function Analytics({
   };
 
   return (
-    <div className="min-h-full w-full bg-background">
+    <div className="ph-no-capture min-h-full w-full bg-background">
       <AnalyticsShell
         activeItemId={object}
         title={config.label}

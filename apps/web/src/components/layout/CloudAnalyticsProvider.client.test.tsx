@@ -22,6 +22,7 @@ describe('CloudAnalyticsProvider', () => {
     render(
       <CloudAnalyticsProvider
         cloudEnabled={false}
+        consentGranted
         intercomAppId="intercom-app"
         posthogProjectKey="posthog-project"
         userId="user-1"
@@ -36,6 +37,7 @@ describe('CloudAnalyticsProvider', () => {
     render(
       <CloudAnalyticsProvider
         cloudEnabled
+        consentGranted
         intercomAppId="intercom-app"
         posthogHost="https://eu.i.posthog.com"
         posthogProjectKey="posthog-project"
@@ -51,6 +53,10 @@ describe('CloudAnalyticsProvider', () => {
       'src',
       'https://eu.i.posthog.com/static/array.js',
     );
+    expect(window.posthog?._i).toContainEqual([
+      'posthog-project',
+      expect.objectContaining({ maskInputOptions: true }),
+    ]);
   });
 
   it('identifies a user who signs in after PostHog initializes', () => {
@@ -60,6 +66,7 @@ describe('CloudAnalyticsProvider', () => {
     const { rerender } = render(
       <CloudAnalyticsProvider
         cloudEnabled
+        consentGranted
         posthogProjectKey="posthog-project"
       />,
     );
@@ -73,6 +80,7 @@ describe('CloudAnalyticsProvider', () => {
     rerender(
       <CloudAnalyticsProvider
         cloudEnabled
+        consentGranted
         posthogProjectKey="posthog-project"
         userId="user-1"
       />,
@@ -88,6 +96,7 @@ describe('CloudAnalyticsProvider', () => {
     render(
       <CloudAnalyticsProvider
         cloudEnabled
+        consentGranted
         intercomAppId="intercom-app"
         userId="user-1"
       />,
@@ -115,6 +124,7 @@ describe('CloudAnalyticsProvider', () => {
       render(
         <CloudAnalyticsProvider
           cloudEnabled
+          consentGranted
           intercomAppId="intercom-app"
           userId="user-1"
         />,
@@ -141,6 +151,7 @@ describe('CloudAnalyticsProvider', () => {
     render(
       <CloudAnalyticsProvider
         cloudEnabled
+        consentGranted
         intercomAppId="intercom-app"
         userId="user-1"
       />,
@@ -165,6 +176,7 @@ describe('CloudAnalyticsProvider', () => {
     const { rerender } = render(
       <CloudAnalyticsProvider
         cloudEnabled
+        consentGranted
         intercomAppId="intercom-app"
         userId="user-1"
       />,
@@ -185,6 +197,7 @@ describe('CloudAnalyticsProvider', () => {
     rerender(
       <CloudAnalyticsProvider
         cloudEnabled
+        consentGranted
         intercomAppId="intercom-app"
         userId="user-1"
       />,
@@ -193,5 +206,43 @@ describe('CloudAnalyticsProvider', () => {
     expect(intercom).toHaveBeenLastCalledWith('update', {
       hide_default_launcher: false,
     });
+  });
+
+  it('waits for consent before loading cloud integrations', () => {
+    const { rerender } = render(
+      <CloudAnalyticsProvider
+        cloudEnabled
+        consentGranted={false}
+        intercomAppId="intercom-app"
+        posthogProjectKey="posthog-project"
+      />,
+    );
+
+    expect(
+      document.head.querySelector('script[src*="posthog.com"]'),
+    ).not.toBeInTheDocument();
+    expect(
+      document.head.querySelector('script[src*="intercom.io"]'),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <CloudAnalyticsProvider
+        cloudEnabled
+        consentGranted
+        intercomAppId="intercom-app"
+        posthogProjectKey="posthog-project"
+      />,
+    );
+
+    expect(
+      document.head.querySelector(
+        'script[src="https://us.i.posthog.com/static/array.js"]',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      document.head.querySelector(
+        'script[src="https://widget.intercom.io/widget/intercom-app"]',
+      ),
+    ).toBeInTheDocument();
   });
 });

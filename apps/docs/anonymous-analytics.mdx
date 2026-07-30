@@ -56,6 +56,12 @@ Roomote Cloud deployments keep anonymous analytics enabled and do not show
 this switch. `R_CLOUD_ENABLED` is deployment-managed Cloud configuration; do
 not set it for a self-hosted deployment.
 
+Roomote Cloud also asks users for consent before loading optional support and
+product-experience services such as Intercom and PostHog. This choice does not
+control Roomote's anonymous analytics, which remains governed by the deployment
+configuration above. Self-hosted deployments do not show the cookie consent
+banner.
+
 ## Version checks
 
 Separately from analytics, your deployment checks once a day whether a newer

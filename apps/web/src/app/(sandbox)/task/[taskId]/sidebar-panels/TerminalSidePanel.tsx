@@ -325,7 +325,7 @@ export function TerminalSidePanel({ active, onClose }: TerminalSidePanelProps) {
           </div>
         ) : null}
 
-        <div className="flex-1 min-h-0 bg-zinc-800">
+        <div className="ph-no-capture flex-1 min-h-0 bg-zinc-800">
           <div
             style={{
               display: activeTab === 'terminal' ? 'block' : 'none',

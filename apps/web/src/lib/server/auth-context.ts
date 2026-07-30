@@ -38,6 +38,7 @@ type SignedInAuthContext = {
   primaryEmail: string;
   deploymentMetadata: Record<string, unknown>;
   isAdmin: boolean;
+  cookieConsentedAt: number | null;
   resource: UserResource;
 };
 
@@ -268,6 +269,7 @@ async function ensureDeploymentIdentity({
   return {
     deploymentMetadata,
     role,
+    cookieConsentedAt: existingUser?.cookieConsentedAt?.getTime() ?? null,
     resource: createUserResource({
       userId,
       name,
@@ -379,7 +381,7 @@ export async function getSignedInAuthContext(
     throw error;
   }
 
-  const { deploymentMetadata, role, resource } = identity;
+  const { cookieConsentedAt, deploymentMetadata, role, resource } = identity;
 
   setSentryUserContext({
     id: userId,
@@ -392,6 +394,7 @@ export async function getSignedInAuthContext(
     primaryEmail,
     deploymentMetadata,
     isAdmin: role === 'admin',
+    cookieConsentedAt,
     resource,
   };
 }
@@ -424,6 +427,7 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     featureFlags,
     anonymousAnalyticsEnabled,
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    cookieConsentedAt: authContext.cookieConsentedAt,
     managedAccess: getManagedDeploymentAccessFromMetadata(
       authContext.deploymentMetadata,
     ),

@@ -8,6 +8,7 @@ const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com';
 type PostHogOptions = {
   api_host: string;
   disable_session_recording: boolean;
+  maskInputOptions: boolean;
 };
 
 type PostHog = Array<[string, ...unknown[]]> & {
@@ -41,12 +42,14 @@ function shouldShowDefaultIntercomLauncher(pathname: string | null): boolean {
 
 export function CloudAnalyticsProvider({
   cloudEnabled,
+  consentGranted,
   intercomAppId,
   posthogProjectKey,
   posthogHost,
   userId,
 }: {
   cloudEnabled: boolean;
+  consentGranted: boolean;
   intercomAppId?: string;
   posthogProjectKey?: string;
   posthogHost?: string;
@@ -66,13 +69,17 @@ export function CloudAnalyticsProvider({
   hideDefaultIntercomLauncherRef.current = hideDefaultIntercomLauncher;
 
   useEffect(() => {
-    if (!cloudEnabled) return;
+    if (!cloudEnabled || !consentGranted) return;
     if (posthogProjectKey) {
       const posthog = (window.posthog ??= []);
       posthog._i ??= [];
       posthog._i.push([
         posthogProjectKey,
-        { api_host: resolvedPosthogHost, disable_session_recording: false },
+        {
+          api_host: resolvedPosthogHost,
+          disable_session_recording: false,
+          maskInputOptions: true,
+        },
       ]);
       posthog.identify ??= (id) => posthog.push(['identify', id]);
       posthog.reset ??= () => posthog.push(['reset']);
@@ -101,7 +108,13 @@ export function CloudAnalyticsProvider({
       };
       document.head.append(script);
     }
-  }, [cloudEnabled, intercomAppId, posthogProjectKey, resolvedPosthogHost]);
+  }, [
+    cloudEnabled,
+    consentGranted,
+    intercomAppId,
+    posthogProjectKey,
+    resolvedPosthogHost,
+  ]);
 
   useEffect(() => {
     if (!cloudEnabled || !posthogLoaded.current) return;
