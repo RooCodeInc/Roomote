@@ -58,6 +58,7 @@ vi.mock('@roomote/github', () => ({
     isRoomoteGitHubLogin: vi.fn(() => false),
   },
   getEffectiveGitHubAppSlug: vi.fn(() => 'roomote'),
+  isGitHubRoomoteMentionEnabled: vi.fn(() => true),
   getInstallationOctokit: mockGetInstallationOctokit,
 }));
 
