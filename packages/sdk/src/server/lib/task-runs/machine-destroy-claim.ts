@@ -7,7 +7,7 @@ import { getRedis, REDIS_KEYS } from '@roomote/redis';
  */
 const MACHINE_DESTROY_CLAIM_TTL_SECONDS = 15 * 60;
 
-export type MachineDestroyClaimOutcome =
+type MachineDestroyClaimOutcome =
   /** This caller owns the teardown and must issue the provider delete. */
   | 'claimed'
   /** Another caller is already destroying this machine — do not delete. */
