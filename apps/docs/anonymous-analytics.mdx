@@ -32,14 +32,10 @@ Activity is identified by two anonymous IDs:
 - an **instance ID** for the deployment as a whole
 - a **user analytics ID** for each user
 
-By default, both IDs are short random strings created locally. They are not
-derived from your domain, company, email addresses, or any other real-world
+Both are short random strings created locally. They are not derived from 
+your domain, company, email addresses, or any other real-world
 identifier, and they cannot be edited or read through the app.
 
-Deployment operators can set `R_INSTANCE_ID` to use a deterministic instance
-ID for Ping analytics and version checks. It must be 6-128 characters and use
-only letters, numbers, periods, underscores, colons, or hyphens. This does not
-affect user analytics IDs, which remain locally generated.
 
 ## Turning it off
 
@@ -52,23 +48,16 @@ The setting applies to everyone in the deployment. When disabled, no
 analytics code runs in the browser and no usage events or daily reports
 leave your servers.
 
-Roomote Cloud deployments keep anonymous analytics enabled and do not show
-this switch. `R_CLOUD_ENABLED` is deployment-managed Cloud configuration; do
-not set it for a self-hosted deployment.
+## Roomote Cloud Specifics
 
-Roomote Cloud also asks users for consent before loading optional support and
-product-experience services such as Intercom and PostHog. This choice does not
-control Roomote's anonymous analytics, which remains governed by the deployment
-configuration above. Self-hosted deployments do not show the cookie consent
-banner.
+Roomote Cloud deployments keep anonymous analytics enabled and do not show
+this switch, as described in our privacy policy and asks users for consent 
+before loading optional support and product-experience services such as 
+Intercom and PostHog. This choice does not control Roomote's anonymous 
+analytics, which remains governed by the deployment configuration above.
 
 ## Version checks
 
 Separately from analytics, your deployment checks once a day whether a newer
 Roomote release is available. This check is not optional and carries only
 the anonymous instance ID and your running version — no usage data.
-
-## Local development
-
-Deployments running in development mode (or builds without a release
-version) send nothing at all: no analytics, no version checks.
