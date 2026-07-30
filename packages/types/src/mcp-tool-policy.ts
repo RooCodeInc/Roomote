@@ -132,12 +132,40 @@ const JIRA_READ_ONLY_TOOL_NAMES = [
   'searchJiraIssuesUsingJql',
 ] as const;
 
+const MONDAY_READ_ONLY_TOOL_NAMES = [
+  'get_board_info',
+  'get_board_items_page',
+  'get_board_activity',
+  'board_insights',
+  'get_column_type_info',
+  'list_workspaces',
+  'workspace_info',
+  'read_docs',
+  'all_widgets_schema',
+  'get_form',
+  'get_user_context',
+  'list_users_and_teams',
+  'get_updates',
+  'search',
+  'get_assets',
+  'list_automations',
+  'plan_workflow',
+  'agent_catalog',
+  'get_notetaker_meetings',
+  'get_monday_dev_sprints_boards',
+  'get_sprints_metadata',
+  'get_sprint_summary',
+  'get_graphql_schema',
+  'get_type_details',
+] as const;
+
 const INTEGRATION_MCP_ALLOWED_TOOL_NAMES: Readonly<
   Partial<Record<string, readonly string[]>>
 > = {
   betterstack: BETTER_STACK_READ_ONLY_TOOL_NAMES,
   grafana: GRAFANA_READ_ONLY_TOOL_NAMES,
   jira: JIRA_READ_ONLY_TOOL_NAMES,
+  monday: MONDAY_READ_ONLY_TOOL_NAMES,
   pylon: PYLON_READ_ONLY_TOOL_NAMES,
   railway: RAILWAY_READ_ONLY_TOOL_NAMES,
   sentry: SENTRY_READ_ONLY_TOOL_NAMES,

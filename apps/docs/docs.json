@@ -99,6 +99,7 @@
           "integrations/grafana",
           "integrations/jira",
           "integrations/linear",
+          "integrations/monday",
           "integrations/neon",
           "integrations/notion",
           "integrations/posthog",

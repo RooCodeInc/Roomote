@@ -173,6 +173,20 @@ export const LINEAR_APP_OAUTH_SCOPES = [
   'app:mentionable',
 ] as const;
 
+export const MONDAY_MCP_READ_ONLY_OAUTH_SCOPES = [
+  'account:read',
+  'assets:read',
+  'boards:read',
+  'docs:read',
+  'me:read',
+  'tags:read',
+  'teams:read',
+  'updates:read',
+  'users:read',
+  'webhooks:read',
+  'workspaces:read',
+] as const;
+
 /**
  * MCP Server Configuration
  * This is what gets written to .roomote/mcp.json in the workspace
@@ -305,6 +319,18 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       tokenEndpoint: 'https://api.linear.app/oauth/token',
     },
     oauthScopeSeparator: ',',
+  },
+  {
+    id: 'monday',
+    name: 'monday.com',
+    url: 'https://mcp.monday.com/mcp',
+    description: `Inspect monday.com boards, items, updates, docs, and workspace context from ${PRODUCT_NAME} tasks`,
+    icon: 'monday',
+    oauthScopes: [...MONDAY_MCP_READ_ONLY_OAUTH_SCOPES],
+    oauthScopeMode: 'read-only',
+    serverMode: 'upstream_proxy',
+    instructions:
+      'Use monday.com to inspect boards, items, updates, docs, workspaces, forms, automations, meetings, and sprint context. This connection is read-only; do not assume mutation tools are available.',
   },
   {
     id: 'sentry',

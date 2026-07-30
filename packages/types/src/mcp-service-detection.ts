@@ -9,6 +9,7 @@ export interface SlackMcpSetupServiceDefinition {
   name: string;
   availabilityKind: SlackMcpSetupAvailabilityKind;
   hostSuffixes: string[];
+  excludedHostnames?: string[];
   pathPrefixes?: string[];
   hostRules?: SlackMcpSetupServiceHostRule[];
   requiredDeploymentEnvVars?: string[];
@@ -93,6 +94,25 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Linear',
     availabilityKind: 'linear',
     hostSuffixes: ['linear.app'],
+    deploymentSettingsPath: '/settings/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
+    id: 'monday',
+    name: 'monday.com',
+    availabilityKind: 'curated_oauth',
+    hostSuffixes: ['monday.com'],
+    excludedHostnames: [
+      'monday.com',
+      'www.monday.com',
+      'api.monday.com',
+      'auth.monday.com',
+      'developer.monday.com',
+      'mcp.monday.com',
+      'support.monday.com',
+      'view.monday.com',
+    ],
+    pathPrefixes: ['/boards/'],
     deploymentSettingsPath: '/settings/integrations',
     userSettingsPath: '/settings/personal',
   },

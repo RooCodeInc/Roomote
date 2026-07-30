@@ -30,6 +30,16 @@ describe('integration setup guide', () => {
     );
   });
 
+  it('documents the user-scoped read-only monday.com setup flow', () => {
+    expect(INTEGRATION_SETUP_CONTENT).toContain('# monday.com');
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'Each user connects their own monday.com account via OAuth.',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'The built-in connection is read-only.',
+    );
+  });
+
   it('documents the Sentry MCP-first setup flow', () => {
     expect(INTEGRATION_SETUP_CONTENT).toContain('# Sentry');
     expect(INTEGRATION_SETUP_CONTENT).toContain(
