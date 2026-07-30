@@ -18,10 +18,13 @@ export interface AzureCredentialOptions {
 }
 
 export interface AzureTokenCredential {
+  // Matches @azure/identity TokenCredential: can resolve null when the
+  // chain cannot produce a token (acquireAzureToken turns that into an
+  // actionable error instead of a downstream crash).
   getToken(scope: string): Promise<{
     token: string;
     expiresOnTimestamp: number;
-  }>;
+  } | null>;
 }
 
 /**
@@ -58,9 +61,18 @@ export async function acquireAzureToken(
   credential: AzureTokenCredential,
   scope: string,
 ): Promise<{ token: string; expiresOnTimestamp: number }> {
-  return raceWithAbort({
+  const token = await raceWithAbort({
     promise: credential.getToken(scope),
     signal: AbortSignal.timeout(AZURE_CREDENTIAL_TIMEOUT_MS),
     abortMessage: AZURE_CREDENTIAL_TIMEOUT_MESSAGE,
   });
+
+  if (!token) {
+    throw new Error(
+      'Azure credential chain did not return an access token. Verify service ' +
+        'principal or managed identity configuration and role assignment.',
+    );
+  }
+
+  return token;
 }
