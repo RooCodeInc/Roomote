@@ -196,6 +196,7 @@ export function buildSandboxInstruction(
         lines.push(
           '',
           'Repository setup commands from this environment configuration run in the background and may still be executing while you work. Do not assume dependencies are installed or services are ready: check `.roomote/setup-status.json` in the workspace root for live per-command status, and read the logs under `.roomote/setup-logs/` if something you need appears to be missing. Never re-run a setup command that is still marked as running.',
+          'If the requested work depends on setup that is still running (dependency installs, service startup, secret retrieval), wait for it instead of reporting that you are blocked and ending your turn: re-read `.roomote/setup-status.json` every 10-15 seconds until its top-level `state` reaches a terminal value (`completed`, `completed_with_warnings`, or `failed`), then continue the task from there. You will also receive an in-session `Environment setup update:` message when background setup finishes, so treat a still-running setup as normal startup, not a blocker to hand back to the user.',
         );
       } else {
         lines.push(
