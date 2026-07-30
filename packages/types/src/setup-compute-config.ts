@@ -587,8 +587,8 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         input: {
           type: 'select',
           options: [
-            { value: 'XS', label: 'XS — 0.25 vCPU / 0.5 GiB / 20 GiB disk' },
-            { value: 'S', label: 'S — 0.5 vCPU / 1 GiB / 20 GiB disk' },
+            { value: 'XS', label: 'XS — 0.25 vCPU / 0.5 GiB / 5 GiB disk' },
+            { value: 'S', label: 'S — 0.5 vCPU / 1 GiB / 10 GiB disk' },
             { value: 'M', label: 'M — 1 vCPU / 2 GiB / 20 GiB disk (default)' },
             { value: 'L', label: 'L — 2 vCPU / 4 GiB / 40 GiB disk' },
             { value: 'XL', label: 'XL — 4 vCPU / 8 GiB / 80 GiB disk' },

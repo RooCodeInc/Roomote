@@ -29,10 +29,14 @@ import {
 
 const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
 
-/** ACA sandbox size presets (Azure docs tier table, incl. disk). */
+/**
+ * ACA sandbox size presets. Disk values are the tier caps the service
+ * enforces (measured: `InvalidResourceTier` past cores × 20Gi — XS 5Gi,
+ * S 10Gi, M 20Gi, L 40Gi, XL 80Gi; the doc table's 20Gi for XS/S is wrong).
+ */
 export const AZURE_SIZE_PRESETS = {
-  XS: { cpuMillicores: 250, memoryMiB: 512, diskSize: '20Gi' },
-  S: { cpuMillicores: 500, memoryMiB: 1024, diskSize: '20Gi' },
+  XS: { cpuMillicores: 250, memoryMiB: 512, diskSize: '5Gi' },
+  S: { cpuMillicores: 500, memoryMiB: 1024, diskSize: '10Gi' },
   M: { cpuMillicores: 1000, memoryMiB: 2048, diskSize: '20Gi' },
   L: { cpuMillicores: 2000, memoryMiB: 4096, diskSize: '40Gi' },
   XL: { cpuMillicores: 4000, memoryMiB: 8192, diskSize: '80Gi' },

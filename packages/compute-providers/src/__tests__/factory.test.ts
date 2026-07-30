@@ -443,7 +443,7 @@ describe('createComputeProviderClient', () => {
         expect.objectContaining({
           cpuMillicores: 500,
           memoryMiB: 1024,
-          diskSize: '20Gi',
+          diskSize: '10Gi',
         }),
       );
     } finally {

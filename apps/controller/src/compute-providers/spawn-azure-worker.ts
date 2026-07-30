@@ -201,19 +201,23 @@ export async function spawnAzureWorker(
 
   // Size handling: the operator's AZURE_SANDBOX_SIZE picks the default
   // tier (cpu/memory/disk). The task-side memory constant is only a
-  // platform default — not a user preference — so the provider size wins,
-  // except for nested-Docker tasks whose 8 GiB requirement is hard.
+  // platform default — not a user preference — so the provider size wins.
+  // Nested-Docker tasks bypass the preset entirely: their 8 GiB memory is
+  // hard, and a small preset's 20 GiB disk would otherwise cap image builds.
   const azureSizePreset = parseAzureSizePreset(azureSize);
+  const effectiveSizePreset = sandboxResources.needsNestedDocker
+    ? undefined
+    : azureSizePreset;
   const memoryMiB =
-    sandboxResources.needsNestedDocker || !azureSizePreset
+    sandboxResources.needsNestedDocker || !effectiveSizePreset
       ? sandboxResources.memoryMiB
       : undefined;
   // Record the size the provider will actually provision (preset when the
   // override is omitted), not the task-side platform default.
   const effectiveMemoryMiB =
     memoryMiB ??
-    (azureSizePreset
-      ? AZURE_SIZE_PRESETS[azureSizePreset].memoryMiB
+    (effectiveSizePreset
+      ? AZURE_SIZE_PRESETS[effectiveSizePreset].memoryMiB
       : sandboxResources.memoryMiB);
 
   const computeClient = createComputeProviderClient({
@@ -229,8 +233,11 @@ export async function spawnAzureWorker(
         : azureClientId
           ? { managedIdentityClientId: azureClientId }
           : {}),
-      ...(azureSizePreset ? { size: azureSizePreset } : {}),
+      ...(effectiveSizePreset ? { size: effectiveSizePreset } : {}),
       ...(memoryMiB !== undefined ? { memoryMiB } : {}),
+      // Nested-Docker workloads get at least the L-tier disk for image
+      // builds; preset disks apply otherwise.
+      ...(sandboxResources.needsNestedDocker ? { diskSize: '40Gi' } : {}),
       timeoutMs: azureTimeoutMs,
     },
   });

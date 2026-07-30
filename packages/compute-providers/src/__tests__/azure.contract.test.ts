@@ -153,7 +153,9 @@ describe('azure adapter contract', () => {
       resources: { cpu: '1000m', memory: '2048Mi' },
       lifecycle: {
         autoSuspendPolicy: { enabled: false, interval: 0, mode: 'Memory' },
-        autoDeletePolicy: { enabled: true, deleteIntervalInSeconds: 3600 },
+        // Backstop floors to 30d (suspension-anchored TTL); the 3600s
+        // task timeout stays Roomote-side.
+        autoDeletePolicy: { enabled: true, deleteIntervalInSeconds: 2592000 },
       },
       egressPolicy: { defaultAction: 'Allow', trafficInspection: 'Partial' },
       labels: { app_environment: 'env-1' },
@@ -410,14 +412,9 @@ describe('azure adapter contract', () => {
     expect(resumed?.status).toBe('running');
     expect(requests.some((r) => r.url.includes('/resume'))).toBe(true);
 
-    // Resume refreshes the auto-delete window so the provider deadline
-    // realigns with the worker's fresh Roomote timeout.
-    const lifecyclePost = requests.find(
-      (r) => r.method === 'POST' && r.url.includes('/lifecycle'),
-    );
-    expect(lifecyclePost?.body).toMatchObject({
-      autoDeletePolicy: { enabled: true, deleteIntervalInSeconds: 3600 },
-    });
+    // No lifecycle refresh on resume: auto-delete is suspension-anchored,
+    // so each standby cycle re-anchors the TTL window by itself.
+    expect(requests.some((r) => r.url.includes('/lifecycle'))).toBe(false);
   });
 
   it('destroys an instance and reports usage', async () => {

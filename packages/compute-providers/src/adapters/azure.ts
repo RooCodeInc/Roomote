@@ -48,6 +48,14 @@ const DATA_PLANE_SCOPE = 'https://dynamicsessions.io/.default';
 const DEFAULT_CPU_MILLICORES = 1000;
 const DEFAULT_MEMORY_MIB = 2048;
 
+/**
+ * Provider-side auto-delete backstop (30 days, matching the default azure
+ * standby-retention window in apps/bullmq). Auto-delete only fires on
+ * suspended sandboxes, so this bounds how long a standby sandbox survives
+ * without being woken; Roomote's own timeout stays the Roomote-side one.
+ */
+const AUTO_DELETE_BACKSTOP_MS = 30 * 24 * 60 * 60 * 1_000;
+
 const RUNNING_POLL_INTERVAL_MS = 1_000;
 const RUNNING_POLL_TIMEOUT_MS = 5 * 60 * 1_000;
 const STREAM_POLL_INTERVAL_MS = 1_000;
@@ -703,30 +711,11 @@ export class AzureClient implements ComputeProviderClient {
       await this.waitForState(input.resumeHandle, ['Running'], input.signal);
     }
 
-    // Refresh the auto-delete window: the policy interval is measured from
-    // sandbox creation, so without this a resumed worker's fresh Roomote
-    // timeout would outlive the provider-side deadline (and standby
-    // retention beyond one timeout window would be unreachable). Preserves
-    // the sandbox's existing auto-suspend policy.
-    if (this.config.timeoutMs) {
-      await this.request(
-        'POST',
-        `${this.sandboxPath(input.resumeHandle)}/lifecycle`,
-        {
-          body: {
-            autoSuspendPolicy: current.lifecycle?.autoSuspendPolicy ?? {
-              enabled: false,
-            },
-            autoDeletePolicy: {
-              enabled: true,
-              deleteIntervalInSeconds: Math.ceil(this.config.timeoutMs / 1_000),
-            },
-          },
-          signal: input.signal,
-          abortMessage: `Refreshing auto-delete policy for Azure sandbox ${input.resumeHandle} was aborted`,
-        },
-      );
-    }
+    // NOTE: no lifecycle refresh here. Measured semantics (2026-07-30):
+    // auto-delete is a suspension-anchored TTL (stoppedAt + interval,
+    // laggy sweeper) and never fires on Running sandboxes, and each
+    // suspension re-anchors stoppedAt — so every Roomote standby cycle gets
+    // a fresh TTL window with no action needed from the adapter.
 
     // Ports persist through stop/resume (measured); ensure anyway so callers
     // always get domains back.
@@ -789,9 +778,9 @@ export class AzureClient implements ComputeProviderClient {
 
     const autoSuspendSeconds = this.config.autoSuspendSeconds ?? 0;
 
-    // ACA tiers cap memory at cores × 2Gi (e.g. 1000m → max 2048Mi;
-    // verified live: 400 InvalidResourceTier otherwise). Scale CPU up to fit
-    // the requested memory rather than failing.
+    // ACA tiers cap BOTH memory (cores × 2Gi) and disk (cores × 20Gi) at
+    // the CPU anchor (verified live: 400 InvalidResourceTier past either).
+    // Scale CPU up to fit the requested memory rather than failing.
     const memoryMiB = this.config.memoryMiB ?? DEFAULT_MEMORY_MIB;
     const minCpuMillicores = Math.ceil(memoryMiB / 2048) * 1000;
     const cpuMillicores = Math.max(
@@ -799,12 +788,22 @@ export class AzureClient implements ComputeProviderClient {
       minCpuMillicores,
     );
 
+    // Clamp an explicit disk request to the tier cap (cores × 20Gi).
+    const maxDiskGiB = Math.floor((cpuMillicores / 1000) * 20);
+    const requestedDiskGiB = this.config.diskSize
+      ? Number.parseInt(this.config.diskSize, 10)
+      : undefined;
+    const diskSize =
+      requestedDiskGiB !== undefined
+        ? `${Math.min(requestedDiskGiB, maxDiskGiB)}Gi`
+        : undefined;
+
     return {
       sourcesRef: { diskImage },
       resources: {
         cpu: `${cpuMillicores}m`,
         memory: `${memoryMiB}Mi`,
-        ...(this.config.diskSize ? { disk: this.config.diskSize } : {}),
+        ...(diskSize ? { disk: diskSize } : {}),
       },
       lifecycle: {
         autoSuspendPolicy: {
@@ -812,12 +811,17 @@ export class AzureClient implements ComputeProviderClient {
           interval: autoSuspendSeconds,
           mode: 'Memory',
         },
+        // Measured (2026-07-30): auto-delete fires only on suspended
+        // sandboxes, at stoppedAt + interval. Make it a long backstop
+        // (>= standby retention) rather than the task timeout — the
+        // Roomote-side timeout is enforced by the worker/sleep-check.
         ...(this.config.timeoutMs
           ? {
               autoDeletePolicy: {
                 enabled: true,
                 deleteIntervalInSeconds: Math.ceil(
-                  this.config.timeoutMs / 1_000,
+                  Math.max(this.config.timeoutMs, AUTO_DELETE_BACKSTOP_MS) /
+                    1_000,
                 ),
               },
             }
