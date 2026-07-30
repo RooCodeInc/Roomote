@@ -1107,8 +1107,8 @@ importers:
         specifier: ^1.0.25
         version: 1.0.25(zod@3.25.76)
       '@opencode-ai/sdk':
-        specifier: 1.17.18
-        version: 1.17.18
+        specifier: 1.18.10
+        version: 1.18.10
       '@roomote/auth':
         specifier: workspace:^
         version: link:../auth
@@ -3340,8 +3340,8 @@ packages:
     resolution: {integrity: sha512-da6KbdNCV5sr1/txD896V+6W0iamFWrvVl8cHkBSPT+YlvmT3DwXa4jxZnQc+gnuTEqSWbBeoSZYTayXH9wXcw==}
     engines: {node: '>= 20'}
 
-  '@opencode-ai/sdk@1.17.18':
-    resolution: {integrity: sha512-c/C9PhY8PrbcxDY+JIYtOZsrmMD0KzoVvxq+RGUrZ6LQp57SuVBbT4lfwA2G8Se5RNC1N5JtYjiuaXeECnF2SQ==}
+  '@opencode-ai/sdk@1.18.10':
+    resolution: {integrity: sha512-K+glWbBp5pfGepZ/6EHvuXY3IpVG2qgsEqF4z9mOiUQUrs6KWN72Vdp15Qsl2TCDbemgHWXKQKgbX3b8PSK2hg==}
 
   '@opentelemetry/api-logs@0.207.0':
     resolution: {integrity: sha512-lAb0jQRVyleQQGiuuvCOTDVspc14nx6XJjP4FspJ1sNARo3Regq4ZZbrc3rN4b1TYSuUCvgH+UXUPug4SLOqEQ==}
@@ -13769,7 +13769,7 @@ snapshots:
       '@octokit/request-error': 7.1.0
       '@octokit/webhooks-methods': 6.0.0
 
-  '@opencode-ai/sdk@1.17.18':
+  '@opencode-ai/sdk@1.18.10':
     dependencies:
       cross-spawn: 7.0.6
 

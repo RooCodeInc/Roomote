@@ -1,6 +1,6 @@
 import type { WorkerRuntimePaths } from '@roomote/types';
 
-export const DEFAULT_OPENCODE_CLI_VERSION = '1.17.18';
+export const DEFAULT_OPENCODE_CLI_VERSION = '1.18.10';
 export const DEFAULT_ZERO_CLI_VERSION = '1.21.0';
 
 export const ROOMOTE_OPENCODE_CLI_VERSION_ENV = 'ROOMOTE_OPENCODE_CLI_VERSION';
