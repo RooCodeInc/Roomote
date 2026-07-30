@@ -43,9 +43,9 @@
           {
             "group": "Models and Inference",
             "root": "models",
-            "icon": "brain",
             "expanded": false,
             "pages": [
+              "models",
               "providers/inference/amazon-bedrock",
               "providers/inference/anthropic",
               "providers/inference/baseten",
@@ -73,9 +73,9 @@
           {
             "group": "Communications",
             "root": "communications",
-            "icon": "messages-square",
             "expanded": false,
             "pages": [
+              "communications",
               "providers/communications/discord",
               "providers/communications/microsoft-teams",
               "providers/communications/slack",
@@ -85,9 +85,9 @@
           {
             "group": "Source Control",
             "root": "source-control",
-            "icon": "git-merge",
             "expanded": false,
             "pages": [
+              "source-control",
               "providers/source-control/azure-devops",
               "providers/source-control/bitbucket",
               "providers/source-control/gitea",
@@ -98,9 +98,9 @@
           {
             "group": "Sandboxes",
             "root": "compute",
-            "icon": "cpu",
             "expanded": false,
             "pages": [
+              "compute",
               "providers/compute/blaxel",
               "providers/compute/daytona",
               "providers/compute/docker",
