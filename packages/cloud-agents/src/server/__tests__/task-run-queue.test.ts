@@ -138,6 +138,22 @@ describe('TaskRunQueue - Basic Operations', () => {
       await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
     });
 
+    it('preserves the existing entry when the incoming run requests first-wins semantics', async () => {
+      const scope = 'first-wins-scope';
+      const existing = createTestEntry(1, scope);
+      const incoming = {
+        ...createTestEntry(2, scope),
+        preserveExisting: true,
+      };
+
+      await queue.enqueue(existing);
+      await expect(queue.enqueue(incoming)).resolves.toEqual([
+        { id: incoming.id, scope },
+      ]);
+      await expect(queue.dequeue(false)).resolves.toEqual(existing);
+      await expect(queue.dequeue(false)).resolves.toBeNull();
+    });
+
     it('should handle multiple enqueue/dequeue cycles', async () => {
       // Cycle 1
       await queue.enqueue(createTestEntry(1, 'scope-1'));

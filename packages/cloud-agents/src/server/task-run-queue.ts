@@ -145,6 +145,12 @@ local incomingRaw = ARGV[3]
 local evictedIds = {}
 
 local previousId = redis.call('HGET', KEYS[7], incomingScope)
+local existingId = redis.call('HGET', KEYS[2], incomingScope)
+
+if ARGV[5] == '1' and (previousId or existingId) then
+  return {incomingId}
+end
+
 if previousId then
   redis.call('LREM', KEYS[6], 0, previousId)
   redis.call('HDEL', KEYS[7], incomingScope)
@@ -154,8 +160,6 @@ if previousId then
     table.insert(evictedIds, previousId)
   end
 end
-
-local existingId = redis.call('HGET', KEYS[2], incomingScope)
 
 if existingId then
   redis.call('LREM', KEYS[1], 0, existingId)
@@ -287,6 +291,7 @@ const taskRunQueueEntrySchema = z.object({
   id: z.number(),
   scope: z.string(),
   availableAt: z.number().int().nonnegative().optional(),
+  preserveExisting: z.boolean().optional(),
 });
 
 export type TaskRunQueueEntry = z.infer<typeof taskRunQueueEntrySchema>;
@@ -556,6 +561,7 @@ export class TaskRunQueue {
       entry.scope,
       JSON.stringify(entry),
       entry.availableAt?.toString() ?? '',
+      entry.preserveExisting ? '1' : '0',
     );
 
     if (!Array.isArray(result)) {
@@ -1296,6 +1302,9 @@ async function pushRunOntoQueue(params: {
       id: taskRun.id,
       scope,
       availableAt: resolveQueueAvailableAt(taskRun.payloadKind),
+      ...(taskRun.payloadKind === TaskPayloadKind.GithubPrReviewSync
+        ? { preserveExisting: true }
+        : {}),
     });
 
     if (evictedEntries.length > 0) {

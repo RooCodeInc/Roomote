@@ -1461,4 +1461,51 @@ describe('pr_review queue scope dedup', () => {
     expect(queued).toEqual({ id: newer.id, scope });
     await TaskRunQueue.getInstance().releaseLock(scope, newer.id);
   });
+
+  it('keeps the first queued re-review and cancels only a racing incoming run', async () => {
+    const uniquePrNumber = 424_243;
+    const linkage = {
+      provider: 'github' as const,
+      repository: 'acme/queue-first-wins',
+      prNumber: uniquePrNumber,
+      prUrl: `https://github.com/acme/queue-first-wins/pull/${uniquePrNumber}`,
+    };
+    const makeInput = (headSha: string): FreshTaskLaunch => ({
+      task: {
+        type: TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: linkage.repository,
+          prNumber: linkage.prNumber,
+          prTitle: 'First-wins re-review',
+          prUrl: linkage.prUrl,
+          headSha,
+        },
+      },
+      initiator: { kind: 'automation', key: 'review_code' },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'webhook',
+      prLinkage: linkage,
+    });
+
+    const existing = await enqueueTask(makeInput('a'.repeat(40)), {
+      skipEarlyTitleGeneration: true,
+    });
+    const incoming = await enqueueTask(makeInput('b'.repeat(40)), {
+      skipEarlyTitleGeneration: true,
+    });
+    createdTaskIds.push(existing.taskId, incoming.taskId);
+
+    const persistedRuns = await db.query.taskRuns.findMany({
+      where: inArray(taskRuns.id, [existing.id, incoming.id]),
+    });
+
+    expect(persistedRuns.find((run) => run.id === existing.id)?.status).toBe(
+      RunStatus.Pending,
+    );
+    expect(persistedRuns.find((run) => run.id === incoming.id)?.status).toBe(
+      RunStatus.Canceled,
+    );
+  });
 });
