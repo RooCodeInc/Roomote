@@ -184,6 +184,9 @@ importers:
       '@roomote/linear':
         specifier: workspace:^
         version: link:../../packages/linear
+      '@roomote/monday':
+        specifier: workspace:^
+        version: link:../../packages/monday
       '@roomote/redis':
         specifier: workspace:^
         version: link:../../packages/redis
@@ -630,6 +633,9 @@ importers:
       '@roomote/linear':
         specifier: workspace:^
         version: link:../../packages/linear
+      '@roomote/monday':
+        specifier: workspace:^
+        version: link:../../packages/monday
       '@roomote/redis':
         specifier: workspace:^
         version: link:../../packages/redis
@@ -1517,6 +1523,25 @@ importers:
       vitest:
         specifier: ^4.1.1
         version: 4.1.1(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@24.12.4)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.5(@types/node@24.12.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0))
+
+  packages/monday:
+    dependencies:
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
+    devDependencies:
+      '@roomote/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@roomote/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
+      '@types/node':
+        specifier: ^24.10.13
+        version: 24.13.1
+      vitest:
+        specifier: ^4.1.1
+        version: 4.1.1(@edge-runtime/vm@3.2.0)(@opentelemetry/api@1.9.1)(@types/node@24.13.1)(jsdom@26.1.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(vite@7.3.5(@types/node@24.13.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.4)(yaml@2.9.0))
 
   packages/redis:
     dependencies:

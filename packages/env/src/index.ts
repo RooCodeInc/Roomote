@@ -197,6 +197,9 @@ const serverSchema = {
   R_LINEAR_CLIENT_SECRET: z.string().min(1).optional(),
   R_LINEAR_WEBHOOK_SECRET: z.string().min(1).optional(),
   R_LINEAR_REDIRECT_URI: z.string().min(1).optional(),
+  // The external-agent integration is independent from the hosted MCP and
+  // remains an explicit opt-in while monday.com's Agents API is pre-release.
+  R_MONDAY_AGENT_ENABLED: optInBoolean(),
   DASHBOARD_PASSWORD: z.string().min(1),
   SETUP_TOKEN: z.string().min(1).optional(),
   // Dedicated Better Auth session-signing secret. Optional: falls back to
@@ -441,6 +444,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_LINEAR_CLIENT_SECRET',
   'R_LINEAR_WEBHOOK_SECRET',
   'R_LINEAR_REDIRECT_URI',
+  'R_MONDAY_AGENT_ENABLED',
   'ARTIFACT_SIGNING_KEY_PREVIOUS',
   'SETUP_TOKEN',
   'API_DEBUG_LOGS',

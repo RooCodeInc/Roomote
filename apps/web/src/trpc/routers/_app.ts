@@ -116,6 +116,12 @@ import {
   removeLinearOauthSetupCommand,
   saveLinearOauthSetupCommand,
 } from '../commands/linear';
+import {
+  getMondayAgentInstallationCommand,
+  installMondayAgentCommand,
+  rotateMondayAgentCredentialsCommand,
+  uninstallMondayAgentCommand,
+} from '../commands/monday-agent';
 import { getTeamsIntegrationStatusCommand } from '../commands/teams';
 import {
   getLinkedGitLabAccountCommand,
@@ -1170,6 +1176,21 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         saveLinearOauthSetupCommand(auth, input),
       ),
+  }),
+
+  mondayAgent: createRouter({
+    installation: protectedProcedure.query(({ ctx: { auth } }) =>
+      getMondayAgentInstallationCommand(auth),
+    ),
+    install: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      installMondayAgentCommand(auth),
+    ),
+    rotateCredentials: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      rotateMondayAgentCredentialsCommand(auth),
+    ),
+    uninstall: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      uninstallMondayAgentCommand(auth),
+    ),
   }),
 
   teams: createRouter({

@@ -111,6 +111,10 @@ const DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'ROOMOTE_ENVIRONMENTS_YAML',
 ]);
 
+const INTEGRATION_FEATURE_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'R_MONDAY_AGENT_ENABLED',
+]);
+
 /**
  * Canonical set of control-plane / provider / instance env var names that are
  * never generic user task environment. It is the single source of truth for two
@@ -135,6 +139,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...PROVIDER_IDENTIFIER_ENV_VAR_NAMES,
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
+    ...INTEGRATION_FEATURE_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   ],
 );

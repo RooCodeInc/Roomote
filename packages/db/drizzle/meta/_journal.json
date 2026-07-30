@@ -169,6 +169,13 @@
       "when": 1785419452431,
       "tag": "0023_low_captain_midlands",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785442721282,
+      "tag": "0024_secret_george_stacy",
+      "breakpoints": true
     }
   ]
 }

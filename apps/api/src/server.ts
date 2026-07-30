@@ -42,6 +42,7 @@ import {
   ado,
   slack,
   linear,
+  monday,
   teams,
   telegram,
   discord,
@@ -72,6 +73,7 @@ const PUBLIC_OIDC_PATHS = new Set([
 const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/webhooks/teams',
   '/api/webhooks/telegram',
+  '/api/webhooks/monday/agent',
   '/api/internal/discord/events',
   '/api/internal/discord/events/process',
   '/api/internal/cloud/deployment-access',
@@ -193,6 +195,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/ado', ado);
   app.route('/api/webhooks/slack', slack);
   app.route('/api/webhooks/linear', linear);
+  app.route('/api/webhooks/monday', monday);
   app.route('/api/webhooks/teams', teams);
   app.route('/api/webhooks/telegram', telegram);
   app.route('/api/internal/discord', discord);

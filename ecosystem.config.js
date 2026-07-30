@@ -103,6 +103,7 @@ const defaultEnv = {
     ? `${publicUrl}/api/linear/callback`
     : undefined,
   R_LINEAR_WEBHOOK_SECRET: process.env.R_LINEAR_WEBHOOK_SECRET,
+  R_MONDAY_AGENT_ENABLED: process.env.R_MONDAY_AGENT_ENABLED,
 
   ...openCodeEnv,
 };
