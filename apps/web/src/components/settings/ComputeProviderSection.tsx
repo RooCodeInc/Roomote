@@ -32,6 +32,11 @@ import {
   DialogTitle,
   EnvVarsInfoNote,
   Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Spinner,
   Switch,
   Trash2,
@@ -308,12 +313,9 @@ export function ComputeProviderSection({
         </label>
         <div className="flex items-center gap-2">
           {field.input?.type === 'select' ? (
-            <select
-              id={`${provider.provider}-${field.envVarName}`}
-              className="font-mono flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            <Select
               value={field.runtimeSatisfied ? '' : value}
-              onChange={(event) => {
-                const nextValue = event.target.value;
+              onValueChange={(nextValue) => {
                 setValues((current) => ({
                   ...current,
                   [field.envVarName]: nextValue,
@@ -321,17 +323,27 @@ export function ComputeProviderSection({
               }}
               disabled={savePending || field.runtimeSatisfied}
             >
-              <option value="">
-                {field.runtimeSatisfied
-                  ? 'Managed by environment variable'
-                  : (field.input.placeholder ?? 'Default')}
-              </option>
-              {field.input.options.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label ?? option.value}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                id={`${provider.provider}-${field.envVarName}`}
+                className="font-mono"
+                aria-label={field.label}
+              >
+                <SelectValue
+                  placeholder={
+                    field.runtimeSatisfied
+                      ? 'Managed by environment variable'
+                      : (field.input.placeholder ?? 'Default')
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {field.input.options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label ?? option.value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : (
             <Input
               id={`${provider.provider}-${field.envVarName}`}
