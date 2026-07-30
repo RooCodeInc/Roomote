@@ -44,7 +44,7 @@ describe('CloudConsentGate', () => {
     expect(
       await screen.findByRole('dialog', { name: 'Cookie preferences' }),
     ).toBeVisible();
-    expect(screen.getByText('Like most of the internet, we use cookies.'));
+    expect(screen.getByText('Like any other app, we use cookies.'));
     expect(screen.getByRole('button', { name: 'Accept all' }));
     expect(screen.getByRole('button', { name: 'Refuse non-essential' }));
   });
