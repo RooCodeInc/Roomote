@@ -32,10 +32,10 @@ Activity is identified by two anonymous IDs:
 - an **instance ID** for the deployment as a whole
 - a **user analytics ID** for each user
 
-Both are short random strings created locally. They are not derived from 
-your domain, company, email addresses, or any other real-world
-identifier, and they cannot be edited or read through the app.
-
+Both are short random strings created locally (unless R_INSTANCE_ID is 
+overriden  by the operator). They are not derived from  your domain, 
+company, email  addresses, or any other real-world identifier, and they 
+cannot be edited or read through the app.
 
 ## Turning it off
 
@@ -61,3 +61,8 @@ analytics, which remains governed by the deployment configuration above.
 Separately from analytics, your deployment checks once a day whether a newer
 Roomote release is available. This check is not optional and carries only
 the anonymous instance ID and your running version — no usage data.
+
+## Local development
+
+Deployments running in development mode (or builds without a release
+version) send nothing at all: no analytics, no version checks.
