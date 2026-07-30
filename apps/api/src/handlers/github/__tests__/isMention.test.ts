@@ -154,4 +154,44 @@ describe('isMention', () => {
       ).toBe(false);
     });
   });
+
+  describe('with a Roomote-branded app slug', () => {
+    beforeEach(() => {
+      setConfiguredGitHubAppSlugCache({
+        value: 'roomote-roomote',
+        expiresAt: Date.now() + 60_000,
+      });
+    });
+
+    afterEach(() => {
+      setConfiguredGitHubAppSlugCache(null);
+    });
+
+    it('detects the @Roomote shorthand', () => {
+      expect(
+        isMention({
+          body: '@Roomote please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('still detects the full configured slug', () => {
+      expect(
+        isMention({
+          body: '@roomote-roomote please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('does not treat a longer shorthand lookalike as a mention', () => {
+      expect(
+        isMention({
+          body: '@roomote-helper please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(false);
+    });
+  });
 });
