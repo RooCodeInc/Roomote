@@ -156,9 +156,15 @@ export async function createAzureMachine(
       ? getExposedPorts(namedPorts, proxyPorts)
       : ports;
 
+  // Standby resumes carry resumeHandle, not sourceSnapshotId — record
+  // whichever is present so mutation events keep the resume reference for
+  // debugging/audit.
+  const resumeHandle =
+    'resumeHandle' in options ? options.resumeHandle : undefined;
+
   const mutationContext = {
     launchMode: launchMode as ComputeProviderLaunchMode,
-    sourceSnapshotId: sourceSnapshotId ?? null,
+    sourceSnapshotId: sourceSnapshotId ?? resumeHandle ?? null,
     ports: effectivePorts ?? [],
   };
 
@@ -218,9 +224,6 @@ export async function createAzureMachine(
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     throwIfAborted(createInstanceSignal);
-
-    const resumeHandle =
-      'resumeHandle' in options ? options.resumeHandle : undefined;
 
     console.log(
       `[createAzureMachine] Attempt ${attempt}/${MAX_RETRIES}: ${resumeHandle ? 'resumeFromStandby' : sourceSnapshotId ? 'resumeFromSnapshot' : 'createInstance'}`,
