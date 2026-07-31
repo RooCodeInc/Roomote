@@ -177,10 +177,17 @@ function getSendChatReplyPurpose(input) {
 
 function isPrematureAutomationReply(input, state) {
   if (
-    state?.requiresTerminalCloseoutWithoutTurn !== true ||
+    (state?.requiresTerminalCloseoutWithoutTurn !== true &&
+      state?.suppressChannelRepliesWithoutTurn !== true) ||
     trimString(state.currentTurnMessageTs)
   ) {
     return false;
+  }
+
+  if (state.suppressChannelRepliesWithoutTurn === true) {
+    return SUBAGENT_RESTRICTED_SLACK_POSTING_TOOLS.some((basename) =>
+      matchesToolBasename(input, basename),
+    );
   }
 
   if (!isSendChatReplyTool(input)) {
@@ -562,8 +569,9 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
       JSON.stringify({
         decision: 'block',
         permissionDecision: 'deny',
-        reason:
-          'Automation-started tasks must stay silent until they have a final result, durable blocker, or required user input. Do not send an opening acknowledgement or progress update; use a closeout or clarification only when that outcome is ready.',
+        reason: state.suppressChannelRepliesWithoutTurn
+          ? 'Scheduled automation scans publish through their result-submission tools and must not post directly to the channel.'
+          : 'Automation-started tasks must stay silent until they have a final result, durable blocker, or required user input. Do not send an opening acknowledgement or progress update; use a closeout or clarification only when that outcome is ready.',
       }),
     );
     process.exit(0);

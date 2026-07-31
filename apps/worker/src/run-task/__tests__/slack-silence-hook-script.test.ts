@@ -400,6 +400,80 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stdout).toBe('');
   });
 
+  it.each(['ack', 'progress', 'closeout', 'clarification'])(
+    'rejects %s replies from scheduled automation scans',
+    (purpose) => {
+      const stateFilePath = writeState({
+        startedAtMs: Date.now(),
+        currentTurnRequiresInitialAck: false,
+        suppressChannelRepliesWithoutTurn: true,
+      });
+
+      const result = runHook({
+        input: {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'roomote_send_chat_reply',
+          tool_args: { purpose },
+        },
+        env: {
+          ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        decision: 'block',
+        permissionDecision: 'deny',
+        reason: expect.stringContaining('result-submission tools'),
+      });
+    },
+  );
+
+  it('rejects standalone channel posts from scheduled automation scans', () => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now(),
+      currentTurnRequiresInitialAck: false,
+      suppressChannelRepliesWithoutTurn: true,
+    });
+
+    const result = runHook({
+      input: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'roomote_post_to_channel',
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      decision: 'block',
+      permissionDecision: 'deny',
+    });
+  });
+
+  it('allows result submission from scheduled automation scans', () => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now(),
+      currentTurnRequiresInitialAck: false,
+      suppressChannelRepliesWithoutTurn: true,
+    });
+
+    const result = runHook({
+      input: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'roomote_submit_task_suggestions',
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+  });
+
   it.each(['roomote_add_reaction_to_slack_message'])(
     'rejects %s from late-bound automation tasks',
     (toolName) => {

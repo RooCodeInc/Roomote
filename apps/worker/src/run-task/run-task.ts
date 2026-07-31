@@ -949,6 +949,11 @@ export const runTask = async ({
           requiresLateBoundAutomationCloseout(taskRun)
             ? { requiresTerminalCloseoutWithoutTurn: true }
             : {}),
+          // Scheduled scans publish through their submission tools. They must
+          // never create a second agent-authored channel message.
+          ...(!initialTurnMessageTs && hasScheduledAutomationSource(taskRun)
+            ? { suppressChannelRepliesWithoutTurn: true }
+            : {}),
         }),
         'utf8',
       );
