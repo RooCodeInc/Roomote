@@ -516,8 +516,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-2': 'opencode/glm-5.2',
       'kimi-k3': 'opencode/kimi-k3',
       'kimi-k2-7-code': 'opencode/kimi-k2.7-code',
-      'qwen3-7-max': 'opencode/qwen3.7-max',
-      'qwen3-7-plus': 'opencode/qwen3.7-plus',
       'minimax-m3': 'opencode/minimax-m3',
       'grok-4-5': 'opencode/grok-4.5',
     }),

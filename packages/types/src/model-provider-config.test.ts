@@ -344,7 +344,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           providerId: 'togetherai',
           modelId: 'togetherai/Qwen/Qwen3.7-Max',
         },
-        { providerId: 'opencode', modelId: 'opencode/qwen3.7-max' },
       ],
     },
     {
@@ -352,7 +351,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       expected: [
         { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.7-plus' },
         { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.7-plus' },
-        { providerId: 'opencode', modelId: 'opencode/qwen3.7-plus' },
       ],
     },
   ])(
