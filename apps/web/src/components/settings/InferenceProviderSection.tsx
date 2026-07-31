@@ -603,10 +603,23 @@ function ChatGptSubscriptionRow({
 }) {
   return (
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-col items-start gap-2">
         <span className="min-w-0 truncate text-sm font-medium">
           {getModelProviderLabel(CHATGPT_SUBSCRIPTION_PROVIDER_ID)}
         </span>
+        <BasicTooltip content="Uses more ChatGPT credits for faster responses.">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Fast mode</span>
+            <Switch
+              aria-label="ChatGPT fast mode"
+              checked={fastMode}
+              disabled={errored || isUpdatingFastMode}
+              onCheckedChange={(checked) =>
+                void onFastModeChange(checked === true)
+              }
+            />
+          </div>
+        </BasicTooltip>
       </div>
 
       <div className="flex min-w-0 items-center gap-2">
@@ -623,43 +636,58 @@ function ChatGptSubscriptionRow({
             </p>
           )}
           {!errored ? (
-            <SubscriptionUsageLine usage={usage} className="mt-1" />
+            <SubscriptionUsageLine usage={usage} className="mt-1 max-w-md" />
           ) : null}
         </div>
 
-        {errored ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            onClick={onReconnect}
-          >
-            Reconnect
-          </Button>
-        ) : null}
-        <BasicTooltip content="Uses more ChatGPT credits for faster responses.">
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="text-sm text-muted-foreground">Fast mode</span>
-            <Switch
-              aria-label="ChatGPT fast mode"
-              checked={fastMode}
-              disabled={errored || isUpdatingFastMode}
-              onCheckedChange={(checked) =>
-                void onFastModeChange(checked === true)
-              }
-            />
-          </div>
-        </BasicTooltip>
+        <SubscriptionProviderActions
+          providerLabel={getModelProviderLabel(
+            CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+          )}
+          onReconnect={onReconnect}
+          onDisconnect={onDisconnect}
+          isDisconnecting={isDisconnecting}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SubscriptionProviderActions({
+  providerLabel,
+  onReconnect,
+  onDisconnect,
+  isDisconnecting,
+}: {
+  providerLabel: string;
+  onReconnect: () => void;
+  onDisconnect: () => Promise<void>;
+  isDisconnecting: boolean;
+}) {
+  return (
+    <div className="ml-2 flex shrink-0 items-center gap-1">
+      <BasicTooltip content={`Reconnect ${providerLabel}`}>
         <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0"
+          size="icon"
+          variant="ghost"
+          onClick={onReconnect}
+          disabled={isDisconnecting}
+          aria-label={`Reconnect ${providerLabel}`}
+        >
+          <Pencil />
+        </Button>
+      </BasicTooltip>
+      <BasicTooltip content={`Disconnect ${providerLabel}`}>
+        <Button
+          size="icon"
+          variant="ghost"
           onClick={() => void onDisconnect()}
           disabled={isDisconnecting}
+          aria-label={`Disconnect ${providerLabel}`}
         >
-          {isDisconnecting ? <Spinner /> : 'Disconnect'}
+          {isDisconnecting ? <Spinner /> : <Trash2 />}
         </Button>
-      </div>
+      </BasicTooltip>
     </div>
   );
 }
@@ -699,22 +727,15 @@ function XaiSubscriptionRow({
                 : 'Connected to a SuperGrok / X Premium+ account.'}
           </p>
           {!errored ? (
-            <SubscriptionUsageLine usage={usage} className="mt-1" />
+            <SubscriptionUsageLine usage={usage} className="mt-1 max-w-md" />
           ) : null}
         </div>
-        {errored ? (
-          <Button size="sm" variant="outline" onClick={onReconnect}>
-            Reconnect
-          </Button>
-        ) : null}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void onDisconnect()}
-          disabled={isDisconnecting}
-        >
-          {isDisconnecting ? <Spinner /> : 'Disconnect'}
-        </Button>
+        <SubscriptionProviderActions
+          providerLabel={getModelProviderLabel(XAI_SUBSCRIPTION_PROVIDER_ID)}
+          onReconnect={onReconnect}
+          onDisconnect={onDisconnect}
+          isDisconnecting={isDisconnecting}
+        />
       </div>
     </div>
   );
@@ -750,22 +771,15 @@ function GitHubCopilotSubscriptionRow({
               : 'Connected to a GitHub Copilot account.'}
           </p>
           {!errored ? (
-            <SubscriptionUsageLine usage={usage} className="mt-1" />
+            <SubscriptionUsageLine usage={usage} className="mt-1 max-w-md" />
           ) : null}
         </div>
-        {errored ? (
-          <Button size="sm" variant="outline" onClick={onReconnect}>
-            Reconnect
-          </Button>
-        ) : null}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void onDisconnect()}
-          disabled={isDisconnecting}
-        >
-          {isDisconnecting ? <Spinner /> : 'Disconnect'}
-        </Button>
+        <SubscriptionProviderActions
+          providerLabel={getModelProviderLabel('github-copilot')}
+          onReconnect={onReconnect}
+          onDisconnect={onDisconnect}
+          isDisconnecting={isDisconnecting}
+        />
       </div>
     </div>
   );
