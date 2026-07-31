@@ -141,7 +141,7 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
     capabilities: [
       'Inspect sent and received email delivery details',
       'Review domains, logs, templates, contacts, and broadcasts',
-      'Opt in to email sending and contact mutations when needed',
+      'Opt in to email sending, automation triggers, and contact mutations when needed',
     ],
   },
   vercel: {

@@ -289,6 +289,9 @@ export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
   'remove-contact-from-segment',
   'update-contact-topics',
   'create-contact-import',
+  'create-automation',
+  'update-automation',
+  'send-event',
 ] as const;
 
 export const MCP_INTEGRATIONS: McpIntegration[] = [
@@ -450,7 +453,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     oauthScopes: ['full_access'],
     defaultDisabledTools: [...RESEND_DEFAULT_DISABLED_TOOL_NAMES],
     instructions:
-      'Use Resend to inspect email delivery, received messages, domains, contacts, templates, broadcasts, and related infrastructure. Email sending, scheduled-send changes, and contact mutations are disabled until a deployment admin explicitly enables those tools.',
+      'Use Resend to inspect email delivery, received messages, domains, contacts, templates, broadcasts, and related infrastructure. Email sending, scheduled-send changes, automation mutations and triggers, and contact mutations are disabled until a deployment admin explicitly enables those tools.',
   },
   {
     id: 'braintrust',
