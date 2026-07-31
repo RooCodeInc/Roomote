@@ -704,6 +704,12 @@ describe('UsersSettings', () => {
     expect(screen.getByText('25 of 25 seats used')).toBeInTheDocument();
     expect(screen.getByText(/Licensed to Acme Corp/)).toBeInTheDocument();
     expect(screen.getByText(/All seats are in use/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create invite' }),
+    ).toBeDisabled();
+
+    fireEvent.submit(screen.getByLabelText(/Label/).closest('form')!);
+    expect(mockCreateInvite).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove key' }));
 

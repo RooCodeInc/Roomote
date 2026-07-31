@@ -253,6 +253,7 @@ export function UsersSettings() {
   const adminCount = members.filter((member) => member.role === 'admin').length;
   const visibleInvites = invites.filter((invite) => invite.revokedAt == null);
   const seatsRemaining = license.seatLimit - license.seatsUsed;
+  const isAtSeatCapacity = seatsRemaining <= 0;
   const purchasedLicenseExpiringSoon =
     license.status === 'valid' &&
     license.licenseId?.startsWith('lic_sh_') === true &&
@@ -304,7 +305,7 @@ export function UsersSettings() {
   const handleCreate = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
 
-    if (createInvite.isPending) {
+    if (createInvite.isPending || isAtSeatCapacity) {
       return;
     }
 
@@ -526,7 +527,10 @@ export function UsersSettings() {
                 disabled={createInvite.isPending}
               />
             </div>
-            <Button type="submit" disabled={createInvite.isPending}>
+            <Button
+              type="submit"
+              disabled={createInvite.isPending || isAtSeatCapacity}
+            >
               {createInvite.isPending ? <Spinner /> : null}
               Create invite
             </Button>
