@@ -14,12 +14,36 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
 
   assert.deepEqual(Object.keys(workflow.jobs), ['promote']);
   assert.equal(workflow.jobs.promote.needs, undefined);
+  assert.equal(workflow.on.workflow_dispatch.inputs.version.required, true);
+  assert.equal(workflow.concurrency['cancel-in-progress'], false);
 
   const promoteScript = workflow.jobs.promote.steps.find(
     (step) => typeof step.run === 'string',
   )?.run;
   assert.match(promoteScript, /find-version-commit\.mjs/);
   assert.match(promoteScript, /gh pr create/);
+  assert.match(promoteScript, /develop is currently version/);
+  assert.match(promoteScript, /Cannot refresh missing release branch/);
+  assert.match(promoteScript, /Tag \$tag already exists/);
+  assert.match(promoteScript, /main already contains candidate/);
+  assert.match(promoteScript, /has diverged from develop/);
+  assert.match(promoteScript, /no open Promote PR targets main/);
+  assert.match(promoteScript, /Cannot refresh .* with pending changesets/);
+  assert.equal(
+    promoteScript.match(
+      /git fetch origin "refs\/heads\/main:refs\/remotes\/origin\/main"(?: --tags)? --quiet/g,
+    )?.length,
+    2,
+  );
+  assert.doesNotMatch(promoteScript, /git fetch origin main/);
+  assert.match(promoteScript, /the candidate reached main while this refresh was running/);
+  assert.match(promoteScript, /the Promote PR closed while this refresh was running/);
+  assert.match(promoteScript, /release_sha="\$bump_sha"/);
+  assert.match(
+    promoteScript,
+    /git push origin "\$\{release_sha\}:refs\/heads\/\$\{release_branch\}"/,
+  );
+  assert.doesNotMatch(promoteScript, /--force(?:-with-lease)?/);
 });
 
 test('GHCR release workflow announces only newly created releases in Discord', () => {

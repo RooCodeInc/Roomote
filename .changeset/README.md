@@ -35,8 +35,12 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
    `CHANGELOG.md` section, and consumed changeset deletions.
 3. Squash-merge that release PR. CI cuts a frozen `release/vX.Y.Z` branch at the
    version-bump commit and opens or refreshes a **Promote PR**
-   (`release/vX.Y.Z` → `main`). Commits merged to `develop` afterward wait for
-   the next release instead of riding along.
+   (`release/vX.Y.Z` → `main`). Commits merged to `develop` afterward normally
+   wait for the next release. Before promotion, maintainers may add changesets,
+   run `pnpm run version -- --amend`, merge the amended notes to `develop`, and
+   explicitly dispatch the Release workflow for that version. The refresh is
+   fast-forward-only and refuses shipped, closed, divergent, newer-version, or
+   pending-changeset states.
 4. Merge the Promote PR with a **merge commit** (not squash) into `main` to tag
    `vX.Y.Z`. GHCR builds the matching images, and the GitHub Release is created
    only after those images exist so `releases/latest` never points at a missing

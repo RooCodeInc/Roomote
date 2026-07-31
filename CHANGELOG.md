@@ -4,19 +4,25 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.27.1 (2026-07-31)
 
-This release adds configurable Review Code guidance and current Qwen model recommendations while keeping Coolify task networking reliable.
+This release speeds up repository setup and pull request reviews, improves Discord task continuity, and expands model and deployment reliability.
 
 ### Highlights
 
-- Guide Review Code automations with team-specific instructions across initial and follow-up reviews.
-- Choose recommended Qwen3.7 Max and Qwen3.7 Plus models from supported providers.
-- Keep Coolify task creation and live previews connected to trusted services. Thanks to @tomny-dev for contributing this fix.
+- Set up large repositories faster with blobless clones that preserve full commit and tree history.
+- Apply team guidance throughout Review Code automations and start commit-triggered re-reviews sooner.
+- Continue sleeping Roomote tasks naturally from their Discord task threads without mentioning the bot again.
+- Choose current Qwen3.7 recommendations and keep Coolify task creation and live previews connected reliably. Thanks to @tomny-dev for contributing the Coolify fix.
 
 ### Patch changes
 
 - Keep Coolify task creation and live previews working by connecting trusted services to the worker discovery network. Thanks to @tomny-dev for contributing this fix.
 - Recommend Qwen3.7 Max and Qwen3.7 Plus when connected model providers support them.
 - Let teams add custom instructions to Review Code automations so initial and follow-up reviews follow their preferred guidance.
+- Speed up fresh environment setup for large repositories with blobless partial clones while preserving full commit and tree history.
+- Let users continue sleeping Roomote tasks naturally in their Discord task threads without mentioning the bot again.
+- Start commit-triggered pull request re-reviews sooner while retaining burst protection and per-PR deduplication.
+- Apply configured Review Code instructions to GitHub follow-up reviews so team guidance remains consistent throughout the review lifecycle.
+- Show a pointer cursor on the environment repository selector's create-repository action so its interactivity is clear.
 
 ## 0.27.0 (2026-07-31)
 
