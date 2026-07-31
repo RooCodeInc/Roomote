@@ -8,11 +8,11 @@ import { SLACK_SILENCE_HOOK_SCRIPT } from '../slack-silence-hook-script';
 describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
   const tempDirs: string[] = [];
   const reminder =
-    'Slack has not received a visible update for this turn. Your next action must be a Slack-visible update to the originating thread using send_chat_reply or use send_chat_reaction_emoji only when the latest user turn itself came from Slack and that message can receive a reaction. If a successful visual-proof capture returned screenshot artifact IDs that are not yet visible in the thread and the update mentions or relies on that proof, include those IDs in the same reply via imageArtifactIds. Use request_user_input only when you genuinely require structured input from the user. Normal assistant messages do not count. Do not run more tools first. The only exception is tool_search when the needed Slack reply/post tool is not visible. After sending the Slack update, continue the work you were doing.';
+    'The originating chat thread has not received a visible update for this turn. Your next action must be a chat-visible update to the originating thread using send_chat_reply or use send_chat_reaction_emoji only when the latest user turn itself came from chat and that message can receive a reaction. If a successful visual-proof capture returned screenshot artifact IDs that are not yet visible in the thread and the update mentions or relies on that proof, include those IDs in the same reply via imageArtifactIds. Use request_user_input only when you genuinely require structured input from the user. Normal assistant messages do not count. Do not run more tools first. The only exception is tool_search when the needed chat reply/post tool is not visible. After sending the chat update, continue the work you were doing.';
   const initialAckReminder =
-    'Before starting work that will not post to Slack on this turn, send a quick Slack-visible ack. When the latest user turn itself came from Slack, reactions are allowed on that message, and a lightweight acknowledgement is enough, start with send_chat_reaction_emoji. Otherwise use send_chat_reply. Do not use request_user_input as a generic opening acknowledgement; only use it when you genuinely require structured input from the user. If the needed Slack reply/post tool is not visible, use tool_search first. If context is still too thin to say anything concrete and the turn does not allow reactions, keep the text ack short and non-speculative. After that, continue the work you were doing.';
+    'Before starting work that will not post to chat on this turn, send a quick chat-visible ack. When the latest user turn itself came from chat, reactions are allowed on that message, and a lightweight acknowledgement is enough, start with send_chat_reaction_emoji. Otherwise use send_chat_reply. Do not use request_user_input as a generic opening acknowledgement; only use it when you genuinely require structured input from the user. If the needed chat reply/post tool is not visible, use tool_search first. If context is still too thin to say anything concrete and the turn does not allow reactions, keep the text ack short and non-speculative. After that, continue the work you were doing.';
   const subagentSlackPostDenial =
-    'Slack-posting tools are reserved for the parent agent session. This subagent session must not post to Slack directly. Return your findings in your final report to the parent agent instead; the parent agent will relay any Slack-visible update.';
+    'chat-posting tools are reserved for the parent agent session. This subagent session must not post to chat directly. Return your findings in your final report to the parent agent instead; the parent agent will relay any chat-visible update.';
 
   function writeHook(): string {
     const tempDir = fs.mkdtempSync(
@@ -35,6 +35,8 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
         ...process.env,
         ROOMOTE_SLACK_HOOK_DEBUG: undefined,
         ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: undefined,
+        ROOMOTE_COMMUNICATION_PROVIDER: undefined,
+        ROOMOTE_SLACK_CHANNEL: undefined,
         ...options.env,
       },
     });
@@ -481,6 +483,28 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stderr).toContain('trigger="PostToolUse"');
     expect(result.stderr).toContain('decision="block"');
     expect(result.stderr).toContain('reason="slack_update_overdue"');
+  });
+
+  it('names the communication surface in the silence reminder for non-Slack providers', () => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now() - 7 * 60_000 - 1_000,
+    });
+
+    const result = runHook({
+      input: { hook_event_name: 'PostToolUse', tool_name: 'shell' },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_COMMUNICATION_PROVIDER: 'discord',
+      },
+    });
+
+    expect(result.status).toBe(0);
+    const decision = JSON.parse(result.stdout);
+    expect(decision.reason).toContain(
+      'The originating Discord thread has not received a visible update',
+    );
+    expect(decision.reason).toContain('Discord-visible update');
+    expect(decision.reason).not.toContain('Slack');
   });
 
   it('continues blocking stale non-Slack hook events until another successful Slack reply is recorded', () => {

@@ -300,7 +300,7 @@ const DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS = 10 * 60_000;
 const DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS = 1_000;
 const MAX_PROGRESS_COMMAND_CHARS = 240;
 const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
-  'Before finalizing, post a terminal Slack-visible reply for the current turn.';
+  'Before finalizing, post a terminal chat-visible reply for the current turn.';
 const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
 // OpenCode's built-in tool for loading skills into the session.
 const OPENCODE_SKILL_TOOL = 'skill';
