@@ -558,6 +558,8 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         required: false,
         category: 'credential',
         advanced: true,
+        helpText:
+          'Set this for a user-assigned managed identity, or use it with the tenant ID and client secret for service principal authentication. Leave blank for ambient az login or a system-assigned identity.',
       },
       {
         // Service principal auth for containerized/headless deployments where
@@ -567,6 +569,8 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         required: false,
         category: 'credential',
         advanced: true,
+        helpText:
+          'Service principal authentication only. Provide this together with the client ID and client secret.',
       },
       {
         envVarName: 'AZURE_CLIENT_SECRET',
@@ -575,6 +579,8 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         secret: true,
         category: 'credential',
         advanced: true,
+        helpText:
+          'Service principal authentication only. Provide this together with the client ID and tenant ID.',
       },
       {
         // Default sandbox size. Per-task memory sizing may override the
