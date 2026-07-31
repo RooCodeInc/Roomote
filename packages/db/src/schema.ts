@@ -3300,6 +3300,7 @@ export type MondayAgentInstallationStatus =
   | 'inactive'
   | 'active'
   | 'disabled'
+  | 'disconnected'
   | 'error';
 
 /**
@@ -3343,7 +3344,7 @@ export const mondayAgentInstallations = pgTable(
     ),
     check(
       'monday_agent_installations_singleton_key_check',
-      sql`${table.singletonKey} = 'default' OR (${table.singletonKey} IS NULL AND ${table.status} = 'error')`,
+      sql`${table.singletonKey} = 'default' OR (${table.singletonKey} IS NULL AND ${table.status} IN ('error', 'disconnected'))`,
     ),
   ],
 );

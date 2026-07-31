@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getValidAccessToken: vi.fn(),
   insertValues: vi.fn(),
   updateSet: vi.fn(),
+  updateWhere: vi.fn(),
   deleteWhere: vi.fn(),
   getAccount: vi.fn(),
   connectExternalAgent: vi.fn(),
@@ -59,6 +60,7 @@ vi.mock('@roomote/db/server', () => ({
 import {
   getMondayAgentInstallationCommand,
   installMondayAgentCommand,
+  uninstallMondayAgentCommand,
 } from '.';
 
 const admin = { userId: 'admin-1', isAdmin: true } as never;
@@ -83,10 +85,13 @@ describe('monday.com external-agent setup commands', () => {
       signingSecret: 'signing-secret',
       instructions: null,
     });
+    mocks.disconnectExternalAgent.mockResolvedValue(undefined);
     mocks.insertValues.mockReturnValue({
       returning: vi.fn().mockResolvedValue([{ id: 'installation-1' }]),
     });
-    mocks.updateSet.mockReturnValue({ where: vi.fn().mockResolvedValue([]) });
+    mocks.updateSet.mockReturnValue({ where: mocks.updateWhere });
+    mocks.updateWhere.mockResolvedValue([]);
+    mocks.deleteWhere.mockResolvedValue([]);
   });
 
   it('hides the beta surface from members and disabled deployments', async () => {
@@ -165,5 +170,44 @@ describe('monday.com external-agent setup commands', () => {
         signingSecret: expect.anything(),
       }),
     );
+  });
+
+  it('retries local deletion without disconnecting an already-disconnected agent', async () => {
+    const installation = {
+      id: 'installation-1',
+      accountId: 'account-1',
+      accountName: 'Acme',
+      agentId: 'agent-1',
+      ownerMcpConnectionId: 'connection-1',
+      status: 'inactive',
+      error: null,
+    };
+    mocks.findInstallations
+      .mockResolvedValueOnce([installation])
+      .mockResolvedValueOnce([{ ...installation, status: 'disconnected' }]);
+    mocks.deleteWhere
+      .mockRejectedValueOnce(new Error('database unavailable'))
+      .mockResolvedValueOnce([]);
+
+    await expect(uninstallMondayAgentCommand(admin)).rejects.toThrow(
+      'database unavailable',
+    );
+    expect(mocks.disconnectExternalAgent).toHaveBeenCalledTimes(1);
+    expect(mocks.updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'disconnected', error: null }),
+    );
+    expect(mocks.updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'disconnected',
+        error: expect.stringContaining('local deletion failed'),
+      }),
+    );
+
+    await expect(uninstallMondayAgentCommand(admin)).resolves.toEqual({
+      success: true,
+    });
+    expect(mocks.disconnectExternalAgent).toHaveBeenCalledTimes(1);
+    expect(mocks.getValidAccessToken).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteWhere).toHaveBeenCalledTimes(2);
   });
 });

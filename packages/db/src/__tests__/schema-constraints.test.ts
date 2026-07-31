@@ -402,10 +402,20 @@ describe('monday.com external-agent installation constraints', () => {
           error: 'provider cleanup failed',
         })
         .returning();
+      if (!recovery) throw new Error('Failed to create recovery installation');
       expect(recovery).toMatchObject({
         singletonKey: null,
         accountId: installation.accountId,
         status: 'error',
+      });
+      const [disconnectedRecovery] = await db
+        .update(mondayAgentInstallations)
+        .set({ status: 'disconnected' })
+        .where(eq(mondayAgentInstallations.id, recovery.id))
+        .returning();
+      expect(disconnectedRecovery).toMatchObject({
+        singletonKey: null,
+        status: 'disconnected',
       });
       await expect(
         getMondayAgentInstallationSecrets(installation.agentId),

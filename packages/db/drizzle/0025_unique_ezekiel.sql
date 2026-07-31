@@ -1,0 +1,2 @@
+ALTER TABLE "monday_agent_installations" DROP CONSTRAINT "monday_agent_installations_singleton_key_check";--> statement-breakpoint
+ALTER TABLE "monday_agent_installations" ADD CONSTRAINT "monday_agent_installations_singleton_key_check" CHECK ("monday_agent_installations"."singleton_key" = 'default' OR ("monday_agent_installations"."singleton_key" IS NULL AND "monday_agent_installations"."status" IN ('error', 'disconnected')));

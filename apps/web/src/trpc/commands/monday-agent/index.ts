@@ -265,34 +265,59 @@ export async function uninstallMondayAgentCommand(auth: UserAuthSuccess) {
   const clients = new Map<string, MondayClient>();
   const failures: string[] = [];
   for (const installation of installations) {
-    let client = clients.get(installation.ownerMcpConnectionId);
-    if (!client) {
-      const accessToken = await getValidAccessToken(
-        installation.ownerMcpConnectionId,
-        MONDAY_MCP_URL,
-      );
-      if (!accessToken) {
-        failures.push(`${installation.agentId}: owner account must reconnect`);
+    if (installation.status !== 'disconnected') {
+      let client = clients.get(installation.ownerMcpConnectionId);
+      if (!client) {
+        const accessToken = await getValidAccessToken(
+          installation.ownerMcpConnectionId,
+          MONDAY_MCP_URL,
+        );
+        if (!accessToken) {
+          failures.push(
+            `${installation.agentId}: owner account must reconnect`,
+          );
+          continue;
+        }
+        client = new MondayClient({ token: accessToken });
+        clients.set(installation.ownerMcpConnectionId, client);
+      }
+
+      try {
+        await client.disconnectExternalAgent(installation.agentId);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'unknown provider error';
+        failures.push(`${installation.agentId}: ${message}`);
+        await db
+          .update(mondayAgentInstallations)
+          .set({
+            status: 'error',
+            error: `Provider disconnect failed: ${message}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(mondayAgentInstallations.id, installation.id));
         continue;
       }
-      client = new MondayClient({ token: accessToken });
-      clients.set(installation.ownerMcpConnectionId, client);
+
+      await db
+        .update(mondayAgentInstallations)
+        .set({ status: 'disconnected', error: null, updatedAt: new Date() })
+        .where(eq(mondayAgentInstallations.id, installation.id));
     }
 
     try {
-      await client.disconnectExternalAgent(installation.agentId);
       await db
         .delete(mondayAgentInstallations)
         .where(eq(mondayAgentInstallations.id, installation.id));
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'unknown provider error';
+        error instanceof Error ? error.message : 'unknown local error';
       failures.push(`${installation.agentId}: ${message}`);
       await db
         .update(mondayAgentInstallations)
         .set({
-          status: 'error',
-          error: `Provider disconnect failed: ${message}`,
+          status: 'disconnected',
+          error: `Provider disconnected, but local deletion failed: ${message}`,
           updatedAt: new Date(),
         })
         .where(eq(mondayAgentInstallations.id, installation.id));
