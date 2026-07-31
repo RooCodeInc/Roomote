@@ -63,6 +63,7 @@ describe('GitLab MR review workflows', () => {
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
+      additionalInstructions: 'Focus on authorization boundaries.',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -72,6 +73,8 @@ describe('GitLab MR review workflows', () => {
     expect(result.prompt).toContain('source_control_provider');
     expect(result.prompt).toContain('gitlab');
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
+    expect(result.prompt).toContain('Additional team instructions:');
+    expect(result.prompt).toContain('Focus on authorization boundaries.');
   });
 
   it('builds GitLab MR sync review prompts without fetching GitHub PR details', async () => {
@@ -82,6 +85,7 @@ describe('GitLab MR review workflows', () => {
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
+      additionalInstructions: 'Check backward compatibility.',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -89,6 +93,8 @@ describe('GitLab MR review workflows', () => {
       'Review the new GitLab merge request changes',
     );
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
+    expect(result.prompt).toContain('Additional team instructions:');
+    expect(result.prompt).toContain('Check backward compatibility.');
   });
 
   it('builds initial Gitea PR review prompts without fetching GitHub PR details', async () => {
@@ -99,6 +105,7 @@ describe('GitLab MR review workflows', () => {
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
+      additionalInstructions: 'Focus on authorization boundaries.',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -106,6 +113,7 @@ describe('GitLab MR review workflows', () => {
     expect(result.prompt).toContain('source_control_provider');
     expect(result.prompt).toContain('gitea');
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
+    expect(result.prompt).toContain('Focus on authorization boundaries.');
   });
 
   it('builds Gitea PR sync review prompts without fetching GitHub PR details', async () => {
@@ -116,6 +124,7 @@ describe('GitLab MR review workflows', () => {
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
+      additionalInstructions: 'Check backward compatibility.',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -123,6 +132,7 @@ describe('GitLab MR review workflows', () => {
       'Review the new Gitea pull request changes',
     );
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
+    expect(result.prompt).toContain('Check backward compatibility.');
   });
 
   it('builds initial Azure DevOps PR review prompts without fetching GitHub PR details', async () => {
@@ -133,6 +143,7 @@ describe('GitLab MR review workflows', () => {
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
+      additionalInstructions: 'Focus on authorization boundaries.',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -142,6 +153,7 @@ describe('GitLab MR review workflows', () => {
     expect(result.prompt).toContain('source_control_provider');
     expect(result.prompt).toContain('ado');
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
+    expect(result.prompt).toContain('Focus on authorization boundaries.');
   });
 
   it('builds Azure DevOps PR sync review prompts without fetching GitHub PR details', async () => {
@@ -152,6 +164,7 @@ describe('GitLab MR review workflows', () => {
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
       taskRunUrl: 'https://roomote.example/task/1',
+      additionalInstructions: 'Check backward compatibility.',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -159,5 +172,6 @@ describe('GitLab MR review workflows', () => {
       'Review the new Azure DevOps pull request changes',
     );
     expect(result.prompt).toContain('Do not use GitHub-only CLI commands');
+    expect(result.prompt).toContain('Check backward compatibility.');
   });
 });

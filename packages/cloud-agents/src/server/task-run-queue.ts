@@ -1006,7 +1006,7 @@ const PR_SCOPED_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set([
   TaskPayloadKind.GithubPrReviewSync,
 ]);
 
-export const PR_REVIEW_SYNC_DEBOUNCE_MS = 15_000;
+export const PR_REVIEW_SYNC_DEBOUNCE_MS = 5_000;
 
 export function resolvePrReviewQueuePolicy({
   payloadKind,

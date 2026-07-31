@@ -38,6 +38,8 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'roomote-opencode-slack-hooks-plugin-'),
     );
+    delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
+    delete process.env.ROOMOTE_SLACK_CHANNEL;
   });
 
   afterEach(() => {
@@ -103,7 +105,7 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     await hooks['tool.execute.after']({ ...input, args: {} }, output);
 
     expect(output.output.startsWith('tool output')).toBe(true);
-    expect(output.output).toContain('Slack-visible ack');
+    expect(output.output).toContain('chat-visible ack');
   });
 
   it('does not append a warning when the hook allows the tool call', async () => {
@@ -228,7 +230,7 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     await expect(
       hooks['tool.execute.before'](input, { args: {} }),
     ).rejects.toThrow(
-      'Slack-posting tools are reserved for the parent agent session.',
+      'chat-posting tools are reserved for the parent agent session.',
     );
   });
 
@@ -312,6 +314,6 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     ).resolves.toBeUndefined();
 
     expect(output.output.startsWith('tool output')).toBe(true);
-    expect(output.output).toContain('Slack-visible ack');
+    expect(output.output).toContain('chat-visible ack');
   });
 });

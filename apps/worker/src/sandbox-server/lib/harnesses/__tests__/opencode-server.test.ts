@@ -1445,7 +1445,7 @@ describe('OpenCodeServerHarness', () => {
             {
               type: 'text',
               text: expect.stringContaining(
-                'Before finalizing, post a terminal Slack-visible reply',
+                'Before finalizing, post a terminal chat-visible reply',
               ),
             },
           ],
@@ -1456,6 +1456,205 @@ describe('OpenCodeServerHarness', () => {
           (event) => event.eventName === TaskEventName.TaskCompleted,
         ),
       ).toBe(false);
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('injects a single reminder when OpenCode pairs session.status(idle) with session.idle', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-paired-idle-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'idle' } },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      // The paired session.idle for the same turn end must not inject a
+      // duplicate reminder into the fresh reminder turn.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+
+      // Once the reminder turn actually starts (busy) and later ends without
+      // a closeout, enforcement still applies.
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'busy' } },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+      expect(client.promptAsync.mock.calls[2]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining(
+                'Before finalizing, post a terminal chat-visible reply',
+              ),
+            },
+          ],
+        },
+      });
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('defers the closeout reminder while the session still has unsettled tool work', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-unsettled-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // A completed assistant message that still carries a running tool part:
+      // the shape of a stale idle racing an in-flight tool call.
+      const message = createFinalAssistantMessage();
+      message.parts.push({
+        id: 'part_tool_1',
+        sessionID: 'ses_1',
+        messageID: 'msg_1',
+        type: 'tool',
+        tool: 'edit',
+        callID: 'call_1',
+        state: { status: 'running' },
+      });
+      client.messages.mockResolvedValue([message]);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      // No reminder was injected and the turn was not completed; enforcement
+      // waits for the next genuine idle.
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+
+      // Once the tool work settles, the next idle injects the reminder.
+      client.messages.mockResolvedValue([]);
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining(
+                'Before finalizing, post a terminal chat-visible reply',
+              ),
+            },
+          ],
+        },
+      });
     } finally {
       harness.dispose();
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1647,7 +1846,7 @@ describe('OpenCodeServerHarness', () => {
             {
               type: 'text',
               text: expect.stringContaining(
-                'Before finalizing, post a terminal Slack-visible reply',
+                'Before finalizing, post a terminal chat-visible reply',
               ),
             },
           ],
@@ -1776,7 +1975,7 @@ describe('OpenCodeServerHarness', () => {
             {
               type: 'text',
               text: expect.stringContaining(
-                'Before finalizing, post a terminal Slack-visible reply',
+                'Before finalizing, post a terminal chat-visible reply',
               ),
             },
           ],
@@ -2245,7 +2444,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('terminates an OpenCode retry loop for provider billing suspension', async () => {
+  it('terminates an OpenCode retry loop from a structured 4xx status without a message', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -2289,8 +2488,7 @@ describe('OpenCodeServerHarness', () => {
           status: {
             type: 'retry',
             attempt: 1,
-            message:
-              'Your account org-redacted is suspended due to insufficient balance, please recharge your account.',
+            statusCode: 402,
             next: Date.now() + 2_000,
           },
         },
@@ -2312,7 +2510,7 @@ describe('OpenCodeServerHarness', () => {
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
             String(envelope.payload.text ?? '').includes(
-              'suspended due to insufficient balance',
+              'Provider request failed with a non-retryable error.',
             ),
         ),
       ).toBe(true);
@@ -2321,7 +2519,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('terminates an OpenCode retry loop for message-only payment required status', async () => {
+  it('terminates an OpenCode retry loop after its structured attempt budget without a message', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -2358,15 +2556,14 @@ describe('OpenCodeServerHarness', () => {
         }),
       ).toBe(true);
 
-      // Retry status only carries message; no statusCode/code fields.
+      // The decision uses the structured attempt count, not the provider prose.
       await client.emit({
         type: 'session.status',
         properties: {
           sessionID: 'ses_1',
           status: {
             type: 'retry',
-            attempt: 1,
-            message: 'Payment required',
+            attempt: 3,
             next: Date.now() + 2_000,
           },
         },
@@ -2387,7 +2584,9 @@ describe('OpenCodeServerHarness', () => {
         persistedEnvelopes.some(
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-            String(envelope.payload.text ?? '').includes('Payment required'),
+            String(envelope.payload.text ?? '').includes(
+              'Provider retry limit exceeded.',
+            ),
         ),
       ).toBe(true);
     } finally {
@@ -2395,7 +2594,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('retries a cyber policy refusal with safer framing without aborting the task', async () => {
+  it('retries a ContentFilterError refusal with safer framing without aborting the task', async () => {
     vi.useFakeTimers();
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
@@ -2438,17 +2637,10 @@ describe('OpenCodeServerHarness', () => {
         properties: {
           sessionID: 'ses_1',
           error: {
-            name: 'UnknownError',
+            name: 'ContentFilterError',
             data: {
-              message: JSON.stringify({
-                type: 'error',
-                error: {
-                  type: 'invalid_request',
-                  code: 'cyber_policy',
-                  message:
-                    'This content was flagged for possible cybersecurity risk.',
-                },
-              }),
+              message:
+                "The response was blocked by the provider's content filter",
             },
           },
         },

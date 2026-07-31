@@ -8,7 +8,7 @@ import { SLACK_STOP_HOOK_SCRIPT } from '../slack-stop-hook-script';
 describe('SLACK_STOP_HOOK_SCRIPT', () => {
   const tempDirs: string[] = [];
   const reminder =
-    'Before finalizing, post a terminal Slack-visible reply for the current turn: use send_chat_reply with purpose "closeout" for the answer, result, blocker, or handoff. Use request_user_input only when you genuinely require structured input from the user. Do not continue other work first.';
+    'Before finalizing, post a terminal chat-visible reply for the current turn: use send_chat_reply with purpose "closeout" for the answer, result, blocker, or handoff. Use request_user_input only when you genuinely require structured input from the user. If the current turn was interrupted mid-action or its work is unfinished, finish that work first and then post the closeout. Do not start unrelated new work before the closeout.';
 
   function writeHook(): string {
     const tempDir = fs.mkdtempSync(
@@ -34,6 +34,8 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
         ...process.env,
         ROOMOTE_SLACK_HOOK_DEBUG: undefined,
         ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: undefined,
+        ROOMOTE_COMMUNICATION_PROVIDER: undefined,
+        ROOMOTE_SLACK_CHANNEL: undefined,
         ...options.env,
       },
     });
@@ -93,6 +95,39 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('decision="allow"');
     expect(result.stderr).toContain('reason="non_parent_thread"');
+  });
+
+  it('names the communication surface in the reminder for non-Slack providers', () => {
+    const result = runHook({
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: '/tmp/roomote-state.json',
+        ROOMOTE_COMMUNICATION_PROVIDER: 'discord',
+      },
+    });
+
+    expect(result.status).toBe(0);
+    const decision = JSON.parse(result.stdout);
+    expect(decision.decision).toBe('block');
+    expect(decision.reason).toContain(
+      'post a terminal Discord-visible reply for the current turn',
+    );
+    expect(decision.reason).not.toContain('Slack');
+  });
+
+  it('names Slack in the reminder when a Slack channel is configured', () => {
+    const result = runHook({
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: '/tmp/roomote-state.json',
+        ROOMOTE_SLACK_CHANNEL: 'C123ABC456',
+      },
+    });
+
+    expect(result.status).toBe(0);
+    const decision = JSON.parse(result.stdout);
+    expect(decision.decision).toBe('block');
+    expect(decision.reason).toContain(
+      'post a terminal Slack-visible reply for the current turn',
+    );
   });
 
   it('blocks Stop when Slack reply satisfaction is configured and no successful reply has been recorded', () => {
@@ -166,7 +201,7 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
     const decision = JSON.parse(result.stdout);
     expect(decision.decision).toBe('block');
     expect(decision.reason).toContain(
-      'This automation-started task has not posted its Slack closeout yet.',
+      'This automation-started task has not posted its chat closeout yet.',
     );
     expect(decision.reason).toContain('send_chat_reply purpose "closeout"');
     expect(decision.reason).toContain(

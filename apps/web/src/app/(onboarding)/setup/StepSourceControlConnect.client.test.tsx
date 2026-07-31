@@ -15,6 +15,8 @@ const {
   toastWarningMock,
   authenticateAdoMutateMock,
   pendingInstallationsDataRef,
+  adoLinkedAccountDataRef,
+  mutationVariablesRef,
 } = vi.hoisted(() => ({
   createInstallationMutateMock: vi.fn(),
   syncRepositoriesMutateMock: vi.fn(),
@@ -48,6 +50,13 @@ const {
   pendingInstallationsDataRef: {
     current: undefined as { pending: boolean } | undefined,
   },
+  adoLinkedAccountDataRef: {
+    current: { configured: true, account: null } as {
+      configured: boolean;
+      account: { accountId: string; displayName: string } | null;
+    },
+  },
+  mutationVariablesRef: { current: [] as unknown[] },
 }));
 
 vi.mock('@tanstack/react-query', async () => {
@@ -58,8 +67,10 @@ vi.mock('@tanstack/react-query', async () => {
     useMutation: (options: {
       mutationFn?: (variables: unknown) => unknown;
     }) => ({
-      mutateAsync: async (variables: unknown) =>
-        options.mutationFn?.(variables),
+      mutateAsync: async (variables: unknown) => {
+        mutationVariablesRef.current.push(variables);
+        return options.mutationFn?.(variables);
+      },
       isPending: false,
     }),
     useQueryClient: () => ({
@@ -131,7 +142,7 @@ vi.mock('@/hooks/source-control/useSyncRepositories', () => ({
 
 vi.mock('@/hooks/linked-accounts', () => ({
   useAdoLinkedAccount: () => ({
-    data: { configured: true, account: null },
+    data: adoLinkedAccountDataRef.current,
     isPending: false,
   }),
   useAuthenticateAdoAccount: () => ({
@@ -200,6 +211,7 @@ function buildSourceControlSetup(
         runtimeConfigSatisfied: true,
         savedConfigSatisfied: false,
         configSatisfied: true,
+        configStepSatisfied: true,
         configSatisfiedByRuntimeEnv: true,
         connected: false,
         repositoryCount: 0,
@@ -214,6 +226,8 @@ describe('StepSourceControlConnect', () => {
     vi.clearAllMocks();
     syncRepositoriesOptionsRef.current = null;
     pendingInstallationsDataRef.current = undefined;
+    adoLinkedAccountDataRef.current = { configured: true, account: null };
+    mutationVariablesRef.current = [];
     ensureQueryDataMock.mockResolvedValue({
       sourceControlSetup: {
         providers: [
@@ -360,6 +374,7 @@ describe('StepSourceControlConnect', () => {
               runtimeConfigSatisfied: false,
               savedConfigSatisfied: true,
               configSatisfied: true,
+              configStepSatisfied: true,
               configSatisfiedByRuntimeEnv: false,
             },
           ],
@@ -475,6 +490,61 @@ describe('StepSourceControlConnect', () => {
       '/setup?step=source-control-connect',
     );
     expect(syncRepositoriesMutateMock).not.toHaveBeenCalled();
+  });
+
+  it('saves the linked account and syncs on the first return from the delegated Azure DevOps sign-in', async () => {
+    // Returning from Microsoft, `ADO_LINKED_ACCOUNT_ID` is still unsaved, so
+    // `configSatisfied` is false while the config step itself has nothing left
+    // to collect. Saving that id is this step's job and must not wait on
+    // another click, or the completed sign-in reads as not having registered.
+    adoLinkedAccountDataRef.current = {
+      configured: true,
+      account: { accountId: 'ado-account-id', displayName: 'Ada Lovelace' },
+    };
+
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('ado', {
+          lockReason: null,
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          providers: [
+            {
+              ...buildSourceControlSetup('ado').providers[0]!,
+              runtimeConfigSatisfied: false,
+              savedConfigSatisfied: false,
+              configSatisfied: false,
+              configStepSatisfied: true,
+              configSatisfiedByRuntimeEnv: false,
+              fields: [
+                {
+                  envVarName: 'ADO_AUTH_MODE',
+                  acceptedEnvVarNames: ['ADO_AUTH_MODE'],
+                  label: 'Azure DevOps Authentication Mode',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  savedValue: 'delegated',
+                  satisfiedByEnvVarName: 'ADO_AUTH_MODE',
+                },
+              ],
+            },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(1);
+    });
+    expect(mutationVariablesRef.current).toContainEqual({
+      provider: 'ado',
+      values: {
+        ADO_AUTH_MODE: 'delegated',
+        ADO_LINKED_ACCOUNT_ID: 'ado-account-id',
+      },
+    });
+    expect(authenticateAdoMutateMock).not.toHaveBeenCalled();
   });
 
   it('does not auto-sync an OAuth-configured GitLab provider before OAuth completes', () => {

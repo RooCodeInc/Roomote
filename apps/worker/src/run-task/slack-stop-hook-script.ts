@@ -2,15 +2,40 @@ export const SLACK_STOP_HOOK_SCRIPT = `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
 
+// Mirrors the Roomote MCP server's getChatReplySurfaceLabel so reminders name
+// the surface the task actually replies to instead of hardcoding Slack.
+function getChatSurfaceLabel() {
+  const provider = (process.env.ROOMOTE_COMMUNICATION_PROVIDER || '').trim();
+  if (provider === 'teams') {
+    return 'Teams';
+  }
+  if (provider === 'telegram') {
+    return 'Telegram';
+  }
+  if (provider === 'discord') {
+    return 'Discord';
+  }
+  return (process.env.ROOMOTE_SLACK_CHANNEL || '').trim() ? 'Slack' : 'chat';
+}
+
+const SURFACE_LABEL = getChatSurfaceLabel();
 const REMINDER = [
-  'Before finalizing, post a terminal Slack-visible reply for the current turn:',
+  'Before finalizing, post a terminal ' +
+    SURFACE_LABEL +
+    '-visible reply for the current turn:',
   'use send_chat_reply with purpose "closeout" for the answer, result, blocker, or handoff.',
   'Use request_user_input only when you genuinely require structured input from the user.',
-  'Do not continue other work first.',
+  'If the current turn was interrupted mid-action or its work is unfinished,',
+  'finish that work first and then post the closeout.',
+  'Do not start unrelated new work before the closeout.',
 ].join(' ');
 const AUTOMATION_CLOSEOUT_REMINDER = [
-  'This automation-started task has not posted its Slack closeout yet.',
-  'Before finalizing, post one self-contained Slack message with send_chat_reply purpose "closeout" that explains',
+  'This automation-started task has not posted its ' +
+    SURFACE_LABEL +
+    ' closeout yet.',
+  'Before finalizing, post one self-contained ' +
+    SURFACE_LABEL +
+    ' message with send_chat_reply purpose "closeout" that explains',
   'what the automation asked you to investigate and the concrete outcome (PR link, no-op or deferred reason, or blocker).',
   'Do not start new work first.',
 ].join(' ');

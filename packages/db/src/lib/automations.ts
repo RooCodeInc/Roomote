@@ -924,6 +924,7 @@ export function normalizeBackgroundAgentSettings(
     updatedAt: row?.updatedAt ?? now,
 
     reviewCodeSettings: normalizeReviewCodeAutomationSettings(reviewCode),
+    reviewCodeInstructions: reviewCode?.instructions ?? null,
 
     conflictResolverFrequency: getAutomationFrequency(
       conflictResolver,

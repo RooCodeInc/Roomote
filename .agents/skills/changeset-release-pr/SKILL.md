@@ -205,7 +205,10 @@ Commit the generated release artifacts on a feature branch and open a PR against
   `pnpm run version`, review the result, and commit that output in the release
   PR.
 - Never run or commit `changeset version` output.
-- Never push to `release/v*`; CI owns frozen release branches.
+- Never push to `release/v*` manually. CI owns release branches; before a
+  candidate reaches `main`, maintainers may amend its notes with
+  `pnpm run version -- --amend` and explicitly dispatch the Release workflow to
+  fast-forward the open candidate from `develop`.
 - Never merge an out-of-date release PR. Regenerate it from the latest
   `develop` so every commit included in the cut was part of the release audit.
 - Never bump versions in workspace `package.json` files.

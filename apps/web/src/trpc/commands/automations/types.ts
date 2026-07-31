@@ -56,6 +56,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'suggesterInstructions'
   | 'suggesterRoutingInstructions'
   | 'announcerInstructions'
+  | 'reviewerInstructions'
   | 'issueFixerInstructions';
 
 export type BackgroundAgentFieldErrors = Partial<
@@ -240,6 +241,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   reviewerReviewAllPullRequestAuthors: boolean;
   reviewerReviewOnCommit: boolean;
   reviewerReviewDraftPrs: boolean;
+  reviewerInstructions?: string | null;
   reviewerRelayReviewResultsToTask: boolean;
   reviewerRelayUserIds: string[];
   conflictResolverFrequency: ConflictResolverFrequency;

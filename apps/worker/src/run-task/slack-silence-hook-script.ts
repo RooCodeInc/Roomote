@@ -11,12 +11,33 @@ const SUBAGENT_RESTRICTED_SLACK_POSTING_TOOLS = ${JSON.stringify([
   ...SLACK_POSTING_TOOL_BASENAMES,
 ])};
 
+// Mirrors the Roomote MCP server's getChatReplySurfaceLabel so reminders name
+// the surface the task actually replies to instead of hardcoding Slack.
+function getChatSurfaceLabel() {
+  const provider = (process.env.ROOMOTE_COMMUNICATION_PROVIDER || '').trim();
+  if (provider === 'teams') {
+    return 'Teams';
+  }
+  if (provider === 'telegram') {
+    return 'Telegram';
+  }
+  if (provider === 'discord') {
+    return 'Discord';
+  }
+  return (process.env.ROOMOTE_SLACK_CHANNEL || '').trim() ? 'Slack' : 'chat';
+}
+
+const SURFACE_LABEL = getChatSurfaceLabel();
 const REMINDER = [
-  'Slack has not received a visible update for this turn. Your next action',
-  'must be a Slack-visible update to the originating thread using',
+  'The originating ' +
+    SURFACE_LABEL +
+    ' thread has not received a visible update for this turn. Your next action',
+  'must be a ' +
+    SURFACE_LABEL +
+    '-visible update to the originating thread using',
   'send_chat_reply',
   'or use send_chat_reaction_emoji only when the latest user turn itself came',
-  'from Slack and that message can receive a reaction.',
+  'from ' + SURFACE_LABEL + ' and that message can receive a reaction.',
   'If a successful visual-proof capture returned screenshot artifact IDs that',
   'are not yet visible in the thread and the update mentions or relies on that',
   'proof, include those IDs in the same reply via imageArtifactIds.',
@@ -24,29 +45,39 @@ const REMINDER = [
   'from the user.',
   'Normal assistant messages do not count.',
   'Do not run more tools first.',
-  'The only exception is tool_search when the needed Slack reply/post tool is',
+  'The only exception is tool_search when the needed ' +
+    SURFACE_LABEL +
+    ' reply/post tool is',
   'not visible.',
-  'After sending the Slack update, continue the work you were doing.',
+  'After sending the ' +
+    SURFACE_LABEL +
+    ' update, continue the work you were doing.',
 ].join(' ');
 const INITIAL_ACK_REMINDER = [
-  'Before starting work that will not post to Slack on this turn, send a',
-  'quick Slack-visible ack.',
-  'When the latest user turn itself came from Slack, reactions are allowed on',
+  'Before starting work that will not post to ' +
+    SURFACE_LABEL +
+    ' on this turn, send a',
+  'quick ' + SURFACE_LABEL + '-visible ack.',
+  'When the latest user turn itself came from ' +
+    SURFACE_LABEL +
+    ', reactions are allowed on',
   'that message, and a lightweight acknowledgement is enough, start with',
   'send_chat_reaction_emoji.',
   'Otherwise use send_chat_reply.',
   'Do not use request_user_input as a generic opening acknowledgement;',
   'only use it when you genuinely require structured input from the user.',
-  'If the needed Slack reply/post tool is not visible, use tool_search first.',
+  'If the needed ' +
+    SURFACE_LABEL +
+    ' reply/post tool is not visible, use tool_search first.',
   'If context is still too thin to say anything concrete and the turn does',
   'not allow reactions, keep the text ack short and non-speculative.',
   'After that, continue the work you were doing.',
 ].join(' ');
 const SUBAGENT_SLACK_POST_DENIAL = [
-  'Slack-posting tools are reserved for the parent agent session.',
-  'This subagent session must not post to Slack directly.',
+  SURFACE_LABEL + '-posting tools are reserved for the parent agent session.',
+  'This subagent session must not post to ' + SURFACE_LABEL + ' directly.',
   'Return your findings in your final report to the parent agent instead;',
-  'the parent agent will relay any Slack-visible update.',
+  'the parent agent will relay any ' + SURFACE_LABEL + '-visible update.',
 ].join(' ');
 const MAX_SILENCE_MS = 7 * 60 * 1000;
 const HOOK_NAME = 'slack-silence';
