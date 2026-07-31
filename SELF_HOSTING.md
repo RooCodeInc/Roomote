@@ -737,9 +737,47 @@ BL_API_KEY=...
 BL_WORKSPACE=...
 # Optional prebuilt Blaxel image override
 BLAXEL_IMAGE=sandbox/roomote-worker:<version>
+
+# Azure Container Apps (preview)
+DEFAULT_COMPUTE_PROVIDER=azure
+AZURE_SUBSCRIPTION_ID=...
+AZURE_RESOURCE_GROUP=...
+AZURE_SANDBOX_GROUP=...
+AZURE_SANDBOX_REGION=...
+AZURE_SANDBOX_DISK_IMAGE=...
+# Optional: client ID for a user-assigned managed identity (Azure-hosted
+# controllers) OR the service principal app/client ID when paired with
+# AZURE_TENANT_ID + AZURE_CLIENT_SECRET. Omit to use the ambient chain
+# (az login locally, system-assigned identity deployed).
+AZURE_CLIENT_ID=...
+# Optional (recommended for Docker installs): service principal auth —
+# all three together. az login inside containers is impractical, so
+# Docker/compose deployments should use this or a managed identity.
+AZURE_TENANT_ID=...
+AZURE_CLIENT_SECRET=...
+# Optional: pull credentials for baking the worker disk image from a private
+# registry (GHCR: token owner's GitHub username + PAT with read:packages)
+AZURE_SANDBOX_REGISTRY_USERNAME=...
+AZURE_SANDBOX_REGISTRY_TOKEN=...
 ```
 
-`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`, and `BLAXEL_IMAGE` can also be provisioned
+Azure auth uses the ambient Azure credential chain instead of an API key:
+`az login` for local runs, or a managed identity (optionally user-assigned via
+`AZURE_CLIENT_ID`) when the controller itself runs in Azure. Containerized
+installs (docker compose, including `deploy/install.sh`) cannot use `az
+login` inside the container — configure the service principal triple
+(`AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`), created with
+`az ad sp create-for-rbac --name <name> --skip-assignment` plus a
+`Container Apps SandboxGroup Data Owner` role assignment on the sandbox
+group, or run the controller on an Azure VM with a managed identity. One-time sandbox
+group bootstrap: `aca sandboxgroup create --name <group> --location <region>
+--set-config` — the calling principal is granted the Container Apps
+SandboxGroup Data Owner role automatically; grant it explicitly to any
+additional principal (for example a deployed controller's managed identity).
+Azure Container Apps sandboxes are in public preview, so expect API drift.
+
+`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`, `BLAXEL_IMAGE`, and
+`AZURE_SANDBOX_DISK_IMAGE` can also be provisioned
 automatically during setup when a registry-qualified `DOCKER_WORKER_IMAGE`
 is configured — the setup wizard and the Settings → Sandboxes page build the
 worker base artifact in your provider account after credentials are saved.

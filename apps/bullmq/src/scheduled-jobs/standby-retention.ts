@@ -13,7 +13,7 @@ import { activeRunStatuses, type RunStatus } from '@roomote/types';
 
 const LOG_PREFIX = '[standbyRetention]';
 const MS_PER_HOUR = 60 * 60 * 1_000;
-const STANDBY_PROVIDERS = ['docker', 'blaxel'] as const;
+const STANDBY_PROVIDERS = ['docker', 'blaxel', 'azure'] as const;
 
 type StandbyProvider = (typeof STANDBY_PROVIDERS)[number];
 
@@ -42,6 +42,8 @@ export function selectStandbyEvictions(
 const DEFAULT_POLICY = {
   docker: { maxCount: 10, maxAgeHours: 24 },
   blaxel: { maxCount: 25, maxAgeHours: 168 },
+  // Suspended ACA sandboxes cost almost nothing, so azure retention is generous.
+  azure: { maxCount: 50, maxAgeHours: 720 },
 } as const;
 
 function parsePolicyInteger(
@@ -63,7 +65,12 @@ export function resolveStandbyRetentionPolicy(
   maxCount: number;
   maxAgeMs: number;
 } {
-  const prefix = provider === 'docker' ? 'DOCKER' : 'BLAXEL';
+  const prefix =
+    provider === 'docker'
+      ? 'DOCKER'
+      : provider === 'azure'
+        ? 'AZURE'
+        : 'BLAXEL';
   const defaults = DEFAULT_POLICY[provider];
   const maxCount = parsePolicyInteger(
     env[`${prefix}_STANDBY_MAX_COUNT`],
@@ -74,7 +81,9 @@ export function resolveStandbyRetentionPolicy(
     env[`${prefix}_STANDBY_MAX_AGE_HOURS`],
     defaults.maxAgeHours,
     1,
-    168,
+    // Providers with a higher default keep their ceiling (azure: 720h);
+    // others stay capped at 168h as before.
+    Math.max(168, defaults.maxAgeHours),
   );
 
   return { maxCount, maxAgeMs: maxAgeHours * MS_PER_HOUR };
@@ -83,6 +92,13 @@ export function resolveStandbyRetentionPolicy(
 async function createClient(provider: StandbyProvider) {
   if (provider === 'docker') {
     return createComputeProviderClient({ provider: 'docker' });
+  }
+
+  if (provider === 'azure') {
+    return createComputeProviderClient({
+      provider: 'azure',
+      envFallback: await resolveComputeProviderEnvValues('azure'),
+    });
   }
 
   return createComputeProviderClient({

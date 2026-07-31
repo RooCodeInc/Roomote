@@ -103,6 +103,7 @@
             "expanded": false,
             "pages": [
               "compute",
+              "providers/compute/azure",
               "providers/compute/blaxel",
               "providers/compute/daytona",
               "providers/compute/docker",

@@ -72,6 +72,7 @@ const SANDBOX_PROVIDER_LABELS = {
   daytona: 'Daytona',
   e2b: 'E2B',
   blaxel: 'Blaxel',
+  azure: 'Azure',
   roomote: 'Roomote Cloud',
 } satisfies Record<ComputeProvider, string>;
 
@@ -81,6 +82,7 @@ const SANDBOX_PROVIDER_ICONS = {
   daytona: CloudIcon,
   e2b: CloudIcon,
   blaxel: CloudIcon,
+  azure: CloudIcon,
   roomote: CloudIcon,
 } satisfies Record<ComputeProvider, typeof CloudIcon>;
 

@@ -646,11 +646,7 @@ export function Home({
                     setSelectedComputeProvider(value as ComputeProvider)
                   }
                 >
-                  <SelectTrigger
-                    size="sm"
-                    className="w-36"
-                    aria-label="Sandbox provider"
-                  >
+                  <SelectTrigger size="sm" aria-label="Sandbox provider">
                     <SelectValue placeholder="Backend" />
                   </SelectTrigger>
                   <SelectContent>

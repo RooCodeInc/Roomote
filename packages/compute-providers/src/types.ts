@@ -341,6 +341,81 @@ export interface E2bConfig {
   timeoutMs?: number;
 }
 
+export interface AzureConfig {
+  /** Azure subscription ID (`AZURE_SUBSCRIPTION_ID`). */
+  subscriptionId: string;
+  /** Azure resource group containing the sandbox group (`AZURE_RESOURCE_GROUP`). */
+  resourceGroup: string;
+  /** Sandbox group name (`AZURE_SANDBOX_GROUP`). */
+  sandboxGroup: string;
+  /** Data-plane region (`AZURE_SANDBOX_REGION`), e.g. `canadacentral`. */
+  region: string;
+  /**
+   * Disk image used as the base for fresh sandboxes
+   * (`AZURE_SANDBOX_DISK_IMAGE`). Private disk image resource ID (baked from
+   * the Roomote worker OCI image), or `public:<name>` for a public preset
+   * (e.g. `public:ubuntu`).
+   */
+  diskImage: string;
+  /**
+   * Optional client ID of a user-assigned managed identity
+   * (`AZURE_CLIENT_ID`). When unset and no service principal is configured,
+   * auth falls back to the ambient Azure credential chain (az login locally,
+   * system-assigned identity when deployed).
+   */
+  managedIdentityClientId?: string;
+  /**
+   * Service principal credentials (`AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
+   * `AZURE_CLIENT_SECRET`). Preferred for containerized deployments: unlike
+   * the ambient chain, these values come through Roomote's resolved-env
+   * channel (DB-persisted setup values or process env), not only process env.
+   */
+  servicePrincipal?: {
+    tenantId: string;
+    clientId: string;
+    clientSecret: string;
+  };
+  /**
+   * Maximum sandbox lifetime in milliseconds, enforced provider-side via the
+   * sandbox auto-delete lifecycle policy.
+   */
+  timeoutMs?: number;
+  /**
+   * Idle auto-suspend interval in seconds. Defaults to 0 (disabled): Roomote
+   * drives suspend/resume explicitly via standby and idle workers must not
+   * suspend underneath the controller.
+   */
+  autoSuspendSeconds?: number;
+  /**
+   * ACA size tier (`AZURE_SANDBOX_SIZE`). Sets cpu/memory/disk defaults;
+   * explicit cpuMillicores/memoryMiB/diskSize fields win over the preset.
+   */
+  size?: 'XS' | 'S' | 'M' | 'L' | 'XL';
+  /** CPU request in millicores (default 1000 = 1 vCPU). */
+  cpuMillicores?: number;
+  /** Memory request in MiB (default 2048). */
+  memoryMiB?: number;
+  /**
+   * Base disk size as a storage quantity (e.g. `"80Gi"`). The service enforces
+   * disk <= cores × 20Gi; Roomote's built-in size presets use XS 5Gi, S 10Gi,
+   * M 20Gi, L 40Gi, XL 80Gi.
+   */
+  diskSize?: string;
+  /**
+   * Egress proxy TLS inspection mode for new sandboxes. Defaults to
+   * `Partial`: Roomote configures no egress rules, and with the service
+   * default (`Full`) the proxy TLS-resigns ALL outbound traffic (breaking
+   * language-specific trust stores such as Java's cacerts) and blocks
+   * non-HTTP traffic (breaking SSH git). Set `Full` when wiring deny-default
+   * egress rules or header transforms.
+   */
+  egressTrafficInspection?: 'Legacy' | 'Full' | 'Partial' | 'None';
+  /** Test seam: token provider override (scope `https://dynamicsessions.io/.default`). */
+  tokenProvider?: { getToken(): Promise<string> };
+  /** Test seam; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
 export interface BlaxelConfig {
   /** Blaxel API key (`BL_API_KEY`). */
   apiKey: string;
@@ -387,6 +462,10 @@ export type ComputeProviderFactoryOptions = (
   | {
       provider: 'blaxel';
       config?: BlaxelConfig;
+    }
+  | {
+      provider: 'azure';
+      config?: AzureConfig;
     }
 ) & {
   /**

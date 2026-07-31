@@ -1431,6 +1431,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     blaxelImageBuild: presentSetupNewComputeProvisioning(
       setupNewState.blaxelImageBuild,
     ),
+    azureDiskImageBuild: presentSetupNewComputeProvisioning(
+      setupNewState.azureDiskImageBuild,
+    ),
   };
 
   const sourceControlConnection = await getSourceControlConnectionSummary();

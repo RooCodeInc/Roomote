@@ -489,7 +489,9 @@ async function collectDeploymentDiagnostics(): Promise<DeploymentDiagnostics> {
         { label: 'Sandbox provider', value: providers.computeProvider },
         {
           label: 'Snapshot support',
-          value: ['daytona', 'e2b', 'modal'].includes(providers.computeProvider)
+          value: ['daytona', 'e2b', 'modal', 'azure'].includes(
+            providers.computeProvider,
+          )
             ? 'Supported'
             : 'Unknown',
         },

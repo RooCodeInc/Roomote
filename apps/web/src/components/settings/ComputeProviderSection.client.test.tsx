@@ -168,6 +168,65 @@ describe('ComputeProviderSection provisioning states', () => {
 });
 
 describe('ComputeProviderSection advanced settings', () => {
+  const azureProvider: ComputeProviderStatus = {
+    provider: 'azure',
+    label: 'Azure Container Apps',
+    description: 'Azure sandboxes.',
+    supportsSnapshots: true,
+    fields: [
+      {
+        envVarName: 'AZURE_SUBSCRIPTION_ID',
+        label: 'Azure Subscription ID',
+        category: 'credential',
+        runtimeSatisfied: false,
+        savedSatisfied: true,
+        savedValue: 'subscription-id',
+        defaultSatisfied: false,
+        setupProvisionable: false,
+      },
+      {
+        envVarName: 'AZURE_CLIENT_ID',
+        label: 'Managed Identity / Service Principal Client ID',
+        required: false,
+        category: 'credential',
+        advanced: true,
+        helpText:
+          'Set this for a user-assigned managed identity, or use it with the tenant ID and client secret for service principal authentication.',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        defaultSatisfied: false,
+        setupProvisionable: false,
+      },
+      {
+        envVarName: 'AZURE_TENANT_ID',
+        label: 'Service Principal Tenant ID',
+        required: false,
+        category: 'credential',
+        advanced: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        defaultSatisfied: false,
+        setupProvisionable: false,
+      },
+      {
+        envVarName: 'AZURE_CLIENT_SECRET',
+        label: 'Service Principal Client Secret',
+        required: false,
+        secret: true,
+        category: 'credential',
+        advanced: true,
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        defaultSatisfied: false,
+        setupProvisionable: false,
+      },
+    ],
+    runtimeConfigSatisfied: false,
+    savedConfigSatisfied: true,
+    configSatisfied: true,
+    infrastructureSatisfied: true,
+  };
+
   const dockerProvider: ComputeProviderStatus = {
     provider: 'docker',
     label: 'Local Docker',
@@ -192,6 +251,40 @@ describe('ComputeProviderSection advanced settings', () => {
     configSatisfied: true,
     infrastructureSatisfied: true,
   };
+
+  it('moves optional Azure authentication fields into advanced settings', () => {
+    renderSection(null, azureProvider);
+
+    expect(screen.getByLabelText('Azure Subscription ID')).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(
+        'Managed Identity / Service Principal Client ID (optional)',
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Service Principal Tenant ID (optional)'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Service Principal Client Secret (optional)'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced settings' }));
+
+    expect(
+      screen.getByLabelText(
+        'Managed Identity / Service Principal Client ID (optional)',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Service Principal Tenant ID (optional)'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Service Principal Client Secret (optional)'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/user-assigned managed identity/),
+    ).toBeInTheDocument();
+  });
 
   it('keeps provider overrides collapsed until requested and saves edits', () => {
     const onSave = vi.fn();

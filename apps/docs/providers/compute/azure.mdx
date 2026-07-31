@@ -1,0 +1,114 @@
+---
+title: Azure Container Apps
+icon: '/logo/integrations/azure.svg'
+description: Run Roomote tasks on Azure Container Apps sandboxes.
+---
+
+Azure Container Apps sandboxes are hardware-isolated microVMs that run Roomote
+tasks on your own Azure subscription. The provider supports memory+disk
+snapshots and sub-second suspend/resume standby, so both environment setup
+caching and task sleep/resume flows keep the full workspace state.
+
+Azure Container Apps sandboxes are in public preview; expect API drift.
+
+## When to use Azure Container Apps
+
+Use Azure Container Apps when:
+
+- task work should run inside your own Azure subscription
+- you want hosted sandboxes without managing an API key (auth uses the
+  ambient Azure login or a managed identity)
+- memory+disk snapshots or standby with sub-second resume is useful
+
+## Prerequisites
+
+1. An Azure subscription and resource group.
+2. A sandbox group (one-time bootstrap):
+
+   ```sh
+   aca sandboxgroup create --name <group> --location <region> --set-config
+   ```
+
+   The calling principal is granted the Container Apps SandboxGroup Data
+   Owner role automatically; grant it explicitly to any additional principal,
+   such as a deployed controller's managed identity.
+3. Authentication: `az login` for local runs; a managed identity when the
+   Roomote controller itself runs in Azure (set `AZURE_CLIENT_ID` for a
+   user-assigned identity); or a service principal (recommended for
+   containerized installs, where `az login` is impractical) —
+   `az ad sp create-for-rbac --name <name> --skip-assignment`, then grant the
+   app the Data Owner role from step 2 and set all three of
+   `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`.
+
+## Configuration
+
+Add Azure Container Apps from **Settings > Sandboxes**, or provide the values
+as deployment env vars:
+
+```sh
+DEFAULT_COMPUTE_PROVIDER=azure
+AZURE_SUBSCRIPTION_ID=...
+AZURE_RESOURCE_GROUP=...
+AZURE_SANDBOX_GROUP=...
+AZURE_SANDBOX_REGION=...
+```
+
+Optional values:
+
+```sh
+AZURE_CLIENT_ID=...
+AZURE_SANDBOX_DISK_IMAGE=...
+# Service principal auth (all three together; recommended for Docker installs)
+AZURE_TENANT_ID=...
+AZURE_CLIENT_SECRET=...
+# Worker image registry pull credentials (only for private images)
+AZURE_SANDBOX_REGISTRY_USERNAME=...
+AZURE_SANDBOX_REGISTRY_TOKEN=...
+# Sandbox size (XS/S/M/L/XL, default M) and egress TLS inspection (default Partial)
+AZURE_SANDBOX_SIZE=...
+AZURE_SANDBOX_EGRESS_INSPECTION=...
+```
+
+`AZURE_SANDBOX_DISK_IMAGE` selects the worker disk image. Leave it unset to
+let Roomote provision it automatically: the setup wizard and the Settings >
+Sandboxes page bake a disk image from the published worker OCI image after
+the Azure settings are saved. Private registries (e.g. a private GHCR
+worker image) need `AZURE_SANDBOX_REGISTRY_USERNAME` +
+`AZURE_SANDBOX_REGISTRY_TOKEN`.
+
+## Snapshots and standby
+
+Azure snapshots capture memory and disk, so a restored sandbox resumes in
+sub-second time with processes still alive. Task standby uses the same
+memory-preserving suspend/resume, and sandboxes bill storage-only while
+suspended. Preview port URLs do not survive a snapshot restore; Roomote
+re-adds ports after resume.
+
+## Egress TLS inspection
+
+The ACA egress proxy can TLS-inspect (MITM) outbound traffic. Roomote creates
+sandboxes with `trafficInspection: Partial`, so with no egress rules
+configured nothing is inspected: package managers (npm, Maven/Gradle, pip)
+see normal public certificate chains, and non-HTTP traffic such as SSH git
+works. The service default (`Full`) resigns all TLS traffic with the proxy CA
+(`/etc/ssl/certs/adc-egress-proxy-ca.crt`, preinstalled in the system store
+and referenced by `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE`) and blocks non-HTTP
+traffic; choose `Full` only when wiring deny-default egress rules or header
+transforms, and note Java's per-JDK cacerts still needs a manual import in
+that mode.
+
+## Verify setup
+
+1. save the Azure subscription, resource group, sandbox group, and region
+2. select Azure Container Apps as the default sandbox provider
+3. start a small task from an environment
+4. confirm the task starts, streams logs, and can run project commands
+5. verify preview links if the task starts a web app
+
+## Common issues
+
+- **Authentication fails.** Run `az login` locally, or confirm the deployed
+  controller's managed identity holds the Container Apps SandboxGroup Data
+  Owner role on the sandbox group.
+- **Sandbox creation is slow on first use.** Cold disk image pulls take
+  longer; the worker disk image bake is a one-time provisioning step.
