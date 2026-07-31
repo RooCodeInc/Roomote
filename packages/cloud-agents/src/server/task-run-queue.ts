@@ -93,7 +93,6 @@ import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
 enum TaskRunQueueKeys {
   // Version the storage layout so old and new controllers can coexist during
   // a rolling deployment. Both versions still contend on the same scope lock.
-  LegacyQueue = 'queue:cloud-jobs',
   PreviousQueue = 'queue:cloud-jobs:v2',
   PreviousEntries = 'queue:cloud-jobs:v2:entries',
   PreviousEntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
@@ -517,39 +516,6 @@ export class TaskRunQueue {
 
   public async enqueue(entry: TaskRunQueueEntry): Promise<TaskRunQueueEntry[]> {
     const evictedEntries: TaskRunQueueEntry[] = [];
-    const legacyEntries = await this.redis.lrange(
-      TaskRunQueueKeys.LegacyQueue,
-      0,
-      -1,
-    );
-
-    for (const rawValue of legacyEntries) {
-      try {
-        const legacyEntry = taskRunQueueEntrySchema.parse(JSON.parse(rawValue));
-
-        if (legacyEntry.scope !== entry.scope) {
-          continue;
-        }
-
-        if (entry.preserveExisting) {
-          return legacyEntry.id === entry.id
-            ? []
-            : [{ id: entry.id, scope: entry.scope }];
-        }
-
-        const removed = await this.redis.lrem(
-          TaskRunQueueKeys.LegacyQueue,
-          0,
-          rawValue,
-        );
-
-        if (removed > 0 && legacyEntry.id !== entry.id) {
-          evictedEntries.push(legacyEntry);
-        }
-      } catch {
-        // Leave malformed legacy entries for dequeue to discard.
-      }
-    }
 
     const result = await this.redis.eval(
       ATOMIC_ENQUEUE_SCRIPT,
@@ -585,36 +551,6 @@ export class TaskRunQueue {
     const deadline = Date.now() + this.timeout * 1000;
 
     do {
-      const legacyRawValue = await this.redis.lpop(
-        TaskRunQueueKeys.LegacyQueue,
-      );
-
-      if (legacyRawValue) {
-        try {
-          const legacyEntry = taskRunQueueEntrySchema.parse(
-            JSON.parse(legacyRawValue),
-          );
-          const acquired = await this.redis.set(
-            legacyEntry.scope,
-            legacyEntry.id,
-            'EX',
-            Math.ceil(TASK_TIMEOUT_MS / 1000),
-            'NX',
-          );
-
-          if (acquired === 'OK') {
-            console.log(
-              `[TaskRunQueue] acquired lock for ${legacyEntry.scope}`,
-            );
-            return legacyEntry;
-          }
-
-          await this.redis.rpush(TaskRunQueueKeys.LegacyQueue, legacyRawValue);
-        } catch {
-          // Invalid legacy entries are intentionally discarded.
-        }
-      }
-
       const previousRawValue = await this.redis.eval(
         ATOMIC_PREVIOUS_DEQUEUE_SCRIPT,
         4,

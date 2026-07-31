@@ -10,7 +10,6 @@ const PREVIOUS_QUEUE_KEY = 'queue:cloud-jobs:v2';
 const PREVIOUS_SCOPES_KEY = 'queue:cloud-jobs:v2:scopes';
 const PREVIOUS_ENTRIES_KEY = 'queue:cloud-jobs:v2:entries';
 const PREVIOUS_ENTRY_SCOPES_KEY = 'queue:cloud-jobs:v2:entry-scopes';
-const LEGACY_QUEUE_KEY = 'queue:cloud-jobs';
 
 function createMockRedis() {
   return new Redis();
@@ -185,38 +184,6 @@ describe('TaskRunQueue - Rolling Deploy Compatibility', () => {
 
   afterEach(async () => {
     await redis.flushall();
-  });
-
-  it('drains entries written using the legacy queue layout', async () => {
-    const entry = createTestEntry(41, 'legacy-scope');
-    await redis.rpush(LEGACY_QUEUE_KEY, JSON.stringify(entry));
-
-    await expect(queue.dequeue(false)).resolves.toEqual(entry);
-  });
-
-  it('evicts a legacy entry when a newer run uses the same scope', async () => {
-    const older = createTestEntry(41, 'shared-scope');
-    await redis.rpush(LEGACY_QUEUE_KEY, JSON.stringify(older));
-
-    await expect(
-      queue.enqueue(createTestEntry(42, 'shared-scope')),
-    ).resolves.toEqual([older]);
-    await expect(redis.llen(LEGACY_QUEUE_KEY)).resolves.toBe(0);
-  });
-
-  it('preserves a legacy entry when the incoming run requests first-wins semantics', async () => {
-    const existing = createTestEntry(42, 'legacy-first-wins-scope');
-    const incoming = {
-      ...createTestEntry(43, existing.scope),
-      preserveExisting: true,
-    };
-    await redis.rpush(LEGACY_QUEUE_KEY, JSON.stringify(existing));
-
-    await expect(queue.enqueue(incoming)).resolves.toEqual([
-      { id: incoming.id, scope: incoming.scope },
-    ]);
-    await expect(redis.llen(LEGACY_QUEUE_KEY)).resolves.toBe(1);
-    await expect(queue.dequeue(false)).resolves.toEqual(existing);
   });
 
   it('drains entries written using the previous v2 queue layout', async () => {
