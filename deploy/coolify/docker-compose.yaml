@@ -160,6 +160,7 @@ services:
     image: *roomote-app-image
     restart: unless-stopped
     command: api
+    networks: [default]
     depends_on:
       redis:
         condition: service_started
@@ -226,7 +227,7 @@ services:
       <<: *roomote-shared-env
       DOCKER_HOST: tcp://docker-proxy:2375
       # The worker release archive is baked into the app image; the
-      # controller reads the release version from the VERSION file inside
+      # controller reads the worker release version from the VERSION file inside
       # the archive. Do not unset: the fallback is GitHub worker releases,
       # which do not exist for develop builds.
       DOCKER_WORKER_RELEASE_PATH: /roomote/releases/worker-current.tar.gz
@@ -290,6 +291,7 @@ services:
   #   image: *roomote-app-image
   #   restart: unless-stopped
   #   command: preview-proxy
+  #   networks: [default]
   #   depends_on:
   #     db-migrate:
   #       condition: service_completed_successfully
