@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.27.1 (2026-07-31)
 
-This release speeds up repository setup and pull request reviews, improves Discord task continuity, and expands model and deployment reliability.
+This release speeds up setup and pull request reviews while improving chat task continuity, delegated Azure DevOps sign-in, model recommendations, and deployment reliability.
 
 ### Highlights
 
 - Set up large repositories faster with blobless clones that preserve full commit and tree history.
 - Apply team guidance throughout Review Code automations and start commit-triggered re-reviews sooner.
-- Continue sleeping Roomote tasks naturally from their Discord task threads without mentioning the bot again.
-- Choose current Qwen3.7 recommendations and keep Coolify task creation and live previews connected reliably. Thanks to @tomny-dev for contributing the Coolify fix.
+- Continue chat tasks naturally with reliable, provider-aware reminders that do not interrupt active work.
+- Complete delegated Azure DevOps setup on the first Microsoft sign-in, choose current Qwen3.7 recommendations, and keep Coolify task networking reliable. Thanks to @tomny-dev for contributing the Coolify fix.
 
 ### Patch changes
 
@@ -23,6 +23,9 @@ This release speeds up repository setup and pull request reviews, improves Disco
 - Start commit-triggered pull request re-reviews sooner while retaining burst protection and per-PR deduplication.
 - Apply configured Review Code instructions to GitHub follow-up reviews so team guidance remains consistent throughout the review lifecycle.
 - Show a pointer cursor on the environment repository selector's create-repository action so its interactivity is clear.
+- Complete Azure DevOps delegated setup on the first Microsoft sign-in instead of returning users to the credentials form without saving the linked account or syncing repositories.
+- Name the active Discord, Slack, Teams, or Telegram surface correctly in task closeout and silence reminders.
+- Keep closeout reminders from interrupting in-flight agent work or appearing twice for the same turn.
 
 ## 0.27.0 (2026-07-31)
 
