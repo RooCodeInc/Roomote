@@ -1609,6 +1609,13 @@ export class OpenCodeServerHarness
   private stopHookReminderCount = 0;
   private stopHookReminderStallTimer: ReturnType<typeof setTimeout> | null =
     null;
+  // OpenCode 1.17 emits session.status(idle) followed by session.idle for the
+  // same turn end. Submitting a closeout reminder on the status-sourced entry
+  // sets inFlight again, so the paired session.idle would re-enter
+  // finishCurrentTurn, see the still-unsatisfied closeout state, and inject a
+  // duplicate reminder into the fresh reminder turn. This guard swallows that
+  // exact follow-up idle; any busy/retry transition clears it first.
+  private ignoreNextStopHookSessionIdle = false;
   private readonly stallWatchdogs: OpenCodeStallWatchdogs;
   private resolveEventStreamReady: (() => void) | undefined;
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
@@ -2112,6 +2119,7 @@ export class OpenCodeServerHarness
     this.stopHookReminderCount = 0;
     this.queuedUserInputReplayPromptId = null;
     this.ignoreNextUserInputReplaySessionIdle = false;
+    this.ignoreNextStopHookSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
     this.cancelRequestedBeforeSession = false;
@@ -3732,6 +3740,7 @@ export class OpenCodeServerHarness
       // loop advanced. Keep the stall watchdog armed during transient backoff.
       this.ignoreNextProviderRecoverySessionIdle = false;
       this.ignoreNextUserInputReplaySessionIdle = false;
+      this.ignoreNextStopHookSessionIdle = false;
       this.inFlight = true;
       this.stallWatchdogs.noteActivity();
       this.stallWatchdogs.ensureTurnStallArmed();
@@ -3743,6 +3752,7 @@ export class OpenCodeServerHarness
       // guard consume the retry's eventual idle transition.
       this.ignoreNextProviderRecoverySessionIdle = false;
       this.ignoreNextUserInputReplaySessionIdle = false;
+      this.ignoreNextStopHookSessionIdle = false;
       this.inFlight = true;
       // Status transitions prove the session is alive (e.g. a provider retry
       // loop), but not that the turn's loop advanced — a steer awaiting
@@ -3827,6 +3837,11 @@ export class OpenCodeServerHarness
 
     if (this.ignoreNextUserInputReplaySessionIdle) {
       this.ignoreNextUserInputReplaySessionIdle = false;
+      return;
+    }
+
+    if (this.ignoreNextStopHookSessionIdle) {
+      this.ignoreNextStopHookSessionIdle = false;
       return;
     }
 
@@ -4602,12 +4617,35 @@ export class OpenCodeServerHarness
             `OpenCode Slack closeout hook still blocked after ${MAX_OPENCODE_STOP_HOOK_REMINDERS} reminders; completing the turn without a Slack closeout reason=${reason}`,
           );
         } else {
+          if (await this.hasUnsettledToolWork(sessionId)) {
+            // The idle that triggered enforcement was stale: the session
+            // still has a tool call pending/running or an assistant message
+            // streaming. A reminder submitted now lands mid-work and reads
+            // as an instruction to drop that work, so defer to the next
+            // genuine idle. Restore inFlight so that idle passes the entry
+            // guard, and arm the fail-safe in case it never arrives.
+            this.logger.info(
+              `OpenCode Slack closeout reminder deferred: the session still has unsettled tool work sessionId=${sessionId}`,
+            );
+            this.inFlight = true;
+            this.armStopHookReminderStall(sessionId);
+            return;
+          }
+
           this.stopHookReminderCount += 1;
+          this.logger.info(
+            `OpenCode Slack closeout reminder submitted count=${this.stopHookReminderCount} source=${source} sessionId=${sessionId}`,
+          );
           await this.submitPrompt({
             text: reason,
             visibleInTranscript: false,
             source: 'opencode-stop-hook',
           });
+          // The reminder submission re-arms inFlight, so the session.idle
+          // paired with the status-sourced idle that brought us here would
+          // re-enter this method against the unchanged closeout state and
+          // inject a duplicate reminder. Swallow that exact follow-up idle.
+          this.ignoreNextStopHookSessionIdle = source === 'session_status';
           // We now await a fresh turn to re-enter this method. Arm a fail-safe
           // so a session that never produces that turn (wedged after the
           // reminder) still reaches a terminal state instead of hanging.
@@ -4758,6 +4796,56 @@ export class OpenCodeServerHarness
     });
 
     return this.persistAssistantMessage(message);
+  }
+
+  /**
+   * Whether the session's recent messages show work still in progress: a tool
+   * part in pending/running state, or the newest assistant message not yet
+   * completed. Used to keep the closeout reminder from being injected into a
+   * session whose idle signal was stale, where the reminder would land
+   * mid-work and supersede the in-flight tool call. Verification failures return false
+   * (proceed with the reminder) so a transient fetch error cannot silently
+   * stall closeout enforcement.
+   */
+  private async hasUnsettledToolWork(sessionId: string): Promise<boolean> {
+    let messages: OpenCodeSessionMessage[];
+
+    try {
+      messages = await this.client.messages({
+        sessionId,
+        limit: 20,
+        signal: this.eventAbortController.signal,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `OpenCode closeout quiescence check failed; proceeding with the reminder sessionId=${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return false;
+    }
+
+    const latestAssistantMessage = [...messages]
+      .reverse()
+      .find((message) => message.info.role === 'assistant');
+
+    if (
+      latestAssistantMessage &&
+      !latestAssistantMessage.info.time?.completed
+    ) {
+      return true;
+    }
+
+    return messages.some((message) =>
+      message.parts.some((part) => {
+        if (part.type !== 'tool') {
+          return false;
+        }
+
+        const status = (part as OpenCodeToolPart).state?.status;
+        return status === 'pending' || status === 'running';
+      }),
+    );
   }
 
   private async finalizeLatestAssistantMessage(): Promise<FinalizedAssistantTurn | null> {

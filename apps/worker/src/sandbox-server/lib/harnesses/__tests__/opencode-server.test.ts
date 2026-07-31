@@ -1462,6 +1462,205 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('injects a single reminder when OpenCode pairs session.status(idle) with session.idle', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-paired-idle-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'idle' } },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      // The paired session.idle for the same turn end must not inject a
+      // duplicate reminder into the fresh reminder turn.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+
+      // Once the reminder turn actually starts (busy) and later ends without
+      // a closeout, enforcement still applies.
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'busy' } },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+      expect(client.promptAsync.mock.calls[2]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining(
+                'Before finalizing, post a terminal Slack-visible reply',
+              ),
+            },
+          ],
+        },
+      });
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('defers the closeout reminder while the session still has unsettled tool work', async () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-unsettled-'),
+    );
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 1_000,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
+
+    const { client, harness } = createHarness(new FakeOpenCodeServerClient(), {
+      commandEnv: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
+      },
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Do work.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // A completed assistant message that still carries a running tool part:
+      // the shape of a stale idle racing an in-flight tool call.
+      const message = createFinalAssistantMessage();
+      message.parts.push({
+        id: 'part_tool_1',
+        sessionID: 'ses_1',
+        messageID: 'msg_1',
+        type: 'tool',
+        tool: 'edit',
+        callID: 'call_1',
+        state: { status: 'running' },
+      });
+      client.messages.mockResolvedValue([message]);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      // No reminder was injected and the turn was not completed; enforcement
+      // waits for the next genuine idle.
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+
+      // Once the tool work settles, the next idle injects the reminder.
+      client.messages.mockResolvedValue([]);
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining(
+                'Before finalizing, post a terminal Slack-visible reply',
+              ),
+            },
+          ],
+        },
+      });
+    } finally {
+      harness.dispose();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('drains an answered question replay before evaluating the stop guard', async () => {
     const tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'roomote-opencode-stop-guard-replay-'),
