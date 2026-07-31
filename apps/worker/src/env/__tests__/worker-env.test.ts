@@ -315,6 +315,27 @@ describe('WorkerEnv', () => {
       expect(env.buildUserFacingEnv().DOCKER_HOST).toBe('tcp://127.0.0.1:2375');
     });
 
+    it('captures clone timeout configuration without exposing it to task processes', () => {
+      const processEnv = {
+        HOME: '/home/worker',
+        PATH: '/usr/bin',
+        AUTH_TOKEN: 'my-auth-token',
+        TRPC_URL: 'https://trpc.example.com',
+        R_APP_URL: 'https://api.example.com',
+        WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS: '1200',
+      } as NodeJS.ProcessEnv;
+
+      const env = WorkerEnv.fromProcessEnv(processEnv);
+
+      expect(env.repositoryCloneTimeoutSeconds).toBe(1_200);
+      expect(
+        processEnv.WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS,
+      ).toBeUndefined();
+      expect(env.buildUserFacingEnv()).not.toHaveProperty(
+        'WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS',
+      );
+    });
+
     it('should keep sandbox auth validation working after process.env cleanup', async () => {
       const { privateKey, publicKey } = generateKeyPairSync('ec', {
         namedCurve: 'P-256',

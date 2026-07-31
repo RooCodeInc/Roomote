@@ -165,6 +165,11 @@ const serverSchema = {
   GITLAB_WEBHOOK_SIGNING_TOKEN: emptyStringDefault(),
   WORKER_RELEASE_CHANNEL: z.enum(['stable', 'preview']).optional(),
   WORKER_RELEASE_VERSION: z.string().min(1).optional(),
+  WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600),
   SLACK_APP_ID: emptyStringDefault(),
   R_SLACK_CLIENT_ID: z.string().min(1).optional(),
   R_SLACK_CLIENT_SECRET: z.string().min(1).optional(),

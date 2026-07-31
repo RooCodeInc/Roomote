@@ -2,6 +2,7 @@ vi.mock('@roomote/env', () => ({
   Env: {
     R_APP_URL: 'https://web.roomote.example.com',
     TRPC_URL: 'https://api.roomote.example.com',
+    WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS: 600,
   },
 }));
 
@@ -54,6 +55,15 @@ describe('buildBaseWorkerEnv', () => {
     });
 
     expect(env.ROOMOTE_APP_URL).toBe(env.R_APP_URL);
+  });
+
+  it('forwards deployment clone timeout configuration to workers', () => {
+    const env = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      extraEnv: {},
+    });
+
+    expect(env.WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS).toBe('600');
   });
 
   it('forwards an explicit preview proxy base URL', () => {

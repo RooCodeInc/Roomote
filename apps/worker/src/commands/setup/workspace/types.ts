@@ -69,6 +69,8 @@ export interface PrepareWorkspaceOptions {
   serviceContext?: ServiceContext;
   gitAuthorName?: string;
   gitAuthorEmail?: string;
+  /** Deployment-managed clone deadline; never exposed to project commands. */
+  repositoryCloneTimeoutSeconds?: number;
 }
 
 function formatWorkspaceRepositoryPreparationMessage(

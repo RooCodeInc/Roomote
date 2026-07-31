@@ -173,6 +173,22 @@ describe('CommandExecutor', () => {
     expect(result.stdout).toBe('stdin closed');
   });
 
+  it('classifies command timeouts in execution diagnostics', async () => {
+    const executor = new CommandExecutor(mockRepoPath, mockEnv);
+    const command: Command = {
+      name: 'Timeout Test',
+      run: 'sleep 1',
+      timeout: 0.05,
+      continue_on_error: false,
+    };
+
+    const error = await executor.execute(command).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ExecutionError);
+    expect(error.result.timedOut).toBe(true);
+    expect(error.formatDetails()).toContain('timeout -> 0.05 seconds');
+  });
+
   it('should execute multi-line commands as separate commands', async () => {
     const executor = new CommandExecutor(mockRepoPath, mockEnv);
 

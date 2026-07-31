@@ -126,6 +126,7 @@ describe('Env', () => {
       expect(env.DOCKER_STANDBY_MAX_AGE_HOURS).toBe(24);
       expect(env.BLAXEL_STANDBY_MAX_COUNT).toBe(25);
       expect(env.BLAXEL_STANDBY_MAX_AGE_HOURS).toBe(168);
+      expect(env.WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS).toBe(600);
       expect(env.R_MODEL).toBeUndefined();
       expect(env.R_SMALL_MODEL).toBeUndefined();
       expect(env.R_VISION_MODEL).toBeUndefined();
@@ -153,6 +154,22 @@ describe('Env', () => {
         process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
       }
     }
+  });
+
+  it('validates repository clone timeout overrides', () => {
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS: '1200',
+      }).WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS,
+    ).toBe(1_200);
+
+    expect(() =>
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS: '0',
+      }),
+    ).toThrow();
   });
 
   it('requires an explicit opt-in for unbounded Docker task disks', () => {

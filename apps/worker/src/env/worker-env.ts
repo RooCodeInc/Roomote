@@ -2,6 +2,7 @@ import * as os from 'node:os';
 
 import { configureAuthClientEnv } from '@roomote/auth/client';
 import {
+  COMMAND_DEFAULT_TIMEOUT,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   parseModelProviderEnvKeys,
@@ -21,6 +22,7 @@ interface WorkerConfig {
   previewAuthPublicKey?: string;
   previewAuthCookieName?: string;
   appEnv?: string;
+  repositoryCloneTimeoutSeconds?: number;
 }
 
 const PRESET_SYSTEM_ENV: Record<string, string> = {
@@ -45,7 +47,12 @@ const SYSTEM_KEYS = [
 // so nested application commands do not inherit it accidentally. This includes
 // the legacy ROOMOTE_APP_ENV alias the controller still injects for pre-rename
 // snapshot workers.
-const WORKER_INTERNAL_CONFIG_KEYS = ['R_APP_ENV', 'APP_ENV', 'ROOMOTE_APP_ENV'];
+const WORKER_INTERNAL_CONFIG_KEYS = [
+  'R_APP_ENV',
+  'APP_ENV',
+  'ROOMOTE_APP_ENV',
+  'WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS',
+];
 const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'AUTH_TOKEN',
   'TRPC_URL',
@@ -109,6 +116,15 @@ function buildLauncherOpenCodeEnv(
   }
 
   return env;
+}
+
+function parsePositiveInteger(
+  value: string | undefined,
+  fallback: number,
+): number {
+  const parsed = Number(value);
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 /**
@@ -224,6 +240,10 @@ export class WorkerEnv {
       previewAuthCookieName: processEnv.PREVIEW_AUTH_COOKIE_NAME,
       roomoteAppUrl: processEnv.R_APP_URL!,
       appEnv: processEnv.R_APP_ENV ?? processEnv.APP_ENV,
+      repositoryCloneTimeoutSeconds: parsePositiveInteger(
+        processEnv.WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS,
+        COMMAND_DEFAULT_TIMEOUT,
+      ),
     };
 
     const env = new WorkerEnv({
@@ -404,5 +424,11 @@ export class WorkerEnv {
 
   get appEnv(): string | undefined {
     return this.workerConfig.appEnv;
+  }
+
+  get repositoryCloneTimeoutSeconds(): number {
+    return (
+      this.workerConfig.repositoryCloneTimeoutSeconds ?? COMMAND_DEFAULT_TIMEOUT
+    );
   }
 }

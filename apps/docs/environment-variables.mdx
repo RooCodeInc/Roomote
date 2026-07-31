@@ -261,6 +261,7 @@ as per-task auth tokens or workspace paths.
 | `AZURE_SANDBOX_EGRESS_INSPECTION`    | Optional          | Egress proxy TLS inspection: `Partial` (default — only rule-matched traffic inspected), `Full`, `Legacy`, `None`. Use `Full` only with egress rules/transforms; it TLS-resigns all traffic and blocks non-HTTP.                     |
 | `WORKER_RELEASE_CHANNEL`             | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                                      |
 | `WORKER_RELEASE_VERSION`             | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                             |
+| `WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS` | Optional     | Maximum time allowed for an initial repository clone. Defaults to `600`; increase this for large repositories or slower networks.         |
 | `LOCAL_SANDBOX_FILES_DIR`            | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                          |
 
 ### Source control providers

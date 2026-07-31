@@ -18,6 +18,7 @@ const BLOCKED_WORKER_ENV_KEYS = new Set([
   'DASHBOARD_PASSWORD',
   'SETUP_TOKEN',
   'MODAL_TOKEN_SECRET',
+  'WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS',
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
 ]);
 
@@ -152,6 +153,9 @@ export function buildBaseWorkerEnv({
     // Remove once pre-rename snapshots have aged out.
     ROOMOTE_APP_URL: Env.R_APP_URL,
     TRPC_URL: Env.TRPC_URL,
+    WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS: String(
+      Env.WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS,
+    ),
     SKIP_ENV_VALIDATION: '1',
     // These are launcher-to-worker transport values. Keep them tied to the
     // current process env instead of the shared Env snapshot because the worker

@@ -38,6 +38,7 @@ export interface ExecutionResult {
   stdout?: string;
   stderr?: string;
   error?: string;
+  timedOut?: boolean;
 }
 
 export class ExecutionError extends Error {
@@ -56,13 +57,23 @@ export class ExecutionError extends Error {
   formatDetails(): string {
     const { result } = this;
 
-    const truncate = (s: string, max = 4000) =>
-      s.length > max ? '... (truncated)\n' + s.slice(-max) : s;
+    const sanitize = (value: string) =>
+      value.replace(/(https?:\/\/)[^\s/@]+(?::[^\s/@]*)?@/gi, '$1[redacted]@');
+    const truncate = (s: string, max = 4000) => {
+      const sanitized = sanitize(s);
+      return sanitized.length > max
+        ? '... (truncated)\n' + sanitized.slice(-max)
+        : sanitized;
+    };
 
-    const parts = [result.command.run];
+    const parts = [sanitize(result.command.run)];
 
     if (result.exitCode !== undefined) {
       parts.push(`\nexit code -> ${result.exitCode}`);
+    }
+
+    if (result.timedOut) {
+      parts.push(`\ntimeout -> ${result.command.timeout} seconds`);
     }
 
     if (result.error) {
@@ -104,6 +115,7 @@ export class CommandExecutor {
     let duration;
     let error;
     let exitCode: number | undefined;
+    let timedOut = false;
     let stderr = '';
     let stdout = '';
 
@@ -178,6 +190,7 @@ export class CommandExecutor {
       if (e instanceof ExecaError) {
         error = e.shortMessage;
         exitCode = e.exitCode;
+        timedOut = e.timedOut;
 
         if (e.stdout) {
           if (verbose) {
@@ -209,6 +222,7 @@ export class CommandExecutor {
       stdout,
       stderr,
       error,
+      timedOut,
     };
 
     if (!success && !command.continue_on_error) {
