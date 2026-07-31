@@ -256,14 +256,22 @@ services:
     image: *roomote-app-image
     restart: unless-stopped
     command: bullmq
+    # Docker standby retention and the settings "Validate environment" checks
+    # run here; both reach Docker through the restricted socket proxy, never
+    # the raw socket.
+    networks: [default, docker-api]
     depends_on:
       redis:
         condition: service_started
       db-migrate:
         condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
     environment:
       <<: *roomote-shared-env
       PORT: 3002
+      DOCKER_HOST: tcp://docker-proxy:2375
+      DOCKER_WORKER_RELEASE_PATH: /roomote/releases/worker-current.tar.gz
     healthcheck:
       test:
         [
