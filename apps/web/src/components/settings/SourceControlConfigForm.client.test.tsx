@@ -41,6 +41,25 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+const { adoLinkedAccountRef } = vi.hoisted(() => ({
+  adoLinkedAccountRef: {
+    current: {
+      data: undefined as
+        | {
+            configured: boolean;
+            account: { accountId: string; displayName: string } | null;
+          }
+        | undefined,
+      isPending: false,
+    },
+  },
+}));
+
+vi.mock('@/hooks/linked-accounts', () => ({
+  useAdoLinkedAccount: () => adoLinkedAccountRef.current,
+  useAuthenticateAdoAccount: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     sourceControl: {
@@ -87,6 +106,7 @@ function buildConfigStatus(
         runtimeConfigSatisfied: false,
         savedConfigSatisfied: true,
         configSatisfied: true,
+        configStepSatisfied: true,
         configSatisfiedByRuntimeEnv: false,
         connected: true,
         repositoryCount: 2,
@@ -101,6 +121,7 @@ describe('SourceControlConfigForm', () => {
     mutateMock.mockReset();
     invalidateQueriesMock.mockClear();
     mutationOptionsRef.current = null;
+    adoLinkedAccountRef.current = { data: undefined, isPending: false };
   });
 
   it('shows plain values for non-secrets and a mask for secrets when runtime-configured', () => {
@@ -258,6 +279,7 @@ describe('SourceControlConfigForm', () => {
               runtimeConfigSatisfied: false,
               savedConfigSatisfied: false,
               configSatisfied: false,
+              configStepSatisfied: false,
               configSatisfiedByRuntimeEnv: false,
               connected: false,
               repositoryCount: 0,
@@ -281,5 +303,126 @@ describe('SourceControlConfigForm', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Microsoft Entra Tenant ID/)).toBeInTheDocument();
     expect(screen.getByText(/Azure DevOps Webhook Secret/)).toBeInTheDocument();
+  });
+
+  function buildAdoDelegatedStatus(linkedAccountField: {
+    savedSatisfied: boolean;
+    savedValue: string | null;
+  }): SetupSourceControlStatus {
+    const ado = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+      (provider) => provider.provider === 'ado',
+    )!;
+    const fields = ado.fields.map((field) => ({
+      ...field,
+      runtimeSatisfied: false,
+      savedSatisfied:
+        field.envVarName === 'ADO_AUTH_MODE'
+          ? true
+          : field.envVarName === 'ADO_LINKED_ACCOUNT_ID'
+            ? linkedAccountField.savedSatisfied
+            : false,
+      savedValue:
+        field.envVarName === 'ADO_AUTH_MODE'
+          ? 'delegated'
+          : field.envVarName === 'ADO_LINKED_ACCOUNT_ID'
+            ? linkedAccountField.savedValue
+            : null,
+      satisfiedByEnvVarName: null,
+    }));
+
+    return {
+      selectedProvider: 'ado',
+      preselectedProvider: 'ado',
+      runtimeConfiguredProvider: null,
+      runtimeConfiguredProviders: [],
+      lockReason: null,
+      connectedProvider: null,
+      setupSatisfied: false,
+      setupSatisfiedByRuntimeEnv: false,
+      providers: [
+        {
+          provider: 'ado',
+          label: 'Azure DevOps',
+          connectionMode: 'token',
+          runtimeConfigSatisfied: false,
+          savedConfigSatisfied: false,
+          configSatisfied: false,
+          configStepSatisfied: true,
+          configSatisfiedByRuntimeEnv: false,
+          connected: false,
+          repositoryCount: 0,
+          fields,
+        },
+      ],
+    };
+  }
+
+  it('says a linked Azure DevOps account is not in use before its id is saved', () => {
+    adoLinkedAccountRef.current = {
+      data: {
+        configured: true,
+        account: { accountId: 'ada@contoso.com', displayName: 'Ada Lovelace' },
+      },
+      isPending: false,
+    };
+
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildAdoDelegatedStatus({
+          savedSatisfied: false,
+          savedValue: null,
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/Connected as Ada Lovelace/)).toBeInTheDocument();
+    expect(screen.getByText(/Not in use yet/)).toBeInTheDocument();
+  });
+
+  it('says a reconnected Azure DevOps account is not in use while the saved id still belongs to the previous account', () => {
+    adoLinkedAccountRef.current = {
+      data: {
+        configured: true,
+        account: { accountId: 'ada@contoso.com', displayName: 'Ada Lovelace' },
+      },
+      isPending: false,
+    };
+
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildAdoDelegatedStatus({
+          savedSatisfied: true,
+          savedValue: 'grace@contoso.com',
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/Connected as Ada Lovelace/)).toBeInTheDocument();
+    expect(screen.getByText(/Not in use yet/)).toBeInTheDocument();
+  });
+
+  it('drops the not-in-use hint once the saved id matches the linked Azure DevOps account', () => {
+    adoLinkedAccountRef.current = {
+      data: {
+        configured: true,
+        account: { accountId: 'ada@contoso.com', displayName: 'Ada Lovelace' },
+      },
+      isPending: false,
+    };
+
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildAdoDelegatedStatus({
+          savedSatisfied: true,
+          savedValue: 'ada@contoso.com',
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/Connected as Ada Lovelace/)).toBeInTheDocument();
+    expect(screen.queryByText(/Not in use yet/)).not.toBeInTheDocument();
   });
 });
