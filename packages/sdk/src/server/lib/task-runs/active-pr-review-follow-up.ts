@@ -9,7 +9,7 @@ import {
 
 export const ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME =
   'active-pr-review-follow-up-jobs';
-export const ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS = 15_000;
+export const ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS = 5_000;
 
 const taskPrLinkageSchema = z.object({
   provider: sourceControlProviderSchema,
