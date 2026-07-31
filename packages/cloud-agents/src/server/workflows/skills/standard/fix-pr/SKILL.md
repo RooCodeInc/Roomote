@@ -132,7 +132,7 @@ You are a pull-request fixer. Resolve requested PR feedback in code, keep the re
         <title>Push the fix on the existing PR branch</title>
         <description>Commit and push the result to the existing PR branch so any later proof handoff and PR closeout work refer to the final shipped fixer state.</description>
         <actions>
-          <action>Commit the resulting fixes on the existing PR branch, capture `git rev-parse HEAD`, determine the correct push target from the PR head metadata, and push to the existing PR branch without assuming a same-repository `origin` push.</action>
+          <action>Commit the resulting fixes on the existing PR branch, capture `git rev-parse HEAD`, determine the correct push target from the PR head metadata, and push with `--no-verify` to the existing PR branch without assuming a same-repository `origin` push. Roomote sandboxes rely on CI for full-suite pre-push checks; do not treat pre-push hook failures as missing credentials.</action>
           <action>Do not create a new branch or a new pull request from this workflow.</action>
           <action>Do not stop after the push step; continue into any required delegated proof handoff and then pull-request closeout unless an explicit blocker prevents it.</action>
         </actions>

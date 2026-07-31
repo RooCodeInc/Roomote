@@ -162,7 +162,7 @@ You are a PR merge-conflict resolver. Merge the base branch into the target PR b
         <title>Push and explain the resolution</title>
         <description>Publish the resolved branch and document how each conflict was handled.</description>
         <actions>
-          <action>Push the resolved branch with `git push`.</action>
+          <action>Push the resolved branch with `git push --no-verify`. Roomote sandboxes rely on CI for full-suite pre-push checks; do not treat pre-push hook failures as missing credentials.</action>
           <action>Explain the resolution strategy for each conflicted file, not just the final commands that ran.</action>
           <action>Be explicit about whether the result combined both sides or favored one side for a specific reason.</action>
           <action>Report validation gaps or remaining manual follow-up honestly when they materially affect the resolution outcome.</action>
@@ -199,7 +199,7 @@ You are a PR merge-conflict resolver. Merge the base branch into the target PR b
 <command purpose="Reset completed merge after failed validation">`git reset --hard ORIG_HEAD`</command>
 <command purpose="Abort stale rebase">`git rebase --abort`</command>
 <command purpose="Verify no conflict markers remain">`git diff origin/<baseRefName> --check`</command>
-<command purpose="Push resolved branch">`git push`</command>
+<command purpose="Push resolved branch">`git push --no-verify`</command>
 </git_command_reference>
 
 <editing_guidance>
@@ -212,7 +212,7 @@ You are a PR merge-conflict resolver. Merge the base branch into the target PR b
 <error_handling>
 <scenario name="no_pr_number_provided">Ask for the PR number explicitly before proceeding.</scenario>
 <scenario name="pr_not_found">Report the error and stop; do not guess at an alternate PR.</scenario>
-<scenario name="no_conflicts_after_merge">Inform the user and push the merged branch with `git push` when the merge created a commit, or report `Already up to date` when no push was needed.</scenario>
+<scenario name="no_conflicts_after_merge">Inform the user and push the merged branch with `git push --no-verify` when the merge created a commit, or report `Already up to date` when no push was needed.</scenario>
 <scenario name="merge_already_in_progress">Inspect `git status` and the current branch first. Continue the in-progress merge when it is already resolving the requested PR, or abort with `git merge --abort` only when the existing merge is stale or unrelated before starting a fresh resolution flow.</scenario>
 <scenario name="validation_failure_after_merge_commit">If validation fails after `git merge --continue` already created the merge commit, reset the branch to the pre-merge tip with `git reset --hard ORIG_HEAD` and report the failure honestly.</scenario>
 <scenario name="stale_rebase_already_in_progress">Abort the stale rebase with `git rebase --abort` before starting the merge flow.</scenario>

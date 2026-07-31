@@ -134,7 +134,7 @@ You are executing a command to create a pull request with the current changes.
           <action>After `git add -A`, explicitly compare `git diff --cached --name-status` against the intended deliverables for this task. If any staged path is unexpected, unstage it with `git restore --staged <path>` before committing. Treat generated or untracked files as excluded by default unless they are clearly part of the requested delivery.</action>
           <action>After the staged-path review is complete, run `cd <REPO_DIR> && git commit -m '<commit-message-for-this-repo>'`.</action>
           <action>If a repository has only unpushed commits and no working tree changes, skip the commit step for that repository.</action>
-          <action>If hooks fail, fix the underlying issue instead of bypassing validation with `--no-verify` unless no other safe option remains.</action>
+          <action>If pre-commit hooks fail, fix the underlying formatting or validation issue. Do not use `git commit --no-verify` unless no safer option remains.</action>
         </actions>
         <validation>Every repository is either clean with a new commit or intentionally skipped because it already had the necessary commits.</validation>
       </step>
@@ -142,7 +142,8 @@ You are executing a command to create a pull request with the current changes.
         <title>Push the target branch</title>
         <description>Push each repository's current HEAD to the remote after the delivery branch and commit state are correct.</description>
         <actions>
-          <action>For each repository, run `cd <REPO_DIR> && git push origin HEAD`.</action>
+          <action>For each repository, run `cd <REPO_DIR> && git push origin HEAD --no-verify`. Roomote sandboxes rely on CI for full-suite pre-push checks; local pre-push hooks often fail for environment reasons and get misreported as missing Git credentials. Never treat a pre-push hook failure as a credential problem when `git push --no-verify` succeeds.</action>
+          <action>If push still fails after `--no-verify`, report the exact remote/auth error and stop.</action>
           <action>Record the final branch name and confirm the remote push succeeded before proceeding.</action>
         </actions>
         <validation>Every repository that is being prepared for a pull request has a pushed remote branch.</validation>
@@ -212,9 +213,9 @@ You are executing a command to create a pull request with the current changes.
 <exceptions>Skip the section only when there is truly only one PR for the task or no sibling PR URL can be recovered honestly.</exceptions>
 </guideline>
 <guideline priority="high">
-<rule>Preserve commit and push validation hooks unless there is no safe alternative.</rule>
-<rationale>Hook failures often indicate real formatting, linting, or typing problems that should be fixed before review.</rationale>
-<exceptions>Only bypass as a last resort after diagnosing why the hook cannot be satisfied.</exceptions>
+<rule>Fix pre-commit hook failures; always push with `--no-verify` in Roomote sandboxes.</rule>
+<rationale>Pre-commit catches real local formatting issues. Pre-push suites belong to CI; sandbox PATH and tooling differ from developer laptops and produce false delivery blockers (including misreported credentials).</rationale>
+<exceptions>None for sandbox pre-push. Still fix pre-commit failures that block the commit itself.</exceptions>
 </guideline>
 <guideline priority="medium">
 <rule>Use descriptive branch names, conventional commit messages, and concise pull request copy.</rule>
@@ -295,9 +296,10 @@ You are executing a command to create a pull request with the current changes.
 <scenario name="hook_or_push_failure">
 <problem>A commit or push command fails.</problem>
 <causes>
-<cause>Pre-commit or pre-push checks failed.</cause>
-<cause>The branch conflicts with remote permissions or branch protection.</cause>
+<cause>Pre-commit hooks failed on the commit.</cause>
+<cause>Pre-push hooks failed (retry with `git push --no-verify`).</cause>
+<cause>The branch conflicts with remote permissions or branch protection (confirm with `--no-verify` so hooks are not confused with auth).</cause>
 </causes>
-<recovery>Diagnose and fix the validation issue when possible; otherwise report the exact blocker instead of forcing completion.</recovery>
+<recovery>Fix pre-commit failures; push with `--no-verify`. If the remote still rejects the push, report the exact error instead of inventing a credentials story.</recovery>
 </scenario>
 </error_handling>

@@ -111,8 +111,52 @@ export async function installMise(logger: StartupLogger): Promise<void> {
 
 async function ensureMiseManagedTools(logger: StartupLogger): Promise<void> {
   await ensureDefaultMiseToolsInConfig(logger);
+  await ensureCorepackYarnShim(logger);
   await ensureDefaultPythonPackages(logger);
   await installRipgrep(logger);
+}
+
+/**
+ * Enable Corepack's yarn shim and reshime mise so `yarn` is on PATH.
+ * Many customer repos (packageManager: yarn@…) run husky pre-push with `yarn`;
+ * the default mise toolset only installs node/npm/pnpm, so pushes fail with
+ * `yarn: not found` and agents mis-report that as missing Git credentials.
+ */
+async function ensureCorepackYarnShim(logger: StartupLogger): Promise<void> {
+  if (await isCommandAvailable('yarn')) {
+    logger.debug.log('yarn already available on PATH');
+    return;
+  }
+
+  logger.debug.log('enabling corepack yarn and reshimming mise');
+
+  try {
+    await execa(
+      'bash',
+      [
+        '-lc',
+        // Corepack ships with Node and activates the packageManager-selected
+        // yarn. mise reshim exposes the new node-bin shims (yarn/yarnpkg)
+        // through /opt/mise/shims so husky pre-push can find them.
+        'corepack enable && (mise reshim nodejs 2>/dev/null || mise reshim node 2>/dev/null || mise reshim 2>/dev/null || true)',
+      ],
+      {
+        cwd: homedir(),
+        stdin: 'ignore',
+      },
+    );
+  } catch (error) {
+    logger.userLog.warn(
+      `Failed to enable corepack yarn: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  if (!(await isCommandAvailable('yarn'))) {
+    logger.userLog.warn(
+      'corepack enable completed but yarn is still unavailable on PATH',
+    );
+  }
 }
 
 /**

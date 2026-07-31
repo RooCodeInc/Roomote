@@ -39,7 +39,11 @@ describe('installMise', () => {
   });
 
   it('ensures ripgrep once mise is already available', async () => {
-    mockIsCommandAvailable.mockResolvedValue(true);
+    // yarn available → skip corepack; python module available → skip install;
+    // then ripgrep checks.
+    mockIsCommandAvailable
+      .mockResolvedValueOnce(true) // yarn
+      .mockResolvedValueOnce(true); // uv for python packages path may still run
     mockExeca
       .mockResolvedValueOnce({
         exitCode: 0,
@@ -71,44 +75,73 @@ describe('installMise', () => {
     );
   });
 
+  it('enables corepack yarn when yarn is missing from PATH', async () => {
+    mockIsCommandAvailable
+      .mockResolvedValueOnce(true) // mise available
+      .mockResolvedValueOnce(false) // yarn missing
+      .mockResolvedValueOnce(true); // yarn after enable
+    mockExeca
+      .mockResolvedValueOnce({} as never) // corepack enable
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never) // python module check
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never); // rg --version
+
+    await installMise(logger);
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'bash',
+      ['-lc', expect.stringContaining('corepack enable')],
+      expect.objectContaining({
+        cwd: expect.any(String),
+        stdin: 'ignore',
+      }),
+    );
+  });
+
   it('installs mise before ensuring ripgrep when mise is missing', async () => {
     mockIsCommandAvailable
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(true);
+      .mockResolvedValueOnce(false) // mise missing
+      .mockResolvedValueOnce(true) // mise after install
+      .mockResolvedValueOnce(true) // yarn present (skip corepack)
+      .mockResolvedValueOnce(true) // uv for python package install
+      .mockResolvedValueOnce(true); // mise for ripgrep install
     mockReadFile.mockRejectedValueOnce(new Error('missing config') as never);
     mockExeca
-      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({} as never) // curl install mise
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never)
+      } as never) // mise use nodejs
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never)
+      } as never) // mise use pnpm
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never)
+      } as never) // mise use uv
       .mockResolvedValueOnce({
         exitCode: 1,
         stderr: '',
-      } as never)
-      .mockResolvedValueOnce({} as never)
+      } as never) // python -c import openai fails
+      .mockResolvedValueOnce({} as never) // install openai package
       .mockResolvedValueOnce({
         exitCode: 1,
         stderr: '',
-      } as never)
+      } as never) // rg missing
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never)
+      } as never) // mise use ripgrep
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never);
+      } as never); // rg available after install
 
     await installMise(logger);
 

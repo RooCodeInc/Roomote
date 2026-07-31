@@ -69,7 +69,7 @@ You are executing a command to push work to remote branches without creating a p
           <action>After `git add -A`, explicitly compare `git diff --cached --name-status` against the intended deliverables for this task. If any staged path is unexpected, unstage it with `git restore --staged <path>` before committing. Treat generated or untracked files as excluded by default unless they are clearly part of the requested delivery.</action>
           <action>After the staged-path review is complete, for each repository with working tree changes run `cd <REPO_DIR> && git commit -m '<commit-message-for-this-repo>'`.</action>
           <action>If the repository already has unpushed commits and no working tree changes, skip only the commit while still ensuring the branch is correct.</action>
-          <action>If hooks fail, fix the validation issue rather than bypassing `--no-verify` unless no safer option remains.</action>
+          <action>If pre-commit hooks fail, fix the underlying formatting or validation issue. Do not use `git commit --no-verify` unless no safer option remains.</action>
         </actions>
         <validation>Each repository is on a delivery branch created from the provided base/default branch, or is explicitly identified as already on an existing delivery branch for this task.</validation>
       </step>
@@ -77,7 +77,8 @@ You are executing a command to push work to remote branches without creating a p
         <title>Push the branch for each repository</title>
         <description>Publish the resulting branch to the remote so the work is available for later pull request creation.</description>
         <actions>
-          <action>For each repository, run `cd <REPO_DIR> && if git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null; then git push; else git push -u origin HEAD; fi`.</action>
+          <action>For each repository, push with pre-push hooks skipped: `cd <REPO_DIR> && if git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null; then git push --no-verify; else git push -u origin HEAD --no-verify; fi`. Roomote sandboxes rely on CI for full-suite pre-push checks (lint, typecheck, tests); local pre-push hooks often need host package managers and fail with false "auth" or credential errors. Never treat a pre-push hook failure as missing Git credentials when `git push --no-verify` succeeds.</action>
+          <action>If push still fails after `--no-verify`, report the exact remote/auth error. Do not invent credential explanations.</action>
           <action>Record the pushed repository and branch for final reporting.</action>
         </actions>
         <validation>Every targeted repository has a confirmed pushed branch or a clearly reported blocker.</validation>
@@ -119,10 +120,10 @@ You are executing a command to push work to remote branches without creating a p
 <rationale>Pushed work should remain understandable when reviewed later outside the current task context.</rationale>
 <exceptions>Use repository-specific conventions if they are stricter than the default pattern.</exceptions>
 </guideline>
-<guideline priority="medium">
-<rule>Respect validation hooks and fix their failures instead of bypassing them casually.</rule>
-<rationale>These flows are meant to keep repository state clean, not just to move bytes to a remote.</rationale>
-<exceptions>Only bypass as a last resort after the root cause has been investigated and documented.</exceptions>
+<guideline priority="high">
+<rule>Always push with `git push --no-verify` (or `git push -u origin HEAD --no-verify`) in Roomote sandboxes.</rule>
+<rationale>Pre-push hooks that re-run lint/typecheck/test suites belong to CI. Sandbox PATH and tooling differ from developer laptops, so those hooks create false delivery failures (including misreported "credential" blockers).</rationale>
+<exceptions>None for sandbox delivery. Still fix pre-commit hook failures that block the commit itself.</exceptions>
 </guideline>
 </best_practices>
 
@@ -145,7 +146,7 @@ You are executing a command to push work to remote branches without creating a p
 <principle>Do not create a pull request when the user explicitly asked only for a branch push.</principle>
 <principle>Stop and report blockers rather than pretending the branch was pushed when it was not.</principle>
 </principles>
-<constraints>Use only non-interactive git commands, keep hook-based checks, and avoid destructive history rewriting unless the user explicitly asked for it.</constraints>
+<constraints>Use only non-interactive git commands, push with `--no-verify` so pre-push CI suites do not block delivery, and avoid destructive history rewriting unless the user explicitly asked for it.</constraints>
 <boundaries>
 <rule>This workflow handles branch creation, optional commits, remote push, and push reporting.</rule>
 <rule>This workflow does not open pull requests automatically.</rule>
@@ -170,7 +171,7 @@ You are executing a command to push work to remote branches without creating a p
       </step>
       <step number="3">
         <description>Push both branches and report the follow-up pull request commands.</description>
-        <approach>Run `git push` or `git push -u origin HEAD` per repository and summarize the next command for each one.</approach>
+        <approach>Run `git push --no-verify` or `git push -u origin HEAD --no-verify` per repository and summarize the next command for each one.</approach>
         <expected_outcome>The user can immediately create pull requests later without losing the work.</expected_outcome>
       </step>
     </workflow>
@@ -193,9 +194,9 @@ You are executing a command to push work to remote branches without creating a p
 <scenario name="push_blocked_by_validation_or_permissions">
 <problem>The branch cannot be pushed.</problem>
 <causes>
-<cause>Repository hooks fail.</cause>
-<cause>Remote permissions, branch protection, or authentication prevent the push.</cause>
+<cause>Remote permissions, branch protection, or authentication prevent the push (confirm with `git push --no-verify` so local pre-push hooks are not confused with auth).</cause>
+<cause>Pre-commit hooks blocked the commit before a push was attempted.</cause>
 </causes>
-<recovery>Fix the validation issue when possible; otherwise surface the exact blocker and stop rather than claiming the push succeeded.</recovery>
+<recovery>Retry with `--no-verify` if a pre-push hook was the only failure. If that still fails, surface the exact remote error and stop rather than claiming the push succeeded or inventing a credentials story.</recovery>
 </scenario>
 </error_handling>
