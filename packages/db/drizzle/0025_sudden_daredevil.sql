@@ -13,7 +13,7 @@ CREATE TABLE "monday_agent_installations" (
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "monday_agent_installations_singleton_unique" UNIQUE("singleton_key"),
 	CONSTRAINT "monday_agent_installations_agent_id_unique" UNIQUE("agent_id"),
-	CONSTRAINT "monday_agent_installations_singleton_key_check" CHECK ("monday_agent_installations"."singleton_key" = 'default' OR ("monday_agent_installations"."singleton_key" IS NULL AND "monday_agent_installations"."status" = 'error'))
+	CONSTRAINT "monday_agent_installations_singleton_key_check" CHECK ("monday_agent_installations"."singleton_key" = 'default' OR ("monday_agent_installations"."singleton_key" IS NULL AND "monday_agent_installations"."status" IN ('error', 'disconnected')))
 );
 --> statement-breakpoint
 ALTER TABLE "monday_agent_installations" ADD CONSTRAINT "monday_agent_installations_owner_mcp_connection_id_mcp_connections_id_fk" FOREIGN KEY ("owner_mcp_connection_id") REFERENCES "public"."mcp_connections"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint

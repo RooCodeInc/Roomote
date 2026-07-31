@@ -1,5 +1,6 @@
 import {
   getEffectiveGitHubAppSlug,
+  isGitHubRoomoteMentionEnabled,
   Schemas as GitHubSchemas,
 } from '@roomote/github';
 
@@ -17,8 +18,12 @@ export const isMention = (comment: {
   // GitHub only treats `@name` as a mention when it stands alone; a bare
   // substring check would also fire on longer logins (`@<slug>-fan`) and on
   // email addresses (`grace@<slug>.example.com`).
+  const appSlug = getEffectiveGitHubAppSlug();
+  const acceptedSlugs = isGitHubRoomoteMentionEnabled()
+    ? [appSlug, 'roomote']
+    : [appSlug];
   const mentionPattern = new RegExp(
-    `(^|[^\\w.-])@${escapeRegExp(getEffectiveGitHubAppSlug())}(?![\\w-])`,
+    `(^|[^\\w.-])@(?:${acceptedSlugs.map(escapeRegExp).join('|')})(?![\\w-])`,
     'i',
   );
 

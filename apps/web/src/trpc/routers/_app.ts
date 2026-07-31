@@ -87,10 +87,12 @@ import {
 } from '../commands/github';
 import {
   getPrActionCommand,
+  getGitHubRoomoteMentionCommand,
   getRepositoriesCommand,
   getSourceControlConfigStatusCommand,
   saveSourceControlConfigCommand,
   setPrActionCommand,
+  setGitHubRoomoteMentionCommand,
   syncRepositoriesCommand,
 } from '../commands/source-control';
 import {
@@ -336,6 +338,7 @@ import {
   isChatGptSubscriptionConnectedCommand,
   pollChatGptDeviceAuthCommand,
   startChatGptDeviceAuthCommand,
+  updateChatGptSubscriptionFastModeCommand,
 } from '../commands/chatgpt-subscription';
 import {
   disconnectGitHubCopilotSubscriptionCommand,
@@ -1079,6 +1082,16 @@ export const appRouter = createRouter({
     setPrAction: protectedProcedure
       .input(z.object({ prAction: z.enum(prActions) }))
       .mutation(({ ctx: { auth }, input }) => setPrActionCommand(auth, input)),
+
+    githubRoomoteMention: protectedProcedure.query(({ ctx: { auth } }) =>
+      getGitHubRoomoteMentionCommand(auth),
+    ),
+
+    setGitHubRoomoteMention: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setGitHubRoomoteMentionCommand(auth, input),
+      ),
 
     syncRepositories: protectedProcedure
       .input(
@@ -2078,6 +2091,12 @@ export const appRouter = createRouter({
     disconnect: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectChatGptSubscriptionCommand(auth),
     ),
+
+    updateFastMode: protectedProcedure
+      .input(z.object({ fastMode: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        updateChatGptSubscriptionFastModeCommand(auth, input),
+      ),
   }),
 
   githubCopilotSubscription: createRouter({

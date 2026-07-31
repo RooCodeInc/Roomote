@@ -46,6 +46,7 @@ import { startSnapshotQueue } from './snapshot-queue';
 import { startDockerValidationQueue } from './docker-validation-queue';
 import { startSlackPrInactivityQueue } from './slack-pr-inactivity-queue';
 import { startPrReviewNotificationQueue } from './pr-review-notification-queue';
+import { startActivePrReviewFollowUpQueue } from './active-pr-review-follow-up-queue';
 import { startTaskSleepQueue } from './task-sleep-queue';
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
@@ -162,6 +163,11 @@ const {
   prReviewNotificationWorker,
   prReviewNotificationQueueEvents,
 } = startPrReviewNotificationQueue();
+const {
+  queue: activePrReviewFollowUpQueue,
+  worker: activePrReviewFollowUpWorker,
+  queueEvents: activePrReviewFollowUpQueueEvents,
+} = startActivePrReviewFollowUpQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
@@ -188,6 +194,7 @@ createBullBoard({
     }),
     new BullMQAdapter(slackPrInactivityQueue, { readOnlyMode: false }),
     new BullMQAdapter(prReviewNotificationQueue, { readOnlyMode: false }),
+    new BullMQAdapter(activePrReviewFollowUpQueue, { readOnlyMode: false }),
   ],
   serverAdapter,
 });
@@ -346,6 +353,9 @@ async function gracefulShutdown() {
     await prReviewNotificationWorker.close();
     await prReviewNotificationQueueEvents.close();
     await prReviewNotificationQueue.close();
+    await activePrReviewFollowUpWorker.close();
+    await activePrReviewFollowUpQueueEvents.close();
+    await activePrReviewFollowUpQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   } catch (error) {

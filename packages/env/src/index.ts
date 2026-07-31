@@ -65,7 +65,7 @@ const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
-    .enum(['modal', 'docker', 'daytona', 'e2b', 'roomote'])
+    .enum(['modal', 'docker', 'daytona', 'e2b', 'roomote', 'azure'])
     .default('docker'),
   EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
   DOCKER_WORKER_IMAGE: z
@@ -261,6 +261,20 @@ const serverSchema = {
   BLAXEL_REGION: z.string().optional(),
   E2B_DOMAIN: z.string().optional(),
   E2B_TEMPLATE_ID: z.string().optional(),
+  AZURE_SUBSCRIPTION_ID: z.string().optional(),
+  AZURE_RESOURCE_GROUP: z.string().optional(),
+  AZURE_SANDBOX_GROUP: z.string().optional(),
+  AZURE_SANDBOX_REGION: z.string().optional(),
+  AZURE_SANDBOX_DISK_IMAGE: z.string().optional(),
+  AZURE_CLIENT_ID: z.string().optional(),
+  AZURE_TENANT_ID: z.string().optional(),
+  AZURE_CLIENT_SECRET: z.string().optional(),
+  AZURE_SANDBOX_REGISTRY_USERNAME: z.string().optional(),
+  AZURE_SANDBOX_REGISTRY_TOKEN: z.string().optional(),
+  AZURE_SANDBOX_SIZE: z.enum(['XS', 'S', 'M', 'L', 'XL']).optional(),
+  AZURE_SANDBOX_EGRESS_INSPECTION: z
+    .enum(['Legacy', 'Full', 'Partial', 'None'])
+    .optional(),
   // E2B caps sandbox lifetime per plan (1 hour on Hobby, 24 hours on Pro);
   // requesting more fails sandbox creation with a 400, so the controller
   // clamps the provider-side timeout to this ceiling. Raise it only when the
@@ -487,6 +501,18 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'E2B_DOMAIN',
   'E2B_TEMPLATE_ID',
   'E2B_MAX_SANDBOX_TIMEOUT_MS',
+  'AZURE_SUBSCRIPTION_ID',
+  'AZURE_RESOURCE_GROUP',
+  'AZURE_SANDBOX_GROUP',
+  'AZURE_SANDBOX_REGION',
+  'AZURE_SANDBOX_DISK_IMAGE',
+  'AZURE_CLIENT_ID',
+  'AZURE_TENANT_ID',
+  'AZURE_CLIENT_SECRET',
+  'AZURE_SANDBOX_REGISTRY_USERNAME',
+  'AZURE_SANDBOX_REGISTRY_TOKEN',
+  'AZURE_SANDBOX_SIZE',
+  'AZURE_SANDBOX_EGRESS_INSPECTION',
   'DOCKER_WORKER_NETWORK',
   'DOCKER_WORKER_RELEASE_PATH',
   'GITHUB_AUTOMATED_SKIP_REPOS',

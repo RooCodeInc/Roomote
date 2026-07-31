@@ -1,6 +1,7 @@
 import {
   CHATGPT_ACCOUNT_ID_HEADER,
   getInferenceGatewayProvider,
+  INFERENCE_GATEWAY_RESOURCE_PATTERN,
   INFERENCE_GATEWAY_REGION_PATTERN,
   type InferenceGatewayProvider,
 } from '@roomote/types';
@@ -230,9 +231,8 @@ function hasTraversalOrEncodedSlash(upstreamPath: string): boolean {
 }
 
 /**
- * Resolve the provider's upstream base, substituting the `{region}`
- * placeholder from the deployment's region env var (falling back to the
- * provider default) for region-templated upstreams like Bedrock.
+ * Resolve the provider's upstream base, substituting constrained deployment
+ * values into region- and resource-templated upstreams.
  */
 async function resolveProviderUpstreamBaseUrl(
   provider: InferenceGatewayProvider,
@@ -254,8 +254,30 @@ async function resolveProviderUpstreamBaseUrl(
     );
   }
 
+  let upstreamBaseUrl = provider.upstreamBaseUrl!;
+
+  if (provider.resource) {
+    const resource = await resolveModelProviderEnvValue([
+      provider.resource.envVarName,
+    ]);
+
+    if (!resource) {
+      throw new Error(
+        `${provider.resource.envVarName} must be configured for ${provider.name}.`,
+      );
+    }
+
+    if (!INFERENCE_GATEWAY_RESOURCE_PATTERN.test(resource)) {
+      throw new Error(
+        `${provider.resource.envVarName} must be a valid resource name for ${provider.name}. Received "${resource}".`,
+      );
+    }
+
+    upstreamBaseUrl = upstreamBaseUrl.replace('{resource}', resource);
+  }
+
   if (!provider.region) {
-    return provider.upstreamBaseUrl!;
+    return upstreamBaseUrl;
   }
 
   const region =
@@ -282,7 +304,7 @@ async function resolveProviderUpstreamBaseUrl(
     );
   }
 
-  return provider.upstreamBaseUrl!.replace('{region}', region);
+  return upstreamBaseUrl.replace('{region}', region);
 }
 
 function validateDynamicUpstreamBaseUrl(

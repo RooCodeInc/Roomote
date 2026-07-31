@@ -46,7 +46,11 @@ import { recordChatTurnStart } from '../mcp/roomote-mcp-server/chat-reply-satisf
 import { recordSandboxPromptSlackTurnStart } from '../sandbox-server/procedures/slackReplyTurnTracking';
 import { type IntegrationMcpOptions } from '../commands/setup/setup-mcps';
 
-import type { RunTaskOptions, RunTaskState } from './types';
+import type {
+  EnvironmentSetupSettledOutcome,
+  RunTaskOptions,
+  RunTaskState,
+} from './types';
 import {
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_DEV_MS,
@@ -134,6 +138,86 @@ function formatWorkspaceReadinessWarnings(
     'This task is starting before workspace readiness is fully settled. Some environment setup steps may still be running or may have reported warnings.',
     'Acknowledge this politely if it affects the user request, and do not assume the environment is fully configured.',
     ...normalizedWarnings.map((warning) => `- ${warning}`),
+  ].join('\n');
+}
+
+/**
+ * In-session notification delivered when background environment setup
+ * settles while the agent is already working. The trailing guard sentence is
+ * insurance against the #661 duplicate-question bug for the narrow race where
+ * a request_user_input is issued between the delivery-time phase check and
+ * the prompt landing in the session.
+ */
+function buildEnvironmentSetupSettledPrompt(
+  outcome: EnvironmentSetupSettledOutcome,
+): string {
+  const doNotRepeatQuestions =
+    'If you have already asked the user a question that is still unanswered, do not repeat or re-issue it — keep waiting for their reply.';
+
+  if (outcome.status === 'rejected') {
+    return [
+      ...buildEnvironmentSetupSettledOutcomeSummary(outcome),
+      'Check `.roomote/setup-status.json` and `.roomote/setup-logs/` in the workspace root before relying on installed dependencies or running services. Continue with the user request and mention the failure if it affects your work.',
+      doNotRepeatQuestions,
+    ].join('\n');
+  }
+
+  if (outcome.warningMessages.length > 0) {
+    return [
+      ...buildEnvironmentSetupSettledOutcomeSummary(outcome),
+      'Details are in `.roomote/setup-status.json` and `.roomote/setup-logs/` in the workspace root. Verify anything you depend on is actually available. Continue with the user request; only mention this if it affects your work.',
+      doNotRepeatQuestions,
+    ].join('\n');
+  }
+
+  return [
+    ...buildEnvironmentSetupSettledOutcomeSummary(outcome),
+    'The environment is now fully configured; `.roomote/setup-status.json` has per-command results. Continue with the user request — no action or acknowledgement is needed.',
+    doNotRepeatQuestions,
+  ].join('\n');
+}
+
+function buildEnvironmentSetupSettledOutcomeSummary(
+  outcome: EnvironmentSetupSettledOutcome,
+): string[] {
+  if (outcome.status === 'rejected') {
+    return [
+      'Environment setup update: background environment setup failed unexpectedly.',
+      `Error: ${outcome.errorMessage}`,
+    ];
+  }
+
+  if (outcome.warningMessages.length > 0) {
+    return [
+      'Environment setup update: background environment setup (repository setup commands and Docker projects) finished with warnings:',
+      ...outcome.warningMessages.map((warning) => `- ${warning}`),
+    ];
+  }
+
+  return [
+    'Environment setup update: background environment setup (repository setup commands and Docker projects) finished successfully.',
+  ];
+}
+
+/**
+ * Variant of the settled notice used to wake a task that went idle while
+ * background setup was still running, so a task that reported itself blocked
+ * on setup can resume without a manual user nudge. The zero-tool-call escape
+ * hatch is load-bearing: after a terminal closeout, any non-Slack tool call
+ * re-arms the Slack stop hook's closeout requirement
+ * (current_turn_terminal_reply_stale), so an agent that "just checks"
+ * something before ending an already-completed task would be forced to post
+ * a redundant message.
+ */
+function buildEnvironmentSetupSettledWakePrompt(
+  outcome: EnvironmentSetupSettledOutcome,
+): string {
+  return [
+    ...buildEnvironmentSetupSettledOutcomeSummary(outcome),
+    'Per-command results are in `.roomote/setup-status.json` in the workspace root, with output logs under `.roomote/setup-logs/`.',
+    'Your previous turn ended while this environment setup was still running.',
+    "If any part of the user's request was deferred or reported as blocked because setup had not finished, continue that work now and report the outcome as you normally would.",
+    'If the request was already fully handled, end this turn immediately without calling any tools and without posting any message — this update needs no acknowledgement.',
   ].join('\n');
 }
 
@@ -566,7 +650,6 @@ function getQueuedSnapshotResumeLinearMessages(
     : [];
 }
 
-const SLACK_PROOF_AUTO_POST_FLAG = FeatureFlag.SlackProofAutoPost;
 const BACKGROUND_SUBAGENTS_FLAG = FeatureFlag.BackgroundSubagents;
 const CODE_MODE_FLAG = FeatureFlag.CodeMode;
 
@@ -862,20 +945,6 @@ export const runTask = async ({
     }
 
     try {
-      const slackProofAutoPostEnabled = await sdk.featureFlags.evaluate(
-        SLACK_PROOF_AUTO_POST_FLAG,
-      );
-
-      if (slackProofAutoPostEnabled) {
-        runtimeEnv.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
-      }
-    } catch (error) {
-      logger.warn(
-        `[runTask] Failed to evaluate SlackProofAutoPost feature flag: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    try {
       const backgroundSubagentsEnabled = await sdk.featureFlags.evaluate(
         BACKGROUND_SUBAGENTS_FLAG,
       );
@@ -904,9 +973,6 @@ export const runTask = async ({
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
     if (slackReplyContext?.threadTs) {
-      // Slack proof auto-post resolves its thread destination from these env
-      // vars when visual-proof artifacts are uploaded through the Roomote MCP
-      // server.
       runtimeEnv.ROOMOTE_SLACK_CHANNEL = slackReplyContext.channel;
       runtimeEnv.ROOMOTE_SLACK_THREAD_TS = slackReplyContext.threadTs;
     }
@@ -1283,6 +1349,88 @@ export const runTask = async ({
       // terminal intent, so shut the sandbox down instead of leaving a soft
       // resume hold that outlives the canceled task.
       harnessManager?.cancelTask({ terminate: true });
+    });
+    // Close the loop on background environment setup: when it settles while
+    // the agent is actively working, push a notification into the session so
+    // the agent can stop polling `.roomote/setup-status.json` and continue.
+    // Delivery is deferred until the runtime signals taskStarted — the phase
+    // flips to running before the StartNewTask command carrying the initial
+    // prompt is delivered, so injecting earlier can race the initial user
+    // prompt and replace it as the session's first message. While a
+    // structured question is outstanding (waiting_for_user_input), hold the
+    // notice instead of injecting: an unsolicited system turn at that point
+    // made agents re-issue the pending request_user_input, which Slack
+    // rendered as duplicate questions (#661). A held notice is retried on the
+    // next phase change once the answer arrives. A task that settled to
+    // waiting_for_prompt is woken with an idle-aware variant — it may have
+    // ended its turn reporting itself blocked on setup — while stopped or
+    // shutting-down tasks drop the notice; .roomote/setup-status.json keeps
+    // the ground truth either way.
+    let pendingEnvironmentSetupOutcome:
+      | EnvironmentSetupSettledOutcome
+      | undefined;
+    let runtimeTaskStartedForSetupNotice = false;
+
+    const deliverEnvironmentSetupNotice = () => {
+      const currentManager = harnessManager;
+      const outcome = pendingEnvironmentSetupOutcome;
+
+      if (!currentManager || !outcome || !runtimeTaskStartedForSetupNotice) {
+        return;
+      }
+
+      const phase = currentManager.getStatus().phase;
+
+      if (phase === 'waiting_for_user_input') {
+        // Keep the outcome pending; answering the question flips the phase
+        // back to running, and that stateChange retries delivery.
+        return;
+      }
+
+      pendingEnvironmentSetupOutcome = undefined;
+
+      // A task that settled to waiting_for_prompt while setup was still
+      // running may have ended its turn reporting itself blocked on setup, so
+      // wake it with an idle-aware notice instead of dropping the outcome.
+      // Any other non-running phase (stopped, shutting down) stays dropped.
+      const wakeFromIdle = phase === 'waiting_for_prompt';
+
+      if (phase !== 'running' && !wakeFromIdle) {
+        return;
+      }
+
+      const sent = currentManager.sendFollowUpPrompt({
+        prompt: wakeFromIdle
+          ? buildEnvironmentSetupSettledWakePrompt(outcome)
+          : buildEnvironmentSetupSettledPrompt(outcome),
+        visibleInTranscript: false,
+        source: 'environment-setup',
+      });
+
+      void recordWorkerRuntimeEvent({
+        eventType: 'decision',
+        message: `Background environment setup settled (${outcome.status}) while task run #${taskRun.id} was ${wakeFromIdle ? 'idle' : 'running'}; in-session ${wakeFromIdle ? 'wake-up' : 'notification'} ${sent ? 'delivered' : 'was not accepted by the harness'}.`,
+        details: {
+          reason: 'background_environment_setup_notification',
+          outcome: outcome.status,
+          delivered: sent,
+          wakeFromIdle,
+        },
+      });
+    };
+
+    backgroundEnvironmentSetup?.onSettled((outcome) => {
+      pendingEnvironmentSetupOutcome = outcome;
+      deliverEnvironmentSetupNotice();
+    });
+    harnessManager.on('taskStateEvent', (eventName) => {
+      if (eventName === 'taskStarted') {
+        runtimeTaskStartedForSetupNotice = true;
+        deliverEnvironmentSetupNotice();
+      }
+    });
+    harnessManager.on('stateChange', () => {
+      deliverEnvironmentSetupNotice();
     });
     harnessManager.on('taskStateEvent', (eventName) => {
       void recordWorkerRuntimeEvent({

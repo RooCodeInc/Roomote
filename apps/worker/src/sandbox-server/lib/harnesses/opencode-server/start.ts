@@ -367,9 +367,6 @@ export async function startOpenCodeServerHarness({
       stopHookReminderStallTimeoutMs: parseTimeoutMs(
         process.env.ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,
       ),
-      steerPickupTimeoutMs: parseTimeoutMs(
-        process.env.ROOMOTE_OPENCODE_STEER_PICKUP_TIMEOUT_MS,
-      ),
       turnStallTimeoutMs: parseTimeoutMs(
         process.env.ROOMOTE_OPENCODE_TURN_STALL_TIMEOUT_MS,
       ),

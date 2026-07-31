@@ -77,6 +77,15 @@ describe('Roomote GitHub bot identity helpers', () => {
       );
     });
 
+    it('keeps the shorthand when it is enabled', () => {
+      const body =
+        '> Created by Roomote. Follow up by mentioning @roomote-roomote.';
+
+      expect(
+        normalizePrBodyAttributionAppMention(body, 'roomote-roomote', true),
+      ).toBe('> Created by Roomote. Follow up by mentioning @roomote.');
+    });
+
     it('rewrites Opened on behalf of attribution mentions', () => {
       const body =
         '> Opened on behalf of Matt Rubens. [View the task](https://example.com/task/1) or mention @roomote for follow-up asks.';

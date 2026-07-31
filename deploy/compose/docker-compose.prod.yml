@@ -22,6 +22,22 @@ x-roomote-base-env: &roomote-base-env
   ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
   TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
+  # Azure Container Apps sandbox provider. In the base anchor so controller,
+  # api, and bullmq all see it — credentials can also come from the
+  # DB-persisted setup values instead of process env.
+  AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-}
+  AZURE_RESOURCE_GROUP: ${AZURE_RESOURCE_GROUP:-}
+  AZURE_SANDBOX_GROUP: ${AZURE_SANDBOX_GROUP:-}
+  AZURE_SANDBOX_REGION: ${AZURE_SANDBOX_REGION:-}
+  AZURE_SANDBOX_DISK_IMAGE: ${AZURE_SANDBOX_DISK_IMAGE:-}
+  AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+  AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+  AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+  AZURE_SANDBOX_REGISTRY_USERNAME: ${AZURE_SANDBOX_REGISTRY_USERNAME:-}
+  AZURE_SANDBOX_REGISTRY_TOKEN: ${AZURE_SANDBOX_REGISTRY_TOKEN:-}
+  AZURE_SANDBOX_SIZE: ${AZURE_SANDBOX_SIZE:-}
+  AZURE_SANDBOX_EGRESS_INSPECTION: ${AZURE_SANDBOX_EGRESS_INSPECTION:-}
+  AZURE_HTTP_DEBUG: ${AZURE_HTTP_DEBUG:-}
 
 x-roomote-inference-env: &roomote-inference-env
   <<: *roomote-base-env

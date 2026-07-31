@@ -22,13 +22,6 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
       'Show the internal-only Personal Settings toggle for the user-level debug UI preference',
   },
 
-  [FeatureFlag.SlackProofAutoPost]: {
-    defaultValue: false,
-    metadataKey: 'slack_proof_auto_post',
-    description:
-      'Auto-post trusted built-in visual proof back into the originating Slack thread for Slack-started tasks',
-  },
-
   [FeatureFlag.SuggestionRouting]: {
     defaultValue: false,
     metadataKey: 'suggestion_routing',

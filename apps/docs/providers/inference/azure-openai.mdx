@@ -1,0 +1,55 @@
+---
+title: Azure OpenAI
+icon: 'https://cdn.simpleicons.org/microsoftazure'
+description: Run OpenAI models from an Azure OpenAI resource in Roomote tasks.
+---
+
+Azure OpenAI serves OpenAI models from a resource in your Azure subscription.
+Roomote supports API-key authentication for resources at
+`https://<resource>.openai.azure.com`.
+
+## Prerequisites
+
+Before connecting Azure OpenAI, create:
+
+- an Azure OpenAI resource
+- an API key for that resource
+- a deployment for every model you intend to use
+
+The **deployment name must exactly match the model ID** expected by OpenCode.
+For example, using `azure/gpt-5.6-terra` requires a deployment named
+`gpt-5.6-terra`.
+
+## Configuration
+
+Add **Azure OpenAI** in **Settings > Models**, then enter the API key and the
+resource name from the Azure portal. The resource name is the first hostname
+segment, not a full URL.
+
+Environment-variable configuration uses:
+
+```sh
+AZURE_API_KEY=...
+AZURE_RESOURCE_NAME=my-resource
+```
+
+Roomote adds recommended GPT models under the `azure/` prefix. In gateway mode,
+the API key stays on the Roomote control plane and model requests are proxied to
+the configured Azure resource. The non-secret resource name remains available
+to the task runtime so OpenCode can initialize the provider.
+
+## Verify setup
+
+1. save the API key and resource name
+2. confirm each Azure deployment name matches its model ID
+3. enable an `azure/...` model and assign it to a role
+4. run a small task and confirm usage appears for the Azure resource
+
+## Common issues
+
+- **The resource cannot be reached.** Enter only the resource name, such as
+  `my-resource`, without a URL, path, or domain.
+- **Azure reports that the deployment does not exist.** Rename or recreate the
+  deployment so its name exactly matches the model ID.
+- **Authentication fails.** Confirm the key belongs to the configured Azure
+  OpenAI resource and has not been regenerated.

@@ -8,6 +8,7 @@ import {
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { autoAddConnectedSubscriptionTaskModels } from '../task-models';
 
 function assertAdmin(auth: UserAuthSuccess): void {
   if (!auth.isAdmin) throw new Error('Unauthorized');
@@ -39,7 +40,13 @@ export async function pollGitHubCopilotDeviceAuthCommand(
   input: { deviceCode: string },
 ) {
   assertAdmin(auth);
-  return pollGitHubCopilotDeviceAuth(input);
+  const result = await pollGitHubCopilotDeviceAuth(input);
+
+  if (result.status === 'success') {
+    await autoAddConnectedSubscriptionTaskModels('github-copilot');
+  }
+
+  return result;
 }
 
 export async function disconnectGitHubCopilotSubscriptionCommand(

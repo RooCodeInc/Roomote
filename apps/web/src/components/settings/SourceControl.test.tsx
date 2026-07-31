@@ -63,6 +63,7 @@ const mutations = vi.hoisted(() => ({
   syncAdo: vi.fn(),
   syncBitbucket: vi.fn(),
   setPrAction: vi.fn(),
+  setGitHubRoomoteMention: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -161,6 +162,14 @@ vi.mock('@/hooks/source-control', () => ({
     isPending: false,
     mutate: mutations.setPrAction,
   }),
+  useGitHubRoomoteMention: () => ({
+    data: { enabled: true },
+    isLoading: false,
+  }),
+  useSetGitHubRoomoteMention: () => ({
+    isPending: false,
+    mutate: mutations.setGitHubRoomoteMention,
+  }),
   useSourceControlConfigStatus: () => ({
     data: {
       selectedProvider: null,
@@ -245,6 +254,22 @@ vi.mock('@/components/system', () => ({
   ),
   Spinner: (props: SVGProps<SVGSVGElement>) => (
     <svg aria-hidden="true" {...props} />
+  ),
+  Switch: ({
+    checked,
+    onCheckedChange,
+    ...props
+  }: {
+    checked: boolean;
+    onCheckedChange: (checked: boolean) => void;
+  } & ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onCheckedChange(!checked)}
+      {...props}
+    />
   ),
   Select: ({
     children,
@@ -562,6 +587,25 @@ describe('SourceControl settings', () => {
 
     expect(mutations.setPrAction).toHaveBeenCalledWith(
       'create',
+      expect.anything(),
+    );
+  });
+
+  it('lets admins opt out of the shorter GitHub mention', () => {
+    render(<SourceControl />);
+
+    const toggle = screen.getByRole('switch', {
+      name: 'Also respond to @roomote',
+    });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(
+      screen.getByText(/another Roomote deployment is installed/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(mutations.setGitHubRoomoteMention).toHaveBeenCalledWith(
+      false,
       expect.anything(),
     );
   });

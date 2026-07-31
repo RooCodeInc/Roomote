@@ -33,6 +33,16 @@ describe('invocation identity formatting', () => {
     });
   });
 
+  it('uses the GitHub Roomote shorthand when enabled', () => {
+    expect(
+      buildGitHubInvocationIdentity('roomote-roomote', true),
+    ).toMatchObject({
+      mentionText: '@roomote',
+      nativeMention: '@roomote',
+      examplePrompt: '@roomote address the PR feedback above',
+    });
+  });
+
   it('formats a Telegram username as a handle and deep link', () => {
     expect(buildTelegramInvocationIdentity('@custom_bot')).toMatchObject({
       provider: 'telegram',

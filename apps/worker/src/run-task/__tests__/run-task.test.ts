@@ -266,6 +266,7 @@ import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
+import type { EnvironmentSetupSettledOutcome } from '../types';
 
 describe('runTask', () => {
   beforeEach(() => {
@@ -2628,62 +2629,216 @@ describe('runTask', () => {
     );
   });
 
-  it('does not inject mid-task notices when background environment setup settles', async () => {
-    const onSettled = vi.fn();
+  describe('background environment setup settled notices', () => {
+    type SettledListener = (outcome: EnvironmentSetupSettledOutcome) => void;
 
-    await runTask({
-      taskRun: {
-        id: 205,
-        taskId: 'task-205',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: 'do work',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      backgroundEnvironmentSetup: {
-        hasPendingBackgroundSetup: true,
-        onSettled,
-      },
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      workerEnv: {
-        buildUserFacingEnv: vi.fn(() => ({})),
-        roomoteAppUrl: 'http://localhost:3000',
-        trpcUrl: 'http://localhost:3001',
-        authToken: 'auth-token',
-        appEnv: 'test',
-        setRuntimeEnv: vi.fn(),
-      } as never,
+    const runTaskWithBackgroundSetup = async () => {
+      const onSettled = vi.fn<(listener: SettledListener) => void>();
+
+      await runTask({
+        taskRun: {
+          id: 205,
+          taskId: 'task-205',
+          payloadKind: TaskPayloadKind.StandardTask,
+          harness: 'opencode-server',
+          payload: {},
+          result: null,
+        } as never,
+        envVars: {},
+        workspacePath: '/tmp/workspace',
+        prompt: 'do work',
+        harnessInstructions: undefined,
+        agentInstructions: undefined,
+        environmentConfig: undefined,
+        backgroundEnvironmentSetup: {
+          hasPendingBackgroundSetup: true,
+          onSettled,
+        },
+        callbacks: {},
+        context: {},
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          log: vi.fn(),
+        } as never,
+        workerEnv: {
+          buildUserFacingEnv: vi.fn(() => ({})),
+          roomoteAppUrl: 'http://localhost:3000',
+          trpcUrl: 'http://localhost:3001',
+          authToken: 'auth-token',
+          appEnv: 'test',
+          setRuntimeEnv: vi.fn(),
+        } as never,
+      });
+
+      const manager = harnessManagerInstances[0]!;
+      const settledListener = onSettled.mock.calls[0]?.[0];
+
+      return { manager, settledListener };
+    };
+
+    const environmentSetupNoticeCalls = (manager: FakeHarnessManager) =>
+      manager.sendFollowUpPrompt.mock.calls.filter(
+        (call) => call[0]?.source === 'environment-setup',
+      );
+
+    it('injects a settled notice once the runtime task has started', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      expect(settledListener).toBeDefined();
+
+      // Settling before taskStarted must not race the initial prompt.
+      settledListener!({ status: 'fulfilled', warningMessages: [] });
+      expect(environmentSetupNoticeCalls(manager)).toHaveLength(0);
+
+      manager.emit('taskStateEvent', 'taskStarted');
+
+      const noticeCalls = environmentSetupNoticeCalls(manager);
+
+      expect(noticeCalls).toHaveLength(1);
+      expect(noticeCalls[0]![0]).toMatchObject({
+        visibleInTranscript: false,
+        source: 'environment-setup',
+      });
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'Environment setup update: background environment setup (repository setup commands and Docker projects) finished successfully.',
+      );
     });
 
-    const manager = harnessManagerInstances[0]!;
+    it('holds the settled notice while a question is pending and delivers it when the phase returns to running', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
 
-    expect(onSettled).not.toHaveBeenCalled();
-    expect(manager.sendFollowUpPrompt).not.toHaveBeenCalledWith(
-      expect.objectContaining({ source: 'environment-setup' }),
-    );
-    expect(
-      manager.sendFollowUpPrompt.mock.calls.some((call) => {
-        const prompt = call[0]?.prompt;
+      manager.emit('taskStateEvent', 'taskStarted');
+      manager.getStatus.mockReturnValue({
+        isConnected: true,
+        phase: 'waiting_for_user_input',
+        sessionId: undefined,
+      });
+      settledListener!({
+        status: 'fulfilled',
+        warningMessages: ['Dev server never became ready'],
+      });
 
-        return (
-          typeof prompt === 'string' &&
-          prompt.includes('Environment setup update:')
-        );
-      }),
-    ).toBe(false);
+      expect(environmentSetupNoticeCalls(manager)).toHaveLength(0);
+
+      manager.getStatus.mockReturnValue({
+        isConnected: true,
+        phase: 'running',
+        sessionId: undefined,
+      });
+      manager.emit('stateChange', 'running', {});
+
+      const noticeCalls = environmentSetupNoticeCalls(manager);
+
+      expect(noticeCalls).toHaveLength(1);
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'Dev server never became ready',
+      );
+
+      // Later phase changes must not re-deliver the consumed notice.
+      manager.emit('stateChange', 'running', {});
+      expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+    });
+
+    it('drops the settled notice when the task is stopped', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      manager.getStatus.mockReturnValue({
+        isConnected: true,
+        phase: 'stopped',
+        sessionId: undefined,
+      });
+      settledListener!({ status: 'fulfilled', warningMessages: [] });
+
+      expect(environmentSetupNoticeCalls(manager)).toHaveLength(0);
+
+      // Even if the task later runs again, the stale notice stays dropped.
+      manager.getStatus.mockReturnValue({
+        isConnected: true,
+        phase: 'running',
+        sessionId: undefined,
+      });
+      manager.emit('stateChange', 'running', {});
+      expect(environmentSetupNoticeCalls(manager)).toHaveLength(0);
+    });
+
+    it('wakes a task that went idle while setup was still running with an idle-aware notice', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      manager.getStatus.mockReturnValue({
+        isConnected: true,
+        phase: 'waiting_for_prompt',
+        sessionId: undefined,
+      });
+      settledListener!({
+        status: 'fulfilled',
+        warningMessages: ['Dev server never became ready'],
+      });
+
+      const noticeCalls = environmentSetupNoticeCalls(manager);
+
+      expect(noticeCalls).toHaveLength(1);
+      expect(noticeCalls[0]![0]).toMatchObject({
+        visibleInTranscript: false,
+        source: 'environment-setup',
+      });
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'Dev server never became ready',
+      );
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'Your previous turn ended while this environment setup was still running.',
+      );
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'end this turn immediately without calling any tools',
+      );
+
+      // The wake consumes the outcome; later phase changes must not re-send.
+      manager.getStatus.mockReturnValue({
+        isConnected: true,
+        phase: 'running',
+        sessionId: undefined,
+      });
+      manager.emit('stateChange', 'running', {});
+      expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+    });
+
+    it('does not use the idle wake wording for a task that is actively running', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      settledListener!({ status: 'fulfilled', warningMessages: [] });
+
+      const noticeCalls = environmentSetupNoticeCalls(manager);
+
+      expect(noticeCalls).toHaveLength(1);
+      expect(noticeCalls[0]![0].prompt).not.toContain(
+        'Your previous turn ended',
+      );
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'Continue with the user request',
+      );
+    });
+
+    it('reports a rejected background setup with the error message', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      settledListener!({
+        status: 'rejected',
+        errorMessage: 'setup exploded',
+      });
+
+      const noticeCalls = environmentSetupNoticeCalls(manager);
+
+      expect(noticeCalls).toHaveLength(1);
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'background environment setup failed unexpectedly',
+      );
+      expect(noticeCalls[0]![0].prompt).toContain('setup exploded');
+    });
   });
 
   it('coerces an explicit legacy direct harness into the sandbox server', async () => {

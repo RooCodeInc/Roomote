@@ -52,6 +52,8 @@ const MODEL_PROVIDER_DOC_PATHS: Partial<
 > = {
   'amazon-bedrock': 'providers/inference/amazon-bedrock',
   anthropic: 'providers/inference/anthropic',
+  azure: 'providers/inference/azure-openai',
+  'azure-cognitive-services': 'providers/inference/azure-foundry',
   baseten: 'providers/inference/baseten',
   chatgpt: 'providers/inference/chatgpt',
   'github-copilot': 'providers/inference/github-copilot',

@@ -6,7 +6,76 @@ import { TASK_TIMEOUT_MS } from '@roomote/types';
 import { TaskRunQueue, type TaskRunQueueEntry } from '../task-run-queue';
 
 const QUEUE_KEY = 'queue:cloud-jobs:v2';
-const LEGACY_QUEUE_KEY = 'queue:cloud-jobs';
+const SCOPES_KEY = 'queue:cloud-jobs:v2:scopes';
+const ENTRIES_KEY = 'queue:cloud-jobs:v2:entries';
+const ENTRY_SCOPES_KEY = 'queue:cloud-jobs:v2:entry-scopes';
+
+// Keep copies of the pre-change scripts here to prove a controller or producer
+// from the previous release honors delays created by the new implementation.
+const PREVIOUS_V2_ENQUEUE_SCRIPT = `
+local incomingId = ARGV[1]
+local incomingScope = ARGV[2]
+local incomingRaw = ARGV[3]
+local existingId = redis.call('HGET', KEYS[2], incomingScope)
+local evictedId = ''
+
+if existingId then
+  redis.call('LREM', KEYS[1], 0, existingId)
+
+  if existingId ~= incomingId then
+    evictedId = existingId
+    redis.call('HDEL', KEYS[3], existingId)
+    redis.call('HDEL', KEYS[4], existingId)
+  end
+end
+
+redis.call('HSET', KEYS[2], incomingScope, incomingId)
+redis.call('HSET', KEYS[3], incomingId, incomingRaw)
+redis.call('HSET', KEYS[4], incomingId, incomingScope)
+redis.call('RPUSH', KEYS[1], incomingId)
+
+return evictedId
+`;
+
+const PREVIOUS_V2_DEQUEUE_SCRIPT = `
+local queueLength = redis.call('LLEN', KEYS[1])
+local lockTtlSeconds = tonumber(ARGV[1])
+
+for _ = 1, queueLength do
+  local entryId = redis.call('LPOP', KEYS[1])
+
+  if entryId then
+    local rawValue = redis.call('HGET', KEYS[3], entryId)
+    local entryScope = redis.call('HGET', KEYS[4], entryId)
+
+    if rawValue and entryScope then
+      local acquired = redis.call(
+        'SET',
+        entryScope,
+        entryId,
+        'EX',
+        lockTtlSeconds,
+        'NX'
+      )
+
+      if acquired then
+        redis.call('HDEL', KEYS[3], entryId)
+        redis.call('HDEL', KEYS[4], entryId)
+
+        if redis.call('HGET', KEYS[2], entryScope) == entryId then
+          redis.call('HDEL', KEYS[2], entryScope)
+        end
+
+        return rawValue
+      end
+
+      redis.call('RPUSH', KEYS[1], entryId)
+    end
+  end
+end
+
+return nil
+`;
 
 function createMockRedis() {
   return new Redis();
@@ -97,6 +166,59 @@ describe('TaskRunQueue - Basic Operations', () => {
       expect(result).toBeNull();
     });
 
+    it('leaves delayed entries queued while dequeuing ready work behind them', async () => {
+      const delayed = {
+        ...createTestEntry(1, 'delayed-scope'),
+        availableAt: Date.now() + 60_000,
+      };
+      const ready = createTestEntry(2, 'ready-scope');
+      await queue.enqueue(delayed);
+      await queue.enqueue(ready);
+
+      await expect(queue.dequeue(false)).resolves.toEqual(ready);
+      await expect(queue.dequeue(false)).resolves.toBeNull();
+      await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
+
+      const nowReady = { ...delayed, availableAt: Date.now() - 1 };
+      await queue.enqueue(nowReady);
+      await expect(queue.dequeue(false)).resolves.toEqual(nowReady);
+    });
+
+    it('resets a delayed scope to the newest debounce deadline', async () => {
+      const scope = 'debounced-scope';
+      const older = {
+        ...createTestEntry(1, scope),
+        availableAt: Date.now() - 1,
+      };
+      const newer = {
+        ...createTestEntry(2, scope),
+        availableAt: Date.now() + 60_000,
+      };
+
+      await queue.enqueue(older);
+      await expect(queue.enqueue(newer)).resolves.toEqual([
+        { id: older.id, scope },
+      ]);
+      await expect(queue.dequeue(false)).resolves.toBeNull();
+      await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
+    });
+
+    it('preserves the existing entry when the incoming run requests first-wins semantics', async () => {
+      const scope = 'first-wins-scope';
+      const existing = createTestEntry(1, scope);
+      const incoming = {
+        ...createTestEntry(2, scope),
+        preserveExisting: true,
+      };
+
+      await queue.enqueue(existing);
+      await expect(queue.enqueue(incoming)).resolves.toEqual([
+        { id: incoming.id, scope },
+      ]);
+      await expect(queue.dequeue(false)).resolves.toEqual(existing);
+      await expect(queue.dequeue(false)).resolves.toBeNull();
+    });
+
     it('should handle multiple enqueue/dequeue cycles', async () => {
       // Cycle 1
       await queue.enqueue(createTestEntry(1, 'scope-1'));
@@ -130,21 +252,55 @@ describe('TaskRunQueue - Rolling Deploy Compatibility', () => {
     await redis.flushall();
   });
 
-  it('drains entries written using the legacy queue layout', async () => {
-    const entry = createTestEntry(41, 'legacy-scope');
-    await redis.rpush(LEGACY_QUEUE_KEY, JSON.stringify(entry));
+  it('uses the shared scope lock to keep delayed work from old v2 consumers', async () => {
+    const delayed = {
+      ...createTestEntry(43, 'shared-v2-scope'),
+      availableAt: Date.now() + 60_000,
+    };
+    await queue.enqueue(delayed);
 
-    await expect(queue.dequeue(false)).resolves.toEqual(entry);
+    const oldConsumerResult = await redis.eval(
+      PREVIOUS_V2_DEQUEUE_SCRIPT,
+      4,
+      QUEUE_KEY,
+      SCOPES_KEY,
+      ENTRIES_KEY,
+      ENTRY_SCOPES_KEY,
+      Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
+    );
+
+    expect(oldConsumerResult).toBeUndefined();
+    await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
   });
 
-  it('evicts a legacy entry when a newer run uses the same scope', async () => {
-    const older = createTestEntry(41, 'shared-scope');
-    await redis.rpush(LEGACY_QUEUE_KEY, JSON.stringify(older));
+  it('keeps the delay when an old v2 producer replaces the queued entry', async () => {
+    const first = {
+      ...createTestEntry(44, 'shared-v2-scope'),
+      availableAt: Date.now() + 60_000,
+    };
+    const replacement = createTestEntry(45, first.scope);
+    await queue.enqueue(first);
 
     await expect(
-      queue.enqueue(createTestEntry(42, 'shared-scope')),
-    ).resolves.toEqual([older]);
-    await expect(redis.llen(LEGACY_QUEUE_KEY)).resolves.toBe(0);
+      redis.eval(
+        PREVIOUS_V2_ENQUEUE_SCRIPT,
+        4,
+        QUEUE_KEY,
+        SCOPES_KEY,
+        ENTRIES_KEY,
+        ENTRY_SCOPES_KEY,
+        replacement.id.toString(),
+        replacement.scope,
+        JSON.stringify(replacement),
+      ),
+    ).resolves.toBe(first.id.toString());
+
+    await expect(queue.dequeue(false)).resolves.toBeNull();
+    await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
+
+    await redis.del(first.scope);
+    await expect(queue.dequeue(false)).resolves.toEqual(replacement);
+    await expect(queue.dequeue(false)).resolves.toBeNull();
   });
 });
 

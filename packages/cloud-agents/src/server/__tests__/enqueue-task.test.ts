@@ -48,7 +48,9 @@ import {
   enqueueTaskRelaunch,
   DeploymentReadOnlyError,
   persistEarlyGeneratedTaskTitle,
+  PR_REVIEW_SYNC_DEBOUNCE_MS,
   resolveFreshTaskComputeProvider,
+  resolvePrReviewQueuePolicy,
   resolveQueueScope,
   shouldCaptureActivationTaskCreatedEvent,
   shouldCaptureTaskCreatedEvent,
@@ -1354,6 +1356,35 @@ describe('pr_review queue scope dedup', () => {
     expect(second).toBe('acme/widgets:42');
   });
 
+  it('debounces GitHub commit re-reviews without changing other launches', () => {
+    const now = 1_000_000;
+
+    expect(
+      resolvePrReviewQueuePolicy({
+        payloadKind: TaskPayloadKind.GithubPrReviewSync,
+        sourceControlProvider: 'github',
+        now,
+      }),
+    ).toEqual({
+      availableAt: now + PR_REVIEW_SYNC_DEBOUNCE_MS,
+      preserveExisting: true,
+    });
+    expect(
+      resolvePrReviewQueuePolicy({
+        payloadKind: TaskPayloadKind.GithubPrReview,
+        sourceControlProvider: 'github',
+        now,
+      }),
+    ).toEqual({});
+    expect(
+      resolvePrReviewQueuePolicy({
+        payloadKind: TaskPayloadKind.GithubPrReviewSync,
+        sourceControlProvider: 'gitlab',
+        now,
+      }),
+    ).toEqual({});
+  });
+
   it('gives non-pr-review launches unique scopes', () => {
     const one = resolveQueueScope({
       workflow: 'standard',
@@ -1447,5 +1478,107 @@ describe('pr_review queue scope dedup', () => {
     const queued = await TaskRunQueue.getInstance().dequeue(false);
     expect(queued).toEqual({ id: newer.id, scope });
     await TaskRunQueue.getInstance().releaseLock(scope, newer.id);
+  });
+
+  it('keeps the first queued re-review and cancels only a racing incoming run', async () => {
+    const uniquePrNumber = 424_243;
+    const linkage = {
+      provider: 'github' as const,
+      repository: 'acme/queue-first-wins',
+      prNumber: uniquePrNumber,
+      prUrl: `https://github.com/acme/queue-first-wins/pull/${uniquePrNumber}`,
+    };
+    const makeInput = (headSha: string): FreshTaskLaunch => ({
+      task: {
+        type: TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: linkage.repository,
+          prNumber: linkage.prNumber,
+          prTitle: 'First-wins re-review',
+          prUrl: linkage.prUrl,
+          headSha,
+        },
+      },
+      initiator: { kind: 'automation', key: 'review_code' },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'webhook',
+      prLinkage: linkage,
+    });
+
+    const existing = await enqueueTask(makeInput('a'.repeat(40)), {
+      skipEarlyTitleGeneration: true,
+    });
+    const incoming = await enqueueTask(makeInput('b'.repeat(40)), {
+      skipEarlyTitleGeneration: true,
+    });
+    createdTaskIds.push(existing.taskId, incoming.taskId);
+
+    const persistedRuns = await db.query.taskRuns.findMany({
+      where: inArray(taskRuns.id, [existing.id, incoming.id]),
+    });
+
+    expect(persistedRuns.find((run) => run.id === existing.id)?.status).toBe(
+      RunStatus.Pending,
+    );
+    expect(persistedRuns.find((run) => run.id === incoming.id)?.status).toBe(
+      RunStatus.Canceled,
+    );
+  });
+
+  it('keeps non-GitHub re-reviews immediate and replaces a stale queued head', async () => {
+    const uniquePrNumber = 424_244;
+    const linkage = {
+      provider: 'gitlab' as const,
+      repository: 'acme/gitlab-last-wins',
+      prNumber: uniquePrNumber,
+      prUrl: `https://gitlab.example.com/acme/gitlab-last-wins/-/merge_requests/${uniquePrNumber}`,
+    };
+    const makeInput = (headSha: string): FreshTaskLaunch => ({
+      task: {
+        type: TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: linkage.repository,
+          sourceControlProvider: 'gitlab',
+          prNumber: linkage.prNumber,
+          prTitle: 'GitLab last-wins re-review',
+          prUrl: linkage.prUrl,
+          headSha,
+        },
+      },
+      initiator: { kind: 'automation', key: 'review_code' },
+      workflow: 'pr_review',
+      surface: 'gitlab',
+      trigger: 'webhook',
+      prLinkage: linkage,
+    });
+
+    const stale = await enqueueTask(makeInput('a'.repeat(40)), {
+      skipEarlyTitleGeneration: true,
+    });
+    const current = await enqueueTask(makeInput('b'.repeat(40)), {
+      skipEarlyTitleGeneration: true,
+    });
+    createdTaskIds.push(stale.taskId, current.taskId);
+
+    const persistedRuns = await db.query.taskRuns.findMany({
+      where: inArray(taskRuns.id, [stale.id, current.id]),
+    });
+
+    expect(persistedRuns.find((run) => run.id === stale.id)?.status).toBe(
+      RunStatus.Canceled,
+    );
+    expect(persistedRuns.find((run) => run.id === current.id)?.status).toBe(
+      RunStatus.Pending,
+    );
+
+    const queued = await TaskRunQueue.getInstance().dequeue(false);
+    expect(queued).toEqual({
+      id: current.id,
+      scope: `${linkage.repository}:${linkage.prNumber}`,
+    });
+    await TaskRunQueue.getInstance().releaseLock(queued!.scope, current.id);
   });
 });

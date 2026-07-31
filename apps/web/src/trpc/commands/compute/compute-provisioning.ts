@@ -12,9 +12,11 @@ import { queuePersistedTaskRun } from '@roomote/cloud-agents/server';
 import {
   buildBlaxelWorkerImage,
   buildE2bWorkerTemplate,
+  deriveAzureWorkerDiskImageName,
   deriveBlaxelWorkerImageName,
   deriveDaytonaWorkerSnapshotName,
   deriveE2bWorkerTemplateRef,
+  registerAzureDiskImage,
   registerDaytonaWorkerSnapshot,
 } from '@roomote/compute-providers';
 import {
@@ -136,6 +138,73 @@ const PROVISIONING_PROVIDERS: Record<
       });
 
       return { artifactRef: built.imageRef };
+    },
+  },
+  azure: {
+    envVarName: 'AZURE_SANDBOX_DISK_IMAGE',
+    deriveArtifactRef: deriveAzureWorkerDiskImageName,
+    provision: async ({ resolvedEnv, imageRef, templateRef }) => {
+      const subscriptionId = resolvedEnv.AZURE_SUBSCRIPTION_ID;
+      const resourceGroup = resolvedEnv.AZURE_RESOURCE_GROUP;
+      const sandboxGroup = resolvedEnv.AZURE_SANDBOX_GROUP;
+      const region = resolvedEnv.AZURE_SANDBOX_REGION;
+
+      if (!subscriptionId) {
+        throw new Error('AZURE_SUBSCRIPTION_ID is not configured');
+      }
+      if (!resourceGroup) {
+        throw new Error('AZURE_RESOURCE_GROUP is not configured');
+      }
+      if (!sandboxGroup) {
+        throw new Error('AZURE_SANDBOX_GROUP is not configured');
+      }
+      if (!region) {
+        throw new Error('AZURE_SANDBOX_REGION is not configured');
+      }
+
+      // Private registries need pull credentials for the bake (GHCR: the
+      // token owner's GitHub username + a PAT with read:packages).
+      const registryUsername = resolvedEnv.AZURE_SANDBOX_REGISTRY_USERNAME;
+      const registryToken = resolvedEnv.AZURE_SANDBOX_REGISTRY_TOKEN;
+      if (
+        (registryUsername && !registryToken) ||
+        (!registryUsername && registryToken)
+      ) {
+        throw new Error(
+          'AZURE_SANDBOX_REGISTRY_USERNAME and AZURE_SANDBOX_REGISTRY_TOKEN must be set together',
+        );
+      }
+
+      const spTenantId = resolvedEnv.AZURE_TENANT_ID;
+      const spClientId = resolvedEnv.AZURE_CLIENT_ID;
+      const spClientSecret = resolvedEnv.AZURE_CLIENT_SECRET;
+      const registered = await registerAzureDiskImage({
+        subscriptionId,
+        resourceGroup,
+        sandboxGroup,
+        region,
+        ...(spTenantId && spClientId && spClientSecret
+          ? {
+              servicePrincipal: {
+                tenantId: spTenantId,
+                clientId: spClientId,
+                clientSecret: spClientSecret,
+              },
+            }
+          : { managedIdentityClientId: resolvedEnv.AZURE_CLIENT_ID }),
+        ...(registryUsername && registryToken
+          ? {
+              registryCredentials: {
+                username: registryUsername,
+                token: registryToken,
+              },
+            }
+          : {}),
+        imageRef,
+        name: templateRef,
+      });
+
+      return { artifactRef: registered.diskImageId };
     },
   },
 };

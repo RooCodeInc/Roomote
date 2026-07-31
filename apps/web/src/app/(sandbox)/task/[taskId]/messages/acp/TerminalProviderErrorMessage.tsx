@@ -15,20 +15,20 @@ export function TerminalProviderErrorMessage({
 
   return (
     <div
-      className="flex items-start gap-2 py-1 text-sm text-destructive"
+      className="min-w-0 text-sm text-destructive"
       data-testid="terminal-provider-error"
       role="alert"
     >
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 items-center gap-2 py-1">
+        <AlertTriangle className="size-3 shrink-0" />
         <p className="font-medium">Provider error</p>
-        <p
-          className="text-foreground whitespace-pre-wrap wrap-break-word"
-          data-testid="terminal-provider-error-summary"
-        >
-          {error.errorSummary}
-        </p>
       </div>
+      <p
+        className="ml-5 text-foreground whitespace-pre-wrap wrap-break-word"
+        data-testid="terminal-provider-error-summary"
+      >
+        {error.errorSummary}
+      </p>
     </div>
   );
 }

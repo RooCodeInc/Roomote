@@ -5,9 +5,8 @@ import {
   prepareLocalArtifactUpload,
   uploadPreparedArtifact,
 } from './local-file-upload.js';
-import { replyToChatWithVisualProof } from './chat-proof-auto-post.js';
 import { errorResult, successResult, catchError } from './tool-result.js';
-import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
+import type { ArtifactConfig, ToolResult } from './types.js';
 
 type ManageArtifactsUploadType = Extract<
   TaskArtifactType,
@@ -22,7 +21,6 @@ export async function handleUpload(
     deleteAfterUpload?: boolean;
   },
   config: ArtifactConfig,
-  roomoteConfig?: RoomoteConfig | null,
 ): Promise<ToolResult> {
   try {
     if (!config.workspacePath) {
@@ -38,20 +36,6 @@ export async function handleUpload(
       artifactType: input.artifactType,
       preparedArtifact,
     });
-    const isImageArtifact = preparedArtifact.contentType.startsWith('image/');
-    const slackProofText = isImageArtifact
-      ? undefined
-      : `[Open artifact](${result.viewUrl})`;
-    const slackAutoPosted =
-      result.artifactType === 'visual-proof'
-        ? await replyToChatWithVisualProof({
-            roomoteConfig,
-            text: slackProofText,
-            imageArtifactIds: isImageArtifact ? [result.artifactId] : [],
-            logContext: 'manage_artifacts',
-          })
-        : undefined;
-
     // Delete the source file after successful upload if requested
     if (input.deleteAfterUpload) {
       await deletePreparedLocalArtifact(preparedArtifact);
@@ -62,7 +46,6 @@ export async function handleUpload(
       artifactType: result.artifactType,
       viewUrl: result.viewUrl,
       ...(result.rawUrl && { rawUrl: result.rawUrl }),
-      ...(slackAutoPosted !== undefined && { slackAutoPosted }),
       ...(input.deleteAfterUpload && { deleted: true }),
     });
   } catch (error) {

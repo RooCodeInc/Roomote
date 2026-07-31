@@ -78,6 +78,9 @@ vi.mock('@/trpc/client', () => ({
       disconnect: {
         mutationOptions: () => ({ mutationKey: ['disconnect'] }),
       },
+      updateFastMode: {
+        mutationOptions: () => ({ mutationKey: ['updateFastMode'] }),
+      },
       startDeviceAuth: {
         mutationOptions: () => ({ mutationKey: ['startDeviceAuth'] }),
       },
@@ -429,6 +432,29 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.queryByRole('button', { name: /Connect ChatGPT/ }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', { name: 'ChatGPT fast mode' }),
+    ).not.toBeChecked();
+  });
+
+  it('updates fast mode from the connected ChatGPT provider row', async () => {
+    providerSetupData.current = buildProviderSetup({ chatgptConnected: true });
+    chatgptStatusData.current = {
+      connected: true,
+      status: 'connected',
+      fastMode: false,
+    };
+    mutateAsyncMock.mockResolvedValue({ success: true });
+
+    renderInferenceProviderSection();
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('switch', { name: 'ChatGPT fast mode' }),
+      );
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledWith({ fastMode: true });
   });
 
   it('shows a usage line under a connected subscription row', () => {

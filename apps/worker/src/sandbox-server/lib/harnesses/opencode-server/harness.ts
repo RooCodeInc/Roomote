@@ -64,7 +64,6 @@ import {
   resolveWorkflowSkillTransition,
 } from './workflow-skill-transition';
 import {
-  DEFAULT_OPENCODE_STEER_PICKUP_TIMEOUT_MS,
   DEFAULT_OPENCODE_TURN_STALL_TIMEOUT_MS,
   OpenCodeStallWatchdogs,
   formatOpenCodeTurnStallErrorText,
@@ -118,7 +117,6 @@ interface OpenCodeServerHarnessOptions {
   executeToolProgressInitialDelayMs?: number;
   executeToolProgressIntervalMs?: number;
   stopHookReminderStallTimeoutMs?: number;
-  steerPickupTimeoutMs?: number;
   turnStallTimeoutMs?: number;
   subagentSettlementGraceMs?: number;
   queuedPromptRetryDelayMs?: number;
@@ -1574,6 +1572,8 @@ export class OpenCodeServerHarness
   private sessionId: string | undefined;
   private resumedSessionPendingValidation = false;
   private inFlight = false;
+  private nativeSteerSubmissionsInFlight = 0;
+  private recoveringWedgedTurn = false;
   /**
    * Set when CancelTask arrives before any OpenCode session id exists. A
    * later-successful createSession must abort that session instead of starting
@@ -1700,9 +1700,6 @@ export class OpenCodeServerHarness
       emitRuntimeOutput: (event) => this.emit('runtimeOutput', event),
     });
     this.stallWatchdogs = new OpenCodeStallWatchdogs({
-      steerPickupTimeoutMs:
-        options.steerPickupTimeoutMs ??
-        DEFAULT_OPENCODE_STEER_PICKUP_TIMEOUT_MS,
       turnStallTimeoutMs:
         options.turnStallTimeoutMs ?? DEFAULT_OPENCODE_TURN_STALL_TIMEOUT_MS,
       logger: this.logger,
@@ -1712,7 +1709,8 @@ export class OpenCodeServerHarness
       hasDeferringActivity: () =>
         this.pendingUserInputRequests.size > 0 ||
         this.activeExecuteToolProgress.size > 0 ||
-        this.activeSubagentWatchdogs.size > 0,
+        this.activeSubagentWatchdogs.size > 0 ||
+        this.nativeSteerSubmissionsInFlight > 0,
       verifyNoRunningTool: async (sessionId) => {
         try {
           const messages = await this.client.messages({
@@ -1742,11 +1740,8 @@ export class OpenCodeServerHarness
           return 'unverified';
         }
       },
-      onSteerPickupStall: async (pending) => {
-        await this.handleSteerPickupStall(pending);
-      },
-      onTurnStalled: async (sessionId) => {
-        await this.recoverWedgedTurn(sessionId);
+      onTurnStalled: async (sessionId, pendingSteers) => {
+        await this.recoverWedgedTurn(sessionId, pendingSteers);
       },
     });
   }
@@ -2189,12 +2184,14 @@ export class OpenCodeServerHarness
       // follow-up doesn't skip ahead of the automatic retry.
       if (
         this.inFlight &&
+        !this.recoveringWedgedTurn &&
         command.data.autoSteerWhenQueued &&
         !command.data.queueOnly &&
         this.sessionId &&
         this.pendingUserInputRequests.size === 0
       ) {
         const steerSessionId = this.sessionId;
+        this.nativeSteerSubmissionsInFlight += 1;
 
         try {
           await this.submitPrompt({ ...command.data, text });
@@ -2203,11 +2200,10 @@ export class OpenCodeServerHarness
             ...command.data,
             text,
           });
-          // Injection succeeding does not mean delivery: OpenCode only reads
-          // injected prompts between loop steps, and a turn stalled inside a
-          // single LLM stream request never reaches one. Watch for turn
-          // progress and escalate to abort-and-replay if none arrives.
-          this.stallWatchdogs.armSteerPickup({
+          // Trust native pickup between loop steps. Retain the steer only so
+          // verified whole-turn stall recovery can replay it if the current
+          // model stream never reaches another boundary.
+          this.stallWatchdogs.trackNativeSteer({
             text,
             ...(command.data.images ? { images: command.data.images } : {}),
             ...(command.data.userId ? { userId: command.data.userId } : {}),
@@ -2225,6 +2221,8 @@ export class OpenCodeServerHarness
               error instanceof Error ? error.message : String(error)
             }`,
           );
+        } finally {
+          this.nativeSteerSubmissionsInFlight -= 1;
         }
       }
 
@@ -2252,6 +2250,10 @@ export class OpenCodeServerHarness
           !this.isProviderRateLimitBackoffPending() &&
           this.providerErrorRecoveryQueuedPromptId === null
         ) {
+          if (this.recoveringWedgedTurn) {
+            return;
+          }
+
           await this.interruptForQueuedReplay();
         }
       }
@@ -4669,29 +4671,6 @@ export class OpenCodeServerHarness
   }
 
   /**
-   * Host side of a steer-pickup stall: queue each steer's content invisibly,
-   * front-load it, and interrupt for abort-and-replay. The coordinator already
-   * logged the stall and filtered disposed/empty/non-in-flight cases.
-   */
-  private async handleSteerPickupStall(
-    pending: PendingSteerPickup[],
-  ): Promise<void> {
-    const queuedIds = pending.map((steer) =>
-      this.prompts.enqueue({
-        ...steer,
-        visibleInTranscript: false,
-      }),
-    );
-
-    // Front-load the replayed steers while preserving their send order.
-    for (const queuedId of [...queuedIds].reverse()) {
-      this.prompts.prioritize(queuedId);
-    }
-
-    await this.interruptForQueuedReplay();
-  }
-
-  /**
    * Terminal recovery for a wedged turn, mirroring handleSessionError's
    * teardown around an intentional abort: stop the stuck request
    * (suppressing the MessageAbortedError the abort provokes), keep the
@@ -4700,47 +4679,67 @@ export class OpenCodeServerHarness
    * nothing queued — abort the task so it reaches a terminal, retryable
    * state instead of hanging until the sandbox deadline.
    */
-  private async recoverWedgedTurn(sessionId: string): Promise<void> {
+  private async recoverWedgedTurn(
+    sessionId: string,
+    pendingSteers: PendingSteerPickup[],
+  ): Promise<void> {
+    this.recoveringWedgedTurn = true;
     const stallTimeoutMs = this.stallWatchdogs.turnStallTimeoutMsValue;
 
-    this.logger.error(
-      `OpenCode turn produced no session events for ${stallTimeoutMs}ms with no tool running; treating the session as wedged and aborting the turn sessionId=${sessionId}`,
-    );
-
-    this.armReplayAbortErrorSuppression();
-
     try {
-      await this.client.abort({
-        sessionId,
-        signal: this.eventAbortController.signal,
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Failed to abort wedged OpenCode session ${sessionId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+      this.logger.error(
+        `OpenCode turn produced no session events for ${stallTimeoutMs}ms with no tool running; treating the session as wedged and aborting the turn sessionId=${sessionId}`,
       );
+
+      const queuedSteerIds = pendingSteers.map((steer) =>
+        this.prompts.enqueue({
+          ...steer,
+          visibleInTranscript: false,
+        }),
+      );
+
+      // Front-load replayed steers while preserving their send order.
+      for (const queuedId of [...queuedSteerIds].reverse()) {
+        this.prompts.prioritize(queuedId);
+      }
+
+      this.armReplayAbortErrorSuppression();
+
+      try {
+        await this.client.abort({
+          sessionId,
+          signal: this.eventAbortController.signal,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Failed to abort wedged OpenCode session ${sessionId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+
+      // Keep whatever partial output the wedged turn streamed, ordered before
+      // the stall notice, and drop the trailing finalize/part events the abort
+      // provokes for the dead message.
+      await this.flushAssistantMessageForCancel(sessionId);
+      this.suppressAssistantOutputUntilNextPrompt = true;
+      this.runtimeEvents.assistantMessage({
+        sessionId,
+        text: formatOpenCodeTurnStallErrorText(stallTimeoutMs),
+      });
+      this.inFlight = false;
+      this.finalizedAssistantTurn = null;
+      this.clearAllExecuteToolProgress();
+
+      if (this.prompts.hasQueuedMessages()) {
+        await this.drainQueuedPrompts();
+        return;
+      }
+
+      this.runtimeEvents.taskAborted(sessionId);
+    } finally {
+      this.recoveringWedgedTurn = false;
     }
-
-    // Keep whatever partial output the wedged turn streamed, ordered before
-    // the stall notice, and drop the trailing finalize/part events the abort
-    // provokes for the dead message.
-    await this.flushAssistantMessageForCancel(sessionId);
-    this.suppressAssistantOutputUntilNextPrompt = true;
-    this.runtimeEvents.assistantMessage({
-      sessionId,
-      text: formatOpenCodeTurnStallErrorText(stallTimeoutMs),
-    });
-    this.inFlight = false;
-    this.finalizedAssistantTurn = null;
-    this.clearAllExecuteToolProgress();
-
-    if (this.prompts.hasQueuedMessages()) {
-      await this.drainQueuedPrompts();
-      return;
-    }
-
-    this.runtimeEvents.taskAborted(sessionId);
   }
 
   private async finalizeAssistantMessage(

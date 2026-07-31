@@ -52,6 +52,12 @@ describe('normalizeTaskModelId', () => {
       'anthropic/claude-sonnet-4',
     );
     expect(normalizeTaskModelId('openai/gpt-5.4')).toBe('openai/gpt-5.4');
+    expect(normalizeTaskModelId('azure/gpt-5.6-terra')).toBe(
+      'azure/gpt-5.6-terra',
+    );
+    expect(normalizeTaskModelId('azure-cognitive-services/gpt-5.6-terra')).toBe(
+      'azure-cognitive-services/gpt-5.6-terra',
+    );
     expect(normalizeTaskModelId('vercel/openai/gpt-5.4')).toBe(
       'vercel/openai/gpt-5.4',
     );

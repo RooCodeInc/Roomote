@@ -12,6 +12,7 @@ import { desc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { slackInstallations, teamsInstallations } from '../schema';
 import { resolveDiscordRuntimeCredentials } from './discord-runtime-credentials';
+import { getDeploymentGitHubRoomoteMentionEnabled } from './github-mention-settings';
 import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
 import { resolveTelegramRuntimeCredentials } from './telegram-runtime-credentials';
 
@@ -33,6 +34,7 @@ export async function resolveInvocationIdentities(): Promise<
     teamsInstallation,
     telegramCredentials,
     discordCredentials,
+    githubRoomoteMentionEnabled,
   ] = await Promise.all([
     db.query.slackInstallations.findFirst({
       where: eq(slackInstallations.isActive, true),
@@ -52,6 +54,7 @@ export async function resolveInvocationIdentities(): Promise<
     }),
     resolveTelegramRuntimeCredentials(),
     resolveDiscordRuntimeCredentials(),
+    getDeploymentGitHubRoomoteMentionEnabled(),
   ]);
 
   const githubSlug = readConfiguredValue(
@@ -83,7 +86,7 @@ export async function resolveInvocationIdentities(): Promise<
       username: discordCredentials.botUsername,
       displayName: discordCredentials.botDisplayName,
     }),
-    buildGitHubInvocationIdentity(githubSlug),
+    buildGitHubInvocationIdentity(githubSlug, githubRoomoteMentionEnabled),
     buildGenericInvocationIdentity('linear', 'Linear'),
     buildGenericInvocationIdentity('gitlab', 'GitLab'),
     buildGenericInvocationIdentity('gitea', 'Gitea'),
