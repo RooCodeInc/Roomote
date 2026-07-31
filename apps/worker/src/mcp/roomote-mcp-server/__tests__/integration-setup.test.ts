@@ -90,7 +90,7 @@ describe('integration setup guide', () => {
       'That admin connects Resend once for the workspace via OAuth.',
     );
     expect(INTEGRATION_SETUP_CONTENT).toContain(
-      'Email sending, scheduled-send changes, automation mutations and triggers, and contact mutations are disabled',
+      'Email sending, credential creation, scheduled-send changes, automation mutations and triggers, and contact mutations are disabled',
     );
   });
 });

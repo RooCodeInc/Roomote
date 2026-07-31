@@ -292,6 +292,10 @@ export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
   'create-automation',
   'update-automation',
   'send-event',
+  'create-api-key',
+  'create-contact-property',
+  'update-contact-property',
+  'remove-contact-property',
 ] as const;
 
 export const MCP_INTEGRATIONS: McpIntegration[] = [
@@ -445,7 +449,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     id: 'resend',
     name: 'Resend',
     url: 'https://mcp.resend.com/mcp',
-    description: `Inspect and manage shared email infrastructure through Resend from ${PRODUCT_NAME} tasks. Sending, automation triggers, and contact mutations start disabled.`,
+    description: `Inspect and manage shared email infrastructure through Resend from ${PRODUCT_NAME} tasks. Sending, credential creation, automation triggers, and contact mutations start disabled.`,
     icon: 'resend',
     connectionScope: 'deployment',
     connectionMode: 'oauth',
@@ -453,7 +457,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     oauthScopes: ['full_access'],
     defaultDisabledTools: [...RESEND_DEFAULT_DISABLED_TOOL_NAMES],
     instructions:
-      'Use Resend to inspect email delivery, received messages, domains, contacts, templates, broadcasts, and related infrastructure. Email sending, scheduled-send changes, automation mutations and triggers, and contact mutations are disabled until a deployment admin explicitly enables those tools.',
+      'Use Resend to inspect email delivery, received messages, domains, contacts, templates, broadcasts, and related infrastructure. Email sending, credential creation, scheduled-send changes, automation mutations and triggers, and contact mutations are disabled until a deployment admin explicitly enables those tools.',
   },
   {
     id: 'braintrust',

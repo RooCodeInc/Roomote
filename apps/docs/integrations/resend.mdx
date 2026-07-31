@@ -15,16 +15,19 @@ connection is shared across the deployment and requests Resend's
 
 ## Safer defaults
 
-Roomote initially disables tools that send or reschedule email, mutate or
-trigger automations, and mutate contacts. Read operations remain available,
-and canceling a pending scheduled email remains enabled as a safety action.
+Roomote initially disables tools that send or reschedule email, create API
+credentials, mutate or trigger automations, and mutate contacts. Read
+operations remain available, and canceling a pending scheduled email remains
+enabled as a safety action.
 
 The disabled tools include:
 
 - single, batch, and broadcast sending
 - rescheduling a scheduled email
+- creating API keys that could bypass Roomote's tool policy
 - creating or updating automations, or sending events that trigger them
 - creating, updating, or removing contacts
+- creating, updating, or removing contact properties
 - changing contact segment or topic membership
 - importing contacts from CSV
 
