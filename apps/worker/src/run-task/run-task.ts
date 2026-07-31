@@ -156,8 +156,7 @@ function buildEnvironmentSetupSettledPrompt(
 
   if (outcome.status === 'rejected') {
     return [
-      'Environment setup update: background environment setup failed unexpectedly.',
-      `Error: ${outcome.errorMessage}`,
+      ...buildEnvironmentSetupSettledOutcomeSummary(outcome),
       'Check `.roomote/setup-status.json` and `.roomote/setup-logs/` in the workspace root before relying on installed dependencies or running services. Continue with the user request and mention the failure if it affects your work.',
       doNotRepeatQuestions,
     ].join('\n');
@@ -165,16 +164,60 @@ function buildEnvironmentSetupSettledPrompt(
 
   if (outcome.warningMessages.length > 0) {
     return [
-      'Environment setup update: background environment setup (repository setup commands and Docker projects) finished with warnings:',
-      ...outcome.warningMessages.map((warning) => `- ${warning}`),
+      ...buildEnvironmentSetupSettledOutcomeSummary(outcome),
       'Details are in `.roomote/setup-status.json` and `.roomote/setup-logs/` in the workspace root. Verify anything you depend on is actually available. Continue with the user request; only mention this if it affects your work.',
       doNotRepeatQuestions,
     ].join('\n');
   }
 
   return [
-    'Environment setup update: background environment setup (repository setup commands and Docker projects) finished successfully. The environment is now fully configured; `.roomote/setup-status.json` has per-command results. Continue with the user request — no action or acknowledgement is needed.',
+    ...buildEnvironmentSetupSettledOutcomeSummary(outcome),
+    'The environment is now fully configured; `.roomote/setup-status.json` has per-command results. Continue with the user request — no action or acknowledgement is needed.',
     doNotRepeatQuestions,
+  ].join('\n');
+}
+
+function buildEnvironmentSetupSettledOutcomeSummary(
+  outcome: EnvironmentSetupSettledOutcome,
+): string[] {
+  if (outcome.status === 'rejected') {
+    return [
+      'Environment setup update: background environment setup failed unexpectedly.',
+      `Error: ${outcome.errorMessage}`,
+    ];
+  }
+
+  if (outcome.warningMessages.length > 0) {
+    return [
+      'Environment setup update: background environment setup (repository setup commands and Docker projects) finished with warnings:',
+      ...outcome.warningMessages.map((warning) => `- ${warning}`),
+    ];
+  }
+
+  return [
+    'Environment setup update: background environment setup (repository setup commands and Docker projects) finished successfully.',
+  ];
+}
+
+/**
+ * Variant of the settled notice used to wake a task that went idle while
+ * background setup was still running, so a task that reported itself blocked
+ * on setup can resume without a manual user nudge. The zero-tool-call escape
+ * hatch is load-bearing: after a terminal closeout, any non-Slack tool call
+ * re-arms the Slack stop hook's closeout requirement
+ * (current_turn_terminal_reply_stale), so an agent that "just checks"
+ * something before ending an already-completed task would be forced to post
+ * a redundant message.
+ */
+function buildEnvironmentSetupSettledWakePrompt(
+  outcome: EnvironmentSetupSettledOutcome,
+): string {
+  return [
+    ...buildEnvironmentSetupSettledOutcomeSummary(outcome),
+    'Per-command results are in `.roomote/setup-status.json` in the workspace root, with output logs under `.roomote/setup-logs/`.',
+    'Your previous turn ended while this environment setup was still running.',
+    "If any part of the user's request was deferred or reported as blocked because setup had not finished, continue that work now and report the outcome as you normally would.",
+    'If the request was already fully handled, end this turn immediately without calling any tools and without posting any message — this update needs no acknowledgement.',
   ].join('\n');
 }
 
@@ -1336,9 +1379,11 @@ export const runTask = async ({
     // notice instead of injecting: an unsolicited system turn at that point
     // made agents re-issue the pending request_user_input, which Slack
     // rendered as duplicate questions (#661). A held notice is retried on the
-    // next phase change once the answer arrives. If the task has settled to
-    // idle, drop the notice — waking an idle task would burn a turn for
-    // nothing, and .roomote/setup-status.json already has the ground truth.
+    // next phase change once the answer arrives. A task that settled to
+    // waiting_for_prompt is woken with an idle-aware variant — it may have
+    // ended its turn reporting itself blocked on setup — while stopped or
+    // shutting-down tasks drop the notice; .roomote/setup-status.json keeps
+    // the ground truth either way.
     let pendingEnvironmentSetupOutcome:
       | EnvironmentSetupSettledOutcome
       | undefined;
@@ -1362,23 +1407,32 @@ export const runTask = async ({
 
       pendingEnvironmentSetupOutcome = undefined;
 
-      if (phase !== 'running') {
+      // A task that settled to waiting_for_prompt while setup was still
+      // running may have ended its turn reporting itself blocked on setup, so
+      // wake it with an idle-aware notice instead of dropping the outcome.
+      // Any other non-running phase (stopped, shutting down) stays dropped.
+      const wakeFromIdle = phase === 'waiting_for_prompt';
+
+      if (phase !== 'running' && !wakeFromIdle) {
         return;
       }
 
       const sent = currentManager.sendFollowUpPrompt({
-        prompt: buildEnvironmentSetupSettledPrompt(outcome),
+        prompt: wakeFromIdle
+          ? buildEnvironmentSetupSettledWakePrompt(outcome)
+          : buildEnvironmentSetupSettledPrompt(outcome),
         visibleInTranscript: false,
         source: 'environment-setup',
       });
 
       void recordWorkerRuntimeEvent({
         eventType: 'decision',
-        message: `Background environment setup settled (${outcome.status}) while task run #${taskRun.id} was running; in-session notification ${sent ? 'delivered' : 'was not accepted by the harness'}.`,
+        message: `Background environment setup settled (${outcome.status}) while task run #${taskRun.id} was ${wakeFromIdle ? 'idle' : 'running'}; in-session ${wakeFromIdle ? 'wake-up' : 'notification'} ${sent ? 'delivered' : 'was not accepted by the harness'}.`,
         details: {
           reason: 'background_environment_setup_notification',
           outcome: outcome.status,
           delivered: sent,
+          wakeFromIdle,
         },
       });
     };

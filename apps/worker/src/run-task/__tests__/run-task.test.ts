@@ -2741,13 +2741,13 @@ describe('runTask', () => {
       expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
     });
 
-    it('drops the settled notice when the task is no longer running', async () => {
+    it('drops the settled notice when the task is stopped', async () => {
       const { manager, settledListener } = await runTaskWithBackgroundSetup();
 
       manager.emit('taskStateEvent', 'taskStarted');
       manager.getStatus.mockReturnValue({
         isConnected: true,
-        phase: 'waiting_for_prompt',
+        phase: 'stopped',
         sessionId: undefined,
       });
       settledListener!({ status: 'fulfilled', warningMessages: [] });
@@ -2762,6 +2762,64 @@ describe('runTask', () => {
       });
       manager.emit('stateChange', 'running', {});
       expect(environmentSetupNoticeCalls(manager)).toHaveLength(0);
+    });
+
+    it('wakes a task that went idle while setup was still running with an idle-aware notice', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      manager.getStatus.mockReturnValue({
+        isConnected: true,
+        phase: 'waiting_for_prompt',
+        sessionId: undefined,
+      });
+      settledListener!({
+        status: 'fulfilled',
+        warningMessages: ['Dev server never became ready'],
+      });
+
+      const noticeCalls = environmentSetupNoticeCalls(manager);
+
+      expect(noticeCalls).toHaveLength(1);
+      expect(noticeCalls[0]![0]).toMatchObject({
+        visibleInTranscript: false,
+        source: 'environment-setup',
+      });
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'Dev server never became ready',
+      );
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'Your previous turn ended while this environment setup was still running.',
+      );
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'end this turn immediately without calling any tools',
+      );
+
+      // The wake consumes the outcome; later phase changes must not re-send.
+      manager.getStatus.mockReturnValue({
+        isConnected: true,
+        phase: 'running',
+        sessionId: undefined,
+      });
+      manager.emit('stateChange', 'running', {});
+      expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+    });
+
+    it('does not use the idle wake wording for a task that is actively running', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      settledListener!({ status: 'fulfilled', warningMessages: [] });
+
+      const noticeCalls = environmentSetupNoticeCalls(manager);
+
+      expect(noticeCalls).toHaveLength(1);
+      expect(noticeCalls[0]![0].prompt).not.toContain(
+        'Your previous turn ended',
+      );
+      expect(noticeCalls[0]![0].prompt).toContain(
+        'Continue with the user request',
+      );
     });
 
     it('reports a rejected background setup with the error message', async () => {
