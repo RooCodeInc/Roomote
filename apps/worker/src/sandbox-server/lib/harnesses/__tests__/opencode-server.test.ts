@@ -1445,7 +1445,7 @@ describe('OpenCodeServerHarness', () => {
             {
               type: 'text',
               text: expect.stringContaining(
-                'Before finalizing, post a terminal Slack-visible reply',
+                'Before finalizing, post a terminal chat-visible reply',
               ),
             },
           ],
@@ -1551,7 +1551,7 @@ describe('OpenCodeServerHarness', () => {
             {
               type: 'text',
               text: expect.stringContaining(
-                'Before finalizing, post a terminal Slack-visible reply',
+                'Before finalizing, post a terminal chat-visible reply',
               ),
             },
           ],
@@ -1649,7 +1649,7 @@ describe('OpenCodeServerHarness', () => {
             {
               type: 'text',
               text: expect.stringContaining(
-                'Before finalizing, post a terminal Slack-visible reply',
+                'Before finalizing, post a terminal chat-visible reply',
               ),
             },
           ],
@@ -1846,7 +1846,7 @@ describe('OpenCodeServerHarness', () => {
             {
               type: 'text',
               text: expect.stringContaining(
-                'Before finalizing, post a terminal Slack-visible reply',
+                'Before finalizing, post a terminal chat-visible reply',
               ),
             },
           ],
@@ -1975,7 +1975,7 @@ describe('OpenCodeServerHarness', () => {
             {
               type: 'text',
               text: expect.stringContaining(
-                'Before finalizing, post a terminal Slack-visible reply',
+                'Before finalizing, post a terminal chat-visible reply',
               ),
             },
           ],
