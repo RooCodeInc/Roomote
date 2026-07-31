@@ -19,18 +19,12 @@ import { standardTask } from './standardTask';
 
 export function buildSlackMessageInstructions({
   includeRequestUserInputGuidance = false,
-  visualProofAutoPostEnabled = false,
 }: {
   includeRequestUserInputGuidance?: boolean;
-  visualProofAutoPostEnabled?: boolean;
 } = {}): string {
-  const slackProofDeliveryInstructions = visualProofAutoPostEnabled
-    ? `
-    <rule>Built-in visual proof for the current proof milestone is already posted back to the originating Slack thread by the worker when trusted Slack context exists.</rule>
-    <rule>When that built-in proof auto-post happens, do not send a second Slack reply that only narrates the visible proof, counts screenshots, names localhost capture URLs, mentions internal temp or artifact file paths, repeats the capture summary, or says there was no blocker. Treat the built-in proof post as the proof-ready update unless the proof is blocked or that detail materially changes the user's next step.</rule>
-    <rule>Keep later Slack replies focused on the user outcome, delivery state, blocker, or next action rather than restating what is already visible in the proof attachments.</rule>`
-    : `
-    <rule>Visual-proof uploads are not auto-posted to Slack for this task. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
+  const slackProofDeliveryInstructions = `
+    <rule>Visual-proof uploads are not posted to Slack automatically. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
+    <rule>When a Slack-visible reply mentions or relies on a successful proof capture, attach that proof's screenshot artifact IDs to the same reply via \`imageArtifactIds\`. Do not narrate captured proof in one message and defer sharing the images to a later one.</rule>
     <rule>When other task-generated images were uploaded earlier in the same run and still need to be shown in the thread, pass those artifact IDs to \`send_chat_reply\` via \`imageArtifactIds\`.</rule>`;
 
   return `
@@ -166,11 +160,6 @@ function getNonSlackChatProviderDisplay(provider: NonSlackChatProvider): {
 
 export function buildChatProviderMessageInstructions(
   provider: NonSlackChatProvider,
-  {
-    visualProofAutoPostEnabled = false,
-  }: {
-    visualProofAutoPostEnabled?: boolean;
-  } = {},
 ): string {
   const { tag, name, label } = getNonSlackChatProviderDisplay(provider);
   const requestUserInputInstructions =
@@ -182,13 +171,9 @@ export function buildChatProviderMessageInstructions(
     <rule>A ${label}-rendered \`request_user_input\` prompt is supplemental and never satisfies ack or closeout on its own. Pair it with a brief \`send_chat_reply\` closeout that states what input is needed and that work is paused pending the answer.</rule>
   </${tag}_request_user_input>`
       : '';
-  const proofDeliveryInstructions = visualProofAutoPostEnabled
-    ? `
-    <rule>Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.</rule>
-    <rule>When that built-in proof auto-post happens, do not send a second ${label} reply that only narrates the visible proof, counts screenshots, names localhost capture URLs, mentions internal temp or artifact file paths, repeats the capture summary, or says there was no blocker. Treat the built-in proof post as the proof-ready update unless the proof is blocked or that detail materially changes the user's next step.</rule>
-    <rule>Keep later ${label} replies focused on the user outcome, delivery state, blocker, or next action rather than restating what is already visible in the proof attachments.</rule>`
-    : `
-    <rule>Visual-proof uploads are not auto-posted to ${label} for this task. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
+  const proofDeliveryInstructions = `
+    <rule>Visual-proof uploads are not posted to ${label} automatically. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
+    <rule>When a ${label}-visible reply mentions or relies on a successful proof capture, attach that proof's screenshot artifact IDs to the same reply via \`imageArtifactIds\`. Do not narrate captured proof in one message and defer sharing the images to a later one.</rule>
     <rule>When other task-generated images were uploaded earlier in the same run and still need to be shown in the thread, pass those artifact IDs to \`send_chat_reply\` via \`imageArtifactIds\`.</rule>`;
 
   return `
@@ -241,14 +226,8 @@ export function buildChatProviderMessageInstructions(
 `.trim();
 }
 
-export function buildTeamsMessageInstructions({
-  visualProofAutoPostEnabled = false,
-}: {
-  visualProofAutoPostEnabled?: boolean;
-} = {}): string {
-  return buildChatProviderMessageInstructions('teams', {
-    visualProofAutoPostEnabled,
-  });
+export function buildTeamsMessageInstructions(): string {
+  return buildChatProviderMessageInstructions('teams');
 }
 
 function formatWorkspaceReadinessContext({
@@ -297,7 +276,6 @@ export async function slackAppMention({
   codeReviewsEnabled,
   codeReviewReviewOnCommit,
   codeReviewReviewDraftPrs,
-  visualProofAutoPostEnabled,
   prAction,
 }: {
   taskSpec: SlackAppMentionTask;
@@ -311,7 +289,6 @@ export async function slackAppMention({
   codeReviewsEnabled?: boolean;
   codeReviewReviewOnCommit?: boolean;
   codeReviewReviewDraftPrs?: boolean;
-  visualProofAutoPostEnabled?: boolean;
   prAction?: PrAction;
 }): Promise<{
   prompt: string;
@@ -393,7 +370,6 @@ export async function slackAppMention({
 
   const slackInstructions = buildSlackMessageInstructions({
     includeRequestUserInputGuidance: true,
-    visualProofAutoPostEnabled,
   });
   result.harnessInstructions = result.harnessInstructions
     ? `${slackInstructions}\n\n${result.harnessInstructions}`
