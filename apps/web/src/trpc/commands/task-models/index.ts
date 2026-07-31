@@ -472,6 +472,65 @@ export async function getTaskModelProviderSetupCommand(
 }
 
 /**
+ * Persists a newly connected subscription provider's recommended models.
+ * Device-code flows do not pass through the API-key provider save command,
+ * so they call this after OAuth credentials have been stored successfully.
+ */
+export async function autoAddConnectedSubscriptionTaskModels(
+  providerId: SetupModelProviderId,
+): Promise<number> {
+  const provider = getSetupModelProvider(providerId);
+  const [chatgptConnected, githubCopilotConnected, xaiSubscriptionConnected] =
+    await Promise.all([
+      isChatGptSubscriptionConnected(),
+      isGitHubCopilotSubscriptionConnected(),
+      isXaiSubscriptionConnected(),
+    ]);
+
+  return db.transaction(async (tx) => {
+    const [persistedEnvVarNames, persistedTaskModels] = await Promise.all([
+      getPersistedEnvironmentVariableNames(tx),
+      getPersistedRawTaskModelSettings(tx),
+    ]);
+    const connectedProviderIds = new Set<string>([
+      provider.id,
+      ...collectConnectedTaskModelProviderIds({
+        runtimeEnv: process.env,
+        persistedEnvVarNames,
+        chatgptConnected,
+        githubCopilotConnected,
+        xaiSubscriptionConnected,
+      }),
+    ]);
+    const autoAdd = buildAutoAddedTaskModelSettings({
+      provider,
+      persistedTaskModelSettings: persistedTaskModels,
+      connectedProviderIds,
+    });
+
+    if (!autoAdd) {
+      return 0;
+    }
+
+    await tx
+      .insert(deploymentSettings)
+      .values({
+        id: DEFAULT_DEPLOYMENT_ID,
+        taskModelSettings: autoAdd.taskModelSettings,
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          taskModelSettings: autoAdd.taskModelSettings,
+          updatedAt: new Date(),
+        },
+      });
+
+    return autoAdd.addedModels.length;
+  });
+}
+
+/**
  * Saves the selected inference provider and, when given, its API key from the
  * models settings page. Unlike the setup wizard's `saveModelConfig`, this does
  * not reset the persisted runtime model config, so existing default, helper,

@@ -6,12 +6,14 @@ const {
   mockIsXaiSubscriptionConnected,
   mockPollXaiDeviceAuth,
   mockStartXaiDeviceAuth,
+  mockAutoAddConnectedSubscriptionTaskModels,
 } = vi.hoisted(() => ({
   mockDisconnectXaiSubscription: vi.fn(),
   mockGetXaiSubscriptionStatus: vi.fn(),
   mockIsXaiSubscriptionConnected: vi.fn(),
   mockPollXaiDeviceAuth: vi.fn(),
   mockStartXaiDeviceAuth: vi.fn(),
+  mockAutoAddConnectedSubscriptionTaskModels: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -20,6 +22,11 @@ vi.mock('@roomote/db/server', () => ({
   isXaiSubscriptionConnected: mockIsXaiSubscriptionConnected,
   pollXaiDeviceAuth: mockPollXaiDeviceAuth,
   startXaiDeviceAuth: mockStartXaiDeviceAuth,
+}));
+
+vi.mock('../task-models', () => ({
+  autoAddConnectedSubscriptionTaskModels:
+    mockAutoAddConnectedSubscriptionTaskModels,
 }));
 
 import {
@@ -78,6 +85,9 @@ describe('xai subscription commands', () => {
     expect(result).not.toHaveProperty('refresh');
     expect(JSON.stringify(result)).not.toContain('access-secret');
     expect(JSON.stringify(result)).not.toContain('refresh-secret');
+    expect(mockAutoAddConnectedSubscriptionTaskModels).toHaveBeenCalledWith(
+      'xai-subscription',
+    );
   });
 
   it('forwards pending and failed poll results without token fields', async () => {
@@ -99,5 +109,6 @@ describe('xai subscription commands', () => {
       status: 'failed',
       error: 'xAI device authorization was denied.',
     });
+    expect(mockAutoAddConnectedSubscriptionTaskModels).not.toHaveBeenCalled();
   });
 });

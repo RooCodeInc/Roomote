@@ -72,6 +72,7 @@ vi.mock('../environment-variables', () => ({
 }));
 
 import {
+  autoAddConnectedSubscriptionTaskModels,
   getTaskModelProviderSetupCommand,
   getTaskModelSettingsCommand,
   deleteTaskModelProviderCommand,
@@ -1221,6 +1222,40 @@ describe('task model provider commands', () => {
         process.env[name] = originalValue;
       }
     }
+  });
+
+  it('persists and enables recommended models for a connected subscription', async () => {
+    mockIsChatGptSubscriptionConnected.mockResolvedValue(true);
+    mockPersistedSetupNewState(
+      {},
+      {
+        models: [
+          {
+            id: 'openrouter/z-ai/glm-5.2',
+            displayName: 'GLM 5.2',
+            family: 'GLM',
+          },
+        ],
+        allowedModelIds: ['openrouter/z-ai/glm-5.2'],
+        defaultModelId: 'openrouter/z-ai/glm-5.2',
+      },
+    );
+
+    await expect(
+      autoAddConnectedSubscriptionTaskModels('chatgpt'),
+    ).resolves.toBeGreaterThan(0);
+
+    expect(txValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskModelSettings: expect.objectContaining({
+          allowedModelIds: expect.arrayContaining([
+            'openai/gpt-5.6-sol',
+            'openai/gpt-5.6-terra',
+            'openai/gpt-5.6-luna',
+          ]),
+        }),
+      }),
+    );
   });
 
   it('appends recommended models of connected providers to the settings catalog, disabled', async () => {
