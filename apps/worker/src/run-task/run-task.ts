@@ -2077,6 +2077,7 @@ export const runTask = async ({
 
     // Map TaskState to RunTaskState for resolve-status compatibility.
     const finalState: RunTaskState = { ...pollingState, ...finalTaskState };
+    const resolvedResult = resolveStatus(finalState);
 
     // Wait for BullMQ to pick up the authoritative sleep deadline and claim the
     // external sleep action. BullMQ is responsible for both resumable snapshots
@@ -2096,15 +2097,26 @@ export const runTask = async ({
     // messages). The drain check below is kept as a fallback for edge cases where
     // the snapshot fails or times out but the worker survives.
     const skipSleepAfterTerminalCancel = Boolean(finalState.cancelTriggeredAt);
+    const skipSleepAfterTerminalFailure =
+      resolvedResult.status === RunStatus.Failed;
     if (skipSleepAfterTerminalCancel) {
       logger.info(
         `[runTask] Skipping external sleep handoff after terminal cancel for task run ${taskRun.id}`,
       );
     }
+    if (skipSleepAfterTerminalFailure) {
+      logger.info(
+        `[runTask] Skipping external sleep handoff after terminal failure for task run ${taskRun.id}`,
+      );
+    }
 
     let sleepActionTriggered = false;
 
-    if (!skipExternalSleepAction && !skipSleepAfterTerminalCancel) {
+    if (
+      !skipExternalSleepAction &&
+      !skipSleepAfterTerminalCancel &&
+      !skipSleepAfterTerminalFailure
+    ) {
       // BullMQ may claim the sleep action and snapshot the filesystem while
       // the handoff helper polls below. The harness has already shut down, so
       // drop on-disk credential material first; resume re-injects it from the
@@ -2197,7 +2209,7 @@ export const runTask = async ({
     } else {
       taskCancellation.abortController.abort();
     }
-    return resolveStatus(finalState);
+    return resolvedResult;
   } finally {
     activeWorkerCrashContext = null;
   }

@@ -722,6 +722,16 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       return null;
     }
 
+    // Failed shutdowns must reach finishRun so channel integrations can report
+    // the error. Snapshotting would otherwise finalize the run as completed.
+    if (
+      this.phase === 'shutting_down' &&
+      this.state.lastErrorMessage &&
+      !this.state.taskFinishedAt
+    ) {
+      return null;
+    }
+
     if (this.phase === 'shutting_down' || this.state.clientDisconnectedAt) {
       return Date.now();
     }
