@@ -68,7 +68,8 @@ When adding or changing a selectable inference provider, keep its public and
 in-app setup help in sync in the same change:
 
 - add or update `providers/inference/<provider>.mdx`, including its provider
-  logo in frontmatter
+  logo in frontmatter; prefer the monochrome SVG from LobeHub Icons when one
+  is available
 - update the Inference providers navigation in `docs.json` and the provider
   table in `models.mdx`
 - map the setup provider id to that guide in
