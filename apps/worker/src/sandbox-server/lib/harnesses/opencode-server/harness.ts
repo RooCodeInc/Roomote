@@ -4633,6 +4633,9 @@ export class OpenCodeServerHarness
           }
 
           this.stopHookReminderCount += 1;
+          this.logger.info(
+            `OpenCode Slack closeout reminder submitted count=${this.stopHookReminderCount} source=${source} sessionId=${sessionId}`,
+          );
           await this.submitPrompt({
             text: reason,
             visibleInTranscript: false,
