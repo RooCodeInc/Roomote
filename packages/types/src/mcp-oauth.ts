@@ -445,7 +445,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     id: 'resend',
     name: 'Resend',
     url: 'https://mcp.resend.com/mcp',
-    description: `Inspect and manage shared email infrastructure through Resend from ${PRODUCT_NAME} tasks`,
+    description: `Inspect and manage shared email infrastructure through Resend from ${PRODUCT_NAME} tasks. Sending, automation triggers, and contact mutations start disabled.`,
     icon: 'resend',
     connectionScope: 'deployment',
     connectionMode: 'oauth',

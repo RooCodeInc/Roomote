@@ -844,6 +844,11 @@ describe('Integrations settings', () => {
       screen.getByRole('button', { name: 'Connect and enable Resend' }),
     ).toBeInTheDocument();
     expect(
+      screen.getByText(
+        'Inspect and manage shared email infrastructure through Resend from Roomote tasks. Sending, automation triggers, and contact mutations start disabled.',
+      ),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole('button', { name: 'Connect and enable Jira' }),
     ).toBeInTheDocument();
     expect(
