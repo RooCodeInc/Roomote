@@ -336,6 +336,44 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
 
   it.each([
     {
+      displayName: 'Qwen3.7 Max',
+      expected: [
+        { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.7-max' },
+        { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.7-max' },
+        {
+          providerId: 'togetherai',
+          modelId: 'togetherai/Qwen/Qwen3.7-Max',
+        },
+        { providerId: 'opencode', modelId: 'opencode/qwen3.7-max' },
+      ],
+    },
+    {
+      displayName: 'Qwen3.7 Plus',
+      expected: [
+        { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.7-plus' },
+        { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.7-plus' },
+        { providerId: 'opencode', modelId: 'opencode/qwen3.7-plus' },
+      ],
+    },
+  ])(
+    'recommends $displayName only from providers that support it',
+    ({ displayName, expected }) => {
+      const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+        (provider) => {
+          const model = provider.suggestedTaskModels.find(
+            (suggestion) => suggestion.displayName === displayName,
+          );
+
+          return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+        },
+      );
+
+      expect(providersByModel).toEqual(expected);
+    },
+  );
+
+  it.each([
+    {
       displayName: 'GPT 5.6 Sol',
       modelId: 'gpt-5.6-sol',
     },
