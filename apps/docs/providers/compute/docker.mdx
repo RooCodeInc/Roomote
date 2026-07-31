@@ -166,6 +166,10 @@ one to a fix.
   they include the underlying crash, missing dependency, or fetch failure.
 - **The task cannot reach Roomote services.** Check `DOCKER_WORKER_NETWORK` and
   the Compose network used by the API and controller.
+- **A large repository times out while cloning.** Increase
+  `WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS` from its 600-second default and
+  restart the Roomote services. Timeout failures stop immediately instead of
+  restarting the same clone from zero.
 - **A worker reports that its disk limit is unsupported.** Configure a Docker
   storage driver with per-container writable-layer quota support. Only set
   `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` when an equivalent host-level quota

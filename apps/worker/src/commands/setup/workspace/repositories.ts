@@ -70,6 +70,7 @@ export async function initializeRepositories(
     gitAuthorName,
     gitAuthorEmail,
     sourceControlProvider,
+    repositoryCloneTimeoutSeconds,
   }: PrepareWorkspaceOptions,
 ): Promise<PrepareWorkspaceResult> {
   const resolvedSourceControlProvider =
@@ -81,6 +82,7 @@ export async function initializeRepositories(
   const { workspaceRoot, workspaceManager } = createWorkspaceManager(
     envVars,
     logger,
+    repositoryCloneTimeoutSeconds,
   );
 
   await timedStep(logger, 'initializeRepositories: configure git', () =>

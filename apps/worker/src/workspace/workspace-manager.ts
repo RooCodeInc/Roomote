@@ -55,6 +55,8 @@ type WorkspaceTimingRecorder = <T>(
 const SKILLS_INSTALL_COMMAND = 'npx -y skills add';
 const REPOSITORY_FETCH_MAX_ATTEMPTS = 5;
 const REPOSITORY_FETCH_INITIAL_RETRY_DELAY_MS = 2_000;
+const REPOSITORY_CLONE_MAX_ATTEMPTS = 5;
+const REPOSITORY_CLONE_INITIAL_RETRY_DELAY_MS = 2_000;
 const RESET_LOCAL_CHANGES_COMMAND =
   'if git rev-parse --verify HEAD >/dev/null 2>&1; then git reset --hard HEAD; fi';
 const REPOSITORY_WORKTREE_SYNC_TIMEOUT = COMMAND_DEFAULT_TIMEOUT;
@@ -141,6 +143,9 @@ export class WorkspaceManager {
     private readonly env: NodeJS.ProcessEnv,
     private readonly verbose = false,
     private readonly recordTiming?: WorkspaceTimingRecorder,
+    private readonly options: {
+      repositoryCloneTimeoutSeconds?: number;
+    } = {},
   ) {}
 
   private async timed<T>(label: string, fn: () => Promise<T> | T): Promise<T> {
@@ -669,22 +674,25 @@ export class WorkspaceManager {
       await mkdir(dirname(resolvedRepoPath), { recursive: true });
 
       await this.timed(`prepare ${fullName}: clone`, () =>
-        executor.execute({
-          name: 'Git clone',
-          // Use git transport directly so clone works with the worker's
-          // file-backed credential helper and avoids gh's extra API lookup.
-          // Escape both args: cloneUrl is provider-synced and may include
-          // shell metacharacters from a hostile self-hosted origin.
-          // Retries re-run this same line, and a clone killed mid-transfer
-          // (e.g. by the timeout) leaves a partial target directory that
-          // would make every retry fail with "destination path already
-          // exists" — remove it first. Safe: needsClone guarantees the path
-          // did not exist before the first attempt.
-          run: `rm -rf -- '${shellEscape(fullName)}' && git clone '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
-          // Allow brief auth and repository visibility propagation delays.
-          retries: 4,
-          timeout: 300,
-          continue_on_error: false,
+        this.cloneRepositoryWithRetry({
+          executor,
+          repoFullName: fullName,
+          command: {
+            name: 'Git clone',
+            // Use git transport directly so clone works with the worker's
+            // file-backed credential helper and avoids gh's extra API lookup.
+            // Escape both args: cloneUrl is provider-synced and may include
+            // shell metacharacters from a hostile self-hosted origin.
+            // Retries re-run this same line, and a failed clone leaves a partial
+            // target directory that would make the next attempt fail with
+            // "destination path already exists". Safe: needsClone guarantees
+            // the path did not exist before the first attempt.
+            run: `rm -rf -- '${shellEscape(fullName)}' && git clone '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
+            timeout:
+              this.options.repositoryCloneTimeoutSeconds ??
+              COMMAND_DEFAULT_TIMEOUT,
+            continue_on_error: false,
+          },
         }),
       );
     }
@@ -1247,6 +1255,66 @@ export class WorkspaceManager {
         await this.sleep(delayMs);
       }
     }
+  }
+
+  private async cloneRepositoryWithRetry({
+    executor,
+    repoFullName,
+    command,
+  }: {
+    executor: CommandExecutor;
+    repoFullName: string;
+    command: Parameters<CommandExecutor['execute']>[0];
+  }): Promise<void> {
+    for (
+      let attempt = 1;
+      attempt <= REPOSITORY_CLONE_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        await executor.execute(command);
+        return;
+      } catch (error) {
+        if (!(error instanceof ExecutionError)) {
+          throw error;
+        }
+
+        if (error.result.timedOut) {
+          throw new ExecutionError(
+            `Git clone for ${repoFullName} timed out after ${command.timeout} seconds. Increase WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS for repositories that need more time.`,
+            error.result,
+          );
+        }
+
+        if (attempt === REPOSITORY_CLONE_MAX_ATTEMPTS) {
+          throw error;
+        }
+
+        const delayMs =
+          REPOSITORY_CLONE_INITIAL_RETRY_DELAY_MS * 2 ** (attempt - 1);
+        const failureReason = this.formatRepositoryFailureReason(error);
+
+        console.warn(
+          `[WorkspaceManager] Git clone attempt ${attempt}/${REPOSITORY_CLONE_MAX_ATTEMPTS} failed for ${repoFullName}: ${failureReason}. Retrying in ${delayMs}ms...`,
+        );
+
+        await this.sleep(delayMs);
+      }
+    }
+  }
+
+  private formatRepositoryFailureReason(error: ExecutionError): string {
+    const reason =
+      error.result.stderr?.trim() || error.result.error || error.message;
+    const sanitized = reason.replace(
+      /(https?:\/\/)[^\s/@]+(?::[^\s/@]*)?@/gi,
+      '$1[redacted]@',
+    );
+    const maxLength = 1_000;
+
+    return sanitized.length > maxLength
+      ? `... (truncated) ${sanitized.slice(-maxLength)}`
+      : sanitized;
   }
 
   public async executeEnvironmentRepositoryCommands(

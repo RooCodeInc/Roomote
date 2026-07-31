@@ -39,6 +39,7 @@ export function resolveRuntimePathsForWorker() {
 export function createWorkspaceManager(
   envVars: Record<string, string | undefined>,
   logger?: StartupLogger,
+  repositoryCloneTimeoutSeconds?: number,
 ): {
   workspaceRoot: string;
   workspaceManager: WorkspaceManager;
@@ -53,6 +54,7 @@ export function createWorkspaceManager(
     logger
       ? (label, fn) => timedStep(logger, `initializeRepositories: ${label}`, fn)
       : undefined,
+    { repositoryCloneTimeoutSeconds },
   );
 
   return { workspaceRoot, workspaceManager };

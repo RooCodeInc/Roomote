@@ -137,6 +137,7 @@ export async function setup({
     ...workspaceOpts,
     cleanupLegacyPaths:
       workspaceOpts.taskRunType === TaskPayloadKind.SnapshotEnvironment,
+    repositoryCloneTimeoutSeconds: workerEnv.repositoryCloneTimeoutSeconds,
     envVars: {
       ...workerEnv.buildUserFacingEnv(),
       ...workspaceOpts.envVars,

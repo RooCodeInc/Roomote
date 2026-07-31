@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+import { ExecutionError } from '../../command-executor';
 import { WorkspaceManager } from '../workspace-manager';
 
 vi.mock('@roomote/sdk/client', () => ({
@@ -80,8 +81,13 @@ describe('WorkspaceManager repository clone preparation', () => {
     await rm(workspaceRoot, { recursive: true, force: true });
   });
 
-  function createManager(env: NodeJS.ProcessEnv = { PATH: '/usr/bin' }) {
-    const manager = new WorkspaceManager(workspaceRoot, env);
+  function createManager(
+    env: NodeJS.ProcessEnv = { PATH: '/usr/bin' },
+    repositoryCloneTimeoutSeconds?: number,
+  ) {
+    const manager = new WorkspaceManager(workspaceRoot, env, false, undefined, {
+      repositoryCloneTimeoutSeconds,
+    });
 
     // Stub the post-clone steps that shell out or hit the network; these
     // tests only cover the credential fail-fast and clone/cleanup behavior.
@@ -148,6 +154,92 @@ describe('WorkspaceManager repository clone preparation', () => {
     expect(clone!.run).toBe(
       `rm -rf -- 'acme/backend' && git clone 'https://github.com/acme/backend.git' 'acme/backend'`,
     );
+    expect(clone).toMatchObject({ timeout: 600 });
+  });
+
+  it('uses the deployment-configured clone timeout', async () => {
+    stubTokenFile({ nonEmpty: true });
+    mockCloneCreatesRepo();
+    const manager = createManager({ PATH: '/usr/bin' }, 1_200);
+
+    await manager.prepareRepository(REPO_FULL_NAME, 'main', undefined);
+
+    expect(getCloneCommand()).toMatchObject({ timeout: 1_200 });
+  });
+
+  it('fails immediately with an actionable diagnostic when clone times out', async () => {
+    stubTokenFile({ nonEmpty: true });
+    executeMock.mockImplementation(async (command) => {
+      if (command.name === 'Git clone') {
+        throw new ExecutionError('Command timed out', {
+          command,
+          success: false,
+          duration: 600_000,
+          stderr: 'Receiving objects: 42% (420/1000)',
+          error: 'Command timed out',
+          timedOut: true,
+        });
+      }
+
+      return { success: true, stdout: '', stderr: '' };
+    });
+    const manager = createManager({ PATH: '/usr/bin' }, 600);
+
+    await expect(
+      manager.prepareRepository(REPO_FULL_NAME, 'main', undefined),
+    ).rejects.toThrow(
+      /timed out after 600 seconds.*WORKER_REPOSITORY_CLONE_TIMEOUT_SECONDS/s,
+    );
+
+    expect(
+      executeMock.mock.calls.filter(
+        ([command]) => command.name === 'Git clone',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('retries transient clone failures with sanitized diagnostics', async () => {
+    stubTokenFile({ nonEmpty: true });
+    let cloneAttempts = 0;
+    executeMock.mockImplementation(async (command) => {
+      if (command.name === 'Git clone') {
+        cloneAttempts += 1;
+        if (cloneAttempts === 1) {
+          throw new ExecutionError('Clone failed', {
+            command,
+            success: false,
+            duration: 100,
+            exitCode: 128,
+            stderr:
+              "fatal: unable to access 'https://token:secret@example.com/acme/backend.git'",
+            error: 'Command failed with exit code 128',
+          });
+        }
+
+        await mkdir(join(workspaceRoot, REPO_FULL_NAME, '.git'), {
+          recursive: true,
+        });
+      }
+
+      return { success: true, stdout: '', stderr: '' };
+    });
+    const manager = createManager();
+    const sleepSpy = vi
+      .spyOn(
+        manager as unknown as { sleep: (ms: number) => Promise<void> },
+        'sleep',
+      )
+      .mockResolvedValue(undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await manager.prepareRepository(REPO_FULL_NAME, 'main', undefined);
+
+    expect(cloneAttempts).toBe(2);
+    expect(sleepSpy).toHaveBeenCalledWith(2_000);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('https://[redacted]@example.com'),
+    );
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('secret'));
   });
 
   it('materializes an env GH_TOKEN into the token file before cloning', async () => {
