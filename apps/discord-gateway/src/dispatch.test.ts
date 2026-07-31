@@ -486,8 +486,8 @@ describe('handleGatewayDispatch', () => {
     );
   });
 
-  it('drops unmentioned messages in threads not owned by the Roomote bot', async () => {
-    const enqueue = vi.fn();
+  it('forwards unmentioned messages in non-bot-owned threads for API classification', async () => {
+    const enqueue = vi.fn().mockResolvedValue(true);
 
     await expect(
       handleGatewayDispatch(
@@ -518,9 +518,19 @@ describe('handleGatewayDispatch', () => {
           }),
         },
       ),
-    ).resolves.toBe('ignored');
+    ).resolves.toBe('enqueued');
 
-    expect(enqueue).not.toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          channel: expect.objectContaining({
+            id: 'thread-foreign',
+            parent_id: 'channel-root',
+            owner_id: 'someone-else',
+          }),
+        }),
+      }),
+    );
   });
 
   it('retains explicit bot mentions in threads owned by someone else', async () => {
