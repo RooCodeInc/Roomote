@@ -1,5 +1,5 @@
 ---
-title: Sandboxes
+title: Sandboxes Overview
 icon: cpu
 description: 'Choose where Roomote runs task sandboxes: local Docker or a hosted sandbox backend.'
 ---
@@ -44,6 +44,7 @@ Roomote supports local and hosted sandbox backends:
 | <IntegrationName href="/providers/compute/e2b" icon="e2b" name="E2B" />             | Hosted task sandboxes with snapshot support            | Runs task sandboxes on E2B-managed infrastructure.                      |
 | <IntegrationName href="/providers/compute/daytona" icon="daytona" name="Daytona" /> | Hosted task sandboxes with snapshot support            | Supports environment and task-level snapshot flows.                     |
 | <IntegrationName href="/providers/compute/blaxel" icon="blaxel" name="Blaxel" />    | Hosted perpetual task sandboxes                        | Uses automatic standby for resumable tasks.                             |
+| <IntegrationName href="/providers/compute/azure" icon="azure" name="Azure" />      | Hosted task sandboxes on Azure Container Apps (preview) | Supports memory+disk snapshots and sub-second standby resume.           |
 
 Docker is the default because it works well for local development and simple
 self-hosted deployments. Hosted providers are useful when you want task work to

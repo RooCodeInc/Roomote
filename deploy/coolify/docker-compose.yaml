@@ -20,9 +20,9 @@
 #   (unlike Railway's per-occurrence `secret()` template function).
 # - The Coolify host has a Docker socket, so the `docker` sandbox provider
 #   works and is the template default. Only a restricted internal proxy mounts
-#   the raw socket; the controller reaches its allowed API sections over the
-#   docker-api network. Hosted sandboxes (modal/e2b/daytona) are a config-only
-#   swap; see "Task execution" in README.md.
+#   the raw socket; the controller and BullMQ reach their allowed API sections
+#   over the docker-api network. Hosted sandboxes (modal/e2b/daytona) are a
+#   config-only swap; see "Task execution" in README.md.
 # - No openssl provisioning step. `R_AUTO_GENERATE_KEYS=true` makes
 #   Roomote generate the `JOB_AUTH_*`/`PREVIEW_AUTH_*` P-256 keypairs at
 #   first boot and persist them encrypted (with `ENCRYPTION_KEY`) in
@@ -256,14 +256,22 @@ services:
     image: *roomote-app-image
     restart: unless-stopped
     command: bullmq
+    # Docker standby retention and the settings "Validate environment" checks
+    # run here; both reach Docker through the restricted socket proxy, never
+    # the raw socket.
+    networks: [default, docker-api]
     depends_on:
       redis:
         condition: service_started
       db-migrate:
         condition: service_completed_successfully
+      docker-proxy:
+        condition: service_started
     environment:
       <<: *roomote-shared-env
       PORT: 3002
+      DOCKER_HOST: tcp://docker-proxy:2375
+      DOCKER_WORKER_RELEASE_PATH: /roomote/releases/worker-current.tar.gz
     healthcheck:
       test:
         [

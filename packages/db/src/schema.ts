@@ -101,6 +101,9 @@ export const users = pgTable(
     // getUserAnalyticsId). Never derived from user data and never editable
     // through any user-facing mutation.
     analyticsId: text('analytics_id'),
+    // Acceptance is shared across devices. Refusal remains device-local, so
+    // null intentionally means either declined here or not answered yet.
+    cookieConsentedAt: timestamp('cookie_consented_at'),
     onboardingCompletedAt: timestamp('onboarding_completed_at'),
     // Soft reference to invites.id: the invite that admitted this user, or
     // null for org-membership sign-ins and pre-invite users.
@@ -1066,20 +1069,20 @@ export const taskRuns = pgTable(
     index('task_runs_snapshot_id_idx').on(table.snapshotId),
     index('task_runs_sleep_at_idx').on(table.sleepAt),
     index('task_runs_worker_heartbeat_at_idx').on(table.workerHeartbeatAt),
-    index('task_runs_sleep_check_due_idx')
+    index('task_runs_sleep_check_due_v2_idx')
       .using('btree', table.sleepAt, table.createdAt, table.vendor)
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
       ),
-    index('task_runs_sleep_check_stale_worker_idx')
+    index('task_runs_sleep_check_stale_worker_v2_idx')
       .using('btree', table.workerHeartbeatAt, table.createdAt, table.vendor)
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
       ),
-    index('task_runs_sleep_check_active_idx')
+    index('task_runs_sleep_check_active_v2_idx')
       .using('btree', table.vendor, table.createdAt.desc())
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
       ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),

@@ -1,0 +1,51 @@
+---
+title: Z.AI Coding Plan
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/zai.svg'
+description: Connect a regional Z.AI Coding Plan key and use its included GLM allowance.
+---
+
+Z.AI Coding Plan is a membership-based coding service for GLM models. Its keys
+and included quotas are separate from usage-billed [Z.AI platform API
+keys](/providers/inference/zai).
+
+## Get a Coding Plan key
+
+Activate a plan and follow the [Z.AI Coding Plan documentation](https://docs.z.ai/devpack/overview)
+to create a key. Generate it in the same international or China region you will
+select in Roomote.
+
+## Configuration
+
+Add **Z.AI Coding Plan** in **Settings > Models**, paste the plan key, and select
+its region. Environment-variable configuration uses:
+
+```sh
+ZAI_CODING_PLAN_API_KEY=...
+ZAI_CODING_PLAN_REGION=global # or china
+```
+
+Both values are required. Models use the `zai-coding-plan/` prefix, keeping
+their membership quota separate from metered `zai/` model IDs.
+
+## Cost behavior
+
+Requests consume the Coding Plan's included quota and reset windows rather than
+a general Z.AI API balance. Roomote shows quota information when the provider's
+regional monitoring endpoint returns it. The plan console remains authoritative
+for allowance, renewal, overage, and regional terms.
+
+## Verify setup
+
+1. save the Coding Plan key and matching region
+2. confirm Z.AI Coding Plan models appear
+3. enable a `zai-coding-plan/...` model and assign it to a role
+4. run a small task and check the quota display when available
+
+## Common issues
+
+- **The key is rejected.** Confirm it is a Coding Plan key, not a general API
+  platform key, and that the selected region matches.
+- **The plan quota is exhausted.** Wait for its reset or switch the role to a
+  separately billed provider.
+- **Quota is not displayed.** The upstream monitor endpoint is undocumented and
+  may be unavailable while inference continues to work.

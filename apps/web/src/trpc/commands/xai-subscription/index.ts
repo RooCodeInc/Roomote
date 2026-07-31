@@ -8,6 +8,7 @@ import {
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { autoAddConnectedSubscriptionTaskModels } from '../task-models';
 
 function assertAdmin(auth: UserAuthSuccess): void {
   if (!auth.isAdmin) {
@@ -49,6 +50,7 @@ export async function pollXaiDeviceAuthCommand(
   // Never surface the stored OAuth record (which contains refresh/access
   // tokens) to the client. Return a token-free status shape only.
   if (result.status === 'success') {
+    await autoAddConnectedSubscriptionTaskModels('xai-subscription');
     return { status: 'success' };
   }
 

@@ -324,6 +324,23 @@ const computeProviderUsagePolicies: Record<
       };
     },
   },
+  azure: {
+    async deriveUsage(context) {
+      await recordComputeProviderUsageSampleIfPresent({
+        context,
+        provider: 'azure',
+        source: 'worker_azure_cgroup_poll',
+      });
+
+      return {
+        activeCpuDurationMs: context.inputActiveCpuDurationMs,
+        observedMemoryMibMilliseconds:
+          context.inputObservedMemoryMibMilliseconds,
+        detailPatch: {},
+        preferredMeasurementSource: 'roomote_observation',
+      };
+    },
+  },
 };
 
 function resolveMeasurementSource(input: {

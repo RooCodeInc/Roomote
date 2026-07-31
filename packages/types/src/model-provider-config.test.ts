@@ -7,6 +7,7 @@ import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DEFAULT_TASK_MODEL_ID,
   getDisplayModelProviderId,
+  getModelProviderLabel,
   groupModelsByDisplayProvider,
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
@@ -14,6 +15,7 @@ import {
   getSetupModelProvider,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
+  resolveSetupModelProviderIdFromModel,
   SETUP_MODEL_PROVIDER_CATALOG,
   type ReasoningEffort,
   type SetupModelProviderDescriptor,
@@ -222,6 +224,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'baseten',
         'togetherai',
         'openai',
+        'azure',
+        'azure-cognitive-services',
         'anthropic',
         'moonshotai',
         'kimi-for-coding',
@@ -360,6 +364,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
         { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
         { providerId: 'openai', modelId: `openai/${modelId}` },
+        { providerId: 'azure', modelId: `azure/${modelId}` },
+        {
+          providerId: 'azure-cognitive-services',
+          modelId: `azure-cognitive-services/${modelId}`,
+        },
         { providerId: 'opencode', modelId: `opencode/${modelId}` },
         {
           providerId: 'amazon-bedrock',
@@ -442,6 +451,53 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       defaultRoomoteModel: 'google/gemini-3.1-pro-preview',
     });
   });
+
+  it.each([
+    [
+      'azure',
+      'Azure OpenAI',
+      'AZURE_API_KEY',
+      'AZURE_RESOURCE_NAME',
+      'azure/gpt-5.6-terra',
+    ],
+    [
+      'azure-cognitive-services',
+      'Azure AI Foundry',
+      'AZURE_COGNITIVE_SERVICES_API_KEY',
+      'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
+      'azure-cognitive-services/gpt-5.6-terra',
+    ],
+  ] as const)(
+    'maps %s to its API key and required non-secret resource name',
+    (providerId, label, apiKeyEnvVarName, resourceEnvVarName, defaultModel) => {
+      const provider = getSetupModelProvider(providerId);
+
+      expect(provider).toMatchObject({
+        id: providerId,
+        label,
+        envVarName: apiKeyEnvVarName,
+        authKind: 'api-key',
+        defaultRoomoteModel: defaultModel,
+        credentialHelp: {
+          href: 'https://portal.azure.com/',
+          linkLabel: 'Open Azure portal',
+        },
+      });
+      expect(provider.additionalEnvFields).toEqual([
+        {
+          envVarName: resourceEnvVarName,
+          label: 'Resource name',
+          secret: false,
+          required: true,
+          placeholder: 'my-resource',
+        },
+      ]);
+      expect(getModelProviderLabel(providerId)).toBe(label);
+      expect(resolveSetupModelProviderIdFromModel(defaultModel)).toBe(
+        providerId,
+      );
+    },
+  );
 
   it('maps Vercel AI Gateway to the AI_GATEWAY_API_KEY env var', () => {
     const vercelProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
@@ -880,6 +936,14 @@ describe('getModelProviderEnvKeyCandidates', () => {
 
   it('publishes the flattened default provider env key list', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('AI_GATEWAY_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('AZURE_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('AZURE_RESOURCE_NAME');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+      'AZURE_COGNITIVE_SERVICES_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+      'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
+    );
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('REQUESTY_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('BASETEN_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('TOGETHER_API_KEY');
@@ -932,6 +996,18 @@ describe('getModelProviderEnvKeyCandidates', () => {
     );
     expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
       'AWS_REGION',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'AZURE_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'AZURE_RESOURCE_NAME',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'AZURE_COGNITIVE_SERVICES_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
     );
   });
 });

@@ -4,10 +4,12 @@ import {
   isChatGptSubscriptionConnected,
   pollChatGptDeviceAuth,
   startChatGptDeviceAuth,
+  updateChatGptSubscriptionFastMode,
   type ChatGptSubscriptionPublicStatus,
 } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { autoAddConnectedSubscriptionTaskModels } from '../task-models';
 
 function assertAdmin(auth: UserAuthSuccess): asserts auth is UserAuthSuccess {
   if (!auth.isAdmin) {
@@ -51,6 +53,7 @@ export async function pollChatGptDeviceAuthCommand(
   // Never surface the stored OAuth record (which contains refresh/access
   // tokens) to the client. Return a token-free status shape only.
   if (result.status === 'success') {
+    await autoAddConnectedSubscriptionTaskModels('chatgpt');
     return { status: 'success' };
   }
 
@@ -66,5 +69,14 @@ export async function disconnectChatGptSubscriptionCommand(
 ): Promise<{ success: true }> {
   assertAdmin(auth);
   await disconnectChatGptSubscription();
+  return { success: true };
+}
+
+export async function updateChatGptSubscriptionFastModeCommand(
+  auth: UserAuthSuccess,
+  input: { fastMode: boolean },
+): Promise<{ success: true }> {
+  assertAdmin(auth);
+  await updateChatGptSubscriptionFastMode(input.fastMode);
   return { success: true };
 }

@@ -25,7 +25,6 @@ import {
 
 import { handleCreatePlan } from './create-plan.js';
 import { handleUpload } from './upload.js';
-import { isVisualProofAutoPostEnabled } from './chat-proof-auto-post.js';
 import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
 import { handleListArtifacts } from './list-artifacts.js';
@@ -231,13 +230,8 @@ roomoteMcpServer.registerTool(
       'Create, upload, download, and list artifacts in Roomote. ' +
       'Use action "create_plan" to create a markdown plan artifact (requires title and content). Returns viewUrl for sharing. ' +
       'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type). Use type "general" for ordinary files. ' +
-      (isVisualProofAutoPostEnabled()
-        ? 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof; for Slack-started tasks when visual-proof auto-post is enabled, visual-proof uploads are posted back to the originating Slack thread automatically. '
-        : 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not auto-posted to chat for this task; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ') +
+      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ' +
       'Returns rawUrl for direct embedding (for example PR <img src>). ' +
-      (shouldIncludeLegacySlackArtifactCompositionGuidance()
-        ? 'After uploading image files, if `send_chat_reply` or `post_to_channel` is available, pass the returned artifact IDs to those tools via `imageArtifactIds` so the user sees them directly in Slack. '
-        : '') +
       'Use action "download" to retrieve an artifact by task ID and artifact path (requires taskId and path). Downloads may target the current task or another task, so artifacts such as plans published by earlier tasks can be retrieved. ' +
       'For download, the path must include the category prefix exactly as stored in Roomote (e.g., "plans/my-plan.md" or "tmp/capture.png", not just the filename). ' +
       'Use action "list" to list the artifacts already uploaded for a task (defaults to the current task) with their stored paths and URLs, optionally filtered by artifactType. Use it to reuse previously uploaded artifact links (for example visual-proof links) instead of relying on transcript memory or re-uploading.',
@@ -262,9 +256,7 @@ roomoteMcpServer.registerTool(
       type: manageArtifactsUploadTypeSchema
         .optional()
         .describe(
-          isVisualProofAutoPostEnabled()
-            ? 'Artifact type for upload. Required for upload; use "general" for ordinary files and "visual-proof" for visual proof that auto-posts to Slack for Slack-started tasks when visual-proof auto-post is enabled.'
-            : 'Artifact type for upload. Required for upload; use "general" for ordinary files and "visual-proof" for visual proof. Visual-proof uploads do not auto-post to chat for this task.',
+          'Artifact type for upload. Required for upload; use "general" for ordinary files and "visual-proof" for visual proof. Visual-proof uploads are not posted to chat automatically.',
         ),
       artifactType: taskArtifactTypeSchema
         .optional()
@@ -342,7 +334,6 @@ roomoteMcpServer.registerTool(
             deleteAfterUpload: params.deleteAfterUpload,
           },
           config,
-          getRoomoteConfig(),
         );
       }
       case 'download': {
@@ -441,10 +432,6 @@ function getChatReplySurfaceLabel():
   }
 
   return process.env.ROOMOTE_SLACK_CHANNEL?.trim() ? 'Slack' : 'chat';
-}
-
-function shouldIncludeLegacySlackArtifactCompositionGuidance(): boolean {
-  return false;
 }
 
 function shouldRegisterChannelPostTool(): boolean {

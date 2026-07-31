@@ -1,0 +1,50 @@
+---
+title: Moonshot AI (Kimi)
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/moonshot.svg'
+description: Use Kimi models through the metered Moonshot AI Open Platform API.
+---
+
+Moonshot AI provides metered API access to Kimi models through its Open
+Platform. This connection is separate from the membership-based [Kimi for
+Coding](/providers/inference/kimi-for-coding) service.
+
+## Get an API key
+
+Create a key on the [Kimi API Platform keys page](https://platform.kimi.ai/console/api-keys).
+Do not paste a Kimi for Coding membership key here; the two services use
+different endpoints and billing.
+
+## Configuration
+
+Add **Moonshot AI (Kimi)** in **Settings > Models** and paste the Open Platform
+key, or configure:
+
+```sh
+MOONSHOT_API_KEY=...
+```
+
+Models use the `moonshotai/` prefix. Roomote recommends available Kimi coding
+models and can map a multimodal model to vision, planning, and review roles.
+
+## Cost behavior
+
+Open Platform requests draw from the account's API balance and are billed by
+model usage. This is independent of any Kimi for Coding membership allowance.
+Roomote records token usage and estimates cost from model metadata; the Kimi API
+Platform balance and published pricing are authoritative.
+
+## Verify setup
+
+1. save `MOONSHOT_API_KEY`
+2. confirm Moonshot AI models appear in **Settings > Models**
+3. enable a `moonshotai/...` model and assign it to a role
+4. run a small task and confirm usage appears in the Open Platform console
+
+## Common issues
+
+- **The key is rejected.** Confirm it was created at `platform.kimi.ai`, not in
+  the Kimi Code membership console.
+- **The balance does not change as expected.** Check that the selected model has
+  the `moonshotai/` prefix rather than another gateway's Kimi model.
+- **A model lacks a required capability.** Choose a Kimi model that supports the
+  task's tool calling, context, or image-input requirements.

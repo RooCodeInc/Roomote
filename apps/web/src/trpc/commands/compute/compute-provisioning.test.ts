@@ -56,11 +56,14 @@ vi.mock('@roomote/compute-providers', () => ({
   buildBlaxelWorkerImage: vi.fn(),
   buildE2bWorkerTemplate: mockBuildE2bWorkerTemplate,
   registerDaytonaWorkerSnapshot: vi.fn(),
+  registerAzureDiskImage: vi.fn(),
   deriveBlaxelWorkerImageName: (imageRef: string) =>
     `roomote-worker-${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
   deriveE2bWorkerTemplateRef: (imageRef: string) =>
     `roomote-worker:${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
   deriveDaytonaWorkerSnapshotName: (imageRef: string) =>
+    `roomote-worker-${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
+  deriveAzureWorkerDiskImageName: (imageRef: string) =>
     `roomote-worker-${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
 }));
 

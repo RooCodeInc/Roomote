@@ -6,6 +6,7 @@ import type { TaskRun } from '@roomote/db/server';
 const {
   mockCreateGitHubToken,
   mockGetDeploymentPrAction,
+  mockGetDeploymentGitHubRoomoteMentionEnabled,
   mockGetOctokit,
   mockRepositoriesFindFirst,
   mockEnvironmentsFindFirst,
@@ -22,6 +23,7 @@ const {
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetDeploymentPrAction: vi.fn(),
+  mockGetDeploymentGitHubRoomoteMentionEnabled: vi.fn().mockResolvedValue(true),
   mockGetOctokit: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
@@ -84,6 +86,8 @@ const { mockTaskPullRequestUpsert, mockTaskRunAssociationUpdate } = vi.hoisted(
 );
 
 vi.mock('@roomote/db/server', () => ({
+  getDeploymentGitHubRoomoteMentionEnabled: (...args: unknown[]) =>
+    mockGetDeploymentGitHubRoomoteMentionEnabled(...args),
   getDeploymentPrAction: (...args: unknown[]) =>
     mockGetDeploymentPrAction(...args),
   db: {
@@ -166,6 +170,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(true);
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockResolveRunCommitAuthor.mockResolvedValue({
       displayName: 'Roomote',
@@ -422,7 +427,7 @@ describe('platform-managed draft state', () => {
     expect(result.warnings).toEqual([]);
   });
 
-  it('rewrites a hardcoded @roomote attribution mention to the configured app slug', async () => {
+  it('uses the @roomote shorthand in attribution when enabled', async () => {
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(
       'roomote-roomote',
     );
@@ -446,7 +451,37 @@ describe('platform-managed draft state', () => {
 
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: '> Created by Roomote. Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).\n\n## What changed\n\nDone.',
+        body: '> Created by Roomote. Follow up by mentioning @roomote or in [the web UI](https://example.com/task/1).\n\n## What changed\n\nDone.',
+      }),
+    );
+  });
+
+  it('uses the configured app slug in attribution after opting out', async () => {
+    mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(
+      'roomote-roomote',
+    );
+    mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(false);
+    const octokit = makeOctokit({
+      created: {
+        number: 12,
+        node_id: 'node-12',
+        html_url: 'https://github.com/acme/web/pull/12',
+        title: '[Feature] X',
+        draft: true,
+      },
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...githubInput,
+        body: '> Created by Roomote. Follow up by mentioning @roomote or in [the web UI](https://example.com/task/1).',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: '> Created by Roomote. Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).',
       }),
     );
   });

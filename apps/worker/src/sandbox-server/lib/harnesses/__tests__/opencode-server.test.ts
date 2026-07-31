@@ -2097,14 +2097,14 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('advertises native turn steering so steers use the suppressed interrupt path', () => {
+  it('advertises native turn steering so steerTask avoids terminal cancellation', () => {
     const { harness } = createHarness();
 
     try {
-      // steerTask only routes an active turn through the suppressed
-      // interrupt-and-replay path when the harness reports native turn
-      // steering. Returning false here makes it fall back to a terminal
-      // cancel, which surfaces the abort error and emits TaskAborted.
+      // steerTask only routes an active turn through OpenCode's native prompt
+      // path when the harness reports native turn steering. Returning false
+      // makes it fall back to a terminal cancel, which surfaces the abort
+      // error and emits TaskAborted.
       expect(harness.supportsNativeTurnSteering).toBe(true);
     } finally {
       harness.dispose();

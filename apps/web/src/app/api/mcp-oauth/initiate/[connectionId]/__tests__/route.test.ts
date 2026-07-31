@@ -219,6 +219,43 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     expect(registerOAuthClientMock).not.toHaveBeenCalled();
   });
 
+  it('requests only explicit read scopes for monday.com registration and authorization', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'monday',
+      userId: 'user-1',
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'monday',
+      name: 'monday.com',
+      url: 'https://mcp.monday.com/mcp',
+    });
+    discoverOAuthEndpointsMock.mockResolvedValue({
+      authorization_endpoint: 'https://mcp.monday.com/authorize',
+      token_endpoint: 'https://mcp.monday.com/token',
+      registration_endpoint: 'https://mcp.monday.com/register',
+      scopes_supported: ['boards:read', 'boards:write', 'updates:read'],
+    });
+    getClientInformationMock.mockResolvedValue(undefined);
+    getMcpIntegrationOauthScopesMock.mockReturnValue([
+      'boards:read',
+      'updates:read',
+    ]);
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(registerOAuthClientMock).toHaveBeenCalledWith(
+      'https://mcp.monday.com/register',
+      expect.objectContaining({ scope: 'boards:read updates:read' }),
+    );
+    const authUrl = new URL(response.headers.get('location')!);
+    expect(authUrl.searchParams.get('scope')).toBe('boards:read updates:read');
+    expect(authUrl.searchParams.get('scope')).not.toContain('boards:write');
+  });
+
   it('stores the configured Linear OAuth client for the callback', async () => {
     getMcpIntegrationOauthEndpointsMock.mockReturnValue({
       authorizationEndpoint: 'https://linear.app/oauth/authorize',

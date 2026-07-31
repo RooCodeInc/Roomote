@@ -1,0 +1,45 @@
+---
+title: ChatGPT Subscription
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/openai.svg'
+description: Connect an eligible ChatGPT subscription to Roomote through OpenAI sign-in.
+---
+
+The ChatGPT subscription provider lets Roomote use supported coding models under
+an eligible ChatGPT Plus or Pro account. It is separate from the [OpenAI API
+provider](/providers/inference/openai): it uses subscription sign-in and plan
+limits instead of an `OPENAI_API_KEY` and API usage billing.
+
+## Connect a subscription
+
+Add **ChatGPT (subscription)** in **Settings > Models** and follow the OpenAI
+device authorization flow. Sign in with the ChatGPT account whose subscription
+you want Roomote to use. No API key or deployment environment variable is
+required.
+
+Roomote stores and refreshes the authorization securely. Connected models retain
+the `openai/` model prefix, so the Models page identifies the active connection
+rather than creating a separate model namespace.
+
+## Cost behavior
+
+Requests count against the included limits of the connected ChatGPT plan rather
+than an OpenAI API balance. Roomote shows the provider-reported 5-hour and weekly
+usage windows when available. These values come from an unofficial OpenAI usage
+endpoint and may temporarily disappear without blocking tasks. Review plan terms
+on [ChatGPT pricing](https://chatgpt.com/pricing).
+
+## Verify setup
+
+1. complete the device authorization flow
+2. confirm ChatGPT shows as connected in **Settings > Models**
+3. enable a supported `openai/...` model and assign it to a role
+4. run a small task and confirm the subscription usage display updates
+
+## Common issues
+
+- **Authorization expires or fails.** Use **Reconnect** and finish the device
+  flow with the same eligible ChatGPT account.
+- **Usage is not displayed.** The unofficial usage endpoint may be unavailable;
+  this does not necessarily mean model access is disconnected.
+- **A plan limit is reached.** Wait for the displayed window to reset or connect
+  the OpenAI API provider for separately billed capacity.

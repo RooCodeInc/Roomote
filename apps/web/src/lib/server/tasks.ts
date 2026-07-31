@@ -441,8 +441,7 @@ export const getTasks = async ({
  *
  * Simple search by title with ILIKE, scoped to tasks initiated by the
  * current user (matches the default tasks list). Explicit `includeIds`
- * (pins / recently visited) can still surface specific visible tasks the
- * user has interacted with, even when they were not the initiator.
+ * ensure the user's pinned / recently visited tasks are included.
  */
 
 type SearchTaskResult = {
@@ -497,9 +496,8 @@ export const searchTasks = async ({
     .orderBy(desc(tasks.activityAt), desc(tasks.id))
     .limit(limit);
 
-  // Fetch pinned / visited tasks that aren't already in the search results.
-  // Absolute visibility is required, but initiator is not — pins and direct
-  // visits can include other users' tasks the current user already opened.
+  // Fetch the current user's pinned / visited tasks that aren't already in the
+  // search results.
   const searchResultIds = new Set(searchResults.map((t) => t.id));
 
   const missingIds = (includeIds ?? []).filter(
@@ -517,7 +515,13 @@ export const searchTasks = async ({
         activityAt: tasks.activityAt,
       })
       .from(tasks)
-      .where(and(...visibleConditions, inArray(tasks.id, missingIds)))
+      .where(
+        and(
+          ...visibleConditions,
+          eq(tasks.initiatorUserId, userId),
+          inArray(tasks.id, missingIds),
+        ),
+      )
       .orderBy(desc(tasks.activityAt), desc(tasks.id));
   }
 

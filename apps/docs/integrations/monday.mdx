@@ -1,0 +1,61 @@
+---
+title: monday.com
+description: Bring monday.com board, item, update, and workspace context into Roomote tasks.
+icon: '/logo/integrations/monday.svg'
+---
+
+The monday.com integration connects Roomote to monday.com's hosted MCP server.
+It gives agents read-only access to the monday.com data the connected user can
+already access.
+
+Use it to inspect:
+
+- boards, groups, columns, items, and activity
+- item updates and monday WorkDocs
+- workspaces, users, teams, forms, and assets
+- automations, meetings, and monday dev sprint context
+
+## Setup
+
+<Steps>
+  <Step title="Enable monday.com">
+    A deployment administrator opens **Settings > Integrations**, finds
+    **monday.com**, and selects **Enable**. The administrator can also manage
+    which read-only monday.com tools are available to tasks.
+  </Step>
+  <Step title="Link your monday.com account">
+    Each user opens **Personal Settings**, selects **Link account** for
+    monday.com, and approves the OAuth request. Tool calls use that user's
+    monday.com permissions.
+  </Step>
+  <Step title="Use monday.com context in a task">
+    Include a monday.com board or item link in the request, or ask Roomote to
+    find the relevant board, item, update, or document after your account is
+    linked.
+  </Step>
+</Steps>
+
+## Access model
+
+The connection is user-scoped. Roomote does not share one person's monday.com
+credentials with another person or use them for tasks that have no acting user.
+
+The built-in integration exposes a read-only subset of monday.com's MCP tools.
+It does not create or modify boards, items, columns, updates, workflows, agents,
+or other monday.com data.
+
+<Note>
+  This MCP connection provides monday.com context inside Roomote tasks. Starting
+  Roomote tasks from monday.com assignments or mentions is not part of this
+  integration.
+</Note>
+
+## Troubleshooting
+
+If monday.com is unavailable in a task:
+
+- confirm an administrator enabled it in **Settings > Integrations**
+- confirm you linked your account in **Personal Settings**
+- reconnect your account if monday.com reports that authorization expired or
+  was revoked
+- confirm your monday.com user can access the requested board, item, or document

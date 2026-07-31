@@ -111,6 +111,7 @@ const auth = {
   featureFlags,
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
+  cookieConsentedAt: null,
   resource: {
     username: null,
     fullName: null,

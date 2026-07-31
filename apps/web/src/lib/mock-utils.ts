@@ -5,7 +5,6 @@ import type { UserResource } from '@/types';
 export const mockFeatureFlags: Record<FeatureFlag, boolean> = {
   [FeatureFlag.SlackEvalLauncher]: false,
   [FeatureFlag.ShowDebugUISetting]: false,
-  [FeatureFlag.SlackProofAutoPost]: false,
   [FeatureFlag.SuggestionRouting]: false,
   [FeatureFlag.VisualProofAutoScreencast]: false,
   [FeatureFlag.BackgroundSubagents]: false,

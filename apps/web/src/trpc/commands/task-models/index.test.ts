@@ -72,6 +72,7 @@ vi.mock('../environment-variables', () => ({
 }));
 
 import {
+  autoAddConnectedSubscriptionTaskModels,
   getTaskModelProviderSetupCommand,
   getTaskModelSettingsCommand,
   deleteTaskModelProviderCommand,
@@ -84,6 +85,10 @@ import {
 const PROVIDER_ENV_VAR_NAMES = [
   'OPENROUTER_API_KEY',
   'OPENAI_API_KEY',
+  'AZURE_API_KEY',
+  'AZURE_RESOURCE_NAME',
+  'AZURE_COGNITIVE_SERVICES_API_KEY',
+  'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
   'ANTHROPIC_API_KEY',
   'MOONSHOT_API_KEY',
   'KIMI_API_KEY',
@@ -1219,6 +1224,40 @@ describe('task model provider commands', () => {
     }
   });
 
+  it('persists and enables recommended models for a connected subscription', async () => {
+    mockIsChatGptSubscriptionConnected.mockResolvedValue(true);
+    mockPersistedSetupNewState(
+      {},
+      {
+        models: [
+          {
+            id: 'openrouter/z-ai/glm-5.2',
+            displayName: 'GLM 5.2',
+            family: 'GLM',
+          },
+        ],
+        allowedModelIds: ['openrouter/z-ai/glm-5.2'],
+        defaultModelId: 'openrouter/z-ai/glm-5.2',
+      },
+    );
+
+    await expect(
+      autoAddConnectedSubscriptionTaskModels('chatgpt'),
+    ).resolves.toBeGreaterThan(0);
+
+    expect(txValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskModelSettings: expect.objectContaining({
+          allowedModelIds: expect.arrayContaining([
+            'openai/gpt-5.6-sol',
+            'openai/gpt-5.6-terra',
+            'openai/gpt-5.6-luna',
+          ]),
+        }),
+      }),
+    );
+  });
+
   it('appends recommended models of connected providers to the settings catalog, disabled', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'ANTHROPIC_API_KEY',
@@ -1350,6 +1389,8 @@ describe('task model provider commands', () => {
     const result = await getTaskModelProviderSetupCommand(buildMockAuth());
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
+      'AZURE_RESOURCE_NAME',
+      'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
       'AWS_REGION',
       'ZAI_REGION',
       'ZAI_CODING_PLAN_REGION',

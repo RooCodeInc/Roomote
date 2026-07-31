@@ -160,9 +160,7 @@ function escapeRegExp(value) {
 export function extractChangelogSection(changelogMarkdown, version) {
   const bare = version.replace(/^v/, '');
   const lines = changelogMarkdown.split(/\r?\n/);
-  const headingRe = new RegExp(
-    `^##\\s+v?${escapeRegExp(bare)}(?:\\s|\\(|$)`,
-  );
+  const headingRe = new RegExp(`^##\\s+v?${escapeRegExp(bare)}(?:\\s|\\(|$)`);
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     if (headingRe.test(lines[i])) {
@@ -182,13 +180,30 @@ export function extractChangelogSection(changelogMarkdown, version) {
   return lines.slice(start, end).join('\n').trim();
 }
 
-const DISCORD_EMBED_TITLE_LIMIT = 256;
-const DISCORD_EMBED_DESCRIPTION_LIMIT = 4096;
-const ROOMOTE_BRAND_COLOR = 0xb0cd26;
+const DISCORD_MESSAGE_LIMIT = 2000;
 
 function truncateDiscordText(value, limit) {
   if (value.length <= limit) return value;
   return `${value.slice(0, limit - 1).trimEnd()}…`;
+}
+
+function removePatchChangesSection(markdown) {
+  const lines = markdown.split('\n');
+  const kept = [];
+  let skipping = false;
+
+  for (const line of lines) {
+    if (/^###\s+Patch changes\s*$/i.test(line)) {
+      skipping = true;
+      continue;
+    }
+    if (skipping && /^#{1,3}\s+/.test(line)) {
+      skipping = false;
+    }
+    if (!skipping) kept.push(line);
+  }
+
+  return kept.join('\n').trim();
 }
 
 /**
@@ -214,42 +229,24 @@ export function buildDiscordReleasePayload(release) {
     throw new TypeError('GitHub Release tagName and url are required');
   }
 
-  const releaseName =
-    typeof release.name === 'string' && release.name.trim()
-      ? release.name.trim()
-      : `Roomote ${tagName}`;
-  const titleSuffix = ' is now available';
-  const title = `${truncateDiscordText(
-    releaseName,
-    DISCORD_EMBED_TITLE_LIMIT - titleSuffix.length,
-  )}${titleSuffix}`;
-
-  let description =
-    typeof release.body === 'string' && release.body.trim()
-      ? release.body.trim()
-      : `Roomote ${tagName} is now available.`;
-  if (description.length > DISCORD_EMBED_DESCRIPTION_LIMIT) {
-    const readMore = `\n\n[Read the full release notes](${url})`;
-    description = `${description
-      .slice(0, DISCORD_EMBED_DESCRIPTION_LIMIT - readMore.length - 1)
-      .trimEnd()}…${readMore}`;
-  }
-
-  const embed = {
-    title,
-    url,
-    description,
-    color: ROOMOTE_BRAND_COLOR,
-    footer: { text: 'RooCodeInc/Roomote • GitHub Release' },
-  };
-  if (typeof release.publishedAt === 'string' && release.publishedAt.trim()) {
-    embed.timestamp = release.publishedAt;
-  }
+  const version = tagName.replace(/^v/i, '');
+  const versionTag = `v${version}`;
+  const prefix = `# Roomote ${version} is out!`;
+  const suffix = `See the full release notes [${versionTag}](${url}). Let us know what you think!`;
+  const body =
+    typeof release.body === 'string'
+      ? removePatchChangesSection(release.body)
+      : '';
+  const bodyLimit = DISCORD_MESSAGE_LIMIT - prefix.length - suffix.length - 4;
+  const announcementBody = truncateDiscordText(body, bodyLimit);
+  const content = announcementBody
+    ? `${prefix}\n\n${announcementBody}\n\n${suffix}`
+    : `${prefix}\n\n${suffix}`;
 
   return {
     username: 'Roomote Releases',
+    content,
     allowed_mentions: { parse: [] },
-    embeds: [embed],
   };
 }
 

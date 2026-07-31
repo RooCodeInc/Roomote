@@ -17,6 +17,7 @@ const {
   mockQueuePrReviewSummaryNotification,
   mockRecordWebhook,
   mockResolveConfiguredGitHubAppSlug,
+  mockResolveGitHubRoomoteMentionEnabled,
   mockResolveDeploymentEnvVar,
   mockUpdateTaskPrStatus,
   mockUpsertGitHubPullRequestFactFromWebhook,
@@ -49,6 +50,7 @@ const {
   mockQueuePrReviewSummaryNotification: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveConfiguredGitHubAppSlug: vi.fn(),
+  mockResolveGitHubRoomoteMentionEnabled: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockUpsertGitHubPullRequestFactFromWebhook: vi.fn(),
@@ -104,6 +106,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/github', () => ({
   isRepoSkipped: mockIsRepoSkipped,
   resolveConfiguredGitHubAppSlug: mockResolveConfiguredGitHubAppSlug,
+  resolveGitHubRoomoteMentionEnabled: mockResolveGitHubRoomoteMentionEnabled,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -200,6 +203,7 @@ describe('github webhook router', () => {
     mockQueuePrReviewSummaryNotification.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveConfiguredGitHubAppSlug.mockReset();
+    mockResolveGitHubRoomoteMentionEnabled.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockUpsertGitHubPullRequestFactFromWebhook.mockReset();
@@ -209,6 +213,7 @@ describe('github webhook router', () => {
 
     mockIsRepoSkipped.mockReturnValue(false);
     mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote');
+    mockResolveGitHubRoomoteMentionEnabled.mockResolvedValue(true);
     mockResolveDeploymentEnvVar.mockResolvedValue('test-secret');
     mockIsFromKnownInstallation.mockResolvedValue(true);
     mockVerify.mockResolvedValue(true);
@@ -428,7 +433,7 @@ describe('github webhook router', () => {
     expect(mockHandlePushConflictCheck).toHaveBeenCalled();
   });
 
-  it('refreshes the configured app slug before dispatching handlers', async () => {
+  it('refreshes GitHub mention settings before dispatching handlers', async () => {
     const response = await app.request('http://localhost/api/webhooks/github', {
       method: 'POST',
       headers: {
@@ -441,8 +446,12 @@ describe('github webhook router', () => {
 
     expect(response.status).toBe(200);
     expect(mockResolveConfiguredGitHubAppSlug).toHaveBeenCalledTimes(1);
+    expect(mockResolveGitHubRoomoteMentionEnabled).toHaveBeenCalledTimes(1);
     expect(
       mockResolveConfiguredGitHubAppSlug.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockVerifyAndReceive.mock.invocationCallOrder[0]!);
+    expect(
+      mockResolveGitHubRoomoteMentionEnabled.mock.invocationCallOrder[0],
     ).toBeLessThan(mockVerifyAndReceive.mock.invocationCallOrder[0]!);
   });
 

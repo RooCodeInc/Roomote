@@ -1,0 +1,43 @@
+---
+title: xAI Grok Subscription
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/xai.svg'
+description: Connect an eligible SuperGrok or X Premium+ subscription to Roomote.
+---
+
+The xAI Grok subscription provider lets Roomote use included Grok capacity from
+an eligible SuperGrok or X Premium+ account. It uses account authorization and
+plan limits instead of an `XAI_API_KEY` and metered API billing.
+
+## Connect a subscription
+
+Add **xAI (Grok subscription)** in **Settings > Models** and complete the xAI
+authorization flow with the account that owns the eligible plan. No API key or
+deployment environment variable is required.
+
+Subscription models keep the `xai/` prefix. When both subscription and [xAI API
+key](/providers/inference/xai) connections exist, Roomote prefers subscription
+access for those models.
+
+## Cost behavior
+
+Requests consume the plan's included usage windows rather than an xAI API
+balance. Roomote displays plan and allowance information when xAI's unofficial
+CLI usage service returns it. That service can change without notice, so the
+usage line may disappear even while inference still works. Your xAI or X plan
+and billing page is authoritative.
+
+## Verify setup
+
+1. complete the xAI authorization flow
+2. confirm the Grok subscription shows as connected
+3. enable an `xai/...` model and assign it to a role
+4. run a small task and check the subscription usage display when available
+
+## Common issues
+
+- **Authorization succeeds but models fail.** Confirm the account has an
+  eligible active plan with coding or API-compatible Grok access.
+- **Usage is not displayed.** The provider's unofficial usage endpoint may be
+  unavailable; try a task before reconnecting.
+- **The allowance is exhausted.** Wait for the plan window to reset or disconnect
+  the subscription so a configured `XAI_API_KEY` can provide metered capacity.

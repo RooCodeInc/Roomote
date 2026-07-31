@@ -11,7 +11,10 @@ vi.mock('@roomote/env', async (importOriginal) => {
   };
 });
 
-import { setConfiguredGitHubAppSlugCache } from '@roomote/github';
+import {
+  setConfiguredGitHubAppSlugCache,
+  setGitHubRoomoteMentionSettingCache,
+} from '@roomote/github';
 
 import { isMention } from '../isMention';
 
@@ -125,6 +128,7 @@ describe('isMention', () => {
 
     afterEach(() => {
       setConfiguredGitHubAppSlugCache(null);
+      setGitHubRoomoteMentionSettingCache(null);
     });
 
     it('detects mentions of the configured slug', () => {
@@ -136,13 +140,32 @@ describe('isMention', () => {
       ).toBe(true);
     });
 
-    it('ignores mentions of the default slug when another slug is configured', () => {
+    it('detects the @roomote shorthand when another slug is configured', () => {
+      expect(
+        isMention({
+          body: 'Hey @roomote can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('only detects the configured slug after opting out', () => {
+      setGitHubRoomoteMentionSettingCache({
+        value: false,
+      });
+
       expect(
         isMention({
           body: 'Hey @roomote can you take a look?',
           user: { login: 'testuser' },
         }),
       ).toBe(false);
+      expect(
+        isMention({
+          body: 'Hey @acme can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
     });
 
     it('returns false for comments authored by the configured bot', () => {
@@ -152,6 +175,65 @@ describe('isMention', () => {
           user: { login: 'acme[bot]' },
         }),
       ).toBe(false);
+    });
+  });
+
+  describe('with a Roomote-branded app slug', () => {
+    beforeEach(() => {
+      setConfiguredGitHubAppSlugCache({
+        value: 'roomote-roomote',
+        expiresAt: Date.now() + 60_000,
+      });
+    });
+
+    afterEach(() => {
+      setConfiguredGitHubAppSlugCache(null);
+    });
+
+    it('detects the @Roomote shorthand', () => {
+      expect(
+        isMention({
+          body: '@Roomote please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('still detects the full configured slug', () => {
+      expect(
+        isMention({
+          body: '@roomote-roomote please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('does not treat a longer shorthand lookalike as a mention', () => {
+      expect(
+        isMention({
+          body: '@roomote-helper please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(false);
+    });
+
+    it('only detects the full configured slug after opting out', () => {
+      setGitHubRoomoteMentionSettingCache({
+        value: false,
+      });
+
+      expect(
+        isMention({
+          body: '@Roomote please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(false);
+      expect(
+        isMention({
+          body: '@roomote-roomote please take a look',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
     });
   });
 });

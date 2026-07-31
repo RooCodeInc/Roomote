@@ -10,6 +10,7 @@ import {
 import type {
   ComputeProviderClient,
   ComputeProviderFactoryOptions,
+  AzureConfig,
   BlaxelConfig,
   DaytonaConfig,
   E2bConfig,
@@ -23,9 +24,48 @@ import {
   DaytonaClient,
   E2bClient,
   BlaxelClient,
+  AzureClient,
 } from './adapters';
 
 const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
+
+/**
+ * ACA sandbox size presets. Disk values are the tier caps the service
+ * enforces (measured: `InvalidResourceTier` past cores × 20Gi — XS 5Gi,
+ * S 10Gi, M 20Gi, L 40Gi, XL 80Gi; the doc table's 20Gi for XS/S is wrong).
+ */
+export const AZURE_SIZE_PRESETS = {
+  XS: { cpuMillicores: 250, memoryMiB: 512, diskSize: '5Gi' },
+  S: { cpuMillicores: 500, memoryMiB: 1024, diskSize: '10Gi' },
+  M: { cpuMillicores: 1000, memoryMiB: 2048, diskSize: '20Gi' },
+  L: { cpuMillicores: 2000, memoryMiB: 4096, diskSize: '40Gi' },
+  XL: { cpuMillicores: 4000, memoryMiB: 8192, diskSize: '80Gi' },
+} as const;
+
+export type AzureSizePreset = keyof typeof AZURE_SIZE_PRESETS;
+
+export function parseAzureSizePreset(
+  value: string | undefined,
+): AzureSizePreset | undefined {
+  return value === 'XS' ||
+    value === 'S' ||
+    value === 'M' ||
+    value === 'L' ||
+    value === 'XL'
+    ? value
+    : undefined;
+}
+
+function parseAzureEgressInspection(
+  value: string | undefined,
+): 'Legacy' | 'Full' | 'Partial' | 'None' | undefined {
+  return value === 'Legacy' ||
+    value === 'Full' ||
+    value === 'Partial' ||
+    value === 'None'
+    ? value
+    : undefined;
+}
 
 export { getComputeProviderCapabilities } from '@roomote/types';
 
@@ -314,6 +354,93 @@ export function createComputeProviderClient(
           : {}),
       };
       return new BlaxelClient(config);
+    }
+
+    case 'azure': {
+      const subscriptionId =
+        options.config?.subscriptionId ?? envValue('AZURE_SUBSCRIPTION_ID');
+      const resourceGroup =
+        options.config?.resourceGroup ?? envValue('AZURE_RESOURCE_GROUP');
+      const sandboxGroup =
+        options.config?.sandboxGroup ?? envValue('AZURE_SANDBOX_GROUP');
+      const region = options.config?.region ?? envValue('AZURE_SANDBOX_REGION');
+      const diskImage =
+        options.config?.diskImage ?? envValue('AZURE_SANDBOX_DISK_IMAGE');
+      // Each SP component follows the same config-then-env precedence as
+      // every other Azure field, so an explicit config never loses to
+      // ambient env.
+      const spTenantId =
+        options.config?.servicePrincipal?.tenantId ??
+        envValue('AZURE_TENANT_ID');
+      const spClientId =
+        options.config?.servicePrincipal?.clientId ??
+        envValue('AZURE_CLIENT_ID');
+      const spClientSecret =
+        options.config?.servicePrincipal?.clientSecret ??
+        envValue('AZURE_CLIENT_SECRET');
+
+      // An explicit managedIdentityClientId is a deliberate choice of auth
+      // mode; ambient SP env vars must not silently override it. Service
+      // principal auth only kicks in when the full triple is present — a
+      // lone AZURE_CLIENT_ID still means user-assigned managed identity.
+      const callerChoseManagedIdentity =
+        options.config?.managedIdentityClientId !== undefined;
+      const servicePrincipal =
+        !callerChoseManagedIdentity &&
+        spTenantId &&
+        spClientId &&
+        spClientSecret
+          ? {
+              tenantId: spTenantId,
+              clientId: spClientId,
+              clientSecret: spClientSecret,
+            }
+          : undefined;
+      const managedIdentityClientId =
+        options.config?.managedIdentityClientId ?? envValue('AZURE_CLIENT_ID');
+
+      assertDefined(subscriptionId, 'Missing AZURE_SUBSCRIPTION_ID');
+      assertDefined(resourceGroup, 'Missing AZURE_RESOURCE_GROUP');
+      assertDefined(sandboxGroup, 'Missing AZURE_SANDBOX_GROUP');
+      assertDefined(region, 'Missing AZURE_SANDBOX_REGION');
+      assertDefined(diskImage, 'Missing AZURE_SANDBOX_DISK_IMAGE');
+
+      // Size preset only fills values the caller didn't set explicitly.
+      const sizePreset =
+        options.config?.size ??
+        parseAzureSizePreset(envValue('AZURE_SANDBOX_SIZE'));
+      const egressInspection =
+        options.config?.egressTrafficInspection ??
+        parseAzureEgressInspection(envValue('AZURE_SANDBOX_EGRESS_INSPECTION'));
+
+      const config: AzureConfig = {
+        ...(options.config ?? {}),
+        subscriptionId,
+        resourceGroup,
+        sandboxGroup,
+        region,
+        diskImage,
+        ...(servicePrincipal
+          ? { servicePrincipal }
+          : managedIdentityClientId
+            ? { managedIdentityClientId }
+            : {}),
+        ...(sizePreset && options.config?.cpuMillicores === undefined
+          ? { cpuMillicores: AZURE_SIZE_PRESETS[sizePreset].cpuMillicores }
+          : {}),
+        ...(sizePreset && options.config?.memoryMiB === undefined
+          ? { memoryMiB: AZURE_SIZE_PRESETS[sizePreset].memoryMiB }
+          : {}),
+        ...(sizePreset && options.config?.diskSize === undefined
+          ? { diskSize: AZURE_SIZE_PRESETS[sizePreset].diskSize }
+          : {}),
+        ...(egressInspection &&
+        options.config?.egressTrafficInspection === undefined
+          ? { egressTrafficInspection: egressInspection }
+          : {}),
+      };
+
+      return new AzureClient(config);
     }
 
     default: {

@@ -1,4 +1,4 @@
-import { PRODUCT_NAME, getGitHubAppMention } from './constants';
+import { PRODUCT_NAME, getGitHubFollowUpMention } from './constants';
 
 export const invocationProviders = [
   'slack',
@@ -56,9 +56,13 @@ export function buildGenericInvocationIdentity(
 
 export function buildGitHubInvocationIdentity(
   slug: string | null | undefined,
+  roomoteMentionEnabled = false,
 ): InvocationIdentity {
   const normalizedSlug = slug?.trim() || 'roomote';
-  const mentionText = getGitHubAppMention(normalizedSlug);
+  const mentionText = getGitHubFollowUpMention(
+    normalizedSlug,
+    roomoteMentionEnabled,
+  );
 
   return {
     provider: 'github',

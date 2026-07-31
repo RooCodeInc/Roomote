@@ -5,7 +5,6 @@
 export enum FeatureFlag {
   SlackEvalLauncher = 'SlackEvalLauncher',
   ShowDebugUISetting = 'ShowDebugUISetting',
-  SlackProofAutoPost = 'SlackProofAutoPost',
   SuggestionRouting = 'SuggestionRouting',
   VisualProofAutoScreencast = 'VisualProofAutoScreencast',
   BackgroundSubagents = 'BackgroundSubagents',
@@ -89,7 +88,6 @@ export interface MetadataRecord {
   slack_eval_launcher?: boolean;
   show_debug_ui_setting?: boolean;
   show_debug_ui?: boolean;
-  slack_proof_auto_post?: boolean;
   queue_parallel_task_limit?: boolean | number | string;
   suggestion_routing?: boolean;
   visual_proof_auto_screencast?: boolean;

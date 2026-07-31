@@ -30,6 +30,8 @@ export type AuthorizedUser = {
   anonymousAnalyticsEnabled: boolean;
   /** Whether this deployment uses Roomote Cloud-only behavior. */
   cloudEnabled: boolean;
+  /** When this user accepted optional Cloud cookies, serialized as epoch ms. */
+  cookieConsentedAt: number | null;
   managedAccess?: ManagedDeploymentAccess;
   resource: UserResource;
 };

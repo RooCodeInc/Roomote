@@ -136,6 +136,25 @@ describe('Capture visual proof skill', () => {
     expect(skillContent).not.toContain('upload-manifest.json');
   });
 
+  it('carries artifact IDs and optional chat-sharing guidance to the parent', () => {
+    const skillContent = read(
+      '../skills/standard/capture-visual-proof/SKILL.md',
+    );
+
+    expect(skillContent).toContain(
+      "include each screenshot's `artifactId`, `viewUrl`, `rawUrl`, and one short sentence explaining what the still proves",
+    );
+    expect(skillContent).toContain(
+      "every retained keyframe's `artifactId`, `viewUrl`, and `rawUrl`",
+    );
+    expect(skillContent).toContain(
+      'When uploaded proof artifacts are present, carry forward a short `Sharing note`',
+    );
+    expect(skillContent).toContain(
+      'when `send_chat_reply` with `imageArtifactIds` is available and the proof may be relevant to the user in the originating thread',
+    );
+  });
+
   it('preflights the browser target with a shell probe before spawning the runner', () => {
     const skillContent = read(
       '../skills/standard/capture-visual-proof/SKILL.md',

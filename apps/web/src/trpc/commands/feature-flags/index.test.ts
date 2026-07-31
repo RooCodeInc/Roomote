@@ -65,6 +65,7 @@ function buildAuth(isAdmin: boolean): UserAuthSuccess {
     featureFlags: mockFeatureFlags,
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
+    cookieConsentedAt: null,
     resource: mockUserResource,
   };
 }

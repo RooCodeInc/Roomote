@@ -30,7 +30,10 @@ import {
   resolveTelegramRuntimeCredentials,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
-import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
+import {
+  resolveConfiguredGitHubAppSlug,
+  resolveGitHubRoomoteMentionEnabled,
+} from '@roomote/github';
 import { getRedis } from '@roomote/redis';
 
 import { githubPrReview } from './workflows/githubPrReview';
@@ -122,7 +125,10 @@ export async function generatePrompt({
   // checks, review-summary comment reuse, PR attribution mentions); refresh
   // the configured app slug first so an app created through the /setup flow
   // is recognized as ourselves.
-  await resolveConfiguredGitHubAppSlug();
+  await Promise.all([
+    resolveConfiguredGitHubAppSlug(),
+    resolveGitHubRoomoteMentionEnabled(),
+  ]);
   const telegramBotUsername =
     getCommunicationProviderFromTaskPayload(taskSpec.payload) === 'telegram'
       ? (await resolveTelegramRuntimeCredentials()).botUsername
@@ -164,9 +170,6 @@ export async function generatePrompt({
   );
   const backgroundProofCaptureEnabled = await evaluateOrgFeatureFlag(
     FeatureFlag.BackgroundSubagents,
-  );
-  const visualProofAutoPostEnabled = await evaluateOrgFeatureFlag(
-    FeatureFlag.SlackProofAutoPost,
   );
   const prAction = await getDeploymentPrAction().catch(() => undefined);
   const reviewCodeSettings = await getReviewCodeAutomationSettings().catch(
@@ -232,7 +235,6 @@ export async function generatePrompt({
         codeReviewsEnabled,
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
-        visualProofAutoPostEnabled,
         prAction,
       });
     }
@@ -404,7 +406,6 @@ export async function generatePrompt({
       if (slackChannel && slackThreadTs) {
         const slackInstructions = buildSlackMessageInstructions({
           includeRequestUserInputGuidance: true,
-          visualProofAutoPostEnabled,
         });
         result.harnessInstructions = result.harnessInstructions
           ? `${slackInstructions}\n\n${result.harnessInstructions}`
@@ -414,12 +415,8 @@ export async function generatePrompt({
       if (nonSlackChatProvider) {
         const chatInstructions =
           nonSlackChatProvider === 'teams'
-            ? buildTeamsMessageInstructions({
-                visualProofAutoPostEnabled,
-              })
-            : buildChatProviderMessageInstructions(nonSlackChatProvider, {
-                visualProofAutoPostEnabled,
-              });
+            ? buildTeamsMessageInstructions()
+            : buildChatProviderMessageInstructions(nonSlackChatProvider);
         result.harnessInstructions = result.harnessInstructions
           ? `${chatInstructions}\n\n${result.harnessInstructions}`
           : chatInstructions;

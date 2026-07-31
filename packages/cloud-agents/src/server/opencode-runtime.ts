@@ -4,9 +4,11 @@ import { createServer } from 'node:net';
 
 import {
   collectOpenRouterVariantModelAlias,
+  CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   isTaskModelIdDisabled,
   mergeOpenCodeModelReasoningOptions,
+  mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   type OpenRouterVariantModelAlias,
@@ -77,8 +79,15 @@ function buildModelBackedOpenCodeConfigContent(
     );
   }
 
+  const providerModelConfig =
+    env[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1'
+      ? mergeOpenCodeChatGptFastModeOptions(providerReasoningConfig, [
+          model,
+          smallModel,
+        ])
+      : providerReasoningConfig;
   const providerConfig = mergeOpenRouterVariantAliasModels(
-    providerReasoningConfig,
+    providerModelConfig,
     variantAliases,
   );
 

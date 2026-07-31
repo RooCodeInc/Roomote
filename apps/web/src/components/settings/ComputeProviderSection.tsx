@@ -32,6 +32,11 @@ import {
   DialogTitle,
   EnvVarsInfoNote,
   Input,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Spinner,
   Switch,
   Trash2,
@@ -47,6 +52,7 @@ const BRAND_ICON_BY_PROVIDER: Record<ComputeProvider, string> = {
   daytona: 'daytona',
   e2b: 'e2b',
   blaxel: 'blaxel',
+  azure: 'azure',
   roomote: 'roomote',
 };
 
@@ -120,15 +126,17 @@ export function ComputeProviderSection({
   localDockerTogglePending = false,
 }: ComputeProviderSectionProps) {
   const isLocalDocker = provider.provider === 'docker';
-  const inputFields = provider.fields.filter(isComputeCredentialField);
-  // Provider-specific routing, endpoint, and retention settings. Managed
-  // worker artifacts are never form inputs. Runtime overrides remain visible
-  // here but locked so operators can see where the effective policy comes from.
-  const advancedInfraFields = provider.fields.filter(
+  const credentialFields = provider.fields.filter(isComputeCredentialField);
+  const inputFields = credentialFields.filter((field) => !field.advanced);
+  // Optional authentication, routing, endpoint, resource, and retention
+  // settings. Managed worker artifacts are never form inputs. Runtime
+  // overrides remain visible here but locked so operators can see where the
+  // effective policy comes from.
+  const advancedFields = provider.fields.filter(
     (field) =>
-      isComputeInfrastructureField(field) &&
       isComputeOperatorEditableField(field) &&
-      field.advanced,
+      field.advanced &&
+      (isComputeCredentialField(field) || isComputeInfrastructureField(field)),
   );
   const missingDefaultBlockingInfraFields = provider.fields.filter(
     (field) =>
@@ -141,8 +149,8 @@ export function ComputeProviderSection({
   );
   const hasMissingDefaultBlockingInfra =
     missingDefaultBlockingInfraFields.length > 0;
-  const hasNoInputFields = inputFields.length === 0;
-  const hasConfiguredValues = inputFields.some(
+  const hasNoInputFields = credentialFields.length === 0;
+  const hasConfiguredValues = credentialFields.some(
     (field) => field.runtimeSatisfied || field.savedSatisfied,
   );
   const hasSavedValues = provider.fields.some((field) => field.savedSatisfied);
@@ -212,15 +220,17 @@ export function ComputeProviderSection({
   // Credentials are already satisfied when a save can still start or retry
   // auto-provisioning without retyping values (existing installs that later
   // gain a registry-qualified worker image).
-  const credentialsSatisfiedForProvisioning = inputFields.every((field) => {
-    const nextValue = values[field.envVarName]?.trim() ?? '';
-    return (
-      field.required === false ||
-      field.runtimeSatisfied ||
-      field.savedSatisfied ||
-      nextValue.length > 0
-    );
-  });
+  const credentialsSatisfiedForProvisioning = credentialFields.every(
+    (field) => {
+      const nextValue = values[field.envVarName]?.trim() ?? '';
+      return (
+        field.required === false ||
+        field.runtimeSatisfied ||
+        field.savedSatisfied ||
+        nextValue.length > 0
+      );
+    },
+  );
   // A failed run is retried by saving again — even with no new values, as
   // long as the required credentials are already satisfied.
   const canRetryProvisioning =
@@ -234,7 +244,7 @@ export function ComputeProviderSection({
     credentialsSatisfiedForProvisioning &&
     !provisioningRunning;
 
-  const hasPendingValueChanges = [...inputFields, ...advancedInfraFields].some(
+  const hasPendingValueChanges = [...inputFields, ...advancedFields].some(
     (field) => {
       if (field.runtimeSatisfied) {
         return false;
@@ -253,7 +263,7 @@ export function ComputeProviderSection({
     },
   );
 
-  const hasMissingRequiredValue = inputFields.some((field) => {
+  const hasMissingRequiredValue = credentialFields.some((field) => {
     const nextValue = values[field.envVarName]?.trim() ?? '';
     return (
       field.required !== false &&
@@ -270,10 +280,10 @@ export function ComputeProviderSection({
 
   const hasEditableFields =
     inputFields.some((field) => !field.runtimeSatisfied) ||
-    advancedInfraFields.some((field) => !field.runtimeSatisfied);
+    advancedFields.some((field) => !field.runtimeSatisfied);
   const runtimeConfigured =
-    inputFields.length > 0 &&
-    inputFields.every((field) => field.runtimeSatisfied);
+    credentialFields.length > 0 &&
+    credentialFields.every((field) => field.runtimeSatisfied);
 
   const handleSave = () => {
     onSave(provider.provider, values);
@@ -306,54 +316,96 @@ export function ComputeProviderSection({
           {field.required === false ? ' (optional)' : ''}
         </label>
         <div className="flex items-center gap-2">
-          <Input
-            id={`${provider.provider}-${field.envVarName}`}
-            secret={isSecretField && !field.runtimeSatisfied}
-            type={isSecretField ? undefined : (field.input?.type ?? 'text')}
-            min={field.input?.min}
-            max={field.input?.max}
-            step={field.input?.step}
-            className="font-mono"
-            value={
-              isSecretField && field.runtimeSatisfied
-                ? MASKED_VALUE
-                : shouldShowSavedValueMask
+          {field.input?.type === 'select' ? (
+            <Select
+              // Mirror the text/number inputs: show the effective configured
+              // value even when the field is managed by environment variable.
+              value={
+                field.runtimeSatisfied ? (field.savedValue ?? value) : value
+              }
+              onValueChange={(nextValue) => {
+                setValues((current) => ({
+                  ...current,
+                  [field.envVarName]: nextValue,
+                }));
+              }}
+              disabled={savePending || field.runtimeSatisfied}
+            >
+              <SelectTrigger
+                id={`${provider.provider}-${field.envVarName}`}
+                className="font-mono"
+                aria-label={field.label}
+              >
+                <SelectValue
+                  placeholder={
+                    field.runtimeSatisfied
+                      ? 'Managed by environment variable'
+                      : (field.input.placeholder ?? 'Default')
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {field.input.options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label ?? option.value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              id={`${provider.provider}-${field.envVarName}`}
+              secret={isSecretField && !field.runtimeSatisfied}
+              type={isSecretField ? undefined : (field.input?.type ?? 'text')}
+              min={field.input?.min}
+              max={field.input?.max}
+              step={field.input?.step}
+              className="font-mono"
+              value={
+                isSecretField && field.runtimeSatisfied
                   ? MASKED_VALUE
-                  : field.runtimeSatisfied && !isSecretField
-                    ? (field.savedValue ?? value)
-                    : value
-            }
-            onFocus={() => {
-              if (shouldShowSavedValueMask) {
-                setEditingSavedValues((current) => ({
-                  ...current,
-                  [field.envVarName]: true,
-                }));
+                  : shouldShowSavedValueMask
+                    ? MASKED_VALUE
+                    : field.runtimeSatisfied && !isSecretField
+                      ? (field.savedValue ?? value)
+                      : value
               }
-            }}
-            onBlur={() => {
-              if (isSecretField && field.savedSatisfied && value.length === 0) {
-                setEditingSavedValues((current) => ({
+              onFocus={() => {
+                if (shouldShowSavedValueMask) {
+                  setEditingSavedValues((current) => ({
+                    ...current,
+                    [field.envVarName]: true,
+                  }));
+                }
+              }}
+              onBlur={() => {
+                if (
+                  isSecretField &&
+                  field.savedSatisfied &&
+                  value.length === 0
+                ) {
+                  setEditingSavedValues((current) => ({
+                    ...current,
+                    [field.envVarName]: false,
+                  }));
+                }
+              }}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                setValues((current) => ({
                   ...current,
-                  [field.envVarName]: false,
+                  [field.envVarName]: nextValue,
                 }));
+              }}
+              placeholder={
+                field.runtimeSatisfied
+                  ? 'Managed by environment variable'
+                  : (field.input?.placeholder ?? field.label)
               }
-            }}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              setValues((current) => ({
-                ...current,
-                [field.envVarName]: nextValue,
-              }));
-            }}
-            placeholder={
-              field.runtimeSatisfied
-                ? 'Managed by environment variable'
-                : (field.input?.placeholder ?? field.label)
-            }
-            disabled={savePending || field.runtimeSatisfied}
-            data-1p-ignore
-          />
+              disabled={savePending || field.runtimeSatisfied}
+              data-1p-ignore
+            />
+          )}
           {(field.runtimeSatisfied || field.savedSatisfied) && <Check />}
         </div>
         {field.helpText ? (
@@ -487,7 +539,7 @@ export function ComputeProviderSection({
                 </div>
               )}
 
-              {advancedInfraFields.length > 0 ? (
+              {advancedFields.length > 0 ? (
                 <Collapsible
                   open={advancedExpanded}
                   onOpenChange={setAdvancedExpanded}
@@ -506,20 +558,18 @@ export function ComputeProviderSection({
                   </CollapsibleTrigger>
                   <CollapsibleContent className="space-y-3 pt-2">
                     <p className="text-sm text-muted-foreground">
-                      Provider routing, endpoint, and standby retention
-                      overrides. Leave optional values blank to use provider
-                      defaults.
+                      Optional authentication, provider routing, resource, and
+                      retention overrides. Leave optional values blank to use
+                      provider defaults.
                     </p>
                     <div className="space-y-3">
-                      {advancedInfraFields.map((field) =>
-                        renderFieldInput(field),
-                      )}
+                      {advancedFields.map((field) => renderFieldInput(field))}
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
               ) : null}
 
-              {(inputFields.length > 0 || advancedInfraFields.length > 0) && (
+              {(inputFields.length > 0 || advancedFields.length > 0) && (
                 <EnvVarsInfoNote runtimeConfigured={runtimeConfigured} />
               )}
 
@@ -547,7 +597,7 @@ export function ComputeProviderSection({
                 canRetryProvisioning ||
                 canStartProvisioning) &&
                 (inputFields.length > 0 ||
-                  advancedInfraFields.length > 0 ||
+                  advancedFields.length > 0 ||
                   canRetryProvisioning ||
                   canStartProvisioning) && (
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

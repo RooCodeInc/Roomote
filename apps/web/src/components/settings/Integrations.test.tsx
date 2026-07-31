@@ -801,6 +801,7 @@ describe('Integrations settings', () => {
       'Braintrust',
       'Grafana',
       'Jira',
+      'monday.com',
       'Neon',
       'Notion',
       'PostHog',
@@ -1022,6 +1023,21 @@ describe('Integrations settings', () => {
     expect(
       screen.getByText(
         'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the monday.com confirmation dialog copy for highlighted integrations', () => {
+    state.searchParams = 'highlight=monday';
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByRole('heading', { name: 'Enable monday.com?' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
       ),
     ).toBeInTheDocument();
   });

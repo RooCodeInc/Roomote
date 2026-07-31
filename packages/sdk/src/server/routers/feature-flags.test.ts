@@ -4,7 +4,7 @@ const { mockEvaluateFeatureFlag } = vi.hoisted(() => ({
 
 vi.mock('@roomote/feature-flags/server', () => ({
   FeatureFlag: {
-    SlackProofAutoPost: 'SlackProofAutoPost',
+    BackgroundSubagents: 'BackgroundSubagents',
   },
   getFeatureFlagEvaluator: vi.fn(() => ({
     evaluate: mockEvaluateFeatureFlag,
@@ -53,24 +53,30 @@ describe('featureFlagsRouter.evaluate', () => {
 
     await expect(
       createAuthCaller().evaluate({
-        flag: FeatureFlag.SlackProofAutoPost,
+        flag: FeatureFlag.BackgroundSubagents,
       }),
     ).resolves.toBe(true);
 
-    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith('SlackProofAutoPost', {
-      isDeploymentContext: true,
-    });
+    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith(
+      'BackgroundSubagents',
+      {
+        isDeploymentContext: true,
+      },
+    );
   });
 
   it('evaluates deployment flags for run-token callers', async () => {
     await expect(
       createJobCaller().evaluate({
-        flag: FeatureFlag.SlackProofAutoPost,
+        flag: FeatureFlag.BackgroundSubagents,
       }),
     ).resolves.toBe(false);
 
-    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith('SlackProofAutoPost', {
-      isDeploymentContext: true,
-    });
+    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith(
+      'BackgroundSubagents',
+      {
+        isDeploymentContext: true,
+      },
+    );
   });
 });

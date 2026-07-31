@@ -179,6 +179,10 @@ as per-task auth tokens or workspace paths.
 | `OPENROUTER_API_KEY`                   | Provider key | OpenRouter API key. Can also be saved from **Settings > Models**.                                                                       |
 | `AI_GATEWAY_API_KEY`                   | Provider key | Vercel AI Gateway API key.                                                                                                              |
 | `OPENAI_API_KEY`                       | Provider key | OpenAI API key.                                                                                                                         |
+| `AZURE_API_KEY`                        | Provider key | Azure OpenAI API key.                                                                                                                   |
+| `AZURE_RESOURCE_NAME`                  | Provider config | Azure OpenAI resource name, without the domain or URL.                                                                                |
+| `AZURE_COGNITIVE_SERVICES_API_KEY`     | Provider key | Azure AI Foundry / AI Services API key.                                                                                                 |
+| `AZURE_COGNITIVE_SERVICES_RESOURCE_NAME` | Provider config | Azure AI Foundry / AI Services resource name, without the domain or URL.                                                           |
 | `ANTHROPIC_API_KEY`                    | Provider key | Anthropic API key.                                                                                                                      |
 | `XAI_API_KEY`                          | Provider key | xAI / Grok API key. Optional when a SuperGrok / eligible X Premium+ subscription is connected from **Settings > Models**.               |
 | `XAI_OAUTH_CLIENT_ID`                  | Optional     | Override for the public Grok CLI OAuth client id used by the SuperGrok device-code connect flow. Defaults to the public CLI client id.  |
@@ -207,7 +211,7 @@ as per-task auth tokens or workspace paths.
 
 | Env var                              | Required          | Used for                                                                                                                                 |
 | ------------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, and `blaxel`. |
+| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, `blaxel`, and `azure`. |
 | `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                                  |
 | `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker. In production, prefer an immutable registry-qualified tag.                                                  |
 | `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                          |
@@ -243,6 +247,18 @@ as per-task auth tokens or workspace paths.
 | `BLAXEL_REGION`                      | Optional          | Blaxel sandbox placement region. Unset lets Blaxel choose the closest region.                                                            |
 | `BLAXEL_STANDBY_MAX_COUNT`           | Optional          | Maximum Blaxel standby sandboxes retained for resume. Defaults to `25`; `0` disables retention.                                          |
 | `BLAXEL_STANDBY_MAX_AGE_HOURS`       | Optional          | Maximum age of a Blaxel standby sandbox. Defaults to `168`, capped at `168`.                                                             |
+| `AZURE_SUBSCRIPTION_ID`              | Azure             | Azure subscription ID hosting the sandbox group. Can also be saved from **Settings > Sandboxes**.                                          |
+| `AZURE_RESOURCE_GROUP`               | Azure             | Resource group containing the Azure sandbox group.                                                                                        |
+| `AZURE_SANDBOX_GROUP`                | Azure             | Azure Container Apps sandbox group name.                                                                                                  |
+| `AZURE_SANDBOX_REGION`               | Azure             | Data-plane region for the sandbox group, for example `canadacentral`.                                                                     |
+| `AZURE_SANDBOX_DISK_IMAGE`           | Azure             | Worker disk image ID. Auto-provisioned from the worker OCI image during setup when unset.                                                 |
+| `AZURE_CLIENT_ID`                    | Optional          | User-assigned managed identity client ID — or the service principal's app ID when paired with `AZURE_TENANT_ID` + `AZURE_CLIENT_SECRET`. Unset uses `az login` locally or the system-assigned identity when deployed.                     |
+| `AZURE_TENANT_ID`                    | Optional          | Service principal tenant ID (with `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET`). Recommended for containerized installs.                     |
+| `AZURE_CLIENT_SECRET`                | Optional          | Service principal client secret (with `AZURE_TENANT_ID` + `AZURE_CLIENT_ID`).                     |
+| `AZURE_SANDBOX_REGISTRY_USERNAME`    | Optional          | Username for pulling a private worker image during disk-image provisioning (GHCR: token owner's GitHub username).                     |
+| `AZURE_SANDBOX_REGISTRY_TOKEN`       | Optional          | Token for pulling a private worker image during disk-image provisioning (GHCR: PAT with `read:packages`).                     |
+| `AZURE_SANDBOX_SIZE`                 | Optional          | Default sandbox size: `XS` (0.25/0.5 GiB/5 GiB disk), `S` (0.5/1 GiB/10 GiB disk), `M` (1/2 GiB/20 GiB, default), `L` (2/4/40 GiB), `XL` (4/8/80 GiB). ACA caps memory at cores×2Gi (CPU scales up to fit) and disk at cores×20Gi (clamped).                     |
+| `AZURE_SANDBOX_EGRESS_INSPECTION`    | Optional          | Egress proxy TLS inspection: `Partial` (default — only rule-matched traffic inspected), `Full`, `Legacy`, `None`. Use `Full` only with egress rules/transforms; it TLS-resigns all traffic and blocks non-HTTP.                     |
 | `WORKER_RELEASE_CHANNEL`             | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                                      |
 | `WORKER_RELEASE_VERSION`             | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                             |
 | `LOCAL_SANDBOX_FILES_DIR`            | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                          |

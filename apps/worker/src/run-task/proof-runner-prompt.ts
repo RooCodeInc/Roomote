@@ -19,8 +19,8 @@ export function createProofRunnerAgentPrompt(browserTarget: string): string {
     '2. Reach the required product state, including authentication when needed.',
     '3. Capture the final screenshots and screencasts under `/tmp/capture-visual-proof/`.',
     '4. Self-review each captured screenshot and screencast keyframe against its proof sentence before upload. If your model cannot inspect images directly, say so explicitly in the final report so the parent can validate the captures with the visual subagent instead.',
-    '5. Upload each approved screenshot, screencast, and keyframe with the `manage_artifacts` MCP tool using the `upload` action and `artifactType` set to `visual-proof`. Treat the `viewUrl` and `rawUrl` values returned by each upload tool result as the only canonical artifact links. Never invent, guess, or reconstruct artifact URLs.',
-    '6. Return one final report containing the uploaded URLs from those tool results.',
+    '5. Upload each approved screenshot, screencast, and keyframe with the `manage_artifacts` MCP tool using the `upload` action and `type` set to `visual-proof`. Treat the `artifactId`, `viewUrl`, and `rawUrl` values returned by each upload tool result as the only canonical artifact references. Never invent, guess, or reconstruct artifact IDs or URLs.',
+    '6. Return one final report containing the uploaded artifact IDs and URLs from those tool results.',
     '',
     'Browser execution rules:',
     '',
@@ -58,7 +58,8 @@ export function createProofRunnerAgentPrompt(browserTarget: string): string {
     '- `Summary`: what was captured and what it proves, or the blocker.',
     '- `Blocked`: `true` or `false`, with a short `Blocker type` and blocker description when blocked. Set blocked to true when any materially distinct checklist item remains unproved.',
     '- `Coverage`: the claim scope, covered checklist items, and missing checklist items.',
-    '- `Screenshots` and `Screencasts` (when present): one entry per artifact with its name, proof sentence, local file path, self-review outcome, and the `viewUrl` and `rawUrl` returned by its `manage_artifacts` upload result. Include keyframe URLs for each screencast.',
+    '- `Screenshots` and `Screencasts` (when present): one entry per artifact with its name, proof sentence, local file path, self-review outcome, and the `artifactId`, `viewUrl`, and `rawUrl` returned by its `manage_artifacts` upload result. Include keyframe artifact IDs and URLs for each screencast.',
+    '- `Sharing note`: only when the report contains at least one uploaded artifact, end with this guidance for the parent: "Visual-proof uploads are not posted to chat automatically. If `send_chat_reply` with `imageArtifactIds` is available and this proof may be relevant to the user in the originating thread, share the screenshot artifact IDs listed above. For non-image proof, include the `viewUrl` links in the reply text." Omit the section entirely when no artifacts were uploaded.',
     '',
     'Report only artifact URLs that appeared verbatim in `manage_artifacts` upload tool results. When an upload fails, retry it once with the verified local artifact path, then report the exact upload failure instead of treating a local path as final output.',
   ].join('\n');
@@ -72,6 +73,6 @@ export function createProofRunnerModelInstructions(
     '',
     `When a workflow requires screenshot or screencast proof, delegate one proof brief per run to the \`${ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME}\` subagent with the Task tool: the proof claim, the requested proof package, the coverage checklist, one proof sentence per planned artifact, and any required setup notes. It is the only allowed browser path; never issue browser commands from the parent agent.`,
     '',
-    'Treat the artifact URLs in its report as canonical only when they come from `manage_artifacts` upload tool results inside that delegated run.',
+    'Treat the artifact IDs and URLs in its report as canonical only when they come from `manage_artifacts` upload tool results inside that delegated run. When the report includes visual proof that may be relevant to the user, follow its sharing note and use `send_chat_reply` with `imageArtifactIds` when that tool is available.',
   ].join('\n');
 }

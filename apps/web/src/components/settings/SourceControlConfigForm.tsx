@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import type { SetupSourceControlStatus } from '@roomote/types';
+import {
+  ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT,
+  type SetupSourceControlStatus,
+} from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { Button, Check, Input, Spinner } from '@/components/system';
@@ -273,6 +276,23 @@ export function SourceControlConfigForm({
             </span>
           </button>
         </div>
+      ) : null}
+      {isAdo && adoAuthMode !== 'pat' ? (
+        <p className="max-w-xl text-sm text-muted-foreground">
+          The Microsoft Entra app registration needs the{' '}
+          <span className="font-medium text-foreground">
+            {ADO_ENTRA_REQUIRED_API_PERMISSIONS_TEXT}
+          </span>{' '}
+          API permissions, saved and admin-consented.{' '}
+          <a
+            href="https://docs.roomote.dev/providers/source-control/azure-devops#required-api-permissions"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-foreground underline"
+          >
+            Setup guide
+          </a>
+        </p>
       ) : null}
       {isAdo && adoAuthMode === 'delegated' ? (
         <div className="max-w-xl rounded-md border p-3 text-sm">

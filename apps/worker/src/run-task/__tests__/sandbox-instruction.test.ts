@@ -337,8 +337,14 @@ describe('buildSandboxInstruction', () => {
     );
     expect(pendingInstruction).toContain('.roomote/setup-status.json');
     expect(pendingInstruction).toContain('.roomote/setup-logs/');
-    expect(pendingInstruction).not.toContain(
-      'You will receive a message when background environment setup finishes',
+    expect(pendingInstruction).toContain(
+      'wait for it instead of reporting that you are blocked and ending your turn',
+    );
+    expect(pendingInstruction).toContain(
+      're-read `.roomote/setup-status.json` every 10-15 seconds',
+    );
+    expect(pendingInstruction).toContain(
+      'You will also receive an in-session `Environment setup update:` message when background setup finishes',
     );
     expect(pendingInstruction).not.toContain(
       'were already executed before your task started',
@@ -353,6 +359,7 @@ describe('buildSandboxInstruction', () => {
       'were already executed before your task started',
     );
     expect(settledInstruction).toContain('.roomote/setup-status.json');
+    expect(settledInstruction).not.toContain('Environment setup update:');
   });
 
   it('omits external preview URLs when configured hosts are unavailable', () => {

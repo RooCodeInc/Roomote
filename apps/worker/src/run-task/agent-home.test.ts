@@ -251,6 +251,75 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases Azure providers onto the inference gateway without a /v1 suffix', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'azure/gpt-5.6-terra',
+        R_SMALL_MODEL: 'azure-cognitive-services/gpt-5.6-luna',
+        AZURE_RESOURCE_NAME: 'openai-resource',
+        AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: 'foundry-resource',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS:
+          'AZURE_API_KEY,AZURE_COGNITIVE_SERVICES_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider.azure?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/azure',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+    expect(config.provider['azure-cognitive-services']?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/azure-cognitive-services',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+  });
+
+  it('leaves Azure providers on their native endpoints in direct mode', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'azure/gpt-5.6-terra',
+        R_SMALL_MODEL: 'azure-cognitive-services/gpt-5.6-luna',
+        AZURE_API_KEY: 'azure-key',
+        AZURE_RESOURCE_NAME: 'openai-resource',
+        AZURE_COGNITIVE_SERVICES_API_KEY: 'foundry-key',
+        AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: 'foundry-resource',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(result.configContent).not.toContain('baseURL');
+    expect(result.configContent).not.toContain('ROOMOTE_CLOUD_TOKEN');
+    expect(config.provider.azure).toBeUndefined();
+    expect(config.provider['azure-cognitive-services']?.options).toMatchObject({
+      apiKey: '{env:AZURE_COGNITIVE_SERVICES_API_KEY}',
+    });
+  });
+
+  it('binds the Foundry-specific API key when Azure OpenAI is not configured', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'azure-cognitive-services/gpt-5.6-terra',
+        AZURE_COGNITIVE_SERVICES_API_KEY: 'foundry-key',
+        AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: 'foundry-resource',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['azure-cognitive-services']?.options).toMatchObject({
+      apiKey: '{env:AZURE_COGNITIVE_SERVICES_API_KEY}',
+    });
+  });
+
   it('rebases Bedrock Mantle onto the gateway while keeping its model config', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
@@ -322,6 +391,34 @@ describe('generateOpenCodeConfig provider support', () => {
       baseURL: 'https://api.example.com/api/inference/openai-chatgpt/v1',
       apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
+  });
+
+  it('enables ChatGPT fast mode on supported models without replacing reasoning options', () => {
+    const runtimeEnv = {
+      R_MODEL: 'openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openai/gpt-5.6-luna',
+      R_MODEL_REASONING_EFFORT: 'high',
+      R_CHATGPT_FAST_MODE: '1',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models?: Record<string, { options?: Record<string, unknown> }> }
+      >;
+    };
+
+    expect(config.provider.openai?.models?.['gpt-5.6-terra']?.options).toEqual({
+      reasoningEffort: 'high',
+      serviceTier: 'priority',
+    });
+    expect(config.provider.openai?.models?.['gpt-5.6-luna']?.options).toEqual({
+      serviceTier: 'priority',
+    });
+    expect(runtimeEnv).not.toHaveProperty('R_CHATGPT_FAST_MODE');
   });
 
   it('rebases GitHub Copilot onto its OAuth-backed gateway segment', () => {

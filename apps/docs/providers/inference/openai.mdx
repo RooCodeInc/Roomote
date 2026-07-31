@@ -1,0 +1,51 @@
+---
+title: OpenAI
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/openai.svg'
+description: Use OpenAI API models with separately billed API capacity.
+---
+
+The OpenAI provider gives Roomote direct, usage-billed API access to supported
+OpenAI models. It is separate from [ChatGPT Subscription](/providers/inference/chatgpt),
+which uses an eligible ChatGPT plan instead of API credits.
+
+## Get an API key
+
+Create a key on the [OpenAI API keys page](https://platform.openai.com/api-keys).
+The key's project must have billing, model access, and suitable usage limits.
+
+## Configuration
+
+Add **OpenAI** in **Settings > Models** and paste the key, or configure:
+
+```sh
+OPENAI_API_KEY=...
+```
+
+Roomote adds recommended models under the `openai/` prefix. Apply a recommended
+mapping or choose separate models for coding, helper, planning, and review work.
+When both OpenAI API and ChatGPT Subscription are connected, they expose the
+same model prefix and Roomote uses the subscription. Disconnect ChatGPT
+Subscription before using billed OpenAI API capacity.
+
+## Cost behavior
+
+OpenAI API requests are billed to the API project by model and token usage; a
+ChatGPT Plus or Pro subscription does not include API credits. Roomote records
+usage and estimates cost from model metadata. The [OpenAI API pricing page](https://openai.com/api/pricing/)
+and project bill are authoritative.
+
+## Verify setup
+
+1. save `OPENAI_API_KEY`
+2. confirm OpenAI models appear and enable at least one
+3. assign an `openai/...` model to a role
+4. run a small task and confirm usage appears in the OpenAI project
+
+## Common issues
+
+- **The key works elsewhere but not in Roomote.** Disconnect ChatGPT Subscription
+  first, then confirm the API key is active and its project has API billing.
+- **Quota or rate-limit errors occur.** Check project spend limits, usage tier,
+  and model-specific limits in the OpenAI Platform.
+- **The wrong connection is used.** If ChatGPT Subscription is also connected,
+  disconnect the subscription before using billed OpenAI API capacity.

@@ -19,9 +19,11 @@ import {
   db,
   environmentRepositoryMappings,
   environmentVariables,
+  getDeploymentGitHubRoomoteMentionEnabled,
   getDeploymentPrAction,
   resolveDeploymentEnvVar,
   setDeploymentPrAction,
+  setDeploymentGitHubRoomoteMentionEnabled,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 
@@ -586,9 +588,9 @@ export async function syncRepositoriesCommand(
           auth.userId,
           syncResult.repositories,
         ).catch(
-          (error: unknown): AdoWebhookSetupSummary => ({
+          async (error: unknown): Promise<AdoWebhookSetupSummary> => ({
             status: 'skipped',
-            reason: error instanceof Error ? error.message : String(error),
+            reason: await Ado.describeAdoApiError(error),
           }),
         );
 
@@ -603,7 +605,15 @@ export async function syncRepositoriesCommand(
 
     return {
       success: false as const,
-      error: error instanceof Error ? error.message : String(error),
+      // A rejected Azure DevOps credential reaches the admin as a toast, so
+      // replace the bare status with what to fix (usually missing or unsaved
+      // Entra API permissions) instead of echoing "401 Unauthorized".
+      error:
+        input.provider === 'ado'
+          ? await Ado.describeAdoApiError(error)
+          : error instanceof Error
+            ? error.message
+            : String(error),
     };
   }
 }
@@ -621,6 +631,25 @@ export async function setPrActionCommand(
   assertAdmin(auth);
 
   return { prAction: await setDeploymentPrAction(input.prAction) };
+}
+
+export async function getGitHubRoomoteMentionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  return {
+    enabled: await getDeploymentGitHubRoomoteMentionEnabled(),
+  };
+}
+
+export async function setGitHubRoomoteMentionCommand(
+  auth: UserAuthSuccess,
+  input: { enabled: boolean },
+) {
+  assertAdmin(auth);
+
+  return {
+    enabled: await setDeploymentGitHubRoomoteMentionEnabled(input.enabled),
+  };
 }
 
 async function getPersistedEnvironmentVariableNames(
@@ -783,35 +812,35 @@ export async function assertValidSourceControlConfigInput(params: {
       : undefined;
   const nextAdoToken =
     params.provider === 'ado'
-      ? (params.values?.['ADO_TOKEN']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_TOKEN')))
+      ? params.values?.['ADO_TOKEN']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_TOKEN'))
       : undefined;
   const nextAdoClientId =
     params.provider === 'ado'
-      ? (params.values?.['ADO_CLIENT_ID']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_CLIENT_ID')))
+      ? params.values?.['ADO_CLIENT_ID']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_CLIENT_ID'))
       : undefined;
   const nextAdoClientSecret =
     params.provider === 'ado'
-      ? (params.values?.['ADO_CLIENT_SECRET']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_CLIENT_SECRET')))
+      ? params.values?.['ADO_CLIENT_SECRET']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_CLIENT_SECRET'))
       : undefined;
   const nextAdoTenantId =
     params.provider === 'ado'
-      ? (params.values?.['ADO_TENANT_ID']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ??
-        (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID')))
+      ? params.values?.['ADO_TENANT_ID']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ||
+        (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID'))
       : undefined;
   const nextAdoAuthMode =
     params.provider === 'ado'
-      ? (params.values?.['ADO_AUTH_MODE']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_AUTH_MODE')) ??
-        (nextAdoToken ? 'pat' : 'entra'))
+      ? params.values?.['ADO_AUTH_MODE']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_AUTH_MODE')) ||
+        (nextAdoToken ? 'pat' : 'entra')
       : undefined;
   const nextAdoLinkedAccountId =
     params.provider === 'ado'
-      ? (params.values?.['ADO_LINKED_ACCOUNT_ID']?.trim() ??
-        (await resolveDeploymentEnvVar('ADO_LINKED_ACCOUNT_ID')))
+      ? params.values?.['ADO_LINKED_ACCOUNT_ID']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_LINKED_ACCOUNT_ID'))
       : undefined;
 
   if (
@@ -853,24 +882,79 @@ export async function assertValidSourceControlConfigInput(params: {
     throw new Error('Configure the Bitbucket OAuth consumer ID and secret.');
   }
 
-  if (nextAdoToken) {
-    const nextAdoOrganization =
-      params.values?.['ADO_ORGANIZATION']?.trim() ??
-      (await Ado.resolveAdoOrganization());
+  if (params.provider !== 'ado') {
+    return;
+  }
 
-    if (!nextAdoOrganization) {
-      return;
-    }
+  // `||`, not `??`, on every resolution above and below: the Settings form
+  // submits an empty string for each field already satisfied by a runtime env
+  // var, and `??` would keep that empty string instead of falling back to the
+  // configured value, which silently skipped the whole probe.
+  const nextAdoOrganization =
+    params.values?.['ADO_ORGANIZATION']?.trim() ||
+    (await Ado.resolveAdoOrganization());
 
-    const validation = await Ado.validateAdoToken({
-      token: nextAdoToken,
-      organization: nextAdoOrganization,
-      baseUrl: params.values?.['ADO_BASE_URL']?.trim() || undefined,
-    });
+  // Without an organization there is nothing to make a real API call against;
+  // the config-first setup step saves credentials before the org is known.
+  if (!nextAdoOrganization) {
+    return;
+  }
 
+  const nextAdoBaseUrl = params.values?.['ADO_BASE_URL']?.trim() || undefined;
+  const assertValid = (validation: Ado.AdoTokenValidationResult) => {
     if (validation.status === 'invalid') {
       throw new Error(validation.error);
     }
+  };
+
+  // Every mode is verified with one real Azure DevOps call before the values
+  // are persisted. Both Entra modes request the `.default` scope, so a token
+  // is issued regardless of which API permissions the app registration was
+  // granted. Without this probe a permission-less registration saves cleanly
+  // and 401s on every later call.
+  if (nextAdoAuthMode === 'pat') {
+    if (nextAdoToken) {
+      assertValid(
+        await Ado.validateAdoToken({
+          token: nextAdoToken,
+          organization: nextAdoOrganization,
+          baseUrl: nextAdoBaseUrl,
+        }),
+      );
+    }
+
+    return;
+  }
+
+  if (nextAdoAuthMode === 'delegated') {
+    // The linked account only exists after the Microsoft sign-in round trip,
+    // so the credentials-first save has nothing to probe yet.
+    if (nextAdoLinkedAccountId) {
+      assertValid(
+        await Ado.validateAdoDelegatedCredentials({
+          linkedAccountId: nextAdoLinkedAccountId,
+          clientId: nextAdoClientId ?? undefined,
+          clientSecret: nextAdoClientSecret ?? undefined,
+          tenantId: nextAdoTenantId ?? undefined,
+          organization: nextAdoOrganization,
+          baseUrl: nextAdoBaseUrl,
+        }),
+      );
+    }
+
+    return;
+  }
+
+  if (nextAdoClientId && nextAdoClientSecret && nextAdoTenantId) {
+    assertValid(
+      await Ado.validateAdoEntraCredentials({
+        clientId: nextAdoClientId,
+        clientSecret: nextAdoClientSecret,
+        tenantId: nextAdoTenantId,
+        organization: nextAdoOrganization,
+        baseUrl: nextAdoBaseUrl,
+      }),
+    );
   }
 }
 

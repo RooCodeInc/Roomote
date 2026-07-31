@@ -35,6 +35,40 @@ describe('SetupDocs', () => {
     expect(getSetupDocsStep(null)).toBe('welcome');
   });
 
+  it.each([
+    ['amazon-bedrock', 'amazon-bedrock'],
+    ['anthropic', 'anthropic'],
+    ['azure', 'azure-openai'],
+    ['azure-cognitive-services', 'azure-foundry'],
+    ['baseten', 'baseten'],
+    ['chatgpt', 'chatgpt'],
+    ['github-copilot', 'github-copilot'],
+    ['google', 'google-gemini'],
+    ['kimi-for-coding', 'kimi-for-coding'],
+    ['litellm', 'litellm'],
+    ['minimax', 'minimax'],
+    ['moonshotai', 'moonshot-ai'],
+    ['ollama', 'ollama'],
+    ['openai', 'openai'],
+    ['openai-compatible', 'openai-compatible'],
+    ['opencode', 'opencode'],
+    ['openrouter', 'openrouter'],
+    ['togetherai', 'together-ai'],
+    ['vercel', 'vercel-ai-gateway'],
+    ['vllm', 'vllm'],
+    ['xai', 'xai'],
+    ['xai-subscription', 'xai-subscription'],
+    ['zai', 'zai'],
+    ['zai-coding-plan', 'zai-coding-plan'],
+  ])(
+    'shows the %s guide for the selected inference provider',
+    (provider, slug) => {
+      expect(getSetupDocsPath('env-vars', { modelProvider: provider })).toBe(
+        `providers/inference/${slug}`,
+      );
+    },
+  );
+
   it('opens and closes the desktop documentation frame', () => {
     function SetupDocsHarness() {
       const [isOpen, setIsOpen] = useState(false);

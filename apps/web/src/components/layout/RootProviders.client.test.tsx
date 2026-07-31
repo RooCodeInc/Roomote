@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react';
 
 const themeProviderPropsSpy = vi.fn();
-const cloudAnalyticsProviderSpy = vi.fn();
+const cloudConsentGateSpy = vi.fn();
 
 vi.mock('@/components/layout/providers', () => ({
   ThemeProvider: ({
@@ -35,9 +35,9 @@ vi.mock('./TelemetryProvider', () => ({
   TelemetryProvider: () => null,
 }));
 
-vi.mock('./CloudAnalyticsProvider', () => ({
-  CloudAnalyticsProvider: (props: Record<string, unknown>) => {
-    cloudAnalyticsProviderSpy(props);
+vi.mock('./CloudConsentGate', () => ({
+  CloudConsentGate: (props: Record<string, unknown>) => {
+    cloudConsentGateSpy(props);
     return null;
   },
 }));
@@ -51,7 +51,7 @@ import { RootProviders } from './RootProviders';
 describe('RootProviders', () => {
   beforeEach(() => {
     themeProviderPropsSpy.mockClear();
-    cloudAnalyticsProviderSpy.mockClear();
+    cloudConsentGateSpy.mockClear();
   });
 
   it('boots the theme provider from Roomote storage with a system fallback', () => {
@@ -88,7 +88,7 @@ describe('RootProviders', () => {
       </RootProviders>,
     );
 
-    expect(cloudAnalyticsProviderSpy).not.toHaveBeenCalled();
+    expect(cloudConsentGateSpy).not.toHaveBeenCalled();
   });
 
   it('instantiates cloud analytics only when cloud is enabled', () => {
@@ -105,9 +105,9 @@ describe('RootProviders', () => {
       </RootProviders>,
     );
 
-    expect(cloudAnalyticsProviderSpy).toHaveBeenCalledWith(
+    expect(cloudConsentGateSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        cloudEnabled: true,
+        cookieConsentedAt: null,
         intercomAppId: 'intercom-app',
         posthogProjectKey: 'posthog-project',
       }),

@@ -153,4 +153,25 @@ describe('postSetupMcpRecommendationsToSlack', () => {
     expect(postMessageMock).not.toHaveBeenCalled();
     expect(insertValuesMock).not.toHaveBeenCalled();
   });
+
+  it('uses monday.com-specific setup copy', async () => {
+    await postSetupMcpRecommendationsToSlack({
+      sourceTaskId: 'task-1',
+      slackChannel: 'C123',
+      createdByUserId: 'user-1',
+      recommendations: [
+        buildRecommendation({ id: 'monday', name: 'monday.com' }),
+      ],
+      appBaseUrl: 'https://app.roomote.dev',
+    });
+
+    expect(postMessageMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
+        ),
+      }),
+    );
+  });
 });

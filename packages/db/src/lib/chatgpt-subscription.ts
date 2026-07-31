@@ -46,6 +46,7 @@ export interface ChatGptSubscriptionRecord {
   accountId?: string;
   email?: string;
   status: ChatGptSubscriptionStatusValue;
+  fastMode: boolean;
   /** Last refresh/connect error message, populated when status is 'error'. */
   error?: string;
   connectedAt: string;
@@ -59,6 +60,7 @@ export interface ChatGptSubscriptionRecord {
 export interface ChatGptSubscriptionPublicStatus {
   connected: boolean;
   status: ChatGptSubscriptionStatusValue;
+  fastMode: boolean;
   accountId?: string;
   email?: string;
   error?: string;
@@ -179,6 +181,30 @@ async function persistRecord(
     });
 }
 
+async function withChatGptSubscriptionLock<T>(
+  executor: DatabaseOrTransaction,
+  operation: (tx: DatabaseOrTransaction) => Promise<T>,
+): Promise<T> {
+  const transaction = (
+    executor as DatabaseOrTransaction & {
+      transaction?: (
+        callback: (tx: DatabaseOrTransaction) => Promise<T>,
+      ) => Promise<T>;
+    }
+  ).transaction;
+
+  if (typeof transaction !== 'function') {
+    return operation(executor);
+  }
+
+  return transaction.call(executor, async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${CHATGPT_SUBSCRIPTION_ADVISORY_LOCK_KEY}))`,
+    );
+    return operation(tx);
+  });
+}
+
 export async function getChatGptSubscription(
   executor: DatabaseOrTransaction = db,
 ): Promise<ChatGptSubscriptionRecord | null> {
@@ -198,12 +224,13 @@ export async function getChatGptSubscriptionStatus(
   const record = await loadRecord(executor);
 
   if (!record) {
-    return { connected: false, status: 'disconnected' };
+    return { connected: false, status: 'disconnected', fastMode: false };
   }
 
   return {
     connected: record.status === 'connected',
     status: record.status,
+    fastMode: record.fastMode === true,
     ...(record.accountId && { accountId: record.accountId }),
     ...(record.email && { email: record.email }),
     ...(record.error && { error: record.error }),
@@ -224,22 +251,52 @@ export async function saveChatGptSubscription(
   tokens: TokenResponse,
   executor: DatabaseOrTransaction = db,
 ): Promise<ChatGptSubscriptionRecord> {
-  const now = Date.now();
-  const accountId = extractAccountIdFromTokens(tokens);
-  const email = extractEmailFromTokens(tokens);
-  const record: ChatGptSubscriptionRecord = {
-    refresh: tokens.refresh_token,
-    access: tokens.access_token,
-    expires: resolveAccessTokenExpires(tokens, now),
-    ...(accountId && { accountId }),
-    ...(email && { email }),
-    status: 'connected',
-    connectedAt: new Date(now).toISOString(),
-    updatedAt: new Date(now).toISOString(),
-  };
+  return withChatGptSubscriptionLock(executor, async (tx) => {
+    const now = Date.now();
+    const existing = await loadRecord(tx);
+    const accountId = extractAccountIdFromTokens(tokens);
+    const email = extractEmailFromTokens(tokens);
+    const record: ChatGptSubscriptionRecord = {
+      refresh: tokens.refresh_token,
+      access: tokens.access_token,
+      expires: resolveAccessTokenExpires(tokens, now),
+      ...(accountId && { accountId }),
+      ...(email && { email }),
+      status: 'connected',
+      fastMode: existing?.fastMode === true,
+      connectedAt: new Date(now).toISOString(),
+      updatedAt: new Date(now).toISOString(),
+    };
 
-  await persistRecord(executor, record);
-  return record;
+    await persistRecord(tx, record);
+    return record;
+  });
+}
+
+export async function updateChatGptSubscriptionFastMode(
+  fastMode: boolean,
+  executor: DatabaseOrTransaction = db,
+): Promise<void> {
+  await withChatGptSubscriptionLock(executor, async (tx) => {
+    const record = await loadRecord(tx);
+
+    if (!record) {
+      throw new Error('ChatGPT subscription is not connected.');
+    }
+
+    await persistRecord(tx, {
+      ...record,
+      fastMode,
+      updatedAt: new Date().toISOString(),
+    });
+  });
+}
+
+export async function isChatGptSubscriptionFastModeEnabled(
+  executor: DatabaseOrTransaction = db,
+): Promise<boolean> {
+  const record = await loadRecord(executor);
+  return record?.fastMode === true;
 }
 
 export async function disconnectChatGptSubscription(
@@ -339,6 +396,7 @@ export async function getFreshChatGptAccessToken(
         ...(accountId && { accountId }),
         ...(email && { email }),
         status: 'connected',
+        fastMode: locked.fastMode === true,
         connectedAt: locked.connectedAt,
         updatedAt: new Date().toISOString(),
       };
@@ -351,6 +409,7 @@ export async function getFreshChatGptAccessToken(
       const errored: ChatGptSubscriptionRecord = {
         ...locked,
         status: 'error',
+        fastMode: locked.fastMode === true,
         error: message,
         updatedAt: new Date().toISOString(),
       };

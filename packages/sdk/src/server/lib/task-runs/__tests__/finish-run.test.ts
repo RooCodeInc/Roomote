@@ -704,7 +704,7 @@ describe('finishRun', () => {
   });
 
   describe('Slack completion handling', () => {
-    it('does not auto-post screenshots for completed Slack jobs', async () => {
+    it('does not post screenshots automatically for completed Slack jobs', async () => {
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,

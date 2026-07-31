@@ -345,6 +345,35 @@ describe('RuntimePromptQueue', () => {
       });
     });
 
+    it('replaces a queue-only prompt with the same client message id', () => {
+      const { queue, emittedEvents } = createQueue();
+
+      const firstId = queue.enqueue({
+        text: 'review head a',
+        queueOnly: true,
+        clientMessageId: 'github-pr-synchronize:100:owner/repo:42',
+      });
+      const replacementId = queue.enqueue({
+        text: 'review head b',
+        queueOnly: true,
+        clientMessageId: 'github-pr-synchronize:100:owner/repo:42',
+      });
+
+      expect(replacementId).toBe(firstId);
+      expect(queue.snapshot()).toEqual([
+        expect.objectContaining({
+          id: firstId,
+          text: 'review head b',
+          queueOnly: true,
+        }),
+      ]);
+      expect(emittedEvents.at(-1)?.payload).toMatchObject({
+        cause: 'replace',
+        queuedMessages: [],
+        deliverableCount: 0,
+      });
+    });
+
     it('hides internal continuations from the visible payload but counts them as deliverable', () => {
       const { queue, emittedEvents } = createQueue();
 

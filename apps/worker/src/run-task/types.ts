@@ -35,9 +35,14 @@ export type EnvironmentSetupSettledOutcome =
 /**
  * Lets the task runtime observe background environment setup without owning
  * it. Implemented by BackgroundEnvironmentSetupController; consumed by
- * runTask so sandbox instructions can tell the agent whether setup is still
- * running. Agents should poll `.roomote/setup-status.json` — the runtime does
- * not inject mid-task settled notices into the harness session.
+ * runTask to (a) tell the agent whether setup is still running and (b) push a
+ * notification into the harness session when it settles mid-task. Delivery is
+ * withheld while a request_user_input is outstanding so the notice cannot
+ * make the agent re-issue a pending question (#661). A task that went idle
+ * while setup was still running is woken with an idle-aware variant so it can
+ * resume work it reported as blocked; stopped or shutting-down tasks drop the
+ * notice. `.roomote/setup-status.json` stays the on-disk ground truth either
+ * way.
  */
 export interface BackgroundEnvironmentSetupNotifier {
   /** True while environment setup is still running in the background. */
@@ -45,8 +50,7 @@ export interface BackgroundEnvironmentSetupNotifier {
   /**
    * Register a listener invoked once background setup settles. Fires
    * immediately (synchronously) if setup already settled; never fires when
-   * there is no background setup. Kept for controller/wiring callers; runTask
-   * no longer uses this to wake the agent session.
+   * there is no background setup.
    */
   onSettled(listener: (outcome: EnvironmentSetupSettledOutcome) => void): void;
 }
@@ -164,9 +168,11 @@ export type RunTaskOptions = {
   repoLocalSkills?: RepoLocalSkill[];
   workspaceReadinessWarnings?: string[];
   /**
-   * Observer for environment setup still finishing in the background. Used only
-   * to pick accurate initial readiness wording for sandbox instructions
-   * (`.roomote/setup-status.json`); does not inject mid-task settled notices.
+   * Observer for environment setup still finishing in the background. Used to
+   * pick accurate readiness wording for the agent and to notify it in-session
+   * when setup settles (withheld while a question is pending, delivered as an
+   * idle wake-up when the task settled mid-setup, dropped once the task is
+   * stopped or shutting down).
    */
   backgroundEnvironmentSetup?: BackgroundEnvironmentSetupNotifier;
   /**

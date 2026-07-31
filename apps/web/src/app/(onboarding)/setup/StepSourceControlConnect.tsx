@@ -303,13 +303,19 @@ export function StepSourceControlConnect({
       adoAuthMode === 'delegated' &&
       adoLinkedAccount.data?.account
     ) {
-      await saveAdoLinkedAccount.mutateAsync({
-        provider: 'ado',
-        values: {
-          ADO_AUTH_MODE: 'delegated',
-          ADO_LINKED_ACCOUNT_ID: adoLinkedAccount.data.account.accountId,
-        },
-      });
+      try {
+        await saveAdoLinkedAccount.mutateAsync({
+          provider: 'ado',
+          values: {
+            ADO_AUTH_MODE: 'delegated',
+            ADO_LINKED_ACCOUNT_ID: adoLinkedAccount.data.account.accountId,
+          },
+        });
+      } catch {
+        // The save verifies the connection against Azure DevOps, so a failure
+        // here (already surfaced by onError) means the sync would fail too.
+        return;
+      }
     }
 
     syncRepositories.mutate();

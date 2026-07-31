@@ -32,6 +32,7 @@ vi.mock('../pull-requests/source-control-pull-request-reads', () => ({
 import {
   buildRoomotePullRequestMetadata,
   computeMostActiveRepo,
+  computeTopUsers,
   getSourceControlAnalyticsPullRequests,
   summarizeRoomotePullRequests,
   toAnalyticsPullRequests,
@@ -166,6 +167,21 @@ describe('buildRoomotePullRequestMetadata', () => {
 
     expect(metadata.size).toBe(0);
   });
+
+  it('preserves whether the PR task was initiated by a human or automation', () => {
+    const metadata = buildRoomotePullRequestMetadata([
+      metadataRow({ prNumber: 1 }),
+      metadataRow({
+        prNumber: 2,
+        initiatorKind: 'automation',
+        initiatorUserId: null,
+        initiatorAutomation: 'review_code',
+      }),
+    ]);
+
+    expect(metadata.get('github:acme/app#1')?.initiatorKind).toBe('user');
+    expect(metadata.get('github:acme/app#2')?.initiatorKind).toBe('automation');
+  });
 });
 
 function analyticsPr(
@@ -299,6 +315,43 @@ describe('summarizeRoomotePullRequests', () => {
     });
 
     expect(roomotePullRequests).toHaveLength(0);
+  });
+});
+
+describe('computeTopUsers', () => {
+  it('returns at most five human initiators and excludes automations', () => {
+    const metadataByKey = buildRoomotePullRequestMetadata([
+      ...Array.from({ length: 6 }, (_, index) =>
+        metadataRow({
+          taskId: `user-task-${index + 1}`,
+          prNumber: index + 1,
+          initiatorUserId: `user-${index + 1}`,
+          userName: `User ${index + 1}`,
+        }),
+      ),
+      metadataRow({
+        taskId: 'automation-task',
+        prNumber: 7,
+        initiatorKind: 'automation',
+        initiatorUserId: null,
+        initiatorAutomation: 'review_code',
+        userName: null,
+      }),
+    ]);
+    const pullRequests = Array.from({ length: 8 }, (_, index) =>
+      analyticsPr({
+        number: index + 1,
+        authorLogin: index === 7 ? 'octomote[bot]' : `author-${index + 1}`,
+      }),
+    );
+
+    expect(computeTopUsers(pullRequests, metadataByKey)).toEqual([
+      { label: 'User 1', pullRequestCount: 1 },
+      { label: 'User 2', pullRequestCount: 1 },
+      { label: 'User 3', pullRequestCount: 1 },
+      { label: 'User 4', pullRequestCount: 1 },
+      { label: 'User 5', pullRequestCount: 1 },
+    ]);
   });
 });
 

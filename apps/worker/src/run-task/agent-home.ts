@@ -8,6 +8,7 @@ import {
   buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenAiCompatibleProviderInstance,
   buildOpenCodeModelReasoningOptions,
+  CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
@@ -30,6 +31,7 @@ import {
   isTaskModelIdDisabled,
   listOpenAiCompatibleProviderInstancesFromEnvNames,
   mergeOpenCodeModelReasoningOptions,
+  mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -79,6 +81,11 @@ const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
 export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
+
+const AZURE_COGNITIVE_SERVICES_PROVIDER_ID = 'azure-cognitive-services';
+
+const AZURE_COGNITIVE_SERVICES_API_KEY_ENV_VAR_NAME =
+  'AZURE_COGNITIVE_SERVICES_API_KEY';
 
 /** Fallback direct-mode base URL for default and named OpenAI-compatible ids. */
 const OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL = 'http://127.0.0.1:4000/v1';
@@ -1204,6 +1211,42 @@ function rebaseProviderOntoGateway(
   };
 }
 
+/**
+ * OpenCode discovers the Azure AI Foundry catalog and resource name from the
+ * `AZURE_COGNITIVE_SERVICES_*` env vars, but its underlying Azure SDK reads
+ * `AZURE_API_KEY` by default. Bind Roomote's provider-specific key explicitly
+ * so direct mode does not borrow the Azure OpenAI key when both providers are
+ * configured. Gateway mode replaces this value with the run token later.
+ */
+function mergeAzureCognitiveServicesProviderConfig(
+  providerConfig: Record<string, unknown>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  if (
+    !modelIds.some((modelId) =>
+      modelId?.trim().startsWith(`${AZURE_COGNITIVE_SERVICES_PROVIDER_ID}/`),
+    )
+  ) {
+    return providerConfig;
+  }
+
+  const existingProvider = asRecord(
+    providerConfig[AZURE_COGNITIVE_SERVICES_PROVIDER_ID],
+  );
+  const existingOptions = asRecord(existingProvider.options);
+
+  return {
+    ...providerConfig,
+    [AZURE_COGNITIVE_SERVICES_PROVIDER_ID]: {
+      ...existingProvider,
+      options: {
+        apiKey: `{env:${AZURE_COGNITIVE_SERVICES_API_KEY_ENV_VAR_NAME}}`,
+        ...existingOptions,
+      },
+    },
+  };
+}
+
 function normalizeStringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((entry): entry is string => typeof entry === 'string');
@@ -1566,6 +1609,8 @@ function resolveModelBackedOpenCodeConfig(
   const planningModelReasoningEffort = normalizeOptionalReasoningEffort(
     runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT?.trim(),
   );
+  const chatGptFastMode =
+    runtimeEnv[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1';
   validateRoomoteModelEnv('R_MODEL', rawModel);
 
   if (rawSmallModel) {
@@ -1652,6 +1697,7 @@ function resolveModelBackedOpenCodeConfig(
   delete runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT;
   delete runtimeEnv.R_MODEL_ENV_KEYS;
+  delete runtimeEnv[CHATGPT_FAST_MODE_ENV_VAR_NAME];
 
   const visualAgent =
     visionModel && visionModel !== effectiveCodingModel
@@ -1802,22 +1848,31 @@ function resolveModelBackedOpenCodeConfig(
     exploreModel,
     planningModel,
   ];
+  const providerModelConfig = chatGptFastMode
+    ? mergeOpenCodeChatGptFastModeOptions(
+        providerReasoningConfig,
+        configuredModelIds,
+      )
+    : providerReasoningConfig;
   const providerConfig = mergeInferenceGatewayProviderConfig(
-    mergeBedrockMantleProviderConfig(
-      mergeBedrockMantleOpenAiProviderConfig(
-        mergeOpenAiCompatibleProviderConfig(
-          mergeOpenRouterVariantAliasModels(
-            providerReasoningConfig,
-            variantAliases,
+    mergeAzureCognitiveServicesProviderConfig(
+      mergeBedrockMantleProviderConfig(
+        mergeBedrockMantleOpenAiProviderConfig(
+          mergeOpenAiCompatibleProviderConfig(
+            mergeOpenRouterVariantAliasModels(
+              providerModelConfig,
+              variantAliases,
+            ),
+            runtimeEnv,
+            configuredModelIds,
+            visionModel ?? effectiveCodingModel,
           ),
           runtimeEnv,
           configuredModelIds,
-          visionModel ?? effectiveCodingModel,
         ),
         runtimeEnv,
         configuredModelIds,
       ),
-      runtimeEnv,
       configuredModelIds,
     ),
     runtimeEnv,

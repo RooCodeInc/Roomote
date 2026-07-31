@@ -91,9 +91,8 @@ import {
 import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
 
 enum TaskRunQueueKeys {
-  // Version the storage layout so old and new controllers can coexist during
-  // a rolling deployment. Both versions still contend on the same scope lock.
-  LegacyQueue = 'queue:cloud-jobs',
+  // Keep the v2 layout during the debounce rollout. Old and new producers and
+  // controllers must see the same entries while they coexist.
   Queue = 'queue:cloud-jobs:v2',
   Entries = 'queue:cloud-jobs:v2:entries',
   EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
@@ -137,17 +136,34 @@ const ATOMIC_ENQUEUE_SCRIPT = `
 local incomingId = ARGV[1]
 local incomingScope = ARGV[2]
 local incomingRaw = ARGV[3]
+local delayMs = tonumber(ARGV[4]) or 0
+local evictedIds = {}
+
 local existingId = redis.call('HGET', KEYS[2], incomingScope)
-local evictedId = ''
+
+if ARGV[5] == '1' and existingId then
+  return {incomingId}
+end
 
 if existingId then
   redis.call('LREM', KEYS[1], 0, existingId)
 
   if existingId ~= incomingId then
-    evictedId = existingId
+    table.insert(evictedIds, existingId)
     redis.call('HDEL', KEYS[3], existingId)
     redis.call('HDEL', KEYS[4], existingId)
   end
+end
+
+local existingLock = redis.call('GET', incomingScope)
+local existingDelayOwner = existingId and ('delay:' .. existingId) or nil
+
+if delayMs > 0 then
+  if not existingLock or existingLock == existingDelayOwner then
+    redis.call('PSETEX', incomingScope, delayMs, 'delay:' .. incomingId)
+  end
+elseif existingLock == existingDelayOwner then
+  redis.call('DEL', incomingScope)
 end
 
 redis.call('HSET', KEYS[2], incomingScope, incomingId)
@@ -155,7 +171,7 @@ redis.call('HSET', KEYS[3], incomingId, incomingRaw)
 redis.call('HSET', KEYS[4], incomingId, incomingScope)
 redis.call('RPUSH', KEYS[1], incomingId)
 
-return evictedId
+return evictedIds
 `;
 
 const ATOMIC_DEQUEUE_SCRIPT = `
@@ -218,6 +234,8 @@ const DEQUEUE_POLL_INTERVAL_MS = 250;
 const taskRunQueueEntrySchema = z.object({
   id: z.number(),
   scope: z.string(),
+  availableAt: z.number().int().nonnegative().optional(),
+  preserveExisting: z.boolean().optional(),
 });
 
 export type TaskRunQueueEntry = z.infer<typeof taskRunQueueEntrySchema>;
@@ -269,6 +287,50 @@ async function cancelTaskRunBeforeQueue(
 
   if (canceled) {
     void captureTaskSettled(taskRun.id, RunStatus.Canceled);
+  }
+}
+
+async function cancelEvictedTaskRuns(
+  entries: TaskRunQueueEntry[],
+  message: string,
+): Promise<void> {
+  if (entries.length === 0) {
+    return;
+  }
+
+  const canceledRuns = await db.transaction(async (tx) => {
+    const endedAt = new Date();
+    const canceledRuns = await tx
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Canceled,
+        canceledAt: endedAt,
+        error: message,
+      })
+      .where(
+        and(
+          inArray(
+            taskRuns.id,
+            entries.map((entry) => entry.id),
+          ),
+          eq(taskRuns.status, RunStatus.Pending),
+        ),
+      )
+      .returning({ id: taskRuns.id, taskId: taskRuns.taskId });
+
+    for (const canceledRun of canceledRuns) {
+      await syncTaskStateFromRuns(tx, canceledRun.taskId);
+      await markTaskStartParallelCountEndedAt(tx, {
+        runId: canceledRun.id,
+        endedAt,
+      });
+    }
+
+    return canceledRuns;
+  });
+
+  for (const canceledRun of canceledRuns) {
+    void captureTaskSettled(canceledRun.id, RunStatus.Canceled);
   }
 }
 
@@ -443,33 +505,6 @@ export class TaskRunQueue {
 
   public async enqueue(entry: TaskRunQueueEntry): Promise<TaskRunQueueEntry[]> {
     const evictedEntries: TaskRunQueueEntry[] = [];
-    const legacyEntries = await this.redis.lrange(
-      TaskRunQueueKeys.LegacyQueue,
-      0,
-      -1,
-    );
-
-    for (const rawValue of legacyEntries) {
-      try {
-        const legacyEntry = taskRunQueueEntrySchema.parse(JSON.parse(rawValue));
-
-        if (legacyEntry.scope !== entry.scope) {
-          continue;
-        }
-
-        const removed = await this.redis.lrem(
-          TaskRunQueueKeys.LegacyQueue,
-          0,
-          rawValue,
-        );
-
-        if (removed > 0 && legacyEntry.id !== entry.id) {
-          evictedEntries.push(legacyEntry);
-        }
-      } catch {
-        // Leave malformed legacy entries for dequeue to discard.
-      }
-    }
 
     const result = await this.redis.eval(
       ATOMIC_ENQUEUE_SCRIPT,
@@ -481,14 +516,16 @@ export class TaskRunQueue {
       entry.id.toString(),
       entry.scope,
       JSON.stringify(entry),
+      Math.max(0, (entry.availableAt ?? 0) - Date.now()).toString(),
+      entry.preserveExisting ? '1' : '0',
     );
 
-    if (typeof result !== 'string') {
+    if (!Array.isArray(result)) {
       throw new Error('Atomic queue enqueue returned an invalid result.');
     }
 
-    if (result) {
-      evictedEntries.push({ id: Number(result), scope: entry.scope });
+    for (const evictedId of result) {
+      evictedEntries.push({ id: Number(evictedId), scope: entry.scope });
     }
 
     return evictedEntries;
@@ -498,36 +535,6 @@ export class TaskRunQueue {
     const deadline = Date.now() + this.timeout * 1000;
 
     do {
-      const legacyRawValue = await this.redis.lpop(
-        TaskRunQueueKeys.LegacyQueue,
-      );
-
-      if (legacyRawValue) {
-        try {
-          const legacyEntry = taskRunQueueEntrySchema.parse(
-            JSON.parse(legacyRawValue),
-          );
-          const acquired = await this.redis.set(
-            legacyEntry.scope,
-            legacyEntry.id,
-            'EX',
-            Math.ceil(TASK_TIMEOUT_MS / 1000),
-            'NX',
-          );
-
-          if (acquired === 'OK') {
-            console.log(
-              `[TaskRunQueue] acquired lock for ${legacyEntry.scope}`,
-            );
-            return legacyEntry;
-          }
-
-          await this.redis.rpush(TaskRunQueueKeys.LegacyQueue, legacyRawValue);
-        } catch {
-          // Invalid legacy entries are intentionally discarded.
-        }
-      }
-
       const rawValue = await this.redis.eval(
         ATOMIC_DEQUEUE_SCRIPT,
         4,
@@ -999,6 +1006,29 @@ const PR_SCOPED_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set([
   TaskPayloadKind.GithubPrReviewSync,
 ]);
 
+export const PR_REVIEW_SYNC_DEBOUNCE_MS = 15_000;
+
+export function resolvePrReviewQueuePolicy({
+  payloadKind,
+  sourceControlProvider = 'github',
+  now = Date.now(),
+}: {
+  payloadKind: TaskPayloadKind;
+  sourceControlProvider?: SourceControlProvider;
+  now?: number;
+}): Pick<TaskRunQueueEntry, 'availableAt' | 'preserveExisting'> {
+  const shouldDebounce =
+    payloadKind === TaskPayloadKind.GithubPrReviewSync &&
+    sourceControlProvider === 'github';
+
+  return shouldDebounce
+    ? {
+        availableAt: now + PR_REVIEW_SYNC_DEBOUNCE_MS,
+        preserveExisting: true,
+      }
+    : {};
+}
+
 /**
  * Computes the Redis queue scope for a fresh launch. PR review launches share
  * a `${repository}:${prNumber}` scope so a newer review of the same PR
@@ -1180,46 +1210,24 @@ async function pushRunOntoQueue(params: {
       .set({ queueScope: scope })
       .where(eq(taskRuns.id, taskRun.id));
 
+    const sourceControlProvider =
+      'sourceControlProvider' in taskRun.payload
+        ? taskRun.payload.sourceControlProvider
+        : undefined;
+    const queuePolicy = resolvePrReviewQueuePolicy({
+      payloadKind: taskRun.payloadKind,
+      sourceControlProvider,
+    });
     const evictedEntries = await TaskRunQueue.getInstance().enqueue({
       id: taskRun.id,
       scope,
+      ...queuePolicy,
     });
 
-    if (evictedEntries.length > 0) {
-      const canceledRuns = await db.transaction(async (tx) => {
-        const endedAt = new Date();
-        const evictedIds = evictedEntries.map((entry) => entry.id);
-        const canceledRuns = await tx
-          .update(taskRuns)
-          .set({
-            status: RunStatus.Canceled,
-            canceledAt: endedAt,
-            error: 'Superseded by a newer task run.',
-          })
-          .where(
-            and(
-              inArray(taskRuns.id, evictedIds),
-              eq(taskRuns.status, RunStatus.Pending),
-            ),
-          )
-          .returning({ id: taskRuns.id, taskId: taskRuns.taskId });
-
-        for (const canceledRun of canceledRuns) {
-          await syncTaskStateFromRuns(tx, canceledRun.taskId);
-          await markTaskStartParallelCountEndedAt(tx, {
-            runId: canceledRun.id,
-            endedAt,
-          });
-
-          console.log(`[TaskRunQueue] evicted ${canceledRun.id} (${scope})`);
-        }
-        return canceledRuns;
-      });
-
-      for (const canceledRun of canceledRuns) {
-        void captureTaskSettled(canceledRun.id, RunStatus.Canceled);
-      }
-    }
+    await cancelEvictedTaskRuns(
+      evictedEntries,
+      'Superseded by a newer task run.',
+    );
   } catch (error) {
     let originalError = error;
 

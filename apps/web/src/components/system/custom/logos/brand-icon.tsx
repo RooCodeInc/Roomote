@@ -87,6 +87,32 @@ function NeonIcon({
   );
 }
 
+function MondayIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 256 156"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M31.846 153.489a31.97 31.97 0 0 1-27.86-16.167 30.91 30.91 0 0 1 .875-31.823l57.373-90.096A31.99 31.99 0 0 1 90.556.015a31.93 31.93 0 0 1 27.41 16.896c5.349 10.113 4.68 22.28-1.725 31.774L58.904 138.78a31.98 31.98 0 0 1-27.058 14.709" />
+      <path d="M130.256 153.488c-11.572 0-22.22-6.187-27.812-16.13a30.81 30.81 0 0 1 .875-31.737l57.264-89.89A31.94 31.94 0 0 1 188.93.016c11.669.255 22.244 6.782 27.592 16.993a30.81 30.81 0 0 1-2.066 31.92l-57.252 89.889a31.93 31.93 0 0 1-26.948 14.671" />
+      <ellipse cx="226.466" cy="125.324" rx="29.538" ry="28.918" />
+    </svg>
+  );
+}
+
 function BlaxelIcon({
   name,
   className,
@@ -203,6 +229,30 @@ function MicrosoftIcon({
       className={className}
     >
       <path d="M3 3h8v8H3V3Zm10 0h8v8h-8V3ZM3 13h8v8H3v-8Zm10 0h8v8h-8v-8Z" />
+    </svg>
+  );
+}
+
+function AzureIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M22.379 23.343a1.62 1.62 0 0 0 1.536-2.14v.002L17.35 1.76A1.62 1.62 0 0 0 15.816.657H8.184A1.62 1.62 0 0 0 6.65 1.76L.086 21.204a1.62 1.62 0 0 0 1.536 2.139h4.741a1.62 1.62 0 0 0 1.535-1.103l.977-2.892 4.947 3.675c.28.208.618.32.966.32m-3.084-12.531 3.624 10.739a.54.54 0 0 1-.51.713v-.001h-.03a.54.54 0 0 1-.322-.106l-9.287-6.9h4.853m6.313 7.006c.116-.326.13-.694.007-1.058L9.79 1.76a1.722 1.722 0 0 0-.007-.02h6.034a.54.54 0 0 1 .512.366l6.562 19.445a.54.54 0 0 1-.338.684" />
     </svg>
   );
 }
@@ -437,6 +487,16 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
     );
   }
 
+  if (icon === 'monday') {
+    return (
+      <MondayIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
+    );
+  }
+
   if (icon === 'pylon') {
     return (
       <PylonIcon
@@ -502,6 +562,16 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
   if (icon === 'blaxel') {
     return (
       <BlaxelIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
+    );
+  }
+
+  if (icon === 'azure') {
+    return (
+      <AzureIcon
         name={name}
         className={className}
         isDecorative={isDecorative}

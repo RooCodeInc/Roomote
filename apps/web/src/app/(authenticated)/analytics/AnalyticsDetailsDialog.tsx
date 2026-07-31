@@ -162,7 +162,7 @@ export function AnalyticsDetailsDialog({
         showCloseButton={false}
         size="max"
         className={[
-          'inset-x-auto bottom-auto left-1/2 top-1/2 w-[calc(100vw-2rem)] max-h-[calc(var(--effective-viewport-height)-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border p-4 md:p-6',
+          'ph-no-capture inset-x-auto bottom-auto left-1/2 top-1/2 w-[calc(100vw-2rem)] max-h-[calc(var(--effective-viewport-height)-2rem)] -translate-x-1/2 -translate-y-1/2 rounded-lg border p-4 md:p-6',
           'overflow-hidden',
           DIALOG_WIDTH_BY_OBJECT[object],
         ].join(' ')}
