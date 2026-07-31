@@ -2,6 +2,38 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.27.0 (2026-07-31)
+
+This release expands Azure, ChatGPT, GitHub, and monday.com capabilities while improving task reliability, privacy, and setup.
+
+### Highlights
+
+- Run tasks with Azure Container Apps Sandboxes, or connect Azure OpenAI and Azure AI Foundry for model inference.
+- Use monday.com context in tasks and invoke Roomote on GitHub with the shorter `@Roomote` mention.
+- Enable Fast mode for ChatGPT subscriptions and manage optional Roomote Cloud analytics with new cookie consent controls.
+- Keep environment setup, Slack follow-ups, visual proof, task privacy, and pull request re-reviews working more reliably.
+
+### Minor changes
+
+- Add Azure Container Apps Sandboxes as a preview compute provider with fast suspend and resume, snapshots, stable preview URLs, configurable sizing, and guided worker image setup. Thanks to @tebieshi for contributing this improvement.
+- Add first-class Azure OpenAI and Azure AI Foundry inference provider setup and model routing.
+- Add Fast mode for ChatGPT subscriptions and improve subscription provider connection, model availability, and settings controls.
+- Add cookie consent controls to Roomote Cloud and defer optional support and product analytics services until users grant consent.
+- Let GitHub users invoke Roomote with the shorter `@Roomote` mention, with an administrator setting to require the full bot name instead.
+- Add a read-only monday.com integration so Roomote tasks can use the current user's board and work-item context.
+
+### Patch changes
+
+- Validate Azure DevOps credentials before saving them, explain rejected credentials clearly, and restore Roomote's own-comment detection and approve or request-changes reviewer votes.
+- Make Discord release announcements more concise and conversational.
+- Make environment setup follow repository guidance and automatically resume tasks when background setup finishes.
+- Improve weekly manager reports with readable number formatting and rankings limited to human users.
+- Coalesce redundant pull request re-reviews and ensure active reviews include newly pushed commits.
+- Prevent recent or pinned task identifiers from exposing tasks owned by another user in the sidebar.
+- Keep Slack follow-ups from interrupting healthy active work while preserving stalled-task recovery.
+- Polish task and dashboard status displays by hiding unreleased PR analytics, strengthening selected-task and provider-error indicators, and collapsing background activity when todo updates begin.
+- Reliably expose captured visual-proof artifacts for explicit sharing in connected chat threads.
+
 ## 0.26.0 (2026-07-29)
 
 This release expands Linear and GitHub workflows, makes release information easier to find, and improves setup and task reliability.
