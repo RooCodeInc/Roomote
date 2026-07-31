@@ -105,4 +105,18 @@ describe('handlePrSynchronize', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
+
+  it('does not enqueue another review for a completed review of the same head', async () => {
+    mockSelect
+      .mockReturnValueOnce(selectResult([]))
+      .mockReturnValueOnce(selectResult([{ id: 100 }]));
+
+    await expect(handlePrSynchronize(payload)).resolves.toEqual({
+      status: 'ok',
+      message: 'PR head SHA already matches the latest reviewed SHA.',
+    });
+
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockReleaseLock).toHaveBeenCalledOnce();
+  });
 });

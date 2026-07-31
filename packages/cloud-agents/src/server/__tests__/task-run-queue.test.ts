@@ -6,6 +6,7 @@ import { TASK_TIMEOUT_MS } from '@roomote/types';
 import { TaskRunQueue, type TaskRunQueueEntry } from '../task-run-queue';
 
 const QUEUE_KEY = 'queue:cloud-jobs:v3';
+const ENTRY_AVAILABLE_AT_KEY = 'queue:cloud-jobs:v3:entry-available-at';
 const PREVIOUS_QUEUE_KEY = 'queue:cloud-jobs:v2';
 const PREVIOUS_SCOPES_KEY = 'queue:cloud-jobs:v2:scopes';
 const PREVIOUS_ENTRIES_KEY = 'queue:cloud-jobs:v2:entries';
@@ -226,6 +227,44 @@ describe('TaskRunQueue - Rolling Deploy Compatibility', () => {
     await expect(queue.enqueue(newer)).resolves.toEqual([older]);
     await expect(redis.llen(PREVIOUS_QUEUE_KEY)).resolves.toBe(0);
     await expect(redis.llen(QUEUE_KEY)).resolves.toBe(1);
+    await expect(queue.dequeue(false)).resolves.toBeNull();
+  });
+
+  it('keeps delayed v3 work canonical when a live v2 writer arrives later', async () => {
+    const delayed = {
+      ...createTestEntry(46, 'v3-then-v2-scope'),
+      availableAt: Date.now() + 60_000,
+      preserveExisting: true,
+    };
+    const laterV2 = createTestEntry(47, delayed.scope);
+    await queue.enqueue(delayed);
+    await redis.rpush(PREVIOUS_QUEUE_KEY, laterV2.id.toString());
+    await redis.hset(PREVIOUS_SCOPES_KEY, laterV2.scope, laterV2.id.toString());
+    await redis.hset(
+      PREVIOUS_ENTRIES_KEY,
+      laterV2.id.toString(),
+      JSON.stringify(laterV2),
+    );
+    await redis.hset(
+      PREVIOUS_ENTRY_SCOPES_KEY,
+      laterV2.id.toString(),
+      laterV2.scope,
+    );
+    await expect(queue.dequeue(false)).resolves.toBeNull();
+    await redis.hset(
+      ENTRY_AVAILABLE_AT_KEY,
+      delayed.id.toString(),
+      (Date.now() - 1).toString(),
+    );
+
+    const evicted: TaskRunQueueEntry[][] = [];
+    await expect(
+      queue.dequeue(false, async (entries) => {
+        evicted.push(entries);
+      }),
+    ).resolves.toEqual(delayed);
+    expect(evicted).toEqual([[laterV2]]);
+    await expect(redis.llen(PREVIOUS_QUEUE_KEY)).resolves.toBe(0);
     await expect(queue.dequeue(false)).resolves.toBeNull();
   });
 });

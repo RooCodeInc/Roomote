@@ -55,6 +55,33 @@ async function findActiveReviewRun(repository: string, prNumber: number) {
   return activeRun;
 }
 
+async function findCompletedSameHeadReviewRun(
+  repository: string,
+  prNumber: number,
+  headSha: string,
+) {
+  const [completedRun] = await db
+    .select({ id: taskRuns.id })
+    .from(tasks)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        eq(tasks.workflow, 'pr_review'),
+        eq(taskPullRequests.sourceControlProvider, 'github'),
+        eq(taskPullRequests.repository, repository),
+        eq(taskPullRequests.prNumber, prNumber),
+        eq(taskPullRequests.prSha, headSha),
+        sql`${taskRuns.status} != ${RunStatus.Failed}`,
+        isNotNull(taskRuns.startedAt),
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .limit(1);
+
+  return completedRun;
+}
+
 async function acquirePrReviewLaunchLock(repository: string, prNumber: number) {
   const key = `pr-review-synchronize:${repository}:${prNumber}`;
 
@@ -110,6 +137,7 @@ export async function handlePrSynchronize({
   });
 
   const target = targets[0];
+  let skippedCompletedHead = false;
 
   if (!target) {
     return { status: 'ok', message: 'No PR reviewer targets found.' };
@@ -136,6 +164,21 @@ export async function handlePrSynchronize({
       if (activeReviewRun) {
         console.log(
           `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> skip_active_review (target: ${currentTarget.id})`,
+        );
+
+        return null;
+      }
+
+      const completedSameHeadRun = await findCompletedSameHeadReviewRun(
+        repository.full_name,
+        pr.number,
+        pr.head.sha,
+      );
+
+      if (completedSameHeadRun) {
+        skippedCompletedHead = true;
+        console.log(
+          `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> skip_already_reviewed_head (target: ${currentTarget.id})`,
         );
 
         return null;
@@ -230,7 +273,9 @@ export async function handlePrSynchronize({
   if (ids.length === 0) {
     return {
       status: 'ok',
-      message: 'A PR review is already active.',
+      message: skippedCompletedHead
+        ? 'PR head SHA already matches the latest reviewed SHA.'
+        : 'A PR review is already active.',
     };
   }
 

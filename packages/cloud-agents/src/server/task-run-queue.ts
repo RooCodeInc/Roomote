@@ -181,6 +181,15 @@ else
 end
 redis.call('RPUSH', KEYS[1], incomingId)
 
+if ARGV[6] ~= '' then
+  local lockOwner = redis.call('GET', KEYS[10])
+  if not lockOwner or lockOwner == incomingId or lockOwner == existingId then
+    redis.call('SET', KEYS[10], incomingId, 'PX', ARGV[6])
+  end
+elseif existingId and redis.call('GET', KEYS[10]) == existingId then
+  redis.call('DEL', KEYS[10])
+end
+
 return evictedIds
 `;
 
@@ -239,16 +248,39 @@ for _, entryId in ipairs(queuedIds) do
 
   if rawValue and entryScope then
     if availableAt <= nowMs then
-      local acquired = redis.call(
-        'SET',
-        entryScope,
-        entryId,
-        'EX',
-        lockTtlSeconds,
-        'NX'
-      )
+      local lockOwner = redis.call('GET', entryScope)
+      local acquired
+
+      if lockOwner == entryId then
+        acquired = redis.call(
+          'SET',
+          entryScope,
+          entryId,
+          'EX',
+          lockTtlSeconds,
+          'XX'
+        )
+      else
+        acquired = redis.call(
+          'SET',
+          entryScope,
+          entryId,
+          'EX',
+          lockTtlSeconds,
+          'NX'
+        )
+      end
 
       if acquired then
+        local previousId = redis.call('HGET', KEYS[7], entryScope)
+
+        if previousId then
+          redis.call('LREM', KEYS[6], 0, previousId)
+          redis.call('HDEL', KEYS[7], entryScope)
+          redis.call('HDEL', KEYS[8], previousId)
+          redis.call('HDEL', KEYS[9], previousId)
+        end
+
         redis.call('LREM', KEYS[1], 1, entryId)
         redis.call('HDEL', KEYS[3], entryId)
         redis.call('HDEL', KEYS[4], entryId)
@@ -258,7 +290,7 @@ for _, entryId in ipairs(queuedIds) do
           redis.call('HDEL', KEYS[2], entryScope)
         end
 
-        return rawValue
+        return {rawValue, previousId or ''}
       end
     end
   else
@@ -285,6 +317,7 @@ return 0
 // per second for a bounded 250ms wake-up delay; a future dedicated wake-up
 // connection can remove that tradeoff without weakening claim atomicity.
 const DEQUEUE_POLL_INTERVAL_MS = 250;
+const DELAYED_ENTRY_RESERVATION_GRACE_MS = 5_000;
 
 const taskRunQueueEntrySchema = z.object({
   id: z.number(),
@@ -342,6 +375,50 @@ async function cancelTaskRunBeforeQueue(
 
   if (canceled) {
     void captureTaskSettled(taskRun.id, RunStatus.Canceled);
+  }
+}
+
+async function cancelEvictedTaskRuns(
+  entries: TaskRunQueueEntry[],
+  message: string,
+): Promise<void> {
+  if (entries.length === 0) {
+    return;
+  }
+
+  const canceledRuns = await db.transaction(async (tx) => {
+    const endedAt = new Date();
+    const canceledRuns = await tx
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Canceled,
+        canceledAt: endedAt,
+        error: message,
+      })
+      .where(
+        and(
+          inArray(
+            taskRuns.id,
+            entries.map((entry) => entry.id),
+          ),
+          eq(taskRuns.status, RunStatus.Pending),
+        ),
+      )
+      .returning({ id: taskRuns.id, taskId: taskRuns.taskId });
+
+    for (const canceledRun of canceledRuns) {
+      await syncTaskStateFromRuns(tx, canceledRun.taskId);
+      await markTaskStartParallelCountEndedAt(tx, {
+        runId: canceledRun.id,
+        endedAt,
+      });
+    }
+
+    return canceledRuns;
+  });
+
+  for (const canceledRun of canceledRuns) {
+    void captureTaskSettled(canceledRun.id, RunStatus.Canceled);
   }
 }
 
@@ -516,10 +593,18 @@ export class TaskRunQueue {
 
   public async enqueue(entry: TaskRunQueueEntry): Promise<TaskRunQueueEntry[]> {
     const evictedEntries: TaskRunQueueEntry[] = [];
+    // Reserve the shared scope past the deadline so v2 consumers requeue work
+    // until a v3 consumer can atomically promote the reservation.
+    const reservationTtl = entry.availableAt
+      ? Math.max(
+          1,
+          entry.availableAt - Date.now() + DELAYED_ENTRY_RESERVATION_GRACE_MS,
+        )
+      : undefined;
 
     const result = await this.redis.eval(
       ATOMIC_ENQUEUE_SCRIPT,
-      9,
+      10,
       TaskRunQueueKeys.Queue,
       TaskRunQueueKeys.Scopes,
       TaskRunQueueKeys.Entries,
@@ -529,11 +614,13 @@ export class TaskRunQueue {
       TaskRunQueueKeys.PreviousScopes,
       TaskRunQueueKeys.PreviousEntries,
       TaskRunQueueKeys.PreviousEntryScopes,
+      entry.scope,
       entry.id.toString(),
       entry.scope,
       JSON.stringify(entry),
       entry.availableAt?.toString() ?? '',
       entry.preserveExisting ? '1' : '0',
+      reservationTtl?.toString() ?? '',
     );
 
     if (!Array.isArray(result)) {
@@ -547,7 +634,10 @@ export class TaskRunQueue {
     return evictedEntries;
   }
 
-  public async dequeue(blocking = true): Promise<TaskRunQueueEntry | null> {
+  public async dequeue(
+    blocking = true,
+    onEvicted?: (entries: TaskRunQueueEntry[]) => Promise<void>,
+  ): Promise<TaskRunQueueEntry | null> {
     const deadline = Date.now() + this.timeout * 1000;
 
     do {
@@ -577,17 +667,21 @@ export class TaskRunQueue {
 
       const rawValue = await this.redis.eval(
         ATOMIC_DEQUEUE_SCRIPT,
-        5,
+        9,
         TaskRunQueueKeys.Queue,
         TaskRunQueueKeys.Scopes,
         TaskRunQueueKeys.Entries,
         TaskRunQueueKeys.EntryScopes,
         TaskRunQueueKeys.EntryAvailableAt,
+        TaskRunQueueKeys.PreviousQueue,
+        TaskRunQueueKeys.PreviousScopes,
+        TaskRunQueueKeys.PreviousEntries,
+        TaskRunQueueKeys.PreviousEntryScopes,
         Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
         Date.now().toString(),
       );
 
-      if (!rawValue) {
+      if (!Array.isArray(rawValue)) {
         if (!blocking || Date.now() >= deadline) {
           return null;
         }
@@ -598,15 +692,25 @@ export class TaskRunQueue {
         continue;
       }
 
+      const [entryRawValue, evictedPreviousId] = rawValue;
+      let entry: TaskRunQueueEntry;
+
       try {
-        const entry = taskRunQueueEntrySchema.parse(
-          JSON.parse(String(rawValue)),
+        entry = taskRunQueueEntrySchema.parse(
+          JSON.parse(String(entryRawValue)),
         );
-        console.log(`[TaskRunQueue] acquired lock for ${entry.scope}`);
-        return entry;
       } catch {
         continue;
       }
+
+      if (evictedPreviousId && onEvicted) {
+        await onEvicted([
+          { id: Number(evictedPreviousId), scope: entry.scope },
+        ]);
+      }
+
+      console.log(`[TaskRunQueue] acquired lock for ${entry.scope}`);
+      return entry;
     } while (blocking && Date.now() < deadline);
 
     return null;
@@ -1249,41 +1353,10 @@ async function pushRunOntoQueue(params: {
         : {}),
     });
 
-    if (evictedEntries.length > 0) {
-      const canceledRuns = await db.transaction(async (tx) => {
-        const endedAt = new Date();
-        const evictedIds = evictedEntries.map((entry) => entry.id);
-        const canceledRuns = await tx
-          .update(taskRuns)
-          .set({
-            status: RunStatus.Canceled,
-            canceledAt: endedAt,
-            error: 'Superseded by a newer task run.',
-          })
-          .where(
-            and(
-              inArray(taskRuns.id, evictedIds),
-              eq(taskRuns.status, RunStatus.Pending),
-            ),
-          )
-          .returning({ id: taskRuns.id, taskId: taskRuns.taskId });
-
-        for (const canceledRun of canceledRuns) {
-          await syncTaskStateFromRuns(tx, canceledRun.taskId);
-          await markTaskStartParallelCountEndedAt(tx, {
-            runId: canceledRun.id,
-            endedAt,
-          });
-
-          console.log(`[TaskRunQueue] evicted ${canceledRun.id} (${scope})`);
-        }
-        return canceledRuns;
-      });
-
-      for (const canceledRun of canceledRuns) {
-        void captureTaskSettled(canceledRun.id, RunStatus.Canceled);
-      }
-    }
+    await cancelEvictedTaskRuns(
+      evictedEntries,
+      'Superseded by a newer task run.',
+    );
   } catch (error) {
     let originalError = error;
 
@@ -2326,7 +2399,12 @@ async function recordSnapshotResumeRequestEvent(input: {
 }
 
 export async function dequeueTaskRun(): Promise<number | null> {
-  const entry = await TaskRunQueue.getInstance().dequeue();
+  const entry = await TaskRunQueue.getInstance().dequeue(true, (entries) =>
+    cancelEvictedTaskRuns(
+      entries,
+      'Superseded by an existing queued task run.',
+    ),
+  );
   return entry ? entry.id : null;
 }
 
