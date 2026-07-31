@@ -150,11 +150,15 @@ export async function generatePrompt({
   const commitAuthor = taskRow
     ? await resolveRunCommitAuthor(db, taskRun)
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
-  const { conflictResolverFrequency, conflictResolverLabel } =
-    await getBackgroundAgentSettings().catch(() => ({
-      conflictResolverFrequency: 'every_6_hours' as const,
-      conflictResolverLabel: DEFAULT_CONFLICT_RESOLVER_LABEL,
-    }));
+  const {
+    conflictResolverFrequency,
+    conflictResolverLabel,
+    reviewCodeInstructions,
+  } = await getBackgroundAgentSettings().catch(() => ({
+    conflictResolverFrequency: 'every_6_hours' as const,
+    conflictResolverLabel: DEFAULT_CONFLICT_RESOLVER_LABEL,
+    reviewCodeInstructions: null,
+  }));
   const enabledConflictResolverLabel =
     conflictResolverFrequency === 'off' ? undefined : conflictResolverLabel;
   const featureFlagEvaluator = getFeatureFlagEvaluator(getRedis());
@@ -186,6 +190,7 @@ export async function generatePrompt({
         taskSpec,
         gitHubToken,
         taskRunUrl,
+        additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
@@ -196,6 +201,7 @@ export async function generatePrompt({
         taskSpec,
         gitHubToken,
         taskRunUrl,
+        additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,

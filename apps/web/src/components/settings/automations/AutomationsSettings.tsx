@@ -158,6 +158,7 @@ type FieldErrors = Partial<
     | 'suggesterInstructions'
     | 'suggesterRoutingInstructions'
     | 'announcerInstructions'
+    | 'reviewerInstructions'
     | 'issueFixerInstructions',
     string
   >
@@ -680,6 +681,7 @@ function mapSettingsToFormState(
         relayEnabled: boolean;
       }>;
     };
+    reviewCodeInstructions: string | null;
     conflictResolverFrequency: ConflictResolverFrequency;
     conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
     conflictResolverLabel: string;
@@ -757,6 +759,7 @@ function mapSettingsToFormState(
       settings.reviewer.reviewAllPullRequestAuthors,
     reviewerReviewOnCommit: settings.reviewer.reviewOnCommit,
     reviewerReviewDraftPrs: settings.reviewer.reviewDraftPrs,
+    reviewerInstructions: settings.reviewCodeInstructions ?? '',
     reviewerRelayReviewResultsToTask:
       settings.reviewer.relayReviewResultsToTask,
     reviewerRelayUserIds: settings.reviewer.relayUsers
@@ -2815,6 +2818,33 @@ export function AutomationsSettings() {
                           Include pull requests opened by people or others
                         </p>
                       </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="reviewer-instructions">
+                        Additional instructions
+                      </Label>
+                      <Textarea
+                        id="reviewer-instructions"
+                        value={formState.reviewerInstructions}
+                        onChange={(event) =>
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  reviewerInstructions: event.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        rows={4}
+                        placeholder="Optional guidance for how to review code and report findings"
+                      />
+                      {fieldErrors.reviewerInstructions ? (
+                        <p className="text-xs text-destructive">
+                          {fieldErrors.reviewerInstructions}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}

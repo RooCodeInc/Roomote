@@ -791,6 +791,17 @@ export function buildStructuredTaskRequest({
   return lines.join('\n').trim();
 }
 
+export function appendAdditionalTeamInstructions(
+  prompt: string,
+  additionalInstructions?: string | null,
+): string {
+  const trimmedInstructions = additionalInstructions?.trim();
+
+  return trimmedInstructions
+    ? `${prompt}\n\nAdditional team instructions:\n${trimmedInstructions}`
+    : prompt;
+}
+
 export function buildGithubCommentActionLink({
   href,
   label,

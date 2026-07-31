@@ -74,6 +74,7 @@ export type FormState = {
   reviewerReviewAllPullRequestAuthors: boolean;
   reviewerReviewOnCommit: boolean;
   reviewerReviewDraftPrs: boolean;
+  reviewerInstructions: string;
   reviewerRelayReviewResultsToTask: boolean;
   reviewerRelayUserIds: string[];
   conflictResolverFrequency: ConflictResolverFrequency;
@@ -132,6 +133,7 @@ const REVIEWER_FIELDS: Array<keyof FormState> = [
   'reviewerReviewAllPullRequestAuthors',
   'reviewerReviewOnCommit',
   'reviewerReviewDraftPrs',
+  'reviewerInstructions',
   'reviewerRelayReviewResultsToTask',
   'reviewerRelayUserIds',
 ];
@@ -313,6 +315,7 @@ export function buildAutomationSettingsSaveInput(
       stateToSave.reviewerReviewAllPullRequestAuthors,
     reviewerReviewOnCommit: stateToSave.reviewerReviewOnCommit,
     reviewerReviewDraftPrs: stateToSave.reviewerReviewDraftPrs,
+    reviewerInstructions: stateToSave.reviewerInstructions.trim() || null,
     reviewerRelayReviewResultsToTask:
       stateToSave.reviewerRelayReviewResultsToTask,
     reviewerRelayUserIds: stateToSave.reviewerRelayUserIds,
