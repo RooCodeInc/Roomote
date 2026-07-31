@@ -172,7 +172,7 @@ describe('monday.com external-agent setup commands', () => {
     );
   });
 
-  it('retries local deletion without disconnecting an already-disconnected agent', async () => {
+  it('retries locally when the disconnected checkpoint and delete both fail', async () => {
     const installation = {
       id: 'installation-1',
       accountId: 'account-1',
@@ -188,6 +188,9 @@ describe('monday.com external-agent setup commands', () => {
     mocks.deleteWhere
       .mockRejectedValueOnce(new Error('database unavailable'))
       .mockResolvedValueOnce([]);
+    mocks.updateWhere
+      .mockRejectedValueOnce(new Error('checkpoint unavailable'))
+      .mockResolvedValueOnce([]);
 
     await expect(uninstallMondayAgentCommand(admin)).rejects.toThrow(
       'database unavailable',
@@ -199,7 +202,9 @@ describe('monday.com external-agent setup commands', () => {
     expect(mocks.updateSet).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'disconnected',
-        error: expect.stringContaining('local deletion failed'),
+        error: expect.stringMatching(
+          /checkpoint unavailable.*local deletion failed.*database unavailable/,
+        ),
       }),
     );
 

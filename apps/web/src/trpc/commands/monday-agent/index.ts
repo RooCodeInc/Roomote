@@ -265,6 +265,7 @@ export async function uninstallMondayAgentCommand(auth: UserAuthSuccess) {
   const clients = new Map<string, MondayClient>();
   const failures: string[] = [];
   for (const installation of installations) {
+    let checkpointError: string | null = null;
     if (installation.status !== 'disconnected') {
       let client = clients.get(installation.ownerMcpConnectionId);
       if (!client) {
@@ -299,10 +300,15 @@ export async function uninstallMondayAgentCommand(auth: UserAuthSuccess) {
         continue;
       }
 
-      await db
-        .update(mondayAgentInstallations)
-        .set({ status: 'disconnected', error: null, updatedAt: new Date() })
-        .where(eq(mondayAgentInstallations.id, installation.id));
+      try {
+        await db
+          .update(mondayAgentInstallations)
+          .set({ status: 'disconnected', error: null, updatedAt: new Date() })
+          .where(eq(mondayAgentInstallations.id, installation.id));
+      } catch (error) {
+        checkpointError =
+          error instanceof Error ? error.message : 'unknown local error';
+      }
     }
 
     try {
@@ -310,17 +316,30 @@ export async function uninstallMondayAgentCommand(auth: UserAuthSuccess) {
         .delete(mondayAgentInstallations)
         .where(eq(mondayAgentInstallations.id, installation.id));
     } catch (error) {
-      const message =
+      const deleteError =
         error instanceof Error ? error.message : 'unknown local error';
+      const message = checkpointError
+        ? `Disconnect checkpoint failed: ${checkpointError}; local deletion failed: ${deleteError}`
+        : deleteError;
       failures.push(`${installation.agentId}: ${message}`);
-      await db
-        .update(mondayAgentInstallations)
-        .set({
-          status: 'disconnected',
-          error: `Provider disconnected, but local deletion failed: ${message}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(mondayAgentInstallations.id, installation.id));
+      try {
+        await db
+          .update(mondayAgentInstallations)
+          .set({
+            status: 'disconnected',
+            error: `Provider disconnected, but local deletion failed: ${message}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(mondayAgentInstallations.id, installation.id));
+      } catch (recoveryError) {
+        const recoveryMessage =
+          recoveryError instanceof Error
+            ? recoveryError.message
+            : 'unknown local error';
+        failures.push(
+          `${installation.agentId}: cleanup recovery persistence failed: ${recoveryMessage}`,
+        );
+      }
     }
   }
 
