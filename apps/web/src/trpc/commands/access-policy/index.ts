@@ -1,6 +1,7 @@
 import {
   and,
   authAccounts,
+  collectLicensedUserCount,
   db,
   deploymentSettings,
   eq,
@@ -8,8 +9,9 @@ import {
   isNull,
   users,
 } from '@roomote/db/server';
+import { randomUUID } from 'node:crypto';
 import type { UserRole } from '@roomote/types';
-import { captureEvent } from '@roomote/telemetry/server';
+import { captureEvent, syncLicenseWithCloud } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
@@ -18,6 +20,7 @@ import {
   createInvite,
   FREE_SEAT_LIMIT,
   getDeploymentAccessPolicy,
+  getEffectiveDeploymentSeatLimit,
   getDeploymentLicenseState,
   getEnvLicenseKey,
   isInviteUsable,
@@ -125,19 +128,26 @@ export async function getAccessPolicySettingsCommand(
 }> {
   assertAdmin(auth);
 
-  const [policy, providerConfig, invites, activeUsers, licenseState] =
-    await Promise.all([
-      getDeploymentAccessPolicy(),
-      resolveAuthProviderConfig(),
-      listInvites(),
-      listActiveUsers(),
-      getDeploymentLicenseState(),
-    ]);
+  const [
+    policy,
+    providerConfig,
+    invites,
+    activeUsers,
+    licenseState,
+    seatLimit,
+  ] = await Promise.all([
+    getDeploymentAccessPolicy(),
+    resolveAuthProviderConfig(),
+    listInvites(),
+    listActiveUsers(),
+    getDeploymentLicenseState(),
+    getEffectiveDeploymentSeatLimit(),
+  ]);
 
   return {
     license: {
       status: licenseState.status,
-      seatLimit: licenseState.seatLimit,
+      seatLimit,
       seatsUsed: activeUsers.length,
       freeSeatLimit: FREE_SEAT_LIMIT,
       licenseId: 'licenseId' in licenseState ? licenseState.licenseId : null,
@@ -198,11 +208,38 @@ export async function setLicenseKeyCommand(
         'That license key has expired. Refresh it in Roomote Cloud or contact Roomote for help.',
       );
     }
+
+    const usage = await collectLicensedUserCount();
+    const activation = await syncLicenseWithCloud({
+      eventId: randomUUID(),
+      observedAt: new Date(),
+      activeUsers: usage.users.total,
+      licenseKey,
+    });
+    if (activation.status === 'license_in_use') {
+      throw new Error(
+        'That license is already active on another deployment. Contact Roomote support to transfer it.',
+      );
+    }
+    if (activation.status === 'rejected') {
+      throw new Error(
+        'Roomote Cloud rejected the activation response. Contact Roomote support if this continues.',
+      );
+    }
+    if (activation.status !== 'synced') {
+      throw new Error(
+        'Roomote Cloud could not activate this license. Check your network connection and try again.',
+      );
+    }
   }
 
   await db
     .update(deploymentSettings)
-    .set({ licenseKey, updatedAt: new Date() })
+    .set({
+      licenseKey,
+      ...(licenseKey == null && { licenseCloudState: null }),
+      updatedAt: new Date(),
+    })
     .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
 
   return { saved: true };

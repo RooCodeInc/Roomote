@@ -53,7 +53,7 @@ describe('sendInstanceReport', () => {
     vi.unstubAllGlobals();
   });
 
-  it('includes a valid license id when analytics is disabled', async () => {
+  it('does not send licensed usage to Ping when analytics is disabled', async () => {
     mocks.getDeploymentLicenseState.mockResolvedValue({
       status: 'valid',
       seatLimit: 100,
@@ -65,23 +65,9 @@ describe('sendInstanceReport', () => {
     });
 
     await expect(sendInstanceReport({ users: { total: 17 } })).resolves.toBe(
-      true,
+      false,
     );
-
-    expect(fetch).toHaveBeenCalledWith(
-      'https://ping.roomote.dev/v1/instance-report',
-      expect.objectContaining({
-        body: expect.any(String),
-      }),
-    );
-    const request = vi.mocked(fetch).mock.calls[0]?.[1];
-    expect(JSON.parse(String(request?.body))).toMatchObject({
-      instanceId: 'instance-123',
-      appVersion: 'v1.2.3',
-      licenseId: 'lic_sh_123',
-      cloud: false,
-      report: { users: { total: 17 } },
-    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('does not report an expired license after analytics opt-out', async () => {

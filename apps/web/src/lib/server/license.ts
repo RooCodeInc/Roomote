@@ -2,6 +2,7 @@ export {
   FREE_SEAT_LIMIT,
   SeatLimitExceededError,
   assertSeatAvailable,
+  getEffectiveDeploymentSeatLimit,
   getDeploymentLicenseState,
   getEnvLicenseKey,
   hasSeatAvailable,

@@ -3,7 +3,12 @@ import { createPublicKey, verify as verifySignature } from 'node:crypto';
 import { Env } from '@roomote/env';
 
 import { db, type DatabaseOrTransaction } from '../db';
-import { deploymentSettings, users } from '../schema';
+import {
+  deploymentSettings,
+  type LicenseCloudEntitlements,
+  type LicenseCloudState,
+  users,
+} from '../schema';
 import { eq, isNull, sql } from 'drizzle-orm';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -13,7 +18,7 @@ export const FREE_SEAT_LIMIT = 10;
 
 const LICENSE_KEY_PREFIX = 'RMLK1';
 const LICENSE_PUBLIC_KEY_SPKI_B64 =
-  'MCowBQYDK2VwAyEALp8Px1N98T1Gh4a8zbj6EnpyWbxF3VJNqTKmXvxK8xc=';
+  'MCowBQYDK2VwAyEAs8vzncSsZYeJCxOYCeSbzH5VEDFJNhh/c6HTBu4N+Sk=';
 
 export type LicensePayload = {
   licenseId: string;
@@ -27,6 +32,8 @@ export type DeploymentLicenseState =
   | { status: 'unlicensed'; seatLimit: number }
   | { status: 'invalid'; seatLimit: number }
   | ({ status: 'valid' | 'expired'; seatLimit: number } & LicensePayload);
+
+export type LicenseCloudLease = LicenseCloudState;
 
 function parseIsoDate(value: unknown): Date | null {
   if (typeof value !== 'string') {
@@ -133,6 +140,65 @@ export function resolveLicenseState(
   };
 }
 
+/**
+ * A paid signed key only raises the seat limit while the matching deployment
+ * has a current lease from Roomote Cloud. The signature remains the source of
+ * truth for the license identity and expiry; Cloud binds that identity to one
+ * installation.
+ */
+export function hasCurrentLicenseActivation(
+  licenseState: DeploymentLicenseState,
+  cloudState: LicenseCloudLease | null | undefined,
+  deploymentId: string,
+  now: Date = new Date(),
+): boolean {
+  const activationExpiresAt = cloudState
+    ? new Date(cloudState.activationExpiresAt)
+    : null;
+  return (
+    licenseState.status === 'valid' &&
+    cloudState?.licenseId === licenseState.licenseId &&
+    cloudState.deploymentId === deploymentId &&
+    activationExpiresAt != null &&
+    !Number.isNaN(activationExpiresAt.getTime()) &&
+    activationExpiresAt.getTime() > now.getTime()
+  );
+}
+
+export function getEffectiveSeatLimit(
+  licenseState: DeploymentLicenseState,
+  cloudState: LicenseCloudLease | null | undefined,
+  deploymentId: string,
+  now: Date = new Date(),
+): number {
+  return hasCurrentLicenseActivation(
+    licenseState,
+    cloudState,
+    deploymentId,
+    now,
+  )
+    ? licenseState.seatLimit
+    : FREE_SEAT_LIMIT;
+}
+
+export function getCurrentLicenseEntitlements(
+  licenseState: DeploymentLicenseState,
+  cloudState: LicenseCloudLease | null | undefined,
+  deploymentId: string,
+  now: Date = new Date(),
+): LicenseCloudEntitlements | null {
+  if (
+    !hasCurrentLicenseActivation(licenseState, cloudState, deploymentId, now) ||
+    !cloudState ||
+    Number.isNaN(new Date(cloudState.entitlementsExpiresAt).getTime()) ||
+    new Date(cloudState.entitlementsExpiresAt).getTime() <= now.getTime()
+  ) {
+    return null;
+  }
+
+  return cloudState.entitlements;
+}
+
 export function getEnvLicenseKey(): string | null {
   const value = Env.R_LICENSE_KEY?.trim();
   return value || null;
@@ -161,6 +227,22 @@ export async function getDeploymentLicenseState(
   return resolveLicenseState(settings?.licenseKey);
 }
 
+export async function getEffectiveDeploymentSeatLimit(): Promise<number> {
+  const [licenseState, settings] = await Promise.all([
+    getDeploymentLicenseState(),
+    db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+      columns: { licenseCloudState: true, instanceAnalyticsId: true },
+    }),
+  ]);
+
+  return getEffectiveSeatLimit(
+    licenseState,
+    settings?.licenseCloudState,
+    Env.R_INSTANCE_ID ?? settings?.instanceAnalyticsId ?? '',
+  );
+}
+
 export class SeatLimitExceededError extends Error {
   constructor(seatLimit: number) {
     super(
@@ -171,22 +253,36 @@ export class SeatLimitExceededError extends Error {
 }
 
 export async function hasSeatAvailable(): Promise<boolean> {
-  const [licenseState, [activeUsers]] = await Promise.all([
+  const [licenseState, settings, [activeUsers]] = await Promise.all([
     getDeploymentLicenseState(),
+    db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+      columns: { licenseCloudState: true, instanceAnalyticsId: true },
+    }),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(users)
       .where(isNull(users.deletedAt)),
   ]);
 
-  return (activeUsers?.count ?? 0) < licenseState.seatLimit;
+  const deploymentId = Env.R_INSTANCE_ID ?? settings?.instanceAnalyticsId ?? '';
+  const seatLimit = getEffectiveSeatLimit(
+    licenseState,
+    settings?.licenseCloudState,
+    deploymentId,
+  );
+  return (activeUsers?.count ?? 0) < seatLimit;
 }
 
 export async function assertSeatAvailable(
   tx: DatabaseOrTransaction,
 ): Promise<void> {
   const [settings] = await tx
-    .select({ licenseKey: deploymentSettings.licenseKey })
+    .select({
+      licenseKey: deploymentSettings.licenseKey,
+      licenseCloudState: deploymentSettings.licenseCloudState,
+      instanceAnalyticsId: deploymentSettings.instanceAnalyticsId,
+    })
     .from(deploymentSettings)
     .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
     .for('update');
@@ -200,7 +296,14 @@ export async function assertSeatAvailable(
     resolveConfiguredLicenseKey(settings?.licenseKey),
   );
 
-  if ((activeUsers?.count ?? 0) >= licenseState.seatLimit) {
-    throw new SeatLimitExceededError(licenseState.seatLimit);
+  const deploymentId = Env.R_INSTANCE_ID ?? settings?.instanceAnalyticsId ?? '';
+  const seatLimit = getEffectiveSeatLimit(
+    licenseState,
+    settings?.licenseCloudState,
+    deploymentId,
+  );
+
+  if ((activeUsers?.count ?? 0) >= seatLimit) {
+    throw new SeatLimitExceededError(seatLimit);
   }
 }

@@ -7,11 +7,15 @@ import {
   eq,
   isNull,
   ne,
+  recordLicenseUsageObservation,
   slackUserMappings,
   telegramUserMappings,
   users,
 } from '@roomote/db/server';
-import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
+import {
+  requestInstancePing,
+  requestLicenseUsageSync,
+} from '@roomote/sdk/server/request-instance-ping';
 import type { UserRole } from '@roomote/types';
 
 import {
@@ -175,6 +179,8 @@ export async function removeUser({
       .set({ deletedAt: now, updatedAt: now })
       .where(eq(users.id, targetUserId));
 
+    await recordLicenseUsageObservation(tx, now);
+
     await tx
       .delete(slackUserMappings)
       .where(eq(slackUserMappings.userId, targetUserId));
@@ -192,6 +198,7 @@ export async function removeUser({
     // A removal changes the instance's user counts; refresh the anonymous
     // report instead of waiting for the daily tick.
     void requestInstancePing('user-removed');
+    void requestLicenseUsageSync('user-removed');
   }
 
   return result;

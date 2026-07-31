@@ -79,11 +79,16 @@ expiry date. Purchased keys are issued annually and can be refreshed from the
 Roomote Cloud portal while the subscription is active. Replace the key in
 Settings or `R_LICENSE_KEY` after refreshing it.
 
-Keys are verified offline; usage reporting does not activate or validate a key.
-Licensed deployments send their license ID and current user count to Roomote's
-Ping service for subscription billing, even when anonymous analytics is
-disabled. The rest of the instance report remains controlled by the anonymous
-analytics setting.
+Keys are signature-verified locally, then activated with Roomote Cloud for the
+deployment's stable installation ID. A paid seat limit remains active while
+the Cloud activation lease is current (up to 72 hours); without it, the
+deployment uses the free-seat limit. Roomote Cloud records the current user
+count and short-lived peaks for subscription billing, independently of
+anonymous analytics. License usage is not sent to the Ping analytics service.
+
+Each license may be active on one deployment at a time. If you move a
+deployment, contact Roomote support to reset the existing activation before
+using its license key on the replacement.
 
 When all seats are in use, existing users keep working normally — only new
 sign-ups are blocked until a seat is freed by removing a user or a license key

@@ -288,6 +288,12 @@ const serverSchema = {
   // Optional Roomote license key (RMLK1.…). When set, takes precedence over
   // the key stored in deployment_settings via Settings → Users.
   R_LICENSE_KEY: z.string().optional(),
+  // Roomote Cloud endpoint used to activate self-hosted licenses and report
+  // licensed seat usage. This is deliberately distinct from Ping telemetry.
+  R_LICENSE_CLOUD_BASE_URL: z
+    .string()
+    .url()
+    .default('https://cloud.roomote.dev'),
   PREVIEW_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
@@ -528,6 +534,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_MODEL_ENV_KEYS',
   'R_ALLOWED_EMAILS',
   'R_LICENSE_KEY',
+  'R_LICENSE_CLOUD_BASE_URL',
   'R_GITHUB_APP_SLUG',
 ]);
 

@@ -14,7 +14,6 @@ import {
   db,
   deploymentSettings,
   eq,
-  getDeploymentLicenseState,
   getInstanceAnalyticsId,
   getUserAnalyticsId,
   taskRuns,
@@ -35,6 +34,11 @@ import {
   buildActivationPrMergedProperties,
   buildActivationTaskProperties,
 } from '../index';
+
+export {
+  syncLicenseWithCloud,
+  type LicenseCloudSyncResult,
+} from './license-cloud';
 
 const LOG_PREFIX = '[telemetry]';
 const REQUEST_TIMEOUT_MS = 5_000;
@@ -423,29 +427,20 @@ export async function checkLatestVersion(): Promise<PingVersionCheckResponse | n
 }
 
 /**
- * Sends the daily instance report. Anonymous reports honor the analytics
- * setting; valid paid licenses always send their license id and usage payload.
- * Never throws. Returns whether the report was accepted.
+ * Sends the daily anonymous instance report. Never throws. Returns whether
+ * the report was accepted.
  */
 export async function sendInstanceReport(
   report: Record<string, unknown>,
 ): Promise<boolean> {
   try {
-    const [analyticsEnabled, licenseState] = await Promise.all([
-      isAnonymousAnalyticsEnabled(),
-      getDeploymentLicenseState(),
-    ]);
-    const licenseId =
-      licenseState.status === 'valid' ? licenseState.licenseId : undefined;
-
-    if (!analyticsEnabled && !licenseId) {
+    if (!(await isAnonymousAnalyticsEnabled())) {
       return false;
     }
 
     const request: PingInstanceReportRequest = {
       instanceId: await getInstanceAnalyticsId(),
       appVersion: getAppVersion(),
-      licenseId,
       cloud: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
       sentAt: new Date().toISOString(),
       report,

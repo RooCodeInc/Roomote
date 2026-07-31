@@ -324,5 +324,6 @@ export {
 
 export {
   requestInstancePing,
+  requestLicenseUsageSync,
   resetInstancePingQueueForTests,
 } from './lib/request-instance-ping';

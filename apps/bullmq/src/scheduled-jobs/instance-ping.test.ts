@@ -51,7 +51,7 @@ describe('instancePingJob', () => {
     expect(mocks.sendInstanceReport).toHaveBeenCalledWith(report);
   });
 
-  it('sends only user count for a valid license after analytics opt-out', async () => {
+  it('does not send licensed usage to Ping after analytics opt-out', async () => {
     mocks.isAnonymousAnalyticsEnabled.mockResolvedValue(false);
     mocks.getDeploymentLicenseState.mockResolvedValue({
       status: 'valid',
@@ -66,10 +66,8 @@ describe('instancePingJob', () => {
     await instancePingJob();
 
     expect(mocks.collectInstanceReportStats).not.toHaveBeenCalled();
-    expect(mocks.collectLicensedUserCount).toHaveBeenCalledOnce();
-    expect(mocks.sendInstanceReport).toHaveBeenCalledWith({
-      users: { total: 7 },
-    });
+    expect(mocks.collectLicensedUserCount).not.toHaveBeenCalled();
+    expect(mocks.sendInstanceReport).not.toHaveBeenCalled();
   });
 
   it('skips the report after opt-out when there is no valid license', async () => {
