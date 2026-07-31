@@ -275,6 +275,7 @@ const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
 const OPEN_CODE_READ_TOOLS = new Set(['read']);
 const OPEN_CODE_SEARCH_TOOLS = new Set(['grep', 'glob', 'find', 'list', 'ls']);
 const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
+const MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS = 3;
 // Fail-safe for a wedged stop-hook reminder cycle. After a turn finishes
 // without the required Slack closeout, we resubmit a reminder prompt and then
 // wait for a fresh turn (a future session.idle re-enters finishCurrentTurn).
@@ -3694,13 +3695,20 @@ export class OpenCodeServerHarness
         asString(properties?.sessionId) ??
         this.sessionId;
       const message = asString(status?.message);
+      const retryAttempt = asFiniteNumber(status?.attempt);
+      const isTerminalProviderError = isOpenCodeTerminalProviderError(status);
+      const exhaustedRetryBudget =
+        retryAttempt !== undefined &&
+        retryAttempt >= MAX_OPENCODE_INTERNAL_RETRY_ATTEMPTS;
 
-      if (
-        sessionId &&
-        message &&
-        isOpenCodeTerminalProviderError({ message })
-      ) {
-        await this.terminateOpenCodeProviderRetry(sessionId, message);
+      if (sessionId && (isTerminalProviderError || exhaustedRetryBudget)) {
+        await this.terminateOpenCodeProviderRetry(
+          sessionId,
+          message ??
+            (isTerminalProviderError
+              ? 'Provider request failed with a non-retryable error.'
+              : 'Provider retry limit exceeded.'),
+        );
         return;
       }
 

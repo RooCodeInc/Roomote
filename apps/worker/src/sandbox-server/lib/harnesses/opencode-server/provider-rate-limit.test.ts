@@ -36,6 +36,29 @@ describe('isOpenCodeProviderRateLimitError', () => {
     ).toBe(true);
   });
 
+  it('requires an HTTP 429; identifier strings and wording do not count', () => {
+    expect(
+      isOpenCodeProviderRateLimitError({ code: 'rate_limit_exceeded' }),
+    ).toBe(false);
+    expect(
+      isOpenCodeProviderRateLimitError({
+        metadata: { error_type: 'too_many_requests' },
+      }),
+    ).toBe(false);
+    expect(
+      isOpenCodeProviderRateLimitError({ message: 'Too many requests' }),
+    ).toBe(false);
+  });
+
+  it('does not retry an explicitly non-retryable 429', () => {
+    expect(
+      isOpenCodeProviderRateLimitError({
+        statusCode: 429,
+        isRetryable: false,
+      }),
+    ).toBe(false);
+  });
+
   it('rejects non-rate-limit provider errors', () => {
     expect(
       isOpenCodeProviderRateLimitError({
