@@ -5,6 +5,7 @@ import { buildGitHubMentionFollowUpRequest } from '../github-pr-follow-up-contex
 import { buildGitHubMentionFollowUpHarnessInstructions } from '../github-message-instructions';
 
 import {
+  appendAdditionalTeamInstructions,
   getPrDetails,
   getTriggeringComment,
   getIssueDetails,
@@ -24,6 +25,7 @@ export async function githubPrReviewFollowUp({
   taskSpec,
   gitHubToken,
   taskRunUrl,
+  additionalInstructions,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
@@ -31,6 +33,7 @@ export async function githubPrReviewFollowUp({
   taskSpec: GithubPullRequestReviewFollowUpTask;
   gitHubToken: string;
   taskRunUrl: string;
+  additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -140,7 +143,10 @@ export async function githubPrReviewFollowUp({
   });
 
   const standardTaskResult = standardTask({
-    description: prompt,
+    description: appendAdditionalTeamInstructions(
+      prompt,
+      additionalInstructions,
+    ),
     repo: fullName,
     taskSurface: 'github',
     taskRunUrl,

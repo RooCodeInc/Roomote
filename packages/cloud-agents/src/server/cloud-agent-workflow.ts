@@ -213,6 +213,7 @@ export async function generatePrompt({
         taskSpec,
         gitHubToken,
         taskRunUrl,
+        additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
