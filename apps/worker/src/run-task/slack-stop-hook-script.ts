@@ -6,7 +6,9 @@ const REMINDER = [
   'Before finalizing, post a terminal Slack-visible reply for the current turn:',
   'use send_chat_reply with purpose "closeout" for the answer, result, blocker, or handoff.',
   'Use request_user_input only when you genuinely require structured input from the user.',
-  'Do not continue other work first.',
+  'If the current turn was interrupted mid-action or its work is unfinished,',
+  'finish that work first and then post the closeout.',
+  'Do not start unrelated new work before the closeout.',
 ].join(' ');
 const AUTOMATION_CLOSEOUT_REMINDER = [
   'This automation-started task has not posted its Slack closeout yet.',
