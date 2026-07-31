@@ -34,7 +34,12 @@ import { getReviewTaskRelayPayload } from './reviewTaskRelayPayload';
 
 async function findActiveReviewRun(repository: string, prNumber: number) {
   const [activeRun] = await db
-    .select({ id: taskRuns.id })
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      status: taskRuns.status,
+      prSha: taskPullRequests.prSha,
+    })
     .from(tasks)
     .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
     .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
@@ -162,6 +167,16 @@ export async function handlePrSynchronize({
       );
 
       if (activeReviewRun) {
+        if (
+          activeReviewRun.status === RunStatus.Pending &&
+          activeReviewRun.prSha !== pr.head.sha
+        ) {
+          await db
+            .update(taskPullRequests)
+            .set({ prSha: pr.head.sha })
+            .where(eq(taskPullRequests.taskId, activeReviewRun.taskId));
+        }
+
         console.log(
           `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> skip_active_review (target: ${currentTarget.id})`,
         );

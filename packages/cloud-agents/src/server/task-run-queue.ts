@@ -91,17 +91,12 @@ import {
 import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
 
 enum TaskRunQueueKeys {
-  // Version the storage layout so old and new controllers can coexist during
-  // a rolling deployment. Both versions still contend on the same scope lock.
-  PreviousQueue = 'queue:cloud-jobs:v2',
-  PreviousEntries = 'queue:cloud-jobs:v2:entries',
-  PreviousEntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
-  PreviousScopes = 'queue:cloud-jobs:v2:scopes',
-  Queue = 'queue:cloud-jobs:v3',
-  Entries = 'queue:cloud-jobs:v3:entries',
-  EntryScopes = 'queue:cloud-jobs:v3:entry-scopes',
-  EntryAvailableAt = 'queue:cloud-jobs:v3:entry-available-at',
-  Scopes = 'queue:cloud-jobs:v3:scopes',
+  // Keep the v2 layout during the debounce rollout. Old and new producers and
+  // controllers must see the same entries while they coexist.
+  Queue = 'queue:cloud-jobs:v2',
+  Entries = 'queue:cloud-jobs:v2:entries',
+  EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
+  Scopes = 'queue:cloud-jobs:v2:scopes',
 }
 
 export function resolveFreshTaskComputeProvider(
@@ -141,23 +136,13 @@ const ATOMIC_ENQUEUE_SCRIPT = `
 local incomingId = ARGV[1]
 local incomingScope = ARGV[2]
 local incomingRaw = ARGV[3]
+local delayMs = tonumber(ARGV[4]) or 0
 local evictedIds = {}
 
-local previousId = redis.call('HGET', KEYS[7], incomingScope)
 local existingId = redis.call('HGET', KEYS[2], incomingScope)
 
-if ARGV[5] == '1' and (previousId or existingId) then
+if ARGV[5] == '1' and existingId then
   return {incomingId}
-end
-
-if previousId then
-  redis.call('LREM', KEYS[6], 0, previousId)
-  redis.call('HDEL', KEYS[7], incomingScope)
-  redis.call('HDEL', KEYS[8], previousId)
-  redis.call('HDEL', KEYS[9], previousId)
-  if previousId ~= incomingId then
-    table.insert(evictedIds, previousId)
-  end
 end
 
 if existingId then
@@ -167,33 +152,29 @@ if existingId then
     table.insert(evictedIds, existingId)
     redis.call('HDEL', KEYS[3], existingId)
     redis.call('HDEL', KEYS[4], existingId)
-    redis.call('HDEL', KEYS[5], existingId)
   end
+end
+
+local existingLock = redis.call('GET', incomingScope)
+local existingDelayOwner = existingId and ('delay:' .. existingId) or nil
+
+if delayMs > 0 then
+  if not existingLock or existingLock == existingDelayOwner then
+    redis.call('PSETEX', incomingScope, delayMs, 'delay:' .. incomingId)
+  end
+elseif existingLock == existingDelayOwner then
+  redis.call('DEL', incomingScope)
 end
 
 redis.call('HSET', KEYS[2], incomingScope, incomingId)
 redis.call('HSET', KEYS[3], incomingId, incomingRaw)
 redis.call('HSET', KEYS[4], incomingId, incomingScope)
-if ARGV[4] ~= '' then
-  redis.call('HSET', KEYS[5], incomingId, ARGV[4])
-else
-  redis.call('HDEL', KEYS[5], incomingId)
-end
 redis.call('RPUSH', KEYS[1], incomingId)
-
-if ARGV[6] ~= '' then
-  local lockOwner = redis.call('GET', KEYS[10])
-  if not lockOwner or lockOwner == incomingId or lockOwner == existingId then
-    redis.call('SET', KEYS[10], incomingId, 'PX', ARGV[6])
-  end
-elseif existingId and redis.call('GET', KEYS[10]) == existingId then
-  redis.call('DEL', KEYS[10])
-end
 
 return evictedIds
 `;
 
-const ATOMIC_PREVIOUS_DEQUEUE_SCRIPT = `
+const ATOMIC_DEQUEUE_SCRIPT = `
 local queueLength = redis.call('LLEN', KEYS[1])
 local lockTtlSeconds = tonumber(ARGV[1])
 
@@ -236,74 +217,6 @@ end
 return nil
 `;
 
-const ATOMIC_DEQUEUE_SCRIPT = `
-local lockTtlSeconds = tonumber(ARGV[1])
-local nowMs = tonumber(ARGV[2])
-local queuedIds = redis.call('LRANGE', KEYS[1], 0, -1)
-
-for _, entryId in ipairs(queuedIds) do
-  local rawValue = redis.call('HGET', KEYS[3], entryId)
-  local entryScope = redis.call('HGET', KEYS[4], entryId)
-  local availableAt = tonumber(redis.call('HGET', KEYS[5], entryId)) or 0
-
-  if rawValue and entryScope then
-    if availableAt <= nowMs then
-      local lockOwner = redis.call('GET', entryScope)
-      local acquired
-
-      if lockOwner == entryId then
-        acquired = redis.call(
-          'SET',
-          entryScope,
-          entryId,
-          'EX',
-          lockTtlSeconds,
-          'XX'
-        )
-      else
-        acquired = redis.call(
-          'SET',
-          entryScope,
-          entryId,
-          'EX',
-          lockTtlSeconds,
-          'NX'
-        )
-      end
-
-      if acquired then
-        local previousId = redis.call('HGET', KEYS[7], entryScope)
-
-        if previousId then
-          redis.call('LREM', KEYS[6], 0, previousId)
-          redis.call('HDEL', KEYS[7], entryScope)
-          redis.call('HDEL', KEYS[8], previousId)
-          redis.call('HDEL', KEYS[9], previousId)
-        end
-
-        redis.call('LREM', KEYS[1], 1, entryId)
-        redis.call('HDEL', KEYS[3], entryId)
-        redis.call('HDEL', KEYS[4], entryId)
-        redis.call('HDEL', KEYS[5], entryId)
-
-        if redis.call('HGET', KEYS[2], entryScope) == entryId then
-          redis.call('HDEL', KEYS[2], entryScope)
-        end
-
-        return {rawValue, previousId or ''}
-      end
-    end
-  else
-    redis.call('LREM', KEYS[1], 0, entryId)
-    redis.call('HDEL', KEYS[3], entryId)
-    redis.call('HDEL', KEYS[4], entryId)
-    redis.call('HDEL', KEYS[5], entryId)
-  end
-end
-
-return nil
-`;
-
 const RELEASE_OWNED_LOCK_SCRIPT = `
 if redis.call('GET', KEYS[1]) == ARGV[1] then
   return redis.call('DEL', KEYS[1])
@@ -317,7 +230,6 @@ return 0
 // per second for a bounded 250ms wake-up delay; a future dedicated wake-up
 // connection can remove that tradeoff without weakening claim atomicity.
 const DEQUEUE_POLL_INTERVAL_MS = 250;
-const DELAYED_ENTRY_RESERVATION_GRACE_MS = 5_000;
 
 const taskRunQueueEntrySchema = z.object({
   id: z.number(),
@@ -593,34 +505,19 @@ export class TaskRunQueue {
 
   public async enqueue(entry: TaskRunQueueEntry): Promise<TaskRunQueueEntry[]> {
     const evictedEntries: TaskRunQueueEntry[] = [];
-    // Reserve the shared scope past the deadline so v2 consumers requeue work
-    // until a v3 consumer can atomically promote the reservation.
-    const reservationTtl = entry.availableAt
-      ? Math.max(
-          1,
-          entry.availableAt - Date.now() + DELAYED_ENTRY_RESERVATION_GRACE_MS,
-        )
-      : undefined;
 
     const result = await this.redis.eval(
       ATOMIC_ENQUEUE_SCRIPT,
-      10,
+      4,
       TaskRunQueueKeys.Queue,
       TaskRunQueueKeys.Scopes,
       TaskRunQueueKeys.Entries,
       TaskRunQueueKeys.EntryScopes,
-      TaskRunQueueKeys.EntryAvailableAt,
-      TaskRunQueueKeys.PreviousQueue,
-      TaskRunQueueKeys.PreviousScopes,
-      TaskRunQueueKeys.PreviousEntries,
-      TaskRunQueueKeys.PreviousEntryScopes,
-      entry.scope,
       entry.id.toString(),
       entry.scope,
       JSON.stringify(entry),
-      entry.availableAt?.toString() ?? '',
+      Math.max(0, (entry.availableAt ?? 0) - Date.now()).toString(),
       entry.preserveExisting ? '1' : '0',
-      reservationTtl?.toString() ?? '',
     );
 
     if (!Array.isArray(result)) {
@@ -634,54 +531,21 @@ export class TaskRunQueue {
     return evictedEntries;
   }
 
-  public async dequeue(
-    blocking = true,
-    onEvicted?: (entries: TaskRunQueueEntry[]) => Promise<void>,
-  ): Promise<TaskRunQueueEntry | null> {
+  public async dequeue(blocking = true): Promise<TaskRunQueueEntry | null> {
     const deadline = Date.now() + this.timeout * 1000;
 
     do {
-      const previousRawValue = await this.redis.eval(
-        ATOMIC_PREVIOUS_DEQUEUE_SCRIPT,
-        4,
-        TaskRunQueueKeys.PreviousQueue,
-        TaskRunQueueKeys.PreviousScopes,
-        TaskRunQueueKeys.PreviousEntries,
-        TaskRunQueueKeys.PreviousEntryScopes,
-        Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
-      );
-
-      if (previousRawValue) {
-        try {
-          const previousEntry = taskRunQueueEntrySchema.parse(
-            JSON.parse(String(previousRawValue)),
-          );
-          console.log(
-            `[TaskRunQueue] acquired lock for ${previousEntry.scope}`,
-          );
-          return previousEntry;
-        } catch {
-          continue;
-        }
-      }
-
       const rawValue = await this.redis.eval(
         ATOMIC_DEQUEUE_SCRIPT,
-        9,
+        4,
         TaskRunQueueKeys.Queue,
         TaskRunQueueKeys.Scopes,
         TaskRunQueueKeys.Entries,
         TaskRunQueueKeys.EntryScopes,
-        TaskRunQueueKeys.EntryAvailableAt,
-        TaskRunQueueKeys.PreviousQueue,
-        TaskRunQueueKeys.PreviousScopes,
-        TaskRunQueueKeys.PreviousEntries,
-        TaskRunQueueKeys.PreviousEntryScopes,
         Math.ceil(TASK_TIMEOUT_MS / 1000).toString(),
-        Date.now().toString(),
       );
 
-      if (!Array.isArray(rawValue)) {
+      if (!rawValue) {
         if (!blocking || Date.now() >= deadline) {
           return null;
         }
@@ -692,25 +556,15 @@ export class TaskRunQueue {
         continue;
       }
 
-      const [entryRawValue, evictedPreviousId] = rawValue;
-      let entry: TaskRunQueueEntry;
-
       try {
-        entry = taskRunQueueEntrySchema.parse(
-          JSON.parse(String(entryRawValue)),
+        const entry = taskRunQueueEntrySchema.parse(
+          JSON.parse(String(rawValue)),
         );
+        console.log(`[TaskRunQueue] acquired lock for ${entry.scope}`);
+        return entry;
       } catch {
         continue;
       }
-
-      if (evictedPreviousId && onEvicted) {
-        await onEvicted([
-          { id: Number(evictedPreviousId), scope: entry.scope },
-        ]);
-      }
-
-      console.log(`[TaskRunQueue] acquired lock for ${entry.scope}`);
-      return entry;
     } while (blocking && Date.now() < deadline);
 
     return null;
@@ -1154,13 +1008,25 @@ const PR_SCOPED_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> = new Set([
 
 export const PR_REVIEW_SYNC_DEBOUNCE_MS = 15_000;
 
-export function resolveQueueAvailableAt(
-  payloadKind: TaskPayloadKind,
+export function resolvePrReviewQueuePolicy({
+  payloadKind,
+  sourceControlProvider = 'github',
   now = Date.now(),
-): number | undefined {
-  return payloadKind === TaskPayloadKind.GithubPrReviewSync
-    ? now + PR_REVIEW_SYNC_DEBOUNCE_MS
-    : undefined;
+}: {
+  payloadKind: TaskPayloadKind;
+  sourceControlProvider?: SourceControlProvider;
+  now?: number;
+}): Pick<TaskRunQueueEntry, 'availableAt' | 'preserveExisting'> {
+  const shouldDebounce =
+    payloadKind === TaskPayloadKind.GithubPrReviewSync &&
+    sourceControlProvider === 'github';
+
+  return shouldDebounce
+    ? {
+        availableAt: now + PR_REVIEW_SYNC_DEBOUNCE_MS,
+        preserveExisting: true,
+      }
+    : {};
 }
 
 /**
@@ -1344,13 +1210,18 @@ async function pushRunOntoQueue(params: {
       .set({ queueScope: scope })
       .where(eq(taskRuns.id, taskRun.id));
 
+    const sourceControlProvider =
+      'sourceControlProvider' in taskRun.payload
+        ? taskRun.payload.sourceControlProvider
+        : undefined;
+    const queuePolicy = resolvePrReviewQueuePolicy({
+      payloadKind: taskRun.payloadKind,
+      sourceControlProvider,
+    });
     const evictedEntries = await TaskRunQueue.getInstance().enqueue({
       id: taskRun.id,
       scope,
-      availableAt: resolveQueueAvailableAt(taskRun.payloadKind),
-      ...(taskRun.payloadKind === TaskPayloadKind.GithubPrReviewSync
-        ? { preserveExisting: true }
-        : {}),
+      ...queuePolicy,
     });
 
     await cancelEvictedTaskRuns(
@@ -2399,12 +2270,7 @@ async function recordSnapshotResumeRequestEvent(input: {
 }
 
 export async function dequeueTaskRun(): Promise<number | null> {
-  const entry = await TaskRunQueue.getInstance().dequeue(true, (entries) =>
-    cancelEvictedTaskRuns(
-      entries,
-      'Superseded by an existing queued task run.',
-    ),
-  );
+  const entry = await TaskRunQueue.getInstance().dequeue();
   return entry ? entry.id : null;
 }
 

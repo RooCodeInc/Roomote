@@ -6,12 +6,18 @@ const {
   mockGetGitHubAutomationTargets,
   mockReleaseLock,
   mockSelect,
+  mockUpdate,
+  mockUpdateSet,
+  mockUpdateWhere,
 } = vi.hoisted(() => ({
   mockAcquireRedisLock: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetGitHubAutomationTargets: vi.fn(),
   mockReleaseLock: vi.fn().mockResolvedValue(undefined),
   mockSelect: vi.fn(),
+  mockUpdate: vi.fn(),
+  mockUpdateSet: vi.fn(),
+  mockUpdateWhere: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -30,7 +36,10 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
-    db: { select: (...args: unknown[]) => mockSelect(...args) },
+    db: {
+      select: (...args: unknown[]) => mockSelect(...args),
+      update: (...args: unknown[]) => mockUpdate(...args),
+    },
   };
 });
 
@@ -81,6 +90,9 @@ describe('handlePrSynchronize', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAcquireRedisLock.mockResolvedValue(mockReleaseLock);
+    mockUpdate.mockReturnValue({ set: mockUpdateSet });
+    mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
+    mockUpdateWhere.mockResolvedValue(undefined);
     mockGetGitHubAutomationTargets.mockResolvedValue({
       status: 'ok',
       targets: [
@@ -102,6 +114,28 @@ describe('handlePrSynchronize', () => {
       message: 'A PR review is already active.',
     });
 
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockReleaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('moves a pending canonical review linkage to the newest head', async () => {
+    mockSelect.mockReturnValueOnce(
+      selectResult([
+        {
+          id: 100,
+          taskId: 'task-100',
+          status: 'pending',
+          prSha: 'old-head',
+        },
+      ]),
+    );
+
+    await expect(handlePrSynchronize(payload)).resolves.toEqual({
+      status: 'ok',
+      message: 'A PR review is already active.',
+    });
+
+    expect(mockUpdateSet).toHaveBeenCalledWith({ prSha: 'new-head' });
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
