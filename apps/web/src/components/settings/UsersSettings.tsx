@@ -737,48 +737,55 @@ export function UsersSettings() {
             return (
               <div
                 key={member.id}
-                className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
+                className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 py-3 first:pt-0 last:pb-0"
               >
-                <Avatar
-                  imageUrl={member.imageUrl}
-                  name={member.name}
-                  email={member.email}
-                  size="md"
-                  alt={member.name || member.email}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 text-sm font-medium">
-                    <span className="truncate">
-                      {member.name || member.email}
-                    </span>
-                  </p>
-                  <p className="truncate text-sm text-muted-foreground">
-                    <span>{member.email}</span>
-                    {' · Joined '}
-                    {formatJoinedDate(member.createdAt)}
-                  </p>
+                <div className="flex flex-row gap-3 items-start md:items-center">
+                  <Avatar
+                    imageUrl={member.imageUrl}
+                    name={member.name}
+                    email={member.email}
+                    size="md"
+                    alt={member.name || member.email}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 text-sm font-medium">
+                      <span className="truncate">
+                        {member.name || member.email}
+                      </span>
+                    </p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      <span>{member.email}</span>
+                      <span className="hidden md:inline"> · </span>
+                      <span className="block md:inline">
+                        {'Joined '}
+                        {formatJoinedDate(member.createdAt)}
+                      </span>
+                    </p>
+                  </div>
                 </div>
-                {roleLockReason ? (
-                  <BasicTooltip content={roleLockReason}>
-                    <span>{roleSelect}</span>
-                  </BasicTooltip>
-                ) : (
-                  roleSelect
-                )}
-                {removeLockReason ? (
-                  <BasicTooltip content={removeLockReason}>
-                    <span>{removeButton}</span>
-                  </BasicTooltip>
-                ) : (
-                  removeButton
-                )}
-                {resetLockReason ? (
-                  <BasicTooltip content={resetLockReason}>
-                    <span>{resetButton}</span>
-                  </BasicTooltip>
-                ) : (
-                  resetButton
-                )}
+                <div className="flex flex-row gap-3 items-center">
+                  {roleLockReason ? (
+                    <BasicTooltip content={roleLockReason}>
+                      <span>{roleSelect}</span>
+                    </BasicTooltip>
+                  ) : (
+                    roleSelect
+                  )}
+                  {removeLockReason ? (
+                    <BasicTooltip content={removeLockReason}>
+                      <span>{removeButton}</span>
+                    </BasicTooltip>
+                  ) : (
+                    removeButton
+                  )}
+                  {resetLockReason ? (
+                    <BasicTooltip content={resetLockReason}>
+                      <span>{resetButton}</span>
+                    </BasicTooltip>
+                  ) : (
+                    resetButton
+                  )}
+                </div>
               </div>
             );
           })}
