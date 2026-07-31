@@ -229,6 +229,56 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       openCodeBaseUrlSuffix: '/v1',
     },
     {
+      id: 'alibaba',
+      name: 'Alibaba Cloud Model Studio',
+      envVarNames: ['DASHSCOPE_API_KEY'],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+      region: {
+        envVarName: 'ALIBABA_REGION',
+        default: 'global',
+        baseUrls: {
+          global: 'https://dashscope-intl.aliyuncs.com/compatible-mode',
+          china: 'https://dashscope.aliyuncs.com/compatible-mode',
+        },
+      },
+    },
+    {
+      id: 'alibaba-coding-plan',
+      name: 'Alibaba Coding Plan',
+      envVarNames: ['ALIBABA_CODING_PLAN_API_KEY'],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+      region: {
+        envVarName: 'ALIBABA_CODING_PLAN_REGION',
+        default: 'global',
+        baseUrls: {
+          global: 'https://coding-intl.dashscope.aliyuncs.com',
+          china: 'https://coding.dashscope.aliyuncs.com',
+        },
+      },
+    },
+    {
+      id: 'alibaba-token-plan',
+      name: 'Alibaba Token Plan',
+      envVarNames: ['ALIBABA_TOKEN_PLAN_API_KEY'],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+      region: {
+        envVarName: 'ALIBABA_TOKEN_PLAN_REGION',
+        default: 'global',
+        baseUrls: {
+          global:
+            'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode',
+          china:
+            'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode',
+        },
+      },
+    },
+    {
       id: 'anthropic',
       name: 'Anthropic',
       envVarNames: ['ANTHROPIC_API_KEY'],

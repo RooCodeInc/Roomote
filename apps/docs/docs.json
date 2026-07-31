@@ -46,6 +46,9 @@
             "expanded": false,
             "pages": [
               "models",
+              "providers/inference/alibaba-coding-plan",
+              "providers/inference/alibaba-model-studio",
+              "providers/inference/alibaba-token-plan",
               "providers/inference/amazon-bedrock",
               "providers/inference/anthropic",
               "providers/inference/azure-foundry",

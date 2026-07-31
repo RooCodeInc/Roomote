@@ -136,6 +136,11 @@ export const ZAI_REGION_OPTIONS = [
   { value: 'china', label: 'China' },
 ] as const;
 
+export const ALIBABA_REGION_OPTIONS = [
+  { value: 'global', label: 'International' },
+  { value: 'china', label: 'China' },
+] as const;
+
 export type SetupModelProviderDescriptor = {
   id: SetupModelProviderId;
   label: string;
@@ -416,6 +421,91 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       codeReview: 'azure-cognitive-services/gpt-5.6-sol',
       explore: 'azure-cognitive-services/gpt-5.6-luna',
       planning: 'azure-cognitive-services/gpt-5.6-sol',
+    },
+  },
+  {
+    // Regional gateway routing lets one Roomote connection cover OpenCode's
+    // separate alibaba and alibaba-cn provider endpoints.
+    id: 'alibaba',
+    label: 'Alibaba Cloud Model Studio (Qwen)',
+    envVarName: 'DASHSCOPE_API_KEY',
+    defaultRoomoteModel: 'alibaba/qwen3.6-plus',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Paste a Model Studio API key for the selected region. Coding Plan and Token Plan keys belong on their separate connections.',
+      href: 'https://modelstudio.console.alibabacloud.com/?tab=globalset#/efm/api_key',
+      linkLabel: 'Open Model Studio API keys',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'ALIBABA_REGION',
+        label: 'Region',
+        secret: false,
+        required: true,
+        options: ALIBABA_REGION_OPTIONS,
+      },
+    ],
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'qwen3-6-plus': 'alibaba/qwen3.6-plus',
+    }),
+    recommendedRoleModels: {
+      vision: 'alibaba/qwen3.6-plus',
+    },
+  },
+  {
+    id: 'alibaba-coding-plan',
+    label: 'Alibaba Coding Plan',
+    envVarName: 'ALIBABA_CODING_PLAN_API_KEY',
+    envVarLabel: 'Alibaba Coding Plan API key',
+    defaultRoomoteModel: 'alibaba-coding-plan/qwen3.6-plus',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Paste a Coding Plan key for the selected region. Do not use a general Model Studio or Token Plan key here.',
+      href: 'https://www.alibabacloud.com/help/en/model-studio/coding-plan',
+      linkLabel: 'Open Alibaba Coding Plan docs',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'ALIBABA_CODING_PLAN_REGION',
+        label: 'Region',
+        secret: false,
+        required: true,
+        options: ALIBABA_REGION_OPTIONS,
+      },
+    ],
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'qwen3-6-plus': 'alibaba-coding-plan/qwen3.6-plus',
+    }),
+    recommendedRoleModels: {
+      vision: 'alibaba-coding-plan/qwen3.6-plus',
+    },
+  },
+  {
+    id: 'alibaba-token-plan',
+    label: 'Alibaba Token Plan',
+    envVarName: 'ALIBABA_TOKEN_PLAN_API_KEY',
+    envVarLabel: 'Alibaba Token Plan API key',
+    defaultRoomoteModel: 'alibaba-token-plan/qwen3.6-plus',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Paste a Token Plan key for the selected region. Do not use a general Model Studio or Coding Plan key here.',
+      href: 'https://www.alibabacloud.com/help/en/model-studio/token-plan-overview',
+      linkLabel: 'Open Alibaba Token Plan docs',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'ALIBABA_TOKEN_PLAN_REGION',
+        label: 'Region',
+        secret: false,
+        required: true,
+        options: ALIBABA_REGION_OPTIONS,
+      },
+    ],
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'qwen3-6-plus': 'alibaba-token-plan/qwen3.6-plus',
+    }),
+    recommendedRoleModels: {
+      vision: 'alibaba-token-plan/qwen3.6-plus',
     },
   },
   {

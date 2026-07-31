@@ -397,6 +397,12 @@ common provider keys into worker containers:
 - `AI_GATEWAY_API_KEY` (Vercel AI Gateway, `vercel/...` models)
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
+- `DASHSCOPE_API_KEY` (Alibaba Cloud Model Studio, `alibaba/...` models, with
+  `ALIBABA_REGION`)
+- `ALIBABA_CODING_PLAN_API_KEY` (Alibaba Coding Plan,
+  `alibaba-coding-plan/...` models, with `ALIBABA_CODING_PLAN_REGION`)
+- `ALIBABA_TOKEN_PLAN_API_KEY` (Alibaba Token Plan,
+  `alibaba-token-plan/...` models, with `ALIBABA_TOKEN_PLAN_REGION`)
 - `MOONSHOT_API_KEY`
 - `KIMI_API_KEY` (Kimi for Coding, `kimi-for-coding/...` models)
 - `MINIMAX_API_KEY`
