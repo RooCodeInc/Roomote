@@ -8,6 +8,4 @@ export {
   resolveConfiguredLicenseKey,
   resolveLicenseState,
   verifyLicenseKey,
-  type DeploymentLicenseState,
-  type LicensePayload,
 } from '@roomote/db/server';
