@@ -67,6 +67,10 @@ const config: KnipConfig = {
         'python',
         'fc-cache',
         'dpkg-query',
+        // Installed at worker runtime for tool version management and
+        // Corepack yarn activation (not npm package deps).
+        'mise',
+        'corepack',
       ],
     },
 
