@@ -274,7 +274,22 @@ export type McpIntegration = {
   oauthScopeMode?: McpIntegrationOauthScopeMode;
   connectionMode?: McpIntegrationConnectionMode;
   serverMode?: McpIntegrationServerMode;
+  defaultDisabledTools?: string[];
 };
+
+export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
+  'send-email',
+  'send-batch-emails',
+  'send-broadcast',
+  'update-email',
+  'create-contact',
+  'update-contact',
+  'remove-contact',
+  'add-contact-to-segment',
+  'remove-contact-from-segment',
+  'update-contact-topics',
+  'create-contact-import',
+] as const;
 
 export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
@@ -422,6 +437,20 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     icon: 'railway',
     connectionScope: 'deployment',
     serverMode: 'upstream_proxy',
+  },
+  {
+    id: 'resend',
+    name: 'Resend',
+    url: 'https://mcp.resend.com/mcp',
+    description: `Inspect and manage shared email infrastructure through Resend from ${PRODUCT_NAME} tasks`,
+    icon: 'resend',
+    connectionScope: 'deployment',
+    connectionMode: 'oauth',
+    serverMode: 'upstream_proxy',
+    oauthScopes: ['full_access'],
+    defaultDisabledTools: [...RESEND_DEFAULT_DISABLED_TOOL_NAMES],
+    instructions:
+      'Use Resend to inspect email delivery, received messages, domains, contacts, templates, broadcasts, and related infrastructure. Email sending, scheduled-send changes, and contact mutations are disabled until a deployment admin explicitly enables those tools.',
   },
   {
     id: 'braintrust',
@@ -642,6 +671,21 @@ export function getMcpIntegrationOauthScopes(
   }
 
   return integration.oauthScopes;
+}
+
+export function getMcpIntegrationDefaultDisabledTools(
+  integrationOrId: McpIntegration | string | undefined,
+): readonly string[] {
+  if (!integrationOrId) {
+    return [];
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.defaultDisabledTools ?? [];
 }
 
 export function getMcpIntegrationOauthEndpoints(

@@ -95,6 +95,14 @@ Railway uses OAuth:
 
 Once connected, I can confirm the connected Railway account and list Railway projects and services during tasks.
 
+# Resend
+
+Resend uses OAuth:
+1. An admin enables Resend from Settings > Integrations.
+2. That admin connects Resend once for the workspace via OAuth.
+
+Once connected, I can inspect email delivery, received messages, domains, contacts, templates, broadcasts, and related infrastructure. Email sending, scheduled-send changes, and contact mutations are disabled until an admin enables those tools from Manage tools.
+
 # Braintrust
 
 Braintrust uses OAuth:

@@ -9,6 +9,7 @@ import {
 } from '@roomote/db/server';
 import {
   getMcpIntegration,
+  getMcpIntegrationDefaultDisabledTools,
   getMcpIntegrationOauthEndpoints,
   isDeploymentScopedMcpIntegration,
   isSelfServeMcpIntegration,
@@ -335,12 +336,19 @@ export async function GET(request: NextRequest) {
 
     if (requiresOrgAdmin) {
       failureStage = 'deployment_enablement';
+      const defaultDisabledTools =
+        getMcpIntegrationDefaultDisabledTools(integration);
       await db
         .insert(deploymentMcpEnablements)
         .values({
           mcpId: integration.id,
           enabled: true,
           enabledByUserId: userId,
+          ...(defaultDisabledTools.length > 0
+            ? {
+                disabledTools: [...defaultDisabledTools],
+              }
+            : {}),
         })
         .onConflictDoUpdate({
           target: deploymentMcpEnablements.mcpId,

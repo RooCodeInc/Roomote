@@ -100,6 +100,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect analytics, feature flags, and experiments.',
   railway:
     'Roomote will be able to inspect Railway account, project, and service inventory.',
+  resend:
+    'Roomote will be able to inspect and manage shared email infrastructure. Sending and contact mutations start disabled.',
   sentry:
     'Roomote will be able to inspect Sentry issue context and run scheduled Sentry triage through MCP.',
   supabase: 'Roomote will get read-only database access and platform context.',

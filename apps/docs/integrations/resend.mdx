@@ -1,0 +1,39 @@
+---
+title: Resend
+description: Inspect and manage shared email infrastructure from Roomote tasks.
+icon: 'https://api.iconify.design/simple-icons:resend.svg?color=currentColor'
+---
+
+Connect Resend when tasks need email delivery status, received messages,
+domains, contacts, templates, broadcasts, or other email infrastructure.
+
+## How setup works
+
+An admin connects Resend once from **Settings > Integrations** using OAuth. The
+connection is shared across the deployment and requests Resend's
+`full_access` scope so Roomote can use inspection and management tools.
+
+## Safer defaults
+
+Roomote initially disables tools that send or reschedule email and tools that
+mutate contacts. Read operations remain available, and canceling a pending
+scheduled email remains enabled as a safety action.
+
+The disabled tools include:
+
+- single, batch, and broadcast sending
+- rescheduling a scheduled email
+- creating, updating, or removing contacts
+- changing contact segment or topic membership
+- importing contacts from CSV
+
+An admin can opt in to individual tools from **Settings > Integrations >
+Resend > Manage tools**. Disabled tools are hidden from tasks and rejected by
+the server if called directly. Admin choices persist when Resend is reconnected
+or disabled and enabled again.
+
+## Verify the connection
+
+After connecting Resend, start with a read-only request such as listing recent
+emails or checking domain status. Enable only the additional tools your team
+expects Roomote to use.

@@ -807,6 +807,7 @@ describe('Integrations settings', () => {
       'PostHog',
       'Pylon',
       'Railway',
+      'Resend',
       'Sentry',
       'Snowflake',
       'Supabase',
@@ -838,6 +839,9 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Connect and enable Railway' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Connect and enable Resend' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Connect and enable Jira' }),

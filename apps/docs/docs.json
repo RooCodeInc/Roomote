@@ -129,6 +129,7 @@
           "integrations/posthog",
           "integrations/pylon",
           "integrations/railway",
+          "integrations/resend",
           "integrations/sentry",
           "integrations/snowflake",
           "integrations/supabase",

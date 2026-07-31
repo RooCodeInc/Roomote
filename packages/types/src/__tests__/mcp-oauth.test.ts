@@ -2,10 +2,12 @@ import {
   getMcpIntegration,
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationConnectionScope,
+  getMcpIntegrationDefaultDisabledTools,
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopes,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
+  RESEND_DEFAULT_DISABLED_TOOL_NAMES,
 } from '../mcp-oauth';
 
 describe('Linear OAuth scopes', () => {
@@ -42,6 +44,42 @@ describe('monday.com OAuth', () => {
     );
     expect(getMcpIntegrationOauthScopes('monday')).not.toContain(
       'webhooks:read',
+    );
+  });
+});
+
+describe('Resend OAuth', () => {
+  it('uses a deployment-scoped hosted MCP with risky tools disabled initially', () => {
+    expect(getMcpIntegration('resend')).toMatchObject({
+      name: 'Resend',
+      url: 'https://mcp.resend.com/mcp',
+      connectionMode: 'oauth',
+      serverMode: 'upstream_proxy',
+      oauthScopes: ['full_access'],
+    });
+    expect(getMcpIntegrationConnectionScope('resend')).toBe('deployment');
+    expect(getMcpIntegrationDefaultDisabledTools('resend')).toEqual(
+      RESEND_DEFAULT_DISABLED_TOOL_NAMES,
+    );
+    expect(RESEND_DEFAULT_DISABLED_TOOL_NAMES).toEqual([
+      'send-email',
+      'send-batch-emails',
+      'send-broadcast',
+      'update-email',
+      'create-contact',
+      'update-contact',
+      'remove-contact',
+      'add-contact-to-segment',
+      'remove-contact-from-segment',
+      'update-contact-topics',
+      'create-contact-import',
+    ]);
+    expect(RESEND_DEFAULT_DISABLED_TOOL_NAMES).toHaveLength(11);
+    expect(getMcpIntegrationDefaultDisabledTools('resend')).not.toContain(
+      'cancel-email',
+    );
+    expect(getMcpIntegrationDefaultDisabledTools('resend')).not.toContain(
+      'list-contacts',
     );
   });
 });
