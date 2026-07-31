@@ -1,18 +1,5 @@
-vi.mock('@roomote/db/server', () => ({
-  db: {},
-  deploymentSettings: { id: 'deployment_settings.id' },
-  eq: vi.fn(),
-}));
-
-vi.mock('../env', () => ({
-  Env: {
-    R_LICENSE_KEY: undefined as string | undefined,
-  },
-}));
-
 import { generateKeyPairSync, sign } from 'node:crypto';
 
-import { Env } from '../env';
 import {
   FREE_SEAT_LIMIT,
   getEnvLicenseKey,
@@ -20,8 +7,7 @@ import {
   resolveLicenseState,
   verifyLicenseKey,
 } from '../license';
-
-const envMock = Env as { R_LICENSE_KEY: string | undefined };
+import { initializeWebRuntimeEnv } from '../env';
 
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const publicKeySpkiB64 = publicKey
@@ -188,11 +174,18 @@ describe('resolveLicenseState', () => {
 
 describe('resolveConfiguredLicenseKey', () => {
   beforeEach(() => {
-    envMock.R_LICENSE_KEY = undefined;
+    vi.stubEnv('R_LICENSE_KEY', '');
+    initializeWebRuntimeEnv();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    initializeWebRuntimeEnv();
   });
 
   it('prefers R_LICENSE_KEY when set', () => {
-    envMock.R_LICENSE_KEY = `  ${issueKey(validPayload)}  `;
+    vi.stubEnv('R_LICENSE_KEY', `  ${issueKey(validPayload)}  `);
+    initializeWebRuntimeEnv();
 
     expect(getEnvLicenseKey()).toBe(issueKey(validPayload));
     expect(resolveConfiguredLicenseKey('RMLK1.db-key.signature')).toBe(

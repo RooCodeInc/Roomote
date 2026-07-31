@@ -106,6 +106,7 @@ type LicenseSummary = {
   seatLimit: number;
   seatsUsed: number;
   freeSeatLimit: number;
+  licenseId: string | null;
   licensee: string | null;
   expiresAt: Date | null;
   /** True when `R_LICENSE_KEY` supplies the active key (UI cannot override). */
@@ -139,6 +140,7 @@ export async function getAccessPolicySettingsCommand(
       seatLimit: licenseState.seatLimit,
       seatsUsed: activeUsers.length,
       freeSeatLimit: FREE_SEAT_LIMIT,
+      licenseId: 'licenseId' in licenseState ? licenseState.licenseId : null,
       licensee: 'licensee' in licenseState ? licenseState.licensee : null,
       expiresAt: 'expiresAt' in licenseState ? licenseState.expiresAt : null,
       fromEnv: getEnvLicenseKey() != null,
@@ -193,7 +195,7 @@ export async function setLicenseKeyCommand(
 
     if (state.status === 'expired') {
       throw new Error(
-        'That license key has expired. Contact Roomote for a renewal.',
+        'That license key has expired. Refresh it in Roomote Cloud or contact Roomote for help.',
       );
     }
   }

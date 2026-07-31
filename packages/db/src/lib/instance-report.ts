@@ -855,3 +855,15 @@ export async function collectInstanceReportStats(
     },
   };
 }
+
+/** Minimal licensed-usage payload sent even when anonymous analytics is off. */
+export async function collectLicensedUserCount(): Promise<{
+  users: { total: number };
+}> {
+  const [userTotals] = await db
+    .select({ total: count() })
+    .from(users)
+    .where(isNull(users.deletedAt));
+
+  return { users: { total: userTotals?.total ?? 0 } };
+}

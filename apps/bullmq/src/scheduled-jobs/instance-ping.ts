@@ -1,5 +1,7 @@
 import {
   collectInstanceReportStats,
+  collectLicensedUserCount,
+  getDeploymentLicenseState,
   recordLatestKnownVersion,
 } from '@roomote/db/server';
 import {
@@ -16,7 +18,8 @@ const LOG_PREFIX = '[instancePing]';
  * 1. Version check against the Ping service (mandatory; carries only the
  *    anonymous instance id + running version). The result is stored for the
  *    in-app "update available" notice.
- * 2. Anonymous instance stats report (covered by the admin opt-out).
+ * 2. Instance stats report. Anonymous stats honor the admin opt-out; a valid
+ *    paid license reports only its current user count when analytics is off.
  *
  * Sends nothing at all in environments where telemetry is not allowed
  * (non-production / no RELEASE_VERSION, unless force-enabled with an explicit
@@ -38,14 +41,21 @@ export async function instancePingJob(): Promise<void> {
     );
   }
 
-  if (!(await isAnonymousAnalyticsEnabled())) {
+  const [analyticsEnabled, licenseState] = await Promise.all([
+    isAnonymousAnalyticsEnabled(),
+    getDeploymentLicenseState(),
+  ]);
+
+  if (!analyticsEnabled && licenseState.status !== 'valid') {
     console.log(
       `${LOG_PREFIX} instance report skipped: anonymous analytics disabled`,
     );
     return;
   }
 
-  const stats = await collectInstanceReportStats();
+  const stats = analyticsEnabled
+    ? await collectInstanceReportStats()
+    : await collectLicensedUserCount();
   const sent = await sendInstanceReport(stats);
   console.log(`${LOG_PREFIX} instance report ${sent ? 'sent' : 'not sent'}`);
 
