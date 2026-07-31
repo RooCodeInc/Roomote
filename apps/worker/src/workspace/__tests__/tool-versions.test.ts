@@ -296,7 +296,7 @@ describe('WorkspaceManager tool versions', () => {
       });
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "rm -rf -- 'acme/backend' && git clone 'https://github.com/acme/backend.git' 'acme/backend'",
+        run: "rm -rf -- 'acme/backend' && git clone --filter=blob:none 'https://github.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -320,7 +320,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "rm -rf -- 'acme/backend' && git clone 'https://gitlab.com/acme/backend.git' 'acme/backend'",
+        run: "rm -rf -- 'acme/backend' && git clone --filter=blob:none 'https://gitlab.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -369,7 +369,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "rm -rf -- 'acme/backend' && git clone 'https://git.example.com/acme/backend.git' 'acme/backend'",
+        run: "rm -rf -- 'acme/backend' && git clone --filter=blob:none 'https://git.example.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -416,7 +416,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "rm -rf -- 'acme/Platform/backend' && git clone 'https://dev.azure.com/acme/Platform/_git/backend' 'acme/Platform/backend'",
+        run: "rm -rf -- 'acme/Platform/backend' && git clone --filter=blob:none 'https://dev.azure.com/acme/Platform/_git/backend' 'acme/Platform/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
