@@ -36,6 +36,8 @@ const sendPromptInputSchema = z
      * follow-ups (Slack, Teams, Telegram), which always steer.
      */
     autoSteerWhenQueued: z.boolean().optional(),
+    /** Keep this prompt queued until the current turn finishes. */
+    queueOnly: z.boolean().optional(),
     /**
      * Hide this prompt from the user-facing transcript. For platform-injected
      * machinery (e.g. spawned-task settle notifications) that the agent must
@@ -207,6 +209,7 @@ export const sendPrompt = publicProcedure
         images: input.images,
         ...(workflowPhase ? { workflowPhase } : {}),
         autoSteerWhenQueued: input.autoSteerWhenQueued,
+        queueOnly: input.queueOnly,
         source: input.source,
         userId,
         userName: input.userName,

@@ -2,6 +2,7 @@ import type { WebhookPullRequestSynchronize } from '../types';
 
 const {
   mockAcquireRedisLock,
+  mockEnqueueActivePrReviewFollowUp,
   mockEnqueueTask,
   mockGetGitHubAutomationTargets,
   mockReleaseLock,
@@ -11,6 +12,7 @@ const {
   mockUpdateWhere,
 } = vi.hoisted(() => ({
   mockAcquireRedisLock: vi.fn(),
+  mockEnqueueActivePrReviewFollowUp: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetGitHubAutomationTargets: vi.fn(),
   mockReleaseLock: vi.fn().mockResolvedValue(undefined),
@@ -26,6 +28,11 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  enqueueActivePrReviewFollowUp: (...args: unknown[]) =>
+    mockEnqueueActivePrReviewFollowUp(...args),
 }));
 
 vi.mock('@roomote/db/server', async () => {
@@ -90,6 +97,7 @@ describe('handlePrSynchronize', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAcquireRedisLock.mockResolvedValue(mockReleaseLock);
+    mockEnqueueActivePrReviewFollowUp.mockResolvedValue(undefined);
     mockUpdate.mockReturnValue({ set: mockUpdateSet });
     mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
     mockUpdateWhere.mockResolvedValue(undefined);
@@ -107,7 +115,18 @@ describe('handlePrSynchronize', () => {
   });
 
   it('keeps the existing non-terminal review and prevents a new run', async () => {
-    mockSelect.mockReturnValueOnce(selectResult([{ id: 100 }]));
+    mockSelect.mockReturnValueOnce(
+      selectResult([
+        {
+          id: 100,
+          taskId: 'task-100',
+          status: 'running',
+          startedAt: new Date(),
+          sandboxServerUrl: 'http://sandbox.test',
+          prSha: 'new-head',
+        },
+      ]),
+    );
 
     await expect(handlePrSynchronize(payload)).resolves.toEqual({
       status: 'ok',
@@ -115,6 +134,8 @@ describe('handlePrSynchronize', () => {
     });
 
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockEnqueueActivePrReviewFollowUp).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
 
@@ -125,6 +146,8 @@ describe('handlePrSynchronize', () => {
           id: 100,
           taskId: 'task-100',
           status: 'pending',
+          startedAt: null,
+          sandboxServerUrl: null,
           prSha: 'old-head',
         },
       ]),
@@ -136,6 +159,74 @@ describe('handlePrSynchronize', () => {
     });
 
     expect(mockUpdateSet).toHaveBeenCalledWith({ prSha: 'new-head' });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockEnqueueActivePrReviewFollowUp).not.toHaveBeenCalled();
+    expect(mockReleaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('debounces new commits onto the active OpenCode review', async () => {
+    mockSelect.mockReturnValueOnce(
+      selectResult([
+        {
+          id: 100,
+          taskId: 'task-100',
+          status: 'running',
+          startedAt: new Date(),
+          sandboxServerUrl: 'http://sandbox.test',
+          prSha: 'old-head',
+        },
+      ]),
+    );
+
+    await expect(handlePrSynchronize(payload)).resolves.toEqual({
+      status: 'ok',
+      message: 'Queued new PR changes on the active review.',
+    });
+
+    expect(mockEnqueueActivePrReviewFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 100,
+        taskId: 'task-100',
+        sandboxServerUrl: 'http://sandbox.test',
+        repository: 'owner/repo',
+        prNumber: 42,
+        previousHeadSha: 'old-head',
+        eventHeadSha: 'new-head',
+        fallback: expect.objectContaining({
+          task: expect.objectContaining({
+            type: 'github_pr_review_sync',
+            payload: expect.objectContaining({ headSha: 'new-head' }),
+          }),
+        }),
+      }),
+    );
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockReleaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('leaves the stored head unchanged when debounce scheduling fails', async () => {
+    mockSelect.mockReturnValueOnce(
+      selectResult([
+        {
+          id: 100,
+          taskId: 'task-100',
+          status: 'running',
+          startedAt: new Date(),
+          sandboxServerUrl: 'http://sandbox.test',
+          prSha: 'old-head',
+        },
+      ]),
+    );
+    mockEnqueueActivePrReviewFollowUp.mockRejectedValueOnce(
+      new Error('queue unavailable'),
+    );
+
+    await expect(handlePrSynchronize(payload)).rejects.toThrow(
+      'queue unavailable',
+    );
+
+    expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });

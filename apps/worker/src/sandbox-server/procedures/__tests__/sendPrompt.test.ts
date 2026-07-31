@@ -100,4 +100,20 @@ describe('sendPrompt procedure', () => {
       }),
     );
   });
+
+  it('forwards queueOnly to keep a follow-up behind the active turn', async () => {
+    const { caller, sendFollowUpPrompt } = createCaller();
+
+    await caller.commands.sendPrompt({
+      prompt: 'review the newest commits next',
+      queueOnly: true,
+    });
+
+    expect(sendFollowUpPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'review the newest commits next',
+        queueOnly: true,
+      }),
+    );
+  });
 });

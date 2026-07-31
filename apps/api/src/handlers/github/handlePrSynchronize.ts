@@ -23,6 +23,7 @@ import {
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { acquireRedisLock } from '@roomote/redis';
+import { enqueueActivePrReviewFollowUp } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
@@ -38,6 +39,8 @@ async function findActiveReviewRun(repository: string, prNumber: number) {
       id: taskRuns.id,
       taskId: taskRuns.taskId,
       status: taskRuns.status,
+      startedAt: taskRuns.startedAt,
+      sandboxServerUrl: taskRuns.sandboxServerUrl,
       prSha: taskPullRequests.prSha,
     })
     .from(tasks)
@@ -143,6 +146,7 @@ export async function handlePrSynchronize({
 
   const target = targets[0];
   let skippedCompletedHead = false;
+  let queuedActiveReviewFollowUp = false;
 
   if (!target) {
     return { status: 'ok', message: 'No PR reviewer targets found.' };
@@ -167,10 +171,68 @@ export async function handlePrSynchronize({
       );
 
       if (activeReviewRun) {
-        if (
-          activeReviewRun.status === RunStatus.Pending &&
-          activeReviewRun.prSha !== pr.head.sha
-        ) {
+        if (activeReviewRun.prSha === pr.head.sha) {
+          console.log(
+            `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> skip_active_review_same_head (target: ${currentTarget.id})`,
+          );
+
+          return null;
+        }
+
+        if (activeReviewRun.startedAt && activeReviewRun.sandboxServerUrl) {
+          const relayPayload = await getReviewTaskRelayPayload({
+            repository: repository.full_name,
+            prNumber: pr.number,
+            branchName: pr.head.ref,
+            prBody: pr.body ?? null,
+            reviewerSettings: currentTarget.settings,
+          });
+
+          await enqueueActivePrReviewFollowUp({
+            runId: activeReviewRun.id,
+            taskId: activeReviewRun.taskId,
+            sandboxServerUrl: activeReviewRun.sandboxServerUrl,
+            repository: repository.full_name,
+            prNumber: pr.number,
+            previousHeadSha: activeReviewRun.prSha,
+            eventHeadSha: pr.head.sha,
+            fallback: {
+              task: {
+                type: TaskPayloadKind.GithubPrReviewSync,
+                ...getBackgroundGithubTaskProperties(currentTarget.properties),
+                payload: {
+                  repo: repository.full_name,
+                  prNumber: pr.number,
+                  prTitle: pr.title,
+                  prUrl: pr.html_url,
+                  headSha: pr.head.sha,
+                  branchName: pr.head.ref,
+                  ...relayPayload,
+                },
+              },
+              initiatorActor: {
+                externalId: String(sender.id),
+                displayName: sender.login,
+              },
+              prLinkage: {
+                provider: 'github',
+                host:
+                  currentTarget.repo.host ??
+                  toHostFromUrl(pr.html_url) ??
+                  'github.com',
+                repositoryId: currentTarget.repo.id,
+                repository: repository.full_name,
+                prNumber: pr.number,
+                prUrl: pr.html_url,
+                prTitle: pr.title,
+                prSha: pr.head.sha,
+                prBaseRef: pr.base?.ref ?? null,
+                prBaseSha: pr.base?.sha ?? null,
+              },
+            },
+          });
+          queuedActiveReviewFollowUp = true;
+        } else {
           await db
             .update(taskPullRequests)
             .set({ prSha: pr.head.sha })
@@ -178,7 +240,11 @@ export async function handlePrSynchronize({
         }
 
         console.log(
-          `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> skip_active_review (target: ${currentTarget.id})`,
+          `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> ${
+            activeReviewRun.startedAt && activeReviewRun.sandboxServerUrl
+              ? 'queue_active_review_follow_up'
+              : 'update_pending_review_head'
+          } (target: ${currentTarget.id})`,
         );
 
         return null;
@@ -288,9 +354,11 @@ export async function handlePrSynchronize({
   if (ids.length === 0) {
     return {
       status: 'ok',
-      message: skippedCompletedHead
-        ? 'PR head SHA already matches the latest reviewed SHA.'
-        : 'A PR review is already active.',
+      message: queuedActiveReviewFollowUp
+        ? 'Queued new PR changes on the active review.'
+        : skippedCompletedHead
+          ? 'PR head SHA already matches the latest reviewed SHA.'
+          : 'A PR review is already active.',
     };
   }
 

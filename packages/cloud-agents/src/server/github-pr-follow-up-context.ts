@@ -95,3 +95,41 @@ ${buildUntrustedContentPolicy()}
 
 ${buildGitHubMessageInstructions()}`;
 }
+
+export function buildGitHubPrSynchronizeFollowUpMessage({
+  repository,
+  prNumber,
+  previousHeadSha,
+  eventHeadSha,
+}: {
+  repository: string;
+  prNumber: number;
+  previousHeadSha?: string | null;
+  eventHeadSha: string;
+}): string {
+  const requestedFollowUp =
+    'New commits were pushed while this pull request review was active. Re-review the live pull request head before finalizing the current review.';
+
+  return `<github-pr-follow-up>
+GitHub reported new commits while this Roomote PR review task was already active. Keep this work in the current task and OpenCode session; do not create another task, executor, sandbox, branch, or pull request.
+
+${buildGitHubRequestedFollowUpBlock(requestedFollowUp)}
+
+Execution rules:
+- Treat this as an update to the current review, not a separate user request.
+- Fetch the live pull request head again before finalizing; the live GitHub head is authoritative if it differs from the webhook SHA.
+- Review every newly introduced change that was not covered by the earlier review pass, and reconcile the existing summary and findings against the final live head.
+- Do not conclude the review until the newly pushed changes have been included.
+
+${buildGitHubTaskContextBlock({
+  repository,
+  pull_request_number: prNumber,
+  previous_review_head_sha: previousHeadSha,
+  synchronize_event_head_sha: eventHeadSha,
+})}
+</github-pr-follow-up>
+
+${buildUntrustedContentPolicy()}
+
+${buildGitHubMessageInstructions()}`;
+}
