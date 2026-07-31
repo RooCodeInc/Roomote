@@ -2,6 +2,22 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.27.1 (2026-07-31)
+
+This release adds configurable Review Code guidance and current Qwen model recommendations while keeping Coolify task networking reliable.
+
+### Highlights
+
+- Guide Review Code automations with team-specific instructions across initial and follow-up reviews.
+- Choose recommended Qwen3.7 Max and Qwen3.7 Plus models from supported providers.
+- Keep Coolify task creation and live previews connected to trusted services. Thanks to @tomny-dev for contributing this fix.
+
+### Patch changes
+
+- Keep Coolify task creation and live previews working by connecting trusted services to the worker discovery network. Thanks to @tomny-dev for contributing this fix.
+- Recommend Qwen3.7 Max and Qwen3.7 Plus when connected model providers support them.
+- Let teams add custom instructions to Review Code automations so initial and follow-up reviews follow their preferred guidance.
+
 ## 0.27.0 (2026-07-31)
 
 This release expands Azure, ChatGPT, GitHub, and monday.com capabilities while improving task reliability, privacy, setup, and Coolify deployments.
