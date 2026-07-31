@@ -14,6 +14,12 @@ const AUTOMATION_CLOSEOUT_REMINDER = [
   'what the automation asked you to investigate and the concrete outcome (PR link, no-op or deferred reason, or blocker).',
   'Do not start new work first.',
 ].join(' ');
+const VISUAL_PROOF_SHARE_REMINDER = [
+  'Visual proof was uploaded but has not been attached to the originating thread.',
+  'Consider sharing the useful screenshots with send_chat_reply via imageArtifactIds',
+  'so the user can see the proof without opening the task UI.',
+  'This is optional: if sharing would be redundant or unhelpful, you may finish without it.',
+].join(' ');
 const HOOK_NAME = 'slack-stop';
 const HOOK_DEBUG_ENV = 'ROOMOTE_SLACK_HOOK_DEBUG';
 
@@ -354,6 +360,15 @@ function getTerminalCurrentTurnFailureReason(state) {
   return 'current_turn_missing_terminal_reply';
 }
 
+function hasPendingVisualProofShareReminder(state) {
+  return (
+    state &&
+    state.visualProofShareReminderPending === true &&
+    Array.isArray(state.unsharedVisualProofArtifactIds) &&
+    state.unsharedVisualProofArtifactIds.some((artifactId) => trimString(artifactId))
+  );
+}
+
 (async () => {
   const stateFilePath = process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE;
   if (!stateFilePath) {
@@ -424,6 +439,23 @@ function getTerminalCurrentTurnFailureReason(state) {
       ),
     });
     process.stdout.write(JSON.stringify({ decision: 'block', reason: REMINDER }));
+    process.exit(0);
+  }
+
+  if (hasPendingVisualProofShareReminder(state)) {
+    state = {
+      ...state,
+      visualProofShareReminderPending: false,
+    };
+    writeState(stateFilePath, state);
+    logBlock({
+      reason: 'unshared_visual_proof_reminder',
+      stateFilePath,
+      unsharedVisualProofCount: state.unsharedVisualProofArtifactIds.length,
+    });
+    process.stdout.write(
+      JSON.stringify({ decision: 'block', reason: VISUAL_PROOF_SHARE_REMINDER }),
+    );
     process.exit(0);
   }
 

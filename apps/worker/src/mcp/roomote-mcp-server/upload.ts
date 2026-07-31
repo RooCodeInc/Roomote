@@ -5,7 +5,11 @@ import {
   prepareLocalArtifactUpload,
   uploadPreparedArtifact,
 } from './local-file-upload.js';
-import { replyToChatWithVisualProof } from './chat-proof-auto-post.js';
+import {
+  isVisualProofAutoPostEnabled,
+  replyToChatWithVisualProof,
+} from './chat-proof-auto-post.js';
+import { recordUnsharedVisualProofArtifact } from './chat-reply-satisfaction.js';
 import { errorResult, successResult, catchError } from './tool-result.js';
 import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
 
@@ -51,6 +55,14 @@ export async function handleUpload(
             logContext: 'manage_artifacts',
           })
         : undefined;
+
+    if (
+      result.artifactType === 'visual-proof' &&
+      isImageArtifact &&
+      !isVisualProofAutoPostEnabled()
+    ) {
+      recordUnsharedVisualProofArtifact({ artifactId: result.artifactId });
+    }
 
     // Delete the source file after successful upload if requested
     if (input.deleteAfterUpload) {

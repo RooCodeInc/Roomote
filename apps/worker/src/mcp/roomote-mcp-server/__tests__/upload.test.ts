@@ -1,4 +1,4 @@
-import { writeFile, mkdir, rm } from 'node:fs/promises';
+import { writeFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -21,6 +21,8 @@ describe('handleUpload', () => {
   const originalCommunicationChannelId =
     process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID;
   const originalSlackProofAutoPost = process.env.ROOMOTE_SLACK_PROOF_AUTO_POST;
+  const originalSlackReplySatisfactionStateFile =
+    process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE;
 
   const config: ArtifactConfig = {
     token: 'test-token',
@@ -38,6 +40,7 @@ describe('handleUpload', () => {
     delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
     delete process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID;
     delete process.env.ROOMOTE_SLACK_PROOF_AUTO_POST;
+    delete process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE;
     resetPostedProofThreadsForTest();
   });
 
@@ -70,6 +73,12 @@ describe('handleUpload', () => {
       delete process.env.ROOMOTE_SLACK_PROOF_AUTO_POST;
     } else {
       process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = originalSlackProofAutoPost;
+    }
+    if (originalSlackReplySatisfactionStateFile === undefined) {
+      delete process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE;
+    } else {
+      process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE =
+        originalSlackReplySatisfactionStateFile;
     }
   });
 
@@ -390,6 +399,8 @@ describe('handleUpload', () => {
     await writeFile(join(testDir, 'proof.png'), Buffer.from([0x89, 0x50]));
     process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
     process.env.ROOMOTE_SLACK_THREAD_TS = '111.222';
+    const stateFilePath = join(testDir, 'reply-state.json');
+    process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE = stateFilePath;
 
     const fetchMock = vi
       .fn()
@@ -421,6 +432,10 @@ describe('handleUpload', () => {
     const parsed = JSON.parse(result.content[0]!.text);
     expect(parsed.success).toBe(true);
     expect(parsed.slackAutoPosted).toBe(false);
+    expect(JSON.parse(await readFile(stateFilePath, 'utf8'))).toEqual({
+      unsharedVisualProofArtifactIds: ['art-proof'],
+      visualProofShareReminderPending: true,
+    });
   });
 
   it('does not auto-post visual-proof uploads twice in the same Slack thread', async () => {
@@ -428,6 +443,8 @@ describe('handleUpload', () => {
     process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
     process.env.ROOMOTE_SLACK_THREAD_TS = '111.222';
     process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
+    const stateFilePath = join(testDir, 'reply-state.json');
+    process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE = stateFilePath;
 
     const fetchMock = vi
       .fn()
@@ -501,6 +518,7 @@ describe('handleUpload', () => {
     expect(secondParsed.success).toBe(true);
     expect(secondParsed.artifactId).toBe('art-proof-2');
     expect(secondParsed.slackAutoPosted).toBe(false);
+    await expect(readFile(stateFilePath, 'utf8')).rejects.toThrow();
   });
 
   it('allows visual-proof auto-posts in a different Slack thread', async () => {
