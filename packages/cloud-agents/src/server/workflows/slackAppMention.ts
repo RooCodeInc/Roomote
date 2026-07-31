@@ -24,6 +24,7 @@ export function buildSlackMessageInstructions({
 } = {}): string {
   const slackProofDeliveryInstructions = `
     <rule>Visual-proof uploads are not posted to Slack automatically. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
+    <rule>When a Slack-visible reply mentions or relies on a successful proof capture, attach that proof's screenshot artifact IDs to the same reply via \`imageArtifactIds\`. Do not narrate captured proof in one message and defer sharing the images to a later one.</rule>
     <rule>When other task-generated images were uploaded earlier in the same run and still need to be shown in the thread, pass those artifact IDs to \`send_chat_reply\` via \`imageArtifactIds\`.</rule>`;
 
   return `
@@ -172,6 +173,7 @@ export function buildChatProviderMessageInstructions(
       : '';
   const proofDeliveryInstructions = `
     <rule>Visual-proof uploads are not posted to ${label} automatically. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
+    <rule>When a ${label}-visible reply mentions or relies on a successful proof capture, attach that proof's screenshot artifact IDs to the same reply via \`imageArtifactIds\`. Do not narrate captured proof in one message and defer sharing the images to a later one.</rule>
     <rule>When other task-generated images were uploaded earlier in the same run and still need to be shown in the thread, pass those artifact IDs to \`send_chat_reply\` via \`imageArtifactIds\`.</rule>`;
 
   return `

@@ -238,6 +238,9 @@ describe('slackAppMention', () => {
       'Visual-proof uploads are not posted to Slack automatically. When proof needs to be visible in the originating thread, share it with `send_chat_reply`: pass image artifact IDs via `imageArtifactIds`, or include artifact `viewUrl`/`rawUrl` links in the reply text for non-images.',
     );
     expect(result.harnessInstructions).toContain(
+      "When a Slack-visible reply mentions or relies on a successful proof capture, attach that proof's screenshot artifact IDs to the same reply via `imageArtifactIds`. Do not narrate captured proof in one message and defer sharing the images to a later one.",
+    );
+    expect(result.harnessInstructions).toContain(
       'When other task-generated images were uploaded earlier in the same run and still need to be shown in the thread, pass those artifact IDs to `send_chat_reply` via `imageArtifactIds`.',
     );
     expect(result.harnessInstructions).toContain(
@@ -662,6 +665,9 @@ describe('buildChatProviderMessageInstructions', () => {
         `Visual-proof uploads are not posted to ${label} automatically.`,
       );
       expect(instructions).toContain('imageArtifactIds');
+      expect(instructions).toContain(
+        `When a ${label}-visible reply mentions or relies on a successful proof capture, attach that proof's screenshot artifact IDs to the same reply via \`imageArtifactIds\`. Do not narrate captured proof in one message and defer sharing the images to a later one.`,
+      );
       expect(instructions).toContain(
         'pass those artifact IDs to `send_chat_reply` via `imageArtifactIds`',
       );
