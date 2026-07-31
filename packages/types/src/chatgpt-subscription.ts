@@ -44,6 +44,11 @@ const CHATGPT_FAST_MODE_MODEL_IDS = new Set([
   'gpt-5.6-luna',
 ]);
 
+// Codex calls this user-facing mode "fast", but its canonical Responses API
+// service tier is `priority`. OpenCode validates model provider options before
+// sending the request and rejects the legacy `fast` alias.
+const CHATGPT_FAST_MODE_SERVICE_TIER = 'priority';
+
 /**
  * Adds ChatGPT fast mode to supported OpenAI models while preserving any
  * existing per-model options such as reasoning effort.
@@ -79,7 +84,10 @@ export function mergeOpenCodeChatGptFastModeOptions(
           ...models,
           [openCodeModelId]: {
             ...model,
-            options: { ...options, serviceTier: 'fast' },
+            options: {
+              ...options,
+              serviceTier: CHATGPT_FAST_MODE_SERVICE_TIER,
+            },
           },
         },
       },

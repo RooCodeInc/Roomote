@@ -413,10 +413,10 @@ describe('generateOpenCodeConfig provider support', () => {
 
     expect(config.provider.openai?.models?.['gpt-5.6-terra']?.options).toEqual({
       reasoningEffort: 'high',
-      serviceTier: 'fast',
+      serviceTier: 'priority',
     });
     expect(config.provider.openai?.models?.['gpt-5.6-luna']?.options).toEqual({
-      serviceTier: 'fast',
+      serviceTier: 'priority',
     });
     expect(runtimeEnv).not.toHaveProperty('R_CHATGPT_FAST_MODE');
   });
