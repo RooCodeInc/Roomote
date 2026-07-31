@@ -637,28 +637,29 @@ function ChatGptSubscriptionRow({
             Reconnect
           </Button>
         ) : null}
-        <BasicTooltip content="Uses more ChatGPT credits for faster responses.">
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="text-sm text-muted-foreground">Fast mode</span>
-            <Switch
-              aria-label="ChatGPT fast mode"
-              checked={fastMode}
-              disabled={errored || isUpdatingFastMode}
-              onCheckedChange={(checked) =>
-                void onFastModeChange(checked === true)
-              }
-            />
-          </div>
-        </BasicTooltip>
-        <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0"
-          onClick={() => void onDisconnect()}
-          disabled={isDisconnecting}
-        >
-          {isDisconnecting ? <Spinner /> : 'Disconnect'}
-        </Button>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void onDisconnect()}
+            disabled={isDisconnecting}
+          >
+            {isDisconnecting ? <Spinner /> : 'Disconnect'}
+          </Button>
+          <BasicTooltip content="Uses more ChatGPT credits for faster responses.">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Fast mode</span>
+              <Switch
+                aria-label="ChatGPT fast mode"
+                checked={fastMode}
+                disabled={errored || isUpdatingFastMode}
+                onCheckedChange={(checked) =>
+                  void onFastModeChange(checked === true)
+                }
+              />
+            </div>
+          </BasicTooltip>
+        </div>
       </div>
     </div>
   );
