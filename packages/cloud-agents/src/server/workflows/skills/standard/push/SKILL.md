@@ -77,8 +77,9 @@ You are executing a command to push work to remote branches without creating a p
         <title>Push the branch for each repository</title>
         <description>Publish the resulting branch to the remote so the work is available for later pull request creation.</description>
         <actions>
-          <action>For each repository, always push with pre-push hooks skipped: `cd <REPO_DIR> && if git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null; then git push --no-verify; else git push -u origin HEAD --no-verify; fi`. Roomote sandboxes rely on CI and server-side checks for lint/typecheck/tests and for secret/policy gates that some repos attach to pre-push. Local pre-push hooks often need host package managers and fail with false "auth" or credential errors. Never treat a pre-push hook failure as missing Git credentials when `git push --no-verify` succeeds.</action>
-          <action>If push still fails after `--no-verify`, report the exact remote/auth error. Do not invent credential explanations.</action>
+          <action>Before pushing, review the outgoing diff for secrets. List what changed with `git diff --stat @{u}..HEAD`, then scan the patch content itself with `git diff @{u}..HEAD | grep -nEi '(api[_-]?key|secret|passwo?rd|BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-|ghp_|github_pat_|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})'` and read every hit in context. When the branch has no upstream yet, use `origin/<base-branch-for-this-repo>..HEAD` as the range. Do not limit the read to configuration files: a leaked token is just as likely to sit in source, a test fixture, or a captured log. If `gitleaks` is on PATH, also run `gitleaks git --log-opts='@{u}..HEAD'`; its absence does not excuse the manual review. Treat any real credential as a hard blocker: do not push, remove it from the commit before any retry, report it, and tell the user the credential must be rotated.</action>
+          <action>For each repository, always run `cd <REPO_DIR> && git push --no-verify -u origin HEAD`. Use `-u origin HEAD` unconditionally: a branch created with `git checkout -b <branch> origin/<base>` already has an upstream of `origin/<base>`, so a bare `git push` fatals on the branch-name mismatch. Pre-push hooks commonly re-run full lint/typecheck/test suites, and in Roomote sandboxes those frequently fail on host tooling differences rather than on real defects, which agents then misreport as missing Git credentials. Skipping pre-push also skips any local secret or policy scanner the repository attaches to that hook, and equivalent server-side coverage is not guaranteed, which is why the secret review above is mandatory rather than optional.</action>
+          <action>If the push still fails, classify the error before reporting it. A rejection that names a secret, credential, key, or policy violation is a real finding, not an environment problem: that covers `remote:` push-protection rejections such as GitHub `GH013` and any hook output naming a leaked credential. Stop, report it, strip the secret from the commit, and never retry those with `--no-verify`. Otherwise, `remote:` lines, HTTP 403, `Permission denied`, `Authentication failed`, or a credential prompt are remote or auth failures, while a non-zero exit printed by the repository's local hook manager (husky, lefthook, pre-commit, simple-git-hooks, or `.git/hooks/`) is a hook failure. Report the exact error text and never substitute a credentials story for a hook failure.</action>
           <action>Record the pushed repository and branch for final reporting.</action>
         </actions>
         <validation>Every targeted repository has a confirmed pushed branch or a clearly reported blocker.</validation>
@@ -121,9 +122,9 @@ You are executing a command to push work to remote branches without creating a p
 <exceptions>Use repository-specific conventions if they are stricter than the default pattern.</exceptions>
 </guideline>
 <guideline priority="high">
-<rule>Always push with `git push --no-verify` (or `git push -u origin HEAD --no-verify`) in Roomote sandboxes.</rule>
-<rationale>Pre-push hooks that re-run lint/typecheck/test suites or local secret/policy scanners belong to CI and server-side checks. Sandbox PATH and tooling differ from developer laptops, so those hooks create false delivery failures (including misreported "credential" blockers). Skipping pre-push also skips local gitleaks-style hooks; that is intentional: CI and branch protection must own those gates.</rationale>
-<exceptions>None for sandbox delivery. Still fix pre-commit hook failures that block the commit itself.</exceptions>
+<rule>Review the outgoing diff for secrets, then always push with `git push --no-verify` (or `git push --no-verify -u origin HEAD`) in Roomote sandboxes.</rule>
+<rationale>Pre-commit catches real local formatting problems cheaply. Pre-push hooks re-run full lint/typecheck/test suites against host tooling the sandbox does not have, so they create false delivery failures that get misreported as missing Git credentials. Skipping pre-push also skips any local secret or policy scanner the repository attaches to that hook, and equivalent server-side coverage is not guaranteed, so the agent owns the secret review rather than assuming CI does.</rationale>
+<exceptions>None for sandbox delivery unless repo-local `AGENTS.md` or the task explicitly requires pre-push hooks to run. Still fix pre-commit hook failures that block the commit itself.</exceptions>
 </guideline>
 </best_practices>
 
@@ -146,7 +147,7 @@ You are executing a command to push work to remote branches without creating a p
 <principle>Do not create a pull request when the user explicitly asked only for a branch push.</principle>
 <principle>Stop and report blockers rather than pretending the branch was pushed when it was not.</principle>
 </principles>
-<constraints>Use only non-interactive git commands, push with `--no-verify` so pre-push CI suites do not block delivery, and avoid destructive history rewriting unless the user explicitly asked for it.</constraints>
+<constraints>Use only non-interactive git commands, push with `--no-verify` so local pre-push hook suites do not block delivery, and avoid destructive history rewriting unless the user explicitly asked for it.</constraints>
 <boundaries>
 <rule>This workflow handles branch creation, optional commits, remote push, and push reporting.</rule>
 <rule>This workflow does not open pull requests automatically.</rule>
@@ -171,7 +172,7 @@ You are executing a command to push work to remote branches without creating a p
       </step>
       <step number="3">
         <description>Push both branches and report the follow-up pull request commands.</description>
-        <approach>Run `git push --no-verify` or `git push -u origin HEAD --no-verify` per repository and summarize the next command for each one.</approach>
+        <approach>Review each outgoing diff for secrets, run `git push --no-verify -u origin HEAD` per repository, and summarize the next command for each one.</approach>
         <expected_outcome>The user can immediately create pull requests later without losing the work.</expected_outcome>
       </step>
     </workflow>
@@ -195,9 +196,10 @@ You are executing a command to push work to remote branches without creating a p
 <problem>The branch cannot be pushed.</problem>
 <causes>
 <cause>Remote permissions, branch protection, or authentication prevent the push after `git push --no-verify` (primary path already skips local pre-push hooks).</cause>
+<cause>Server-side push protection rejected a real secret, which is a finding to report rather than a blocker to work around.</cause>
 <cause>An agent incorrectly ran a verifying push; re-run with `--no-verify` as required for sandboxes.</cause>
 <cause>Pre-commit hooks blocked the commit before a push was attempted.</cause>
 </causes>
-<recovery>Always push with `--no-verify` first. If a verifying push was used by mistake, re-run with `--no-verify`. If that still fails, surface the exact remote error and stop rather than claiming the push succeeded or inventing a credentials story.</recovery>
+<recovery>Always push with `--no-verify` first. If a verifying push was used by mistake, re-run with `--no-verify`. If that still fails, classify the failure by the source of the error text before reporting it, surface the exact remote error, and stop rather than claiming the push succeeded.</recovery>
 </scenario>
 </error_handling>

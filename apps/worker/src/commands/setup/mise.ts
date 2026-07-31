@@ -34,6 +34,15 @@ const DEFAULT_MISE_TOOLS = [
   },
 ] as const;
 
+/** Upper bound on the Corepack yarn download during serial worker setup. */
+const COREPACK_ENABLE_TIMEOUT_MS = 120_000;
+
+/**
+ * Upper bound on `yarn --version`. Once Corepack shims are active this is a
+ * Corepack entrypoint that can reach the network, so it gets a bound too.
+ */
+const YARN_PROBE_TIMEOUT_MS = 30_000;
+
 const DEFAULT_PYTHON_PACKAGES = [
   {
     packageName: 'openai',
@@ -136,20 +145,27 @@ async function ensureCorepackYarnShim(logger: StartupLogger): Promise<void> {
       'bash',
       [
         '-lc',
-        // Corepack ships with Node. `prepare … --activate` installs a concrete
-        // global yarn so husky works even without a packageManager field.
-        // mise reshim exposes the new node-bin shims (yarn/yarnpkg) through
-        // /opt/mise/shims. Fail the command if every reshim arm fails so we
-        // surface a real setup problem instead of a silent PATH miss.
+        // Corepack ships with Node and writes its shims next to the resolved
+        // corepack binary (`dirname $(which corepack)`), which in this image is
+        // inside the mise tree. Scope `enable` to yarn: the unscoped form also
+        // writes pnpm/pnpx there, which would shadow the mise-managed pnpm.
+        // `prepare … --activate` installs a concrete global yarn so husky works
+        // even without a packageManager field, and `mise reshim` republishes
+        // the node bin dir (yarn/yarnpkg) through the mise shim directory.
         [
-          'corepack enable',
+          'corepack enable yarn',
           'corepack prepare yarn@stable --activate',
-          '(mise reshim nodejs 2>/dev/null || mise reshim node 2>/dev/null || mise reshim 2>/dev/null)',
+          'mise reshim',
         ].join(' && '),
       ],
       {
         cwd: homedir(),
         stdin: 'ignore',
+        // `prepare` downloads yarn from the registry, and this runs inside the
+        // serial setup block that gates task start. Bound it so a throttled or
+        // unreachable registry degrades to the warning below instead of
+        // hanging the sandbox boot.
+        timeout: COREPACK_ENABLE_TIMEOUT_MS,
       },
     );
   } catch (error) {
@@ -173,10 +189,13 @@ async function ensureCorepackYarnShim(logger: StartupLogger): Promise<void> {
 async function isYarnExecutable(): Promise<boolean> {
   try {
     const result = await execa('yarn', ['--version'], {
+      cwd: homedir(),
       reject: false,
       stdin: 'ignore',
+      timeout: YARN_PROBE_TIMEOUT_MS,
     });
-    return (result.exitCode ?? 1) === 0;
+    // A missing binary surfaces as exitCode undefined (ENOENT), not 1.
+    return result.exitCode === 0;
   } catch {
     return false;
   }
