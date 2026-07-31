@@ -49,6 +49,7 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     taskModels: {
       providerSetup: { queryKey: () => ['taskModels', 'providerSetup'] },
+      get: { queryKey: () => ['taskModels', 'get'] },
       launchOptions: { queryKey: () => ['taskModels', 'launchOptions'] },
     },
     xaiSubscription: {

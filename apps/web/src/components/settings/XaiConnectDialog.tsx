@@ -116,6 +116,9 @@ export function XaiConnectDialog({
               queryKey: trpc.taskModels.providerSetup.queryKey(),
             }),
             queryClient.invalidateQueries({
+              queryKey: trpc.taskModels.get.queryKey(),
+            }),
+            queryClient.invalidateQueries({
               queryKey: trpc.taskModels.launchOptions.queryKey(),
             }),
             queryClient.invalidateQueries({

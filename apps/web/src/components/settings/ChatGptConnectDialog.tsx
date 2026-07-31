@@ -82,6 +82,9 @@ export function ChatGptConnectDialog({
             queryKey: trpc.taskModels.providerSetup.queryKey(),
           });
           await queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.get.queryKey(),
+          });
+          await queryClient.invalidateQueries({
             queryKey: trpc.taskModels.launchOptions.queryKey(),
           });
           await queryClient.invalidateQueries({
