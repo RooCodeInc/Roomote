@@ -103,11 +103,11 @@ describe('buildOpenCodeCliEnv', () => {
             'gpt-5.6-terra': {
               options: {
                 reasoningEffort: 'high',
-                serviceTier: 'fast',
+                serviceTier: 'priority',
               },
             },
             'gpt-5.6-luna': {
-              options: { serviceTier: 'fast' },
+              options: { serviceTier: 'priority' },
             },
           },
         },

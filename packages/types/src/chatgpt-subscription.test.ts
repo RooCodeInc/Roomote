@@ -19,10 +19,10 @@ describe('mergeOpenCodeChatGptFastModeOptions', () => {
       openai: {
         models: {
           'gpt-5.6-terra': {
-            options: { reasoningEffort: 'high', serviceTier: 'fast' },
+            options: { reasoningEffort: 'high', serviceTier: 'priority' },
           },
-          'gpt-5.6-sol': { options: { serviceTier: 'fast' } },
-          'gpt-5.6-luna': { options: { serviceTier: 'fast' } },
+          'gpt-5.6-sol': { options: { serviceTier: 'priority' } },
+          'gpt-5.6-luna': { options: { serviceTier: 'priority' } },
         },
       },
     });
