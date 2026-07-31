@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.27.0 (2026-07-31)
 
-This release expands Azure, ChatGPT, GitHub, and monday.com capabilities while improving task reliability, privacy, and setup.
+This release expands Azure, ChatGPT, GitHub, and monday.com capabilities while improving task reliability, privacy, setup, and Coolify deployments.
 
 ### Highlights
 
 - Run tasks with Azure Container Apps Sandboxes, or connect Azure OpenAI and Azure AI Foundry for model inference.
 - Use monday.com context in tasks and invoke Roomote on GitHub with the shorter `@Roomote` mention.
 - Enable Fast mode for ChatGPT subscriptions and manage optional Roomote Cloud analytics with new cookie consent controls.
-- Keep environment setup, Slack follow-ups, visual proof, task privacy, and pull request re-reviews working more reliably.
+- Keep Coolify Docker jobs, environment setup, Slack follow-ups, visual proof, task privacy, and pull request re-reviews working more reliably.
 
 ### Minor changes
 
@@ -25,6 +25,7 @@ This release expands Azure, ChatGPT, GitHub, and monday.com capabilities while i
 ### Patch changes
 
 - Validate Azure DevOps credentials before saving them, explain rejected credentials clearly, and restore Roomote's own-comment detection and approve or request-changes reviewer votes.
+- Restore BullMQ access to the restricted Docker proxy in Coolify deployments so Docker environment validation and lifecycle jobs work correctly. Thanks to @tomny-dev for contributing this fix.
 - Make Discord release announcements more concise and conversational.
 - Make environment setup follow repository guidance and automatically resume tasks when background setup finishes.
 - Improve weekly manager reports with readable number formatting and rankings limited to human users.
