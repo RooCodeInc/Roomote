@@ -141,6 +141,87 @@ export const ALIBABA_REGION_OPTIONS = [
   { value: 'china', label: 'China' },
 ] as const;
 
+export const ALIBABA_PROVIDER_REGION_CONFIG = {
+  alibaba: {
+    envVarName: 'ALIBABA_REGION',
+    default: 'global',
+    baseUrls: {
+      global: 'https://dashscope-intl.aliyuncs.com/compatible-mode',
+      china: 'https://dashscope.aliyuncs.com/compatible-mode',
+    },
+  },
+  'alibaba-coding-plan': {
+    envVarName: 'ALIBABA_CODING_PLAN_REGION',
+    default: 'global',
+    baseUrls: {
+      global: 'https://coding-intl.dashscope.aliyuncs.com',
+      china: 'https://coding.dashscope.aliyuncs.com',
+    },
+  },
+  'alibaba-token-plan': {
+    envVarName: 'ALIBABA_TOKEN_PLAN_REGION',
+    default: 'global',
+    baseUrls: {
+      global:
+        'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode',
+      china: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode',
+    },
+  },
+} as const;
+
+type AlibabaProviderId = keyof typeof ALIBABA_PROVIDER_REGION_CONFIG;
+
+export function mergeAlibabaOpenCodeProviderOptions(
+  config: Record<string, unknown>,
+  modelIds: readonly (string | undefined)[],
+  runtimeEnv: Partial<Record<string, string | undefined>>,
+): Record<string, unknown> {
+  const providerIds = new Set(
+    modelIds.flatMap((modelId) => {
+      const providerId = modelId?.split('/')[0] as
+        | AlibabaProviderId
+        | undefined;
+      return providerId && providerId in ALIBABA_PROVIDER_REGION_CONFIG
+        ? [providerId]
+        : [];
+    }),
+  );
+
+  let merged = config;
+  for (const providerId of providerIds) {
+    const regionConfig = ALIBABA_PROVIDER_REGION_CONFIG[providerId];
+    const region =
+      runtimeEnv[regionConfig.envVarName]?.trim() || regionConfig.default;
+    const baseURL = regionConfig.baseUrls[
+      region as keyof typeof regionConfig.baseUrls
+    ] as string | undefined;
+
+    if (!baseURL) {
+      continue;
+    }
+
+    const existingProvider =
+      typeof merged[providerId] === 'object' && merged[providerId] !== null
+        ? (merged[providerId] as Record<string, unknown>)
+        : {};
+    const existingOptions =
+      typeof existingProvider.options === 'object' &&
+      existingProvider.options !== null
+        ? (existingProvider.options as Record<string, unknown>)
+        : {};
+
+    merged = {
+      ...merged,
+      [providerId]: {
+        ...existingProvider,
+        options: { ...existingOptions, baseURL: `${baseURL}/v1` },
+      },
+    };
+  }
+
+  return merged;
+}
+
 export type SetupModelProviderDescriptor = {
   id: SetupModelProviderId;
   label: string;

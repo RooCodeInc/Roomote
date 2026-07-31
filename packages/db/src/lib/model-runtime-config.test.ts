@@ -583,6 +583,42 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
   });
 
+  it.each([
+    ['alibaba/qwen3.6-plus', 'DASHSCOPE_API_KEY', 'ALIBABA_REGION'],
+    [
+      'alibaba-coding-plan/qwen3.6-plus',
+      'ALIBABA_CODING_PLAN_API_KEY',
+      'ALIBABA_CODING_PLAN_REGION',
+    ],
+    [
+      'alibaba-token-plan/qwen3.6-plus',
+      'ALIBABA_TOKEN_PLAN_API_KEY',
+      'ALIBABA_TOKEN_PLAN_REGION',
+    ],
+  ] as const)(
+    'propagates the China region for direct %s control-plane calls',
+    async (model, apiKeyEnvVarName, regionEnvVarName) => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: { roomoteModel: model },
+      });
+
+      const env = await resolveEffectiveModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          [apiKeyEnvVarName]: 'alibaba-key',
+          [regionEnvVarName]: 'china',
+        },
+      });
+
+      expect(env).toMatchObject({
+        R_MODEL: model,
+        R_MODEL_ENV_KEYS: `${apiKeyEnvVarName},${regionEnvVarName}`,
+        [apiKeyEnvVarName]: 'alibaba-key',
+        [regionEnvVarName]: 'china',
+      });
+    },
+  );
+
   it('ignores disabled provider roles and forwards enabled provider credentials', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {

@@ -1,4 +1,7 @@
-import type { SetupModelProviderId } from './model-provider-config';
+import {
+  ALIBABA_PROVIDER_REGION_CONFIG,
+  type SetupModelProviderId,
+} from './model-provider-config';
 import {
   getOpenAiCompatibleProviderInstance,
   isOpenAiCompatibleProviderEnvVarName,
@@ -235,14 +238,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
-      region: {
-        envVarName: 'ALIBABA_REGION',
-        default: 'global',
-        baseUrls: {
-          global: 'https://dashscope-intl.aliyuncs.com/compatible-mode',
-          china: 'https://dashscope.aliyuncs.com/compatible-mode',
-        },
-      },
+      region: ALIBABA_PROVIDER_REGION_CONFIG.alibaba,
     },
     {
       id: 'alibaba-coding-plan',
@@ -251,14 +247,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
-      region: {
-        envVarName: 'ALIBABA_CODING_PLAN_REGION',
-        default: 'global',
-        baseUrls: {
-          global: 'https://coding-intl.dashscope.aliyuncs.com',
-          china: 'https://coding.dashscope.aliyuncs.com',
-        },
-      },
+      region: ALIBABA_PROVIDER_REGION_CONFIG['alibaba-coding-plan'],
     },
     {
       id: 'alibaba-token-plan',
@@ -267,16 +256,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
-      region: {
-        envVarName: 'ALIBABA_TOKEN_PLAN_REGION',
-        default: 'global',
-        baseUrls: {
-          global:
-            'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode',
-          china:
-            'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode',
-        },
-      },
+      region: ALIBABA_PROVIDER_REGION_CONFIG['alibaba-token-plan'],
     },
     {
       id: 'anthropic',
