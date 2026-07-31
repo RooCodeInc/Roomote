@@ -128,13 +128,13 @@ You are executing a command to create a pull request with the current changes.
       </step>
       <step number="4">
         <title>Commit any uncommitted work</title>
-        <description>Stage and commit pending local changes repository by repository, while preserving pre-commit safeguards.</description>
+        <description>Stage and commit pending local changes repository by repository, while preserving hook-based safeguards.</description>
         <actions>
           <action>For repositories with uncommitted changes, run `cd <REPO_DIR> && git add -A && git diff --cached --name-status`.</action>
           <action>After `git add -A`, explicitly compare `git diff --cached --name-status` against the intended deliverables for this task. If any staged path is unexpected, unstage it with `git restore --staged <path>` before committing. Treat generated or untracked files as excluded by default unless they are clearly part of the requested delivery.</action>
           <action>After the staged-path review is complete, run `cd <REPO_DIR> && git commit -m '<commit-message-for-this-repo>'`.</action>
           <action>If a repository has only unpushed commits and no working tree changes, skip the commit step for that repository.</action>
-          <action>If pre-commit hooks fail, fix the underlying formatting or validation issue. Do not use `git commit --no-verify` unless no safer option remains.</action>
+          <action>If hooks fail, fix the underlying issue instead of bypassing validation with `--no-verify` unless no other safe option remains.</action>
         </actions>
         <validation>Every repository is either clean with a new commit or intentionally skipped because it already had the necessary commits.</validation>
       </step>
@@ -142,9 +142,7 @@ You are executing a command to create a pull request with the current changes.
         <title>Push the target branch</title>
         <description>Push each repository's current HEAD to the remote after the delivery branch and commit state are correct.</description>
         <actions>
-          <action>Before pushing, review the outgoing diff for secrets. List what changed with `git diff --stat origin/<base-branch-for-this-repo>..HEAD`, then scan the patch content itself with `git diff origin/<base-branch-for-this-repo>..HEAD | grep -nEi '(api[_-]?key|secret|passwo?rd|BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-|ghp_|github_pat_|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})'` and read every hit in context. Do not limit the read to configuration files: a leaked token is just as likely to sit in source, a test fixture, or a captured log. If `gitleaks` is on PATH, also run `gitleaks git --log-opts='origin/<base-branch-for-this-repo>..HEAD'`; its absence does not excuse the manual review. Treat any real credential as a hard blocker: do not push, remove it from the commit before any retry, report it, and tell the user the credential must be rotated.</action>
-          <action>For each repository, always run `cd <REPO_DIR> && git push --no-verify origin HEAD`. Pre-push hooks commonly re-run full lint/typecheck/test suites, and in Roomote sandboxes those frequently fail on host tooling differences rather than on real defects, which agents then misreport as missing Git credentials. Skipping pre-push also skips any local secret or policy scanner the repository attaches to that hook, and equivalent server-side coverage is not guaranteed, which is why the secret review above is mandatory rather than optional.</action>
-          <action>If the push still fails, classify the error before reporting it. A rejection that names a secret, credential, key, or policy violation is a real finding, not an environment problem: that covers `remote:` push-protection rejections such as GitHub `GH013` and any hook output naming a leaked credential. Stop, report it, strip the secret from the commit, and never retry those with `--no-verify`. Otherwise, `remote:` lines, HTTP 403, `Permission denied`, `Authentication failed`, or a credential prompt are remote or auth failures, while a non-zero exit printed by the repository's local hook manager (husky, lefthook, pre-commit, simple-git-hooks, or `.git/hooks/`) is a hook failure. Report the exact error text and never substitute a credentials story for a hook failure.</action>
+          <action>For each repository, run `cd <REPO_DIR> && git push origin HEAD`.</action>
           <action>Record the final branch name and confirm the remote push succeeded before proceeding.</action>
         </actions>
         <validation>Every repository that is being prepared for a pull request has a pushed remote branch.</validation>
@@ -214,9 +212,9 @@ You are executing a command to create a pull request with the current changes.
 <exceptions>Skip the section only when there is truly only one PR for the task or no sibling PR URL can be recovered honestly.</exceptions>
 </guideline>
 <guideline priority="high">
-<rule>Fix pre-commit hook failures; review the outgoing diff for secrets, then always push with `--no-verify` in Roomote sandboxes.</rule>
-<rationale>Pre-commit catches real local formatting problems cheaply. Pre-push hooks re-run full lint/typecheck/test suites against host tooling the sandbox does not have, so they create false delivery failures that get misreported as missing Git credentials. Skipping pre-push also skips any local secret or policy scanner the repository attaches to that hook, and equivalent server-side coverage is not guaranteed, so the agent owns the secret review rather than assuming CI does.</rationale>
-<exceptions>None for sandbox pre-push unless repo-local `AGENTS.md` or the task explicitly requires pre-push hooks to run. Still fix pre-commit failures that block the commit itself.</exceptions>
+<rule>Preserve commit and push validation hooks unless there is no safe alternative.</rule>
+<rationale>Hook failures often indicate real formatting, linting, or typing problems that should be fixed before review.</rationale>
+<exceptions>Only bypass as a last resort after diagnosing why the hook cannot be satisfied.</exceptions>
 </guideline>
 <guideline priority="medium">
 <rule>Use descriptive branch names, conventional commit messages, and concise pull request copy.</rule>
@@ -297,11 +295,9 @@ You are executing a command to create a pull request with the current changes.
 <scenario name="hook_or_push_failure">
 <problem>A commit or push command fails.</problem>
 <causes>
-<cause>Pre-commit hooks failed on the commit.</cause>
-<cause>An agent incorrectly ran a verifying push (primary path always uses `git push --no-verify` so pre-push should not run).</cause>
-<cause>The secret review found a real credential in the outgoing diff, so the push was correctly withheld.</cause>
-<cause>Remote permissions, branch protection, or authentication reject the push after `--no-verify`.</cause>
+<cause>Pre-commit or pre-push checks failed.</cause>
+<cause>The branch conflicts with remote permissions or branch protection.</cause>
 </causes>
-<recovery>Fix pre-commit failures. Always push with `--no-verify`; if a verifying push was used by mistake, re-run with `--no-verify`. If the remote still rejects the push, classify the rejection first: a secret or policy finding is reported and fixed, never retried around, while a genuine auth or permission error is reported verbatim instead of being turned into a credentials story.</recovery>
+<recovery>Diagnose and fix the validation issue when possible; otherwise report the exact blocker instead of forcing completion.</recovery>
 </scenario>
 </error_handling>

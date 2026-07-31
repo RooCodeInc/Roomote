@@ -69,7 +69,7 @@ You are executing a command to push work to remote branches without creating a p
           <action>After `git add -A`, explicitly compare `git diff --cached --name-status` against the intended deliverables for this task. If any staged path is unexpected, unstage it with `git restore --staged <path>` before committing. Treat generated or untracked files as excluded by default unless they are clearly part of the requested delivery.</action>
           <action>After the staged-path review is complete, for each repository with working tree changes run `cd <REPO_DIR> && git commit -m '<commit-message-for-this-repo>'`.</action>
           <action>If the repository already has unpushed commits and no working tree changes, skip only the commit while still ensuring the branch is correct.</action>
-          <action>If pre-commit hooks fail, fix the underlying formatting or validation issue. Do not use `git commit --no-verify` unless no safer option remains.</action>
+          <action>If hooks fail, fix the validation issue rather than bypassing `--no-verify` unless no safer option remains.</action>
         </actions>
         <validation>Each repository is on a delivery branch created from the provided base/default branch, or is explicitly identified as already on an existing delivery branch for this task.</validation>
       </step>
@@ -77,9 +77,7 @@ You are executing a command to push work to remote branches without creating a p
         <title>Push the branch for each repository</title>
         <description>Publish the resulting branch to the remote so the work is available for later pull request creation.</description>
         <actions>
-          <action>Before pushing, review the outgoing diff for secrets. List what changed with `git diff --stat @{u}..HEAD`, then scan the patch content itself with `git diff @{u}..HEAD | grep -nEi '(api[_-]?key|secret|passwo?rd|BEGIN [A-Z ]*PRIVATE KEY|xox[baprs]-|ghp_|github_pat_|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})'` and read every hit in context. When the branch has no upstream yet, use `origin/<base-branch-for-this-repo>..HEAD` as the range. Do not limit the read to configuration files: a leaked token is just as likely to sit in source, a test fixture, or a captured log. If `gitleaks` is on PATH, also run `gitleaks git --log-opts='@{u}..HEAD'`; its absence does not excuse the manual review. Treat any real credential as a hard blocker: do not push, remove it from the commit before any retry, report it, and tell the user the credential must be rotated.</action>
-          <action>For each repository, always run `cd <REPO_DIR> && git push --no-verify -u origin HEAD`. Use `-u origin HEAD` unconditionally: a branch created with `git checkout -b <branch> origin/<base>` already has an upstream of `origin/<base>`, so a bare `git push` fatals on the branch-name mismatch. Pre-push hooks commonly re-run full lint/typecheck/test suites, and in Roomote sandboxes those frequently fail on host tooling differences rather than on real defects, which agents then misreport as missing Git credentials. Skipping pre-push also skips any local secret or policy scanner the repository attaches to that hook, and equivalent server-side coverage is not guaranteed, which is why the secret review above is mandatory rather than optional.</action>
-          <action>If the push still fails, classify the error before reporting it. A rejection that names a secret, credential, key, or policy violation is a real finding, not an environment problem: that covers `remote:` push-protection rejections such as GitHub `GH013` and any hook output naming a leaked credential. Stop, report it, strip the secret from the commit, and never retry those with `--no-verify`. Otherwise, `remote:` lines, HTTP 403, `Permission denied`, `Authentication failed`, or a credential prompt are remote or auth failures, while a non-zero exit printed by the repository's local hook manager (husky, lefthook, pre-commit, simple-git-hooks, or `.git/hooks/`) is a hook failure. Report the exact error text and never substitute a credentials story for a hook failure.</action>
+          <action>For each repository, run `cd <REPO_DIR> && if git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null; then git push; else git push -u origin HEAD; fi`.</action>
           <action>Record the pushed repository and branch for final reporting.</action>
         </actions>
         <validation>Every targeted repository has a confirmed pushed branch or a clearly reported blocker.</validation>
@@ -121,10 +119,10 @@ You are executing a command to push work to remote branches without creating a p
 <rationale>Pushed work should remain understandable when reviewed later outside the current task context.</rationale>
 <exceptions>Use repository-specific conventions if they are stricter than the default pattern.</exceptions>
 </guideline>
-<guideline priority="high">
-<rule>Review the outgoing diff for secrets, then always push with `git push --no-verify` (or `git push --no-verify -u origin HEAD`) in Roomote sandboxes.</rule>
-<rationale>Pre-commit catches real local formatting problems cheaply. Pre-push hooks re-run full lint/typecheck/test suites against host tooling the sandbox does not have, so they create false delivery failures that get misreported as missing Git credentials. Skipping pre-push also skips any local secret or policy scanner the repository attaches to that hook, and equivalent server-side coverage is not guaranteed, so the agent owns the secret review rather than assuming CI does.</rationale>
-<exceptions>None for sandbox delivery unless repo-local `AGENTS.md` or the task explicitly requires pre-push hooks to run. Still fix pre-commit hook failures that block the commit itself.</exceptions>
+<guideline priority="medium">
+<rule>Respect validation hooks and fix their failures instead of bypassing them casually.</rule>
+<rationale>These flows are meant to keep repository state clean, not just to move bytes to a remote.</rationale>
+<exceptions>Only bypass as a last resort after the root cause has been investigated and documented.</exceptions>
 </guideline>
 </best_practices>
 
@@ -147,7 +145,7 @@ You are executing a command to push work to remote branches without creating a p
 <principle>Do not create a pull request when the user explicitly asked only for a branch push.</principle>
 <principle>Stop and report blockers rather than pretending the branch was pushed when it was not.</principle>
 </principles>
-<constraints>Use only non-interactive git commands, push with `--no-verify` so local pre-push hook suites do not block delivery, and avoid destructive history rewriting unless the user explicitly asked for it.</constraints>
+<constraints>Use only non-interactive git commands, keep hook-based checks, and avoid destructive history rewriting unless the user explicitly asked for it.</constraints>
 <boundaries>
 <rule>This workflow handles branch creation, optional commits, remote push, and push reporting.</rule>
 <rule>This workflow does not open pull requests automatically.</rule>
@@ -172,7 +170,7 @@ You are executing a command to push work to remote branches without creating a p
       </step>
       <step number="3">
         <description>Push both branches and report the follow-up pull request commands.</description>
-        <approach>Review each outgoing diff for secrets, run `git push --no-verify -u origin HEAD` per repository, and summarize the next command for each one.</approach>
+        <approach>Run `git push` or `git push -u origin HEAD` per repository and summarize the next command for each one.</approach>
         <expected_outcome>The user can immediately create pull requests later without losing the work.</expected_outcome>
       </step>
     </workflow>
@@ -195,11 +193,9 @@ You are executing a command to push work to remote branches without creating a p
 <scenario name="push_blocked_by_validation_or_permissions">
 <problem>The branch cannot be pushed.</problem>
 <causes>
-<cause>Remote permissions, branch protection, or authentication prevent the push after `git push --no-verify` (primary path already skips local pre-push hooks).</cause>
-<cause>Server-side push protection rejected a real secret, which is a finding to report rather than a blocker to work around.</cause>
-<cause>An agent incorrectly ran a verifying push; re-run with `--no-verify` as required for sandboxes.</cause>
-<cause>Pre-commit hooks blocked the commit before a push was attempted.</cause>
+<cause>Repository hooks fail.</cause>
+<cause>Remote permissions, branch protection, or authentication prevent the push.</cause>
 </causes>
-<recovery>Always push with `--no-verify` first. If a verifying push was used by mistake, re-run with `--no-verify`. If that still fails, classify the failure by the source of the error text before reporting it, surface the exact remote error, and stop rather than claiming the push succeeded.</recovery>
+<recovery>Fix the validation issue when possible; otherwise surface the exact blocker and stop rather than claiming the push succeeded.</recovery>
 </scenario>
 </error_handling>
