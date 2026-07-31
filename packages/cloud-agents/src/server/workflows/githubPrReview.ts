@@ -12,6 +12,7 @@ import {
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 import {
+  appendAdditionalTeamInstructions,
   buildGithubCommentActionLink,
   buildStructuredTaskRequest,
   findReusableReviewSummaryComment,
@@ -82,12 +83,14 @@ function buildGitLabMergeRequestReviewPrompt({
 function gitLabMergeRequestReview({
   taskSpec,
   taskRunUrl,
+  additionalInstructions,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
+  additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -98,7 +101,10 @@ function gitLabMergeRequestReview({
   });
 
   return standardTask({
-    description: prompt,
+    description: appendAdditionalTeamInstructions(
+      prompt,
+      additionalInstructions,
+    ),
     repo: taskSpec.payload.repo,
     taskSurface: 'gitlab',
     taskRunUrl,
@@ -159,12 +165,14 @@ function buildGiteaPullRequestReviewPrompt({
 function giteaPullRequestReview({
   taskSpec,
   taskRunUrl,
+  additionalInstructions,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
+  additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -175,7 +183,10 @@ function giteaPullRequestReview({
   });
 
   return standardTask({
-    description: prompt,
+    description: appendAdditionalTeamInstructions(
+      prompt,
+      additionalInstructions,
+    ),
     repo: taskSpec.payload.repo,
     taskSurface: 'gitea',
     taskRunUrl,
@@ -236,12 +247,14 @@ function buildBitbucketPullRequestReviewPrompt({
 function bitbucketPullRequestReview({
   taskSpec,
   taskRunUrl,
+  additionalInstructions,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
+  additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -252,7 +265,10 @@ function bitbucketPullRequestReview({
   });
 
   return standardTask({
-    description: prompt,
+    description: appendAdditionalTeamInstructions(
+      prompt,
+      additionalInstructions,
+    ),
     repo: taskSpec.payload.repo,
     taskSurface: 'bitbucket',
     taskRunUrl,
@@ -313,12 +329,14 @@ function buildAdoPullRequestReviewPrompt({
 function adoPullRequestReview({
   taskSpec,
   taskRunUrl,
+  additionalInstructions,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
+  additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -329,7 +347,10 @@ function adoPullRequestReview({
   });
 
   return standardTask({
-    description: prompt,
+    description: appendAdditionalTeamInstructions(
+      prompt,
+      additionalInstructions,
+    ),
     repo: taskSpec.payload.repo,
     taskSurface: 'ado',
     taskRunUrl,
@@ -345,6 +366,7 @@ export async function githubPrReview({
   taskSpec,
   gitHubToken,
   taskRunUrl,
+  additionalInstructions,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
@@ -352,6 +374,7 @@ export async function githubPrReview({
   taskSpec: GithubPullRequestReviewOpenTask;
   gitHubToken: string;
   taskRunUrl: string;
+  additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
@@ -365,6 +388,7 @@ export async function githubPrReview({
       return gitLabMergeRequestReview({
         taskSpec,
         taskRunUrl,
+        additionalInstructions,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
@@ -373,6 +397,7 @@ export async function githubPrReview({
       return giteaPullRequestReview({
         taskSpec,
         taskRunUrl,
+        additionalInstructions,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
@@ -381,6 +406,7 @@ export async function githubPrReview({
       return bitbucketPullRequestReview({
         taskSpec,
         taskRunUrl,
+        additionalInstructions,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
@@ -389,6 +415,7 @@ export async function githubPrReview({
       return adoPullRequestReview({
         taskSpec,
         taskRunUrl,
+        additionalInstructions,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
@@ -547,7 +574,10 @@ export async function githubPrReview({
   });
 
   const standardTaskResult = standardTask({
-    description: prompt,
+    description: appendAdditionalTeamInstructions(
+      prompt,
+      additionalInstructions,
+    ),
     repo: fullName,
     taskSurface: 'github',
     taskRunUrl,

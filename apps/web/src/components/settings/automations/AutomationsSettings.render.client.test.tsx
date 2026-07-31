@@ -55,6 +55,7 @@ const state = vi.hoisted(() => ({
         conflictResolverMaxPrAgeDays: 7 as const,
         conflictResolverLabel: 'roomote:auto-resolve-conflicts',
         conflictResolverInstructions: null,
+        reviewCodeInstructions: null as string | null,
         channelAutoStartSlackChannels: [
           {
             channelId: 'C123BUGS',
@@ -451,6 +452,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.reviewer.reviewAllPullRequestAuthors = false;
     state.settingsQuery.data.reviewer.reviewOnCommit = true;
     state.settingsQuery.data.reviewer.reviewDraftPrs = true;
+    state.settingsQuery.data.settings.reviewCodeInstructions = null;
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
     for (const key of Object.keys(
@@ -476,6 +478,20 @@ describe('AutomationsSettings', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
+  it('shows additional instructions for Review Code', async () => {
+    state.settingsQuery.data.reviewer.enabled = true;
+    state.settingsQuery.data.settings.reviewer.enabled = true;
+    state.settingsQuery.data.settings.reviewCodeInstructions =
+      'Focus on authorization boundaries.';
+
+    render(<AutomationsSettings />);
+    await openReviewerCard();
+
+    expect(screen.getByLabelText('Additional instructions')).toHaveValue(
+      'Focus on authorization boundaries.',
+    );
   });
 
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {

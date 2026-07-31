@@ -42,6 +42,7 @@ const baseFormState: FormState = {
   reviewerReviewAllPullRequestAuthors: false,
   reviewerReviewOnCommit: true,
   reviewerReviewDraftPrs: true,
+  reviewerInstructions: '',
   reviewerRelayReviewResultsToTask: false,
   reviewerRelayUserIds: [] as string[],
   conflictResolverFrequency: 'off' as const,
@@ -211,6 +212,21 @@ describe('Automations selection helpers', () => {
     expect(saveState.suggesterInstructions).toBe('Only save this');
     expect(saveState.announcerFrequency).toBe('off');
     expect(saveState.announcerInstructions).toBe('');
+  });
+
+  it('includes trimmed reviewer instructions when saving Review Code', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        reviewerInstructions: '  Focus on security boundaries.  ',
+      },
+      baseFormState,
+      'reviewer',
+    );
+
+    expect(saveInput.reviewerInstructions).toBe(
+      'Focus on security boundaries.',
+    );
   });
 
   it('builds a save state that keeps grouped suggester routing fields isolated to the suggester card', () => {

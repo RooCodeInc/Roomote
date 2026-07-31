@@ -466,6 +466,7 @@ const automationsRouter = createRouter({
         reviewerReviewAllPullRequestAuthors: z.boolean(),
         reviewerReviewOnCommit: z.boolean(),
         reviewerReviewDraftPrs: z.boolean(),
+        reviewerInstructions: z.string().max(8_000).nullable().optional(),
         reviewerRelayReviewResultsToTask: z.boolean(),
         reviewerRelayUserIds: z.array(z.string()),
         conflictResolverFrequency: z.enum([
