@@ -117,13 +117,14 @@ async function ensureMiseManagedTools(logger: StartupLogger): Promise<void> {
 }
 
 /**
- * Enable Corepack's yarn shim and reshime mise so `yarn` is on PATH.
+ * Enable Corepack's yarn, prepare a concrete yarn binary, and reshim mise so
+ * `yarn` is executable on PATH.
  * Many customer repos (packageManager: yarn@…) run husky pre-push with `yarn`;
  * the default mise toolset only installs node/npm/pnpm, so pushes fail with
  * `yarn: not found` and agents mis-report that as missing Git credentials.
  */
 async function ensureCorepackYarnShim(logger: StartupLogger): Promise<void> {
-  if (await isCommandAvailable('yarn')) {
+  if (await isYarnExecutable()) {
     logger.debug.log('yarn already available on PATH');
     return;
   }
@@ -135,10 +136,16 @@ async function ensureCorepackYarnShim(logger: StartupLogger): Promise<void> {
       'bash',
       [
         '-lc',
-        // Corepack ships with Node and activates the packageManager-selected
-        // yarn. mise reshim exposes the new node-bin shims (yarn/yarnpkg)
-        // through /opt/mise/shims so husky pre-push can find them.
-        'corepack enable && (mise reshim nodejs 2>/dev/null || mise reshim node 2>/dev/null || mise reshim 2>/dev/null || true)',
+        // Corepack ships with Node. `prepare … --activate` installs a concrete
+        // global yarn so husky works even without a packageManager field.
+        // mise reshim exposes the new node-bin shims (yarn/yarnpkg) through
+        // /opt/mise/shims. Fail the command if every reshim arm fails so we
+        // surface a real setup problem instead of a silent PATH miss.
+        [
+          'corepack enable',
+          'corepack prepare yarn@stable --activate',
+          '(mise reshim nodejs 2>/dev/null || mise reshim node 2>/dev/null || mise reshim 2>/dev/null)',
+        ].join(' && '),
       ],
       {
         cwd: homedir(),
@@ -152,10 +159,26 @@ async function ensureCorepackYarnShim(logger: StartupLogger): Promise<void> {
     return;
   }
 
-  if (!(await isCommandAvailable('yarn'))) {
+  if (!(await isYarnExecutable())) {
     logger.userLog.warn(
-      'corepack enable completed but yarn is still unavailable on PATH',
+      'corepack enable completed but yarn is still not executable on PATH',
     );
+  }
+}
+
+/**
+ * True when `yarn --version` succeeds. A PATH entry alone is not enough;
+ * Corepack shims can exist without a prepared yarn binary.
+ */
+async function isYarnExecutable(): Promise<boolean> {
+  try {
+    const result = await execa('yarn', ['--version'], {
+      reject: false,
+      stdin: 'ignore',
+    });
+    return (result.exitCode ?? 1) === 0;
+  } catch {
+    return false;
   }
 }
 

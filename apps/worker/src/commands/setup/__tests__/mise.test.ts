@@ -30,6 +30,11 @@ const logger = {
   debug: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 } as unknown as StartupLogger;
 
+/** Matches the bash -lc body used to enable Corepack yarn + reshim. */
+const COREPACK_YARN_ENABLE_SCRIPT = expect.stringMatching(
+  /corepack enable[\s\S]*corepack prepare yarn@stable --activate[\s\S]*mise reshim/,
+);
+
 describe('installMise', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -39,23 +44,30 @@ describe('installMise', () => {
   });
 
   it('ensures ripgrep once mise is already available', async () => {
-    // yarn available → skip corepack; python module available → skip install;
-    // then ripgrep checks.
-    mockIsCommandAvailable
-      .mockResolvedValueOnce(true) // yarn
-      .mockResolvedValueOnce(true); // uv for python packages path may still run
+    // mise available → skip install; yarn --version ok → skip corepack;
+    // python module available → skip install; then ripgrep checks.
+    mockIsCommandAvailable.mockResolvedValueOnce(true); // mise
     mockExeca
       .mockResolvedValueOnce({
         exitCode: 0,
+        stdout: '1.22.22',
         stderr: '',
-      } as never)
+      } as never) // yarn --version
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never);
+      } as never) // python module check
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never); // rg --version
 
     await installMise(logger);
 
+    expect(mockExeca).toHaveBeenCalledWith('yarn', ['--version'], {
+      reject: false,
+      stdin: 'ignore',
+    });
     expect(mockExeca).toHaveBeenCalledWith(
       'python',
       expect.any(Array),
@@ -73,15 +85,27 @@ describe('installMise', () => {
       ['-lc', 'curl -fsSL https://mise.run | sh'],
       expect.anything(),
     );
+    expect(mockExeca).not.toHaveBeenCalledWith(
+      'bash',
+      ['-lc', COREPACK_YARN_ENABLE_SCRIPT],
+      expect.anything(),
+    );
   });
 
   it('enables corepack yarn when yarn is missing from PATH', async () => {
-    mockIsCommandAvailable
-      .mockResolvedValueOnce(true) // mise available
-      .mockResolvedValueOnce(false) // yarn missing
-      .mockResolvedValueOnce(true); // yarn after enable
+    mockIsCommandAvailable.mockResolvedValueOnce(true); // mise available
     mockExeca
-      .mockResolvedValueOnce({} as never) // corepack enable
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: '',
+        stderr: 'yarn: not found',
+      } as never) // yarn --version before enable
+      .mockResolvedValueOnce({} as never) // corepack prepare + reshim
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '1.22.22',
+        stderr: '',
+      } as never) // yarn --version after enable
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
@@ -95,11 +119,67 @@ describe('installMise', () => {
 
     expect(mockExeca).toHaveBeenCalledWith(
       'bash',
-      ['-lc', expect.stringContaining('corepack enable')],
+      ['-lc', COREPACK_YARN_ENABLE_SCRIPT],
       expect.objectContaining({
         cwd: expect.any(String),
         stdin: 'ignore',
       }),
+    );
+    expect(logger.userLog.warn).not.toHaveBeenCalled();
+  });
+
+  it('warns when corepack enable fails', async () => {
+    mockIsCommandAvailable.mockResolvedValueOnce(true); // mise
+    mockExeca
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: '',
+        stderr: '',
+      } as never) // yarn --version missing
+      .mockRejectedValueOnce(new Error('corepack: command not found') as never)
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never) // python
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never); // rg
+
+    await installMise(logger);
+
+    expect(logger.userLog.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to enable corepack yarn'),
+    );
+  });
+
+  it('warns when yarn remains non-executable after corepack enable', async () => {
+    mockIsCommandAvailable.mockResolvedValueOnce(true); // mise
+    mockExeca
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: '',
+        stderr: '',
+      } as never) // yarn before
+      .mockResolvedValueOnce({} as never) // corepack enable succeeds
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: '',
+        stderr: 'still broken',
+      } as never) // yarn after still fails
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never) // python
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stderr: '',
+      } as never); // rg
+
+    await installMise(logger);
+
+    expect(logger.userLog.warn).toHaveBeenCalledWith(
+      'corepack enable completed but yarn is still not executable on PATH',
     );
   });
 
@@ -107,7 +187,6 @@ describe('installMise', () => {
     mockIsCommandAvailable
       .mockResolvedValueOnce(false) // mise missing
       .mockResolvedValueOnce(true) // mise after install
-      .mockResolvedValueOnce(true) // yarn present (skip corepack)
       .mockResolvedValueOnce(true) // uv for python package install
       .mockResolvedValueOnce(true); // mise for ripgrep install
     mockReadFile.mockRejectedValueOnce(new Error('missing config') as never);
@@ -125,6 +204,11 @@ describe('installMise', () => {
         exitCode: 0,
         stderr: '',
       } as never) // mise use uv
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '1.22.22',
+        stderr: '',
+      } as never) // yarn --version present (skip corepack)
       .mockResolvedValueOnce({
         exitCode: 1,
         stderr: '',
@@ -204,15 +288,20 @@ describe('installMise', () => {
     mockIsCommandAvailable.mockResolvedValue(true);
     mockReadFile.mockResolvedValueOnce('nodejs = "22"\npnpm = "10"' as never);
     mockExeca
-      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({} as never) // mise use uv
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '1.22.22',
+        stderr: '',
+      } as never) // yarn --version
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never)
+      } as never) // python
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never);
+      } as never); // rg
 
     await installMise(logger);
 
@@ -234,15 +323,20 @@ describe('installMise', () => {
     mockIsCommandAvailable.mockResolvedValue(true);
     mockReadFile.mockResolvedValueOnce('pnpm = "10"\nuv = "latest"' as never);
     mockExeca
-      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce({} as never) // mise use nodejs
+      .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '1.22.22',
+        stderr: '',
+      } as never) // yarn --version
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never)
+      } as never) // python
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never);
+      } as never); // rg
 
     await installMise(logger);
 
@@ -264,14 +358,19 @@ describe('installMise', () => {
     mockIsCommandAvailable.mockResolvedValue(true);
     mockExeca
       .mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '1.22.22',
+        stderr: '',
+      } as never) // yarn --version
+      .mockResolvedValueOnce({
         exitCode: 1,
         stderr: '',
-      } as never)
-      .mockResolvedValueOnce({} as never)
+      } as never) // python module missing
+      .mockResolvedValueOnce({} as never) // install openai
       .mockResolvedValueOnce({
         exitCode: 0,
         stderr: '',
-      } as never);
+      } as never); // rg
 
     await installMise(logger);
 

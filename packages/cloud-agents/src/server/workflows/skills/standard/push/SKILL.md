@@ -77,7 +77,7 @@ You are executing a command to push work to remote branches without creating a p
         <title>Push the branch for each repository</title>
         <description>Publish the resulting branch to the remote so the work is available for later pull request creation.</description>
         <actions>
-          <action>For each repository, push with pre-push hooks skipped: `cd <REPO_DIR> && if git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null; then git push --no-verify; else git push -u origin HEAD --no-verify; fi`. Roomote sandboxes rely on CI for full-suite pre-push checks (lint, typecheck, tests); local pre-push hooks often need host package managers and fail with false "auth" or credential errors. Never treat a pre-push hook failure as missing Git credentials when `git push --no-verify` succeeds.</action>
+          <action>For each repository, always push with pre-push hooks skipped: `cd <REPO_DIR> && if git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null; then git push --no-verify; else git push -u origin HEAD --no-verify; fi`. Roomote sandboxes rely on CI and server-side checks for lint/typecheck/tests and for secret/policy gates that some repos attach to pre-push. Local pre-push hooks often need host package managers and fail with false "auth" or credential errors. Never treat a pre-push hook failure as missing Git credentials when `git push --no-verify` succeeds.</action>
           <action>If push still fails after `--no-verify`, report the exact remote/auth error. Do not invent credential explanations.</action>
           <action>Record the pushed repository and branch for final reporting.</action>
         </actions>
@@ -122,7 +122,7 @@ You are executing a command to push work to remote branches without creating a p
 </guideline>
 <guideline priority="high">
 <rule>Always push with `git push --no-verify` (or `git push -u origin HEAD --no-verify`) in Roomote sandboxes.</rule>
-<rationale>Pre-push hooks that re-run lint/typecheck/test suites belong to CI. Sandbox PATH and tooling differ from developer laptops, so those hooks create false delivery failures (including misreported "credential" blockers).</rationale>
+<rationale>Pre-push hooks that re-run lint/typecheck/test suites or local secret/policy scanners belong to CI and server-side checks. Sandbox PATH and tooling differ from developer laptops, so those hooks create false delivery failures (including misreported "credential" blockers). Skipping pre-push also skips local gitleaks-style hooks; that is intentional: CI and branch protection must own those gates.</rationale>
 <exceptions>None for sandbox delivery. Still fix pre-commit hook failures that block the commit itself.</exceptions>
 </guideline>
 </best_practices>
@@ -194,9 +194,10 @@ You are executing a command to push work to remote branches without creating a p
 <scenario name="push_blocked_by_validation_or_permissions">
 <problem>The branch cannot be pushed.</problem>
 <causes>
-<cause>Remote permissions, branch protection, or authentication prevent the push (confirm with `git push --no-verify` so local pre-push hooks are not confused with auth).</cause>
+<cause>Remote permissions, branch protection, or authentication prevent the push after `git push --no-verify` (primary path already skips local pre-push hooks).</cause>
+<cause>An agent incorrectly ran a verifying push; re-run with `--no-verify` as required for sandboxes.</cause>
 <cause>Pre-commit hooks blocked the commit before a push was attempted.</cause>
 </causes>
-<recovery>Retry with `--no-verify` if a pre-push hook was the only failure. If that still fails, surface the exact remote error and stop rather than claiming the push succeeded or inventing a credentials story.</recovery>
+<recovery>Always push with `--no-verify` first. If a verifying push was used by mistake, re-run with `--no-verify`. If that still fails, surface the exact remote error and stop rather than claiming the push succeeded or inventing a credentials story.</recovery>
 </scenario>
 </error_handling>

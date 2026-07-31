@@ -142,7 +142,7 @@ You are executing a command to create a pull request with the current changes.
         <title>Push the target branch</title>
         <description>Push each repository's current HEAD to the remote after the delivery branch and commit state are correct.</description>
         <actions>
-          <action>For each repository, run `cd <REPO_DIR> && git push origin HEAD --no-verify`. Roomote sandboxes rely on CI for full-suite pre-push checks; local pre-push hooks often fail for environment reasons and get misreported as missing Git credentials. Never treat a pre-push hook failure as a credential problem when `git push --no-verify` succeeds.</action>
+          <action>For each repository, always run `cd <REPO_DIR> && git push origin HEAD --no-verify`. Roomote sandboxes rely on CI and server-side checks for full-suite pre-push validation and for secret/policy gates some repos attach to pre-push; local pre-push hooks often fail for environment reasons and get misreported as missing Git credentials. Never treat a pre-push hook failure as a credential problem when `git push --no-verify` succeeds.</action>
           <action>If push still fails after `--no-verify`, report the exact remote/auth error and stop.</action>
           <action>Record the final branch name and confirm the remote push succeeded before proceeding.</action>
         </actions>
@@ -214,7 +214,7 @@ You are executing a command to create a pull request with the current changes.
 </guideline>
 <guideline priority="high">
 <rule>Fix pre-commit hook failures; always push with `--no-verify` in Roomote sandboxes.</rule>
-<rationale>Pre-commit catches real local formatting issues. Pre-push suites belong to CI; sandbox PATH and tooling differ from developer laptops and produce false delivery blockers (including misreported credentials).</rationale>
+<rationale>Pre-commit catches real local formatting issues. Pre-push suites and local secret/policy scanners belong to CI and server-side checks; sandbox PATH and tooling differ from developer laptops and produce false delivery blockers (including misreported credentials). Skipping pre-push is intentional: CI and branch protection must own those gates.</rationale>
 <exceptions>None for sandbox pre-push. Still fix pre-commit failures that block the commit itself.</exceptions>
 </guideline>
 <guideline priority="medium">
@@ -297,9 +297,9 @@ You are executing a command to create a pull request with the current changes.
 <problem>A commit or push command fails.</problem>
 <causes>
 <cause>Pre-commit hooks failed on the commit.</cause>
-<cause>Pre-push hooks failed (retry with `git push --no-verify`).</cause>
-<cause>The branch conflicts with remote permissions or branch protection (confirm with `--no-verify` so hooks are not confused with auth).</cause>
+<cause>An agent incorrectly ran a verifying push (primary path always uses `git push --no-verify` so pre-push should not run).</cause>
+<cause>Remote permissions, branch protection, or authentication reject the push after `--no-verify`.</cause>
 </causes>
-<recovery>Fix pre-commit failures; push with `--no-verify`. If the remote still rejects the push, report the exact error instead of inventing a credentials story.</recovery>
+<recovery>Fix pre-commit failures. Always push with `--no-verify`; if a verifying push was used by mistake, re-run with `--no-verify`. If the remote still rejects the push, report the exact error instead of inventing a credentials story.</recovery>
 </scenario>
 </error_handling>
