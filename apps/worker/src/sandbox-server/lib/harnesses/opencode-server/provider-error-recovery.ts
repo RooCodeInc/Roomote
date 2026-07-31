@@ -22,35 +22,17 @@ export type OpenCodeProviderErrorRecovery = {
   promptText: string;
 };
 
-const POLICY_CODES = new Set([
-  'cyber_policy',
-  'content_policy',
-  'content_policy_violation',
-  'safety_policy',
-]);
+// OpenCode's own typed error names, not provider vocabulary. These are the
+// only non-HTTP signals: they never carry a status because they are raised
+// client-side before or instead of an HTTP response.
+const TERMINAL_ERROR_NAMES = new Set(['contextoverflowerror']);
+const POLICY_ERROR_NAMES = new Set(['contentfiltererror']);
 
-const TERMINAL_CODES = new Set([
-  'account_suspended',
-  'authentication_error',
-  'billing_error',
-  'context_length_exceeded',
-  'credit_balance_too_low',
-  'forbidden',
-  'insufficient_balance',
-  'insufficient_quota',
-  'invalid_api_key',
-  'invalid_model',
-  'model_not_found',
-  'payment_required',
-  'permission_denied',
-  'unauthorized',
-]);
+// Client errors are terminal because replaying the same request cannot
+// succeed, except timeouts (408) and rate limits (429) which are transient.
+const RETRYABLE_CLIENT_STATUS_CODES = new Set([408, 429]);
 
-const TERMINAL_NAMES = new Set(['contextoverflowerror']);
-
-const TERMINAL_STATUS_CODES = new Set([400, 401, 402, 403, 404, 422]);
-
-function collectProviderErrorValues(error: unknown): unknown[] {
+export function collectProviderErrorValues(error: unknown): unknown[] {
   const pending: Array<{ value: unknown; depth: number }> = [
     { value: error, depth: 0 },
   ];
@@ -95,47 +77,71 @@ function normalizeIdentifier(value: unknown): string | undefined {
   return identifier || undefined;
 }
 
-function isPolicyRefusal(values: unknown[]): boolean {
+function asHttpErrorStatus(value: unknown): number | undefined {
+  const numeric =
+    asFiniteNumber(value) ??
+    (typeof value === 'string' && /^\d{3}$/u.test(value.trim())
+      ? Number(value.trim())
+      : undefined);
+
+  return numeric !== undefined &&
+    Number.isInteger(numeric) &&
+    numeric >= 400 &&
+    numeric <= 599
+    ? numeric
+    : undefined;
+}
+
+/**
+ * First HTTP error status found anywhere in the error, outermost value first.
+ * Providers surface it under `statusCode`, `status`, or (OpenRouter) `code`.
+ */
+export function extractProviderErrorHttpStatus(
+  values: unknown[],
+): number | undefined {
   for (const value of values) {
     const record = asRecord(value);
-    const code = normalizeIdentifier(record?.code);
-    const name = normalizeIdentifier(record?.name);
 
-    if ((code && POLICY_CODES.has(code)) || name === 'contentfiltererror') {
-      return true;
+    if (!record) {
+      continue;
+    }
+
+    const status =
+      asHttpErrorStatus(record.statusCode) ??
+      asHttpErrorStatus(record.status) ??
+      asHttpErrorStatus(record.code);
+
+    if (status !== undefined) {
+      return status;
     }
   }
 
-  return false;
+  return undefined;
+}
+
+function hasErrorName(values: unknown[], names: Set<string>): boolean {
+  return values.some((value) => {
+    const name = normalizeIdentifier(asRecord(value)?.name);
+    return name !== undefined && names.has(name);
+  });
 }
 
 function isExplicitlyTerminal(values: unknown[]): boolean {
-  for (const value of values) {
-    const record = asRecord(value);
-
-    if (record?.isRetryable === false) {
-      return true;
-    }
-
-    const statusCode =
-      asFiniteNumber(record?.statusCode) ?? asFiniteNumber(record?.status);
-
-    if (statusCode !== undefined && TERMINAL_STATUS_CODES.has(statusCode)) {
-      return true;
-    }
-
-    const code = normalizeIdentifier(record?.code);
-    const name = normalizeIdentifier(record?.name);
-
-    if (
-      (code && TERMINAL_CODES.has(code)) ||
-      (name && TERMINAL_NAMES.has(name))
-    ) {
-      return true;
-    }
+  if (values.some((value) => asRecord(value)?.isRetryable === false)) {
+    return true;
   }
 
-  return false;
+  if (hasErrorName(values, TERMINAL_ERROR_NAMES)) {
+    return true;
+  }
+
+  const status = extractProviderErrorHttpStatus(values);
+
+  return (
+    status !== undefined &&
+    status < 500 &&
+    !RETRYABLE_CLIENT_STATUS_CODES.has(status)
+  );
 }
 
 /**
@@ -159,7 +165,7 @@ export function getOpenCodeProviderErrorRecovery(
 ): OpenCodeProviderErrorRecovery | null {
   const values = collectProviderErrorValues(error);
 
-  if (isPolicyRefusal(values)) {
+  if (hasErrorName(values, POLICY_ERROR_NAMES)) {
     return {
       kind: 'policy_refusal',
       maxRetries: DEFAULT_OPENCODE_POLICY_REFUSAL_MAX_RETRIES,

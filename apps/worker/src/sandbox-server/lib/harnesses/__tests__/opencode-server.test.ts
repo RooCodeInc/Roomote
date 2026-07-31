@@ -2245,7 +2245,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('terminates an OpenCode retry loop from a structured billing code without a message', async () => {
+  it('terminates an OpenCode retry loop from a structured 4xx status without a message', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -2289,7 +2289,7 @@ describe('OpenCodeServerHarness', () => {
           status: {
             type: 'retry',
             attempt: 1,
-            code: 'insufficient_balance',
+            statusCode: 402,
             next: Date.now() + 2_000,
           },
         },
@@ -2395,7 +2395,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('retries a cyber policy refusal with safer framing without aborting the task', async () => {
+  it('retries a ContentFilterError refusal with safer framing without aborting the task', async () => {
     vi.useFakeTimers();
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
@@ -2438,17 +2438,10 @@ describe('OpenCodeServerHarness', () => {
         properties: {
           sessionID: 'ses_1',
           error: {
-            name: 'UnknownError',
+            name: 'ContentFilterError',
             data: {
-              message: JSON.stringify({
-                type: 'error',
-                error: {
-                  type: 'invalid_request',
-                  code: 'cyber_policy',
-                  message:
-                    'This content was flagged for possible cybersecurity risk.',
-                },
-              }),
+              message:
+                "The response was blocked by the provider's content filter",
             },
           },
         },

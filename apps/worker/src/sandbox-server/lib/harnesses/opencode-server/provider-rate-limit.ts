@@ -1,5 +1,10 @@
 import { asFiniteNumber, asRecord, asString } from '@roomote/types';
 
+import {
+  collectProviderErrorValues,
+  extractProviderErrorHttpStatus,
+} from './provider-error-recovery';
+
 /** How many automatic continue attempts after a provider rate limit. */
 export const DEFAULT_OPENCODE_RATE_LIMIT_MAX_RETRIES = 3;
 
@@ -14,61 +19,8 @@ export const OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT = [
   'Resume from where you left off without restating the rate-limit error.',
 ].join(' ');
 
-const RATE_LIMIT_IDENTIFIERS = new Set([
-  '429',
-  'rate_limit',
-  'rate_limit_error',
-  'rate_limit_exceeded',
-  'too_many_requests',
-]);
-
-function normalizeIdentifier(value: unknown): string | undefined {
-  const identifier = asString(value)?.trim().toLowerCase();
-  return identifier || undefined;
-}
-
-function collectRateLimitValues(error: unknown): unknown[] {
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const collected: unknown[] = [];
-  const seen = new Set<object>();
-
-  while (pending.length > 0) {
-    const current = pending.shift();
-
-    if (!current || current.depth > 4) {
-      continue;
-    }
-
-    const { value, depth } = current;
-    collected.push(value);
-
-    if (typeof value === 'string') {
-      try {
-        pending.push({ value: JSON.parse(value) as unknown, depth: depth + 1 });
-      } catch {
-        // Classification never depends on unstructured provider prose.
-      }
-      continue;
-    }
-
-    if (!value || typeof value !== 'object' || seen.has(value)) {
-      continue;
-    }
-
-    seen.add(value);
-    for (const nested of Object.values(value)) {
-      pending.push({ value: nested, depth: depth + 1 });
-    }
-  }
-
-  return collected;
-}
-
 /**
- * True when an OpenCode session.error payload is a provider rate limit
- * (HTTP 429 / rate_limit_exceeded), including the
+ * True when an OpenCode session.error payload is an HTTP 429, including the
  * UnknownError-wrapped OpenRouter shape:
  * `{"code":429,"message":"Provider returned error","metadata":{"error_type":"rate_limit_exceeded"}}`
  *
@@ -76,33 +28,13 @@ function collectRateLimitValues(error: unknown): unknown[] {
  * that UnknownError payload falls through as a terminal session.error.
  */
 export function isOpenCodeProviderRateLimitError(error: unknown): boolean {
-  const values = collectRateLimitValues(error);
+  const values = collectProviderErrorValues(error);
 
   if (values.some((value) => asRecord(value)?.isRetryable === false)) {
     return false;
   }
 
-  for (const value of values) {
-    const record = asRecord(value);
-    if (!record) {
-      continue;
-    }
-
-    const statusCode =
-      asFiniteNumber(record.statusCode) ?? asFiniteNumber(record.status);
-    const code = normalizeIdentifier(record.code);
-    const errorType = normalizeIdentifier(record.error_type);
-
-    if (
-      statusCode === 429 ||
-      (code && RATE_LIMIT_IDENTIFIERS.has(code)) ||
-      (errorType && RATE_LIMIT_IDENTIFIERS.has(errorType))
-    ) {
-      return true;
-    }
-  }
-
-  return false;
+  return extractProviderErrorHttpStatus(values) === 429;
 }
 
 /**

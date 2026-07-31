@@ -36,18 +36,15 @@ describe('isOpenCodeProviderRateLimitError', () => {
     ).toBe(true);
   });
 
-  it('detects exact structured rate-limit identifiers', () => {
+  it('requires an HTTP 429; identifier strings and wording do not count', () => {
     expect(
       isOpenCodeProviderRateLimitError({ code: 'rate_limit_exceeded' }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isOpenCodeProviderRateLimitError({
         metadata: { error_type: 'too_many_requests' },
       }),
-    ).toBe(true);
-  });
-
-  it('does not classify message wording as a rate limit', () => {
+    ).toBe(false);
     expect(
       isOpenCodeProviderRateLimitError({ message: 'Too many requests' }),
     ).toBe(false);

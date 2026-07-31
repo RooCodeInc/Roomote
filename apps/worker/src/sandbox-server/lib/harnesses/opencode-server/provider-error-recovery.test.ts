@@ -9,27 +9,25 @@ import {
 } from './provider-error-recovery';
 
 describe('getOpenCodeProviderErrorRecovery', () => {
-  it('detects an UnknownError-wrapped cyber policy refusal', () => {
-    const recovery = getOpenCodeProviderErrorRecovery({
-      name: 'UnknownError',
-      data: {
-        message: JSON.stringify({
-          type: 'error',
-          error: {
-            type: 'invalid_request',
-            code: 'cyber_policy',
-            message:
-              'This content was flagged for possible cybersecurity risk.',
-          },
-        }),
-      },
-    });
-
-    expect(recovery).toMatchObject({ kind: 'policy_refusal', maxRetries: 2 });
-    expect(recovery?.promptText).toContain('Continue the legitimate task');
-    expect(recovery?.promptText).toContain(
-      'Do not attempt to bypass the policy',
-    );
+  it('gives status-less policy codes the generic bounded retry budget', () => {
+    // Only OpenCode's typed ContentFilterError selects the policy prompt;
+    // provider policy code vocabulary is not classified.
+    expect(
+      getOpenCodeProviderErrorRecovery({
+        name: 'UnknownError',
+        data: {
+          message: JSON.stringify({
+            type: 'error',
+            error: {
+              type: 'invalid_request',
+              code: 'cyber_policy',
+              message:
+                'This content was flagged for possible cybersecurity risk.',
+            },
+          }),
+        },
+      }),
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
   });
 
   it('gives unknown provider errors a bounded retry budget', () => {
@@ -79,7 +77,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
   });
 
-  it('classifies structured billing codes inside JSON strings as terminal', () => {
+  it('gives status-less billing codes the bounded retry budget', () => {
     const error = JSON.stringify({
       error: {
         code: 'insufficient_balance',
@@ -87,9 +85,35 @@ describe('getOpenCodeProviderErrorRecovery', () => {
       },
     });
 
+    expect(isOpenCodeTerminalProviderError(error)).toBe(false);
+    expect(getOpenCodeProviderErrorRecovery(error)).toMatchObject({
+      kind: 'provider_error',
+      maxRetries: 3,
+    });
+  });
+
+  it('classifies HTTP client-error statuses inside JSON strings as terminal', () => {
+    const error = JSON.stringify({
+      error: {
+        code: 402,
+        message: 'There is not enough credit to run this request.',
+      },
+    });
+
     expect(isOpenCodeTerminalProviderError(error)).toBe(true);
     expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
   });
+
+  it.each([408, 429, 500, 503])(
+    'keeps retryable status %d out of the terminal set',
+    (statusCode) => {
+      expect(isOpenCodeTerminalProviderError({ statusCode })).toBe(false);
+      expect(getOpenCodeProviderErrorRecovery({ statusCode })).toMatchObject({
+        kind: 'provider_error',
+        maxRetries: 3,
+      });
+    },
+  );
 
   it.each([
     {
