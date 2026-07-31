@@ -146,6 +146,45 @@ describe('OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT', () => {
     expect(output.output).toBe('tool output');
   });
 
+  it('appends the visual-proof advisory when a parent task returns', async () => {
+    const stateFilePath = path.join(tempDir, 'slack-state.json');
+    const nowMs = Date.now();
+
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        parentThreadId: 'ses_parent',
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: nowMs,
+        satisfiedTurnMessageTs: '111.222',
+        recordedAtMs: nowMs,
+        unsharedVisualProofArtifactIds: ['artifact-1'],
+        visualProofShareReminderPending: true,
+      }),
+      'utf8',
+    );
+
+    process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE = stateFilePath;
+    process.env.ROOMOTE_NODE_EXECUTABLE = process.execPath;
+
+    const hooks = await loadHooks();
+    const input: ToolHookInput = {
+      tool: 'task',
+      sessionID: 'ses_parent',
+      callID: 'call_proof_task',
+    };
+    const output: ToolHookOutput = {
+      title: 'task',
+      output: 'proof report',
+      metadata: {},
+    };
+
+    await hooks['tool.execute.after'](input, output);
+
+    expect(output.output).toContain('proof report');
+    expect(output.output).toContain('Visual proof just returned');
+  });
+
   it('rejects a progress reply before an automation task has a result', async () => {
     const stateFilePath = path.join(tempDir, 'slack-state.json');
     fs.writeFileSync(

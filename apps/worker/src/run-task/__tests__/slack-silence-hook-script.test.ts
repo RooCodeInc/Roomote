@@ -50,6 +50,13 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     return stateFilePath;
   }
 
+  function resultState(stateFilePath: string): Record<string, unknown> {
+    return JSON.parse(fs.readFileSync(stateFilePath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+  }
+
   afterEach(() => {
     for (const tempDir of tempDirs.splice(0)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -481,6 +488,98 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stderr).toContain('trigger="PostToolUse"');
     expect(result.stderr).toContain('decision="block"');
     expect(result.stderr).toContain('reason="slack_update_overdue"');
+  });
+
+  it('advises the parent once immediately after a proof task returns', () => {
+    const stateFilePath = writeState({
+      parentThreadId: 'thread-parent',
+      currentTurnMessageTs: 'user-111.222',
+      currentTurnStartedAtMs: Date.now(),
+      satisfiedTurnMessageTs: 'user-111.222',
+      recordedAtMs: Date.now(),
+      unsharedVisualProofArtifactIds: ['artifact-1'],
+      visualProofShareReminderPending: true,
+    });
+    const options = {
+      input: {
+        hook_event_name: 'PostToolUse',
+        threadId: 'thread-parent',
+        tool_name: 'task',
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    };
+
+    const firstResult = runHook(options);
+
+    expect(JSON.parse(firstResult.stdout)).toEqual({
+      decision: 'block',
+      reason: expect.stringContaining('Visual proof just returned'),
+    });
+    expect(resultState(stateFilePath).visualProofShareAdvisoryAtMs).toEqual(
+      expect.any(Number),
+    );
+    expect(resultState(stateFilePath).visualProofShareReminderPending).toBe(
+      true,
+    );
+
+    const secondResult = runHook(options);
+    expect(secondResult.stdout).toBe('');
+  });
+
+  it.each(['roomote_manage_tasks', 'task_status'])(
+    'does not treat %s as a returned proof task',
+    (toolName) => {
+      const stateFilePath = writeState({
+        parentThreadId: 'thread-parent',
+        currentTurnMessageTs: 'user-111.222',
+        currentTurnStartedAtMs: Date.now(),
+        satisfiedTurnMessageTs: 'user-111.222',
+        recordedAtMs: Date.now(),
+        unsharedVisualProofArtifactIds: ['artifact-1'],
+        visualProofShareReminderPending: true,
+      });
+
+      const result = runHook({
+        input: {
+          hook_event_name: 'PostToolUse',
+          threadId: 'thread-parent',
+          tool_name: toolName,
+        },
+        env: {
+          ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+        },
+      });
+
+      expect(result.stdout).toBe('');
+      expect(resultState(stateFilePath)).not.toHaveProperty(
+        'visualProofShareAdvisoryAtMs',
+      );
+    },
+  );
+
+  it('does not advise from the proof subagent thread itself', () => {
+    const stateFilePath = writeState({
+      parentThreadId: 'thread-parent',
+      currentTurnMessageTs: 'user-111.222',
+      currentTurnStartedAtMs: Date.now(),
+      unsharedVisualProofArtifactIds: ['artifact-1'],
+      visualProofShareReminderPending: true,
+    });
+
+    const result = runHook({
+      input: {
+        hook_event_name: 'PostToolUse',
+        threadId: 'thread-subagent',
+        tool_name: 'task',
+      },
+      env: {
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.stdout).toBe('');
   });
 
   it('continues blocking stale non-Slack hook events until another successful Slack reply is recorded', () => {

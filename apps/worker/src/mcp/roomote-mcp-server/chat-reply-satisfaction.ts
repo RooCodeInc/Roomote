@@ -45,6 +45,7 @@ interface ChatReplySatisfactionState {
   lastSilenceReminderAtMs?: number;
   unsharedVisualProofArtifactIds?: string[];
   visualProofShareReminderPending?: boolean;
+  visualProofShareAdvisoryAtMs?: number;
 }
 
 function trimString(value: unknown): string {
@@ -244,6 +245,7 @@ export function recordUnsharedVisualProofArtifact(input: {
     ...existingState,
     unsharedVisualProofArtifactIds: [...artifactIds],
     visualProofShareReminderPending: true,
+    visualProofShareAdvisoryAtMs: undefined,
   });
 }
 
@@ -271,5 +273,9 @@ export function recordSharedVisualProofArtifacts(input: {
     visualProofShareReminderPending:
       unsharedArtifactIds.length > 0 &&
       existingState.visualProofShareReminderPending === true,
+    visualProofShareAdvisoryAtMs:
+      unsharedArtifactIds.length > 0
+        ? existingState.visualProofShareAdvisoryAtMs
+        : undefined,
   });
 }

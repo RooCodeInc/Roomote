@@ -300,6 +300,7 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
         recordedAtMs: Date.now(),
         unsharedVisualProofArtifactIds: ['artifact-1'],
         visualProofShareReminderPending: true,
+        visualProofShareAdvisoryAtMs: Date.now() - 1_000,
       }),
       'utf8',
     );
