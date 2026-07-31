@@ -2,28 +2,24 @@ import type { WebhookPullRequestSynchronize } from '../types';
 
 const {
   mockAcquireRedisLock,
-  mockBuildGitHubPrSynchronizeFollowUpMessage,
+  mockEnqueueActivePrReviewFollowUp,
   mockEnqueueTask,
   mockGetGitHubAutomationTargets,
   mockReleaseLock,
-  mockSendPrompt,
   mockSelect,
   mockUpdate,
   mockUpdateSet,
   mockUpdateWhere,
-  mockWithSandboxServerRpcClient,
 } = vi.hoisted(() => ({
   mockAcquireRedisLock: vi.fn(),
-  mockBuildGitHubPrSynchronizeFollowUpMessage: vi.fn(),
+  mockEnqueueActivePrReviewFollowUp: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetGitHubAutomationTargets: vi.fn(),
   mockReleaseLock: vi.fn().mockResolvedValue(undefined),
-  mockSendPrompt: vi.fn(),
   mockSelect: vi.fn(),
   mockUpdate: vi.fn(),
   mockUpdateSet: vi.fn(),
   mockUpdateWhere: vi.fn(),
-  mockWithSandboxServerRpcClient: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -31,14 +27,12 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  buildGitHubPrSynchronizeFollowUpMessage: (...args: unknown[]) =>
-    mockBuildGitHubPrSynchronizeFollowUpMessage(...args),
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  withSandboxServerRpcClient: (...args: unknown[]) =>
-    mockWithSandboxServerRpcClient(...args),
+  enqueueActivePrReviewFollowUp: (...args: unknown[]) =>
+    mockEnqueueActivePrReviewFollowUp(...args),
 }));
 
 vi.mock('@roomote/db/server', async () => {
@@ -103,16 +97,7 @@ describe('handlePrSynchronize', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAcquireRedisLock.mockResolvedValue(mockReleaseLock);
-    mockBuildGitHubPrSynchronizeFollowUpMessage.mockReturnValue(
-      'Review the latest live PR head.',
-    );
-    mockSendPrompt.mockResolvedValue({ success: true });
-    mockWithSandboxServerRpcClient.mockImplementation(
-      ({ call }: { call: (client: unknown) => Promise<unknown> }) =>
-        call({
-          commands: { sendPrompt: { mutate: mockSendPrompt } },
-        }),
-    );
+    mockEnqueueActivePrReviewFollowUp.mockResolvedValue(undefined);
     mockUpdate.mockReturnValue({ set: mockUpdateSet });
     mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
     mockUpdateWhere.mockResolvedValue(undefined);
@@ -149,7 +134,7 @@ describe('handlePrSynchronize', () => {
     });
 
     expect(mockEnqueueTask).not.toHaveBeenCalled();
-    expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
+    expect(mockEnqueueActivePrReviewFollowUp).not.toHaveBeenCalled();
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
@@ -175,11 +160,11 @@ describe('handlePrSynchronize', () => {
 
     expect(mockUpdateSet).toHaveBeenCalledWith({ prSha: 'new-head' });
     expect(mockEnqueueTask).not.toHaveBeenCalled();
-    expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
+    expect(mockEnqueueActivePrReviewFollowUp).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
 
-  it('natively steers new commits into an active OpenCode review', async () => {
+  it('debounces new commits onto the active OpenCode review', async () => {
     mockSelect.mockReturnValueOnce(
       selectResult([
         {
@@ -198,32 +183,29 @@ describe('handlePrSynchronize', () => {
       message: 'Queued new PR changes on the active review.',
     });
 
-    expect(mockBuildGitHubPrSynchronizeFollowUpMessage).toHaveBeenCalledWith({
-      repository: 'owner/repo',
-      prNumber: 42,
-      previousHeadSha: 'old-head',
-      eventHeadSha: 'new-head',
-    });
-    expect(mockWithSandboxServerRpcClient).toHaveBeenCalledWith(
+    expect(mockEnqueueActivePrReviewFollowUp).toHaveBeenCalledWith(
       expect.objectContaining({
         runId: 100,
-        userId: null,
+        taskId: 'task-100',
         sandboxServerUrl: 'http://sandbox.test',
+        repository: 'owner/repo',
+        prNumber: 42,
+        previousHeadSha: 'old-head',
+        eventHeadSha: 'new-head',
+        fallback: expect.objectContaining({
+          task: expect.objectContaining({
+            type: 'github_pr_review_sync',
+            payload: expect.objectContaining({ headSha: 'new-head' }),
+          }),
+        }),
       }),
     );
-    expect(mockSendPrompt).toHaveBeenCalledWith({
-      prompt: 'Review the latest live PR head.',
-      source: 'github-pr-synchronize',
-      clientMessageId: 'github-pr-synchronize:owner/repo:42:new-head',
-      autoSteerWhenQueued: true,
-      visibleInTranscript: false,
-    });
-    expect(mockUpdateSet).toHaveBeenCalledWith({ prSha: 'new-head' });
+    expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockReleaseLock).toHaveBeenCalledOnce();
   });
 
-  it('leaves the stored head unchanged when active-review steering fails', async () => {
+  it('leaves the stored head unchanged when debounce scheduling fails', async () => {
     mockSelect.mockReturnValueOnce(
       selectResult([
         {
@@ -236,10 +218,12 @@ describe('handlePrSynchronize', () => {
         },
       ]),
     );
-    mockSendPrompt.mockRejectedValueOnce(new Error('sandbox unavailable'));
+    mockEnqueueActivePrReviewFollowUp.mockRejectedValueOnce(
+      new Error('queue unavailable'),
+    );
 
     await expect(handlePrSynchronize(payload)).rejects.toThrow(
-      'sandbox unavailable',
+      'queue unavailable',
     );
 
     expect(mockUpdate).not.toHaveBeenCalled();

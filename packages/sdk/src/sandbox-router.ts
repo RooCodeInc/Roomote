@@ -128,6 +128,8 @@ export interface SandboxSendPromptInput {
   userName?: string;
   userImageUrl?: string;
   autoSteerWhenQueued?: boolean;
+  /** Keep the prompt queued until the current turn finishes. */
+  queueOnly?: boolean;
   /** Hide the prompt from the user-facing transcript (platform machinery). */
   visibleInTranscript?: boolean;
 }

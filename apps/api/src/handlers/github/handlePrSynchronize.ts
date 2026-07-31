@@ -21,12 +21,9 @@ import {
   not,
   sql,
 } from '@roomote/db/server';
-import {
-  buildGitHubPrSynchronizeFollowUpMessage,
-  enqueueTask,
-} from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { acquireRedisLock } from '@roomote/redis';
-import { withSandboxServerRpcClient } from '@roomote/sdk/server';
+import { enqueueActivePrReviewFollowUp } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
@@ -109,45 +106,6 @@ async function acquirePrReviewLaunchLock(repository: string, prNumber: number) {
   return null;
 }
 
-async function queueActiveReviewFollowUp({
-  runId,
-  sandboxServerUrl,
-  repository,
-  prNumber,
-  previousHeadSha,
-  eventHeadSha,
-}: {
-  runId: number;
-  sandboxServerUrl: string;
-  repository: string;
-  prNumber: number;
-  previousHeadSha: string | null;
-  eventHeadSha: string;
-}) {
-  const prompt = buildGitHubPrSynchronizeFollowUpMessage({
-    repository,
-    prNumber,
-    previousHeadSha,
-    eventHeadSha,
-  });
-
-  await withSandboxServerRpcClient({
-    runId,
-    // This is a platform event, not a human handoff. A deployment-principal
-    // token preserves the review's current acting user and credentials.
-    userId: null,
-    sandboxServerUrl,
-    call: (client) =>
-      client.commands.sendPrompt.mutate({
-        prompt,
-        source: 'github-pr-synchronize',
-        clientMessageId: `github-pr-synchronize:${repository}:${prNumber}:${eventHeadSha}`,
-        autoSteerWhenQueued: true,
-        visibleInTranscript: false,
-      }),
-  });
-}
-
 export async function handlePrSynchronize({
   installation,
   repository,
@@ -222,21 +180,64 @@ export async function handlePrSynchronize({
         }
 
         if (activeReviewRun.startedAt && activeReviewRun.sandboxServerUrl) {
-          await queueActiveReviewFollowUp({
+          const relayPayload = await getReviewTaskRelayPayload({
+            repository: repository.full_name,
+            prNumber: pr.number,
+            branchName: pr.head.ref,
+            prBody: pr.body ?? null,
+            reviewerSettings: currentTarget.settings,
+          });
+
+          await enqueueActivePrReviewFollowUp({
             runId: activeReviewRun.id,
+            taskId: activeReviewRun.taskId,
             sandboxServerUrl: activeReviewRun.sandboxServerUrl,
             repository: repository.full_name,
             prNumber: pr.number,
             previousHeadSha: activeReviewRun.prSha,
             eventHeadSha: pr.head.sha,
+            fallback: {
+              task: {
+                type: TaskPayloadKind.GithubPrReviewSync,
+                ...getBackgroundGithubTaskProperties(currentTarget.properties),
+                payload: {
+                  repo: repository.full_name,
+                  prNumber: pr.number,
+                  prTitle: pr.title,
+                  prUrl: pr.html_url,
+                  headSha: pr.head.sha,
+                  branchName: pr.head.ref,
+                  ...relayPayload,
+                },
+              },
+              initiatorActor: {
+                externalId: String(sender.id),
+                displayName: sender.login,
+              },
+              prLinkage: {
+                provider: 'github',
+                host:
+                  currentTarget.repo.host ??
+                  toHostFromUrl(pr.html_url) ??
+                  'github.com',
+                repositoryId: currentTarget.repo.id,
+                repository: repository.full_name,
+                prNumber: pr.number,
+                prUrl: pr.html_url,
+                prTitle: pr.title,
+                prSha: pr.head.sha,
+                prBaseRef: pr.base?.ref ?? null,
+                prBaseSha: pr.base?.sha ?? null,
+              },
+            },
           });
           queuedActiveReviewFollowUp = true;
+        } else {
+          await db
+            .update(taskPullRequests)
+            .set({ prSha: pr.head.sha })
+            .where(eq(taskPullRequests.taskId, activeReviewRun.taskId));
         }
-
-        await db
-          .update(taskPullRequests)
-          .set({ prSha: pr.head.sha })
-          .where(eq(taskPullRequests.taskId, activeReviewRun.taskId));
 
         console.log(
           `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> ${

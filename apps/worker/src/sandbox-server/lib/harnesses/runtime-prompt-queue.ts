@@ -14,6 +14,7 @@ type RuntimePromptQueueUpdateCause =
   | 'delete'
   | 'prioritize'
   | 'move'
+  | 'replace'
   | 'clear'
   | 'restore';
 
@@ -42,8 +43,18 @@ export class RuntimePromptQueue {
     userImageUrl?: string;
     clientMessageId?: string;
   }): string {
+    const replaceIndex =
+      prompt.queueOnly && prompt.clientMessageId
+        ? this.queuedMessages.findIndex(
+            (message) =>
+              message.queueOnly &&
+              message.clientMessageId === prompt.clientMessageId,
+          )
+        : -1;
+    const existing =
+      replaceIndex >= 0 ? this.queuedMessages[replaceIndex] : undefined;
     const queuedMessage = {
-      id: `runtime-queued-${++this.queuedMessageIdCounter}`,
+      id: existing?.id ?? `runtime-queued-${++this.queuedMessageIdCounter}`,
       text: prompt.text,
       images: prompt.images ? [...prompt.images] : undefined,
       queueOnly: prompt.queueOnly,
@@ -55,8 +66,13 @@ export class RuntimePromptQueue {
       timestamp: Date.now(),
     };
 
-    this.queuedMessages.push(queuedMessage);
+    if (replaceIndex >= 0) {
+      this.queuedMessages[replaceIndex] = queuedMessage;
+      this.emitUpdate('replace');
+      return queuedMessage.id;
+    }
 
+    this.queuedMessages.push(queuedMessage);
     this.emitUpdate('enqueue');
     return queuedMessage.id;
   }

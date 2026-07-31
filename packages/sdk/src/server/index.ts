@@ -31,6 +31,13 @@ export {
   refreshTaskTitleOnCompletion,
 } from './lib/task-runs/record-task-message-envelope';
 export { ensureSnapshotResumeGitHubFollowUpFallback } from './lib/task-runs/ensure-snapshot-resume-github-follow-up-fallback';
+export {
+  ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
+  activePrReviewFollowUpRequestSchema,
+  enqueueActivePrReviewFollowUp,
+  type ActivePrReviewFollowUpRequest,
+} from './lib/task-runs/active-pr-review-follow-up';
 export * from './lib/manager-slack';
 export * from './automations';
 export * from './lib/manager-stats';
