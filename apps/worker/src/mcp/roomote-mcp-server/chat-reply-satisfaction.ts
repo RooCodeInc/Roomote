@@ -43,9 +43,6 @@ interface ChatReplySatisfactionState {
   terminalSatisfactionTool?: 'send_chat_reply';
   lastNonSlackWorkAfterTerminalAtMs?: number;
   lastSilenceReminderAtMs?: number;
-  unsharedVisualProofArtifactIds?: string[];
-  visualProofShareReminderPending?: boolean;
-  visualProofShareAdvisoryAtMs?: number;
 }
 
 function trimString(value: unknown): string {
@@ -222,60 +219,4 @@ export function recordChatReplySatisfaction(input: {
   };
 
   writeState(stateFilePath, state);
-}
-
-export function recordUnsharedVisualProofArtifact(input: {
-  artifactId: string;
-  stateFilePath?: string;
-}): void {
-  const stateFilePath = getStateFilePath(input.stateFilePath);
-  const artifactId = input.artifactId.trim();
-
-  if (!stateFilePath || !artifactId) {
-    return;
-  }
-
-  const existingState = readState(stateFilePath);
-  const artifactIds = new Set(
-    existingState.unsharedVisualProofArtifactIds ?? [],
-  );
-  artifactIds.add(artifactId);
-
-  writeState(stateFilePath, {
-    ...existingState,
-    unsharedVisualProofArtifactIds: [...artifactIds],
-    visualProofShareReminderPending: true,
-    visualProofShareAdvisoryAtMs: undefined,
-  });
-}
-
-export function recordSharedVisualProofArtifacts(input: {
-  artifactIds: string[];
-  stateFilePath?: string;
-}): void {
-  const stateFilePath = getStateFilePath(input.stateFilePath);
-  const sharedArtifactIds = new Set(
-    input.artifactIds.map((artifactId) => artifactId.trim()).filter(Boolean),
-  );
-
-  if (!stateFilePath || sharedArtifactIds.size === 0) {
-    return;
-  }
-
-  const existingState = readState(stateFilePath);
-  const unsharedArtifactIds = (
-    existingState.unsharedVisualProofArtifactIds ?? []
-  ).filter((artifactId) => !sharedArtifactIds.has(artifactId));
-
-  writeState(stateFilePath, {
-    ...existingState,
-    unsharedVisualProofArtifactIds: unsharedArtifactIds,
-    visualProofShareReminderPending:
-      unsharedArtifactIds.length > 0 &&
-      existingState.visualProofShareReminderPending === true,
-    visualProofShareAdvisoryAtMs:
-      unsharedArtifactIds.length > 0
-        ? existingState.visualProofShareAdvisoryAtMs
-        : undefined,
-  });
 }

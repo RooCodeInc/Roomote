@@ -8,7 +8,6 @@ import {
 } from './slack-post-helpers.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
 import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
-import { recordSharedVisualProofArtifacts } from './chat-reply-satisfaction.js';
 
 export async function handleSendChatReply(
   input: {
@@ -57,8 +56,6 @@ export async function handleSendChatReply(
         images: allArtifactIds.map((artifactId) => ({ artifactId })),
       }),
     });
-
-    recordSharedVisualProofArtifacts({ artifactIds: allArtifactIds });
 
     return successResult({
       messageTs: reply.messageTs,

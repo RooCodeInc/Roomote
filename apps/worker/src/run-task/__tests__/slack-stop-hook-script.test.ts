@@ -281,49 +281,6 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('reminds once when visual proof has not been shared, then allows Stop', () => {
-    const stateFilePath = path.join(
-      fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),
-      'state.json',
-    );
-    tempDirs.push(path.dirname(stateFilePath));
-    fs.writeFileSync(
-      stateFilePath,
-      JSON.stringify({
-        currentTurnMessageTs: 'user-111.222',
-        satisfiedTurnMessageTs: 'user-111.222',
-        terminalSatisfiedTurnMessageTs: 'user-111.222',
-        terminalSatisfiedAtMs: Date.now(),
-        messageTs: 'bot-333.444',
-        tool: 'send_chat_reply',
-        replyPurpose: 'closeout',
-        recordedAtMs: Date.now(),
-        unsharedVisualProofArtifactIds: ['artifact-1'],
-        visualProofShareReminderPending: true,
-        visualProofShareAdvisoryAtMs: Date.now() - 1_000,
-      }),
-      'utf8',
-    );
-
-    const env = {
-      ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
-    };
-    const firstResult = runHook({ env });
-
-    expect(JSON.parse(firstResult.stdout)).toEqual({
-      decision: 'block',
-      reason: expect.stringContaining(
-        'Visual proof was uploaded but has not been attached',
-      ),
-    });
-    expect(firstResult.stderr).toContain(
-      'reason="unshared_visual_proof_reminder"',
-    );
-
-    const secondResult = runHook({ env });
-    expect(secondResult.stdout).toBe('');
-  });
-
   it('allows Stop for legacy successful replies without recorded purpose', () => {
     const stateFilePath = path.join(
       fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),

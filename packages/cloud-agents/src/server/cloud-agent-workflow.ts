@@ -171,9 +171,6 @@ export async function generatePrompt({
   const backgroundProofCaptureEnabled = await evaluateOrgFeatureFlag(
     FeatureFlag.BackgroundSubagents,
   );
-  const visualProofAutoPostEnabled = await evaluateOrgFeatureFlag(
-    FeatureFlag.SlackProofAutoPost,
-  );
   const prAction = await getDeploymentPrAction().catch(() => undefined);
   const reviewCodeSettings = await getReviewCodeAutomationSettings().catch(
     () => null,
@@ -238,7 +235,6 @@ export async function generatePrompt({
         codeReviewsEnabled,
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
-        visualProofAutoPostEnabled,
         prAction,
       });
     }
@@ -410,7 +406,6 @@ export async function generatePrompt({
       if (slackChannel && slackThreadTs) {
         const slackInstructions = buildSlackMessageInstructions({
           includeRequestUserInputGuidance: true,
-          visualProofAutoPostEnabled,
         });
         result.harnessInstructions = result.harnessInstructions
           ? `${slackInstructions}\n\n${result.harnessInstructions}`
@@ -420,12 +415,8 @@ export async function generatePrompt({
       if (nonSlackChatProvider) {
         const chatInstructions =
           nonSlackChatProvider === 'teams'
-            ? buildTeamsMessageInstructions({
-                visualProofAutoPostEnabled,
-              })
-            : buildChatProviderMessageInstructions(nonSlackChatProvider, {
-                visualProofAutoPostEnabled,
-              });
+            ? buildTeamsMessageInstructions()
+            : buildChatProviderMessageInstructions(nonSlackChatProvider);
         result.harnessInstructions = result.harnessInstructions
           ? `${chatInstructions}\n\n${result.harnessInstructions}`
           : chatInstructions;

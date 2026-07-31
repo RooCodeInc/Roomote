@@ -5,9 +5,7 @@ import path from 'node:path';
 import {
   CHAT_REPLY_SATISFACTION_STATE_FILE_ENV as SLACK_REPLY_SATISFACTION_STATE_FILE_ENV,
   recordChatReplySatisfaction as recordSlackReplySatisfaction,
-  recordSharedVisualProofArtifacts,
   recordChatTurnStart as recordSlackTurnStart,
-  recordUnsharedVisualProofArtifact,
 } from '../chat-reply-satisfaction';
 
 describe('Slack reply satisfaction state', () => {
@@ -98,40 +96,6 @@ describe('Slack reply satisfaction state', () => {
       messageTs: '111.222',
       tool: 'send_chat_reply',
       recordedAtMs: 1234,
-    });
-  });
-
-  it('tracks unshared visual proof and clears artifacts after they are attached', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
-    tempDirs.push(tempDir);
-    const stateFilePath = path.join(tempDir, 'reply-state.json');
-
-    recordUnsharedVisualProofArtifact({
-      artifactId: 'artifact-1',
-      stateFilePath,
-    });
-    recordUnsharedVisualProofArtifact({
-      artifactId: 'artifact-2',
-      stateFilePath,
-    });
-    recordSharedVisualProofArtifacts({
-      artifactIds: ['artifact-1'],
-      stateFilePath,
-    });
-
-    expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
-      unsharedVisualProofArtifactIds: ['artifact-2'],
-      visualProofShareReminderPending: true,
-    });
-
-    recordSharedVisualProofArtifacts({
-      artifactIds: ['artifact-2'],
-      stateFilePath,
-    });
-
-    expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
-      unsharedVisualProofArtifactIds: [],
-      visualProofShareReminderPending: false,
     });
   });
 

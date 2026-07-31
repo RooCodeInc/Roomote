@@ -566,7 +566,6 @@ function getQueuedSnapshotResumeLinearMessages(
     : [];
 }
 
-const SLACK_PROOF_AUTO_POST_FLAG = FeatureFlag.SlackProofAutoPost;
 const BACKGROUND_SUBAGENTS_FLAG = FeatureFlag.BackgroundSubagents;
 const CODE_MODE_FLAG = FeatureFlag.CodeMode;
 
@@ -862,20 +861,6 @@ export const runTask = async ({
     }
 
     try {
-      const slackProofAutoPostEnabled = await sdk.featureFlags.evaluate(
-        SLACK_PROOF_AUTO_POST_FLAG,
-      );
-
-      if (slackProofAutoPostEnabled) {
-        runtimeEnv.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
-      }
-    } catch (error) {
-      logger.warn(
-        `[runTask] Failed to evaluate SlackProofAutoPost feature flag: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    try {
       const backgroundSubagentsEnabled = await sdk.featureFlags.evaluate(
         BACKGROUND_SUBAGENTS_FLAG,
       );
@@ -904,9 +889,6 @@ export const runTask = async ({
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
     if (slackReplyContext?.threadTs) {
-      // Slack proof auto-post resolves its thread destination from these env
-      // vars when visual-proof artifacts are uploaded through the Roomote MCP
-      // server.
       runtimeEnv.ROOMOTE_SLACK_CHANNEL = slackReplyContext.channel;
       runtimeEnv.ROOMOTE_SLACK_THREAD_TS = slackReplyContext.threadTs;
     }

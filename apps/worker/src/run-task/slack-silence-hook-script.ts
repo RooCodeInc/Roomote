@@ -45,13 +45,6 @@ const SUBAGENT_SLACK_POST_DENIAL = [
   'Return your findings in your final report to the parent agent instead;',
   'the parent agent will relay any Slack-visible update.',
 ].join(' ');
-const VISUAL_PROOF_SHARE_ADVISORY = [
-  'Visual proof just returned with screenshots that have not been attached to',
-  'the originating thread.',
-  'Consider sharing the useful images now with send_chat_reply via',
-  'imageArtifactIds so the user can see them without opening the task UI.',
-  'This is optional when sharing would be redundant or unhelpful.',
-].join(' ');
 const MAX_SILENCE_MS = 7 * 60 * 1000;
 const HOOK_NAME = 'slack-silence';
 const HOOK_DEBUG_ENV = 'ROOMOTE_SLACK_HOOK_DEBUG';
@@ -251,20 +244,6 @@ function isRequestUserInputTool(input) {
     toolName.includes('/request_user_input_handoff') ||
     toolName.includes('.request_user_input') ||
     toolName.includes('.request_user_input_handoff')
-  );
-}
-
-function isTaskTool(input) {
-  return trimString(getToolName(input)) === 'task';
-}
-
-function hasPendingVisualProofShareAdvisory(state) {
-  return (
-    state &&
-    state.visualProofShareReminderPending === true &&
-    readFiniteMs(state.visualProofShareAdvisoryAtMs) === null &&
-    Array.isArray(state.unsharedVisualProofArtifactIds) &&
-    state.unsharedVisualProofArtifactIds.some((artifactId) => trimString(artifactId))
   );
 }
 
@@ -607,32 +586,6 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
         : {}),
     };
     writeState(stateFilePath, state);
-  }
-
-  if (
-    hookEventName === 'PostToolUse' &&
-    isTaskTool(hookInput) &&
-    hasPendingVisualProofShareAdvisory(state)
-  ) {
-    state = {
-      ...state,
-      visualProofShareAdvisoryAtMs: nowMs,
-    };
-    writeState(stateFilePath, state);
-    logDecision('INFO', {
-      trigger: hookEventName,
-      decision: 'block',
-      tool: getToolName(hookInput),
-      reason: 'unshared_visual_proof_advisory',
-      stateFilePath,
-    });
-    process.stdout.write(
-      JSON.stringify({
-        decision: 'block',
-        reason: VISUAL_PROOF_SHARE_ADVISORY,
-      }),
-    );
-    process.exit(0);
   }
 
   if (

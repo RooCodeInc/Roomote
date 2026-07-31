@@ -174,34 +174,6 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('documents automatic Slack visual-proof posting for Slack-started tasks', async () => {
-    const { registeredTools } = await importRoomoteMcpServer({
-      ROOMOTE_SLACK_CHANNEL: 'C123',
-      ROOMOTE_SLACK_THREAD_TS: '123.456',
-      ROOMOTE_SLACK_PROOF_AUTO_POST: 'true',
-    });
-    const artifactsTool = getRegisteredTool(
-      registeredTools,
-      'manage_artifacts',
-    );
-
-    expect(artifactsTool.config.description).toContain(
-      'Create, upload, download, and list artifacts in Roomote.',
-    );
-    expect(artifactsTool.config.description).not.toContain(
-      'Not Slack-visible by itself: creates, uploads, or downloads Roomote artifacts.',
-    );
-    expect(artifactsTool.config.description).toContain(
-      'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type).',
-    );
-    expect(artifactsTool.config.description).toContain(
-      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof; for Slack-started tasks when visual-proof auto-post is enabled, visual-proof uploads are posted back to the originating Slack thread automatically.',
-    );
-    expect(artifactsTool.config.description).not.toContain(
-      'After uploading image files, if `send_chat_reply` or `post_to_channel` is available, pass the returned artifact IDs to those tools via `imageArtifactIds` so the user sees them directly in Slack.',
-    );
-  });
-
   it('registers show_widget for presentational HTML in the task transcript', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const tool = getRegisteredTool(registeredTools, 'show_widget');
@@ -260,7 +232,7 @@ describe('roomote MCP tool descriptions', () => {
     });
   });
 
-  it('documents manual visual-proof posting when Slack auto-post is disabled', async () => {
+  it('documents explicit visual-proof sharing', async () => {
     const { registeredTools } = await importRoomoteMcpServer({
       ROOMOTE_SLACK_CHANNEL: 'C123',
       ROOMOTE_SLACK_THREAD_TS: '123.456',
@@ -271,10 +243,7 @@ describe('roomote MCP tool descriptions', () => {
     );
 
     expect(artifactsTool.config.description).toContain(
-      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not auto-posted to chat for this task; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images).',
-    );
-    expect(artifactsTool.config.description).not.toContain(
-      'visual-proof uploads are posted back to the originating Slack thread automatically.',
+      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images).',
     );
   });
 

@@ -235,19 +235,10 @@ describe('slackAppMention', () => {
       'When a blocker, delivery update, input request, useful progress update, or closeout would otherwise leave the Slack thread hanging, post the concise Slack lifecycle reply before finalizing.',
     );
     expect(result.harnessInstructions).toContain(
-      'Visual-proof uploads are not auto-posted to Slack for this task. When proof needs to be visible in the originating thread, share it with `send_chat_reply`: pass image artifact IDs via `imageArtifactIds`, or include artifact `viewUrl`/`rawUrl` links in the reply text for non-images.',
+      'Visual-proof uploads are not posted to Slack automatically. When proof needs to be visible in the originating thread, share it with `send_chat_reply`: pass image artifact IDs via `imageArtifactIds`, or include artifact `viewUrl`/`rawUrl` links in the reply text for non-images.',
     );
     expect(result.harnessInstructions).toContain(
       'When other task-generated images were uploaded earlier in the same run and still need to be shown in the thread, pass those artifact IDs to `send_chat_reply` via `imageArtifactIds`.',
-    );
-    expect(result.harnessInstructions).not.toContain(
-      'Built-in visual proof for the current proof milestone is already posted back to the originating Slack thread by the worker when trusted Slack context exists.',
-    );
-    expect(result.harnessInstructions).not.toContain(
-      "When that built-in proof auto-post happens, do not send a second Slack reply that only narrates the visible proof, counts screenshots, names localhost capture URLs, mentions internal temp or artifact file paths, repeats the capture summary, or says there was no blocker. Treat the built-in proof post as the proof-ready update unless the proof is blocked or that detail materially changes the user's next step.",
-    );
-    expect(result.harnessInstructions).not.toContain(
-      'Keep later Slack replies focused on the user outcome, delivery state, blocker, or next action rather than restating what is already visible in the proof attachments.',
     );
     expect(result.harnessInstructions).toContain(
       'When sharing screenshots or screencast links with `send_chat_reply`, and the environment instructions expose configured external preview URLs, include the most relevant preview link in the Slack text. Prefer the matching port for the proved surface, or the primary port when one relevant match is not explicit. Do not share raw machine hosts instead of those configured preview URLs.',
@@ -563,7 +554,7 @@ describe('slackAppMention', () => {
     );
   });
 
-  it('documents built-in proof delivery for Slack visual proof', async () => {
+  it('documents explicit proof sharing for Slack visual proof', async () => {
     const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
       payload: {
@@ -578,41 +569,12 @@ describe('slackAppMention', () => {
     const result = await slackAppMention({
       taskSpec,
       taskRunUrl: 'https://example.com/tasks/1',
-      visualProofAutoPostEnabled: true,
     });
 
     expect(result.harnessInstructions).toContain(
-      'Built-in visual proof for the current proof milestone is already posted back to the originating Slack thread by the worker when trusted Slack context exists.',
+      'Visual-proof uploads are not posted to Slack automatically.',
     );
-    expect(result.harnessInstructions).toContain(
-      'When that built-in proof auto-post happens, do not send a second Slack reply that only narrates the visible proof',
-    );
-  });
-
-  it('documents manual proof posting when Slack visual-proof auto-post is disabled', async () => {
-    const taskSpec: SlackAppMentionTask = {
-      type: TaskPayloadKind.SlackAppMention,
-      payload: {
-        repo: 'Roomote/example-app',
-        channel: 'C123',
-        user: 'U123',
-        text: '@Roomote ship the fix',
-        ts: '123.456',
-      },
-    };
-
-    const result = await slackAppMention({
-      taskSpec,
-      taskRunUrl: 'https://example.com/tasks/1',
-      visualProofAutoPostEnabled: false,
-    });
-
-    expect(result.harnessInstructions).toContain(
-      'Visual-proof uploads are not auto-posted to Slack for this task.',
-    );
-    expect(result.harnessInstructions).not.toContain(
-      'Built-in visual proof for the current proof milestone is already posted back to the originating Slack thread by the worker when trusted Slack context exists.',
-    );
+    expect(result.harnessInstructions).toContain('imageArtifactIds');
   });
 });
 
@@ -686,7 +648,7 @@ describe('buildChatProviderMessageInstructions', () => {
   );
 
   it.each(['discord', 'teams', 'telegram'] as const)(
-    'documents manual visual-proof posting when auto-post is disabled for %s',
+    'documents explicit visual-proof sharing for %s',
     (provider) => {
       const label =
         provider === 'discord'
@@ -694,44 +656,14 @@ describe('buildChatProviderMessageInstructions', () => {
           : provider === 'telegram'
             ? 'Telegram'
             : 'Teams';
-      const instructions = buildChatProviderMessageInstructions(provider, {
-        visualProofAutoPostEnabled: false,
-      });
+      const instructions = buildChatProviderMessageInstructions(provider);
 
       expect(instructions).toContain(
-        `Visual-proof uploads are not auto-posted to ${label} for this task.`,
+        `Visual-proof uploads are not posted to ${label} automatically.`,
       );
       expect(instructions).toContain('imageArtifactIds');
       expect(instructions).toContain(
         'pass those artifact IDs to `send_chat_reply` via `imageArtifactIds`',
-      );
-      expect(instructions).not.toContain(
-        `Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.`,
-      );
-    },
-  );
-
-  it.each(['discord', 'teams', 'telegram'] as const)(
-    'documents built-in visual-proof auto-post when enabled for %s',
-    (provider) => {
-      const label =
-        provider === 'discord'
-          ? 'Discord'
-          : provider === 'telegram'
-            ? 'Telegram'
-            : 'Teams';
-      const instructions = buildChatProviderMessageInstructions(provider, {
-        visualProofAutoPostEnabled: true,
-      });
-
-      expect(instructions).toContain(
-        `Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.`,
-      );
-      expect(instructions).toContain(
-        `When that built-in proof auto-post happens, do not send a second ${label} reply that only narrates the visible proof`,
-      );
-      expect(instructions).not.toContain(
-        `Visual-proof uploads are not auto-posted to ${label} for this task.`,
       );
     },
   );
