@@ -61,7 +61,7 @@ jobs:
             exit 0
           fi
 
-          git fetch origin main --quiet
+          git fetch origin "refs/heads/main:refs/remotes/origin/main" --quiet
 
           if ! git show-ref --verify --quiet refs/remotes/origin/main; then
             echo "origin/main is missing; create main before promoting."
@@ -104,7 +104,7 @@ jobs:
 
             # Minimize the merge race by repeating the shipped-state and PR
             # checks immediately before moving the candidate branch.
-            git fetch origin main --tags --quiet
+            git fetch origin "refs/heads/main:refs/remotes/origin/main" --tags --quiet
             if git rev-parse "$tag" >/dev/null 2>&1 || git merge-base --is-ancestor "$candidate_sha" origin/main; then
               echo "Cannot refresh ${tag}: the candidate reached main while this refresh was running."
               exit 1

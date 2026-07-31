@@ -29,7 +29,13 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
   assert.match(promoteScript, /has diverged from develop/);
   assert.match(promoteScript, /no open Promote PR targets main/);
   assert.match(promoteScript, /Cannot refresh .* with pending changesets/);
-  assert.match(promoteScript, /git fetch origin main --tags --quiet/);
+  assert.equal(
+    promoteScript.match(
+      /git fetch origin "refs\/heads\/main:refs\/remotes\/origin\/main"(?: --tags)? --quiet/g,
+    )?.length,
+    2,
+  );
+  assert.doesNotMatch(promoteScript, /git fetch origin main/);
   assert.match(promoteScript, /the candidate reached main while this refresh was running/);
   assert.match(promoteScript, /the Promote PR closed while this refresh was running/);
   assert.match(promoteScript, /release_sha="\$bump_sha"/);
