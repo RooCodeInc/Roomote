@@ -54,6 +54,21 @@ docker run -d roomote-worker:local`;
     );
   });
 
+  it('explains Docker address pool exhaustion', () => {
+    const error = `Failed to run docker network.
+
+Error response from daemon: all predefined address pools have been fully subnetted
+
+command:
+docker network create roomote-task-12`;
+
+    const display = getTaskRunErrorDisplayMessage(error);
+
+    expect(display).toContain("Docker's address pools are exhausted");
+    expect(display).toContain('Remove unused Roomote task networks');
+    expect(display).toContain('default-address-pools');
+  });
+
   it('explains worker start timeouts and keeps the docker process list', () => {
     const error = `Docker worker for task run #9 did not start within 60s.
 
@@ -122,6 +137,9 @@ docker run -d roomote-worker:local`;
         'docker_release_archive_missing',
       ),
     ).toContain('missing the local worker release archive');
+    expect(
+      getTaskRunErrorDisplayMessage(undefined, 'docker_address_pool_exhausted'),
+    ).toContain("Docker's address pools are exhausted");
     expect(getTaskRunErrorDisplayMessage(undefined, undefined)).toBeUndefined();
   });
 

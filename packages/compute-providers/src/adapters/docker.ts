@@ -32,6 +32,8 @@ import type {
 const execFileAsync = promisify(execFile);
 const DOCKER_WORKER_CONTAINER_PREFIX = 'roomote-worker-';
 
+type DockerCommand = typeof docker;
+
 function getTaskDaemonContainerName(instanceId: string): string {
   return `${instanceId}-docker`;
 }
@@ -60,6 +62,74 @@ function getSourceRunId(instanceId: string): number | null {
   if (!instanceId.startsWith(DOCKER_WORKER_CONTAINER_PREFIX)) return null;
   const runId = Number(instanceId.slice(DOCKER_WORKER_CONTAINER_PREFIX.length));
   return Number.isInteger(runId) ? runId : null;
+}
+
+async function removeTaskNetwork(
+  taskNetwork: string,
+  signal: AbortSignal | undefined,
+  runDocker: DockerCommand,
+): Promise<void> {
+  const output = await runDocker(['network', 'inspect', taskNetwork], {
+    signal,
+    allowFailure: true,
+  });
+  let containerIds: string[] = [];
+
+  try {
+    const networks = JSON.parse(output) as Array<{
+      Containers?: Record<string, unknown> | null;
+    }>;
+    containerIds = Object.keys(networks[0]?.Containers ?? {});
+  } catch {
+    // Missing networks and transient inspect failures are handled by the
+    // idempotent remove below.
+  }
+
+  for (const containerId of containerIds) {
+    await runDocker(['network', 'disconnect', '-f', taskNetwork, containerId], {
+      signal,
+      allowFailure: true,
+    });
+  }
+
+  await runDocker(['network', 'rm', taskNetwork], {
+    signal,
+    allowFailure: true,
+  });
+}
+
+export async function destroyDockerInstance(
+  input: DestroyInstanceInput,
+  runDocker: DockerCommand = docker,
+): Promise<DestroyInstanceResult> {
+  const sourceRunId = getSourceRunId(input.instanceId);
+  await runDocker(['rm', '-f', `${input.instanceId}-egress-policy`], {
+    signal: input.signal,
+    allowFailure: true,
+  });
+  await runDocker(['rm', '-f', getTaskDaemonContainerName(input.instanceId)], {
+    signal: input.signal,
+    allowFailure: true,
+  });
+  await runDocker(['rm', '-f', input.instanceId], {
+    signal: input.signal,
+    allowFailure: true,
+  });
+  if (sourceRunId !== null) {
+    await removeTaskNetwork(
+      `roomote-task-${sourceRunId}`,
+      input.signal,
+      runDocker,
+    );
+  }
+  await runDocker(
+    ['volume', 'rm', '-f', getTaskWorkspaceVolumeName(input.instanceId)],
+    {
+      signal: input.signal,
+      allowFailure: true,
+    },
+  );
+  return {};
 }
 
 export class DockerClient implements ComputeProviderClient {
@@ -95,33 +165,7 @@ export class DockerClient implements ComputeProviderClient {
   public async destroyInstance(
     input: DestroyInstanceInput,
   ): Promise<DestroyInstanceResult> {
-    const sourceRunId = getSourceRunId(input.instanceId);
-    await docker(['rm', '-f', `${input.instanceId}-egress-policy`], {
-      signal: input.signal,
-      allowFailure: true,
-    });
-    await docker(['rm', '-f', getTaskDaemonContainerName(input.instanceId)], {
-      signal: input.signal,
-      allowFailure: true,
-    });
-    await docker(['rm', '-f', input.instanceId], {
-      signal: input.signal,
-      allowFailure: true,
-    });
-    if (sourceRunId !== null) {
-      await docker(['network', 'rm', `roomote-task-${sourceRunId}`], {
-        signal: input.signal,
-        allowFailure: true,
-      });
-    }
-    await docker(
-      ['volume', 'rm', '-f', getTaskWorkspaceVolumeName(input.instanceId)],
-      {
-        signal: input.signal,
-        allowFailure: true,
-      },
-    );
-    return {};
+    return destroyDockerInstance(input);
   }
 
   public async enterStandby(

@@ -220,6 +220,10 @@ const SPAWN_ERROR_CLASSIFIERS: ReadonlyArray<{
       /pull access denied|repository does not exist or may require ['"]?docker login['"]?|manifest for .+ not found|Unable to find image ['"].+['"] locally/i,
   },
   {
+    code: TaskRunErrorCode.DockerAddressPoolExhausted,
+    pattern: /all predefined address pools have been fully subnetted/i,
+  },
+  {
     code: TaskRunErrorCode.DockerPortInUse,
     pattern:
       /port is already allocated|bind: address already in use|failed to bind host port/i,

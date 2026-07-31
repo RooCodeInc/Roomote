@@ -2053,6 +2053,7 @@ export const bootingRunStatuses = [
 export const TaskRunErrorCode = {
   DockerDaemonUnreachable: 'docker_daemon_unreachable',
   DockerImageMissing: 'docker_image_missing',
+  DockerAddressPoolExhausted: 'docker_address_pool_exhausted',
   DockerPortInUse: 'docker_port_in_use',
   DockerReleaseArchiveMissing: 'docker_release_archive_missing',
   DockerWorkerStartTimeout: 'docker_worker_start_timeout',
