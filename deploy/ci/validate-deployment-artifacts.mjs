@@ -395,6 +395,28 @@ assert(
     ),
   'coolify: Docker proxy environment must match production Compose',
 );
+const coolifyBullmq = coolify.services?.bullmq;
+assert(
+  coolifyBullmq?.networks?.includes('default'),
+  'coolify: bullmq must remain on the default application network',
+);
+assert(
+  coolifyBullmq?.networks?.includes('docker-api'),
+  'coolify: bullmq must join the docker-api network',
+);
+assert(
+  coolifyBullmq?.depends_on?.['docker-proxy']?.condition === 'service_started',
+  'coolify: bullmq must wait for the Docker proxy to start',
+);
+assert(
+  coolifyBullmq?.environment?.DOCKER_HOST === 'tcp://docker-proxy:2375',
+  'coolify: bullmq must use the restricted Docker proxy',
+);
+assert(
+  coolifyBullmq?.environment?.DOCKER_WORKER_RELEASE_PATH ===
+    '/roomote/releases/worker-current.tar.gz',
+  'coolify: bullmq must receive the baked worker release path',
+);
 
 const fly = parseToml(read('deploy/fly/fly.toml'));
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
