@@ -36,6 +36,9 @@ describe('SetupDocs', () => {
   });
 
   it.each([
+    ['alibaba', 'alibaba-model-studio'],
+    ['alibaba-coding-plan', 'alibaba-coding-plan'],
+    ['alibaba-token-plan', 'alibaba-token-plan'],
     ['amazon-bedrock', 'amazon-bedrock'],
     ['anthropic', 'anthropic'],
     ['azure', 'azure-openai'],

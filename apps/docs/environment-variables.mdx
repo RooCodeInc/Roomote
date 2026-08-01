@@ -184,6 +184,12 @@ as per-task auth tokens or workspace paths.
 | `AZURE_COGNITIVE_SERVICES_API_KEY`     | Provider key | Azure AI Foundry / AI Services API key.                                                                                                 |
 | `AZURE_COGNITIVE_SERVICES_RESOURCE_NAME` | Provider config | Azure AI Foundry / AI Services resource name, without the domain or URL.                                                           |
 | `ANTHROPIC_API_KEY`                    | Provider key | Anthropic API key.                                                                                                                      |
+| `DASHSCOPE_API_KEY`                    | Provider key | Alibaba Cloud Model Studio API key for `alibaba/...` models in the region selected by `ALIBABA_REGION`.                                |
+| `ALIBABA_REGION`                       | Provider config | Alibaba Model Studio region: `global` (International) or `china`. Defaults to `global` when unset.                                  |
+| `ALIBABA_CODING_PLAN_API_KEY`          | Provider key | Alibaba Coding Plan API key for `alibaba-coding-plan/...` models.                                                                      |
+| `ALIBABA_CODING_PLAN_REGION`           | Provider config | Alibaba Coding Plan region: `global` (International) or `china`. Defaults to `global` when unset.                                  |
+| `ALIBABA_TOKEN_PLAN_API_KEY`           | Provider key | Alibaba Token Plan API key for `alibaba-token-plan/...` models.                                                                        |
+| `ALIBABA_TOKEN_PLAN_REGION`            | Provider config | Alibaba Token Plan region: `global` (International) or `china`. Defaults to `global` when unset.                                    |
 | `XAI_API_KEY`                          | Provider key | xAI / Grok API key. Optional when a SuperGrok / eligible X Premium+ subscription is connected from **Settings > Models**.               |
 | `XAI_OAUTH_CLIENT_ID`                  | Optional     | Override for the public Grok CLI OAuth client id used by the SuperGrok device-code connect flow. Defaults to the public CLI client id.  |
 | `MOONSHOT_API_KEY`                     | Provider key | Moonshot AI / Kimi Open Platform API key.                                                                                               |

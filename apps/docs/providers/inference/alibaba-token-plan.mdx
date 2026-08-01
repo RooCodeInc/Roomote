@@ -1,0 +1,40 @@
+---
+title: Alibaba Token Plan
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/qwen.svg'
+description: Use Qwen models through an Alibaba Token Plan in the international or China region.
+---
+
+Alibaba Token Plan provides prepaid token allowance through plan-specific
+endpoints. Its keys are separate from metered [Model Studio
+API](/providers/inference/alibaba-model-studio) and Coding Plan connections.
+
+## Get a Token Plan key
+
+Activate a plan and follow the [Alibaba Token Plan documentation](https://www.alibabacloud.com/help/en/model-studio/token-plan-overview).
+Create the key in the same international or China region you select in Roomote.
+
+## Configuration
+
+Add **Alibaba Token Plan** in **Settings > Models**, paste the plan key, and
+select its region. Environment-variable configuration uses:
+
+```sh
+ALIBABA_TOKEN_PLAN_API_KEY=...
+ALIBABA_TOKEN_PLAN_REGION=global # or china
+```
+
+Models use the `alibaba-token-plan/` prefix.
+
+## Verify setup
+
+1. save the Token Plan key and matching region
+2. confirm Alibaba Token Plan models appear in **Settings > Models**
+3. enable an `alibaba-token-plan/...` model and assign it to a role
+4. run a small task and confirm usage in the matching plan console
+
+## Common issues
+
+- **The key is rejected.** Confirm it is a Token Plan key and that the selected
+  region matches.
+- **The plan allowance is exhausted.** Wait for its reset or switch the role to
+  a separately billed provider.

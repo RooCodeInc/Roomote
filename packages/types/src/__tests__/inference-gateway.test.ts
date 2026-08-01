@@ -56,6 +56,61 @@ describe('inference gateway URL builders', () => {
 
   it.each([
     [
+      'alibaba',
+      'DASHSCOPE_API_KEY',
+      'ALIBABA_REGION',
+      'https://dashscope-intl.aliyuncs.com/compatible-mode',
+      'https://dashscope.aliyuncs.com/compatible-mode',
+    ],
+    [
+      'alibaba-coding-plan',
+      'ALIBABA_CODING_PLAN_API_KEY',
+      'ALIBABA_CODING_PLAN_REGION',
+      'https://coding-intl.dashscope.aliyuncs.com',
+      'https://coding.dashscope.aliyuncs.com',
+    ],
+    [
+      'alibaba-token-plan',
+      'ALIBABA_TOKEN_PLAN_API_KEY',
+      'ALIBABA_TOKEN_PLAN_REGION',
+      'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode',
+      'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode',
+    ],
+  ] as const)(
+    'registers %s as a regional OpenAI-compatible provider',
+    (
+      providerId,
+      apiKeyEnvVarName,
+      regionEnvVarName,
+      globalBaseUrl,
+      chinaBaseUrl,
+    ) => {
+      const provider = getInferenceGatewayProvider(providerId);
+      expect(provider).toMatchObject({
+        envVarNames: [apiKeyEnvVarName],
+        authHeader: { name: 'authorization', scheme: 'bearer' },
+        openCodeBaseUrlSuffix: '/v1',
+        region: {
+          envVarName: regionEnvVarName,
+          default: 'global',
+          baseUrls: { global: globalBaseUrl, china: chinaBaseUrl },
+        },
+      });
+      expect(provider?.allowedPaths).toContain('/v1/chat/completions');
+      expect(
+        buildInferenceGatewayOpenCodeBaseUrl(
+          'https://api.example.com/api/inference',
+          provider!,
+        ),
+      ).toBe(`https://api.example.com/api/inference/${providerId}/v1`);
+      expect(
+        getInferenceGatewayProviderByEnvVarName(apiKeyEnvVarName)?.id,
+      ).toBe(providerId);
+    },
+  );
+
+  it.each([
+    [
       'azure',
       'AZURE_API_KEY',
       'AZURE_RESOURCE_NAME',
@@ -247,6 +302,9 @@ describe('inference gateway key lookups', () => {
     );
 
     expect(regionProviders.map((provider) => provider.id)).toEqual([
+      'alibaba',
+      'alibaba-coding-plan',
+      'alibaba-token-plan',
       'zai',
       'zai-coding-plan',
     ]);

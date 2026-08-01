@@ -58,6 +58,40 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it.each([
+    [
+      'alibaba/qwen3.6-plus',
+      'ALIBABA_REGION',
+      'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    ],
+    [
+      'alibaba-coding-plan/qwen3.6-plus',
+      'ALIBABA_CODING_PLAN_REGION',
+      'https://coding.dashscope.aliyuncs.com/v1',
+    ],
+    [
+      'alibaba-token-plan/qwen3.6-plus',
+      'ALIBABA_TOKEN_PLAN_REGION',
+      'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    ],
+  ] as const)(
+    'configures the China endpoint for direct %s calls',
+    (model, regionEnvVarName, baseURL) => {
+      const env = buildOpenCodeCliEnv({
+        R_MODEL: model,
+        [regionEnvVarName]: 'china',
+      });
+      const providerId = model.split('/')[0]!;
+
+      expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toMatchObject({
+        model,
+        provider: {
+          [providerId]: { options: { baseURL } },
+        },
+      });
+    },
+  );
+
   it('applies per-role reasoning options to the model-backed config', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'openrouter/openai/gpt-5.4',

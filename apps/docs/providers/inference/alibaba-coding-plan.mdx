@@ -1,0 +1,40 @@
+---
+title: Alibaba Coding Plan
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/qwen.svg'
+description: Use Qwen models through an Alibaba Coding Plan in the international or China region.
+---
+
+Alibaba Coding Plan provides a plan allowance for coding-focused model access.
+Its keys and endpoints are separate from metered [Model Studio
+API](/providers/inference/alibaba-model-studio) and Token Plan connections.
+
+## Get a Coding Plan key
+
+Activate a plan and follow the [Alibaba Coding Plan documentation](https://www.alibabacloud.com/help/en/model-studio/coding-plan).
+Create the key in the same international or China region you select in Roomote.
+
+## Configuration
+
+Add **Alibaba Coding Plan** in **Settings > Models**, paste the plan key, and
+select its region. Environment-variable configuration uses:
+
+```sh
+ALIBABA_CODING_PLAN_API_KEY=...
+ALIBABA_CODING_PLAN_REGION=global # or china
+```
+
+Models use the `alibaba-coding-plan/` prefix.
+
+## Verify setup
+
+1. save the Coding Plan key and matching region
+2. confirm Alibaba Coding Plan models appear in **Settings > Models**
+3. enable an `alibaba-coding-plan/...` model and assign it to a role
+4. run a small task and confirm usage in the matching plan console
+
+## Common issues
+
+- **The key is rejected.** Confirm it is a Coding Plan key and that the selected
+  region matches.
+- **The plan allowance is exhausted.** Wait for its reset or switch the role to
+  a separately billed provider.

@@ -226,6 +226,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'openai',
         'azure',
         'azure-cognitive-services',
+        'alibaba',
+        'alibaba-coding-plan',
+        'alibaba-token-plan',
         'anthropic',
         'moonshotai',
         'kimi-for-coding',
@@ -972,6 +975,20 @@ describe('getModelProviderEnvKeyCandidates', () => {
 
   it('publishes the flattened default provider env key list', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('AI_GATEWAY_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('DASHSCOPE_API_KEY');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('ALIBABA_REGION');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+      'ALIBABA_CODING_PLAN_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+      'ALIBABA_CODING_PLAN_REGION',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+      'ALIBABA_TOKEN_PLAN_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+      'ALIBABA_TOKEN_PLAN_REGION',
+    );
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('AZURE_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('AZURE_RESOURCE_NAME');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(

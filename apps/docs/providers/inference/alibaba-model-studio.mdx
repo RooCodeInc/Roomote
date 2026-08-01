@@ -1,0 +1,50 @@
+---
+title: Alibaba Cloud Model Studio (Qwen)
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/qwen.svg'
+description: Use Qwen models through the international or China Alibaba Cloud Model Studio API.
+---
+
+Alibaba Cloud Model Studio provides metered API access to Qwen models. Roomote
+supports both the international and China Model Studio endpoints; the key and
+region must match.
+
+## Get an API key
+
+Create an API key in the [Model Studio console](https://modelstudio.console.alibabacloud.com/?tab=globalset#/efm/api_key).
+Keys are region-specific. Coding Plan and Token Plan keys use separate Roomote
+connections.
+
+## Configuration
+
+Add **Alibaba Cloud Model Studio (Qwen)** in **Settings > Models**, paste the API
+key, and select its region. Environment-variable configuration uses:
+
+```sh
+DASHSCOPE_API_KEY=...
+ALIBABA_REGION=global # or china
+```
+
+Models use the `alibaba/` prefix. Roomote recommends Qwen3.6 Plus as a coding
+and multimodal model; you can add other Model Studio model IDs after connecting.
+
+## Cost behavior
+
+Requests draw from the Alibaba Cloud account associated with the key and use
+Model Studio's metered API pricing. Roomote records token usage and estimates
+cost from model metadata; the Model Studio billing console is authoritative.
+
+## Verify setup
+
+1. save `DASHSCOPE_API_KEY` with the matching `ALIBABA_REGION`
+2. confirm Alibaba Cloud Model Studio models appear in **Settings > Models**
+3. enable an `alibaba/...` model and assign it to a role
+4. run a small task and confirm usage appears in the Model Studio console
+
+## Common issues
+
+- **The key is rejected.** Confirm the selected region matches the endpoint
+  where the key was created and that it is not a subscription-plan key.
+- **A model is unavailable.** Confirm the model is enabled in the same Alibaba
+  Cloud region as the API key.
+- **A model lacks a required capability.** Choose a Qwen model that supports the
+  task's tool calling, context, or image-input requirements.

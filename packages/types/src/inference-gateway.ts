@@ -1,4 +1,7 @@
-import type { SetupModelProviderId } from './model-provider-config';
+import {
+  ALIBABA_PROVIDER_REGION_CONFIG,
+  type SetupModelProviderId,
+} from './model-provider-config';
 import {
   getOpenAiCompatibleProviderInstance,
   isOpenAiCompatibleProviderEnvVarName,
@@ -227,6 +230,33 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'alibaba',
+      name: 'Alibaba Cloud Model Studio',
+      envVarNames: ['DASHSCOPE_API_KEY'],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+      region: ALIBABA_PROVIDER_REGION_CONFIG.alibaba,
+    },
+    {
+      id: 'alibaba-coding-plan',
+      name: 'Alibaba Coding Plan',
+      envVarNames: ['ALIBABA_CODING_PLAN_API_KEY'],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+      region: ALIBABA_PROVIDER_REGION_CONFIG['alibaba-coding-plan'],
+    },
+    {
+      id: 'alibaba-token-plan',
+      name: 'Alibaba Token Plan',
+      envVarNames: ['ALIBABA_TOKEN_PLAN_API_KEY'],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+      region: ALIBABA_PROVIDER_REGION_CONFIG['alibaba-token-plan'],
     },
     {
       id: 'anthropic',

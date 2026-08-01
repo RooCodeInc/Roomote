@@ -125,6 +125,9 @@ describe('inference gateway', () => {
         // Region lookups resolve separately from API keys.
         if (
           nameList.includes('AWS_REGION') ||
+          nameList.includes('ALIBABA_REGION') ||
+          nameList.includes('ALIBABA_CODING_PLAN_REGION') ||
+          nameList.includes('ALIBABA_TOKEN_PLAN_REGION') ||
           nameList.includes('ZAI_REGION') ||
           nameList.includes('ZAI_CODING_PLAN_REGION')
         ) {
@@ -232,6 +235,18 @@ describe('inference gateway', () => {
     const app = createApp(createRunToken());
 
     const cases: Array<[string, string]> = [
+      [
+        'alibaba',
+        'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions',
+      ],
+      [
+        'alibaba-coding-plan',
+        'https://coding-intl.dashscope.aliyuncs.com/v1/chat/completions',
+      ],
+      [
+        'alibaba-token-plan',
+        'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/chat/completions',
+      ],
       ['requesty', 'https://router.requesty.ai/v1/chat/completions'],
       ['baseten', 'https://inference.baseten.co/v1/chat/completions'],
       ['togetherai', 'https://api.together.xyz/v1/chat/completions'],
@@ -256,6 +271,50 @@ describe('inference gateway', () => {
       expect(new Headers(init.headers).get('authorization')).toBe(
         'Bearer provider-secret-key',
       );
+    }
+  });
+
+  it('proxies Alibaba providers to their China endpoints when selected', async () => {
+    const cases = [
+      {
+        providerId: 'alibaba',
+        regionEnvVarName: 'ALIBABA_REGION',
+        expectedUrl:
+          'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+      },
+      {
+        providerId: 'alibaba-coding-plan',
+        regionEnvVarName: 'ALIBABA_CODING_PLAN_REGION',
+        expectedUrl:
+          'https://coding.dashscope.aliyuncs.com/v1/chat/completions',
+      },
+      {
+        providerId: 'alibaba-token-plan',
+        regionEnvVarName: 'ALIBABA_TOKEN_PLAN_REGION',
+        expectedUrl:
+          'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions',
+      },
+    ];
+
+    for (const { providerId, regionEnvVarName, expectedUrl } of cases) {
+      mockResolveModelProviderEnvValue.mockImplementation(
+        async (names: string | readonly string[]) => {
+          const nameList = typeof names === 'string' ? [names] : names;
+          return nameList.includes(regionEnvVarName)
+            ? 'china'
+            : 'provider-secret-key';
+        },
+      );
+      const fetchMock = stubUpstreamFetch();
+
+      const response = await postMessages(
+        createApp(createRunToken()),
+        `/api/inference/${providerId}/v1/chat/completions`,
+      );
+
+      expect(response.status).toBe(200);
+      const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(expectedUrl);
     }
   });
 

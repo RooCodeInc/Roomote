@@ -50,6 +50,9 @@ const COMPUTE_PROVIDER_DOC_PATHS: Record<string, string> = {
 const MODEL_PROVIDER_DOC_PATHS: Partial<
   Record<BuiltinSetupModelProviderId, string>
 > = {
+  alibaba: 'providers/inference/alibaba-model-studio',
+  'alibaba-coding-plan': 'providers/inference/alibaba-coding-plan',
+  'alibaba-token-plan': 'providers/inference/alibaba-token-plan',
   'amazon-bedrock': 'providers/inference/amazon-bedrock',
   anthropic: 'providers/inference/anthropic',
   azure: 'providers/inference/azure-openai',

@@ -7,6 +7,7 @@ import {
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   isTaskModelIdDisabled,
+  mergeAlibabaOpenCodeProviderOptions,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
@@ -86,9 +87,10 @@ function buildModelBackedOpenCodeConfigContent(
           smallModel,
         ])
       : providerReasoningConfig;
-  const providerConfig = mergeOpenRouterVariantAliasModels(
-    providerModelConfig,
-    variantAliases,
+  const providerConfig = mergeAlibabaOpenCodeProviderOptions(
+    mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
+    [model, smallModel],
+    env,
   );
 
   return JSON.stringify({
