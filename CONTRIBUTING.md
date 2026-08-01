@@ -48,6 +48,16 @@ pnpm changeset
 Any `@roomote/*` package selection is equivalent — only the bump level is read.
 See [`.changeset/README.md`](.changeset/README.md).
 
+### Test a pull request from GHCR
+
+A repository owner, member, or collaborator can comment `/publish-images` on
+an open pull request to publish preview builds of `roomote-app` and
+`roomote-worker`. The workflow replies with immutable `pr-<number>-<short-sha>`
+image references and updates the movable `pr-<number>` tags. This works for
+fork pull requests: PR-controlled code runs in an unprivileged build job, while
+a separate publisher job receives only the completed image artifacts and the
+package-write token. PR preview images currently target `linux/amd64`.
+
 ### How a release ships
 
 1. Merge work to `develop` (squash), adding changesets for user-visible changes

@@ -1,0 +1,218 @@
+name: Publish PR Images
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: publish-pr-images-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve PR build metadata
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.body == '/publish-images' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      owner: ${{ steps.pr.outputs.owner }}
+      sha: ${{ steps.pr.outputs.sha }}
+      version: ${{ steps.pr.outputs.version }}
+    steps:
+      - name: Resolve PR head
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          sha="$(jq -r '.head.sha' <<<"$pr")"
+          state="$(jq -r '.state' <<<"$pr")"
+          [ "$state" = 'open' ] || {
+            echo "Pull request #${PR_NUMBER} is not open." >&2
+            exit 1
+          }
+          case "$sha" in
+            '' | *[!0-9a-f]*)
+              echo "Invalid pull request head SHA: $sha" >&2
+              exit 1
+              ;;
+          esac
+          [ "${#sha}" -eq 40 ] || {
+            echo "Invalid pull request head SHA length: $sha" >&2
+            exit 1
+          }
+
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=pr-${PR_NUMBER}-${sha:0:8}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.app }} (amd64)
+    needs: prepare
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: app
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-app
+            image: roomote-app
+          - app: worker
+            dockerfile: apps/worker/Dockerfile
+            target: runtime
+            image: roomote-worker
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      - name: Read product version
+        id: product
+        shell: bash
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker builder
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+
+      # This job executes PR-controlled Dockerfiles without any package-write
+      # token. The privileged publisher below only imports the finished image.
+      - name: Build ${{ matrix.app }} image
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          tags: local/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
+          outputs: type=docker,dest=/tmp/${{ matrix.image }}.tar
+          build-args: |
+            R_APP_ENV=preview
+            RELEASE_VERSION=${{ needs.prepare.outputs.version }}
+            RELEASE_PRODUCT_VERSION=${{ steps.product.outputs.version }}
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-image-${{ matrix.app }}
+          path: /tmp/${{ matrix.image }}.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish PR images
+    needs: [prepare, build]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: read
+    outputs:
+      mutable_updated: ${{ steps.images.outputs.mutable_updated }}
+    steps:
+      - name: Download image artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: pr-image-*
+          path: /tmp/images
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Import and publish images
+        id: images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ needs.prepare.outputs.owner }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mutable_version="pr-${PR_NUMBER}"
+          echo 'mutable_updated=false' >> "$GITHUB_OUTPUT"
+
+          for image in roomote-app roomote-worker; do
+            docker load --input "/tmp/images/${image}.tar"
+            local_ref="local/${image}:${VERSION}"
+            immutable_ref="ghcr.io/${OWNER}/${image}:${VERSION}"
+            docker tag "$local_ref" "$immutable_ref"
+            docker push "$immutable_ref"
+          done
+
+          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          if [ "$current_sha" != "$SHA" ]; then
+            echo "PR advanced to $current_sha; leaving movable tags unchanged."
+            exit 0
+          fi
+
+          for image in roomote-app roomote-worker; do
+            immutable_ref="ghcr.io/${OWNER}/${image}:${VERSION}"
+            mutable_ref="ghcr.io/${OWNER}/${image}:${mutable_version}"
+            docker tag "$immutable_ref" "$mutable_ref"
+            docker push "$mutable_ref"
+          done
+          echo 'mutable_updated=true' >> "$GITHUB_OUTPUT"
+
+  comment:
+    name: Comment PR image references
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post published image references
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ needs.prepare.outputs.owner }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          MUTABLE_UPDATED: ${{ needs.publish.outputs.mutable_updated }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mutable_version="pr-${PR_NUMBER}"
+          if [ "$MUTABLE_UPDATED" = 'true' ]; then
+            mutable_note="$(cat <<EOF
+          Movable references:
+
+          - \`ghcr.io/${OWNER}/roomote-app:${mutable_version}\`
+          - \`ghcr.io/${OWNER}/roomote-worker:${mutable_version}\`
+
+          Re-run with \`/publish-images\` after new commits to refresh them.
+          EOF
+          )"
+          else
+            mutable_note="The PR advanced during the build, so the movable references were left unchanged. Re-run \`/publish-images\` to refresh them."
+          fi
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$(cat <<EOF
+          Published amd64 GHCR images for this PR:
+
+          - \`ghcr.io/${OWNER}/roomote-app:${VERSION}\`
+          - \`ghcr.io/${OWNER}/roomote-worker:${VERSION}\`
+
+          ${mutable_note}
+          EOF
+          )"

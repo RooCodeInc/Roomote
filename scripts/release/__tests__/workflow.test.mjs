@@ -36,8 +36,14 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
     2,
   );
   assert.doesNotMatch(promoteScript, /git fetch origin main/);
-  assert.match(promoteScript, /the candidate reached main while this refresh was running/);
-  assert.match(promoteScript, /the Promote PR closed while this refresh was running/);
+  assert.match(
+    promoteScript,
+    /the candidate reached main while this refresh was running/,
+  );
+  assert.match(
+    promoteScript,
+    /the Promote PR closed while this refresh was running/,
+  );
   assert.match(promoteScript, /release_sha="\$bump_sha"/);
   assert.match(
     promoteScript,
@@ -70,4 +76,61 @@ test('GHCR release workflow announces only newly created releases in Discord', (
   );
   assert.match(announceRelease.run, /build-discord-release-payload\.mjs/);
   assert.match(announceRelease.run, /--retry-all-errors/);
+});
+
+test('GHCR workflow publishes explicitly requested pull request images safely', () => {
+  const workflow = YAML.parse(
+    readFileSync(
+      join(repoRoot, '.github/workflows/publish-pr-images.yml'),
+      'utf8',
+    ),
+  );
+
+  assert.deepEqual(workflow.on.issue_comment.types, ['created']);
+  assert.match(workflow.jobs.prepare.if, /\/publish-images/);
+  assert.match(workflow.jobs.prepare.if, /state == 'open'/);
+  assert.match(workflow.jobs.prepare.if, /OWNER/);
+  assert.match(workflow.jobs.prepare.if, /MEMBER/);
+  assert.match(workflow.jobs.prepare.if, /COLLABORATOR/);
+
+  const build = workflow.jobs.build;
+  assert.equal(build.permissions.packages, undefined);
+  const buildCheckout = build.steps.find(
+    (step) => step.name === 'Checkout PR head',
+  );
+  assert.equal(buildCheckout.with.ref, '${{ needs.prepare.outputs.sha }}');
+  assert.equal(buildCheckout.with['persist-credentials'], false);
+
+  const buildImage = build.steps.find((step) => step.name.startsWith('Build '));
+  assert.match(buildImage.with.outputs, /type=docker/);
+  assert.equal(buildImage.with.push, undefined);
+
+  const publisher = workflow.jobs.publish;
+  assert.equal(publisher.permissions.packages, 'write');
+  assert.equal(
+    publisher.steps.some(
+      (step) =>
+        step.uses?.startsWith('actions/checkout') ||
+        step.uses?.startsWith('./'),
+    ),
+    false,
+  );
+  const publishScript = publisher.steps.find(
+    (step) => step.name === 'Import and publish images',
+  ).run;
+  assert.match(publishScript, /docker load/);
+  assert.match(publishScript, /current_sha/);
+  assert.match(publishScript, /roomote-app roomote-worker/);
+  assert.equal(
+    publisher.outputs.mutable_updated,
+    '${{ steps.images.outputs.mutable_updated }}',
+  );
+
+  const commentJob = workflow.jobs.comment;
+  assert.deepEqual(commentJob.needs, ['prepare', 'publish']);
+  assert.equal(commentJob.permissions['pull-requests'], 'write');
+  assert.match(commentJob.steps[0].run, /roomote-app/);
+  assert.match(commentJob.steps[0].run, /roomote-worker/);
+  assert.match(commentJob.steps[0].run, /Movable references/);
+  assert.match(commentJob.steps[0].run, /MUTABLE_UPDATED/);
 });
