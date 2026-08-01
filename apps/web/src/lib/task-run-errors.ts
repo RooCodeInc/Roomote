@@ -22,6 +22,8 @@ const DOCKER_DAEMON_UNAVAILABLE =
   /Cannot connect to the Docker daemon|failed to connect to the [Dd]ocker API|Is the docker daemon running|connect: no such file or directory.*docker\.sock/i;
 const DOCKER_IMAGE_MISSING_OR_UNAUTHORIZED =
   /pull access denied|repository does not exist or may require ['"]?docker login['"]?|manifest for .+ not found|Unable to find image ['"].+['"] locally/i;
+const DOCKER_ADDRESS_POOL_EXHAUSTED =
+  /all predefined address pools have been fully subnetted/i;
 const DOCKER_PORT_IN_USE =
   /port is already allocated|bind: address already in use|failed to bind host port/i;
 const DOCKER_WORKER_START_TIMEOUT =
@@ -97,6 +99,8 @@ const DOCKER_ERROR_CODE_MESSAGES: Record<TaskRunErrorCode, string> = {
     "Roomote couldn't reach the Docker daemon. Make sure Docker Desktop (or the Docker Engine) is running and that this host can access the Docker socket.",
   [TaskRunErrorCode.DockerImageMissing]:
     "Roomote couldn't find or pull the worker image. For local/self-hosted setups, build the worker image first (for example `roomote-worker:local`) and confirm the image name matches your configuration.",
+  [TaskRunErrorCode.DockerAddressPoolExhausted]:
+    "Roomote couldn't create a task network because Docker's address pools are exhausted. Remove unused Roomote task networks and retry. On Docker Desktop, restart Docker if address space is not released; for recurring failures, configure a larger non-overlapping `default-address-pools` range.",
   [TaskRunErrorCode.DockerPortInUse]:
     "Roomote couldn't start the sandbox because a required host port is already in use. Stop the other process using that port, then retry.",
   [TaskRunErrorCode.DockerWorkerFetchFailed]:
@@ -129,6 +133,12 @@ function getDockerSpawnDisplayMessage(error: string): string | undefined {
 
   if (DOCKER_IMAGE_MISSING_OR_UNAUTHORIZED.test(error)) {
     return DOCKER_ERROR_CODE_MESSAGES[TaskRunErrorCode.DockerImageMissing];
+  }
+
+  if (DOCKER_ADDRESS_POOL_EXHAUSTED.test(error)) {
+    return DOCKER_ERROR_CODE_MESSAGES[
+      TaskRunErrorCode.DockerAddressPoolExhausted
+    ];
   }
 
   if (DOCKER_PORT_IN_USE.test(error)) {

@@ -450,6 +450,39 @@ describe('restoreDockerStandbyNetworking', () => {
 });
 
 describe('cleanupStaleDockerSandboxes', () => {
+  it('removes an old orphan network after disconnecting trusted peers', async () => {
+    const taskNetwork = getDockerTaskNetworkName(92);
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (args[0] === 'network' && args[1] === 'ls') {
+        return `${taskNetwork}\n`;
+      }
+      if (args[0] === 'network' && args[1] === 'inspect') {
+        return JSON.stringify([
+          {
+            Labels: {
+              'dev.roomote.sandbox.container': 'roomote-worker-92',
+              'dev.roomote.sandbox.auto-remove': 'true',
+              'dev.roomote.task-run-id': '92',
+              'dev.roomote.sandbox.created-at-ms': '1000',
+            },
+            Containers: { api123: { Name: 'roomote-api' } },
+          },
+        ]);
+      }
+      return '';
+    });
+
+    await cleanupStaleDockerSandboxes({ nowMs: 20 * 60 * 1_000 }, runDocker);
+
+    expect(runDocker).toHaveBeenCalledWith(
+      ['network', 'disconnect', '-f', taskNetwork, 'api123'],
+      { allowFailure: true },
+    );
+    expect(runDocker).toHaveBeenCalledWith(['network', 'rm', taskNetwork], {
+      allowFailure: true,
+    });
+  });
+
   it('removes a stopped auto-remove container and disconnects trusted peers after a controller restart', async () => {
     const taskNetwork = getDockerTaskNetworkName(93);
     const networkInspect = JSON.stringify([
@@ -852,6 +885,11 @@ describe('classifyDockerSpawnError', () => {
         'Docker worker release archive does not exist: /releases/worker.tar.gz',
       ),
     ).toBe(TaskRunErrorCode.DockerReleaseArchiveMissing);
+    expect(
+      classifyDockerSpawnError(
+        'Error response from daemon: all predefined address pools have been fully subnetted',
+      ),
+    ).toBe(TaskRunErrorCode.DockerAddressPoolExhausted);
   });
 
   it('returns undefined for failures with no mapped category', () => {
