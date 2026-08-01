@@ -10,6 +10,11 @@
  *                                     (initiatorKind 'user' + actorExternalId)
  */
 
+import {
+  LINEAR_AGENT_ACTOR_ID,
+  normalizeExternalActorId,
+} from '@roomote/types';
+
 const AUTOMATION_CREATOR_FILTER_PREFIX = 'automation:';
 const EXTERNAL_CREATOR_FILTER_PREFIX = 'external:';
 
@@ -25,6 +30,9 @@ type ParsedCreatorFilterValue =
   | {
       kind: 'external';
       externalId: string;
+    }
+  | {
+      kind: 'linearAgent';
     };
 
 export function buildCreatorFilterValue(input: {
@@ -43,10 +51,10 @@ export function buildCreatorFilterValue(input: {
     return input.initiatorUserId;
   }
 
-  if (input.actorExternalId) {
-    return `${EXTERNAL_CREATOR_FILTER_PREFIX}${encodeURIComponent(
-      input.actorExternalId,
-    )}`;
+  const externalId = normalizeExternalActorId(input.actorExternalId);
+
+  if (externalId) {
+    return `${EXTERNAL_CREATOR_FILTER_PREFIX}${encodeURIComponent(externalId)}`;
   }
 
   return null;
@@ -75,6 +83,10 @@ export function parseCreatorFilterValue(
     }
 
     if (externalId) {
+      if (externalId === LINEAR_AGENT_ACTOR_ID) {
+        return { kind: 'linearAgent' };
+      }
+
       return { kind: 'external', externalId };
     }
   }

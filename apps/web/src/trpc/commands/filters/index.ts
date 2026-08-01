@@ -18,6 +18,7 @@ import {
 
 import {
   ALL_REPOSITORIES,
+  formatExternalActorLabel,
   type TaskSurface,
   getTaskModelDisplayName,
 } from '@roomote/types';
@@ -123,7 +124,7 @@ export async function getUsersOnlyForFilterCommand(
     } else {
       optionsByValue.set(value, {
         value,
-        label: row.actorDisplayName ?? row.actorExternalId ?? '',
+        label: formatExternalActorLabel(row) ?? '',
         subLabel: getSurfaceSubLabel(row.surface),
       });
     }
