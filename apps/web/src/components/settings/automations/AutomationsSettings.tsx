@@ -2646,30 +2646,6 @@ export function AutomationsSettings() {
   return (
     <div className="space-y-4">
       {!settingsQuery.isPending &&
-      capabilities &&
-      !capabilities.slackConnected ? (
-        <Alert>
-          <AlertDescription>
-            <div className="flex items-center gap-3">
-              <AlertCircle className="size-4" />
-              <span>
-                You need to connect Slack for automations that post updates into
-                channels.
-              </span>
-              <Button
-                size="sm"
-                onClick={() => connectSlack.mutate()}
-                disabled={connectSlack.isPending}
-              >
-                <Slack />
-                {connectSlack.isPending ? 'Connecting...' : 'Connect Slack'}
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {!settingsQuery.isPending &&
       capabilities?.requiresSlackReconnect &&
       capabilities.missingScopes.length > 0 ? (
         <Alert>
