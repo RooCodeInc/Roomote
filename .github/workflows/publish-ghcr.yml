@@ -456,31 +456,11 @@ jobs:
 
           echo "Announced GitHub Release $VERSION in Discord"
 
-  notify-ops:
-    name: Notify ops repository
-    runs-on: ubuntu-latest
-    needs: publish
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.ROOMOTE_OPS_REPO != '' }}
-    permissions:
-      contents: read
-    steps:
-      - name: Send repository dispatch
-        env:
-          GH_TOKEN: ${{ secrets.ROOMOTE_OPS_DISPATCH_TOKEN }}
-          OPS_REPO: ${{ vars.ROOMOTE_OPS_REPO }}
-        run: |
-          set -euo pipefail
-          : "${GH_TOKEN:?ROOMOTE_OPS_DISPATCH_TOKEN is required}"
-          event_type=roomote-main-build
-          image_tag="main-${GITHUB_SHA:0:8}"
-          gh api "repos/${OPS_REPO}/dispatches" \
-            -f "event_type=${event_type}" \
-            -f "client_payload[image_tag]=${image_tag}" \
-            -f "client_payload[sha]=${GITHUB_SHA}" \
-            -f "client_payload[ref]=${GITHUB_REF}"
-
-  # Keep staging Cloud delivery independent from the existing Roomote-Ops
-  # production path. This job only follows successful develop image publishes.
+  # This job only follows successful develop image publishes. (The old
+  # notify-ops job that dispatched hand-built fleet deploys to Roomote-Ops
+  # was removed 2026-08-01 with that repo's retirement: every tenant is
+  # Cloud-managed, and the dispatch had been redeploying quiesced legacy
+  # projects on every main build.)
   notify-staging-cloud:
     name: Notify staging Cloud
     runs-on: ubuntu-latest
