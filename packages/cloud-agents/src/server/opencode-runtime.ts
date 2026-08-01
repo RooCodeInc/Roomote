@@ -3,11 +3,9 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 
 import {
-  applyImplicitLiteLlmModelPrefix,
   collectOpenRouterVariantModelAlias,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
-  isConfiguredEnvValue,
   isTaskModelIdDisabled,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
@@ -37,11 +35,7 @@ const OPENCODE_SDK_SERVER_READY_FETCH_TIMEOUT_MS = 1_000;
 function buildModelBackedOpenCodeConfigContent(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  const isLiteLlmConfigured = isConfiguredEnvValue(env.LITELLM_BASE_URL);
-  const rawModel = applyImplicitLiteLlmModelPrefix(
-    env.R_MODEL?.trim() ?? '',
-    isLiteLlmConfigured,
-  );
+  const rawModel = env.R_MODEL?.trim();
 
   if (!rawModel || isTaskModelIdDisabled(rawModel)) {
     return undefined;
@@ -53,10 +47,7 @@ function buildModelBackedOpenCodeConfigContent(
   // contain.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
   const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
-  const configuredSmallModel = env.R_SMALL_MODEL?.trim();
-  const rawSmallModel = configuredSmallModel
-    ? applyImplicitLiteLlmModelPrefix(configuredSmallModel, isLiteLlmConfigured)
-    : undefined;
+  const rawSmallModel = env.R_SMALL_MODEL?.trim();
   const smallModel =
     rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
       ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)

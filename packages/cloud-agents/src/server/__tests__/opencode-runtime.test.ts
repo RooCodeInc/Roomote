@@ -62,8 +62,8 @@ describe('buildOpenCodeCliEnv', () => {
 
   it('materializes LiteLLM provider config for restricted helper inference', () => {
     const env = buildOpenCodeCliEnv({
-      R_MODEL: 'qwen3.6:35b-unsloth',
-      R_SMALL_MODEL: 'coding',
+      R_MODEL: 'litellm/qwen3.6:35b-unsloth',
+      R_SMALL_MODEL: 'litellm/coding',
       LITELLM_BASE_URL: 'https://litellm.example.com/v1',
       LITELLM_API_KEY: 'secret',
     });
@@ -85,6 +85,20 @@ describe('buildOpenCodeCliEnv', () => {
           },
         },
       },
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+    });
+  });
+
+  it('does not infer model ownership from LiteLLM endpoint availability', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'qwen3.6:35b-unsloth',
+      LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+      LITELLM_API_KEY: 'secret',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'qwen3.6:35b-unsloth',
+      small_model: 'qwen3.6:35b-unsloth',
       permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
