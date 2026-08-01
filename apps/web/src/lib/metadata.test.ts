@@ -30,7 +30,7 @@ describe('PAGE_METADATA', () => {
     expect(PAGE_METADATA.settings.title).toBe('Roomote Settings');
     expect(PAGE_METADATA.taskHistory.title).toBe('Roomote Task History');
     expect(PAGE_METADATA.logIn.title).toBe('Roomote Log In');
-    expect(PAGE_METADATA.signUp.title).toBe('Roomote Sign up');
+    expect(PAGE_METADATA.invite.title).toBe('Roomote Invitation');
     expect(PAGE_METADATA.setup.title).toBe('Roomote Setup');
     expect(PAGE_METADATA.onboarding.title).toBe('Roomote Onboarding');
 
@@ -41,19 +41,23 @@ describe('PAGE_METADATA', () => {
     }
   });
 
-  it('keeps login and signup titles distinct and static', () => {
-    expect(PAGE_METADATA.logIn.title).not.toEqual(PAGE_METADATA.signUp.title);
+  it('keeps login and invite titles distinct and static', () => {
+    expect(PAGE_METADATA.logIn.title).not.toEqual(PAGE_METADATA.invite.title);
     expect(PAGE_METADATA.logIn.description).not.toContain('task');
-    expect(PAGE_METADATA.signUp.description).not.toContain('task');
+    expect(PAGE_METADATA.invite.description).not.toContain('task');
   });
 });
 
-describe('sign-in metadata eligibility', () => {
-  it('documents that sign-up titles require form eligibility plus invite', () => {
-    // Contract reminder for page generateMetadata: invited alone is not enough.
-    // Keep the static strings available; route wiring gates them with
-    // canVisitorSignUp() && invited.
-    expect(PAGE_METADATA.signUp.title).toBe('Roomote Sign up');
+describe('invite metadata', () => {
+  it('clearly identifies invite links without exposing invite details', () => {
+    expect(PAGE_METADATA.invite.title).toBe('Roomote Invitation');
+    expect(PAGE_METADATA.invite.description).toBe(
+      "You've been invited to join this Roomote deployment.",
+    );
+    expect(PAGE_METADATA.invite.openGraph).toEqual({
+      title: 'Roomote Invitation',
+      description: "You've been invited to join this Roomote deployment.",
+    });
     expect(PAGE_METADATA.logIn.title).toBe('Roomote Log In');
   });
 });

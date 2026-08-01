@@ -27,14 +27,8 @@ export async function generateMetadata(props: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }): Promise<Metadata> {
   const searchParams = await props.searchParams;
-  // Bootstrap web runtime env the same way the page does before asking
-  // whether this visitor is allowed to create an account.
-  await getConfiguredAuthProviders();
-  const canSignUp = await canVisitorSignUp();
-  // Match auth-form defaultMode: sign-up only when the form can show it
-  // and the visitor arrived with a non-empty `invited` query.
-  return canSignUp && hasInvitedParam(searchParams.invited)
-    ? PAGE_METADATA.signUp
+  return hasInvitedParam(searchParams.invited)
+    ? PAGE_METADATA.invite
     : PAGE_METADATA.logIn;
 }
 
