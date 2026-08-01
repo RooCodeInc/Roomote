@@ -509,8 +509,9 @@ export function supersedeProductVersion(repoRoot, level, options = {}) {
   }
 
   const previous = readCurrentProductVersion(repoRoot);
-  const next = computeNextVersion(previous, [level]);
   const pending = parsePendingChangesets(repoRoot);
+  const pendingLevels = pending.flatMap((entry) => Object.values(entry.bumps));
+  const next = computeNextVersion(previous, [level, ...pendingLevels]);
   const changelogPath = join(repoRoot, 'CHANGELOG.md');
   if (!existsSync(changelogPath)) {
     throw new Error('Cannot supersede a release without CHANGELOG.md');
