@@ -3,10 +3,13 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 
 import {
+  applyImplicitLiteLlmModelPrefix,
   collectOpenRouterVariantModelAlias,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  isConfiguredEnvValue,
   isTaskModelIdDisabled,
+  mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
@@ -34,7 +37,11 @@ const OPENCODE_SDK_SERVER_READY_FETCH_TIMEOUT_MS = 1_000;
 function buildModelBackedOpenCodeConfigContent(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  const rawModel = env.R_MODEL?.trim();
+  const isLiteLlmConfigured = isConfiguredEnvValue(env.LITELLM_BASE_URL);
+  const rawModel = applyImplicitLiteLlmModelPrefix(
+    env.R_MODEL?.trim() ?? '',
+    isLiteLlmConfigured,
+  );
 
   if (!rawModel || isTaskModelIdDisabled(rawModel)) {
     return undefined;
@@ -46,7 +53,10 @@ function buildModelBackedOpenCodeConfigContent(
   // contain.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
   const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
-  const rawSmallModel = env.R_SMALL_MODEL?.trim();
+  const configuredSmallModel = env.R_SMALL_MODEL?.trim();
+  const rawSmallModel = configuredSmallModel
+    ? applyImplicitLiteLlmModelPrefix(configuredSmallModel, isLiteLlmConfigured)
+    : undefined;
   const smallModel =
     rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
       ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
@@ -86,9 +96,10 @@ function buildModelBackedOpenCodeConfigContent(
           smallModel,
         ])
       : providerReasoningConfig;
-  const providerConfig = mergeOpenRouterVariantAliasModels(
-    providerModelConfig,
-    variantAliases,
+  const providerConfig = mergeOpenAiCompatibleProviderConfig(
+    mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
+    env,
+    [model, smallModel],
   );
 
   return JSON.stringify({

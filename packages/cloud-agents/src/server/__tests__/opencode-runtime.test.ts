@@ -20,6 +20,8 @@ describe('buildOpenCodeCliEnv', () => {
     'R_MODEL_REASONING_EFFORT',
     'R_SMALL_MODEL_REASONING_EFFORT',
     'R_CHATGPT_FAST_MODE',
+    'LITELLM_BASE_URL',
+    'LITELLM_API_KEY',
     'GOOGLE_APPLICATION_CREDENTIALS',
     'MISTRAL_API_KEY',
     'BASH_ENV',
@@ -54,6 +56,35 @@ describe('buildOpenCodeCliEnv', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/openai/gpt-5.4',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+    });
+  });
+
+  it('materializes LiteLLM provider config for restricted helper inference', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'qwen3.6:35b-unsloth',
+      R_SMALL_MODEL: 'coding',
+      LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+      LITELLM_API_KEY: 'secret',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'litellm/qwen3.6:35b-unsloth',
+      small_model: 'litellm/coding',
+      provider: {
+        litellm: {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'LiteLLM',
+          options: {
+            baseURL: 'https://litellm.example.com/v1',
+            apiKey: '{env:LITELLM_API_KEY}',
+          },
+          models: {
+            'qwen3.6:35b-unsloth': { name: 'qwen3.6:35b-unsloth' },
+            coding: { name: 'coding' },
+          },
+        },
+      },
       permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
