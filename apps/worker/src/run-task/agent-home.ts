@@ -6,7 +6,6 @@ import {
   BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
-  buildOpenAiCompatibleProviderInstance,
   buildOpenCodeModelReasoningOptions,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_GATEWAY_PROVIDER_ID,
@@ -17,7 +16,7 @@ import {
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
   getMcpIntegration,
-  getOpenAiCompatibleProviderInstance,
+  getOpenAiCompatibleRuntimeConfigs,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
@@ -27,15 +26,12 @@ import {
   XAI_OPENCODE_PROVIDER_ID,
   type InferenceGatewayProvider,
   isConfiguredEnvValue,
-  isOpenAiCompatibleProviderId,
   isTaskModelIdDisabled,
-  listOpenAiCompatibleProviderInstancesFromEnvNames,
+  mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
-  OPENAI_COMPATIBLE_PROVIDER_ID,
-  type OpenAiCompatibleProviderInstance,
   parseInferenceGatewayKeys,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
@@ -86,152 +82,6 @@ const AZURE_COGNITIVE_SERVICES_PROVIDER_ID = 'azure-cognitive-services';
 
 const AZURE_COGNITIVE_SERVICES_API_KEY_ENV_VAR_NAME =
   'AZURE_COGNITIVE_SERVICES_API_KEY';
-
-/** Fallback direct-mode base URL for default and named OpenAI-compatible ids. */
-const OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL = 'http://127.0.0.1:4000/v1';
-
-const DEFAULT_OPENAI_COMPATIBLE_INSTANCE =
-  buildOpenAiCompatibleProviderInstance(null);
-
-/**
- * Static OpenAI-compatible-style endpoint providers. Catalog entry names and
- * env vars for the built-in `openai-compatible` id come from `@roomote/types`;
- * ollama/vllm/litellm stay local here. Named `openai-compatible-<slug>`
- * connections are discovered dynamically via the shared helpers.
- */
-const STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
-  [OPENAI_COMPATIBLE_PROVIDER_ID]: {
-    name: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.label,
-    baseUrlEnvVarName: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.baseUrlEnvVarName,
-    fallbackBaseUrl: OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL,
-    apiKeyEnvVarName: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.apiKeyEnvVarName as
-      | string
-      | undefined,
-    keyless: false,
-    // Arbitrary endpoints must not inherit OPENAI_* credentials. When the
-    // optional dedicated key is blank, omit the API key entirely so keyless
-    // servers that reject bearer auth match setup qualification behavior.
-    allowOpenAiEnvFallback: false,
-  },
-  ollama: {
-    name: 'Ollama',
-    baseUrlEnvVarName: 'OLLAMA_BASE_URL',
-    fallbackBaseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnvVarName: undefined as string | undefined,
-    keyless: true,
-    allowOpenAiEnvFallback: false,
-  },
-  vllm: {
-    name: 'vLLM',
-    baseUrlEnvVarName: 'VLLM_BASE_URL',
-    fallbackBaseUrl: 'http://127.0.0.1:8000/v1',
-    apiKeyEnvVarName: 'VLLM_API_KEY' as string | undefined,
-    keyless: false,
-    allowOpenAiEnvFallback: true,
-  },
-  litellm: {
-    name: 'LiteLLM',
-    baseUrlEnvVarName: 'LITELLM_BASE_URL',
-    fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
-    apiKeyEnvVarName: 'LITELLM_API_KEY' as string | undefined,
-    keyless: false,
-    allowOpenAiEnvFallback: true,
-  },
-} as const;
-
-type StaticOpenAiCompatibleProviderId =
-  keyof typeof STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS;
-
-type OpenAiCompatibleProviderRuntimeConfig = {
-  name: string;
-  baseUrlEnvVarName: string;
-  fallbackBaseUrl: string;
-  apiKeyEnvVarName: string | undefined;
-  keyless: boolean;
-  allowOpenAiEnvFallback: boolean;
-};
-
-function toNamedOpenAiCompatibleRuntimeConfig(
-  instance: OpenAiCompatibleProviderInstance,
-): OpenAiCompatibleProviderRuntimeConfig {
-  return {
-    name: instance.label,
-    baseUrlEnvVarName: instance.baseUrlEnvVarName,
-    fallbackBaseUrl: OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL,
-    apiKeyEnvVarName: instance.apiKeyEnvVarName,
-    keyless: false,
-    allowOpenAiEnvFallback: false,
-  };
-}
-
-function resolveNamedOpenAiCompatibleInstance(
-  providerId: string,
-  runtimeEnv: Record<string, string>,
-): OpenAiCompatibleProviderInstance | null {
-  const instance = getOpenAiCompatibleProviderInstance(providerId);
-  if (!instance?.slug) {
-    return null;
-  }
-
-  if (!instance.labelEnvVarName) {
-    return instance;
-  }
-
-  const label = runtimeEnv[instance.labelEnvVarName]?.trim();
-  if (!label) {
-    return instance;
-  }
-
-  return getOpenAiCompatibleProviderInstance(providerId, { label }) ?? instance;
-}
-
-function getOpenAiCompatibleRuntimeConfigs(
-  modelIds: Array<string | undefined>,
-  runtimeEnv: Record<string, string>,
-): Map<string, OpenAiCompatibleProviderRuntimeConfig> {
-  const configs = new Map<string, OpenAiCompatibleProviderRuntimeConfig>();
-
-  for (const [providerId, provider] of Object.entries(
-    STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
-  ) as Array<
-    [StaticOpenAiCompatibleProviderId, OpenAiCompatibleProviderRuntimeConfig]
-  >) {
-    configs.set(providerId, provider);
-  }
-
-  const candidateProviderIds = new Set<string>();
-
-  for (const modelId of modelIds) {
-    const providerId = modelId?.trim().split('/')[0];
-    if (providerId && isOpenAiCompatibleProviderId(providerId)) {
-      candidateProviderIds.add(providerId);
-    }
-  }
-
-  for (const instance of listOpenAiCompatibleProviderInstancesFromEnvNames(
-    Object.keys(runtimeEnv),
-  )) {
-    candidateProviderIds.add(instance.id);
-  }
-
-  for (const providerId of candidateProviderIds) {
-    if (configs.has(providerId)) {
-      continue;
-    }
-
-    const instance = resolveNamedOpenAiCompatibleInstance(
-      providerId,
-      runtimeEnv,
-    );
-    if (!instance) {
-      continue;
-    }
-
-    configs.set(providerId, toNamedOpenAiCompatibleRuntimeConfig(instance));
-  }
-
-  return configs;
-}
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -933,97 +783,6 @@ function toBedrockMantleRuntimeModelId(modelId: string): string {
         BEDROCK_MANTLE_OPENCODE_PROVIDER_ID.length + 1,
       )}`
     : modelId;
-}
-
-function mergeOpenAiCompatibleProviderConfig(
-  providerConfig: Record<string, unknown>,
-  runtimeEnv: Record<string, string>,
-  modelIds: Array<string | undefined>,
-  visionModel?: string,
-): Record<string, unknown> {
-  let merged = providerConfig;
-  const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
-    modelIds,
-    runtimeEnv,
-  );
-
-  for (const [providerId, provider] of runtimeConfigs) {
-    const prefix = `${providerId}/`;
-    const modelIdsForProvider = [
-      ...new Set(
-        modelIds.flatMap((modelId) => {
-          const normalized = modelId?.trim();
-
-          return normalized?.startsWith(prefix)
-            ? [normalized.slice(prefix.length)]
-            : [];
-        }),
-      ),
-    ];
-
-    if (modelIdsForProvider.length === 0) {
-      continue;
-    }
-
-    const existingProvider = asRecord(merged[providerId]);
-    const existingOptions = asRecord(existingProvider.options);
-    const existingModels = asRecord(existingProvider.models);
-    const directApiKey = provider.apiKeyEnvVarName
-      ? runtimeEnv[provider.apiKeyEnvVarName]?.trim()
-      : undefined;
-    const baseURL =
-      runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
-      (provider.allowOpenAiEnvFallback
-        ? runtimeEnv.OPENAI_BASE_URL?.trim()
-        : '') ||
-      provider.fallbackBaseUrl;
-    const apiKeyOptions = directApiKey
-      ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
-      : provider.keyless
-        ? { apiKey: 'ollama' }
-        : provider.allowOpenAiEnvFallback && runtimeEnv.OPENAI_API_KEY?.trim()
-          ? { apiKey: '{env:OPENAI_API_KEY}' }
-          : {};
-
-    merged = {
-      ...merged,
-      [providerId]: {
-        ...existingProvider,
-        npm: '@ai-sdk/openai-compatible',
-        name: provider.name,
-        options: {
-          ...existingOptions,
-          baseURL,
-          // OpenAI-compatible clients require an API key even though Ollama
-          // itself accepts unauthenticated requests.
-          ...apiKeyOptions,
-        },
-        models: {
-          ...existingModels,
-          ...Object.fromEntries(
-            modelIdsForProvider.map((modelId) => [
-              modelId,
-              {
-                name: modelId,
-                ...(visionModel === `${providerId}/${modelId}`
-                  ? {
-                      attachment: true,
-                      modalities: {
-                        input: ['text', 'image'],
-                        output: ['text'],
-                      },
-                    }
-                  : {}),
-                ...asRecord(existingModels[modelId]),
-              },
-            ]),
-          ),
-        },
-      },
-    };
-  }
-
-  return merged;
 }
 
 /**

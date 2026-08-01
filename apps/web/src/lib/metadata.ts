@@ -50,9 +50,9 @@ export const PAGE_METADATA = {
     title: 'Roomote Log In',
     description: 'Sign in to your Roomote account.',
   }),
-  signUp: createPageMetadata({
-    title: 'Roomote Sign up',
-    description: 'Create a Roomote account.',
+  invite: createPageMetadata({
+    title: 'Roomote Invitation',
+    description: "You've been invited to join this Roomote deployment.",
   }),
   setup: createPageMetadata({
     title: 'Roomote Setup',

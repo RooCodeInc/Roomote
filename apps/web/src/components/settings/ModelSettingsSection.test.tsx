@@ -1282,7 +1282,7 @@ describe('ModelSettingsSection', () => {
       // subscription models keep the openai/ model-id prefix.
       expect(screen.getByLabelText('New model slug')).toHaveAttribute(
         'placeholder',
-        'Eg: gpt-5.6-terra',
+        'Eg: gpt-5.6-sol',
       );
 
       fireEvent.change(screen.getByLabelText('New model slug'), {

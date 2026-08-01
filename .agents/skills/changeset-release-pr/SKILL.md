@@ -66,15 +66,20 @@ git log v<last>..origin/develop --oneline --first-parent
 For anything ambiguous, read the PR body with `gh pr view <number>` to identify
 the user-facing or operator-facing impact.
 
-### 3. Identify external contributors
+### 3. Identify external contributors and issue reporters
 
 For every merged PR that will have a changelog bullet, inspect its author with
-`gh pr view <number> --json author`. Thank contributors only when the author is
-not a bot and is not a code owner. Read the applicable `CODEOWNERS` file and
+`gh pr view <number> --json author,closingIssuesReferences`. Inspect the author
+of every returned issue with
+`gh issue view <issue-url> --json author,authorAssociation,url`. Classify PR
+authors and issue reporters as external only when they are not bots and are not
+code owners. Also require an issue reporter's `authorAssociation` to be outside
+`OWNER`, `MEMBER`, and `COLLABORATOR`. Read the applicable `CODEOWNERS` file and
 resolve its individual GitHub-owner entries and organization-team entries before
-classifying the author; if this repository has no `CODEOWNERS` file, no author
-is excluded on that basis. Do not treat an author as external merely because
-their PR was merged by someone else.
+classifying them; if this repository has no `CODEOWNERS` file, no author or
+reporter is excluded on that basis, but the issue-author association check still
+applies. Do not treat someone as external merely because another person merged
+the PR or implemented the fix.
 
 - Treat GitHub App and bot accounts as bots; never add contributor thanks for
   them.
@@ -82,6 +87,11 @@ their PR was merged by someone else.
 - Keep a mapping from each eligible external contributor to the release note
   that covers their PR. If multiple eligible contributors are covered by one
   note, thank each of them in that note.
+- Keep a mapping from each eligible external issue reporter and linked issue URL
+  to the release note that covers the associated PR. Link each issue and thank
+  its reporter in that note.
+- When the same person is both the contributor and issue reporter for one note,
+  combine the acknowledgement instead of thanking them twice.
 - Do not add a thank-you to a skipped internal, docs-only, CI, or dependency
   change that does not receive a changelog bullet.
 
@@ -140,6 +150,11 @@ One concise, user-facing summary of the change.
   sentence such as `Thanks to @octocat for contributing this improvement.` Keep
   the thanks in the same paragraph as the release-note summary. Update an
   existing pending changeset when it is the note that covers the contribution.
+- For a note associated with an issue from an eligible external reporter, link
+  the issue and thank them with a concise sentence such as
+  `Thanks to @octocat for reporting [#123](https://github.com/owner/repo/issues/123).`
+  Use the issue's canonical URL, keep the thanks in the same paragraph, and
+  update an existing pending changeset when it covers the reported change.
 - These newly authored files are temporary release inputs. `pnpm run version`
   consumes them before the release branch is committed.
 

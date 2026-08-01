@@ -42,6 +42,7 @@ export * from './model-provider-config';
 export * from './openai-compatible-providers';
 export * from './recommended-task-models';
 export * from './opencode-openrouter-variants';
+export * from './opencode-provider-config';
 export * from './opencode-reasoning';
 export * from './mcp-oauth';
 export * from './mcp-response-parsing';
