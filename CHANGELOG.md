@@ -2,6 +2,27 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.29.0 (2026-08-01)
+
+This release expands model reasoning and preset options while improving LiteLLM routing, invite previews, and environment guidance.
+
+### Highlights
+
+- Choose Max reasoning for supported OpenAI and Anthropic models, and use refreshed OpenAI and ChatGPT presets with specialized defaults and a Luna Max option.
+- Route GitHub mentions and other helper calls reliably through configured LiteLLM providers.
+- Share invite links with clear, privacy-safe previews and keep admin-only environment guidance hidden from members.
+
+### Minor changes
+
+- Refresh the recommended OpenAI and ChatGPT subscription model presets with Sol defaults for coding and vision, specialized supporting models, and a Luna Max option for higher-effort coding.
+- Let administrators select and persist Max reasoning for supported OpenAI and Anthropic models while preserving compatibility with existing reasoning levels.
+
+### Patch changes
+
+- Give shared invite links a clear Roomote Invitation preview without exposing invite tokens, roles, or deployment details.
+- Keep GitHub mention routing and other non-task helper calls working with LiteLLM-backed models by registering their configured endpoint, adapter, credentials, and model catalog. Thanks to @tomny-dev for reporting [#963](https://github.com/RooCodeInc/Roomote/issues/963).
+- Hide the homepage environment-creation warning and admin-only action from members who cannot manage environments.
+
 ## 0.28.0 (2026-08-01)
 
 This release speeds up setup and pull request reviews while improving chat task continuity, task attribution, model recommendations, and deployment reliability.
