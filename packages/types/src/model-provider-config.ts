@@ -903,6 +903,7 @@ export const REASONING_EFFORT_LABELS = {
   medium: 'Medium',
   high: 'High',
   xhigh: 'Extra high',
+  max: 'Max',
 } satisfies Record<ReasoningEffort, string>;
 
 export const REASONING_EFFORT_OPTIONS = REASONING_EFFORT_VALUES.map(

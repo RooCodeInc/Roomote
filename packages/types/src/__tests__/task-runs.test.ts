@@ -614,6 +614,24 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.reasoningEffort).toBe('xhigh');
   });
 
+  it('parses max reasoningEffort overrides on task payloads', () => {
+    const parsed = taskSpecSchema.parse({
+      userId: 'user-1',
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Investigate this flow',
+        reasoningEffort: 'max',
+      },
+    });
+
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.reasoningEffort).toBe('max');
+  });
+
   it('parses OpenCode harness model overrides on task payloads', () => {
     const parsed = taskSpecSchema.parse({
       userId: 'user-1',
@@ -1088,7 +1106,7 @@ describe('taskSpecSchema', () => {
       payload: {
         repo: 'owner/repo',
         description: 'Fix this',
-        reasoningEffort: 'max',
+        reasoningEffort: 'turbo',
       },
     });
 

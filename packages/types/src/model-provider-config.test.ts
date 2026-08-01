@@ -1055,11 +1055,13 @@ describe('reasoning effort labels', () => {
       { value: 'medium', label: 'Medium' },
       { value: 'high', label: 'High' },
       { value: 'xhigh', label: 'Extra high' },
+      { value: 'max', label: 'Max' },
     ]);
   });
 
   it('returns the shared label for a reasoning effort', () => {
     expect(getReasoningEffortLabel('high')).toBe('High');
+    expect(getReasoningEffortLabel('max')).toBe('Max');
   });
 });
 

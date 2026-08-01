@@ -11,6 +11,7 @@ const ANTHROPIC_THINKING_BUDGET_TOKENS: Record<ReasoningEffort, number> = {
   medium: 8_000,
   high: 16_000,
   xhigh: 31_999,
+  max: 31_999,
 };
 
 /**
