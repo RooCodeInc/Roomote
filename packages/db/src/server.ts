@@ -186,6 +186,8 @@ export {
   deploymentMcpEnablementsRelations,
   mcpConnections,
   mcpConnectionsRelations,
+  mondayAgentInstallations,
+  mondayAgentInstallationsRelations,
   oauthState,
   oauthStateRelations,
   mcpOauthReplays,
@@ -194,11 +196,14 @@ export {
   userApiKeysRelations,
 } from './schema';
 
+export * from './lib/monday-agent-installations';
+
 export * from './fixtures/factories/index';
 
 export type {
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
+  MondayAgentInstallationStatus,
 } from './schema';
 export type { AutomationWorkItemDisposition } from '@roomote/types';

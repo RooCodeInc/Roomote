@@ -11,6 +11,7 @@ export { bitbucket } from './bitbucket';
 export { ado } from './ado';
 export { slack } from './slack';
 export { linear } from './linear';
+export { monday } from './monday';
 export { teams } from './teams';
 export { telegram } from './telegram';
 export { discord } from './discord';

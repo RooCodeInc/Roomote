@@ -196,6 +196,12 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
+    name: 'webhook-monday-agent',
+    match: { type: 'exact', path: '/api/webhooks/monday/agent' },
+    policy: 'webhook',
+    rateLimits: WEBHOOK_RATE_LIMITS,
+  },
+  {
     name: 'webhook-teams',
     match: { type: 'prefix', path: '/api/webhooks/teams' },
     policy: 'webhook',

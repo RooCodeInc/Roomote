@@ -3296,6 +3296,69 @@ export const mcpConnectionsRelations = relations(mcpConnections, ({ one }) => ({
   }),
 }));
 
+export type MondayAgentInstallationStatus =
+  | 'inactive'
+  | 'active'
+  | 'disabled'
+  | 'disconnected'
+  | 'error';
+
+/**
+ * mondayAgentInstallations
+ *
+ * Stores the separate custom-agent identity issued by monday.com. The owner
+ * MCP connection is retained so credential rotation and uninstall always run
+ * as the same monday.com user that created the agent.
+ */
+export const mondayAgentInstallations = pgTable(
+  'monday_agent_installations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Null rows are failed-cleanup recovery records. Exactly one non-null
+    // primary installation can exist at a time.
+    singletonKey: text('singleton_key').default('default'),
+    accountId: text('account_id').notNull(),
+    accountName: text('account_name'),
+    agentId: text('agent_id').notNull(),
+    ownerMcpConnectionId: uuid('owner_mcp_connection_id')
+      .notNull()
+      .references(() => mcpConnections.id, { onDelete: 'restrict' }),
+    agentApiToken: encryptedText('agent_api_token').notNull(),
+    signingSecret: encryptedText('signing_secret').notNull(),
+    status: text('status')
+      .notNull()
+      .default('inactive')
+      .$type<MondayAgentInstallationStatus>(),
+    error: text('error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('monday_agent_installations_singleton_unique').on(
+      table.singletonKey,
+    ),
+    index('monday_agent_installations_account_id_idx').on(table.accountId),
+    unique('monday_agent_installations_agent_id_unique').on(table.agentId),
+    index('monday_agent_installations_owner_connection_idx').on(
+      table.ownerMcpConnectionId,
+    ),
+    check(
+      'monday_agent_installations_singleton_key_check',
+      sql`${table.singletonKey} = 'default' OR (${table.singletonKey} IS NULL AND ${table.status} IN ('error', 'disconnected'))`,
+    ),
+  ],
+);
+
+export const mondayAgentInstallationsRelations = relations(
+  mondayAgentInstallations,
+  ({ one }) => ({
+    ownerMcpConnection: one(mcpConnections, {
+      fields: [mondayAgentInstallations.ownerMcpConnectionId],
+      references: [mcpConnections.id],
+    }),
+  }),
+);
+
 /**
  * oauthState
  */

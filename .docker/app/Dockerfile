@@ -59,6 +59,7 @@ COPY packages/gitea/package.json ./packages/gitea/
 COPY packages/bitbucket/package.json ./packages/bitbucket/
 COPY packages/gitlab/package.json ./packages/gitlab/
 COPY packages/linear/package.json ./packages/linear/
+COPY packages/monday/package.json ./packages/monday/
 COPY packages/redis/package.json ./packages/redis/
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/slack/package.json ./packages/slack/

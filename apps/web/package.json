@@ -59,6 +59,7 @@
     "@roomote/github": "workspace:^",
     "@roomote/gitlab": "workspace:^",
     "@roomote/linear": "workspace:^",
+    "@roomote/monday": "workspace:^",
     "@roomote/redis": "workspace:^",
     "@roomote/sdk": "workspace:^",
     "@roomote/slack": "workspace:^",

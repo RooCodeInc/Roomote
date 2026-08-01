@@ -28,7 +28,11 @@ import {
 
 import {
   db,
+  eq,
+  getMondayAgentInstallationSecrets,
   inArray,
+  mcpConnections,
+  mondayAgentInstallations,
   repositories,
   repositoryFactory,
   runFactory,
@@ -332,5 +336,104 @@ describe('repositories host-aware uniqueness', () => {
       }),
       'repositories_provider_host_full_name_unique',
     );
+  });
+});
+
+describe('monday.com external-agent installation constraints', () => {
+  it('encrypts credentials, enforces one installation, and restricts owner deletion', async () => {
+    const user = await userFactory.create();
+    createdUserIds.push(user.id);
+    const [connection] = await db
+      .insert(mcpConnections)
+      .values({
+        userId: user.id,
+        mcpId: 'monday',
+        connectionRole: 'default',
+        enabled: true,
+        authStatus: 'authenticated',
+        accessToken: 'owner-token',
+      })
+      .returning();
+    if (!connection) throw new Error('Failed to create test MCP connection');
+
+    const [installation] = await db
+      .insert(mondayAgentInstallations)
+      .values({
+        accountId: `account-${randomUUID()}`,
+        agentId: `agent-${randomUUID()}`,
+        ownerMcpConnectionId: connection.id,
+        agentApiToken: 'agent-api-token',
+        signingSecret: 'agent-signing-secret',
+      })
+      .returning();
+    if (!installation) throw new Error('Failed to create test installation');
+
+    try {
+      expect(installation.agentApiToken).not.toBe('agent-api-token');
+      expect(installation.signingSecret).not.toBe('agent-signing-secret');
+      await expect(
+        getMondayAgentInstallationSecrets(installation.agentId),
+      ).resolves.toMatchObject({
+        agentApiToken: 'agent-api-token',
+        signingSecret: 'agent-signing-secret',
+      });
+
+      await expectConstraintViolation(
+        db.insert(mondayAgentInstallations).values({
+          accountId: `account-${randomUUID()}`,
+          agentId: `agent-${randomUUID()}`,
+          ownerMcpConnectionId: connection.id,
+          agentApiToken: 'another-token',
+          signingSecret: 'another-secret',
+        }),
+        'monday_agent_installations_singleton_unique',
+      );
+
+      const [recovery] = await db
+        .insert(mondayAgentInstallations)
+        .values({
+          singletonKey: null,
+          accountId: installation.accountId,
+          agentId: `recovery-${randomUUID()}`,
+          ownerMcpConnectionId: connection.id,
+          agentApiToken: 'recovery-token',
+          signingSecret: 'recovery-secret',
+          status: 'error',
+          error: 'provider cleanup failed',
+        })
+        .returning();
+      if (!recovery) throw new Error('Failed to create recovery installation');
+      expect(recovery).toMatchObject({
+        singletonKey: null,
+        accountId: installation.accountId,
+        status: 'error',
+      });
+      const [disconnectedRecovery] = await db
+        .update(mondayAgentInstallations)
+        .set({ status: 'disconnected' })
+        .where(eq(mondayAgentInstallations.id, recovery.id))
+        .returning();
+      expect(disconnectedRecovery).toMatchObject({
+        singletonKey: null,
+        status: 'disconnected',
+      });
+      await expect(
+        getMondayAgentInstallationSecrets(installation.agentId),
+      ).resolves.toMatchObject({ agentApiToken: 'agent-api-token' });
+
+      await expectConstraintViolation(
+        db.delete(mcpConnections).where(eq(mcpConnections.id, connection.id)),
+        'monday_agent_installations_owner_mcp_connection_id_mcp_connecti',
+      );
+    } finally {
+      await db
+        .delete(mondayAgentInstallations)
+        .where(
+          eq(mondayAgentInstallations.ownerMcpConnectionId, connection.id),
+        );
+      await db
+        .delete(mcpConnections)
+        .where(eq(mcpConnections.id, connection.id));
+    }
   });
 });

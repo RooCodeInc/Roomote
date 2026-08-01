@@ -167,6 +167,18 @@ describe('Env', () => {
     ).toBe(true);
   });
 
+  it('keeps the monday.com external-agent beta opt-in disabled by default', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    delete runtimeEnv.R_MONDAY_AGENT_ENABLED;
+
+    expect(createRoomoteEnv(runtimeEnv).R_MONDAY_AGENT_ENABLED).toBe(false);
+    expect(
+      createRoomoteEnv({ ...runtimeEnv, R_MONDAY_AGENT_ENABLED: 'true' })
+        .R_MONDAY_AGENT_ENABLED,
+    ).toBe(true);
+  });
+
   it('defaults webhook retention to three days and accepts an override', () => {
     const runtimeEnv = { ...process.env };
     delete runtimeEnv.SKIP_ENV_VALIDATION;

@@ -7,6 +7,7 @@ import {
   and,
   isNull,
   or,
+  hasMondayAgentInstallationForOwnerConnection,
 } from '@roomote/db/server';
 import {
   filterMcpToolDefinitions,
@@ -1362,17 +1363,31 @@ export async function disconnectMcpCommand(
     assertAdmin(auth);
   }
 
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, input.mcpId),
+      eq(mcpConnections.connectionRole, connectionRole),
+      connectionScope === 'deployment'
+        ? isNull(mcpConnections.userId)
+        : eq(mcpConnections.userId, auth.userId),
+    ),
+    columns: { id: true },
+  });
+  if (!connection) {
+    throw new Error('MCP connection not found');
+  }
+  if (
+    input.mcpId === 'monday' &&
+    (await hasMondayAgentInstallationForOwnerConnection(connection.id))
+  ) {
+    throw new Error(
+      'Uninstall the monday.com external agent before disconnecting this account',
+    );
+  }
+
   const [deleted] = await db
     .delete(mcpConnections)
-    .where(
-      and(
-        eq(mcpConnections.mcpId, input.mcpId),
-        eq(mcpConnections.connectionRole, connectionRole),
-        connectionScope === 'deployment'
-          ? isNull(mcpConnections.userId)
-          : eq(mcpConnections.userId, auth.userId),
-      ),
-    )
+    .where(eq(mcpConnections.id, connection.id))
     .returning();
 
   if (!deleted) {

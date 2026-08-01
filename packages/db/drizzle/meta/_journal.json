@@ -176,6 +176,13 @@
       "when": 1785435030830,
       "tag": "0024_azure_sleep_check_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785508110744,
+      "tag": "0025_sudden_daredevil",
+      "breakpoints": true
     }
   ]
 }
