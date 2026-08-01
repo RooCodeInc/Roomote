@@ -11,9 +11,10 @@
 #   compatibility image. The controller uses its dedicated non-root image,
 #   which is the only control-plane image containing the Docker CLI.
 # - Coolify's proxy is the HTTPS edge. There is no bundled Caddy and no
-#   `/_roomote-api` path routing: web, api, and minio each get their own
-#   public domain through `SERVICE_FQDN_*` declarations, and `TRPC_URL`
-#   points at the api origin directly.
+#   `/_roomote-api` path routing: web, api-ingress, and minio each get their
+#   own public domain through `SERVICE_FQDN_*` declarations, and `TRPC_URL`
+#   points at the api origin directly. The single-network api-ingress keeps
+#   Traefik from selecting one of the API's isolated task-network addresses.
 # - Coolify magic variables with the same name resolve to the same value
 #   across every service in this resource, so shared secrets such as
 #   `SERVICE_PASSWORD_MINIO` are safe to reference in more than one place
@@ -160,16 +161,13 @@ services:
     image: *roomote-app-image
     restart: unless-stopped
     command: api
-    networks: [default]
+    networks: [default, coolify]
     depends_on:
       redis:
         condition: service_started
       db-migrate:
         condition: service_completed_successfully
     environment:
-      # Task workers and GitHub webhooks call this origin directly, so the
-      # api domain must be publicly reachable over HTTPS.
-      SERVICE_FQDN_API_3001: ''
       <<: *roomote-shared-env
       PORT: 3001
     healthcheck:
@@ -177,6 +175,43 @@ services:
         [
           'CMD-SHELL',
           'curl -fsS --max-time 2 http://127.0.0.1:3001/health/liveness >/dev/null',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  # Traefik must only see a container on Coolify's own network. The API also
+  # joins per-task networks at runtime, and Traefik can otherwise select an
+  # address that the Coolify proxy cannot reach.
+  api-ingress:
+    image: nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=16m,mode=755
+      - /var/run:rw,noexec,nosuid,nodev,size=4m,mode=755
+      - /tmp:rw,noexec,nosuid,nodev,size=4m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    networks: [coolify]
+    depends_on:
+      api:
+        condition: service_healthy
+    configs:
+      - source: api-ingress-nginx
+        target: /etc/nginx/conf.d/default.conf
+        mode: 0444
+    environment:
+      # Task workers and GitHub webhooks call this origin, so Coolify routes
+      # the public API domain to this single-network relay on port 3001. Keep
+      # the API identifier so existing resources retain SERVICE_URL_API.
+      SERVICE_FQDN_API_3001: ''
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget -q -T 2 -O /dev/null http://127.0.0.1:3001/health/liveness',
         ]
       interval: 5s
       timeout: 3s
@@ -313,12 +348,43 @@ services:
   #     retries: 12
   #     start_period: 20s
 
+configs:
+  api-ingress-nginx:
+    content: |
+      server {
+        listen 3001;
+        server_name _;
+        client_max_body_size 0;
+
+        location / {
+          proxy_pass http://api:3001;
+          proxy_http_version 1.1;
+          proxy_buffering off;
+          proxy_request_buffering off;
+          proxy_read_timeout 3600s;
+          proxy_send_timeout 3600s;
+          proxy_set_header Host $$host;
+          proxy_set_header X-Real-IP $$remote_addr;
+          proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Host $$host;
+          proxy_set_header X-Forwarded-Proto $$http_x_forwarded_proto;
+          proxy_set_header Upgrade $$http_upgrade;
+          proxy_set_header Connection $$http_connection;
+        }
+      }
+
 volumes:
   pg_data:
   redis_data:
   minio_data:
 
 networks:
+  # Coolify creates this network before deploying the Compose resource and
+  # exposes its UUID to Compose interpolation. The API ingress uses it as its
+  # sole network so Traefik has exactly one reachable address to select.
+  coolify:
+    name: ${COOLIFY_RESOURCE_UUID}
+    external: true
   # Named explicitly so the controller's DOCKER_WORKER_NETWORK value is
   # stable across redeploys. Coolify may attach additional networks of its
   # own; that is fine as long as this one exists.

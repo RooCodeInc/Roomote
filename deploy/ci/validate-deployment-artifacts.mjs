@@ -45,6 +45,7 @@ const composeEnv = {
   ARTIFACT_SIGNING_KEY: 'deployment-ci-artifact-signing-key',
   CADDY_HTTP_PORT: '18080',
   CADDY_HTTPS_PORT: '18443',
+  COOLIFY_RESOURCE_UUID: 'deployment-ci-coolify',
   COMPOSE_PROFILES: 'local-postgres',
   DASHBOARD_PASSWORD: 'deployment-ci-dashboard-password',
   DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
@@ -417,6 +418,41 @@ assert(
     '/roomote/releases/worker-current.tar.gz',
   'coolify: bullmq must receive the baked worker release path',
 );
+const coolifyApi = coolify.services?.api;
+const coolifyApiIngress = coolify.services?.['api-ingress'];
+assert(coolifyApiIngress, 'coolify: missing api-ingress');
+assert(
+  !('SERVICE_FQDN_API_3001' in (coolifyApi?.environment ?? {})),
+  'coolify: api must not be exposed directly through Traefik',
+);
+assert(
+  coolifyApi?.networks?.includes('default') &&
+    coolifyApi?.networks?.includes('coolify'),
+  'coolify: api must remain worker-reachable and accessible to api-ingress',
+);
+assert(
+  JSON.stringify(coolifyApiIngress?.networks) === JSON.stringify(['coolify']),
+  'coolify: api-ingress must only join the Coolify-managed network',
+);
+assert(
+  'SERVICE_FQDN_API_3001' in (coolifyApiIngress?.environment ?? {}),
+  'coolify: api-ingress must own the public API domain',
+);
+assert(
+  coolifyApi?.environment?.TRPC_URL === '${SERVICE_URL_API}',
+  'coolify: app services must retain the API ingress URL identifier',
+);
+assert(
+  coolify.configs?.['api-ingress-nginx']?.content?.includes(
+    'proxy_pass http://api:3001;',
+  ),
+  'coolify: api-ingress must relay to the internal API service',
+);
+assert(
+  coolify.networks?.coolify?.external === true &&
+    coolify.networks?.coolify?.name === '${COOLIFY_RESOURCE_UUID}',
+  'coolify: ingress network must resolve to the predefined resource UUID',
+);
 
 const fly = parseToml(read('deploy/fly/fly.toml'));
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
@@ -457,6 +493,7 @@ const imageLocations = {
     'docker-compose.production.yml',
     'deploy/compose/docker-compose.prod.yml',
   ],
+  nginx: ['deploy/coolify/docker-compose.yaml'],
 };
 
 for (const [imageName, locations] of Object.entries(imageLocations)) {

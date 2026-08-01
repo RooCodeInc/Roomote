@@ -14,9 +14,11 @@ instead. For a managed PaaS with no server of your own, see
 ## How the Coolify shape differs from single-host
 
 - **Coolify's proxy is the HTTPS edge.** There is no bundled Caddy and no
-  `/_roomote-api` path routing. The web app, the API, and MinIO each get
-  their own public domain through `SERVICE_FQDN_*` declarations in the
-  compose file, so `TRPC_URL` points at the api service's domain directly.
+  `/_roomote-api` path routing. The web app, the API ingress, and MinIO each
+  get their own public domain through `SERVICE_FQDN_*` declarations in the
+  compose file, so `TRPC_URL` points at the API origin directly. The API
+  ingress remains only on Coolify's managed network and relays to the API,
+  preventing Traefik from selecting an isolated task-network address.
   GitHub webhooks and sandbox workers call that API origin, and Slack
   webhooks arrive at the web origin and are proxied to the API internally.
 - **The Docker socket is available.** Unlike Railway, the Coolify host runs
@@ -86,8 +88,8 @@ follow the image.
    save. Coolify parses the file, lists the services, and generates values
    for every `SERVICE_*` magic variable.
 3. In the service settings, set the domains: the **web** service's domain is
-   the app origin users open, the **api** service's domain is what GitHub
-   webhooks and workers call, and the **minio** service's domain serves
+   the app origin users open, the **api-ingress** service's domain is what
+   GitHub webhooks and workers call, and the **minio** service's domain serves
    presigned artifact URLs (routed to port 9000). Use `https://` for all
    three. Coolify generates placeholder domains when the server has a
    wildcard domain configured; replace them with real ones for production.
@@ -104,7 +106,8 @@ follow the image.
 | `minio`         | pinned MinIO + volume   | yes (routed to port 9000)  | `mc ready local`             |
 | `db-migrate`    | `roomote-app:develop`   | no (one-shot)              | excluded                     |
 | `web`           | `roomote-app:develop`   | yes (port 3000)            | `/health`                    |
-| `api`           | `roomote-app:develop`   | yes (port 3001)            | `/health/liveness`           |
+| `api`           | `roomote-app:develop`   | no (internal upstream)     | `/health/liveness`           |
+| `api-ingress`   | pinned `nginx:alpine`   | yes (port 3001)            | `/health/liveness` via API   |
 | `controller`    | `roomote-app:develop`   | no                         | `/health/controller` via API |
 | `bullmq`        | `roomote-app:develop`   | no                         | `/admin/health`              |
 | `preview-proxy` | `roomote-app:develop`   | optional (wildcard domain) | `/health`                    |
@@ -148,6 +151,16 @@ the same server. Two things matter in this mode:
   worker containers fail to start after a deploy, confirm the configured
   discovery network exists with `docker network ls` and that Coolify preserved
   the standard Compose service labels.
+
+  The API also joins Coolify's managed resource network so `api-ingress` can
+  reach it, but only `api-ingress` receives the public API domain. Do not move
+  `SERVICE_FQDN_API_3001` back to `api`: containers attached to custom or
+  per-task networks are unsafe Traefik targets because the proxy may select an
+  address outside its own network. The `${COOLIFY_RESOURCE_UUID}` network name
+  is resolved by Compose; it is intentionally not placed in a Traefik label,
+  where Coolify does not expand it reliably. The ingress declaration keeps the
+  `API` magic-variable identifier so upgrades retain the existing
+  `SERVICE_URL_API` value used by `TRPC_URL`.
 
   Docker task writable layers fail closed when the host storage driver cannot
   enforce `DOCKER_WORKER_DISK_LIMIT`. Keep
