@@ -15,6 +15,7 @@ import { AUTO_WORKSPACE_VALUE } from '@/components/tasks/constants';
 let currentSearchParams = '';
 let currentFeatureFlags: Record<string, boolean> = {};
 let currentCloudEnabled = false;
+let currentIsAdmin = true;
 let currentShowDebugUI = false;
 let currentShowDebugUILoading = false;
 let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
@@ -62,7 +63,7 @@ vi.mock('sonner', () => ({
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({
     userId: 'user-1',
-    isAdmin: true,
+    isAdmin: currentIsAdmin,
     name: 'Test User',
     primaryEmail: 'test@example.com',
     cloudEnabled: currentCloudEnabled,
@@ -324,6 +325,7 @@ describe('Home', () => {
     currentSearchParams = '';
     currentFeatureFlags = {};
     currentCloudEnabled = false;
+    currentIsAdmin = true;
     currentShowDebugUI = false;
     currentShowDebugUILoading = false;
     currentEnvironments = [
@@ -939,6 +941,17 @@ describe('Home', () => {
     expect(
       screen.getByText(/You haven't created any environments yet/i),
     ).toBeInTheDocument();
+  });
+
+  it('does not show the empty-environments warning to members', () => {
+    currentIsAdmin = false;
+    currentEnvironments = [];
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(
+      screen.queryByText(/You haven't created any environments yet/i),
+    ).not.toBeInTheDocument();
   });
 
   it('allows all-repositories launches when no environments exist', async () => {
