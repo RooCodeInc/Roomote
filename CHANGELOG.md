@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.28.0 (2026-08-01)
 
-This release speeds up setup and pull request reviews while improving chat task continuity, delegated Azure DevOps sign-in, model recommendations, and deployment reliability.
+This release speeds up setup and pull request reviews while improving chat task continuity, task attribution, model recommendations, and deployment reliability.
 
 ### Highlights
 
 - Set up repositories faster with blobless clones and support git hooks that require yarn without changing the managed pnpm or npm versions.
 - Apply team guidance throughout Review Code automations and start commit-triggered re-reviews sooner.
-- Continue chat tasks naturally with reliable, provider-aware reminders, and receive failure details in the conversation where the task started.
-- Complete delegated Azure DevOps setup on the first Microsoft sign-in, choose current Qwen3.7 recommendations, and keep Coolify task networking reliable. Thanks to @tomny-dev for contributing the Coolify fix.
+- Continue chat tasks naturally with reliable, provider-aware reminders, receive failure details in the originating conversation, and see consistent `Linear Agent` attribution.
+- Complete delegated Azure DevOps setup on the first Microsoft sign-in and keep Coolify and Docker task networking reliable. Thanks to @tomny-dev for contributing the Coolify fix.
 
 ### Minor changes
 
@@ -32,6 +32,8 @@ This release speeds up setup and pull request reviews while improving chat task 
 - Settle terminal provider and runtime errors as failed tasks so users receive the existing failure details in the Discord, Slack, Teams, or Telegram conversation where the task started.
 - Put yarn on the sandbox PATH during worker setup, so repositories whose git hooks shell out to yarn no longer fail with `yarn: not found` (which agents were reporting as a missing Git credential). Corepack is enabled for yarn only, leaving the mise-managed pnpm and npm untouched. Thanks to @pridemusvaire for contributing this fix.
 - Classify provider failures from structured HTTP status and retryability signals instead of provider-specific message wording, with bounded retries before status-less errors fail cleanly.
+- Remove residual Docker task networks after completed, canceled, or failed tasks, and show actionable recovery guidance when Docker address pools are exhausted.
+- Show identity-less Linear task creators consistently as `Linear Agent` across task history, creator filters, analytics, and manager statistics instead of exposing raw session IDs.
 
 ## 0.27.0 (2026-07-31)
 
