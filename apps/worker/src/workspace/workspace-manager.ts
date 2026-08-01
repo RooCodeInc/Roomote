@@ -680,7 +680,12 @@ export class WorkspaceManager {
           // would make every retry fail with "destination path already
           // exists" — remove it first. Safe: needsClone guarantees the path
           // did not exist before the first attempt.
-          run: `rm -rf -- '${shellEscape(fullName)}' && git clone '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
+          // Blobless partial clone: full commit/tree history (so log,
+          // merge-base, and PR base computations work), but historical
+          // blobs are fetched lazily instead of up front — large repos
+          // clone in a fraction of the time. Lazy fetches go through the
+          // same credential proxy that is alive for the whole run.
+          run: `rm -rf -- '${shellEscape(fullName)}' && git clone --filter=blob:none '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
           // Allow brief auth and repository visibility propagation delays.
           retries: 4,
           timeout: 300,

@@ -205,6 +205,24 @@ export function SourceControlConfigForm({
     providerStatus.fields.find((field) => field.envVarName === 'ADO_TOKEN')
       ?.savedSatisfied,
   );
+  // Linking the Microsoft account and persisting it as ADO_LINKED_ACCOUNT_ID
+  // are two separate actions: the OAuth round trip only creates the linked
+  // account, and this form's Save is what the deployment actually reads. Say so
+  // rather than letting "Connected as ..." imply the work is finished. Compare
+  // the configured value, not mere presence: after reconnecting as a different
+  // Microsoft account the old id can still be the one configured, and the
+  // displayed account is then not the one in use.
+  const adoLinkedAccountField = providerStatus.fields.find(
+    (field) => field.envVarName === 'ADO_LINKED_ACCOUNT_ID',
+  );
+  const adoLinkedAccountSaved = Boolean(
+    adoLinkedAccountField &&
+    (adoLinkedAccountField.runtimeSatisfied ||
+      adoLinkedAccountField.savedSatisfied) &&
+    adoLinkedAccount.data?.account?.accountId &&
+    adoLinkedAccountField.savedValue?.trim() ===
+      adoLinkedAccount.data.account.accountId,
+  );
 
   const isActionDisabled =
     saveConfig.isPending ||
@@ -301,6 +319,12 @@ export function SourceControlConfigForm({
               ? `Connected as ${adoLinkedAccount.data.account.displayName}.`
               : 'Connect the Azure DevOps account Roomote should use for this deployment.'}
           </p>
+          {adoLinkedAccount.data?.account && !adoLinkedAccountSaved ? (
+            <p className="mt-1 text-foreground">
+              Not in use yet. Save the configuration below to switch the
+              deployment over to this account.
+            </p>
+          ) : null}
           <Button
             type="button"
             size="sm"

@@ -170,3 +170,18 @@ one to a fix.
   storage driver with per-container writable-layer quota support. Only set
   `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` when an equivalent host-level quota
   is already enforced.
+- **Docker's address pools are exhausted.** List Roomote-managed task networks
+  and remove only unused ones:
+
+  ```sh
+  docker network ls --filter label=dev.roomote.sandbox.managed=true
+  docker network prune --filter label=dev.roomote.sandbox.managed=true
+  ```
+
+  Docker asks for confirmation and prunes only networks with no attached
+  containers. On Docker Desktop with the WSL2 backend, restart Docker Desktop if
+  released networks do not restore address space. If exhaustion recurs, set
+  Docker's `default-address-pools` in the Docker Engine configuration to a
+  larger private range that does not overlap the host, VPN, or deployment
+  networks, then restart Docker. Roomote does not assign static task subnets
+  because host and VPN ranges differ between deployments.

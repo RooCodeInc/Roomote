@@ -146,7 +146,7 @@ describe('WorkspaceManager repository clone preparation', () => {
     const clone = getCloneCommand();
     expect(clone).toBeDefined();
     expect(clone!.run).toBe(
-      `rm -rf -- 'acme/backend' && git clone 'https://github.com/acme/backend.git' 'acme/backend'`,
+      `rm -rf -- 'acme/backend' && git clone --filter=blob:none 'https://github.com/acme/backend.git' 'acme/backend'`,
     );
   });
 

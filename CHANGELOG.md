@@ -2,6 +2,39 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.28.0 (2026-08-01)
+
+This release speeds up setup and pull request reviews while improving chat task continuity, task attribution, model recommendations, and deployment reliability.
+
+### Highlights
+
+- Set up repositories faster with blobless clones and support git hooks that require yarn without changing the managed pnpm or npm versions.
+- Apply team guidance throughout Review Code automations and start commit-triggered re-reviews sooner.
+- Continue chat tasks naturally with reliable, provider-aware reminders, receive failure details in the originating conversation, and see consistent `Linear Agent` attribution.
+- Complete delegated Azure DevOps setup on the first Microsoft sign-in and keep Coolify and Docker task networking reliable. Thanks to @tomny-dev for contributing the Coolify fix.
+
+### Minor changes
+
+- Let teams add custom instructions to Review Code automations so initial and follow-up reviews follow their preferred guidance.
+
+### Patch changes
+
+- Keep Coolify task creation and live previews working by connecting trusted services to the worker discovery network. Thanks to @tomny-dev for contributing this fix.
+- Recommend Qwen3.7 Max and Qwen3.7 Plus when connected model providers support them.
+- Speed up fresh environment setup for large repositories with blobless partial clones while preserving full commit and tree history.
+- Let users continue sleeping Roomote tasks naturally in their Discord task threads without mentioning the bot again.
+- Start commit-triggered pull request re-reviews sooner while retaining burst protection and per-PR deduplication.
+- Apply configured Review Code instructions to GitHub follow-up reviews so team guidance remains consistent throughout the review lifecycle.
+- Show a pointer cursor on the environment repository selector's create-repository action so its interactivity is clear.
+- Complete Azure DevOps delegated setup on the first Microsoft sign-in instead of returning users to the credentials form without saving the linked account or syncing repositories.
+- Name the active Discord, Slack, Teams, or Telegram surface correctly in task closeout and silence reminders.
+- Keep closeout reminders from interrupting in-flight agent work or appearing twice for the same turn.
+- Settle terminal provider and runtime errors as failed tasks so users receive the existing failure details in the Discord, Slack, Teams, or Telegram conversation where the task started.
+- Put yarn on the sandbox PATH during worker setup, so repositories whose git hooks shell out to yarn no longer fail with `yarn: not found` (which agents were reporting as a missing Git credential). Corepack is enabled for yarn only, leaving the mise-managed pnpm and npm untouched. Thanks to @pridemusvaire for contributing this fix.
+- Classify provider failures from structured HTTP status and retryability signals instead of provider-specific message wording, with bounded retries before status-less errors fail cleanly.
+- Remove residual Docker task networks after completed, canceled, or failed tasks, and show actionable recovery guidance when Docker address pools are exhausted.
+- Show identity-less Linear task creators consistently as `Linear Agent` across task history, creator filters, analytics, and manager statistics instead of exposing raw session IDs.
+
 ## 0.27.0 (2026-07-31)
 
 This release expands Azure, ChatGPT, GitHub, and monday.com capabilities while improving task reliability, privacy, setup, and Coolify deployments.

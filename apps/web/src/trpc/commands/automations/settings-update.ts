@@ -299,6 +299,10 @@ export async function updateBackgroundAgentSettingsCommand(
       'Triage Issues instructions are too long.';
   }
 
+  if ((input.reviewerInstructions?.length ?? 0) > 8_000) {
+    fieldErrors.reviewerInstructions = 'Review Code instructions are too long.';
+  }
+
   const channelAutoStartRows = shouldUpdateChannelAutoStart
     ? normalizeChannelAutoStartInputRows({
         rows: input.channelAutoStartSlackChannels,
@@ -1101,6 +1105,10 @@ export async function updateBackgroundAgentSettingsCommand(
     await upsertAutomation(tx, {
       key: 'review_code',
       enabled: input.reviewerEnabled,
+      instructions:
+        input.reviewerInstructions === undefined
+          ? existingSettings.reviewCodeInstructions
+          : normalizeOptionalText(input.reviewerInstructions),
       settings: reviewerSettings,
       updatedAt: now,
     });

@@ -44,6 +44,19 @@ export type SetupSourceControlProviderStatus = Omit<
   runtimeConfigSatisfied: boolean;
   savedConfigSatisfied: boolean;
   configSatisfied: boolean;
+  /**
+   * True once every value the source-control *config* step itself collects is
+   * satisfied, which is not the same as the provider being usable.
+   *
+   * Azure DevOps delegated mode is the one provider whose `configSatisfied`
+   * depends on a value acquired on a *later* step: `ADO_LINKED_ACCOUNT_ID` only
+   * exists after the Microsoft sign-in round trip on the connect step. Gating
+   * the config step on `configSatisfied` therefore deadlocks: returning from
+   * Microsoft bounces the user back to the config form, so a completed sign-in
+   * looks like it never registered. Step gating uses this flag; anything
+   * deciding whether the provider actually works keeps using `configSatisfied`.
+   */
+  configStepSatisfied: boolean;
   configSatisfiedByRuntimeEnv: boolean;
   connected: boolean;
   repositoryCount: number;
@@ -123,6 +136,7 @@ function getAdoFieldValue(
 function isAdoCredentialConfigured(
   fields: readonly SetupSourceControlFieldStatus[],
   kind: 'runtime' | 'saved' | 'effective',
+  { requireLinkedAccount = true }: { requireLinkedAccount?: boolean } = {},
 ): boolean {
   const isConfigured = (envVarName: string) =>
     fields.some((field) => {
@@ -144,7 +158,11 @@ function isAdoCredentialConfigured(
   ].every(isConfigured);
   if (!hasAppCredentials) return false;
 
-  return authMode !== 'delegated' || isConfigured('ADO_LINKED_ACCOUNT_ID');
+  return (
+    authMode !== 'delegated' ||
+    !requireLinkedAccount ||
+    isConfigured('ADO_LINKED_ACCOUNT_ID')
+  );
 }
 
 export const SETUP_SOURCE_CONTROL_PROVIDER_CATALOG = sourceControlProviders.map(
@@ -475,6 +493,11 @@ export function buildSetupSourceControlStatus(input: {
     const adoSavedCredentialSatisfied =
       descriptor.provider !== 'ado' ||
       isAdoCredentialConfigured(fields, 'saved');
+    const adoConfigStepCredentialSatisfied =
+      descriptor.provider !== 'ado' ||
+      isAdoCredentialConfigured(fields, 'effective', {
+        requireLinkedAccount: false,
+      });
     const configSatisfied = standardConfigSatisfied && adoCredentialSatisfied;
 
     return {
@@ -484,6 +507,8 @@ export function buildSetupSourceControlStatus(input: {
         runtimeConfigSatisfied && adoRuntimeCredentialSatisfied,
       savedConfigSatisfied: savedConfigSatisfied && adoSavedCredentialSatisfied,
       configSatisfied,
+      configStepSatisfied:
+        standardConfigSatisfied && adoConfigStepCredentialSatisfied,
       configSatisfiedByRuntimeEnv:
         runtimeConfigSatisfied && adoRuntimeCredentialSatisfied,
       connected: connectedProviderSet.has(descriptor.provider),

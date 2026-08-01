@@ -40,7 +40,7 @@ export function EnvironmentRepositorySelector({
           <p className="border-b border-dotted pb-1">
             <button
               type="button"
-              className="flex w-full items-center gap-2 py-1 text-left hover:text-accent-foreground"
+              className="flex w-full cursor-pointer items-center gap-2 py-1 text-left hover:text-accent-foreground"
               onClick={onCreateRepository}
             >
               <PackagePlus className="size-4 mx-0.5" />

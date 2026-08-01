@@ -282,9 +282,15 @@ export function StepSourceControlConnect({
   const oauthAutoSyncMarkerPresent =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('sync') === '1';
+  // `configStepSatisfied` rather than `configSatisfied`: delegated Azure DevOps
+  // only satisfies the latter once `ADO_LINKED_ACCOUNT_ID` is saved, and saving
+  // it is what `handleSyncRepositories` does below. Requiring it here would
+  // strand the user on a manual "Sync repositories" button immediately after a
+  // successful Microsoft sign-in. `needsAdoMicrosoftConnection` still holds the
+  // auto-sync back until an account is actually linked.
   const shouldAutoSync =
     isSourceControlTokenBackedProvider(provider) &&
-    providerStatus?.configSatisfied === true &&
+    providerStatus?.configStepSatisfied === true &&
     !alreadyConnected &&
     !needsAdoMicrosoftConnection &&
     (provider !== 'gitlab' ||

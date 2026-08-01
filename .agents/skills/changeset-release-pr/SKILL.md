@@ -49,6 +49,10 @@ node scripts/release/find-version-commit.mjs <version> origin/develop
 ```
 
 Call out the unshipped release and do not merge a later Promote PR before it.
+If the user explicitly chooses to replace that unshipped release instead, audit
+from the newest published tag, close the older Promote PR, and run
+`pnpm run version -- --supersede <patch|minor|major>` so the replacement release
+keeps the unshipped notes and folds in every newer pending changeset.
 
 ### 2. Collect what changed since then
 
@@ -205,7 +209,12 @@ Commit the generated release artifacts on a feature branch and open a PR against
   `pnpm run version`, review the result, and commit that output in the release
   PR.
 - Never run or commit `changeset version` output.
-- Never push to `release/v*`; CI owns frozen release branches.
+- Never push to `release/v*` manually. CI owns release branches; before a
+  candidate reaches `main`, maintainers may amend its notes with
+  `pnpm run version -- --amend` and explicitly dispatch the Release workflow to
+  fast-forward the open candidate from `develop`.
+- Never leave an older Promote PR open when an explicit superseding release is
+  prepared. Close it so versions cannot be promoted out of order.
 - Never merge an out-of-date release PR. Regenerate it from the latest
   `develop` so every commit included in the cut was part of the release audit.
 - Never bump versions in workspace `package.json` files.

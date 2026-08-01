@@ -51,7 +51,7 @@ function runHook(scriptPath, input) {
       payload?.reason ??
       payload?.stopReason ??
       payload?.hookSpecificOutput?.additionalContext ??
-      'Slack-visible update is required before continuing.',
+      'A user-visible chat update is required before continuing.',
   };
 }
 

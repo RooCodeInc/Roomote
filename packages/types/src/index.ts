@@ -26,6 +26,7 @@ export * from './environment-definition-tasks';
 export * from './eval-harness-selection';
 export * from './environment-variables';
 export * from './error-utils';
+export * from './external-actor';
 export * from './git-diff';
 export * from './git-ref';
 export * from './hostname';

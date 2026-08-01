@@ -62,6 +62,8 @@ export async function createLinearAgentRun({
       : { kind: 'user', userId }
     : {
         kind: 'user',
+        // The session prefix is normalized to the shared Linear Agent identity
+        // on read when Linear omits the human actor entirely.
         externalId: user?.id ?? `linear-session:${sessionId}`,
         displayName: user?.name,
       };

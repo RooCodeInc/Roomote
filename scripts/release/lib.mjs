@@ -354,6 +354,81 @@ export function buildChangelogSection(pending, nextVersion, date) {
 }
 
 /**
+ * Add pending changeset summaries to an existing release section without
+ * changing its summary or highlights.
+ */
+export function amendChangelogSection(existing, pending, version) {
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const heading = new RegExp(`^## ${escapedVersion} \\([^\\n]+\\)$`, 'm');
+  const match = heading.exec(existing);
+  if (!match) {
+    throw new Error(`No CHANGELOG section found for ${version}`);
+  }
+
+  const start = match.index;
+  const nextHeading = existing.slice(start + match[0].length).search(/\n## /);
+  const end =
+    nextHeading === -1
+      ? existing.length
+      : start + match[0].length + nextHeading;
+  let section = existing.slice(start, end).trimEnd();
+
+  const byLevel = { major: [], minor: [], patch: [] };
+  for (const entry of pending) {
+    const level = ['major', 'minor', 'patch'].find((candidate) =>
+      Object.values(entry.bumps).includes(candidate),
+    );
+    if (level) {
+      byLevel[level].push(
+        entry.summary.replace(/\s+/g, ' ').trim() || entry.file,
+      );
+    }
+  }
+
+  const levels = [
+    ['major', 'Major changes'],
+    ['minor', 'Minor changes'],
+    ['patch', 'Patch changes'],
+  ];
+  for (let index = 0; index < levels.length; index += 1) {
+    const [level, label] = levels[index];
+    const summaries = byLevel[level];
+    if (summaries.length === 0) continue;
+
+    const bullets = summaries.map((summary) => `- ${summary}`).join('\n');
+    const levelHeading = `### ${label}`;
+    const headingIndex = section.indexOf(levelHeading);
+    if (headingIndex !== -1) {
+      const contentStart = headingIndex + levelHeading.length;
+      const nextSection = section.indexOf('\n### ', contentStart);
+      const contentEnd = nextSection === -1 ? section.length : nextSection;
+      section =
+        section.slice(0, contentEnd).trimEnd() +
+        `\n${bullets}\n\n` +
+        section.slice(contentEnd).trimStart();
+      section = section.trimEnd();
+      continue;
+    }
+
+    const lowerHeading = levels
+      .slice(index + 1)
+      .map(([, lowerLabel]) => section.indexOf(`### ${lowerLabel}`))
+      .find((position) => position !== -1);
+    const insertion = `### ${label}\n\n${bullets}\n\n`;
+    if (lowerHeading === undefined) {
+      section = `${section}\n\n${insertion}`.trimEnd();
+    } else {
+      section =
+        section.slice(0, lowerHeading).trimEnd() +
+        `\n\n${insertion}` +
+        section.slice(lowerHeading);
+    }
+  }
+
+  return `${existing.slice(0, start)}${section}\n\n${existing.slice(end).trimStart()}`;
+}
+
+/**
  * Apply the pending changesets as one product version bump: prepend the
  * release section to the root CHANGELOG.md, set the root package.json
  * version, and delete the consumed changeset files. Workspace package
@@ -396,4 +471,82 @@ export function applyProductVersion(repoRoot, options = {}) {
   }
 
   return { previous, next, changesets: pending.map((entry) => entry.file) };
+}
+
+/**
+ * Fold pending changesets into the current release section without changing
+ * the product version. Used only before that version is promoted to main.
+ */
+export function amendProductVersion(repoRoot) {
+  const pending = parsePendingChangesets(repoRoot);
+  if (pending.length === 0) return null;
+
+  const version = readCurrentProductVersion(repoRoot);
+  const changelogPath = join(repoRoot, 'CHANGELOG.md');
+  if (!existsSync(changelogPath)) {
+    throw new Error('Cannot amend a release without CHANGELOG.md');
+  }
+  const existing = readFileSync(changelogPath, 'utf8');
+  writeFileSync(
+    changelogPath,
+    amendChangelogSection(existing, pending, version),
+  );
+
+  for (const entry of pending) {
+    rmSync(join(repoRoot, '.changeset', entry.file));
+  }
+
+  return { version, changesets: pending.map((entry) => entry.file) };
+}
+
+/**
+ * Replace an unshipped current release with a new version while preserving its
+ * release notes and folding in any newly pending changesets.
+ */
+export function supersedeProductVersion(repoRoot, level, options = {}) {
+  if (!['major', 'minor', 'patch'].includes(level)) {
+    throw new Error(`Unsupported supersede level: ${level}`);
+  }
+
+  const previous = readCurrentProductVersion(repoRoot);
+  const pending = parsePendingChangesets(repoRoot);
+  const pendingLevels = pending.flatMap((entry) => Object.values(entry.bumps));
+  const next = computeNextVersion(previous, [level, ...pendingLevels]);
+  const changelogPath = join(repoRoot, 'CHANGELOG.md');
+  if (!existsSync(changelogPath)) {
+    throw new Error('Cannot supersede a release without CHANGELOG.md');
+  }
+
+  const existing = readFileSync(changelogPath, 'utf8');
+  const amended =
+    pending.length === 0
+      ? existing
+      : amendChangelogSection(existing, pending, previous);
+  const date = options.date ?? new Date().toISOString().slice(0, 10);
+  const heading = new RegExp(
+    `^## ${escapeRegExp(previous)} \\([^\\n]+\\)$`,
+    'm',
+  );
+  if (!heading.test(amended)) {
+    throw new Error(`No CHANGELOG section found for ${previous}`);
+  }
+  writeFileSync(
+    changelogPath,
+    amended.replace(heading, `## ${next} (${date})`),
+  );
+
+  const rootPath = join(repoRoot, 'package.json');
+  const root = readJson(rootPath);
+  root.version = next;
+  writeFileSync(rootPath, `${JSON.stringify(root, null, 2)}\n`);
+
+  for (const entry of pending) {
+    rmSync(join(repoRoot, '.changeset', entry.file));
+  }
+
+  return {
+    previous,
+    next,
+    changesets: pending.map((entry) => entry.file),
+  };
 }

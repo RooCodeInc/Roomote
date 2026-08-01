@@ -64,6 +64,33 @@ describe('task creator filter helpers', () => {
     });
   });
 
+  it('groups fallback Linear sessions under one filter value', () => {
+    const buildValue = (actorExternalId: string) =>
+      buildCreatorFilterValue({
+        initiatorKind: 'user',
+        initiatorUserId: null,
+        initiatorAutomation: null,
+        actorExternalId,
+      });
+
+    expect(buildValue('linear-session:first')).toBe('external:linear-agent');
+    expect(buildValue('linear-session:second')).toBe('external:linear-agent');
+    expect(parseCreatorFilterValue('external:linear-agent')).toEqual({
+      kind: 'linearAgent',
+    });
+  });
+
+  it('keeps legacy session-specific filter values parseable', () => {
+    expect(
+      parseCreatorFilterValue(
+        `external:${encodeURIComponent('linear-session:legacy')}`,
+      ),
+    ).toEqual({
+      kind: 'external',
+      externalId: 'linear-session:legacy',
+    });
+  });
+
   it('returns null when no initiator columns identify a creator', () => {
     expect(
       buildCreatorFilterValue({

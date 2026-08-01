@@ -247,16 +247,15 @@ export async function handleGatewayDispatch(
     }
     // Discord sends every message from subscribed guild channels. Root
     // channels only start Roomote work when the bot is mentioned — except
-    // auto-respond channels, which forward every top-level message — while
-    // DMs and task threads retain natural follow-ups without an extra
-    // mention.
+    // auto-respond channels, which forward every top-level message. Forward
+    // all thread messages so the API's durable conversation lookup can retain
+    // natural follow-ups even when Roomote did not create the Discord thread.
     if (
       message.guild_id &&
       botUserId &&
       !autoStartChannel &&
       !isBotMentioned(message, botUserId) &&
-      (cachedChannel?.isThread !== true ||
-        cachedChannel.ownerId !== botUserId) &&
+      cachedChannel?.isThread !== true &&
       !(
         dependencies.enqueueUnknownGuildChannel === true &&
         cachedChannel === undefined

@@ -34,6 +34,15 @@ const DEFAULT_MISE_TOOLS = [
   },
 ] as const;
 
+/** Upper bound on the Corepack yarn download during serial worker setup. */
+const COREPACK_ENABLE_TIMEOUT_MS = 120_000;
+
+/**
+ * Upper bound on `yarn --version`. Once Corepack shims are active this is a
+ * Corepack entrypoint that can reach the network, so it gets a bound too.
+ */
+const YARN_PROBE_TIMEOUT_MS = 30_000;
+
 const DEFAULT_PYTHON_PACKAGES = [
   {
     packageName: 'openai',
@@ -111,8 +120,85 @@ export async function installMise(logger: StartupLogger): Promise<void> {
 
 async function ensureMiseManagedTools(logger: StartupLogger): Promise<void> {
   await ensureDefaultMiseToolsInConfig(logger);
+  await ensureCorepackYarnShim(logger);
   await ensureDefaultPythonPackages(logger);
   await installRipgrep(logger);
+}
+
+/**
+ * Enable Corepack's yarn, prepare a concrete yarn binary, and reshim mise so
+ * `yarn` is executable on PATH.
+ * Many customer repos (packageManager: yarn@…) run husky pre-push with `yarn`;
+ * the default mise toolset only installs node/npm/pnpm, so pushes fail with
+ * `yarn: not found` and agents mis-report that as missing Git credentials.
+ */
+async function ensureCorepackYarnShim(logger: StartupLogger): Promise<void> {
+  if (await isYarnExecutable()) {
+    logger.debug.log('yarn already available on PATH');
+    return;
+  }
+
+  logger.debug.log('enabling corepack yarn and reshimming mise');
+
+  try {
+    await execa(
+      'bash',
+      [
+        '-lc',
+        // Corepack ships with Node and writes its shims next to the resolved
+        // corepack binary (`dirname $(which corepack)`), which in this image is
+        // inside the mise tree. Scope `enable` to yarn: the unscoped form also
+        // writes pnpm/pnpx there, which would shadow the mise-managed pnpm.
+        // `prepare … --activate` installs a concrete global yarn so husky works
+        // even without a packageManager field, and `mise reshim` republishes
+        // the node bin dir (yarn/yarnpkg) through the mise shim directory.
+        [
+          'corepack enable yarn',
+          'corepack prepare yarn@stable --activate',
+          'mise reshim',
+        ].join(' && '),
+      ],
+      {
+        cwd: homedir(),
+        stdin: 'ignore',
+        // `prepare` downloads yarn from the registry, and this runs inside the
+        // serial setup block that gates task start. Bound it so a throttled or
+        // unreachable registry degrades to the warning below instead of
+        // hanging the sandbox boot.
+        timeout: COREPACK_ENABLE_TIMEOUT_MS,
+      },
+    );
+  } catch (error) {
+    logger.userLog.warn(
+      `Failed to enable corepack yarn: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  if (!(await isYarnExecutable())) {
+    logger.userLog.warn(
+      'corepack enable completed but yarn is still not executable on PATH',
+    );
+  }
+}
+
+/**
+ * True when `yarn --version` succeeds. A PATH entry alone is not enough;
+ * Corepack shims can exist without a prepared yarn binary.
+ */
+async function isYarnExecutable(): Promise<boolean> {
+  try {
+    const result = await execa('yarn', ['--version'], {
+      cwd: homedir(),
+      reject: false,
+      stdin: 'ignore',
+      timeout: YARN_PROBE_TIMEOUT_MS,
+    });
+    // A missing binary surfaces as exitCode undefined (ENOENT), not 1.
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

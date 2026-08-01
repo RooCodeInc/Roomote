@@ -57,12 +57,21 @@ See [`.changeset/README.md`](.changeset/README.md).
    the final version bump and `CHANGELOG.md` entry.
 3. Squash-merge that release PR. Automation cuts a frozen `release/vX.Y.Z`
    branch at the version-bump commit and opens or refreshes a **Promote
-   `vX.Y.Z` to production** PR (`release/vX.Y.Z` → `main`). Work merged to
-   `develop` afterward waits for the next release.
+   `vX.Y.Z` to production** PR (`release/vX.Y.Z` → `main`). By default, work
+   merged to `develop` afterward waits for the next release. Before promotion,
+   a maintainer may amend the current version's notes with
+   `pnpm run version -- --amend`, merge those amendments to `develop`, and
+   explicitly dispatch the Release workflow for that version. The workflow
+   only fast-forwards an open, unshipped candidate with no pending changesets.
 4. Merge that promote PR with a **merge commit** (branch rules on `main` allow
    merge only; `develop` stays squash-only). Tagging (`vX.Y.Z`), GHCR image
    publish (`latest`), and the GitHub Release follow from `main` / tag workflows.
    Product tagging requires the `RELEASE_BOT_TOKEN` repository secret.
+
+To replace an unshipped candidate rather than refresh it, run
+`pnpm run version -- --supersede <patch|minor|major>` after auditing from the
+last published tag. This carries the unshipped notes into the replacement
+version; close the older Promote PR before promoting the replacement.
 
 ## Contributor License Agreement
 

@@ -456,6 +456,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   channelAutoStartDiscordChannelIds: string[];
   channelAutoStartInstructions: string | null;
   reviewCodeSettings: PrReviewSettings;
+  reviewCodeInstructions: string | null;
   conflictResolverFrequency: ConflictResolverFrequency;
   conflictResolverLabel: string;
   conflictResolverInstructions: string | null;
