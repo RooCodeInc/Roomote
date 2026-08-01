@@ -19,6 +19,12 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     ).toEqual({ reasoning: { effort: 'xhigh' } });
   });
 
+  it('passes max through for OpenAI-style OpenRouter models', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions('openrouter/openai/gpt-5.4', 'max'),
+    ).toEqual({ reasoning: { effort: 'max' } });
+  });
+
   it('clamps xhigh to high for non-OpenAI OpenRouter models', () => {
     expect(
       buildOpenCodeModelReasoningOptions(
@@ -73,6 +79,12 @@ describe('buildOpenCodeModelReasoningOptions', () => {
       thinking: { type: 'adaptive', display: 'summarized' },
       effort: 'medium',
     });
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-opus-4-7', 'max'),
+    ).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      effort: 'max',
+    });
   });
 
   it('clamps xhigh to high for the Anthropic 4.6 family', () => {
@@ -87,6 +99,12 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     ).toEqual({
       thinking: { type: 'adaptive' },
       effort: 'high',
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-sonnet-4-6', 'max'),
+    ).toEqual({
+      thinking: { type: 'adaptive' },
+      effort: 'max',
     });
   });
 
@@ -141,6 +159,9 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     expect(
       buildOpenCodeModelReasoningOptions('vercel/openai/gpt-5.4', 'medium'),
     ).toEqual({ reasoningEffort: 'medium' });
+    expect(buildOpenCodeModelReasoningOptions('openai/gpt-5.4', 'max')).toEqual(
+      { reasoningEffort: 'max' },
+    );
   });
 
   it('clamps LiteLLM xhigh reasoning to high', () => {
