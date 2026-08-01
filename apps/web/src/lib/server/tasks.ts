@@ -1,7 +1,9 @@
 import {
   type BackgroundAutomationKey,
   type TaskWorkflow,
+  formatExternalActorLabel,
   getUserDisplayName,
+  LINEAR_SESSION_ACTOR_PREFIX,
 } from '@roomote/types';
 import {
   type SQL,
@@ -14,6 +16,7 @@ import {
   and,
   desc,
   inArray,
+  like,
   lt,
   isNull,
   sql,
@@ -87,6 +90,14 @@ export function getCreatorFilterCondition(value: string): TaskFilterCondition {
       eq(tasks.initiatorKind, 'user'),
       isNull(tasks.initiatorUserId),
       eq(tasks.actorExternalId, creatorFilter.externalId),
+    )!;
+  }
+
+  if (creatorFilter.kind === 'linearAgent') {
+    return and(
+      eq(tasks.initiatorKind, 'user'),
+      isNull(tasks.initiatorUserId),
+      like(tasks.actorExternalId, `${LINEAR_SESSION_ACTOR_PREFIX}%`),
     )!;
   }
 
@@ -239,7 +250,7 @@ export function resolveTaskCreatorDisplay(
 
   return {
     kind: 'external',
-    label: task.actorDisplayName ?? task.actorExternalId ?? '',
+    label: formatExternalActorLabel(task) ?? '',
   };
 }
 

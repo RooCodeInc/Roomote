@@ -1,5 +1,7 @@
 import {
   ALL_REPOSITORIES,
+  formatExternalActorLabel,
+  normalizeExternalActorId,
   PRODUCT_NAME,
   type TaskSurface,
 } from '@roomote/types';
@@ -114,13 +116,11 @@ export function getTaskInitiatorDimensionValue(input: {
     });
   }
 
-  const externalLabel =
-    input.actorDisplayName ?? input.actorExternalId ?? NO_VALUE_LABEL;
+  const externalId = normalizeExternalActorId(input.actorExternalId);
+  const externalLabel = formatExternalActorLabel(input) ?? NO_VALUE_LABEL;
 
   return createDimensionValue(
-    input.actorExternalId
-      ? `external:${input.actorExternalId}`
-      : `external:${externalLabel}`,
+    externalId ? `external:${externalId}` : `external:${externalLabel}`,
     externalLabel,
   );
 }

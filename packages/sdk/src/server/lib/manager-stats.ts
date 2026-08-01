@@ -1,6 +1,8 @@
 import * as GitHub from '@roomote/github';
 import {
+  formatExternalActorLabel,
   formatAutomationLabel,
+  normalizeExternalActorId,
   type SourceControlProvider,
 } from '@roomote/types';
 
@@ -59,8 +61,7 @@ function getInitiatorLabel(row: TaskInitiatorRow): string {
   return (
     row.userName ??
     row.userEmail ??
-    row.actorDisplayName ??
-    row.actorExternalId ??
+    formatExternalActorLabel(row) ??
     'Unknown user'
   );
 }
@@ -258,7 +259,8 @@ async function getActiveUserCount(since: Date) {
       return [`user:${row.initiatorUserId}`];
     }
 
-    return row.actorExternalId ? [`external:${row.actorExternalId}`] : [];
+    const externalId = normalizeExternalActorId(row.actorExternalId);
+    return externalId ? [`external:${externalId}`] : [];
   });
 
   return new Set(humanCreatorKeys).size;
