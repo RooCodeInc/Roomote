@@ -556,7 +556,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       id: 'chatgpt',
       label: 'ChatGPT (subscription)',
       authKind: 'oauth',
-      defaultRoomoteModel: 'openai/gpt-5.6-terra',
+      defaultRoomoteModel: 'openai/gpt-5.6-sol',
     });
     expect(chatgptProvider?.envVarName).toBeUndefined();
   });
@@ -761,6 +761,44 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
 });
 
 describe('buildRecommendedDeploymentModelConfig', () => {
+  it.each(['openai', 'chatgpt'] as const)(
+    'builds the %s presets with role-specific reasoning',
+    (providerId) => {
+      const provider = getSetupModelProvider(providerId);
+
+      expect(buildRecommendedDeploymentModelConfig(provider)).toEqual({
+        roomoteModel: 'openai/gpt-5.6-sol',
+        roomoteSmallModel: 'openai/gpt-5.6-luna',
+        roomoteVisionModel: 'openai/gpt-5.6-sol',
+        roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
+        roomoteExploreModel: 'openai/gpt-5.6-luna',
+        roomotePlanningModel: 'openai/gpt-5.6-sol',
+        roomoteModelReasoningEffort: 'medium',
+        roomoteSmallModelReasoningEffort: 'low',
+        roomoteVisionModelReasoningEffort: 'low',
+        roomoteCodeReviewModelReasoningEffort: 'high',
+        roomoteExploreModelReasoningEffort: 'low',
+        roomotePlanningModelReasoningEffort: 'xhigh',
+      });
+      expect(
+        buildRecommendedDeploymentModelConfig(provider, 'luna-max'),
+      ).toEqual({
+        roomoteModel: 'openai/gpt-5.6-luna',
+        roomoteSmallModel: 'openai/gpt-5.6-luna',
+        roomoteVisionModel: 'openai/gpt-5.6-sol',
+        roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
+        roomoteExploreModel: 'openai/gpt-5.6-luna',
+        roomotePlanningModel: 'openai/gpt-5.6-sol',
+        roomoteModelReasoningEffort: 'max',
+        roomoteSmallModelReasoningEffort: 'low',
+        roomoteVisionModelReasoningEffort: 'low',
+        roomoteCodeReviewModelReasoningEffort: 'high',
+        roomoteExploreModelReasoningEffort: 'low',
+        roomotePlanningModelReasoningEffort: 'xhigh',
+      });
+    },
+  );
+
   it('maps the provider default to coding and recommended models to their roles', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),

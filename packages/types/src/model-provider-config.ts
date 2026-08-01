@@ -189,6 +189,70 @@ export type SetupModelProviderDescriptor = {
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
   'openrouter';
 
+const OPENAI_RECOMMENDED_MODEL_PRESETS = [
+  {
+    id: 'default',
+    label: 'Recommended',
+    default: true,
+    roles: {
+      coding: {
+        modelId: 'openai/gpt-5.6-sol',
+        reasoningEffort: 'medium',
+      },
+      helper: {
+        modelId: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'low',
+      },
+      vision: {
+        modelId: 'openai/gpt-5.6-sol',
+        reasoningEffort: 'low',
+      },
+      codeReview: {
+        modelId: 'openai/gpt-5.6-terra',
+        reasoningEffort: 'high',
+      },
+      explore: {
+        modelId: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'low',
+      },
+      planning: {
+        modelId: 'openai/gpt-5.6-sol',
+        reasoningEffort: 'xhigh',
+      },
+    },
+  },
+  {
+    id: 'luna-max',
+    label: 'Luna Max',
+    roles: {
+      coding: {
+        modelId: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'max',
+      },
+      helper: {
+        modelId: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'low',
+      },
+      vision: {
+        modelId: 'openai/gpt-5.6-sol',
+        reasoningEffort: 'low',
+      },
+      codeReview: {
+        modelId: 'openai/gpt-5.6-terra',
+        reasoningEffort: 'high',
+      },
+      explore: {
+        modelId: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'low',
+      },
+      planning: {
+        modelId: 'openai/gpt-5.6-sol',
+        reasoningEffort: 'xhigh',
+      },
+    },
+  },
+] as const satisfies readonly RecommendedModelPreset[];
+
 export const SETUP_MODEL_PROVIDER_CATALOG = [
   {
     id: 'openrouter',
@@ -341,19 +405,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'openai',
     label: 'OpenAI',
     envVarName: 'OPENAI_API_KEY',
-    defaultRoomoteModel: 'openai/gpt-5.6-terra',
+    defaultRoomoteModel: 'openai/gpt-5.6-sol',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
     }),
-    recommendedRoleModels: {
-      helper: 'openai/gpt-5.6-luna',
-      codeReview: 'openai/gpt-5.6-sol',
-      explore: 'openai/gpt-5.6-luna',
-      planning: 'openai/gpt-5.6-sol',
-    },
+    recommendedPresets: OPENAI_RECOMMENDED_MODEL_PRESETS,
   },
   {
     id: 'azure',
@@ -762,19 +821,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: CHATGPT_SUBSCRIPTION_PROVIDER_ID,
     label: 'ChatGPT (subscription)',
     envVarName: undefined,
-    defaultRoomoteModel: 'openai/gpt-5.6-terra',
+    defaultRoomoteModel: 'openai/gpt-5.6-sol',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
     }),
-    recommendedRoleModels: {
-      helper: 'openai/gpt-5.6-luna',
-      codeReview: 'openai/gpt-5.6-sol',
-      explore: 'openai/gpt-5.6-luna',
-      planning: 'openai/gpt-5.6-sol',
-    },
+    recommendedPresets: OPENAI_RECOMMENDED_MODEL_PRESETS,
   },
   {
     id: XAI_SUBSCRIPTION_PROVIDER_ID,
