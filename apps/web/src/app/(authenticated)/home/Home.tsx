@@ -107,8 +107,11 @@ export function Home({
 }: HomeProps) {
   const router = useRouter();
   const environments = useEnvironments();
-  const { cloudEnabled, managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS } =
-    useAuthorizedUser();
+  const {
+    cloudEnabled,
+    isAdmin,
+    managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
+  } = useAuthorizedUser();
 
   const { isDebugUIVisible } = useShowDebugUI();
   const canSelectBranch = isDebugUIVisible;
@@ -447,7 +450,7 @@ export function Home({
   const shouldDimMainForm = isBottomSheetExpanded && isShortViewport;
   const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
   const showNoEnvironmentsWarning =
-    !environments.isPending && !hasAnyEnvironments;
+    isAdmin && !environments.isPending && !hasAnyEnvironments;
   const submitDisabledReason =
     getTaskLaunchDisabledReason(managedAccess) ??
     (!hasAnyEnvironments && watchedRepository === AUTO_WORKSPACE_VALUE
