@@ -901,7 +901,7 @@ async function inspectContainer(
   let output: string;
 
   try {
-    output = await runDocker(['inspect', containerIdOrName]);
+    output = await runDocker(['container', 'inspect', containerIdOrName]);
   } catch (error) {
     if (isDockerObjectNotFoundError(error)) {
       return undefined;
