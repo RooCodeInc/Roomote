@@ -68,6 +68,11 @@ See [`.changeset/README.md`](.changeset/README.md).
    publish (`latest`), and the GitHub Release follow from `main` / tag workflows.
    Product tagging requires the `RELEASE_BOT_TOKEN` repository secret.
 
+To replace an unshipped candidate rather than refresh it, run
+`pnpm run version -- --supersede <patch|minor|major>` after auditing from the
+last published tag. This carries the unshipped notes into the replacement
+version; close the older Promote PR before promoting the replacement.
+
 ## Contributor License Agreement
 
 All contributors are required to sign the Roomote

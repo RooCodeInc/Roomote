@@ -498,3 +498,54 @@ export function amendProductVersion(repoRoot) {
 
   return { version, changesets: pending.map((entry) => entry.file) };
 }
+
+/**
+ * Replace an unshipped current release with a new version while preserving its
+ * release notes and folding in any newly pending changesets.
+ */
+export function supersedeProductVersion(repoRoot, level, options = {}) {
+  if (!['major', 'minor', 'patch'].includes(level)) {
+    throw new Error(`Unsupported supersede level: ${level}`);
+  }
+
+  const previous = readCurrentProductVersion(repoRoot);
+  const next = computeNextVersion(previous, [level]);
+  const pending = parsePendingChangesets(repoRoot);
+  const changelogPath = join(repoRoot, 'CHANGELOG.md');
+  if (!existsSync(changelogPath)) {
+    throw new Error('Cannot supersede a release without CHANGELOG.md');
+  }
+
+  const existing = readFileSync(changelogPath, 'utf8');
+  const amended =
+    pending.length === 0
+      ? existing
+      : amendChangelogSection(existing, pending, previous);
+  const date = options.date ?? new Date().toISOString().slice(0, 10);
+  const heading = new RegExp(
+    `^## ${escapeRegExp(previous)} \\([^\\n]+\\)$`,
+    'm',
+  );
+  if (!heading.test(amended)) {
+    throw new Error(`No CHANGELOG section found for ${previous}`);
+  }
+  writeFileSync(
+    changelogPath,
+    amended.replace(heading, `## ${next} (${date})`),
+  );
+
+  const rootPath = join(repoRoot, 'package.json');
+  const root = readJson(rootPath);
+  root.version = next;
+  writeFileSync(rootPath, `${JSON.stringify(root, null, 2)}\n`);
+
+  for (const entry of pending) {
+    rmSync(join(repoRoot, '.changeset', entry.file));
+  }
+
+  return {
+    previous,
+    next,
+    changesets: pending.map((entry) => entry.file),
+  };
+}

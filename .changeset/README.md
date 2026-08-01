@@ -46,6 +46,12 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
    only after those images exist so `releases/latest` never points at a missing
    image set. The `release/vX.Y.Z` branch can be deleted after the merge.
 
+If a maintainer explicitly replaces an unshipped candidate with a later
+version, run `pnpm run version -- --supersede <patch|minor|major>`. This retains
+the candidate's notes, consumes newer changesets, updates the root version, and
+replaces the existing changelog heading. Close the superseded Promote PR before
+promoting the replacement.
+
 Branch rules (must match GitHub rulesets):
 
 - **`develop`**: squash-only merges for feature and release PRs.
