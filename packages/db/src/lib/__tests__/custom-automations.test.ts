@@ -135,6 +135,52 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
+  it('persists a model override and rejects malformed model ids', async () => {
+    const [environment] = await db
+      .insert(environments)
+      .values({
+        name: `custom-auto-env-model-${Date.now()}`,
+        config: { name: 'test', repositories: [] },
+      })
+      .returning();
+
+    const created = await createCustomAutomation({
+      name: `Model override ${Date.now()}`,
+      prompt: 'Scan with a pinned model.',
+      enabled: true,
+      scheduleMode: 'daily',
+      model: 'anthropic/claude-sonnet-5',
+      environmentId: environment!.id,
+      target: {},
+    });
+    expect(created.model).toBe('anthropic/claude-sonnet-5');
+
+    const cleared = await updateCustomAutomation(created.id, {
+      name: created.name,
+      prompt: created.prompt,
+      enabled: true,
+      scheduleMode: 'daily',
+      model: null,
+      environmentId: environment!.id,
+      target: {},
+    });
+    expect(cleared.model).toBeNull();
+
+    await expect(
+      updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'daily',
+        model: 'no-provider-prefix',
+        environmentId: environment!.id,
+        target: {},
+      }),
+    ).rejects.toThrow('provider/model format');
+
+    await deleteCustomAutomation(created.id);
+  });
+
   it('claims a launch while the previous task is still active', async () => {
     const [environment] = await db
       .insert(environments)

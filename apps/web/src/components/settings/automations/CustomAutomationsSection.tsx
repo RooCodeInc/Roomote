@@ -33,6 +33,8 @@ import {
   Trash2,
 } from '@/components/system';
 
+import { ModelSelect } from '@/components/tasks/ModelSelect';
+
 import { SlackChannelSelect } from './SlackChannelSelect';
 
 type CustomAutomationFormState = {
@@ -42,6 +44,8 @@ type CustomAutomationFormState = {
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string;
   cronExpression: string;
+  /** Provider/model launch override; empty string means deployment default. */
+  model: string;
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetChannelId: string;
   targetServiceUrl: string;
@@ -54,6 +58,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   scheduleMode: 'daily',
   environmentId: '',
   cronExpression: '',
+  model: '',
   targetProvider: 'slack',
   targetChannelId: '',
   targetServiceUrl: '',
@@ -112,6 +117,7 @@ function formFromRow(row: CustomAutomationListItem): CustomAutomationFormState {
     scheduleMode: row.scheduleMode,
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
+    model: row.model ?? '',
     targetProvider: target.provider,
     targetChannelId: target.channelId,
     targetServiceUrl: target.serviceUrl,
@@ -349,6 +355,7 @@ export function CustomAutomationsSection() {
       scheduleMode: form.scheduleMode,
       cronExpression:
         form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
+      model: form.model || null,
       environmentId: form.environmentId,
       ...(form.targetProvider !== 'none'
         ? {
@@ -437,6 +444,53 @@ export function CustomAutomationsSection() {
             </Select>
           </div>
 
+          {form.scheduleMode === 'cron' ? (
+            <div className="space-y-2">
+              <Label htmlFor="custom-automation-cron">Custom schedule</Label>
+              <Input
+                id="custom-automation-cron"
+                value={form.cronExpression}
+                disabled={busy}
+                placeholder="Weekdays at 9am or 0 9 * * 1-5"
+                onChange={(event) => {
+                  setResolvedCron(null);
+                  setScheduleSummary(null);
+                  setForm((current) => ({
+                    ...current,
+                    cronExpression: event.target.value,
+                  }));
+                }}
+                onBlur={() => {
+                  const alreadyResolvingThisInput =
+                    resolveScheduleMutation.isPending &&
+                    resolveScheduleMutation.variables?.schedule ===
+                      form.cronExpression;
+                  if (
+                    !clientParsedCron &&
+                    !resolvedCron &&
+                    form.cronExpression.trim() &&
+                    !alreadyResolvingThisInput
+                  ) {
+                    resolveScheduleMutation.mutate({
+                      schedule: form.cronExpression,
+                    });
+                  }
+                }}
+              />
+              {resolveScheduleMutation.isPending ? (
+                <p className="text-sm text-muted-foreground">
+                  Interpreting schedule...
+                </p>
+              ) : effectiveScheduleSummary ? (
+                <p className="text-sm text-muted-foreground">
+                  {effectiveScheduleSummary}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label>Environment</Label>
             <Select
@@ -461,53 +515,22 @@ export function CustomAutomationsSection() {
               </SelectContent>
             </Select>
           </div>
-        </div>
 
-        {form.scheduleMode === 'cron' ? (
           <div className="space-y-2">
-            <Label htmlFor="custom-automation-cron">Custom schedule</Label>
-            <Input
-              id="custom-automation-cron"
-              className="sm:max-w-md"
-              value={form.cronExpression}
+            <Label>Model</Label>
+            <ModelSelect
+              className="w-full"
+              size="default"
+              ariaLabel="Automation model"
+              value={form.model}
+              emptyOptionLabel="Default coding model"
               disabled={busy}
-              placeholder="Weekdays at 9am or 0 9 * * 1-5"
-              onChange={(event) => {
-                setResolvedCron(null);
-                setScheduleSummary(null);
-                setForm((current) => ({
-                  ...current,
-                  cronExpression: event.target.value,
-                }));
-              }}
-              onBlur={() => {
-                const alreadyResolvingThisInput =
-                  resolveScheduleMutation.isPending &&
-                  resolveScheduleMutation.variables?.schedule ===
-                    form.cronExpression;
-                if (
-                  !clientParsedCron &&
-                  !resolvedCron &&
-                  form.cronExpression.trim() &&
-                  !alreadyResolvingThisInput
-                ) {
-                  resolveScheduleMutation.mutate({
-                    schedule: form.cronExpression,
-                  });
-                }
-              }}
+              onValueChange={(value) =>
+                setForm((current) => ({ ...current, model: value }))
+              }
             />
-            {resolveScheduleMutation.isPending ? (
-              <p className="text-sm text-muted-foreground">
-                Interpreting schedule...
-              </p>
-            ) : effectiveScheduleSummary ? (
-              <p className="text-sm text-muted-foreground">
-                {effectiveScheduleSummary}
-              </p>
-            ) : null}
           </div>
-        ) : null}
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
@@ -746,6 +769,7 @@ export function CustomAutomationsSection() {
                         ? destinationLabel
                         : `${target.provider}:${destinationLabel}`}{' '}
                       · {statusLine(row)}
+                      {row.model ? ` · ${row.model}` : null}
                       {row.createdByName ? ` · by ${row.createdByName}` : null}
                     </p>
                   </div>

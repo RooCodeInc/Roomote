@@ -19,6 +19,7 @@ type ManageCustomAutomationsParams = {
   prompt?: string;
   enabled?: boolean;
   schedule?: string;
+  model?: string | null;
   environmentId?: string;
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram' | null;
   targetChannelId?: string;
@@ -61,6 +62,7 @@ export async function handleManageCustomAutomations(
             ? (params.enabled ?? true)
             : params.enabled,
         schedule: params.schedule,
+        model: params.model,
         environmentId: params.environmentId,
         targetProvider: params.targetProvider,
         targetChannelId: params.targetChannelId,

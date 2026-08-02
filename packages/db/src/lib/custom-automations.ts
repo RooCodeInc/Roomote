@@ -9,6 +9,7 @@ import {
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
   CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
+  CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
   MAX_CUSTOM_AUTOMATIONS,
 } from '@roomote/types';
 
@@ -32,6 +33,8 @@ export type CustomAutomationWriteInput = {
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression?: string | null;
+  /** Optional provider/model launch override; null uses the deployment default. */
+  model?: string | null;
   environmentId: string;
   /** Full destination target, or {} when the automation has no report channel. */
   target: OptionalAutomationTarget;
@@ -46,6 +49,7 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   name: string;
   prompt: string;
   cronExpression: string | null;
+  model: string | null;
 } {
   const name = normalizeName(input.name);
   const prompt = input.prompt.trim();
@@ -93,6 +97,18 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
+  const model = input.model?.trim() || null;
+  if (model) {
+    if (model.length > CUSTOM_AUTOMATION_MODEL_MAX_LENGTH) {
+      throw new Error(
+        `Model must be at most ${CUSTOM_AUTOMATION_MODEL_MAX_LENGTH} characters.`,
+      );
+    }
+    if (!/^[^/\s]+\/.+$/u.test(model)) {
+      throw new Error('Model must use provider/model format.');
+    }
+  }
+
   if (!input.environmentId) {
     throw new Error('Environment is required.');
   }
@@ -108,7 +124,7 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  return { name, prompt, cronExpression };
+  return { name, prompt, cronExpression, model };
 }
 
 export type CustomAutomationWithCreator = CustomAutomation & {
@@ -158,7 +174,7 @@ export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression } = assertValidWriteInput(input);
+  const { name, prompt, cronExpression, model } = assertValidWriteInput(input);
 
   const existingCount = await countCustomAutomations(client);
   if (existingCount >= MAX_CUSTOM_AUTOMATIONS) {
@@ -184,6 +200,7 @@ export async function createCustomAutomation(
       enabled: input.enabled,
       scheduleMode: input.scheduleMode,
       cronExpression,
+      model,
       environmentId: input.environmentId,
       target: input.target,
       createdByUserId: input.createdByUserId ?? null,
@@ -202,7 +219,7 @@ export async function updateCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression } = assertValidWriteInput(input);
+  const { name, prompt, cronExpression, model } = assertValidWriteInput(input);
 
   const existing = await getCustomAutomationById(id, client);
   if (!existing) {
@@ -226,6 +243,7 @@ export async function updateCustomAutomation(
       enabled: input.enabled,
       scheduleMode: input.scheduleMode,
       cronExpression,
+      model,
       environmentId: input.environmentId,
       target: input.target,
       updatedAt: new Date(),

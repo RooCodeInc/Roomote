@@ -167,6 +167,42 @@ describe('customAutomationsJob', () => {
     );
   });
 
+  it('passes a model override through to the launch', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, model: 'anthropic/claude-sonnet-5' } as never,
+    ]);
+
+    await customAutomationsJob();
+
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          harness: 'opencode-server',
+          payload: expect.objectContaining({
+            harnessModelOverrides: {
+              'opencode-server': 'anthropic/claude-sonnet-5',
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('launches on the deployment default when a persisted model is invalid', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, model: 'not-a-model' } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
+      task: { harness?: string; payload: Record<string, unknown> };
+    };
+    expect(enqueued.task.harness).toBeUndefined();
+    expect(enqueued.task.payload.harnessModelOverrides).toBeUndefined();
+  });
+
   it('anchors the prompt to the configured report channel', async () => {
     await customAutomationsJob();
 

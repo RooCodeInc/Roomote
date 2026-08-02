@@ -34,6 +34,7 @@ export type CustomAutomationListItem = {
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression: string | null;
+  model: string | null;
   environmentId: string | null;
   target: OptionalAutomationTarget;
   lastRunAt: Date | null;
@@ -52,6 +53,8 @@ export type CustomAutomationWriteInput = {
   enabled: boolean;
   scheduleMode: string;
   cronExpression?: string | null;
+  /** Provider/model launch override, or null for the deployment default. */
+  model?: string | null;
   environmentId: string;
   /** Omitted when the automation has no report destination channel. */
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram';
@@ -78,6 +81,7 @@ function toListItem(
     enabled: row.enabled,
     scheduleMode,
     cronExpression: row.cronExpression,
+    model: row.model,
     environmentId: row.environmentId,
     target: row.target,
     lastRunAt: row.lastRunAt,
@@ -181,6 +185,7 @@ export async function createCustomAutomationCommand(
     enabled: input.enabled,
     scheduleMode: input.scheduleMode,
     cronExpression,
+    model: input.model ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input),
     createdByUserId: auth.userId,
@@ -212,6 +217,7 @@ export async function updateCustomAutomationCommand(
     enabled: input.enabled,
     scheduleMode: input.scheduleMode,
     cronExpression,
+    model: input.model ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input),
   });
