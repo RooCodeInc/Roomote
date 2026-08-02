@@ -29,6 +29,7 @@ jobs:
       worker_artifact: ${{ steps.pr.outputs.worker_artifact }}
       base_version: ${{ steps.pr.outputs.base_version }}
       base_sha: ${{ steps.pr.outputs.base_sha }}
+      reuse_artifacts: ${{ steps.pr.outputs.reuse_artifacts }}
     steps:
       - name: Resolve PR head
         id: pr
@@ -78,16 +79,16 @@ jobs:
           }
           run_id="$(jq -r '.id' <<<"$run")"
           artifacts="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts?per_page=100")"
-          jq -e '.artifacts[] | select(.name == "pr-image-app" and .expired == false)' <<<"$artifacts" >/dev/null || {
-            echo "CI run ${run_id} has no publishable app image artifact." >&2
-            exit 1
-          }
-          jq -e '.artifacts[] | select(.name == "pr-image-metadata" and .expired == false)' <<<"$artifacts" >/dev/null || {
-            echo "CI run ${run_id} has no PR image metadata artifact." >&2
-            exit 1
-          }
+          reuse_artifacts=false
           worker_artifact=false
-          if jq -e '.artifacts[] | select(.name == "pr-image-worker" and .expired == false)' <<<"$artifacts" >/dev/null; then
+          if jq -e '.artifacts[] | select(.name == "pr-image-app" and .expired == false)' <<<"$artifacts" >/dev/null \
+            && jq -e '.artifacts[] | select(.name == "pr-image-metadata" and .expired == false)' <<<"$artifacts" >/dev/null; then
+            reuse_artifacts=true
+            if jq -e '.artifacts[] | select(.name == "pr-image-worker" and .expired == false)' <<<"$artifacts" >/dev/null; then
+              worker_artifact=true
+            fi
+          else
+            # Keep old PRs usable without duplicating fresh CI builds.
             worker_artifact=true
           fi
 
@@ -99,10 +100,69 @@ jobs:
           echo "worker_artifact=$worker_artifact" >> "$GITHUB_OUTPUT"
           echo "base_version=${base_ref}-${base_sha:0:8}" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "reuse_artifacts=$reuse_artifacts" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Rebuild ${{ matrix.app }} image
+    needs: prepare
+    if: ${{ needs.prepare.outputs.reuse_artifacts != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: app
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-app
+            image: roomote-app
+          - app: worker
+            dockerfile: apps/worker/Dockerfile
+            target: runtime
+            image: roomote-worker
+    steps:
+      - name: Checkout PR merge
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+          persist-credentials: false
+
+      - name: Read product version
+        id: product
+        shell: bash
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker builder
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+
+      - name: Build ${{ matrix.app }} image
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          tags: local/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
+          outputs: type=docker,dest=/tmp/${{ matrix.image }}.tar
+          build-args: |
+            R_APP_ENV=preview
+            RELEASE_VERSION=${{ needs.prepare.outputs.version }}
+            RELEASE_PRODUCT_VERSION=${{ steps.product.outputs.version }}
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-image-${{ matrix.app }}
+          path: /tmp/${{ matrix.image }}.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
 
   publish:
     name: Publish PR images
-    needs: prepare
+    needs: [prepare, build]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       actions: read
@@ -112,7 +172,8 @@ jobs:
     outputs:
       mutable_updated: ${{ steps.images.outputs.mutable_updated }}
     steps:
-      - name: Download image artifacts
+      - name: Download CI image artifacts
+        if: ${{ needs.prepare.outputs.reuse_artifacts == 'true' }}
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: pr-image-*
@@ -120,6 +181,14 @@ jobs:
           merge-multiple: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ needs.prepare.outputs.run_id }}
+
+      - name: Download rebuilt image artifacts
+        if: ${{ needs.prepare.outputs.reuse_artifacts != 'true' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: pr-image-*
+          path: /tmp/images
+          merge-multiple: true
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -139,6 +208,7 @@ jobs:
           WORKER_ARTIFACT: ${{ needs.prepare.outputs.worker_artifact }}
           BASE_VERSION: ${{ needs.prepare.outputs.base_version }}
           BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          REUSE_ARTIFACTS: ${{ needs.prepare.outputs.reuse_artifacts }}
         shell: bash
         run: |
           set -euo pipefail
@@ -146,7 +216,10 @@ jobs:
           echo 'mutable_updated=false' >> "$GITHUB_OUTPUT"
 
           docker load --input '/tmp/images/roomote-app.tar'
-          worker_image_affected="$(jq -r '.workerImageAffected' /tmp/images/pr-image-metadata.json)"
+          worker_image_affected=true
+          if [ "$REUSE_ARTIFACTS" = 'true' ]; then
+            worker_image_affected="$(jq -r '.workerImageAffected' /tmp/images/pr-image-metadata.json)"
+          fi
           if [ "$WORKER_ARTIFACT" = 'true' ]; then
             docker load --input '/tmp/images/roomote-worker.tar'
           else

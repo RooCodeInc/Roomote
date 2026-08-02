@@ -95,7 +95,9 @@ test('GHCR workflow publishes explicitly requested pull request images safely', 
   assert.match(publishWorkflow.jobs.prepare.if, /OWNER/);
   assert.match(publishWorkflow.jobs.prepare.if, /MEMBER/);
   assert.match(publishWorkflow.jobs.prepare.if, /COLLABORATOR/);
-  assert.equal(publishWorkflow.jobs.build, undefined);
+  const fallbackBuild = publishWorkflow.jobs.build;
+  assert.match(fallbackBuild.if, /reuse_artifacts != 'true'/);
+  assert.equal(fallbackBuild.permissions.packages, undefined);
 
   for (const jobName of ['docker-build-app', 'docker-build-worker']) {
     const job = ciWorkflow.jobs[jobName];
@@ -117,6 +119,7 @@ test('GHCR workflow publishes explicitly requested pull request images safely', 
   assert.match(prepareScript, /conclusion == "success"/);
   assert.match(prepareScript, /pr-image-app/);
   assert.match(prepareScript, /pr-image-metadata/);
+  assert.match(prepareScript, /reuse_artifacts=false/);
 
   const publisher = publishWorkflow.jobs.publish;
   assert.equal(publisher.permissions.packages, 'write');
@@ -137,6 +140,7 @@ test('GHCR workflow publishes explicitly requested pull request images safely', 
   assert.match(publishScript, /roomote-app roomote-worker/);
   assert.match(publishScript, /BASE_VERSION/);
   assert.match(publishScript, /workerImageAffected/);
+  assert.match(publisher.if, /needs\.build\.result == 'skipped'/);
   assert.equal(
     publisher.outputs.mutable_updated,
     '${{ steps.images.outputs.mutable_updated }}',

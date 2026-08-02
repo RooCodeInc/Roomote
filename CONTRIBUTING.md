@@ -58,7 +58,9 @@ an open pull request to publish preview builds of `roomote-app` and
 fork pull requests: the regular unprivileged CI build exports short-lived image
 artifacts, while a separate publisher job receives only those completed
 artifacts and the package-write token. PR preview images currently target
-`linux/amd64` and require a successful CI run for the current head commit.
+`linux/amd64` and require a successful CI run for the current head commit. The
+publisher reuses fresh CI artifacts and rebuilds only when those short-lived
+artifacts are unavailable.
 
 ### How a release ships
 
