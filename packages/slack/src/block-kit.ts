@@ -2902,10 +2902,11 @@ export async function handleRoutingRejectNo(payload: SlackInteractivePayload) {
   if (prefillJson) {
     try {
       const prefill = JSON.parse(prefillJson) as RoutingPrefillData;
+      const { kickoffMessage: _rejectedKickoff, ...manualPrefill } = prefill;
       await redis.set(
         prefillKey,
         JSON.stringify({
-          ...prefill,
+          ...manualPrefill,
           confirmNonce: randomUUID(),
         } satisfies RoutingPrefillData),
         'EX',
