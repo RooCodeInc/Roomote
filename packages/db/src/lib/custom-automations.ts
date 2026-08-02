@@ -1,20 +1,17 @@
 import { and, asc, count, eq, isNull, lt, or } from 'drizzle-orm';
 
 import {
-  isConfiguredAutomationTarget,
   isScheduleOnlyBackgroundAutomationFrequency,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
   type ScheduleOnlyBackgroundAutomationFrequency,
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
-  CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
-  CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
   MAX_CUSTOM_AUTOMATIONS,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
-import { customAutomations, environments, tasks } from '../schema';
+import { customAutomations, tasks } from '../schema';
 import type { CustomAutomation } from '../types';
 import type { AutomationRunOutcomeStatus } from './automations';
 
@@ -40,92 +37,6 @@ export type CustomAutomationWriteInput = {
   target: OptionalAutomationTarget;
   createdByUserId?: string | null;
 };
-
-function normalizeName(name: string): string {
-  return name.trim().replace(/\s+/g, ' ');
-}
-
-function assertValidWriteInput(input: CustomAutomationWriteInput): {
-  name: string;
-  prompt: string;
-  cronExpression: string | null;
-  model: string | null;
-} {
-  const name = normalizeName(input.name);
-  const prompt = input.prompt.trim();
-
-  if (!name) {
-    throw new Error('Name is required.');
-  }
-
-  if (name.length > CUSTOM_AUTOMATION_NAME_MAX_LENGTH) {
-    throw new Error(
-      `Name must be at most ${CUSTOM_AUTOMATION_NAME_MAX_LENGTH} characters.`,
-    );
-  }
-
-  if (!prompt) {
-    throw new Error('Prompt is required.');
-  }
-
-  if (prompt.length > CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH) {
-    throw new Error(
-      `Prompt must be at most ${CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH} characters.`,
-    );
-  }
-
-  if (
-    input.scheduleMode !== 'cron' &&
-    !isScheduleOnlyBackgroundAutomationFrequency(input.scheduleMode)
-  ) {
-    throw new Error(`Invalid schedule mode: ${input.scheduleMode}`);
-  }
-
-  const cronExpression = input.cronExpression?.trim() || null;
-  if (input.scheduleMode === 'cron' && !cronExpression) {
-    throw new Error('Cron expression is required for a cron schedule.');
-  }
-  if (input.scheduleMode !== 'cron' && cronExpression) {
-    throw new Error('Cron expression is only valid for a cron schedule.');
-  }
-  if (
-    cronExpression &&
-    cronExpression.length > CUSTOM_AUTOMATION_CRON_MAX_LENGTH
-  ) {
-    throw new Error(
-      `Cron expression must be at most ${CUSTOM_AUTOMATION_CRON_MAX_LENGTH} characters.`,
-    );
-  }
-
-  const model = input.model?.trim() || null;
-  if (model) {
-    if (model.length > CUSTOM_AUTOMATION_MODEL_MAX_LENGTH) {
-      throw new Error(
-        `Model must be at most ${CUSTOM_AUTOMATION_MODEL_MAX_LENGTH} characters.`,
-      );
-    }
-    if (!/^[^/\s]+\/.+$/u.test(model)) {
-      throw new Error('Model must use provider/model format.');
-    }
-  }
-
-  if (!input.environmentId) {
-    throw new Error('Environment is required.');
-  }
-
-  const hasAnyTargetField = Boolean(
-    input.target?.provider ||
-    input.target?.targetKind ||
-    input.target?.externalRef,
-  );
-  if (hasAnyTargetField && !isConfiguredAutomationTarget(input.target)) {
-    throw new Error(
-      'Report destination must include a provider, target kind, and channel.',
-    );
-  }
-
-  return { name, prompt, cronExpression, model };
-}
 
 export type CustomAutomationWithCreator = CustomAutomation & {
   createdByUser: { id: string; name: string; email: string } | null;
@@ -174,33 +85,15 @@ export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model } = assertValidWriteInput(input);
-
-  const existingCount = await countCustomAutomations(client);
-  if (existingCount >= MAX_CUSTOM_AUTOMATIONS) {
-    throw new Error(
-      `You can create at most ${MAX_CUSTOM_AUTOMATIONS} custom automations.`,
-    );
-  }
-
-  const environment = await client.query.environments.findFirst({
-    columns: { id: true },
-    where: eq(environments.id, input.environmentId),
-  });
-
-  if (!environment) {
-    throw new Error('Selected environment was not found.');
-  }
-
   const [created] = await client
     .insert(customAutomations)
     .values({
-      name,
-      prompt,
+      name: input.name,
+      prompt: input.prompt,
       enabled: input.enabled,
       scheduleMode: input.scheduleMode,
-      cronExpression,
-      model,
+      cronExpression: input.cronExpression ?? null,
+      model: input.model ?? null,
       environmentId: input.environmentId,
       target: input.target,
       createdByUserId: input.createdByUserId ?? null,
@@ -218,32 +111,16 @@ export async function updateCustomAutomation(
   id: string,
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
-): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model } = assertValidWriteInput(input);
-
-  const existing = await getCustomAutomationById(id, client);
-  if (!existing) {
-    throw new Error('Custom automation was not found.');
-  }
-
-  const environment = await client.query.environments.findFirst({
-    columns: { id: true },
-    where: eq(environments.id, input.environmentId),
-  });
-
-  if (!environment) {
-    throw new Error('Selected environment was not found.');
-  }
-
+): Promise<CustomAutomation | null> {
   const [updated] = await client
     .update(customAutomations)
     .set({
-      name,
-      prompt,
+      name: input.name,
+      prompt: input.prompt,
       enabled: input.enabled,
       scheduleMode: input.scheduleMode,
-      cronExpression,
-      model,
+      cronExpression: input.cronExpression ?? null,
+      model: input.model ?? null,
       environmentId: input.environmentId,
       target: input.target,
       updatedAt: new Date(),
@@ -251,11 +128,7 @@ export async function updateCustomAutomation(
     .where(eq(customAutomations.id, id))
     .returning();
 
-  if (!updated) {
-    throw new Error('Failed to update custom automation.');
-  }
-
-  return updated;
+  return updated ?? null;
 }
 
 export async function deleteCustomAutomation(

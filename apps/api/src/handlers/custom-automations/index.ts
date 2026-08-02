@@ -4,27 +4,22 @@ import { z } from 'zod';
 
 import {
   and,
-  createCustomAutomation,
   db,
   deleteCustomAutomation,
   eq,
   getCustomAutomationById,
   isNull,
   listCustomAutomations,
-  updateCustomAutomation,
   users,
 } from '@roomote/db/server';
 import {
-  listConnectedCommunicationProviders,
+  createCustomAutomationWrite,
+  CustomAutomationWriteError,
   resolveCustomAutomationSchedule,
   runCustomAutomationNow,
+  updateCustomAutomationWrite,
+  type CustomAutomationTargetWriteInput,
 } from '@roomote/sdk/server';
-import type {
-  BackgroundAutomationProvider,
-  BackgroundAutomationTargetKind,
-  CustomAutomationScheduleMode,
-  OptionalAutomationTarget,
-} from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -35,142 +30,48 @@ type CustomAutomationVariables = Variables & {
   customAutomationAdminId: string;
 };
 
-const modelSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(200)
-  .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.');
+const modelSchema = z.string();
 
 const writeSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  prompt: z.string().trim().min(1).max(8_000),
+  name: z.string(),
+  prompt: z.string(),
   enabled: z.boolean().default(true),
-  schedule: z.string().trim().min(1).max(500),
+  schedule: z.string(),
   model: modelSchema.optional(),
   environmentId: z.string().uuid(),
   targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
-  targetChannelId: z.string().trim().min(1).max(160).optional(),
-  targetServiceUrl: z.string().trim().min(1).max(500).optional(),
+  targetChannelId: z.string().optional(),
+  targetServiceUrl: z.string().optional(),
 });
 
 const updateSchema = z.object({
-  name: z.string().trim().min(1).max(100).optional(),
-  prompt: z.string().trim().min(1).max(8_000).optional(),
+  name: z.string().optional(),
+  prompt: z.string().optional(),
   enabled: z.boolean().optional(),
-  schedule: z.string().trim().min(1).max(500).optional(),
+  schedule: z.string().optional(),
   model: modelSchema.nullable().optional(),
   environmentId: z.string().uuid().optional(),
   targetProvider: z
     .enum(['slack', 'discord', 'teams', 'telegram'])
     .nullable()
     .optional(),
-  targetChannelId: z.string().trim().min(1).max(160).optional(),
-  targetServiceUrl: z.string().trim().min(1).max(500).optional(),
+  targetChannelId: z.string().optional(),
+  targetServiceUrl: z.string().nullable().optional(),
 });
 
-const UNIQUE_VIOLATION_CODE = '23505';
-const NAME_UNIQUE_INDEX = 'custom_automations_name_unique_idx';
-export const DUPLICATE_AUTOMATION_NAME_ERROR =
-  'A custom automation with this name already exists.';
-
 /**
- * Whether the error (or anything in its cause chain — drizzle wraps the
- * driver error in a DrizzleQueryError) is the Postgres unique violation for
- * the custom automation name index specifically. Both signals are required:
- * a 23505 on some other constraint is not a duplicate name and must rethrow
- * to the logged 500 path instead of being mislabeled. The two signals may
- * live on different levels of the cause chain (wrapper message vs. driver
- * error fields), so they are accumulated across the walk.
- */
-function isDuplicateNameViolation(error: unknown): boolean {
-  let sawUniqueViolationCode = false;
-  let sawNameUniqueIndex = false;
-
-  for (
-    let current = error, depth = 0;
-    current !== null && current !== undefined && depth < 10;
-    depth += 1
-  ) {
-    const candidate = current as {
-      code?: unknown;
-      constraint?: unknown;
-      message?: unknown;
-      cause?: unknown;
-    };
-
-    if (candidate.code === UNIQUE_VIOLATION_CODE) {
-      sawUniqueViolationCode = true;
-    }
-
-    if (
-      candidate.constraint === NAME_UNIQUE_INDEX ||
-      (typeof candidate.message === 'string' &&
-        candidate.message.includes(NAME_UNIQUE_INDEX))
-    ) {
-      sawNameUniqueIndex = true;
-    }
-
-    if (sawUniqueViolationCode && sawNameUniqueIndex) {
-      return true;
-    }
-
-    current = candidate.cause;
-  }
-
-  return false;
-}
-
-/**
- * Expected validation failures thrown as plain Errors by
- * `createCustomAutomation` / `updateCustomAutomation` (packages/db),
- * `buildTarget`, and schedule validation (packages/sdk). These are safe to
- * echo to the admin-only MCP client so the calling agent can self-correct;
- * the web tRPC surface already shows the same messages to admins. Anything
- * not matched here is rethrown so the app-level onError handler logs it and
- * returns a generic 500.
- */
-const VALIDATION_ERROR_PATTERNS: RegExp[] = [
-  /^Name is required\.$/,
-  /^Name must be at most \d+ characters\.$/,
-  /^Prompt is required\.$/,
-  /^Prompt must be at most \d+ characters\.$/,
-  /^Invalid schedule mode: /,
-  /^Cron expression is required for a cron schedule\.$/,
-  /^Cron expression is only valid for a cron schedule\.$/,
-  /^Cron expression must be at most \d+ characters\.$/,
-  /^Cron expression must be between 1 and \d+ characters\.$/,
-  /^Use a standard five-field cron expression\.$/,
-  /^Model must be at most \d+ characters\.$/,
-  /^Model must use provider\/model format\.$/,
-  /^Environment is required\.$/,
-  /^Selected environment was not found\.$/,
-  /^Custom automation was not found\.$/,
-  /^Report destination must include a provider, target kind, and channel\.$/,
-  /^You can create at most \d+ custom automations\.$/,
-  /^targetChannelId is required when targetProvider is set\.$/,
-  /^Timezone is required\.$/,
-  /^Choose a valid IANA timezone\.$/,
-];
-
-/**
- * Translate an expected validation failure into a 400 response with the
- * message, or return null when the error is not a known validation failure
- * (callers rethrow those so onError logs them as unexpected 500s).
+ * Translate stable domain failures while leaving unexpected failures on the
+ * app-level logged 500 path.
  */
 function knownErrorResponse(
   c: Pick<Context, 'json'>,
   error: unknown,
 ): Response | null {
-  if (isDuplicateNameViolation(error)) {
-    return c.json({ error: DUPLICATE_AUTOMATION_NAME_ERROR }, 400);
-  }
-
-  if (
-    error instanceof Error &&
-    VALIDATION_ERROR_PATTERNS.some((pattern) => pattern.test(error.message))
-  ) {
-    return c.json({ error: error.message }, 400);
+  if (error instanceof CustomAutomationWriteError) {
+    return c.json(
+      { error: error.message, code: error.code },
+      error.code === 'not_found' ? 404 : 400,
+    );
   }
 
   return null;
@@ -200,61 +101,28 @@ async function requireAdmin(auth: McpAuth): Promise<string | null> {
   return user?.id ?? null;
 }
 
-function buildTarget(
+function targetInput(
   input: Pick<
-    z.infer<typeof writeSchema>,
+    z.infer<typeof updateSchema>,
     'targetProvider' | 'targetChannelId' | 'targetServiceUrl'
   >,
-): OptionalAutomationTarget {
-  if (!input.targetProvider) return {};
-  if (!input.targetChannelId) {
-    throw new Error('targetChannelId is required when targetProvider is set.');
-  }
-
-  const kinds: Record<string, BackgroundAutomationTargetKind> = {
-    slack: 'slack_channel',
-    discord: 'discord_channel',
-    teams: 'teams_channel',
-    telegram: 'telegram_chat',
-  };
-  return {
-    provider: input.targetProvider as BackgroundAutomationProvider,
-    targetKind: kinds[input.targetProvider]!,
-    externalRef: input.targetChannelId,
-    ...(input.targetServiceUrl
-      ? { metadata: { serviceUrl: input.targetServiceUrl } }
-      : {}),
-  };
-}
-
-async function resolveWriteSchedule(schedule: string, userId: string) {
+): CustomAutomationTargetWriteInput | null | undefined {
+  if (input.targetProvider === null) return null;
   if (
-    ['off', 'every_hour', 'every_6_hours', 'daily', 'weekly'].includes(schedule)
+    input.targetProvider === undefined &&
+    input.targetChannelId === undefined &&
+    input.targetServiceUrl === undefined
   ) {
-    return {
-      status: 'resolved' as const,
-      scheduleMode: schedule as CustomAutomationScheduleMode,
-      cronExpression: null,
-      resolution: null,
-    };
-  }
-
-  const resolution = await resolveCustomAutomationSchedule({
-    schedule,
-    userId,
-  });
-  if (resolution.status === 'ambiguous' || !resolution.cronExpression) {
-    return {
-      status: 'ambiguous' as const,
-      clarification: resolution.clarification,
-      resolution,
-    };
+    return undefined;
   }
   return {
-    status: 'resolved' as const,
-    scheduleMode: 'cron' as const,
-    cronExpression: resolution.cronExpression,
-    resolution,
+    ...(input.targetProvider ? { provider: input.targetProvider } : {}),
+    ...(input.targetChannelId !== undefined
+      ? { channelId: input.targetChannelId }
+      : {}),
+    ...(input.targetServiceUrl !== undefined
+      ? { serviceUrl: input.targetServiceUrl }
+      : {}),
   };
 }
 
@@ -302,34 +170,21 @@ customAutomationsRouter.post('/', async (c) => {
   const parsed = writeSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   try {
-    const schedule = await resolveWriteSchedule(
-      parsed.data.schedule,
-      adminId(c),
-    );
-    if (schedule.status === 'ambiguous') return c.json(schedule, 409);
-
-    if (parsed.data.targetProvider) {
-      const connected = await listConnectedCommunicationProviders();
-      if (!connected.includes(parsed.data.targetProvider)) {
-        return c.json(
-          { error: `${parsed.data.targetProvider} is not connected.` },
-          400,
-        );
-      }
-    }
-
-    const automation = await createCustomAutomation({
+    const result = await createCustomAutomationWrite({
       name: parsed.data.name,
       prompt: parsed.data.prompt,
       enabled: parsed.data.enabled,
-      scheduleMode: schedule.scheduleMode,
-      cronExpression: schedule.cronExpression,
       model: parsed.data.model ?? null,
       environmentId: parsed.data.environmentId,
-      target: buildTarget(parsed.data),
+      schedule: { schedule: parsed.data.schedule, userId: adminId(c) },
+      target: targetInput(parsed.data) ?? null,
       createdByUserId: adminId(c),
     });
-    return c.json({ automation, resolution: schedule.resolution }, 201);
+    if (result.status === 'ambiguous') return c.json(result, 409);
+    return c.json(
+      { automation: result.automation, resolution: result.resolution },
+      201,
+    );
   } catch (error) {
     const known = knownErrorResponse(c, error);
     if (known) return known;
@@ -340,69 +195,24 @@ customAutomationsRouter.post('/', async (c) => {
 customAutomationsRouter.patch('/:id', async (c) => {
   const parsed = updateSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
-  const existing = await getCustomAutomationById(c.req.param('id'));
-  if (!existing) {
-    return c.json({ error: 'Custom automation was not found.' }, 404);
-  }
   try {
-    const schedule = parsed.data.schedule
-      ? await resolveWriteSchedule(parsed.data.schedule, adminId(c))
-      : {
-          status: 'resolved' as const,
-          scheduleMode: existing.scheduleMode as CustomAutomationScheduleMode,
-          cronExpression: existing.cronExpression,
-          resolution: null,
-        };
-    if (schedule.status === 'ambiguous') return c.json(schedule, 409);
-    if (parsed.data.targetProvider) {
-      const connected = await listConnectedCommunicationProviders();
-      if (!connected.includes(parsed.data.targetProvider)) {
-        return c.json(
-          { error: `${parsed.data.targetProvider} is not connected.` },
-          400,
-        );
-      }
-    }
-    const existingTarget = existing.target;
-    const clearTarget = parsed.data.targetProvider === null;
-    const targetProvider =
-      parsed.data.targetProvider ??
-      (existingTarget.provider === 'slack' ||
-      existingTarget.provider === 'discord' ||
-      existingTarget.provider === 'teams' ||
-      existingTarget.provider === 'telegram'
-        ? existingTarget.provider
-        : undefined);
-    const targetChannelId =
-      parsed.data.targetChannelId ?? existingTarget.externalRef ?? undefined;
-    const existingServiceUrl =
-      typeof existingTarget.metadata?.serviceUrl === 'string'
-        ? existingTarget.metadata.serviceUrl
-        : undefined;
-    const automation = await updateCustomAutomation(c.req.param('id'), {
-      name: parsed.data.name ?? existing.name,
-      prompt: parsed.data.prompt ?? existing.prompt,
-      enabled: parsed.data.enabled ?? existing.enabled,
-      scheduleMode: schedule.scheduleMode,
-      cronExpression: schedule.cronExpression,
-      // Explicit null clears the override; omitted keeps the existing value.
-      model:
-        parsed.data.model === null
-          ? null
-          : (parsed.data.model ?? existing.model),
-      environmentId: parsed.data.environmentId ?? existing.environmentId ?? '',
-      target: clearTarget
-        ? {}
-        : targetProvider && targetChannelId
-          ? buildTarget({
-              targetProvider,
-              targetChannelId,
-              targetServiceUrl:
-                parsed.data.targetServiceUrl ?? existingServiceUrl,
-            })
-          : existingTarget,
+    const result = await updateCustomAutomationWrite(c.req.param('id'), {
+      name: parsed.data.name,
+      prompt: parsed.data.prompt,
+      enabled: parsed.data.enabled,
+      model: parsed.data.model,
+      environmentId: parsed.data.environmentId,
+      schedule:
+        parsed.data.schedule !== undefined
+          ? { schedule: parsed.data.schedule, userId: adminId(c) }
+          : undefined,
+      target: targetInput(parsed.data),
     });
-    return c.json({ automation, resolution: schedule.resolution });
+    if (result.status === 'ambiguous') return c.json(result, 409);
+    return c.json({
+      automation: result.automation,
+      resolution: result.resolution,
+    });
   } catch (error) {
     const known = knownErrorResponse(c, error);
     if (known) return known;

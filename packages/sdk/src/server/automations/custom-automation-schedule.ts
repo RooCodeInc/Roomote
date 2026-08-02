@@ -17,6 +17,10 @@ import {
   DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL,
   resolveSlackWorkspaceTimezone,
 } from './scheduling-utils';
+import {
+  customAutomationValidationError,
+  CustomAutomationWriteError,
+} from './custom-automation-errors';
 
 const DEFAULT_DEPLOYMENT_SETTINGS_ID = 'default';
 const LOG_PREFIX = '[custom-automation-schedule]';
@@ -32,7 +36,7 @@ export type ResolvedDeploymentTimeZone = {
 export function normalizeTimeZone(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
-    throw new Error('Timezone is required.');
+    throw customAutomationValidationError('Timezone is required.');
   }
 
   try {
@@ -40,7 +44,7 @@ export function normalizeTimeZone(value: string): string {
       timeZone: trimmed,
     }).resolvedOptions().timeZone;
   } catch {
-    throw new Error('Choose a valid IANA timezone.');
+    throw customAutomationValidationError('Choose a valid IANA timezone.');
   }
 }
 
@@ -86,15 +90,25 @@ export function validateCronExpression(
 ): string {
   const expression = value.trim().replace(/\s+/g, ' ');
   if (!expression || expression.length > CUSTOM_AUTOMATION_CRON_MAX_LENGTH) {
-    throw new Error(
+    throw customAutomationValidationError(
       `Cron expression must be between 1 and ${CUSTOM_AUTOMATION_CRON_MAX_LENGTH} characters.`,
     );
   }
   if (expression.split(' ').length !== 5) {
-    throw new Error('Use a standard five-field cron expression.');
+    throw customAutomationValidationError(
+      'Use a standard five-field cron expression.',
+    );
   }
 
-  CronExpressionParser.parse(expression, { tz: normalizeTimeZone(timeZone) });
+  try {
+    CronExpressionParser.parse(expression, { tz: normalizeTimeZone(timeZone) });
+  } catch (error) {
+    if (error instanceof CustomAutomationWriteError) throw error;
+    throw customAutomationValidationError(
+      'Use a valid standard five-field cron expression.',
+      { cause: error },
+    );
+  }
   return expression;
 }
 

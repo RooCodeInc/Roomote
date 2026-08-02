@@ -40,11 +40,6 @@ export async function handleManageCustomAutomations(
     method = 'POST';
     body = { schedule: params.schedule };
   } else if (params.action === 'create' || params.action === 'update') {
-    const required = ['name', 'prompt', 'schedule', 'environmentId'] as const;
-    if (params.action === 'create') {
-      const missing = required.find((key) => !params[key]);
-      if (missing) return errorResult(`${missing} is required`);
-    }
     if (params.action === 'update' && !params.automationId) {
       return errorResult('automationId is required for update');
     }

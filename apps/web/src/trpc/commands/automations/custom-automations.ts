@@ -1,24 +1,18 @@
 import {
-  createCustomAutomation,
   deleteCustomAutomation,
   getCustomAutomationById,
   listCustomAutomations,
-  updateCustomAutomation,
   type CustomAutomation,
 } from '@roomote/db/server';
 import {
-  listConnectedCommunicationProviders,
+  createCustomAutomationWrite,
   resolveCustomAutomationSchedule,
-  resolveDeploymentTimeZone,
   runCustomAutomationNow,
-  validateCronExpression,
+  updateCustomAutomationWrite,
   type AutomationRunNowResult,
 } from '@roomote/sdk/server';
 import {
   isScheduleOnlyBackgroundAutomationFrequency,
-  type AutomationTarget,
-  type BackgroundAutomationProvider,
-  type BackgroundAutomationTargetKind,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
 } from '@roomote/types';
@@ -95,65 +89,6 @@ function toListItem(
   };
 }
 
-function buildTarget(
-  input: CustomAutomationWriteInput,
-): OptionalAutomationTarget {
-  if (!input.targetProvider) {
-    return {};
-  }
-
-  const externalRef = input.targetChannelId?.trim() ?? '';
-  if (!externalRef) {
-    throw new Error(
-      'Choose a destination channel for the selected provider, or set the destination to None.',
-    );
-  }
-
-  const targetKindByProvider: Record<
-    NonNullable<CustomAutomationWriteInput['targetProvider']>,
-    BackgroundAutomationTargetKind
-  > = {
-    slack: 'slack_channel',
-    discord: 'discord_channel',
-    teams: 'teams_channel',
-    telegram: 'telegram_chat',
-  };
-
-  const provider = input.targetProvider as BackgroundAutomationProvider;
-  const target: AutomationTarget = {
-    provider,
-    targetKind: targetKindByProvider[input.targetProvider],
-    externalRef,
-  };
-
-  const serviceUrl = input.targetServiceUrl?.trim();
-  if (serviceUrl) {
-    target.metadata = { serviceUrl };
-  }
-
-  return target;
-}
-
-function assertScheduleMode(
-  value: string,
-): asserts value is CustomAutomationScheduleMode {
-  if (!isScheduleOnlyBackgroundAutomationFrequency(value)) {
-    if (value === 'cron') return;
-    throw new Error(`Invalid schedule mode: ${value}`);
-  }
-}
-
-async function assertDestinationConnected(
-  provider: NonNullable<CustomAutomationWriteInput['targetProvider']>,
-): Promise<void> {
-  const connected = await listConnectedCommunicationProviders();
-  if (!connected.includes(provider)) {
-    throw new Error(
-      `Connect ${provider} before saving a ${provider} report destination.`,
-    );
-  }
-}
-
 export async function listCustomAutomationsCommand(
   auth: UserAuthSuccess,
 ): Promise<CustomAutomationListItem[]> {
@@ -167,31 +102,29 @@ export async function createCustomAutomationCommand(
   input: CustomAutomationWriteInput,
 ): Promise<CustomAutomationListItem> {
   assertAdmin(auth);
-  assertScheduleMode(input.scheduleMode);
-  const cronExpression =
-    input.scheduleMode === 'cron'
-      ? validateCronExpression(
-          input.cronExpression ?? '',
-          (await resolveDeploymentTimeZone()).timeZone,
-        )
-      : null;
-  if (input.targetProvider) {
-    await assertDestinationConnected(input.targetProvider);
-  }
-
-  const created = await createCustomAutomation({
+  const result = await createCustomAutomationWrite({
     name: input.name,
     prompt: input.prompt,
     enabled: input.enabled,
-    scheduleMode: input.scheduleMode,
-    cronExpression,
     model: input.model ?? null,
     environmentId: input.environmentId,
-    target: buildTarget(input),
+    schedule: {
+      scheduleMode: input.scheduleMode,
+      cronExpression: input.cronExpression,
+    },
+    target: input.targetProvider
+      ? {
+          provider: input.targetProvider,
+          channelId: input.targetChannelId,
+          serviceUrl: input.targetServiceUrl,
+        }
+      : null,
     createdByUserId: auth.userId,
   });
-
-  return toListItem(created);
+  if (result.status === 'ambiguous') {
+    throw new Error(result.clarification ?? 'Schedule needs clarification.');
+  }
+  return toListItem(result.automation);
 }
 
 export async function updateCustomAutomationCommand(
@@ -199,30 +132,28 @@ export async function updateCustomAutomationCommand(
   input: CustomAutomationWriteInput & { id: string },
 ): Promise<CustomAutomationListItem> {
   assertAdmin(auth);
-  assertScheduleMode(input.scheduleMode);
-  const cronExpression =
-    input.scheduleMode === 'cron'
-      ? validateCronExpression(
-          input.cronExpression ?? '',
-          (await resolveDeploymentTimeZone()).timeZone,
-        )
-      : null;
-  if (input.targetProvider) {
-    await assertDestinationConnected(input.targetProvider);
-  }
-
-  const updated = await updateCustomAutomation(input.id, {
+  const result = await updateCustomAutomationWrite(input.id, {
     name: input.name,
     prompt: input.prompt,
     enabled: input.enabled,
-    scheduleMode: input.scheduleMode,
-    cronExpression,
     model: input.model ?? null,
     environmentId: input.environmentId,
-    target: buildTarget(input),
+    schedule: {
+      scheduleMode: input.scheduleMode,
+      cronExpression: input.cronExpression,
+    },
+    target: input.targetProvider
+      ? {
+          provider: input.targetProvider,
+          channelId: input.targetChannelId,
+          serviceUrl: input.targetServiceUrl,
+        }
+      : null,
   });
-
-  return toListItem(updated);
+  if (result.status === 'ambiguous') {
+    throw new Error(result.clarification ?? 'Schedule needs clarification.');
+  }
+  return toListItem(result.automation);
 }
 
 export async function deleteCustomAutomationCommand(
