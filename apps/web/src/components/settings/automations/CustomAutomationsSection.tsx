@@ -8,6 +8,7 @@ import {
   type CustomAutomationScheduleMode,
 } from '@roomote/types';
 
+import { tryParseCronSchedule } from '@/lib/cron-schedule';
 import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
@@ -117,6 +118,14 @@ function formFromRow(row: CustomAutomationListItem): CustomAutomationFormState {
   };
 }
 
+function formatNextRun(date: Date, timeZone: string): string {
+  return date.toLocaleString(undefined, {
+    timeZone,
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
 function statusLine(row: CustomAutomationListItem): string {
   if (row.lastError) {
     return `Last error: ${row.lastError}`;
@@ -147,6 +156,7 @@ export function CustomAutomationsSection() {
     trpc.automations.listDiscordChannels.queryOptions(),
   );
   const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
+  const miscSettingsQuery = useQuery(trpc.miscSettings.get.queryOptions());
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -268,12 +278,33 @@ export function CustomAutomationsSection() {
         }
         setResolvedCron(result.cronExpression);
         setScheduleSummary(
-          `${result.summary} (${formatTimeZone(result.timeZone)})`,
+          `${result.summary} (${formatTimeZone(result.timeZone)})${
+            result.nextRunAt
+              ? ` · next run ${formatNextRun(result.nextRunAt, result.timeZone)}`
+              : ''
+          }`,
         );
       },
       onError: (error) => toast.error(error.message),
     }),
   );
+
+  // Valid five-field cron is parsed and previewed entirely client-side; the
+  // server round trip (and its LLM fallback) is only for natural language.
+  const schedulingTimeZone = miscSettingsQuery.data?.effectiveTimeZone;
+  const clientParsedCron = useMemo(
+    () =>
+      schedulingTimeZone
+        ? tryParseCronSchedule(form.cronExpression, schedulingTimeZone)
+        : null,
+    [form.cronExpression, schedulingTimeZone],
+  );
+  const effectiveResolvedCron =
+    clientParsedCron?.cronExpression ?? resolvedCron;
+  const effectiveScheduleSummary =
+    clientParsedCron && schedulingTimeZone
+      ? `${clientParsedCron.summary} (${formatTimeZone(schedulingTimeZone)}) · next run ${formatNextRun(clientParsedCron.nextRunAt, schedulingTimeZone)}`
+      : scheduleSummary;
 
   const rows = listQuery.data ?? [];
   const atCap = rows.length >= MAX_CUSTOM_AUTOMATIONS;
@@ -288,7 +319,7 @@ export function CustomAutomationsSection() {
       toast.error('Choose an environment.');
       return;
     }
-    if (form.scheduleMode === 'cron' && !resolvedCron) {
+    if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
       toast.error('Interpret and confirm the custom schedule first.');
       return;
     }
@@ -304,7 +335,8 @@ export function CustomAutomationsSection() {
       prompt: form.prompt,
       enabled: form.enabled,
       scheduleMode: form.scheduleMode,
-      cronExpression: form.scheduleMode === 'cron' ? resolvedCron : null,
+      cronExpression:
+        form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
       environmentId: form.environmentId,
       ...(form.targetProvider !== 'none'
         ? {
@@ -437,25 +469,27 @@ export function CustomAutomationsSection() {
                   }));
                 }}
               />
-              <Button
-                type="button"
-                variant="outline"
-                disabled={
-                  !form.cronExpression.trim() ||
-                  resolveScheduleMutation.isPending
-                }
-                onClick={() =>
-                  resolveScheduleMutation.mutate({
-                    schedule: form.cronExpression,
-                  })
-                }
-              >
-                Interpret schedule
-              </Button>
+              {!clientParsedCron ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={
+                    !form.cronExpression.trim() ||
+                    resolveScheduleMutation.isPending
+                  }
+                  onClick={() =>
+                    resolveScheduleMutation.mutate({
+                      schedule: form.cronExpression,
+                    })
+                  }
+                >
+                  Interpret schedule
+                </Button>
+              ) : null}
             </div>
-            {resolvedCron ? (
+            {effectiveResolvedCron ? (
               <p className="text-sm text-muted-foreground">
-                {resolvedCron} · {scheduleSummary}
+                {effectiveResolvedCron} · {effectiveScheduleSummary}
               </p>
             ) : null}
           </div>
