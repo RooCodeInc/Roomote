@@ -523,7 +523,7 @@ export function CustomAutomationsSection() {
               size="default"
               ariaLabel="Automation model"
               value={form.model}
-              emptyOptionLabel="Deployment default"
+              emptyOptionLabel="Default coding model"
               disabled={busy}
               onValueChange={(value) =>
                 setForm((current) => ({ ...current, model: value }))
