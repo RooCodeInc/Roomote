@@ -457,6 +457,7 @@ export function CustomAutomationsSection() {
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 id="custom-automation-cron"
+                className="sm:max-w-md"
                 value={form.cronExpression}
                 disabled={busy || resolveScheduleMutation.isPending}
                 placeholder="Weekdays at 9am or 0 9 * * 1-5"
