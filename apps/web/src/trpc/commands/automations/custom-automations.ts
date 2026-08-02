@@ -41,6 +41,7 @@ export type CustomAutomationListItem = {
   lastFailedAt: Date | null;
   lastError: string | null;
   lastLaunchedTaskId: string | null;
+  createdByName: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -58,7 +59,11 @@ export type CustomAutomationWriteInput = {
   targetServiceUrl?: string | null;
 };
 
-function toListItem(row: CustomAutomation): CustomAutomationListItem {
+function toListItem(
+  row: CustomAutomation & {
+    createdByUser?: { name: string; email: string } | null;
+  },
+): CustomAutomationListItem {
   const scheduleMode =
     row.scheduleMode === 'cron'
       ? 'cron'
@@ -80,6 +85,7 @@ function toListItem(row: CustomAutomation): CustomAutomationListItem {
     lastFailedAt: row.lastFailedAt,
     lastError: row.lastError,
     lastLaunchedTaskId: row.lastLaunchedTaskId,
+    createdByName: row.createdByUser?.name || row.createdByUser?.email || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

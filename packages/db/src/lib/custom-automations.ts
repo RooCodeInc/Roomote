@@ -111,11 +111,18 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   return { name, prompt, cronExpression };
 }
 
+export type CustomAutomationWithCreator = CustomAutomation & {
+  createdByUser: { id: string; name: string; email: string } | null;
+};
+
 export async function listCustomAutomations(
   client: DatabaseOrTransaction = db,
-): Promise<CustomAutomation[]> {
+): Promise<CustomAutomationWithCreator[]> {
   return client.query.customAutomations.findMany({
     orderBy: [asc(customAutomations.name)],
+    with: {
+      createdByUser: { columns: { id: true, name: true, email: true } },
+    },
   });
 }
 

@@ -731,6 +731,7 @@ export function CustomAutomationsSection() {
                         ? destinationLabel
                         : `${target.provider}:${destinationLabel}`}{' '}
                       · {statusLine(row)}
+                      {row.createdByName ? ` · by ${row.createdByName}` : null}
                     </p>
                   </div>
                   <div className="flex items-center gap-1">
