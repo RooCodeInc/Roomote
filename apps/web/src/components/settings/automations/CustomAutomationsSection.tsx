@@ -270,7 +270,13 @@ export function CustomAutomationsSection() {
   );
   const resolveScheduleMutation = useMutation(
     trpc.automations.resolveCustomAutomationSchedule.mutationOptions({
-      onSuccess: (result) => {
+      onSuccess: (result, variables) => {
+        // The input stays editable while a resolution is in flight; drop
+        // responses for text the user has since changed so a stale cron
+        // cannot be saved for the new schedule.
+        if (variables.schedule !== form.cronExpression) {
+          return;
+        }
         if (result.status === 'ambiguous') {
           setResolvedCron(null);
           setScheduleSummary(null);
@@ -282,7 +288,12 @@ export function CustomAutomationsSection() {
           scheduleSummaryLine(result.summary, result.timeZone),
         );
       },
-      onError: (error) => toast.error(error.message),
+      onError: (error, variables) => {
+        if (variables.schedule !== form.cronExpression) {
+          return;
+        }
+        toast.error(error.message);
+      },
     }),
   );
 
@@ -470,11 +481,15 @@ export function CustomAutomationsSection() {
                 }));
               }}
               onBlur={() => {
+                const alreadyResolvingThisInput =
+                  resolveScheduleMutation.isPending &&
+                  resolveScheduleMutation.variables?.schedule ===
+                    form.cronExpression;
                 if (
                   !clientParsedCron &&
                   !resolvedCron &&
                   form.cronExpression.trim() &&
-                  !resolveScheduleMutation.isPending
+                  !alreadyResolvingThisInput
                 ) {
                   resolveScheduleMutation.mutate({
                     schedule: form.cronExpression,
