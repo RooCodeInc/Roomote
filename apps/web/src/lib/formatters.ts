@@ -142,6 +142,17 @@ export function formatInferenceCost(
 }
 
 /**
+ * Formats an IANA timezone identifier for display by replacing underscores
+ * with spaces (e.g., "Africa/Addis_Ababa" -> "Africa/Addis Ababa"). The
+ * canonical identifier should still be used when persisting values.
+ * @param timeZone The IANA timezone identifier
+ * @returns Human-readable timezone label
+ */
+export function formatTimeZone(timeZone: string): string {
+  return timeZone.replaceAll('_', ' ');
+}
+
+/**
  * Formats tokens with appropriate suffix (K, M, B)
  * @param tokens The number of tokens to format
  * @returns Formatted string with appropriate suffix

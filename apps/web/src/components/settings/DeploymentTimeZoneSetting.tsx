@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { formatTimeZone } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import {
@@ -86,7 +87,9 @@ export function DeploymentTimeZoneSetting() {
     return (
       <p className="text-sm text-muted-foreground">
         Scheduling timezone:{' '}
-        <span className="font-medium text-foreground">{effectiveTimeZone}</span>{' '}
+        <span className="font-medium text-foreground">
+          {formatTimeZone(effectiveTimeZone)}
+        </span>{' '}
         <Button
           type="button"
           variant="link"
@@ -118,7 +121,7 @@ export function DeploymentTimeZoneSetting() {
               aria-expanded={isTimeZonePickerOpen}
               className="w-full justify-between font-normal sm:w-80"
             >
-              <span className="truncate">{timeZone}</span>
+              <span className="truncate">{formatTimeZone(timeZone)}</span>
               <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
             </Button>
           </PopoverTrigger>
@@ -135,6 +138,7 @@ export function DeploymentTimeZoneSetting() {
                     <CommandItem
                       key={value}
                       value={value}
+                      keywords={[formatTimeZone(value)]}
                       onSelect={() => {
                         setTimeZone(value);
                         setIsTimeZonePickerOpen(false);
@@ -146,7 +150,7 @@ export function DeploymentTimeZoneSetting() {
                           value === timeZone ? 'opacity-100' : 'opacity-0',
                         )}
                       />
-                      <span className="truncate">{value}</span>
+                      <span className="truncate">{formatTimeZone(value)}</span>
                     </CommandItem>
                   ))}
                 </CommandGroup>

@@ -1,6 +1,6 @@
 // pnpm test src/lib/__tests__/formatters.test.ts
 
-import { formatNumber, formatCurrency } from '../formatters';
+import { formatNumber, formatCurrency, formatTimeZone } from '../formatters';
 
 describe('formatNumber', () => {
   it('should return empty string for undefined values', () => {
@@ -129,5 +129,20 @@ describe('formatCurrency', () => {
     // Only compact specified
     const compactOnly = formatCurrency(100, { compact: true });
     expect(compactOnly).toContain('$100');
+  });
+});
+
+describe('formatTimeZone', () => {
+  it('replaces underscores with spaces', () => {
+    expect(formatTimeZone('Africa/Addis_Ababa')).toBe('Africa/Addis Ababa');
+    expect(formatTimeZone('America/New_York')).toBe('America/New York');
+    expect(formatTimeZone('America/Argentina/Rio_Gallegos')).toBe(
+      'America/Argentina/Rio Gallegos',
+    );
+  });
+
+  it('leaves identifiers without underscores unchanged', () => {
+    expect(formatTimeZone('UTC')).toBe('UTC');
+    expect(formatTimeZone('Europe/London')).toBe('Europe/London');
   });
 });

@@ -8,7 +8,7 @@ import {
   type CustomAutomationScheduleMode,
 } from '@roomote/types';
 
-import { formatDistanceToNowCompact } from '@/lib/formatters';
+import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
@@ -267,7 +267,9 @@ export function CustomAutomationsSection() {
           return;
         }
         setResolvedCron(result.cronExpression);
-        setScheduleSummary(`${result.summary} (${result.timeZone})`);
+        setScheduleSummary(
+          `${result.summary} (${formatTimeZone(result.timeZone)})`,
+        );
       },
       onError: (error) => toast.error(error.message),
     }),
