@@ -1,4 +1,4 @@
-import { and, asc, count, eq, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, isNull, lt, or } from 'drizzle-orm';
 
 import {
   isConfiguredAutomationTarget,
@@ -280,15 +280,13 @@ export async function recordCustomAutomationRunOutcome(
 
 /**
  * Atomically claim a custom automation launch. Succeeds only when no other
- * launcher holds a fresh claim and, unless `allowWhilePreviousRunActive` is
- * set, there is no active previous task. Manual "Run now" launches pass that
- * flag: an explicit human trigger should not be blocked by an in-flight (or
- * stuck-active) previous run, while scheduled ticks stay single-flight.
+ * launcher holds a fresh claim. Completed claims do not block later scheduled
+ * runs, even if the previously launched task still appears active.
  * Returns the claim fencing token (`launchClaimedAt`) on success, or null.
  */
 export async function tryClaimCustomAutomationLaunch(
   id: string,
-  opts: { allowWhilePreviousRunActive?: boolean } = {},
+  expectedLastRunAt: Date | null,
   client: DatabaseOrTransaction = db,
 ): Promise<Date | null> {
   const now = new Date();
@@ -309,19 +307,9 @@ export async function tryClaimCustomAutomationLaunch(
           isNull(customAutomations.launchClaimedAt),
           lt(customAutomations.launchClaimedAt, staleBefore),
         )!,
-        ...(opts.allowWhilePreviousRunActive
-          ? []
-          : [
-              sql`(
-          ${customAutomations.lastLaunchedTaskId} IS NULL
-          OR NOT EXISTS (
-            SELECT 1
-            FROM tasks t
-            WHERE t.id = ${customAutomations.lastLaunchedTaskId}
-              AND t.state = 'active'
-          )
-        )`,
-            ]),
+        expectedLastRunAt
+          ? eq(customAutomations.lastRunAt, expectedLastRunAt)
+          : isNull(customAutomations.lastRunAt),
       ),
     )
     .returning({ launchClaimedAt: customAutomations.launchClaimedAt });
