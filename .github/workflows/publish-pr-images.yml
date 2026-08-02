@@ -18,12 +18,16 @@ jobs:
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     outputs:
       owner: ${{ steps.pr.outputs.owner }}
       sha: ${{ steps.pr.outputs.sha }}
       version: ${{ steps.pr.outputs.version }}
+      run_id: ${{ steps.pr.outputs.run_id }}
+      worker_artifact: ${{ steps.pr.outputs.worker_artifact }}
+      base_version: ${{ steps.pr.outputs.base_version }}
     steps:
       - name: Resolve PR head
         id: pr
@@ -36,6 +40,8 @@ jobs:
           pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
           sha="$(jq -r '.head.sha' <<<"$pr")"
           state="$(jq -r '.state' <<<"$pr")"
+          base_ref="$(jq -r '.base.ref' <<<"$pr")"
+          base_sha="$(jq -r '.base.sha' <<<"$pr")"
           [ "$state" = 'open' ] || {
             echo "Pull request #${PR_NUMBER} is not open." >&2
             exit 1
@@ -50,75 +56,56 @@ jobs:
             echo "Invalid pull request head SHA length: $sha" >&2
             exit 1
           }
+          case "$base_ref" in
+            develop | main) ;;
+            *)
+              echo "Unsupported pull request base branch: $base_ref" >&2
+              exit 1
+              ;;
+          esac
+
+          runs="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/workflows/CI.yml/runs?event=pull_request&per_page=100")"
+          run="$(jq -c \
+            --argjson number "$PR_NUMBER" \
+            --arg sha "$sha" \
+            --arg base_sha "$base_sha" \
+            '[.[].workflow_runs[] | select(any(.pull_requests[]?; .number == $number and .head.sha == $sha and .base.sha == $base_sha))] | sort_by(.run_number) | reverse | .[0] // empty' \
+            <<<"$runs")"
+          [ -n "$run" ] || {
+            echo "No CI run found for PR #${PR_NUMBER} at ${sha}." >&2
+            exit 1
+          }
+          status="$(jq -r '.status' <<<"$run")"
+          conclusion="$(jq -r '.conclusion // ""' <<<"$run")"
+          [ "$status" = 'completed' ] && [ "$conclusion" = 'success' ] || {
+            echo "Latest CI run for ${sha} is ${status}/${conclusion:-pending}; wait for CI to pass." >&2
+            exit 1
+          }
+          run_id="$(jq -r '.id' <<<"$run")"
+          artifacts="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts?per_page=100")"
+          jq -e '.artifacts[] | select(.name == "pr-image-app" and .expired == false)' <<<"$artifacts" >/dev/null || {
+            echo "CI run ${run_id} has no publishable app image artifact." >&2
+            exit 1
+          }
+          worker_artifact=false
+          if jq -e '.artifacts[] | select(.name == "pr-image-worker" and .expired == false)' <<<"$artifacts" >/dev/null; then
+            worker_artifact=true
+          fi
 
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           echo "owner=$owner" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "version=pr-${PR_NUMBER}-${sha:0:8}" >> "$GITHUB_OUTPUT"
-
-  build:
-    name: Build ${{ matrix.app }} (amd64)
-    needs: prepare
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - app: app
-            dockerfile: .docker/app/Dockerfile
-            target: runtime-app
-            image: roomote-app
-          - app: worker
-            dockerfile: apps/worker/Dockerfile
-            target: runtime
-            image: roomote-worker
-    steps:
-      - name: Checkout PR head
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          persist-credentials: false
-
-      - name: Read product version
-        id: product
-        shell: bash
-        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Docker builder
-        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
-
-      # This job executes PR-controlled Dockerfiles without any package-write
-      # token. The privileged publisher below only imports the finished image.
-      - name: Build ${{ matrix.app }} image
-        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          target: ${{ matrix.target }}
-          platforms: linux/amd64
-          tags: local/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
-          outputs: type=docker,dest=/tmp/${{ matrix.image }}.tar
-          build-args: |
-            R_APP_ENV=preview
-            RELEASE_VERSION=${{ needs.prepare.outputs.version }}
-            RELEASE_PRODUCT_VERSION=${{ steps.product.outputs.version }}
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: pr-image-${{ matrix.app }}
-          path: /tmp/${{ matrix.image }}.tar
-          compression-level: 0
-          if-no-files-found: error
-          retention-days: 1
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "worker_artifact=$worker_artifact" >> "$GITHUB_OUTPUT"
+          echo "base_version=${base_ref}-${base_sha:0:8}" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish PR images
-    needs: [prepare, build]
+    needs: prepare
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
+      actions: read
       contents: read
       packages: write
       pull-requests: read
@@ -131,6 +118,8 @@ jobs:
           pattern: pr-image-*
           path: /tmp/images
           merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ needs.prepare.outputs.run_id }}
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -147,14 +136,25 @@ jobs:
           PR_NUMBER: ${{ github.event.issue.number }}
           SHA: ${{ needs.prepare.outputs.sha }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          WORKER_ARTIFACT: ${{ needs.prepare.outputs.worker_artifact }}
+          BASE_VERSION: ${{ needs.prepare.outputs.base_version }}
         shell: bash
         run: |
           set -euo pipefail
           mutable_version="pr-${PR_NUMBER}"
           echo 'mutable_updated=false' >> "$GITHUB_OUTPUT"
 
+          docker load --input '/tmp/images/roomote-app.tar'
+          if [ "$WORKER_ARTIFACT" = 'true' ]; then
+            docker load --input '/tmp/images/roomote-worker.tar'
+          else
+            docker pull "ghcr.io/${OWNER}/roomote-worker:${BASE_VERSION}"
+            docker tag \
+              "ghcr.io/${OWNER}/roomote-worker:${BASE_VERSION}" \
+              "local/roomote-worker:${VERSION}"
+          fi
+
           for image in roomote-app roomote-worker; do
-            docker load --input "/tmp/images/${image}.tar"
             local_ref="local/${image}:${VERSION}"
             immutable_ref="ghcr.io/${OWNER}/${image}:${VERSION}"
             docker tag "$local_ref" "$immutable_ref"

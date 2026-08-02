@@ -54,9 +54,10 @@ A repository owner, member, or collaborator can comment `/publish-images` on
 an open pull request to publish preview builds of `roomote-app` and
 `roomote-worker`. The workflow replies with immutable `pr-<number>-<short-sha>`
 image references and updates the movable `pr-<number>` tags. This works for
-fork pull requests: PR-controlled code runs in an unprivileged build job, while
-a separate publisher job receives only the completed image artifacts and the
-package-write token. PR preview images currently target `linux/amd64`.
+fork pull requests: the regular unprivileged CI build exports short-lived image
+artifacts, while a separate publisher job receives only those completed
+artifacts and the package-write token. PR preview images currently target
+`linux/amd64` and require a successful CI run for the current head commit.
 
 ### How a release ships
 

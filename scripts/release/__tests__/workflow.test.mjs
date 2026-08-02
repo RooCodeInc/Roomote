@@ -79,33 +79,44 @@ test('GHCR release workflow announces only newly created releases in Discord', (
 });
 
 test('GHCR workflow publishes explicitly requested pull request images safely', () => {
-  const workflow = YAML.parse(
+  const publishWorkflow = YAML.parse(
     readFileSync(
       join(repoRoot, '.github/workflows/publish-pr-images.yml'),
       'utf8',
     ),
   );
-
-  assert.deepEqual(workflow.on.issue_comment.types, ['created']);
-  assert.match(workflow.jobs.prepare.if, /\/publish-images/);
-  assert.match(workflow.jobs.prepare.if, /state == 'open'/);
-  assert.match(workflow.jobs.prepare.if, /OWNER/);
-  assert.match(workflow.jobs.prepare.if, /MEMBER/);
-  assert.match(workflow.jobs.prepare.if, /COLLABORATOR/);
-
-  const build = workflow.jobs.build;
-  assert.equal(build.permissions.packages, undefined);
-  const buildCheckout = build.steps.find(
-    (step) => step.name === 'Checkout PR head',
+  const ciWorkflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/CI.yml'), 'utf8'),
   );
-  assert.equal(buildCheckout.with.ref, '${{ needs.prepare.outputs.sha }}');
-  assert.equal(buildCheckout.with['persist-credentials'], false);
 
-  const buildImage = build.steps.find((step) => step.name.startsWith('Build '));
-  assert.match(buildImage.with.outputs, /type=docker/);
-  assert.equal(buildImage.with.push, undefined);
+  assert.deepEqual(publishWorkflow.on.issue_comment.types, ['created']);
+  assert.match(publishWorkflow.jobs.prepare.if, /\/publish-images/);
+  assert.match(publishWorkflow.jobs.prepare.if, /state == 'open'/);
+  assert.match(publishWorkflow.jobs.prepare.if, /OWNER/);
+  assert.match(publishWorkflow.jobs.prepare.if, /MEMBER/);
+  assert.match(publishWorkflow.jobs.prepare.if, /COLLABORATOR/);
+  assert.equal(publishWorkflow.jobs.build, undefined);
 
-  const publisher = workflow.jobs.publish;
+  for (const jobName of ['docker-build-app', 'docker-build-worker']) {
+    const job = ciWorkflow.jobs[jobName];
+    const buildImage = job.steps.find((step) =>
+      step.name.startsWith('Build publishable '),
+    );
+    const uploadImage = job.steps.find((step) =>
+      step.name.startsWith('Upload publishable '),
+    );
+    assert.match(buildImage.if, /pull_request/);
+    assert.match(buildImage.if, /amd64/);
+    assert.match(buildImage.with.outputs, /type=docker/);
+    assert.equal(buildImage.with.push, undefined);
+    assert.equal(uploadImage.with['retention-days'], 1);
+  }
+
+  const prepareScript = publishWorkflow.jobs.prepare.steps[0].run;
+  assert.match(prepareScript, /actions\/workflows\/CI\.yml\/runs/);
+  assert.match(prepareScript, /pr-image-app/);
+
+  const publisher = publishWorkflow.jobs.publish;
   assert.equal(publisher.permissions.packages, 'write');
   assert.equal(
     publisher.steps.some(
@@ -121,12 +132,13 @@ test('GHCR workflow publishes explicitly requested pull request images safely', 
   assert.match(publishScript, /docker load/);
   assert.match(publishScript, /current_sha/);
   assert.match(publishScript, /roomote-app roomote-worker/);
+  assert.match(publishScript, /BASE_VERSION/);
   assert.equal(
     publisher.outputs.mutable_updated,
     '${{ steps.images.outputs.mutable_updated }}',
   );
 
-  const commentJob = workflow.jobs.comment;
+  const commentJob = publishWorkflow.jobs.comment;
   assert.deepEqual(commentJob.needs, ['prepare', 'publish']);
   assert.equal(commentJob.permissions['pull-requests'], 'write');
   assert.match(commentJob.steps[0].run, /roomote-app/);
