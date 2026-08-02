@@ -4,6 +4,13 @@ const MODAL_RPC_SIGNATURE_REGEX =
   /\/(?<service>modal\.[A-Za-z0-9_.]+)\/(?<method>[A-Za-z][A-Za-z0-9_]*)\s+(?<status>[A-Z_]+):/;
 const MODAL_STATUS_CODE_REGEX = /status\s*=\s*StatusCode\.(?<status>[A-Z_]+)/;
 const MODAL_ERROR_CODE_REGEX = /\(Error code:\s*(?<code>[A-Z0-9]+)\)/;
+const MODAL_CONCURRENT_SANDBOX_LIMIT_PATTERNS = [
+  /\bconcurrent(?:ly)?\b[^\n]*\bsandbox(?:es)?\b[^\n]*\blimit\b/i,
+  /\bsandbox(?:es)?\b[^\n]*\bconcurrent(?:ly)?\b[^\n]*\blimit\b/i,
+  /\bmaximum (?:allowed )?(?:number of )?(?:active |running |concurrent )?sandbox(?:es)?\b/i,
+  /\b(?:active|running) sandbox(?:es)?\b[^\n]*\blimit\b/i,
+  /\blimit\b[^\n]*\b(?:active|running) sandbox(?:es)?\b/i,
+] as const;
 
 export interface ModalRpcErrorEnrichment {
   fingerprint: string[];
@@ -77,6 +84,19 @@ export function getModalRpcErrorMetadata(
   error: unknown,
 ): ModalRpcErrorMetadata | undefined {
   return error instanceof ModalRpcError ? error.metadata : undefined;
+}
+
+export function isModalConcurrentSandboxLimitError(error: unknown): boolean {
+  const metadata = getModalRpcErrorMetadata(error);
+
+  return Boolean(
+    error instanceof Error &&
+    metadata?.operation === 'create_instance' &&
+    metadata.grpcStatus === 'RESOURCE_EXHAUSTED' &&
+    MODAL_CONCURRENT_SANDBOX_LIMIT_PATTERNS.some((pattern) =>
+      pattern.test(error.message),
+    ),
+  );
 }
 
 export function buildModalRpcErrorEnrichment(
