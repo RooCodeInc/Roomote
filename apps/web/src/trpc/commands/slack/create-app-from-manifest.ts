@@ -6,6 +6,7 @@ import { db } from '@roomote/db/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
+import { isRoomoteCloudEnabled } from '@/lib/server/env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { buildSlackAppManifest } from '@/lib/slack-app-manifest';
 import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
@@ -212,7 +213,10 @@ export async function createSlackAppFromManifest({
       };
     }
 
-    const manifest = buildSlackAppManifest({ publicOrigin });
+    const manifest = buildSlackAppManifest({
+      publicOrigin,
+      supportChannelEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    });
 
     const response = await fetch(buildSlackApiUrl('apps.manifest.create'), {
       method: 'POST',
