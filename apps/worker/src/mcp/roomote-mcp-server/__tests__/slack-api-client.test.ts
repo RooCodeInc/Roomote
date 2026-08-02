@@ -240,7 +240,7 @@ describe('reply quote helpers', () => {
   it('posts quote tracking requests through the Slack MCP API', async () => {
     global.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ success: true }),
+      json: async () => ({ success: true, quoteId: 'quote-1' }),
     });
 
     const result = await trackSlackReplyQuote(config, {
@@ -249,7 +249,7 @@ describe('reply quote helpers', () => {
       userName: 'Casey',
     });
 
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, quoteId: 'quote-1' });
     expect(fetch).toHaveBeenCalledWith(
       'https://platform.example.com/api/mcp/slack/track_reply_quote',
       expect.objectContaining({
@@ -274,6 +274,7 @@ describe('reply quote helpers', () => {
 
     const result = await clearSlackReplyQuote(config, {
       runId: 42,
+      quoteId: 'quote-1',
     });
 
     expect(result).toEqual({ success: true });
@@ -286,6 +287,7 @@ describe('reply quote helpers', () => {
         }),
         body: JSON.stringify({
           runId: 42,
+          quoteId: 'quote-1',
         }),
       }),
     );

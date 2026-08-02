@@ -141,6 +141,7 @@ export interface ChannelPostResponse {
 
 export interface SlackMutationResponse {
   success: boolean;
+  quoteId?: string;
 }
 
 export interface SlackReactionAddResponse {

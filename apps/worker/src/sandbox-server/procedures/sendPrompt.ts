@@ -132,17 +132,19 @@ export const sendPrompt = publicProcedure
     }
 
     if (status?.phase === 'waiting_for_prompt' && !status.sessionId) {
-      let trackedSlackQuote = false;
+      let trackedSlackQuoteId: string | null = null;
 
       try {
         if (input.source === 'web') {
-          trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-            runId: ctx.runId,
-            text: resolvedQuoteText,
-            userName: input.userName,
-            logPrefix: 'sendPrompt',
-            warn: (message) => ctx.harnessLogger?.warn(message),
-          });
+          trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote(
+            {
+              runId: ctx.runId,
+              text: resolvedQuoteText,
+              userName: input.userName,
+              logPrefix: 'sendPrompt',
+              warn: (message) => ctx.harnessLogger?.warn(message),
+            },
+          );
         }
 
         const success = ctx.harnessManager!.startNewTaskFromPrompt({
@@ -172,9 +174,10 @@ export const sendPrompt = publicProcedure
 
         return { success: true };
       } catch (error) {
-        if (trackedSlackQuote) {
+        if (trackedSlackQuoteId) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
+            quoteId: trackedSlackQuoteId,
             logPrefix: 'sendPrompt',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -191,11 +194,11 @@ export const sendPrompt = publicProcedure
       }
     }
 
-    let trackedSlackQuote = false;
+    let trackedSlackQuoteId: string | null = null;
 
     try {
       if (input.source === 'web') {
-        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+        trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
           text: resolvedQuoteText,
           userName: input.userName,
@@ -240,9 +243,10 @@ export const sendPrompt = publicProcedure
 
       return { success: true };
     } catch (error) {
-      if (trackedSlackQuote) {
+      if (trackedSlackQuoteId) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
+          quoteId: trackedSlackQuoteId,
           logPrefix: 'sendPrompt',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

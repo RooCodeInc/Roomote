@@ -2,6 +2,7 @@ const {
   delMock,
   execMock,
   expireMock,
+  evalMock,
   getMock,
   lrangeMock,
   multiDelMock,
@@ -15,6 +16,7 @@ const {
   delMock: vi.fn(),
   execMock: vi.fn(),
   expireMock: vi.fn(),
+  evalMock: vi.fn(),
   getMock: vi.fn(),
   lrangeMock: vi.fn(),
   multiDelMock: vi.fn(),
@@ -31,6 +33,7 @@ vi.mock('@roomote/redis', () => ({
     del: delMock,
     multi: multiMock,
     expire: expireMock,
+    eval: evalMock,
     get: getMock,
     rpush: rpushMock,
     sadd: saddMock,
@@ -63,6 +66,7 @@ describe('slack-messages', () => {
     vi.clearAllMocks();
     saddMock.mockResolvedValue(1);
     expireMock.mockResolvedValue(1);
+    evalMock.mockResolvedValue(1);
     setMock.mockResolvedValue('OK');
     delMock.mockResolvedValue(1);
     getMock.mockResolvedValue(null);
@@ -199,13 +203,15 @@ describe('slack-messages', () => {
 
     expect(setMock).toHaveBeenCalledWith(
       'slack:latest_user_message:42',
-      JSON.stringify({
-        text: 'Need a follow-up',
-        userName: 'Brock',
-      }),
+      expect.any(String),
       'EX',
       30 * 24 * 60 * 60,
     );
+    expect(JSON.parse(setMock.mock.calls[0]?.[1] as string)).toEqual({
+      id: expect.any(String),
+      text: 'Need a follow-up',
+      userName: 'Brock',
+    });
   });
 
   it('tracks the latest user message for Slack quotes', async () => {
@@ -217,13 +223,15 @@ describe('slack-messages', () => {
 
     expect(setMock).toHaveBeenCalledWith(
       'slack:latest_user_message:42',
-      JSON.stringify({
-        text: 'Need a follow-up',
-        userName: 'Brock',
-      }),
+      expect.any(String),
       'EX',
       30 * 24 * 60 * 60,
     );
+    expect(JSON.parse(setMock.mock.calls[0]?.[1] as string)).toEqual({
+      id: expect.any(String),
+      text: 'Need a follow-up',
+      userName: 'Brock',
+    });
   });
 
   it('logs through the provided handler when quote tracking fails', async () => {
@@ -245,11 +253,61 @@ describe('slack-messages', () => {
 
   it('retrieves the latest user message for a task run', async () => {
     getMock.mockResolvedValueOnce(
-      JSON.stringify({ text: 'Need a follow-up', userName: 'Brock' }),
+      JSON.stringify({
+        id: 'quote-1',
+        text: 'Need a follow-up',
+        userName: 'Brock',
+      }),
     );
 
     await expect(getLatestUserMessage(42)).resolves.toEqual({
+      id: 'quote-1',
       text: 'Need a follow-up',
+      userName: 'Brock',
+    });
+  });
+
+  it('upgrades a legacy Slack quote record with an exact-match id', async () => {
+    const legacy = JSON.stringify({
+      text: 'Need a follow-up',
+      userName: 'Brock',
+    });
+    getMock.mockResolvedValueOnce(legacy).mockResolvedValueOnce(legacy);
+
+    await expect(getLatestUserMessage(42)).resolves.toEqual({
+      id: expect.any(String),
+      text: 'Need a follow-up',
+      userName: 'Brock',
+    });
+    expect(evalMock).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      'slack:latest_user_message:42',
+      legacy,
+      expect.any(String),
+      30 * 24 * 60 * 60,
+    );
+  });
+
+  it('does not overwrite a newer quote while upgrading a legacy record', async () => {
+    const legacy = JSON.stringify({
+      text: 'Old follow-up',
+      userName: 'Brock',
+    });
+    const current = JSON.stringify({
+      id: 'newer-quote',
+      text: 'New follow-up',
+      userName: 'Brock',
+    });
+    getMock
+      .mockResolvedValueOnce(legacy)
+      .mockResolvedValueOnce(legacy)
+      .mockResolvedValueOnce(current);
+    evalMock.mockResolvedValueOnce(0);
+
+    await expect(getLatestUserMessage(42)).resolves.toEqual({
+      id: 'newer-quote',
+      text: 'New follow-up',
       userName: 'Brock',
     });
   });
@@ -266,7 +324,7 @@ describe('slack-messages', () => {
     await expect(clearLatestUserMessage(42)).resolves.toBeUndefined();
 
     expect(consoleErrorMock).toHaveBeenCalledWith(
-      '[clearLatestUserMessage] Failed to clear latest user message for task run 42: redis failed',
+      '[clearLatestUserMessageForReplyQuote] Failed to clear latest user message for slack task run 42: redis failed',
     );
   });
 

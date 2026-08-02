@@ -68,18 +68,22 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
       token: 'run-token',
       platformApiUrl: 'https://platform.example.com',
     });
-    mockTrackSlackReplyQuote.mockResolvedValue({ success: true });
+    mockTrackSlackReplyQuote.mockResolvedValue({
+      success: true,
+      quoteId: 'quote-1',
+    });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
 
   it('tracks the latest user message through the API when the task run has Slack thread context', async () => {
-    await trackLatestUserMessageForSlackThreadQuote({
+    const quoteId = await trackLatestUserMessageForSlackThreadQuote({
       runId: 1,
       text: 'Follow up from web',
       userName: 'Casey',
       logPrefix: 'testProcedure',
     });
 
+    expect(quoteId).toBe('quote-1');
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockGetRoomoteConfig).toHaveBeenCalledTimes(1);
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
@@ -192,6 +196,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
   it('clears the latest user message through the API when the task run has Slack thread context', async () => {
     await clearLatestUserMessageForSlackThreadQuote({
       runId: 1,
+      quoteId: 'quote-1',
       logPrefix: 'testProcedure',
     });
 
@@ -204,6 +209,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
       },
       {
         runId: 1,
+        quoteId: 'quote-1',
       },
     );
   });

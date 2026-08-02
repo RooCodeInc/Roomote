@@ -66,10 +66,10 @@ export const steerTask = publicProcedure
         });
       }
 
-      let trackedSlackQuote = false;
+      let trackedSlackQuoteId: string | null = null;
 
       try {
-        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+        trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
           text: input.quoteText,
           userName: input.userName,
@@ -97,9 +97,10 @@ export const steerTask = publicProcedure
           stateFilePath: ctx.slackReplySatisfactionStateFile,
         });
       } catch (error) {
-        if (trackedSlackQuote) {
+        if (trackedSlackQuoteId) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
+            quoteId: trackedSlackQuoteId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -122,10 +123,10 @@ export const steerTask = publicProcedure
         });
       }
 
-      let trackedSlackQuote = false;
+      let trackedSlackQuoteId: string | null = null;
 
       try {
-        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+        trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
           text: input.quoteText,
           userName: input.userName,
@@ -152,9 +153,10 @@ export const steerTask = publicProcedure
           stateFilePath: ctx.slackReplySatisfactionStateFile,
         });
       } catch (error) {
-        if (trackedSlackQuote) {
+        if (trackedSlackQuoteId) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
+            quoteId: trackedSlackQuoteId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -191,10 +193,10 @@ export const steerTask = publicProcedure
       });
     }
 
-    let trackedSlackQuote = false;
+    let trackedSlackQuoteId: string | null = null;
 
     try {
-      trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+      trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote({
         runId: ctx.runId,
         text: input.quoteText,
         userName: input.userName,
@@ -221,9 +223,10 @@ export const steerTask = publicProcedure
         stateFilePath: ctx.slackReplySatisfactionStateFile,
       });
     } catch (error) {
-      if (trackedSlackQuote) {
+      if (trackedSlackQuoteId) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
+          quoteId: trackedSlackQuoteId,
           logPrefix: 'steerTask',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

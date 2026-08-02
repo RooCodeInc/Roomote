@@ -214,6 +214,7 @@ export async function clearSlackReplyQuote(
   config: RoomoteConfig,
   input: {
     runId: number;
+    quoteId?: string;
   },
 ): Promise<SlackMutationResponse> {
   return postToChatEndpoint<SlackMutationResponse>(
