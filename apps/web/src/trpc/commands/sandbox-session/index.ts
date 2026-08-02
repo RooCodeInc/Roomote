@@ -2,6 +2,8 @@ import {
   RunStatus,
   TaskPayloadKind,
   activeRunStatuses,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationProviderFromTaskPayload,
   getEnvironmentDefinitionIdFromPayload,
   isBootingRunStatus,
   isExitedRunStatus,
@@ -9,7 +11,11 @@ import {
   taskToolDispatchPayloadSchema,
 } from '@roomote/types';
 import { createRunToken } from '@roomote/auth';
-import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
+import {
+  clearLatestUserMessageForReplyQuoteIfId,
+  setLatestUserMessageForReplyQuote,
+  trackLatestUserMessageForReplyQuote,
+} from '@roomote/communication/messages';
 import {
   and,
   compareAndSetTrustedRunActingUser,
@@ -274,7 +280,15 @@ export async function sendSandboxPromptCommand(
 
   const previousActingUserId = taskRun.actingUserId;
   const requiresActorHandoff = previousActingUserId !== auth.userId;
+  const promptUserName = getAuthenticatedPromptUserName(auth);
+  const shouldTrackDiscordReplyQuote =
+    parsed.source === 'web' &&
+    typeof parsed.prompt === 'string' &&
+    parsed.prompt.trim().length > 0 &&
+    getCommunicationProviderFromTaskPayload(taskRun.payload) === 'discord' &&
+    Boolean(getCommunicationChannelFromTaskPayload(taskRun.payload));
   let didSwitchActingUser = false;
+  let discordReplyQuoteId: string | null = null;
 
   try {
     // The actor switch must land before the prompt reaches the sandbox so the
@@ -298,6 +312,24 @@ export async function sendSandboxPromptCommand(
       ],
     });
 
+    if (shouldTrackDiscordReplyQuote && typeof parsed.prompt === 'string') {
+      try {
+        const quote = await setLatestUserMessageForReplyQuote(
+          'discord',
+          taskRun.id,
+          {
+            text: parsed.prompt,
+            userName: promptUserName ?? 'Someone',
+          },
+        );
+        discordReplyQuoteId = quote.id;
+      } catch (error) {
+        console.warn(
+          `[sendSandboxPromptCommand] Failed to persist Discord reply quote for task run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     const result = await client.commands.sendPrompt.mutate({
       prompt:
         outOfBandContext && typeof parsed.prompt === 'string'
@@ -308,7 +340,7 @@ export async function sendSandboxPromptCommand(
       images: parsed.images,
       source: parsed.source,
       clientMessageId: parsed.clientMessageId,
-      userName: getAuthenticatedPromptUserName(auth),
+      userName: promptUserName,
       userImageUrl: parsed.userImageUrl,
       // Do not leave the previous actor's turn running after the live
       // credential identity changes (mirrors the API follow-up path).
@@ -326,12 +358,20 @@ export async function sendSandboxPromptCommand(
         provider: 'github',
         runId: taskRun.id,
         text: parsed.prompt,
-        userName: getAuthenticatedPromptUserName(auth) ?? 'Someone',
+        userName: promptUserName ?? 'Someone',
       });
     }
 
     return result;
   } catch (error) {
+    if (discordReplyQuoteId) {
+      await clearLatestUserMessageForReplyQuoteIfId(
+        'discord',
+        taskRun.id,
+        discordReplyQuoteId,
+      );
+    }
+
     await releaseOutOfBandContext(outOfBandContext);
 
     if (didSwitchActingUser) {
