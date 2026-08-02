@@ -4,6 +4,21 @@ import { createServerCaller } from '@/trpc/server';
 
 import { GET } from '../route';
 
+// getCallbackHost rewrites internal request origins (localhost) to the
+// configured public app URL, which it reads through the dotenvx-backed Env
+// proxy. The proxy resolves values from the repo-root .env.local file, so a
+// developer-local R_APP_URL/R_PUBLIC_URL (e.g. an ngrok host) would leak into
+// redirect assertions even with process.env stubbed. Replace Env with a
+// test-owned object so redirects always resolve against localhost.
+const { envState } = vi.hoisted(() => ({
+  envState: {} as { R_APP_URL: string; R_PUBLIC_URL?: string },
+}));
+
+vi.mock('@/lib/server/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/server/env')>()),
+  Env: envState,
+}));
+
 vi.mock('@/trpc/server', () => ({
   createServerCaller: vi.fn(),
 }));
@@ -13,36 +28,16 @@ const mockInstallation = vi.fn();
 const mockConnectApp = vi.fn();
 
 describe('GET /api/slack/install-after-auth', () => {
-  // getCallbackHost rewrites internal request origins (localhost) to the
-  // configured public app URL, so machine-level R_APP_URL/R_PUBLIC_URL (e.g. an
-  // ngrok host in the shell) leak into redirect assertions. Pin them per test.
-  const originalAppUrl = process.env.R_APP_URL;
-  const originalPublicUrl = process.env.R_PUBLIC_URL;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.R_APP_URL = 'http://localhost:13000';
-    delete process.env.R_PUBLIC_URL;
+    envState.R_APP_URL = 'http://localhost:13000';
+    delete envState.R_PUBLIC_URL;
     mockCreateServerCaller.mockResolvedValue({
       slack: {
         installation: mockInstallation,
         connectApp: mockConnectApp,
       },
     } as never);
-  });
-
-  afterEach(() => {
-    if (originalAppUrl === undefined) {
-      delete process.env.R_APP_URL;
-    } else {
-      process.env.R_APP_URL = originalAppUrl;
-    }
-
-    if (originalPublicUrl === undefined) {
-      delete process.env.R_PUBLIC_URL;
-    } else {
-      process.env.R_PUBLIC_URL = originalPublicUrl;
-    }
   });
 
   it('redirects to the requested path when Slack is already installed', async () => {

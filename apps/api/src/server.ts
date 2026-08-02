@@ -127,12 +127,23 @@ export function createApiApp(): ApiApp {
   app.onError((error, c: Context<{ Variables: Variables }>) => {
     if (error instanceof HTTPException) {
       if (error.status >= 500) {
+        // Sentry capture is a no-op when Sentry is disabled (the local-dev
+        // default), so always log server-side too — a 500 must never be
+        // invisible in the logs.
+        console.error(
+          `[api] Unhandled error ${c.req.method} ${c.req.path}:`,
+          error,
+        );
         captureApiException(error, c);
       }
 
       return error.getResponse();
     }
 
+    console.error(
+      `[api] Unhandled error ${c.req.method} ${c.req.path}:`,
+      error,
+    );
     captureApiException(error, c);
 
     return c.json({ error: 'internal_server_error' }, { status: 500 });
