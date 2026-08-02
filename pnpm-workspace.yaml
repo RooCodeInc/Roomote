@@ -6,4 +6,6 @@ minimumReleaseAge: 10080
 # lockfile-affecting changes while it finishes maturing.
 minimumReleaseAgeExclude:
   - jose
+  # Allow the patched releases while they finish maturing.
+  - brace-expansion
 blockExoticSubdeps: true
