@@ -109,6 +109,10 @@ roomoteMcpServer.registerTool(
       environmentId: z.string().optional(),
       targetProvider: z
         .enum(['slack', 'discord', 'teams', 'telegram'])
+        .nullable()
+        .describe(
+          'Destination provider. Pass null on update to clear the report destination.',
+        )
         .optional(),
       targetChannelId: z.string().optional(),
       targetServiceUrl: z.string().optional(),

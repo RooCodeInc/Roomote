@@ -51,7 +51,10 @@ const updateSchema = z.object({
   enabled: z.boolean().optional(),
   schedule: z.string().trim().min(1).max(500).optional(),
   environmentId: z.string().uuid().optional(),
-  targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
+  targetProvider: z
+    .enum(['slack', 'discord', 'teams', 'telegram'])
+    .nullable()
+    .optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
   targetServiceUrl: z.string().trim().min(1).max(500).optional(),
 });
@@ -227,6 +230,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
     }
   }
   const existingTarget = existing.target;
+  const clearTarget = parsed.data.targetProvider === null;
   const targetProvider =
     parsed.data.targetProvider ??
     (existingTarget.provider === 'slack' ||
@@ -248,8 +252,9 @@ customAutomationsRouter.patch('/:id', async (c) => {
     scheduleMode: schedule.scheduleMode,
     cronExpression: schedule.cronExpression,
     environmentId: parsed.data.environmentId ?? existing.environmentId ?? '',
-    target:
-      targetProvider && targetChannelId
+    target: clearTarget
+      ? {}
+      : targetProvider && targetChannelId
         ? buildTarget({
             targetProvider,
             targetChannelId,

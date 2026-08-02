@@ -59,6 +59,22 @@ describe('handleManageCustomAutomations', () => {
     });
   });
 
+  it('sends an explicit null provider to clear the report destination', async () => {
+    await handleManageCustomAutomations(
+      {
+        action: 'update',
+        automationId: 'automation-1',
+        targetProvider: null,
+      },
+      config,
+    );
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(request.body as string)).toEqual({
+      targetProvider: null,
+    });
+  });
+
   it('still requires all create fields and defaults enabled to true', async () => {
     const missing = await handleManageCustomAutomations(
       { action: 'create', name: 'Incomplete' },

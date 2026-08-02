@@ -20,7 +20,7 @@ type ManageCustomAutomationsParams = {
   enabled?: boolean;
   schedule?: string;
   environmentId?: string;
-  targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram';
+  targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram' | null;
   targetChannelId?: string;
   targetServiceUrl?: string;
 };
