@@ -13,7 +13,10 @@ import {
 } from '@roomote/db/server';
 import { CUSTOM_AUTOMATION_CRON_MAX_LENGTH } from '@roomote/types';
 
-import { resolveSlackWorkspaceTimezone } from './scheduling-utils';
+import {
+  DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL,
+  resolveSlackWorkspaceTimezone,
+} from './scheduling-utils';
 
 const DEFAULT_DEPLOYMENT_SETTINGS_ID = 'default';
 const LOG_PREFIX = '[custom-automation-schedule]';
@@ -174,7 +177,7 @@ export async function resolveCustomAutomationSchedule(params: {
     userId: params.userId,
     schema: scheduleResolutionSchema,
     maxOutputTokens: 300,
-    system: `Convert a recurring schedule into standard five-field cron. The timezone is ${timeZone} and the reference time is ${now.toISOString()}. Never use seconds or cron macros. Never invent a missing time or resolve conflicting instructions. For underspecified input, return status "ambiguous", cronExpression null, and one focused clarification question. For clear input, return status "resolved", a five-field cron expression, a concise plain-English summary, and clarification null.`,
+    system: `Convert a recurring schedule into standard five-field cron. The timezone is ${timeZone} and the reference time is ${now.toISOString()}. Never use seconds or cron macros. When the input names a clear recurrence but omits the time of day, use ${DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL}:00 and note the default time in the summary. Never resolve conflicting instructions. When the recurrence itself is unclear or instructions conflict, return status "ambiguous", cronExpression null, and one focused clarification question. For clear input, return status "resolved", a five-field cron expression, a concise plain-English summary, and clarification null.`,
     prompt: params.schedule,
   });
 

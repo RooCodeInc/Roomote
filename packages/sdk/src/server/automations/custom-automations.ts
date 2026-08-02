@@ -31,7 +31,7 @@ import {
   validateCronExpression,
   type ResolvedDeploymentTimeZone,
 } from './custom-automation-schedule';
-import { isRunDue } from './scheduling-utils';
+import { DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL, isRunDue } from './scheduling-utils';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -40,8 +40,6 @@ import {
 } from './types';
 
 const LOG_PREFIX = '[custom-automations]';
-/** Applied only to daily/weekly due-gating so hourly modes are not held until 3am. */
-const DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL = 3;
 
 const WINDOW_DAYS: Record<string, number> = {
   every_hour: 1 / 24,

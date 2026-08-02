@@ -7,6 +7,13 @@ interface SlackDeploymentContext {
   slackTeamId: string;
 }
 
+/**
+ * Local hour used when a schedule specifies a day but no time: daily/weekly
+ * preset due-gating and the default time for natural-language custom
+ * schedules that omit a time of day.
+ */
+export const DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL = 3;
+
 function getLocalDateKey(date: Date, timeZone: string): string {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,

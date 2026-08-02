@@ -75,9 +75,11 @@ Create arbitrary scheduled agent runs with:
 
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
-9am.” Roomote previews the canonical cron expression before saving and asks for
-clarification rather than guessing when a time or recurrence is ambiguous.
-Custom schedules do not support seconds or cron macros.
+9am.” Roomote previews the interpreted schedule before saving. A schedule that
+names a day but no time runs at 3am local, matching the daily and weekly
+cadences, and Roomote asks for clarification rather than guessing when the
+recurrence itself is ambiguous. Custom schedules do not support seconds or
+cron macros.
 
 On each due tick, Roomote launches a normal task with that prompt in that
 environment. When a report destination is set, the run is anchored to that
