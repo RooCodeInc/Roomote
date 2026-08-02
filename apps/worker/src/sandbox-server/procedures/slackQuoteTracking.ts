@@ -40,13 +40,20 @@ async function getSlackQuoteTrackingConfig(params: {
   return roomoteConfig;
 }
 
+export interface TrackedSlackReplyQuote {
+  /** Present when the API is new enough to return per-quote ids. */
+  quoteId?: string;
+  text: string;
+  userName: string;
+}
+
 export async function trackLatestUserMessageForSlackThreadQuote(params: {
   runId: number | undefined;
   text: string;
   userName: string | undefined;
   logPrefix: string;
   warn?: (message: string) => void;
-}): Promise<{ quoteId?: string } | null> {
+}): Promise<TrackedSlackReplyQuote | null> {
   const { runId, text, userName, logPrefix, warn } = params;
 
   if (text.trim().length === 0 || typeof runId !== 'number') {
@@ -64,12 +71,17 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
       return null;
     }
 
+    const trackedUserName = userName?.trim() || 'Someone';
     const result = await trackSlackReplyQuote(roomoteConfig, {
       runId,
       text,
-      userName: userName?.trim() || 'Someone',
+      userName: trackedUserName,
     });
-    return result.quoteId ? { quoteId: result.quoteId } : {};
+    return {
+      text,
+      userName: trackedUserName,
+      ...(result.quoteId ? { quoteId: result.quoteId } : {}),
+    };
   } catch (error) {
     warn?.(
       `[${logPrefix}] Non-fatal latest user message sync failure for task run ${runId}: ${
@@ -82,11 +94,11 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
 
 export async function clearLatestUserMessageForSlackThreadQuote(params: {
   runId: number | undefined;
-  quoteId?: string;
+  trackedQuote: TrackedSlackReplyQuote;
   logPrefix: string;
   warn?: (message: string) => void;
 }): Promise<void> {
-  const { runId, quoteId, logPrefix, warn } = params;
+  const { runId, trackedQuote, logPrefix, warn } = params;
 
   if (typeof runId !== 'number') {
     return;
@@ -105,7 +117,11 @@ export async function clearLatestUserMessageForSlackThreadQuote(params: {
 
     await clearSlackReplyQuote(roomoteConfig, {
       runId,
-      ...(quoteId ? { quoteId } : {}),
+      // Without an id (older API track responses), scope the clear by the
+      // tracked content so it cannot drop a newer follow-up stored since.
+      ...(trackedQuote.quoteId
+        ? { quoteId: trackedQuote.quoteId }
+        : { text: trackedQuote.text, userName: trackedQuote.userName }),
     });
   } catch (error) {
     warn?.(

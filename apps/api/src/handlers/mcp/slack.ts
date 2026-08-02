@@ -42,8 +42,11 @@ import {
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
-import { clearLatestUserMessageForReplyQuoteIfId } from '@roomote/communication/messages';
-import { setLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
+import {
+  clearLatestUserMessageForReplyQuoteIfContent,
+  clearLatestUserMessageForReplyQuoteIfId,
+  setLatestUserMessageForReplyQuote,
+} from '@roomote/communication/messages';
 
 import type { Variables } from '../../types';
 
@@ -660,14 +663,22 @@ function parseTrackReplyQuoteRequestBody(body: unknown): {
 function parseClearReplyQuoteRequestBody(body: unknown): {
   runId: number;
   quoteId?: string;
+  text?: string;
+  userName?: string;
 } {
   const record =
     body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
   const quoteId =
     record && typeof record.quoteId === 'string' ? record.quoteId.trim() : '';
+  const text =
+    record && typeof record.text === 'string' ? record.text.trim() : '';
+  const userName =
+    record && typeof record.userName === 'string' ? record.userName.trim() : '';
   return {
     runId: parseSlackReplyQuoteRunId(body),
     ...(quoteId ? { quoteId } : {}),
+    ...(text ? { text } : {}),
+    ...(userName ? { userName } : {}),
   };
 }
 
@@ -728,7 +739,12 @@ slackMcp.post('/clear_reply_quote', async (c) => {
     );
   }
 
-  let parsedBody: { runId: number; quoteId?: string };
+  let parsedBody: {
+    runId: number;
+    quoteId?: string;
+    text?: string;
+    userName?: string;
+  };
   try {
     parsedBody = parseClearReplyQuoteRequestBody(await c.req.json());
   } catch (error) {
@@ -751,7 +767,18 @@ slackMcp.post('/clear_reply_quote', async (c) => {
       parsedBody.runId,
       parsedBody.quoteId,
     );
+  } else if (parsedBody.text) {
+    // Workers tracked through an older API never received a quote id; scope
+    // their rollback by the tracked content so it cannot drop a newer
+    // follow-up stored in the meantime.
+    await clearLatestUserMessageForReplyQuoteIfContent(
+      'slack',
+      parsedBody.runId,
+      { text: parsedBody.text, userName: parsedBody.userName },
+    );
   } else {
+    // Bare runId requests come from previous-release workers whose clear
+    // contract has always been run-scoped.
     await clearLatestUserMessage(parsedBody.runId);
   }
 

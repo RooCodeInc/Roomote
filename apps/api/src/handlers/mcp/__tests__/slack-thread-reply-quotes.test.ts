@@ -5,7 +5,9 @@ import type { Variables } from '../../../types';
 
 const {
   buildThreadReplyImageBlocksMock,
+  clearLatestUserMessageForReplyQuoteIfContentMock,
   clearLatestUserMessageForReplyQuoteIfIdMock,
+  clearLatestUserMessageMock,
   getLatestUserMessageMock,
   getTaskChannelBindingsMock,
   maybeSendCommunicationThreadReplyMock,
@@ -14,7 +16,9 @@ const {
   taskRunFindFirstMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImageBlocksMock: vi.fn(),
+  clearLatestUserMessageForReplyQuoteIfContentMock: vi.fn(),
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
+  clearLatestUserMessageMock: vi.fn(),
   getLatestUserMessageMock: vi.fn(),
   getTaskChannelBindingsMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
@@ -55,7 +59,7 @@ vi.mock('@roomote/slack', () => ({
     block_id: 'footer',
     elements: [{ type: 'mrkdwn', text: footerText }],
   })),
-  clearLatestUserMessage: vi.fn(),
+  clearLatestUserMessage: clearLatestUserMessageMock,
   clearSlackThreadReplyFooterMessageTs: vi.fn(),
   getLatestUserMessage: getLatestUserMessageMock,
   getSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(null),
@@ -83,8 +87,11 @@ vi.mock('@roomote/slack', () => ({
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
+  clearLatestUserMessageForReplyQuoteIfContent:
+    clearLatestUserMessageForReplyQuoteIfContentMock,
   clearLatestUserMessageForReplyQuoteIfId:
     clearLatestUserMessageForReplyQuoteIfIdMock,
+  setLatestUserMessageForReplyQuote: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -292,5 +299,61 @@ describe('Slack thread reply quotes', () => {
 
     expect(response.status).toBe(500);
     expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
+  });
+
+  it('clears exactly by id when the clear request carries a quoteId', async () => {
+    const response = await createApp().request('/mcp/clear_reply_quote', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId: 42, quoteId: 'quote-1' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
+      'slack',
+      42,
+      'quote-1',
+    );
+    expect(
+      clearLatestUserMessageForReplyQuoteIfContentMock,
+    ).not.toHaveBeenCalled();
+    expect(clearLatestUserMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('scopes id-less clears by tracked content so a newer quote survives', async () => {
+    const response = await createApp().request('/mcp/clear_reply_quote', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        runId: 42,
+        text: 'Follow up from web',
+        userName: 'Casey',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(
+      clearLatestUserMessageForReplyQuoteIfContentMock,
+    ).toHaveBeenCalledWith('slack', 42, {
+      text: 'Follow up from web',
+      userName: 'Casey',
+    });
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
+    expect(clearLatestUserMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the run-scoped clear contract for bare previous-release requests', async () => {
+    const response = await createApp().request('/mcp/clear_reply_quote', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId: 42 }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(clearLatestUserMessageMock).toHaveBeenCalledWith(42);
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
+    expect(
+      clearLatestUserMessageForReplyQuoteIfContentMock,
+    ).not.toHaveBeenCalled();
   });
 });

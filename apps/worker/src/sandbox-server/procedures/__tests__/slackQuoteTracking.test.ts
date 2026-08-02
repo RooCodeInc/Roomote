@@ -83,7 +83,11 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
       logPrefix: 'testProcedure',
     });
 
-    expect(trackedQuote).toEqual({ quoteId: 'quote-1' });
+    expect(trackedQuote).toEqual({
+      quoteId: 'quote-1',
+      text: 'Follow up from web',
+      userName: 'Casey',
+    });
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockGetRoomoteConfig).toHaveBeenCalledTimes(1);
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
@@ -99,7 +103,7 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     );
   });
 
-  it('preserves tracked state when an older API omits quoteId', async () => {
+  it('preserves tracked content when an older API omits quoteId', async () => {
     mockTrackSlackReplyQuote.mockResolvedValueOnce({ success: true });
 
     const trackedQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -109,7 +113,10 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
       logPrefix: 'testProcedure',
     });
 
-    expect(trackedQuote).toEqual({});
+    expect(trackedQuote).toEqual({
+      text: 'Follow up from web',
+      userName: 'Casey',
+    });
   });
 
   it('does not leak raw user IDs into the stored Slack quote username', async () => {
@@ -209,7 +216,11 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
   it('clears the latest user message through the API when the task run has Slack thread context', async () => {
     await clearLatestUserMessageForSlackThreadQuote({
       runId: 1,
-      quoteId: 'quote-1',
+      trackedQuote: {
+        quoteId: 'quote-1',
+        text: 'Follow up from web',
+        userName: 'Casey',
+      },
       logPrefix: 'testProcedure',
     });
 
@@ -227,9 +238,13 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     );
   });
 
-  it('uses legacy cleanup when the tracked response had no quoteId', async () => {
+  it('scopes cleanup by tracked content when the tracked response had no quoteId', async () => {
     await clearLatestUserMessageForSlackThreadQuote({
       runId: 1,
+      trackedQuote: {
+        text: 'Follow up from web',
+        userName: 'Casey',
+      },
       logPrefix: 'testProcedure',
     });
 
@@ -238,7 +253,11 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
         token: 'run-token',
         platformApiUrl: 'https://platform.example.com',
       },
-      { runId: 1 },
+      {
+        runId: 1,
+        text: 'Follow up from web',
+        userName: 'Casey',
+      },
     );
   });
 });

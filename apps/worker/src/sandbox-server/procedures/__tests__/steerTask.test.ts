@@ -364,6 +364,8 @@ describe('steerTask procedure', () => {
       },
       {
         runId: 1,
+        text: 'Switch directions',
+        userName: 'Someone',
       },
     );
   });

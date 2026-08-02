@@ -215,6 +215,9 @@ export async function clearSlackReplyQuote(
   input: {
     runId: number;
     quoteId?: string;
+    /** Content match for trackers without a quote id (older API responses). */
+    text?: string;
+    userName?: string;
   },
 ): Promise<SlackMutationResponse> {
   return postToChatEndpoint<SlackMutationResponse>(
