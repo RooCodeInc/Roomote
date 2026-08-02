@@ -52,6 +52,14 @@ vi.mock('../scheduling-utils', () => ({
   resolveSlackWorkspaceTimezone: vi.fn(),
 }));
 
+vi.mock('../custom-automation-schedule', () => ({
+  resolveDeploymentTimeZone: vi.fn(async () => ({
+    timeZone: 'UTC',
+    source: 'utc_fallback',
+    updatedAt: null,
+  })),
+}));
+
 import { formatManagerStatsMessage } from '../manager-stats';
 
 const stats = {

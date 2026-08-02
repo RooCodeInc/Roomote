@@ -920,6 +920,8 @@ export function normalizeBackgroundAgentSettings(
     id: row?.id ?? 'default',
     managerSlackChannelId,
     globalAgentInstructions: row?.globalAgentInstructions ?? null,
+    timeZone: row?.timeZone ?? null,
+    timeZoneUpdatedAt: row?.timeZoneUpdatedAt ?? null,
     createdAt: row?.createdAt ?? now,
     updatedAt: row?.updatedAt ?? now,
 

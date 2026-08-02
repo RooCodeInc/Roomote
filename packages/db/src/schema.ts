@@ -182,6 +182,10 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // projection (built from the automations table) on top.
   managerSlackChannelId: text('manager_slack_channel_id'),
   globalAgentInstructions: text('global_agent_instructions'),
+  // Null preserves the legacy Slack-workspace timezone lookup (UTC fallback)
+  // until an admin explicitly pins a deployment-wide scheduling timezone.
+  timeZone: text('time_zone'),
+  timeZoneUpdatedAt: timestamp('time_zone_updated_at'),
   // N-1 rollback compatibility for the previous release's authorship-rules
   // feature. This product no longer reads or writes these columns, but the
   // prior release still selects them after a one-release code rollback.
@@ -2671,6 +2675,7 @@ export const customAutomations = pgTable(
     prompt: text('prompt').notNull(),
     enabled: boolean('enabled').notNull().default(false),
     scheduleMode: text('schedule_mode').notNull().default('off'),
+    cronExpression: text('cron_expression'),
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),

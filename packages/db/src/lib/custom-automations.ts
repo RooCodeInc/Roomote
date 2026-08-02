@@ -8,6 +8,7 @@ import {
   type ScheduleOnlyBackgroundAutomationFrequency,
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
   MAX_CUSTOM_AUTOMATIONS,
 } from '@roomote/types';
 
@@ -30,6 +31,7 @@ export type CustomAutomationWriteInput = {
   prompt: string;
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
+  cronExpression?: string | null;
   environmentId: string;
   /** Full destination target, or {} when the automation has no report channel. */
   target: OptionalAutomationTarget;
@@ -43,6 +45,7 @@ function normalizeName(name: string): string {
 function assertValidWriteInput(input: CustomAutomationWriteInput): {
   name: string;
   prompt: string;
+  cronExpression: string | null;
 } {
   const name = normalizeName(input.name);
   const prompt = input.prompt.trim();
@@ -67,8 +70,27 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  if (!isScheduleOnlyBackgroundAutomationFrequency(input.scheduleMode)) {
+  if (
+    input.scheduleMode !== 'cron' &&
+    !isScheduleOnlyBackgroundAutomationFrequency(input.scheduleMode)
+  ) {
     throw new Error(`Invalid schedule mode: ${input.scheduleMode}`);
+  }
+
+  const cronExpression = input.cronExpression?.trim() || null;
+  if (input.scheduleMode === 'cron' && !cronExpression) {
+    throw new Error('Cron expression is required for a cron schedule.');
+  }
+  if (input.scheduleMode !== 'cron' && cronExpression) {
+    throw new Error('Cron expression is only valid for a cron schedule.');
+  }
+  if (
+    cronExpression &&
+    cronExpression.length > CUSTOM_AUTOMATION_CRON_MAX_LENGTH
+  ) {
+    throw new Error(
+      `Cron expression must be at most ${CUSTOM_AUTOMATION_CRON_MAX_LENGTH} characters.`,
+    );
   }
 
   if (!input.environmentId) {
@@ -86,14 +108,21 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  return { name, prompt };
+  return { name, prompt, cronExpression };
 }
+
+export type CustomAutomationWithCreator = CustomAutomation & {
+  createdByUser: { id: string; name: string; email: string } | null;
+};
 
 export async function listCustomAutomations(
   client: DatabaseOrTransaction = db,
-): Promise<CustomAutomation[]> {
+): Promise<CustomAutomationWithCreator[]> {
   return client.query.customAutomations.findMany({
     orderBy: [asc(customAutomations.name)],
+    with: {
+      createdByUser: { columns: { id: true, name: true, email: true } },
+    },
   });
 }
 
@@ -129,7 +158,7 @@ export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt } = assertValidWriteInput(input);
+  const { name, prompt, cronExpression } = assertValidWriteInput(input);
 
   const existingCount = await countCustomAutomations(client);
   if (existingCount >= MAX_CUSTOM_AUTOMATIONS) {
@@ -154,6 +183,7 @@ export async function createCustomAutomation(
       prompt,
       enabled: input.enabled,
       scheduleMode: input.scheduleMode,
+      cronExpression,
       environmentId: input.environmentId,
       target: input.target,
       createdByUserId: input.createdByUserId ?? null,
@@ -172,7 +202,7 @@ export async function updateCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt } = assertValidWriteInput(input);
+  const { name, prompt, cronExpression } = assertValidWriteInput(input);
 
   const existing = await getCustomAutomationById(id, client);
   if (!existing) {
@@ -195,6 +225,7 @@ export async function updateCustomAutomation(
       prompt,
       enabled: input.enabled,
       scheduleMode: input.scheduleMode,
+      cronExpression,
       environmentId: input.environmentId,
       target: input.target,
       updatedAt: new Date(),

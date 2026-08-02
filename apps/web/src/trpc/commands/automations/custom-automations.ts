@@ -8,7 +8,10 @@ import {
 } from '@roomote/db/server';
 import {
   listConnectedCommunicationProviders,
+  resolveCustomAutomationSchedule,
+  resolveDeploymentTimeZone,
   runCustomAutomationNow,
+  validateCronExpression,
   type AutomationRunNowResult,
 } from '@roomote/sdk/server';
 import {
@@ -30,6 +33,7 @@ export type CustomAutomationListItem = {
   prompt: string;
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
+  cronExpression: string | null;
   environmentId: string | null;
   target: OptionalAutomationTarget;
   lastRunAt: Date | null;
@@ -37,6 +41,7 @@ export type CustomAutomationListItem = {
   lastFailedAt: Date | null;
   lastError: string | null;
   lastLaunchedTaskId: string | null;
+  createdByName: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -46,6 +51,7 @@ export type CustomAutomationWriteInput = {
   prompt: string;
   enabled: boolean;
   scheduleMode: string;
+  cronExpression?: string | null;
   environmentId: string;
   /** Omitted when the automation has no report destination channel. */
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram';
@@ -53,12 +59,17 @@ export type CustomAutomationWriteInput = {
   targetServiceUrl?: string | null;
 };
 
-function toListItem(row: CustomAutomation): CustomAutomationListItem {
-  const scheduleMode = isScheduleOnlyBackgroundAutomationFrequency(
-    row.scheduleMode,
-  )
-    ? row.scheduleMode
-    : 'off';
+function toListItem(
+  row: CustomAutomation & {
+    createdByUser?: { name: string; email: string } | null;
+  },
+): CustomAutomationListItem {
+  const scheduleMode =
+    row.scheduleMode === 'cron'
+      ? 'cron'
+      : isScheduleOnlyBackgroundAutomationFrequency(row.scheduleMode)
+        ? row.scheduleMode
+        : 'off';
 
   return {
     id: row.id,
@@ -66,6 +77,7 @@ function toListItem(row: CustomAutomation): CustomAutomationListItem {
     prompt: row.prompt,
     enabled: row.enabled,
     scheduleMode,
+    cronExpression: row.cronExpression,
     environmentId: row.environmentId,
     target: row.target,
     lastRunAt: row.lastRunAt,
@@ -73,6 +85,7 @@ function toListItem(row: CustomAutomation): CustomAutomationListItem {
     lastFailedAt: row.lastFailedAt,
     lastError: row.lastError,
     lastLaunchedTaskId: row.lastLaunchedTaskId,
+    createdByName: row.createdByUser?.name || row.createdByUser?.email || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -121,6 +134,7 @@ function assertScheduleMode(
   value: string,
 ): asserts value is CustomAutomationScheduleMode {
   if (!isScheduleOnlyBackgroundAutomationFrequency(value)) {
+    if (value === 'cron') return;
     throw new Error(`Invalid schedule mode: ${value}`);
   }
 }
@@ -150,6 +164,13 @@ export async function createCustomAutomationCommand(
 ): Promise<CustomAutomationListItem> {
   assertAdmin(auth);
   assertScheduleMode(input.scheduleMode);
+  const cronExpression =
+    input.scheduleMode === 'cron'
+      ? validateCronExpression(
+          input.cronExpression ?? '',
+          (await resolveDeploymentTimeZone()).timeZone,
+        )
+      : null;
   if (input.targetProvider) {
     await assertDestinationConnected(input.targetProvider);
   }
@@ -159,6 +180,7 @@ export async function createCustomAutomationCommand(
     prompt: input.prompt,
     enabled: input.enabled,
     scheduleMode: input.scheduleMode,
+    cronExpression,
     environmentId: input.environmentId,
     target: buildTarget(input),
     createdByUserId: auth.userId,
@@ -173,6 +195,13 @@ export async function updateCustomAutomationCommand(
 ): Promise<CustomAutomationListItem> {
   assertAdmin(auth);
   assertScheduleMode(input.scheduleMode);
+  const cronExpression =
+    input.scheduleMode === 'cron'
+      ? validateCronExpression(
+          input.cronExpression ?? '',
+          (await resolveDeploymentTimeZone()).timeZone,
+        )
+      : null;
   if (input.targetProvider) {
     await assertDestinationConnected(input.targetProvider);
   }
@@ -182,6 +211,7 @@ export async function updateCustomAutomationCommand(
     prompt: input.prompt,
     enabled: input.enabled,
     scheduleMode: input.scheduleMode,
+    cronExpression,
     environmentId: input.environmentId,
     target: buildTarget(input),
   });
@@ -210,4 +240,15 @@ export async function triggerCustomAutomationCommand(
 ): Promise<AutomationRunNowResult> {
   assertAdmin(auth);
   return runCustomAutomationNow(input.id);
+}
+
+export async function resolveCustomAutomationScheduleCommand(
+  auth: UserAuthSuccess,
+  input: { schedule: string },
+) {
+  assertAdmin(auth);
+  return resolveCustomAutomationSchedule({
+    schedule: input.schedule,
+    userId: auth.userId,
+  });
 }

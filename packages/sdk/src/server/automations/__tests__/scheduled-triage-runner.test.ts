@@ -49,6 +49,14 @@ vi.mock('../scheduling-utils', () => ({
   resolveSlackWorkspaceTimezone: mockResolveSlackWorkspaceTimezone,
 }));
 
+vi.mock('../custom-automation-schedule', () => ({
+  resolveDeploymentTimeZone: vi.fn(async () => ({
+    timeZone: 'UTC',
+    source: 'utc_fallback',
+    updatedAt: null,
+  })),
+}));
+
 vi.mock('../triage-routing-debug', () => ({
   postScheduledTriageRoutingDebug: mockPostScheduledTriageRoutingDebug,
 }));

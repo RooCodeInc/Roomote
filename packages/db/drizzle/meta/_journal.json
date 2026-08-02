@@ -176,6 +176,13 @@
       "when": 1785435030830,
       "tag": "0024_azure_sleep_check_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785634110216,
+      "tag": "0025_shiny_smiling_tiger",
+      "breakpoints": true
     }
   ]
 }

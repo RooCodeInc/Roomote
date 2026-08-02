@@ -73,6 +73,14 @@ Create arbitrary scheduled agent runs with:
 - an optional **report destination** channel (Slack, Discord, Teams, or
   Telegram)
 
+Admins can also choose **Custom schedule** and enter either a standard
+five-field cron expression or a natural-language schedule such as “weekdays at
+9am.” Roomote previews the interpreted schedule before saving. A schedule that
+names a day but no time runs at 3am local, matching the daily and weekly
+cadences, and Roomote asks for clarification rather than guessing when the
+recurrence itself is ambiguous. Custom schedules do not support seconds or
+cron macros.
+
 On each due tick, Roomote launches a normal task with that prompt in that
 environment. When a report destination is set, the run is anchored to that
 channel: Roomote's first message (the final result, or a blocker or question
@@ -85,6 +93,16 @@ automation to test it immediately.
 Daily and weekly custom automations use the same local-hour window as the
 other scheduled automations (around 3am in the workspace timezone). Cap is
 25 custom automations per deployment.
+
+The **Scheduling timezone** setting is available on both the Automations and
+Deployment settings pages. It applies to all scheduled automations and to
+natural-language schedule interpretation. Existing deployments continue using
+their Slack workspace timezone (or UTC when unavailable) until an admin pins
+an explicit IANA timezone.
+
+Admins can also manage custom automations from a Roomote task through the
+`manage_custom_automations` tool: list, resolve a schedule, create, update,
+delete, or run an enabled automation immediately.
 
 ## Channel automations
 

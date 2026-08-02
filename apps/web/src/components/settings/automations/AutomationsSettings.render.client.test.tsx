@@ -274,6 +274,17 @@ vi.mock('@tanstack/react-query', () => ({
       return { isPending: false, data: [] };
     }
 
+    if (queryOptions.queryKey?.[0] === 'miscSettings') {
+      return {
+        isPending: false,
+        data: {
+          timeZone: null,
+          effectiveTimeZone: 'UTC',
+          timeZoneSource: 'utc_fallback',
+        },
+      };
+    }
+
     if (queryOptions.queryKey?.[0] === 'comms') {
       return {
         data: {
@@ -376,6 +387,9 @@ vi.mock('@/trpc/client', () => ({
       triggerCustomAutomation: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
       },
+      resolveCustomAutomationSchedule: {
+        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
       updateSettings: {
         mutationOptions: (options?: Record<string, unknown>) => {
           mutations.latestSettingsOptions =
@@ -405,6 +419,14 @@ vi.mock('@/trpc/client', () => ({
         queryOptions: () => ({
           queryKey: ['comms', 'status'],
         }),
+      },
+    },
+    miscSettings: {
+      get: {
+        queryOptions: () => ({
+          queryKey: ['miscSettings', 'get'],
+        }),
+        queryKey: () => ['miscSettings', 'get'],
       },
     },
   }),

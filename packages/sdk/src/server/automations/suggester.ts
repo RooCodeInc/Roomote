@@ -26,7 +26,8 @@ import {
   getActiveRepositoryFullNames,
   hasAnyActiveRepository,
 } from './github-deployment-scope';
-import { isRunDue, resolveSlackWorkspaceTimezone } from './scheduling-utils';
+import { resolveDeploymentTimeZone } from './custom-automation-schedule';
+import { isRunDue } from './scheduling-utils';
 import { dispatchSuggestionRoutes } from './suggester-route-dispatch';
 import {
   prepareSuggestionDispatchPlan,
@@ -196,16 +197,7 @@ export async function suggesterJob(
         continue;
       }
 
-      const timezone =
-        deployment.slackBotToken && deployment.slackTeamId
-          ? await resolveSlackWorkspaceTimezone(
-              {
-                slackBotToken: deployment.slackBotToken,
-                slackTeamId: deployment.slackTeamId,
-              },
-              LOG_PREFIX,
-            )
-          : 'UTC';
+      const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
       if (
         !opts.manualTrigger &&
