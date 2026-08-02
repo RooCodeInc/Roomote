@@ -1,18 +1,18 @@
 ---
 title: OpenCode Zen / Go
 icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/opencode.svg'
-description: Use OpenCode's routed Zen or Go model service with Roomote.
+description: Use OpenCode's routed Zen model service with Roomote.
 ---
 
-OpenCode Zen and Go provide an OpenCode-managed catalog of coding models behind
-one account and API key. Use this provider when you want OpenCode routing and
+OpenCode Zen provides an OpenCode-managed catalog of coding models behind one
+account and API key. Use this provider when you want OpenCode routing and
 billing rather than separate credentials for each upstream model company.
 
 ## Get an API key
 
 Sign in to [OpenCode](https://opencode.ai/) and create or copy an API key for
-your Zen or Go account. The account must have an active balance or plan that can
-use the selected models.
+your Zen account. The account must have an active balance that can use the
+selected models.
 
 ## Configuration
 
@@ -28,7 +28,7 @@ work and stronger models for coding, planning, vision, and review.
 
 ## Cost behavior
 
-OpenCode applies the pricing and plan rules shown for Zen or Go and the routed
+OpenCode applies the pricing rules shown for Zen and the routed
 model. Roomote records token usage and estimates cost from model metadata, while
 the OpenCode account balance and [Zen documentation](https://opencode.ai/docs/zen/)
 remain authoritative.
@@ -45,6 +45,6 @@ remain authoritative.
 - **The key is rejected.** Confirm it is an OpenCode service key rather than a
   key for one of the upstream model vendors.
 - **A routed model is unavailable.** Check the model's availability and your
-  Zen or Go plan, then select another model from the connected catalog.
+  Zen balance, then select another model from the connected catalog.
 - **Costs differ by model.** OpenCode routes multiple vendors; check the exact
   `opencode/...` model rather than assuming one rate for the provider.

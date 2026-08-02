@@ -6,8 +6,8 @@ description: What anonymous usage data a Roomote deployment can share, how it is
 
 Roomote can share **anonymous telemetry** with the Roomote team to help
 improve the product. This is on by default, controlled entirely by
-deployment admins, and designed so that nothing sent can identify your
-company, users, code, or repositories.
+deployment admins, and designed so that Roomote-generated identifiers and the
+default payload cannot identify your company, users, code, or repositories.
 
 ## What gets sent
 
@@ -17,10 +17,11 @@ When anonymous telemetry is enabled, your deployment sends:
   never actual URLs or IDs) and product events such as tasks being created
   or settling as completed, failed, or canceled, with non-identifying facts
   like the harness, model, source surface, and sandbox provider used.
-- **A daily instance report** — aggregate counts only: number of users,
-  environments, and connected repositories, task and token totals for the
-  past day, which provider types are configured, and which built-in
-  integrations are enabled.
+- **A daily instance report** — aggregate deployment metadata and usage:
+  setup timestamps; counts of users, environments, and connected repositories;
+  task, model, token, and cost totals for the past day; pull-request statistics
+  for the past week; configured provider types; and enabled built-in
+  integrations.
 
 What is **never** sent: names, emails, repository names, task contents,
 prompts, code, tokens, or credentials.
@@ -32,17 +33,19 @@ Activity is identified by two anonymous IDs:
 - an **instance ID** for the deployment as a whole
 - a **user analytics ID** for each user
 
-Both are short random strings created locally (unless R_INSTANCE_ID is 
-overriden  by the operator). They are not derived from  your domain, 
-company, email  addresses, or any other real-world identifier, and they 
-cannot be edited or read through the app.
+By default, both are short random strings created locally. They are not derived
+from your domain, company, email addresses, or any other real-world identifier,
+and they cannot be edited or read through the app.
+
+If you override `R_INSTANCE_ID`, use a random, non-identifying value. Roomote
+sends the configured value with telemetry and version checks.
 
 ## Turning it off
 
 Anonymous telemetry is opt-out:
 
 - during setup, the final step includes an **Anonymous analytics** switch
-- afterwards, admins can change it any time in **Settings > Misc**
+- afterwards, admins can change it any time in **Settings > Deployment**
 
 The setting applies to everyone in the deployment. When disabled, no
 analytics code runs in the browser and no usage events or daily reports
@@ -50,11 +53,10 @@ leave your servers.
 
 ## Roomote Cloud Specifics
 
-Roomote Cloud deployments keep anonymous analytics enabled and do not show
-this switch, as described in our privacy policy and asks users for consent 
-before loading optional support and product-experience services such as 
-Intercom and PostHog. This choice does not control Roomote's anonymous 
-analytics, which remains governed by the deployment configuration above.
+Roomote Cloud deployments always keep Roomote anonymous analytics enabled and
+do not show this switch, as described in our privacy policy. Cookie consent
+controls only optional support and product-experience services such as Intercom
+and PostHog.
 
 ## Version checks
 
@@ -64,5 +66,6 @@ the anonymous instance ID and your running version — no usage data.
 
 ## Local development
 
-Deployments running in development mode (or builds without a release
-version) send nothing at all: no analytics, no version checks.
+Deployments running in development or preview mode send nothing by default.
+Telemetry runs there only when `ROOMOTE_FORCE_TELEMETRY=true` and a Ping
+endpoint is explicitly configured.

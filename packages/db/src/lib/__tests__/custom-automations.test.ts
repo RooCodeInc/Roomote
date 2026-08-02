@@ -5,6 +5,7 @@ import {
   deleteCustomAutomation,
   getCustomAutomationById,
   listCustomAutomations,
+  recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
   updateCustomAutomation,
@@ -98,7 +99,89 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
-  it('lets manual claims bypass the previous-run-active gate', async () => {
+  it('persists canonical cron schedules and rejects invalid mode combinations', async () => {
+    const [environment] = await db
+      .insert(environments)
+      .values({
+        name: `custom-auto-env-cron-${Date.now()}`,
+        config: { name: 'test', repositories: [] },
+      })
+      .returning();
+
+    const created = await createCustomAutomation({
+      name: `Cron scan ${Date.now()}`,
+      prompt: 'Scan every weekday morning.',
+      enabled: true,
+      scheduleMode: 'cron',
+      cronExpression: '0 9 * * 1-5',
+      environmentId: environment!.id,
+      target: {},
+    });
+    expect(created.scheduleMode).toBe('cron');
+    expect(created.cronExpression).toBe('0 9 * * 1-5');
+
+    await expect(
+      updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: '0 9 * * *',
+        environmentId: environment!.id,
+        target: {},
+      }),
+    ).rejects.toThrow('only valid for a cron schedule');
+
+    await deleteCustomAutomation(created.id);
+  });
+
+  it('persists a model override and rejects malformed model ids', async () => {
+    const [environment] = await db
+      .insert(environments)
+      .values({
+        name: `custom-auto-env-model-${Date.now()}`,
+        config: { name: 'test', repositories: [] },
+      })
+      .returning();
+
+    const created = await createCustomAutomation({
+      name: `Model override ${Date.now()}`,
+      prompt: 'Scan with a pinned model.',
+      enabled: true,
+      scheduleMode: 'daily',
+      model: 'anthropic/claude-sonnet-5',
+      environmentId: environment!.id,
+      target: {},
+    });
+    expect(created.model).toBe('anthropic/claude-sonnet-5');
+
+    const cleared = await updateCustomAutomation(created.id, {
+      name: created.name,
+      prompt: created.prompt,
+      enabled: true,
+      scheduleMode: 'daily',
+      model: null,
+      environmentId: environment!.id,
+      target: {},
+    });
+    expect(cleared.model).toBeNull();
+
+    await expect(
+      updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'daily',
+        model: 'no-provider-prefix',
+        environmentId: environment!.id,
+        target: {},
+      }),
+    ).rejects.toThrow('provider/model format');
+
+    await deleteCustomAutomation(created.id);
+  });
+
+  it('claims a launch while the previous task is still active', async () => {
     const [environment] = await db
       .insert(environments)
       .values({
@@ -125,23 +208,38 @@ describe('custom automations helpers', () => {
       .set({ lastLaunchedTaskId: activeTask.id })
       .where(eq(customAutomations.id, created.id));
 
-    // Scheduled-style claims stay single-flight behind the active task.
-    expect(await tryClaimCustomAutomationLaunch(created.id)).toBeNull();
+    const claim = await tryClaimCustomAutomationLaunch(
+      created.id,
+      created.lastRunAt,
+    );
+    expect(claim).toBeInstanceOf(Date);
 
-    // A manual claim launches despite the active previous task.
-    const manualClaim = await tryClaimCustomAutomationLaunch(created.id, {
-      allowWhilePreviousRunActive: true,
-    });
-    expect(manualClaim).toBeInstanceOf(Date);
-
-    // The claim fence still guards concurrent launches, manual included.
+    // The claim fence still guards concurrent launches.
     expect(
-      await tryClaimCustomAutomationLaunch(created.id, {
-        allowWhilePreviousRunActive: true,
-      }),
+      await tryClaimCustomAutomationLaunch(created.id, created.lastRunAt),
     ).toBeNull();
 
-    await releaseCustomAutomationLaunchClaim(created.id, manualClaim!);
+    await recordCustomAutomationRunOutcome(db, {
+      id: created.id,
+      status: 'succeeded',
+      launchClaimedAt: claim!,
+      lastLaunchedTaskId: activeTask.id,
+    });
+
+    // An evaluator that read the old due state cannot relaunch after the first
+    // evaluator completes and clears its claim.
+    expect(
+      await tryClaimCustomAutomationLaunch(created.id, created.lastRunAt),
+    ).toBeNull();
+
+    const completed = await getCustomAutomationById(created.id);
+    const nextClaim = await tryClaimCustomAutomationLaunch(
+      created.id,
+      completed!.lastRunAt,
+    );
+    expect(nextClaim).toBeInstanceOf(Date);
+
+    await releaseCustomAutomationLaunchClaim(created.id, nextClaim!);
     await deleteCustomAutomation(created.id);
   });
 

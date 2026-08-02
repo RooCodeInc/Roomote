@@ -15,7 +15,17 @@ questions or support an investigation.
 
 ## How setup works
 
-Admins connect Snowflake from **Settings > Integrations**.
+Admins connect Snowflake from **Settings > Integrations** with an account
+identifier, username, role, and PKCS8 PEM-encoded private key. Add the matching
+public key to the Snowflake user first. Supply the private-key passphrase too
+when the key is encrypted.
+
+<Warning>
+  The `execute_sql` tool can run any statement permitted by the configured
+  Snowflake role, including statements that change data or schema. Use a
+  dedicated least-privilege role, preferably read-only when tasks only need
+  warehouse context.
+</Warning>
 
 ## What to expect
 

@@ -73,8 +73,8 @@ integration redirect URL too:
 <public-url>/api/slack/callback
 ```
 
-When you use separate Slack apps for sign-in and communications, use these
-auth-only compatibility variables for the sign-in app:
+The current deployment configuration uses one Slack client credential pair for
+both sign-in and communications:
 
 ```sh
 R_SLACK_CLIENT_ID=...

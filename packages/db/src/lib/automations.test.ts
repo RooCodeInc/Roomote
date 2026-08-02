@@ -4,6 +4,7 @@ import type { Automation } from '../types';
 import {
   normalizeBackgroundAgentSettings,
   normalizeReviewCodeAutomationSettings,
+  resolveAutomationDestination,
 } from './automations';
 
 function channelAutoStartAutomation(
@@ -40,7 +41,57 @@ describe('normalizeReviewCodeAutomationSettings', () => {
   });
 });
 
+describe('resolveAutomationDestination', () => {
+  it('prefers an automation target over either manager channel', () => {
+    const destination = resolveAutomationDestination(
+      {
+        targets: [
+          {
+            provider: 'discord',
+            targetKind: 'discord_channel',
+            externalRef: 'D-AUTOMATION',
+          },
+        ],
+      },
+      'C-MANAGER',
+      'D-MANAGER',
+    );
+
+    expect(destination).toEqual({
+      provider: 'discord',
+      channelId: 'D-AUTOMATION',
+      source: 'automation_target',
+    });
+  });
+
+  it('prefers the Slack manager channel over the Discord manager channel', () => {
+    expect(
+      resolveAutomationDestination(undefined, 'C-MANAGER', 'D-MANAGER'),
+    ).toEqual({
+      provider: 'slack',
+      channelId: 'C-MANAGER',
+      source: 'manager_channel',
+    });
+  });
+
+  it('falls back to the Discord manager channel', () => {
+    expect(resolveAutomationDestination(undefined, null, 'D-MANAGER')).toEqual({
+      provider: 'discord',
+      channelId: 'D-MANAGER',
+      source: 'manager_channel',
+    });
+  });
+});
+
 describe('normalizeBackgroundAgentSettings channel auto-start', () => {
+  it('projects the Discord manager channel', () => {
+    const settings = normalizeBackgroundAgentSettings({
+      managerDiscordChannelId: 'D-MANAGER',
+    } as Parameters<typeof normalizeBackgroundAgentSettings>[0]);
+
+    expect(settings.managerDiscordChannelId).toBe('D-MANAGER');
+  });
+
   it('projects Slack and Discord auto-respond rows separately, ordered by metadata', () => {
     const settings = normalizeBackgroundAgentSettings(null, [
       channelAutoStartAutomation([

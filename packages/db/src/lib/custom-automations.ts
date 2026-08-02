@@ -1,4 +1,4 @@
-import { and, asc, count, eq, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, isNull, lt, or } from 'drizzle-orm';
 
 import {
   isConfiguredAutomationTarget,
@@ -8,6 +8,8 @@ import {
   type ScheduleOnlyBackgroundAutomationFrequency,
   CUSTOM_AUTOMATION_NAME_MAX_LENGTH,
   CUSTOM_AUTOMATION_PROMPT_MAX_LENGTH,
+  CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
+  CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
   MAX_CUSTOM_AUTOMATIONS,
 } from '@roomote/types';
 
@@ -30,6 +32,9 @@ export type CustomAutomationWriteInput = {
   prompt: string;
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
+  cronExpression?: string | null;
+  /** Optional provider/model launch override; null uses the deployment default. */
+  model?: string | null;
   environmentId: string;
   /** Full destination target, or {} when the automation has no report channel. */
   target: OptionalAutomationTarget;
@@ -43,6 +48,8 @@ function normalizeName(name: string): string {
 function assertValidWriteInput(input: CustomAutomationWriteInput): {
   name: string;
   prompt: string;
+  cronExpression: string | null;
+  model: string | null;
 } {
   const name = normalizeName(input.name);
   const prompt = input.prompt.trim();
@@ -67,8 +74,39 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  if (!isScheduleOnlyBackgroundAutomationFrequency(input.scheduleMode)) {
+  if (
+    input.scheduleMode !== 'cron' &&
+    !isScheduleOnlyBackgroundAutomationFrequency(input.scheduleMode)
+  ) {
     throw new Error(`Invalid schedule mode: ${input.scheduleMode}`);
+  }
+
+  const cronExpression = input.cronExpression?.trim() || null;
+  if (input.scheduleMode === 'cron' && !cronExpression) {
+    throw new Error('Cron expression is required for a cron schedule.');
+  }
+  if (input.scheduleMode !== 'cron' && cronExpression) {
+    throw new Error('Cron expression is only valid for a cron schedule.');
+  }
+  if (
+    cronExpression &&
+    cronExpression.length > CUSTOM_AUTOMATION_CRON_MAX_LENGTH
+  ) {
+    throw new Error(
+      `Cron expression must be at most ${CUSTOM_AUTOMATION_CRON_MAX_LENGTH} characters.`,
+    );
+  }
+
+  const model = input.model?.trim() || null;
+  if (model) {
+    if (model.length > CUSTOM_AUTOMATION_MODEL_MAX_LENGTH) {
+      throw new Error(
+        `Model must be at most ${CUSTOM_AUTOMATION_MODEL_MAX_LENGTH} characters.`,
+      );
+    }
+    if (!/^[^/\s]+\/.+$/u.test(model)) {
+      throw new Error('Model must use provider/model format.');
+    }
   }
 
   if (!input.environmentId) {
@@ -86,14 +124,21 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  return { name, prompt };
+  return { name, prompt, cronExpression, model };
 }
+
+export type CustomAutomationWithCreator = CustomAutomation & {
+  createdByUser: { id: string; name: string; email: string } | null;
+};
 
 export async function listCustomAutomations(
   client: DatabaseOrTransaction = db,
-): Promise<CustomAutomation[]> {
+): Promise<CustomAutomationWithCreator[]> {
   return client.query.customAutomations.findMany({
     orderBy: [asc(customAutomations.name)],
+    with: {
+      createdByUser: { columns: { id: true, name: true, email: true } },
+    },
   });
 }
 
@@ -129,7 +174,7 @@ export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt } = assertValidWriteInput(input);
+  const { name, prompt, cronExpression, model } = assertValidWriteInput(input);
 
   const existingCount = await countCustomAutomations(client);
   if (existingCount >= MAX_CUSTOM_AUTOMATIONS) {
@@ -154,6 +199,8 @@ export async function createCustomAutomation(
       prompt,
       enabled: input.enabled,
       scheduleMode: input.scheduleMode,
+      cronExpression,
+      model,
       environmentId: input.environmentId,
       target: input.target,
       createdByUserId: input.createdByUserId ?? null,
@@ -172,7 +219,7 @@ export async function updateCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt } = assertValidWriteInput(input);
+  const { name, prompt, cronExpression, model } = assertValidWriteInput(input);
 
   const existing = await getCustomAutomationById(id, client);
   if (!existing) {
@@ -195,6 +242,8 @@ export async function updateCustomAutomation(
       prompt,
       enabled: input.enabled,
       scheduleMode: input.scheduleMode,
+      cronExpression,
+      model,
       environmentId: input.environmentId,
       target: input.target,
       updatedAt: new Date(),
@@ -280,15 +329,13 @@ export async function recordCustomAutomationRunOutcome(
 
 /**
  * Atomically claim a custom automation launch. Succeeds only when no other
- * launcher holds a fresh claim and, unless `allowWhilePreviousRunActive` is
- * set, there is no active previous task. Manual "Run now" launches pass that
- * flag: an explicit human trigger should not be blocked by an in-flight (or
- * stuck-active) previous run, while scheduled ticks stay single-flight.
+ * launcher holds a fresh claim. Completed claims do not block later scheduled
+ * runs, even if the previously launched task still appears active.
  * Returns the claim fencing token (`launchClaimedAt`) on success, or null.
  */
 export async function tryClaimCustomAutomationLaunch(
   id: string,
-  opts: { allowWhilePreviousRunActive?: boolean } = {},
+  expectedLastRunAt: Date | null,
   client: DatabaseOrTransaction = db,
 ): Promise<Date | null> {
   const now = new Date();
@@ -309,19 +356,9 @@ export async function tryClaimCustomAutomationLaunch(
           isNull(customAutomations.launchClaimedAt),
           lt(customAutomations.launchClaimedAt, staleBefore),
         )!,
-        ...(opts.allowWhilePreviousRunActive
-          ? []
-          : [
-              sql`(
-          ${customAutomations.lastLaunchedTaskId} IS NULL
-          OR NOT EXISTS (
-            SELECT 1
-            FROM tasks t
-            WHERE t.id = ${customAutomations.lastLaunchedTaskId}
-              AND t.state = 'active'
-          )
-        )`,
-            ]),
+        expectedLastRunAt
+          ? eq(customAutomations.lastRunAt, expectedLastRunAt)
+          : isNull(customAutomations.lastRunAt),
       ),
     )
     .returning({ launchClaimedAt: customAutomations.launchClaimedAt });

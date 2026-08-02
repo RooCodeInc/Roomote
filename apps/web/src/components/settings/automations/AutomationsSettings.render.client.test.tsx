@@ -65,6 +65,7 @@ const state = vi.hoisted(() => ({
         ],
         channelAutoStartDiscordChannels: [],
         managerSlackChannelId: 'C123MANAGER',
+        managerDiscordChannelId: null as string | null,
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
@@ -274,6 +275,37 @@ vi.mock('@tanstack/react-query', () => ({
       return { isPending: false, data: [] };
     }
 
+    if (queryOptions.queryKey?.[0] === 'taskModels') {
+      return {
+        isPending: false,
+        data: {
+          defaultModelId: 'anthropic/claude-sonnet-5',
+          chatgptConnected: false,
+          openaiConnected: false,
+          xaiSubscriptionConnected: false,
+          xaiConnected: false,
+          models: [
+            {
+              id: 'anthropic/claude-sonnet-5',
+              displayName: 'Claude Sonnet 5',
+              isDefault: true,
+            },
+          ],
+        },
+      };
+    }
+
+    if (queryOptions.queryKey?.[0] === 'miscSettings') {
+      return {
+        isPending: false,
+        data: {
+          timeZone: null,
+          effectiveTimeZone: 'UTC',
+          timeZoneSource: 'utc_fallback',
+        },
+      };
+    }
+
     if (queryOptions.queryKey?.[0] === 'comms') {
       return {
         data: {
@@ -376,6 +408,9 @@ vi.mock('@/trpc/client', () => ({
       triggerCustomAutomation: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
       },
+      resolveCustomAutomationSchedule: {
+        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
       updateSettings: {
         mutationOptions: (options?: Record<string, unknown>) => {
           mutations.latestSettingsOptions =
@@ -404,6 +439,21 @@ vi.mock('@/trpc/client', () => ({
       status: {
         queryOptions: () => ({
           queryKey: ['comms', 'status'],
+        }),
+      },
+    },
+    miscSettings: {
+      get: {
+        queryOptions: () => ({
+          queryKey: ['miscSettings', 'get'],
+        }),
+        queryKey: () => ['miscSettings', 'get'],
+      },
+    },
+    taskModels: {
+      launchOptions: {
+        queryOptions: () => ({
+          queryKey: ['taskModels', 'launchOptions'],
         }),
       },
     },
@@ -438,6 +488,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.announcerDiscordChannelId = null;
     state.settingsQuery.data.settings.platformIssueDiscordChannelId = null;
     state.settingsQuery.data.settings.managerSlackChannelId = 'C123MANAGER';
+    state.settingsQuery.data.settings.managerDiscordChannelId = null;
     state.settingsQuery.data.settings.managerStatsFrequency = 'off' as never;
     state.settingsQuery.data.settings.sentryTriageFrequency = 'off' as never;
     state.settingsQuery.data.settings.dependabotTriageFrequency =
@@ -574,6 +625,35 @@ describe('AutomationsSettings', () => {
     expect(
       screen.queryByText('Select a Slack channel'),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows Discord as the shared manager destination', async () => {
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.settings.managerDiscordChannelId =
+      '111222333444555666';
+    state.discordChannelsQuery.data.channels = [
+      {
+        id: '111222333444555666',
+        name: 'automation-reports',
+        label: '#automation-reports',
+        guildId: 'guild-1',
+        guildName: 'Acme',
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    const destination = await screen.findByRole('button', {
+      name: /#automation-reports \(Discord\)/,
+    });
+    expect(destination).toBeInTheDocument();
+
+    fireEvent.click(destination);
+    expect(screen.getByLabelText('Select manager channel')).toBeInTheDocument();
+    expect(
+      screen.getByText('Make sure the Roomote app is added to the channel.'),
+    ).toBeInTheDocument();
   });
 
   it('offers the platform issue alerts destination picker with a saved Discord channel selected', async () => {

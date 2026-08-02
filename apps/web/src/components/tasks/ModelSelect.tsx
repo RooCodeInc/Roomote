@@ -20,7 +20,18 @@ type ModelSelectProps = {
   disabled?: boolean;
   className?: string;
   ariaLabel?: string;
+  /**
+   * When set, renders this label as a leading option that maps to the empty
+   * string value, for pickers where "no override" is a valid choice.
+   */
+  emptyOptionLabel?: string;
+  /** Trigger size; use 'default' to line up with default-size form controls. */
+  size?: 'sm' | 'default';
 };
+
+// Radix Select items cannot use an empty-string value, so the empty option
+// round-trips through this sentinel.
+const EMPTY_OPTION_VALUE = '__model-select-empty__';
 
 function modelOptionLabel(model: {
   displayName: string;
@@ -35,6 +46,8 @@ export function ModelSelect({
   disabled = false,
   className,
   ariaLabel = 'Model',
+  emptyOptionLabel,
+  size = 'sm',
 }: ModelSelectProps) {
   const { data, isPending } = useLaunchTaskModels();
   const modelGroups = useMemo(() => {
@@ -59,14 +72,19 @@ export function ModelSelect({
 
   return (
     <Select
-      value={value}
-      onValueChange={onValueChange}
+      value={emptyOptionLabel && !value ? EMPTY_OPTION_VALUE : value}
+      onValueChange={(next) =>
+        onValueChange(next === EMPTY_OPTION_VALUE ? '' : next)
+      }
       disabled={disabled || isPending || !data}
     >
-      <SelectTrigger size="sm" className={className} aria-label={ariaLabel}>
+      <SelectTrigger size={size} className={className} aria-label={ariaLabel}>
         <SelectValue placeholder="Model" />
       </SelectTrigger>
       <SelectContent>
+        {emptyOptionLabel ? (
+          <SelectItem value={EMPTY_OPTION_VALUE}>{emptyOptionLabel}</SelectItem>
+        ) : null}
         {showProviderHeaders
           ? modelGroups.map((group) => (
               <SelectGroup key={group.providerId}>

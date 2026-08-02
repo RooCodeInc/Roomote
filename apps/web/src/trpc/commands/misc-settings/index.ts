@@ -22,6 +22,10 @@ import {
 } from '@roomote/feature-flags';
 import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
+import {
+  normalizeTimeZone,
+  resolveDeploymentTimeZone,
+} from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import {
@@ -62,6 +66,9 @@ export type MiscSettings = {
    */
   telemetryEnvAllowed: boolean;
   diagnostics: DeploymentDiagnostics;
+  timeZone: string | null;
+  effectiveTimeZone: string;
+  timeZoneSource: 'explicit' | 'slack' | 'utc_fallback';
 };
 
 function normalizeMetadata(value: unknown): Record<string, unknown> {
@@ -557,8 +564,16 @@ export async function getMiscSettingsCommand(
 ): Promise<MiscSettings> {
   assertAdmin(auth);
 
-  const metadata = await readDeploymentMetadata();
-  const diagnostics = await collectDeploymentDiagnostics();
+  const [metadata, diagnostics, configured, resolvedTimeZone] =
+    await Promise.all([
+      readDeploymentMetadata(),
+      collectDeploymentDiagnostics(),
+      db.query.deploymentSettings.findFirst({
+        where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+        columns: { timeZone: true },
+      }),
+      resolveDeploymentTimeZone(),
+    ]);
 
   return {
     anonymousAnalyticsEnabled: isAnonymousAnalyticsEnabledFromMetadata(
@@ -568,7 +583,38 @@ export async function getMiscSettingsCommand(
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
     diagnostics,
+    timeZone: configured?.timeZone ?? null,
+    effectiveTimeZone: resolvedTimeZone.timeZone,
+    timeZoneSource: resolvedTimeZone.source,
   };
+}
+
+export async function setDeploymentTimeZoneCommand(
+  auth: UserAuthSuccess,
+  input: { timeZone: string },
+): Promise<{ timeZone: string; effectiveTimeZone: string }> {
+  assertAdmin(auth);
+  const timeZone = normalizeTimeZone(input.timeZone);
+  const existing = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    columns: { id: true, timeZone: true },
+  });
+  const now = new Date();
+
+  if (!existing) {
+    await db.insert(deploymentSettings).values({
+      id: DEFAULT_DEPLOYMENT_ID,
+      timeZone,
+      timeZoneUpdatedAt: now,
+    });
+  } else if (existing.timeZone !== timeZone) {
+    await db
+      .update(deploymentSettings)
+      .set({ timeZone, timeZoneUpdatedAt: now, updatedAt: now })
+      .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
+  }
+
+  return { timeZone, effectiveTimeZone: timeZone };
 }
 
 export async function setAnonymousAnalyticsCommand(
@@ -605,13 +651,5 @@ export async function setAnonymousAnalyticsCommand(
   // consumers, mirroring the experimental feature-flag update path.
   await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
 
-  return {
-    anonymousAnalyticsEnabled: isAnonymousAnalyticsEnabledFromMetadata(
-      nextMetadata,
-      cloudEnabled,
-    ),
-    cloudEnabled,
-    telemetryEnvAllowed: isTelemetryEnvAllowed(),
-    diagnostics: await collectDeploymentDiagnostics(),
-  };
+  return getMiscSettingsCommand(auth);
 }

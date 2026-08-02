@@ -23,6 +23,7 @@ import {
   Switch,
 } from '@/components/system';
 import { Section } from '@/components/settings';
+import { DeploymentTimeZoneSetting } from './DeploymentTimeZoneSetting';
 import type { MiscSettings as MiscSettingsData } from '@/trpc/commands/misc-settings';
 import {
   buildRouterDebugSettingsInput,
@@ -180,6 +181,9 @@ export function MiscSettings() {
 
   return (
     <div className="space-y-4">
+      <Section title="Regional settings">
+        <DeploymentTimeZoneSetting />
+      </Section>
       <RouterDiagnosticsDestination />
       <Section title="Feedback" icon={Mail}>
         <p className="text-muted-foreground">Help us make Roomote better!</p>

@@ -16,6 +16,7 @@ const {
   redisSetMock,
   redisGetMock,
   redisGetdelMock,
+  redisHgetMock,
   redisDelMock,
   hasMessageInThreadMock,
   fetchThreadMessagesMock,
@@ -46,6 +47,7 @@ const {
   redisSetMock: vi.fn(),
   redisGetMock: vi.fn(),
   redisGetdelMock: vi.fn(),
+  redisHgetMock: vi.fn(),
   redisDelMock: vi.fn(),
   hasMessageInThreadMock: vi.fn(),
   fetchThreadMessagesMock: vi.fn(),
@@ -151,6 +153,7 @@ vi.mock('@roomote/redis', () => ({
     del: redisDelMock,
     get: redisGetMock,
     getdel: redisGetdelMock,
+    hget: redisHgetMock,
     exists: vi.fn(),
   })),
 }));
@@ -193,6 +196,7 @@ vi.mock('../slack-notifier', () => ({
 
 import { SlackNotifier } from '../slack-notifier';
 import {
+  handleRoutingRejectNo,
   handleSlackRoutingCorrection,
   showTaskConfiguration,
 } from '../block-kit';
@@ -256,6 +260,7 @@ describe('Slack deleted-mention suppression', () => {
     redisSetMock.mockResolvedValue('OK');
     redisGetMock.mockResolvedValue(null);
     redisGetdelMock.mockResolvedValue(null);
+    redisHgetMock.mockResolvedValue(null);
     redisDelMock.mockResolvedValue(1);
     classifyFollowUpMock.mockResolvedValue({
       intent: 'correct',
@@ -658,6 +663,121 @@ describe('Slack deleted-mention suppression', () => {
       expect.stringContaining('"text":"<@BOT> investigate this"'),
     );
   });
+
+  it('drops the rejected environment kickoff before showing the manual picker', async () => {
+    evalMock.mockResolvedValueOnce(
+      JSON.stringify({
+        agentName: 'Default',
+        workspaceValue: 'env_1',
+        workspaceDisplayName: 'App',
+        kickoffMessage: 'Investigating the issue in App.',
+        workspaceType: 'environment',
+        teamId: 'T123',
+        slackUserId: 'U123',
+        channel: 'C123',
+        confirmNonce: 'nonce-1',
+      }),
+    );
+    redisHgetMock.mockResolvedValueOnce(
+      JSON.stringify({
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      }),
+    );
+    selectLimitMock
+      .mockResolvedValueOnce([{ teamId: 'T123', botAccessToken: 'xoxb-test' }])
+      .mockResolvedValueOnce([{ userId: 'user_1' }]);
+
+    await handleRoutingRejectNo({
+      team: { id: 'T123' },
+      user: { id: 'U123' },
+      message: { ts: 'routing-message-1' },
+      actions: [
+        {
+          type: 'button',
+          value: JSON.stringify({
+            threadId: '111.222',
+            confirmNonce: 'nonce-1',
+          }),
+        },
+      ],
+    } as never);
+
+    const rewrittenPrefill = JSON.parse(
+      redisSetMock.mock.calls[0]?.[1] as string,
+    );
+    expect(rewrittenPrefill).toMatchObject({
+      workspaceValue: 'env_1',
+      workspaceDisplayName: 'App',
+      confirmNonce: expect.any(String),
+    });
+    expect(rewrittenPrefill.confirmNonce).not.toBe('nonce-1');
+    expect(rewrittenPrefill).not.toHaveProperty('kickoffMessage');
+  });
+
+  it.each([
+    ['returns a fallback', 'fallback'],
+    ['throws', 'error'],
+  ] as const)(
+    'drops the corrected environment kickoff when rerouting %s',
+    async (_description, outcome) => {
+      const originalEvent = {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      };
+      evalMock
+        .mockResolvedValueOnce(
+          JSON.stringify({
+            agentName: 'Default',
+            workspaceValue: 'env_1',
+            workspaceDisplayName: 'App',
+            kickoffMessage: 'Investigating the issue in App.',
+            workspaceType: 'environment',
+            teamId: 'T123',
+            slackUserId: 'U123',
+            channel: 'C123',
+            confirmMessageTs: '999.000',
+            confirmNonce: 'nonce-1',
+          }),
+        )
+        .mockResolvedValueOnce(JSON.stringify(originalEvent));
+      if (outcome === 'error') {
+        routeTaskMock.mockRejectedValueOnce(new Error('router unavailable'));
+      } else {
+        routeTaskMock.mockResolvedValueOnce({
+          status: 'fallback',
+          reason: 'No confident route',
+        });
+      }
+
+      const result = await handleSlackRoutingCorrection({
+        threadId: '111.222',
+        correctionText: 'Use a different environment',
+        event: originalEvent as never,
+        slackInstallation: { teamId: 'T123' } as never,
+        userMapping: { userId: 'user_1' } as never,
+        slack: new SlackNotifier('xoxb-test') as never,
+      });
+
+      expect(result).toEqual({ handled: true });
+      const rewrittenPrefill = JSON.parse(
+        redisSetMock.mock.calls[0]?.[1] as string,
+      );
+      expect(rewrittenPrefill).toMatchObject({
+        workspaceValue: 'env_1',
+        workspaceDisplayName: 'App',
+        confirmNonce: expect.any(String),
+      });
+      expect(rewrittenPrefill.confirmNonce).not.toBe('nonce-1');
+      expect(rewrittenPrefill).not.toHaveProperty('kickoffMessage');
+    },
+  );
 
   it('starts immediately when all repositories is the only fallback workspace option', async () => {
     environmentsFindManyMock.mockResolvedValue([]);

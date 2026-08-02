@@ -7,17 +7,18 @@ description: Set up background Roomote work for PR review, conflict resolution, 
 Automations let Roomote work without waiting for a teammate to write a new
 prompt every time.
 
-Use them after your first environment, chat connection, and source-control
-connection are working well. Automations are most useful when your team
-already trusts the normal task review flow and wants Roomote to keep an eye on
-repeated work.
+Use them after your first environment is working well. Connect source control
+or a communications provider when an automation depends on those services.
+Automations are most useful when your team already trusts the normal task
+review flow and wants Roomote to keep an eye on repeated work.
 
 ## Before you turn them on
 
 Make sure the basics are in place:
 
 - source control is connected for PR and repository automations
-- Slack is connected for automations that post updates to channels
+- a communications provider is connected for automations that post updates to
+  channels
 - Roomote has at least one healthy environment for the repositories it should
   work in
 - the team knows where automation output will appear
@@ -70,8 +71,18 @@ Create arbitrary scheduled agent runs with:
 - the **prompt** Roomote should run
 - a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
 - one required **environment**
+- an optional **model** override for the runs; the default follows the
+  deployment task model
 - an optional **report destination** channel (Slack, Discord, Teams, or
   Telegram)
+
+Admins can also choose **Custom schedule** and enter either a standard
+five-field cron expression or a natural-language schedule such as “weekdays at
+9am.” Roomote previews the interpreted schedule before saving. A schedule that
+names a day but no time runs at 3am local, matching the daily and weekly
+cadences, and Roomote asks for clarification rather than guessing when the
+recurrence itself is ambiguous. Custom schedules do not support seconds or
+cron macros.
 
 On each due tick, Roomote launches a normal task with that prompt in that
 environment. When a report destination is set, the run is anchored to that
@@ -85,6 +96,16 @@ automation to test it immediately.
 Daily and weekly custom automations use the same local-hour window as the
 other scheduled automations (around 3am in the workspace timezone). Cap is
 25 custom automations per deployment.
+
+The **Scheduling timezone** setting is available on both the Automations and
+Deployment settings pages. It applies to all scheduled automations and to
+natural-language schedule interpretation. Existing deployments continue using
+their Slack workspace timezone (or UTC when unavailable) until an admin pins
+an explicit IANA timezone.
+
+Admins can also manage custom automations from a Roomote task through the
+`manage_custom_automations` tool: list, resolve a schedule, create, update,
+delete, or run an enabled automation immediately.
 
 ## Channel automations
 
@@ -255,8 +276,9 @@ reviewable task.
 
 ## Possible issues
 
-- **Nothing posts to Slack.** Check that Slack is connected, Roomote is
-  invited to the Manager Channel, and the automation is enabled.
+- **Nothing posts to chat.** Check that the selected communications provider is
+  connected, Roomote can access the destination channel, and the automation is
+  enabled.
 - **Suggestions are too broad.** Add narrower instructions about what to
   prioritize and what to ignore.
 - **Review Code comments on too much.** Turn off draft PR review or adjust

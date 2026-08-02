@@ -103,7 +103,7 @@ export const answerUserInputRequest = publicProcedure
       .getPendingUserInputRequests?.()
       .find((request) => request.requestId === input.requestId);
 
-    let trackedSlackQuote = false;
+    let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
       trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -136,6 +136,7 @@ export const answerUserInputRequest = publicProcedure
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
+          quoteId: trackedSlackQuote.quoteId,
           logPrefix: 'answerUserInputRequest',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

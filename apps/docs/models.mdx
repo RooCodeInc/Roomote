@@ -66,7 +66,7 @@ general API balance:
 | Provider | Connection | Usage behavior |
 | --- | --- | --- |
 | [ChatGPT Subscription](/providers/inference/chatgpt) | OpenAI device authorization | ChatGPT plan windows |
-| [GitHub Copilot](/providers/inference/github-copilot) | GitHub device authorization | Copilot plan and premium requests |
+| [GitHub Copilot](/providers/inference/github-copilot) | GitHub device authorization | Copilot plan allowance |
 | [Kimi for Coding](/providers/inference/kimi-for-coding) | Kimi membership key | Coding membership allowance |
 | [xAI Grok Subscription](/providers/inference/xai-subscription) | xAI account authorization | SuperGrok or eligible X plan allowance |
 | [Z.AI Coding Plan](/providers/inference/zai-coding-plan) | Regional Coding Plan key | Coding Plan quota windows |
@@ -152,12 +152,13 @@ R_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
 R_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
-Roomote automatically forwards common provider configuration to task workers,
-including OpenRouter, Vercel AI Gateway, OpenAI, Azure OpenAI, Azure AI Foundry,
-Anthropic, Google Gemini,
-Moonshot, Kimi for Coding, MiniMax, Z.AI, OpenCode, Amazon Bedrock, xAI, and
-GitHub Copilot keys.
-Use `R_MODEL_ENV_KEYS` when a provider key uses a custom env var name:
+Roomote automatically makes common provider configuration available to the
+model runtime, including OpenRouter, Vercel AI Gateway, OpenAI, Azure OpenAI,
+Azure AI Foundry, Anthropic, Google Gemini, Moonshot, Kimi for Coding, MiniMax,
+Z.AI, OpenCode, Amazon Bedrock, xAI, and GitHub Copilot. For gateway-supported
+providers, credentials stay on the control plane and model requests are proxied
+instead of forwarding the credentials into task workers. Use `R_MODEL_ENV_KEYS`
+when a provider key uses a custom env var name and must be forwarded:
 
 ```sh
 R_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
@@ -175,10 +176,11 @@ list.
 - **Models** controls the provider/model pairs that are available, the default
   model, and specialized model roles.
 
-For subscription-based providers (ChatGPT, GitHub Copilot, Kimi for Coding, and
-xAI Grok / SuperGrok), the provider row also shows current plan usage when the
-provider reports it, such as remaining Copilot premium requests, the percent
-used of the ChatGPT 5-hour and weekly limits, or Grok included-usage windows.
+For subscription-based providers (ChatGPT, GitHub Copilot, Kimi for Coding,
+xAI Grok / SuperGrok, and Z.AI Coding Plan), the provider row also shows current
+plan usage when the provider reports it, such as remaining legacy Copilot
+premium-request quota, the percent used of the ChatGPT 5-hour and weekly
+limits, or Grok included-usage windows.
 These numbers come from unofficial provider endpoints, so the usage line is
 hidden whenever the provider does not return usable data.
 
@@ -205,6 +207,7 @@ where you want more speed, quality, or cost control.
 | Helper model         | Lightweight routing, titles, summaries, and quick internal decisions                     | Low latency, low cost, and enough accuracy for short judgments                            |
 | Vision model         | Visual inspection, screenshots, UI review, and image-heavy work                          | Image understanding, layout reasoning, and concise visual feedback                        |
 | Code review model    | Initial PR or MR review tasks and review-sync work                                       | Careful reasoning, bug finding, security awareness, and willingness to cite evidence      |
+| Explore model        | Repository search and focused codebase exploration                                      | Fast tool use, low latency, and reliable source-grounded investigation                    |
 | Advisor model        | Planning turns and advisor consultations inside longer coding tasks                      | Deliberate reasoning, decomposition, and ability to keep constraints in mind              |
 
 You do not need a separate model for every role. Many teams start with one
@@ -214,7 +217,8 @@ model after they can see real task usage.
 ## Reasoning settings
 
 Some models expose reasoning controls. Roomote lets admins set reasoning levels
-for the main model roles: **Low**, **Medium**, **High**, or **Extra high**.
+for the main model roles: **Low**, **Medium**, **High**, **Extra high**, or
+**Max**.
 
 Higher reasoning can improve planning, debugging, and review quality, but it
 can also increase latency and cost. Use it where deeper thinking changes the
@@ -223,11 +227,11 @@ outcome, not everywhere by default.
 A practical starting point:
 
 - use **Medium** for the default coding model
-- use **Low** for helper and vision work unless you see quality issues
+- use **Low** for helper, vision, and explore work unless you see quality issues
 - use **High** for code review and advisor work when you want more careful
   analysis
-- reserve **Extra high** for models and workflows where the added cost is
-  justified
+- reserve **Extra high** or **Max** for models and workflows where the added
+  cost is justified
 
 If a model does not support reasoning controls, Roomote hides or ignores the
 reasoning selector for that role.

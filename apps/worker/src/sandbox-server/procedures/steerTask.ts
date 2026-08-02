@@ -66,7 +66,7 @@ export const steerTask = publicProcedure
         });
       }
 
-      let trackedSlackQuote = false;
+      let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -100,6 +100,7 @@ export const steerTask = publicProcedure
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
+            quoteId: trackedSlackQuote.quoteId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -122,7 +123,7 @@ export const steerTask = publicProcedure
         });
       }
 
-      let trackedSlackQuote = false;
+      let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -155,6 +156,7 @@ export const steerTask = publicProcedure
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
+            quoteId: trackedSlackQuote.quoteId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -191,7 +193,7 @@ export const steerTask = publicProcedure
       });
     }
 
-    let trackedSlackQuote = false;
+    let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
       trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -224,6 +226,7 @@ export const steerTask = publicProcedure
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
+          quoteId: trackedSlackQuote.quoteId,
           logPrefix: 'steerTask',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

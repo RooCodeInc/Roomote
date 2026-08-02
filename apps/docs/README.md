@@ -15,7 +15,7 @@ and assets all live in this directory and do not depend on `@roomote/web`.
 - `roomote.css` — Roomote brand styling (Monaspace Neon code font, lime CTA,
   rounded surfaces). Mintlify auto-loads CSS placed at the workspace root.
 - `logo/` — light and dark Roomote wordmark logos used in the navbar.
-- `favicon.svg` — the Roomote mark used as the site favicon.
+- `favicon.png` — the Roomote mark used as the site favicon.
 - `fonts/` — the locally bundled Monaspace Neon code font (DM Sans is loaded by Mintlify via the `docs.json` font family reference).
 
 ## Local development

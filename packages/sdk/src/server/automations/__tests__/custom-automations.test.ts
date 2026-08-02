@@ -34,8 +34,19 @@ vi.mock('../destination', () => ({
 }));
 
 vi.mock('../scheduling-utils', () => ({
+  DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL: 3,
   isRunDue: vi.fn(),
   resolveSlackWorkspaceTimezone: vi.fn(async () => 'UTC'),
+}));
+
+vi.mock('../custom-automation-schedule', () => ({
+  resolveDeploymentTimeZone: vi.fn(async () => ({
+    timeZone: 'UTC',
+    source: 'utc_fallback',
+    updatedAt: null,
+  })),
+  validateCronExpression: vi.fn((value: string) => value),
+  isCronRunDue: vi.fn(() => true),
 }));
 
 import { enqueueTask } from '@roomote/cloud-agents/server';
@@ -107,9 +118,10 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result.launchedTaskId).toBe('task_abc');
-    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(automation.id, {
-      allowWhilePreviousRunActive: false,
-    });
+    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(
+      automation.id,
+      automation.lastRunAt,
+    );
     expect(isRunDue).toHaveBeenCalledWith(
       expect.objectContaining({
         frequency: 'daily',
@@ -153,6 +165,42 @@ describe('customAutomationsJob', () => {
         launchClaimedAt: expect.any(Date),
       }),
     );
+  });
+
+  it('passes a model override through to the launch', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, model: 'anthropic/claude-sonnet-5' } as never,
+    ]);
+
+    await customAutomationsJob();
+
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          harness: 'opencode-server',
+          payload: expect.objectContaining({
+            harnessModelOverrides: {
+              'opencode-server': 'anthropic/claude-sonnet-5',
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('launches on the deployment default when a persisted model is invalid', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, model: 'not-a-model' } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
+      task: { harness?: string; payload: Record<string, unknown> };
+    };
+    expect(enqueued.task.harness).toBeUndefined();
+    expect(enqueued.task.payload.harnessModelOverrides).toBeUndefined();
   });
 
   it('anchors the prompt to the configured report channel', async () => {
@@ -302,16 +350,17 @@ describe('runCustomAutomationNow', () => {
     } as never);
   });
 
-  it('launches with manual trigger, bypassing the previous-run-active gate', async () => {
+  it('launches with a manual trigger', async () => {
     const result = await runCustomAutomationNow(automation.id);
 
     expect(result).toEqual({
       outcome: 'launched',
       taskId: 'task_manual',
     });
-    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(automation.id, {
-      allowWhilePreviousRunActive: true,
-    });
+    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(
+      automation.id,
+      automation.lastRunAt,
+    );
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         trigger: 'manual',

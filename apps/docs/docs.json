@@ -146,6 +146,7 @@
           "cost-analytics",
           "environment-variables",
           "environments",
+          "environments/definition",
           "personal-settings",
           "skills",
           "users"

@@ -8,12 +8,12 @@ import {
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
-  slackInstallations,
   tryClaimCustomAutomationLaunch,
   type CustomAutomation,
 } from '@roomote/db/server';
 import {
   isConfiguredAutomationTarget,
+  resolveEvalHarnessSelection,
   TaskPayloadKind,
   type AutomationTarget,
   type CommunicationProvider,
@@ -26,7 +26,13 @@ import {
   listConnectedCommunicationProviders,
   type ResolvedAutomationDestination,
 } from './destination';
-import { isRunDue, resolveSlackWorkspaceTimezone } from './scheduling-utils';
+import {
+  isCronRunDue,
+  resolveDeploymentTimeZone,
+  validateCronExpression,
+  type ResolvedDeploymentTimeZone,
+} from './custom-automation-schedule';
+import { DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL, isRunDue } from './scheduling-utils';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -35,8 +41,6 @@ import {
 } from './types';
 
 const LOG_PREFIX = '[custom-automations]';
-/** Applied only to daily/weekly due-gating so hourly modes are not held until 3am. */
-const DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL = 3;
 
 const WINDOW_DAYS: Record<string, number> = {
   every_hour: 1 / 24,
@@ -124,51 +128,60 @@ function buildChannelAnchoredDescription(
 This run is anchored to the ${promptContext.surfaceLabel} channel above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post to any other channel. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that channel, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".`;
 }
 
-async function resolveTimezone(): Promise<string> {
-  const installation = await db.query.slackInstallations.findFirst({
-    columns: { botAccessToken: true, teamId: true },
-    where: eq(slackInstallations.isActive, true),
-  });
-
-  if (!installation?.botAccessToken || !installation.teamId) {
-    return 'UTC';
-  }
-
-  return resolveSlackWorkspaceTimezone(
-    {
-      slackBotToken: installation.botAccessToken,
-      slackTeamId: installation.teamId,
-    },
-    LOG_PREFIX,
-  );
-}
-
 async function launchCustomAutomationRow(
   automation: CustomAutomation,
   opts: AutomationRunOpts,
+  scheduleContext?: ResolvedDeploymentTimeZone,
 ): Promise<AutomationJobResult> {
   const result = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
 
-  if (frequency === 'off') {
+  if (automation.scheduleMode !== 'cron' && frequency === 'off') {
     result.skippedReason = 'Automation is disabled.';
     return result;
   }
 
   if (!opts.manualTrigger) {
-    const timezone = await resolveTimezone();
+    const timezone = scheduleContext ?? (await resolveDeploymentTimeZone());
     const now = new Date();
+    const cronBaseline = new Date(
+      Math.max(
+        automation.lastRunAt?.getTime() ?? automation.createdAt.getTime(),
+        timezone.updatedAt?.getTime() ?? 0,
+      ),
+    );
+    const presetLastRunAt = timezone.updatedAt
+      ? new Date(
+          Math.max(
+            automation.lastRunAt?.getTime() ?? 0,
+            timezone.updatedAt.getTime(),
+          ),
+        )
+      : automation.lastRunAt;
+    const due =
+      automation.scheduleMode === 'cron'
+        ? Boolean(
+            automation.cronExpression &&
+            isCronRunDue({
+              expression: validateCronExpression(
+                automation.cronExpression,
+                timezone.timeZone,
+              ),
+              timeZone: timezone.timeZone,
+              now,
+              baseline: cronBaseline,
+            }),
+          )
+        : isRunDue({
+            now,
+            timeZone: timezone.timeZone,
+            frequency,
+            lastRunAt: presetLastRunAt,
+            scheduleHourLocal: scheduleHourLocalForFrequency(frequency),
+            windowDays: WINDOW_DAYS,
+          });
 
-    if (
-      !isRunDue({
-        now,
-        timeZone: timezone,
-        frequency,
-        lastRunAt: automation.lastRunAt,
-        scheduleHourLocal: scheduleHourLocalForFrequency(frequency),
-        windowDays: WINDOW_DAYS,
-      })
-    ) {
+    if (!due) {
       result.skippedReason = 'Not due yet.';
       return result;
     }
@@ -235,24 +248,35 @@ async function launchCustomAutomationRow(
     }
   }
 
-  // Manual "Run now" bypasses the previous-run-active gate: an explicit
-  // human trigger should launch even when the last task is still (or is
-  // stuck) active. Scheduled ticks stay single-flight. The short claim
-  // fence still prevents two concurrent launchers from double-launching.
-  const launchClaimedAt = await tryClaimCustomAutomationLaunch(automation.id, {
-    allowWhilePreviousRunActive: opts.manualTrigger === true,
-  });
+  // The short claim fence prevents concurrent launchers from double-launching
+  // without blocking a due run behind a previous task that still appears active.
+  const launchClaimedAt = await tryClaimCustomAutomationLaunch(
+    automation.id,
+    automation.lastRunAt,
+  );
   if (!launchClaimedAt) {
-    result.skippedReason = opts.manualTrigger
-      ? 'Another launch is already in progress.'
-      : 'Previous run is still active.';
+    result.skippedReason = 'Another launch is already in progress.';
     return result;
   }
+
+  // A persisted model override is validated on save; a value that no longer
+  // parses is ignored so a stale pin degrades to the deployment default
+  // instead of blocking the scheduled run.
+  const modelSelection = automation.model
+    ? resolveEvalHarnessSelection({ model: automation.model })
+    : null;
+  if (modelSelection && !modelSelection.ok) {
+    console.warn(
+      `${LOG_PREFIX} Ignoring invalid model override "${automation.model}" on automation ${automation.id}: ${modelSelection.error}`,
+    );
+  }
+  const modelOverride = modelSelection?.ok ? modelSelection : null;
 
   try {
     const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.StandardTask,
+        ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
         payload: {
           repo: '',
           environmentId: automation.environmentId,
@@ -274,6 +298,9 @@ async function launchCustomAutomationRow(
                 channel: destination.channelId,
                 slackChannel: destination.channelId,
               }
+            : {}),
+          ...(modelOverride?.harnessModelOverrides
+            ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
             : {}),
         },
       },
@@ -323,12 +350,17 @@ export async function customAutomationsJob(
     return result;
   }
 
+  const scheduleContext = await resolveDeploymentTimeZone();
   let processed = 0;
   let skipped = 0;
 
   for (const automation of rows) {
     try {
-      const rowResult = await launchCustomAutomationRow(automation, opts);
+      const rowResult = await launchCustomAutomationRow(
+        automation,
+        opts,
+        scheduleContext,
+      );
 
       if (rowResult.launchedTaskId) {
         result.launchedTaskId ??= rowResult.launchedTaskId;

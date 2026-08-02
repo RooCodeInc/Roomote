@@ -2,6 +2,33 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.30.0 (2026-08-02)
+
+This release makes custom automations more flexible and reliable while improving task recovery and cross-channel follow-ups.
+
+### Highlights
+
+- Schedule custom automations with presets, cron, or natural language, choose a model for each automation, and manage them through Roomote.
+- Route manager summaries, suggestions, alerts, and other automation output to Discord as well as Slack.
+- Recover from model-provider errors in the same task without losing the active workspace.
+- Preserve conversational context when continuing Slack- or Discord-linked tasks from the web.
+
+### Minor changes
+
+- Let administrators choose a model for each custom automation while existing automations continue using the deployment default.
+- Let administrators use a Discord channel as the shared destination for manager summaries, suggestions, alerts, and other automation output.
+- Let administrators schedule custom automations with presets, cron, or natural language in a deployment-wide timezone, and manage their full lifecycle through Roomote's MCP tools.
+
+### Patch changes
+
+- Make app image builds more reliable by using BuildKit's built-in Dockerfile frontend instead of launching an unnecessary external frontend image.
+- Return actionable validation messages when Roomote manages custom automations, and record unexpected API failures in server logs for troubleshooting.
+- Launch due custom automations even when an earlier run remains active while retaining duplicate-launch protection.
+- Preserve conversational context when users continue Slack- or Discord-linked tasks from the web, including concurrent follow-ups and image-only replies.
+- Keep active task sandboxes available after model-provider errors so users can recover with a follow-up without losing workspace state.
+- Let users browse and configure Automations without a misleading Slack prerequisite while retaining provider-specific setup and permission guidance.
+- Use kickoff copy that matches the environment selected from Slack's manual routing picker instead of referring to a rejected suggestion.
+
 ## 0.29.0 (2026-08-01)
 
 This release expands model reasoning and preset options while improving LiteLLM routing, invite previews, and environment guidance.

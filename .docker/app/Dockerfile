@@ -1,4 +1,8 @@
-# syntax=docker/dockerfile:1.7
+# No `# syntax=` directive on purpose: this Dockerfile only needs features the
+# BuildKit built-in frontend already provides (secret mounts, multi-stage
+# targets), and resolving an external docker/dockerfile frontend image has
+# crashed CI builders ("frontend grpc server closed unexpectedly") when the
+# cached frontend image goes bad.
 #
 # Shared application image for the Roomote control plane.
 #

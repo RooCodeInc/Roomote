@@ -7,6 +7,12 @@ description: Attach files that Roomote can read directly in chat and the web app
 Roomote can read supported file attachments from the web app and from chat
 threads where you start or continue a Roomote task.
 
+Support varies by chat provider. The web app, Slack, and Telegram can read the
+formats below. Discord supports images and a smaller text and code subset, but
+not Office documents, PDFs, or presentations. Microsoft Teams currently
+supports image attachments only. Slack can also describe one supported video
+attachment per message.
+
 Use attachments when the file itself is the fastest way to show the problem: a
 bug report export, a config file, a markdown handoff, a spreadsheet, or a PDF
 from a customer.
@@ -28,6 +34,9 @@ If the attachments are large, Roomote reads them in the order you attach them
 and applies a shared text budget so the task stays responsive. Very large
 earlier files can leave later files included by name only.
 
+Text-extracted files are limited to 8 MB each. Image, video, and provider
+transport limits vary by surface.
+
 ## Accepted file types
 
 | Content type    | File types                                                                                                                                    |
@@ -44,8 +53,9 @@ earlier files can leave later files included by name only.
 
 Text, code, spreadsheet, document, and presentation files are read into the
 task as attachment context. Images are passed through as image inputs so
-Roomote can inspect them directly, except `.svg` files, which are read as text
-markup instead of being sent as image inputs.
+Roomote can inspect them directly. `.svg` files are normally read as text
+markup, but Discord treats an SVG reported with the `image/svg+xml` content type
+as an image input.
 
 That means you can ask things like:
 
@@ -67,7 +77,7 @@ That means you can ask things like:
 ## Common issues
 
 - **The attachment is huge.** Trim it down or export just the relevant sheet,
-  log window, or section.
+  log window, or section. Text-extracted files larger than 8 MB are rejected.
 - **The attachment is a format not listed here.** Export it as one of the
   accepted formats above.
 - **The task still needs more context.** Add a short prompt that explains the

@@ -1,9 +1,29 @@
-const { mockCreateRunToken, mockSendPromptMutate, mockClaimOutOfBandContext } =
-  vi.hoisted(() => ({
-    mockCreateRunToken: vi.fn(),
-    mockSendPromptMutate: vi.fn(),
-    mockClaimOutOfBandContext: vi.fn(),
-  }));
+const {
+  mockCreateRunToken,
+  mockSendPromptMutate,
+  mockClaimOutOfBandContext,
+  mockSetLatestUserMessageForReplyQuote,
+  mockClearLatestUserMessageForReplyQuoteIfId,
+} = vi.hoisted(() => ({
+  mockCreateRunToken: vi.fn(),
+  mockSendPromptMutate: vi.fn(),
+  mockClaimOutOfBandContext: vi.fn(),
+  mockSetLatestUserMessageForReplyQuote: vi.fn(),
+  mockClearLatestUserMessageForReplyQuoteIfId: vi.fn(),
+}));
+
+vi.mock('@roomote/communication/messages', async () => {
+  const actual = await vi.importActual<
+    typeof import('@roomote/communication/messages')
+  >('@roomote/communication/messages');
+
+  return {
+    ...actual,
+    setLatestUserMessageForReplyQuote: mockSetLatestUserMessageForReplyQuote,
+    clearLatestUserMessageForReplyQuoteIfId:
+      mockClearLatestUserMessageForReplyQuoteIfId,
+  };
+});
 
 vi.mock('@roomote/auth', async () => {
   const actual =
@@ -101,6 +121,12 @@ describe('sendSandboxPromptCommand', () => {
     mockCreateRunToken.mockResolvedValue('run-token');
     mockSendPromptMutate.mockResolvedValue({ success: true });
     mockClaimOutOfBandContext.mockResolvedValue(null);
+    mockSetLatestUserMessageForReplyQuote.mockResolvedValue({
+      id: 'discord-quote-1',
+      text: 'keep going',
+      userName: 'Test User',
+    });
+    mockClearLatestUserMessageForReplyQuoteIfId.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -186,6 +212,73 @@ describe('sendSandboxPromptCommand', () => {
           '<out_of_band_context>\nnotice\n</out_of_band_context>\n\nPlease fix it.',
         quoteText: 'Please fix it.',
       }),
+    );
+  });
+
+  it('stores web follow-ups for the next Discord thread reply quote', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      payload: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'thread-1',
+      },
+      result: {},
+    });
+
+    await sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
+      taskId: task.id,
+      prompt: 'Please quote this in Discord.',
+      source: 'web',
+    });
+
+    expect(mockSetLatestUserMessageForReplyQuote).toHaveBeenCalledWith(
+      'discord',
+      run.id,
+      {
+        text: 'Please quote this in Discord.',
+        userName: 'Test User',
+      },
+    );
+    expect(mockClearLatestUserMessageForReplyQuoteIfId).not.toHaveBeenCalled();
+  });
+
+  it('clears the exact Discord quote when sandbox delivery fails', async () => {
+    mockSendPromptMutate.mockRejectedValueOnce(new Error('sandbox exploded'));
+
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      payload: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+      },
+      result: {},
+    });
+
+    await expect(
+      sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
+        taskId: task.id,
+        prompt: 'Do not leave this pending.',
+        source: 'web',
+      }),
+    ).rejects.toThrow('sandbox exploded');
+
+    expect(mockClearLatestUserMessageForReplyQuoteIfId).toHaveBeenCalledWith(
+      'discord',
+      run.id,
+      'discord-quote-1',
     );
   });
 
