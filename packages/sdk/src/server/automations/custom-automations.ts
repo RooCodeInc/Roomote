@@ -13,6 +13,7 @@ import {
 } from '@roomote/db/server';
 import {
   isConfiguredAutomationTarget,
+  resolveEvalHarnessSelection,
   TaskPayloadKind,
   type AutomationTarget,
   type CommunicationProvider,
@@ -258,10 +259,24 @@ async function launchCustomAutomationRow(
     return result;
   }
 
+  // A persisted model override is validated on save; a value that no longer
+  // parses is ignored so a stale pin degrades to the deployment default
+  // instead of blocking the scheduled run.
+  const modelSelection = automation.model
+    ? resolveEvalHarnessSelection({ model: automation.model })
+    : null;
+  if (modelSelection && !modelSelection.ok) {
+    console.warn(
+      `${LOG_PREFIX} Ignoring invalid model override "${automation.model}" on automation ${automation.id}: ${modelSelection.error}`,
+    );
+  }
+  const modelOverride = modelSelection?.ok ? modelSelection : null;
+
   try {
     const launchResult = await enqueueTask({
       task: {
         type: TaskPayloadKind.StandardTask,
+        ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
         payload: {
           repo: '',
           environmentId: automation.environmentId,
@@ -283,6 +298,9 @@ async function launchCustomAutomationRow(
                 channel: destination.channelId,
                 slackChannel: destination.channelId,
               }
+            : {}),
+          ...(modelOverride?.harnessModelOverrides
+            ? { harnessModelOverrides: modelOverride.harnessModelOverrides }
             : {}),
         },
       },

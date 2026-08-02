@@ -274,6 +274,26 @@ vi.mock('@tanstack/react-query', () => ({
       return { isPending: false, data: [] };
     }
 
+    if (queryOptions.queryKey?.[0] === 'taskModels') {
+      return {
+        isPending: false,
+        data: {
+          defaultModelId: 'anthropic/claude-sonnet-5',
+          chatgptConnected: false,
+          openaiConnected: false,
+          xaiSubscriptionConnected: false,
+          xaiConnected: false,
+          models: [
+            {
+              id: 'anthropic/claude-sonnet-5',
+              displayName: 'Claude Sonnet 5',
+              isDefault: true,
+            },
+          ],
+        },
+      };
+    }
+
     if (queryOptions.queryKey?.[0] === 'miscSettings') {
       return {
         isPending: false,
@@ -427,6 +447,13 @@ vi.mock('@/trpc/client', () => ({
           queryKey: ['miscSettings', 'get'],
         }),
         queryKey: () => ['miscSettings', 'get'],
+      },
+    },
+    taskModels: {
+      launchOptions: {
+        queryOptions: () => ({
+          queryKey: ['taskModels', 'launchOptions'],
+        }),
       },
     },
   }),

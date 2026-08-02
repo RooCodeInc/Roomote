@@ -33,6 +33,8 @@ import {
   Trash2,
 } from '@/components/system';
 
+import { ModelSelect } from '@/components/tasks/ModelSelect';
+
 import { SlackChannelSelect } from './SlackChannelSelect';
 
 type CustomAutomationFormState = {
@@ -42,6 +44,8 @@ type CustomAutomationFormState = {
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string;
   cronExpression: string;
+  /** Provider/model launch override; empty string means deployment default. */
+  model: string;
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetChannelId: string;
   targetServiceUrl: string;
@@ -54,6 +58,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   scheduleMode: 'daily',
   environmentId: '',
   cronExpression: '',
+  model: '',
   targetProvider: 'slack',
   targetChannelId: '',
   targetServiceUrl: '',
@@ -112,6 +117,7 @@ function formFromRow(row: CustomAutomationListItem): CustomAutomationFormState {
     scheduleMode: row.scheduleMode,
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
+    model: row.model ?? '',
     targetProvider: target.provider,
     targetChannelId: target.channelId,
     targetServiceUrl: target.serviceUrl,
@@ -349,6 +355,7 @@ export function CustomAutomationsSection() {
       scheduleMode: form.scheduleMode,
       cronExpression:
         form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
+      model: form.model || null,
       environmentId: form.environmentId,
       ...(form.targetProvider !== 'none'
         ? {
@@ -508,6 +515,20 @@ export function CustomAutomationsSection() {
             ) : null}
           </div>
         ) : null}
+
+        <div className="space-y-2">
+          <Label>Model</Label>
+          <ModelSelect
+            className="w-full sm:max-w-md"
+            ariaLabel="Automation model"
+            value={form.model}
+            emptyOptionLabel="Deployment default"
+            disabled={busy}
+            onValueChange={(value) =>
+              setForm((current) => ({ ...current, model: value }))
+            }
+          />
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
@@ -746,6 +767,7 @@ export function CustomAutomationsSection() {
                         ? destinationLabel
                         : `${target.provider}:${destinationLabel}`}{' '}
                       · {statusLine(row)}
+                      {row.model ? ` · ${row.model}` : null}
                       {row.createdByName ? ` · by ${row.createdByName}` : null}
                     </p>
                   </div>

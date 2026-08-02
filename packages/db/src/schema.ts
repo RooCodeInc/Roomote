@@ -2676,6 +2676,11 @@ export const customAutomations = pgTable(
     enabled: boolean('enabled').notNull().default(false),
     scheduleMode: text('schedule_mode').notNull().default('off'),
     cronExpression: text('cron_expression'),
+    /**
+     * Optional provider/model override for launched runs. Null uses the
+     * deployment default task model.
+     */
+    model: text('model'),
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),

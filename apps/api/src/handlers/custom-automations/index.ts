@@ -39,6 +39,7 @@ const writeSchema = z.object({
   prompt: z.string().trim().min(1).max(8_000),
   enabled: z.boolean().default(true),
   schedule: z.string().trim().min(1).max(500),
+  model: z.string().trim().min(1).max(200).optional(),
   environmentId: z.string().uuid(),
   targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -50,6 +51,7 @@ const updateSchema = z.object({
   prompt: z.string().trim().min(1).max(8_000).optional(),
   enabled: z.boolean().optional(),
   schedule: z.string().trim().min(1).max(500).optional(),
+  model: z.string().trim().min(1).max(200).nullable().optional(),
   environmentId: z.string().uuid().optional(),
   targetProvider: z
     .enum(['slack', 'discord', 'teams', 'telegram'])
@@ -197,6 +199,7 @@ customAutomationsRouter.post('/', async (c) => {
     enabled: parsed.data.enabled,
     scheduleMode: schedule.scheduleMode,
     cronExpression: schedule.cronExpression,
+    model: parsed.data.model ?? null,
     environmentId: parsed.data.environmentId,
     target: buildTarget(parsed.data),
     createdByUserId: adminId(c),
@@ -251,6 +254,9 @@ customAutomationsRouter.patch('/:id', async (c) => {
     enabled: parsed.data.enabled ?? existing.enabled,
     scheduleMode: schedule.scheduleMode,
     cronExpression: schedule.cronExpression,
+    // Explicit null clears the override; omitted keeps the existing value.
+    model:
+      parsed.data.model === null ? null : (parsed.data.model ?? existing.model),
     environmentId: parsed.data.environmentId ?? existing.environmentId ?? '',
     target: clearTarget
       ? {}

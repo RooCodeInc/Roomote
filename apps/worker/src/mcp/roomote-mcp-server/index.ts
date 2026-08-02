@@ -106,6 +106,13 @@ roomoteMcpServer.registerTool(
         .describe(
           'A five-field cron expression, preset, or natural-language recurring schedule.',
         ),
+      model: z
+        .string()
+        .nullable()
+        .describe(
+          'Optional provider/model launch override (for example "anthropic/claude-sonnet-5"). Omit to keep the deployment default; pass null on update to clear an existing override.',
+        )
+        .optional(),
       environmentId: z.string().optional(),
       targetProvider: z
         .enum(['slack', 'discord', 'teams', 'telegram'])

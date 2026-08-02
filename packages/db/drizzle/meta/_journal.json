@@ -183,6 +183,13 @@
       "when": 1785634110216,
       "tag": "0025_shiny_smiling_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785646529215,
+      "tag": "0026_sour_master_mold",
+      "breakpoints": true
     }
   ]
 }
