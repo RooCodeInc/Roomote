@@ -4,15 +4,22 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
 import {
   Button,
+  Check,
+  ChevronsUpDown,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
 } from '@/components/system';
 
 const FALLBACK_TIME_ZONES = [
@@ -47,6 +54,7 @@ export function DeploymentTimeZoneSetting() {
   const settings = useQuery(trpc.miscSettings.get.queryOptions());
   const [timeZone, setTimeZone] = useState('UTC');
   const [isEditing, setIsEditing] = useState(false);
+  const [isTimeZonePickerOpen, setIsTimeZonePickerOpen] = useState(false);
 
   useEffect(() => {
     if (settings.data) {
@@ -96,18 +104,56 @@ export function DeploymentTimeZoneSetting() {
     <div className="space-y-2">
       <Label>Scheduling timezone</Label>
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Select value={timeZone} onValueChange={setTimeZone}>
-          <SelectTrigger className="sm:w-80" aria-label="Scheduling timezone">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {supportedTimeZones().map((value) => (
-              <SelectItem key={value} value={value}>
-                {value}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Popover
+          open={isTimeZonePickerOpen}
+          onOpenChange={setIsTimeZonePickerOpen}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              role="combobox"
+              aria-label="Scheduling timezone"
+              aria-expanded={isTimeZonePickerOpen}
+              className="w-full justify-between font-normal sm:w-80"
+            >
+              <span className="truncate">{timeZone}</span>
+              <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="w-(--radix-popover-trigger-width) p-0"
+          >
+            <Command>
+              <CommandInput placeholder="Search timezones..." />
+              <CommandList>
+                <CommandEmpty>No timezones found.</CommandEmpty>
+                <CommandGroup>
+                  {supportedTimeZones().map((value) => (
+                    <CommandItem
+                      key={value}
+                      value={value}
+                      onSelect={() => {
+                        setTimeZone(value);
+                        setIsTimeZonePickerOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          'mr-2 size-4',
+                          value === timeZone ? 'opacity-100' : 'opacity-0',
+                        )}
+                      />
+                      <span className="truncate">{value}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
         <Button
           disabled={
             update.isPending ||
