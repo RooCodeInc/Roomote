@@ -7,6 +7,11 @@ description: Attach files that Roomote can read directly in chat and the web app
 Roomote can read supported file attachments from the web app and from chat
 threads where you start or continue a Roomote task.
 
+Support varies by chat provider. Slack, Telegram, and Discord can read the
+text-extractable formats below, while Microsoft Teams currently supports image
+attachments only. Slack can also describe one supported video attachment per
+message.
+
 Use attachments when the file itself is the fastest way to show the problem: a
 bug report export, a config file, a markdown handoff, a spreadsheet, or a PDF
 from a customer.
@@ -27,6 +32,9 @@ Attach files when you want Roomote to:
 If the attachments are large, Roomote reads them in the order you attach them
 and applies a shared text budget so the task stays responsive. Very large
 earlier files can leave later files included by name only.
+
+Text-extracted files are limited to 8 MB each. Image, video, and provider
+transport limits vary by surface.
 
 ## Accepted file types
 
@@ -67,7 +75,7 @@ That means you can ask things like:
 ## Common issues
 
 - **The attachment is huge.** Trim it down or export just the relevant sheet,
-  log window, or section.
+  log window, or section. Text-extracted files larger than 8 MB are rejected.
 - **The attachment is a format not listed here.** Export it as one of the
   accepted formats above.
 - **The task still needs more context.** Add a short prompt that explains the

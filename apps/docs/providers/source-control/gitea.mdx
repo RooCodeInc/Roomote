@@ -4,9 +4,9 @@ icon: 'https://api.iconify.design/simple-icons:gitea.svg?color=currentColor'
 description: Configure Gitea repository sync, pull request webhooks, and Actions failure triage for Roomote.
 ---
 
-Gitea support uses a deployment-owned token and instance URL. There is no
-self-serve OAuth or Gitea App installation flow yet, so an operator provides
-the Gitea instance details and syncs repositories from Settings.
+Gitea support uses a deployment-owned OAuth application, instance URL, and
+authorized service account. An operator provides the application details,
+authorizes the service account, and syncs repositories from Settings.
 
 Repository sync can also create pull request webhooks, allowing Review Code
 automation and `@roomote` pull request comments to work for synced Gitea
@@ -14,7 +14,7 @@ repositories.
 
 Use `<public-url>` below for your stable public Roomote URL.
 
-## Create a Gitea bot token
+## Create a Gitea OAuth application and service account
 
 Create a dedicated Gitea bot or service-account user and give it access to the
 organizations or repositories Roomote should use. New deployments use a Gitea
@@ -23,11 +23,11 @@ with the redirect URI shown by Roomote and authorize it with the scopes
 `read:user`, `read:repository`, `write:repository`, `write:issue`, and
 `read:organization`.
 
-If Roomote should configure webhooks automatically, the token identity also
+If Roomote should configure webhooks automatically, the service account also
 needs repository admin access for the synced repositories.
 
-Save the instance URL and token in setup, deployment env vars, or local
-`.env.local`:
+Save the instance URL and OAuth application credentials in setup, deployment
+env vars, or local `.env.local`:
 
 ```sh
 GITEA_BASE_URL=https://git.example.com

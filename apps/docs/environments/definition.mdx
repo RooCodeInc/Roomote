@@ -20,8 +20,8 @@ When a Roomote agent starts a task, the [sandbox provider](/compute) gives it a
 clean sandbox. The environment definition is what turns that empty sandbox into
 a workspace grounded in your product. It is applied in a predictable order:
 
-1. shared workspace tool versions are installed
-2. requested services (databases, caches) are started while repositories clone
+1. requested services (databases, caches) start while repositories are prepared
+2. shared workspace tool fallbacks are installed after repositories are ready
 3. configured Docker projects are built and started from cloned repositories
 4. each repository's setup commands run, in order
 5. named ports become live previews, and agent instructions are attached to

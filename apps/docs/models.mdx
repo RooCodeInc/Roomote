@@ -51,7 +51,7 @@ These connections use metered API billing or a provider-managed gateway:
 | [MiniMax](/providers/inference/minimax) | MiniMax API key | MiniMax account |
 | [Moonshot AI (Kimi)](/providers/inference/moonshot-ai) | Kimi Open Platform key | Moonshot Open Platform balance |
 | [OpenAI](/providers/inference/openai) | OpenAI API key | OpenAI API project |
-| [OpenCode Zen / Go](/providers/inference/opencode) | OpenCode API key | OpenCode account |
+| [OpenCode Zen](/providers/inference/opencode) | OpenCode API key | OpenCode account |
 | [OpenRouter](/providers/inference/openrouter) | OpenRouter API key | OpenRouter balance and key limit |
 | [Together AI](/providers/inference/together-ai) | Together AI API key | Together AI account |
 | [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) | AI Gateway API key | Vercel team |
@@ -66,7 +66,7 @@ general API balance:
 | Provider | Connection | Usage behavior |
 | --- | --- | --- |
 | [ChatGPT Subscription](/providers/inference/chatgpt) | OpenAI device authorization | ChatGPT plan windows |
-| [GitHub Copilot](/providers/inference/github-copilot) | GitHub device authorization | Copilot plan and premium requests |
+| [GitHub Copilot](/providers/inference/github-copilot) | GitHub device authorization | Copilot plan allowance |
 | [Kimi for Coding](/providers/inference/kimi-for-coding) | Kimi membership key | Coding membership allowance |
 | [xAI Grok Subscription](/providers/inference/xai-subscription) | xAI account authorization | SuperGrok or eligible X plan allowance |
 | [Z.AI Coding Plan](/providers/inference/zai-coding-plan) | Regional Coding Plan key | Coding Plan quota windows |
@@ -175,10 +175,11 @@ list.
 - **Models** controls the provider/model pairs that are available, the default
   model, and specialized model roles.
 
-For subscription-based providers (ChatGPT, GitHub Copilot, Kimi for Coding, and
-xAI Grok / SuperGrok), the provider row also shows current plan usage when the
-provider reports it, such as remaining Copilot premium requests, the percent
-used of the ChatGPT 5-hour and weekly limits, or Grok included-usage windows.
+For subscription-based providers (ChatGPT, GitHub Copilot, Kimi for Coding,
+xAI Grok / SuperGrok, and Z.AI Coding Plan), the provider row also shows current
+plan usage when the provider reports it, such as remaining legacy Copilot
+premium-request quota, the percent used of the ChatGPT 5-hour and weekly
+limits, or Grok included-usage windows.
 These numbers come from unofficial provider endpoints, so the usage line is
 hidden whenever the provider does not return usable data.
 
@@ -205,6 +206,7 @@ where you want more speed, quality, or cost control.
 | Helper model         | Lightweight routing, titles, summaries, and quick internal decisions                     | Low latency, low cost, and enough accuracy for short judgments                            |
 | Vision model         | Visual inspection, screenshots, UI review, and image-heavy work                          | Image understanding, layout reasoning, and concise visual feedback                        |
 | Code review model    | Initial PR or MR review tasks and review-sync work                                       | Careful reasoning, bug finding, security awareness, and willingness to cite evidence      |
+| Explore model        | Repository search and focused codebase exploration                                      | Fast tool use, low latency, and reliable source-grounded investigation                    |
 | Advisor model        | Planning turns and advisor consultations inside longer coding tasks                      | Deliberate reasoning, decomposition, and ability to keep constraints in mind              |
 
 You do not need a separate model for every role. Many teams start with one
@@ -224,7 +226,7 @@ outcome, not everywhere by default.
 A practical starting point:
 
 - use **Medium** for the default coding model
-- use **Low** for helper and vision work unless you see quality issues
+- use **Low** for helper, vision, and explore work unless you see quality issues
 - use **High** for code review and advisor work when you want more careful
   analysis
 - reserve **Extra high** or **Max** for models and workflows where the added
