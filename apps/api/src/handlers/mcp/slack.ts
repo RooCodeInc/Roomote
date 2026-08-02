@@ -33,7 +33,6 @@ import {
   setLatestSlackBotReply,
   setSlackThreadReplyFooterMessageTs,
   SlackNotifier,
-  trackLatestUserMessageForSlackQuote,
   trackSlackBotReply,
   withSlackThreadReplyFooterLock,
   THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE as SLACK_THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE,
@@ -43,6 +42,10 @@ import {
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
+import {
+  clearLatestUserMessageForReplyQuoteIfId,
+  setLatestUserMessageForReplyQuote,
+} from '@roomote/communication/messages';
 
 import type { Variables } from '../../types';
 
@@ -285,7 +288,7 @@ function buildSlackThreadReplyQuoteBlock(params: { quote: string }): {
 }
 
 async function peekSlackThreadReplyQuote(params: { runId: number }): Promise<{
-  pendingUserMessage: { text: string; userName: string };
+  pendingUserMessage: { id: string; text: string; userName: string };
   quote: string;
 } | null> {
   try {
@@ -658,9 +661,15 @@ function parseTrackReplyQuoteRequestBody(body: unknown): {
 
 function parseClearReplyQuoteRequestBody(body: unknown): {
   runId: number;
+  quoteId?: string;
 } {
+  const record =
+    body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
+  const quoteId =
+    record && typeof record.quoteId === 'string' ? record.quoteId.trim() : '';
   return {
     runId: parseSlackReplyQuoteRunId(body),
+    ...(quoteId ? { quoteId } : {}),
   };
 }
 
@@ -696,16 +705,16 @@ slackMcp.post('/track_reply_quote', async (c) => {
     );
   }
 
-  await trackLatestUserMessageForSlackQuote({
-    runId: parsedBody.runId,
-    text: parsedBody.text,
-    userName: parsedBody.userName,
-    onError: (error) => {
-      throw error;
+  const quote = await setLatestUserMessageForReplyQuote(
+    'slack',
+    parsedBody.runId,
+    {
+      text: parsedBody.text,
+      userName: parsedBody.userName,
     },
-  });
+  );
 
-  return c.json({ success: true });
+  return c.json({ success: true, quoteId: quote.id });
 });
 
 slackMcp.post('/clear_reply_quote', async (c) => {
@@ -721,7 +730,7 @@ slackMcp.post('/clear_reply_quote', async (c) => {
     );
   }
 
-  let parsedBody: { runId: number };
+  let parsedBody: { runId: number; quoteId?: string };
   try {
     parsedBody = parseClearReplyQuoteRequestBody(await c.req.json());
   } catch (error) {
@@ -738,7 +747,17 @@ slackMcp.post('/clear_reply_quote', async (c) => {
     );
   }
 
-  await clearLatestUserMessage(parsedBody.runId);
+  if (parsedBody.quoteId) {
+    await clearLatestUserMessageForReplyQuoteIfId(
+      'slack',
+      parsedBody.runId,
+      parsedBody.quoteId,
+    );
+  } else {
+    // Bare runId requests come from previous-release workers whose clear
+    // contract has always been run-scoped.
+    await clearLatestUserMessage(parsedBody.runId);
+  }
 
   return c.json({ success: true });
 });
@@ -1071,12 +1090,9 @@ slackMcp.post('/thread_reply', async (c) => {
             slackReplyTarget.channel,
             existingThreadTs,
           );
-        const pendingQuote =
-          normalizedText && includeFooter
-            ? await peekSlackThreadReplyQuote({
-                runId: taskRun.id,
-              })
-            : null;
+        const pendingQuote = await peekSlackThreadReplyQuote({
+          runId: taskRun.id,
+        });
         const replyFallbackText =
           normalizedText ??
           (normalizedBlocks && normalizedBlocks.length > 0
@@ -1088,7 +1104,7 @@ slackMcp.post('/thread_reply', async (c) => {
             : replyFallbackText;
         const blocks: unknown[] = [];
 
-        if (pendingQuote) {
+        if (normalizedText && pendingQuote) {
           blocks.push(
             buildSlackThreadReplyQuoteBlock({
               quote: pendingQuote.quote,
@@ -1140,7 +1156,11 @@ slackMcp.post('/thread_reply', async (c) => {
 
         if (pendingQuote) {
           try {
-            await clearLatestUserMessage(taskRun.id);
+            await clearLatestUserMessageForReplyQuoteIfId(
+              'slack',
+              taskRun.id,
+              pendingQuote.pendingUserMessage.id,
+            );
           } catch (error) {
             console.error(
               `[slackMcp#thread_reply] Failed to clear latest user message for task run ${taskRun.id}: ${

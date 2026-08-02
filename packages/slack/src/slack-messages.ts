@@ -1,9 +1,14 @@
 import { getRedis } from '@roomote/redis';
 import {
+  clearLatestUserMessageForReplyQuote,
   getCommunicationMessages,
+  getLatestUserMessageForReplyQuote,
   hasQueuedCommunicationMessages,
   prependCommunicationMessages,
   queueCommunicationMessage,
+  setLatestUserMessageForReplyQuote,
+  trackLatestUserMessageForReplyQuote,
+  upgradeLegacyUserMessageForReplyQuote,
 } from '@roomote/communication/messages';
 import type { QueuedCommunicationMessage } from '@roomote/types';
 
@@ -24,6 +29,7 @@ export interface LatestSlackBotReply {
 }
 
 export interface LatestUserMessage {
+  id: string;
   text: string;
   userName: string;
 }
@@ -345,7 +351,9 @@ export async function getLatestSlackBotReply(
   }
 }
 
-function parseLatestUserMessage(raw: string | null): LatestUserMessage | null {
+function parseLatestUserMessage(
+  raw: string | null,
+): Omit<LatestUserMessage, 'id'> | null {
   if (!raw) {
     return null;
   }
@@ -354,6 +362,7 @@ function parseLatestUserMessage(raw: string | null): LatestUserMessage | null {
     const parsed = JSON.parse(raw) as Partial<LatestUserMessage>;
 
     if (
+      parsed.id !== undefined ||
       typeof parsed.text !== 'string' ||
       typeof parsed.userName !== 'string'
     ) {
@@ -368,17 +377,9 @@ function parseLatestUserMessage(raw: string | null): LatestUserMessage | null {
 
 export async function setLatestUserMessage(
   runId: number,
-  message: LatestUserMessage,
+  message: Omit<LatestUserMessage, 'id'> & { id?: string },
 ): Promise<void> {
-  const redis = getRedis();
-  const key = getLatestUserMessageKey(runId);
-
-  await redis.set(
-    key,
-    JSON.stringify(message satisfies LatestUserMessage),
-    'EX',
-    SLACK_THREAD_DELIVERED_MESSAGE_TTL_SECONDS,
-  );
+  await setLatestUserMessageForReplyQuote('slack', runId, message);
 }
 
 export async function trackLatestUserMessageForSlackQuote({
@@ -387,44 +388,42 @@ export async function trackLatestUserMessageForSlackQuote({
   userName,
   onError,
 }: TrackLatestUserMessageForSlackQuoteParams): Promise<void> {
-  try {
-    await setLatestUserMessage(runId, {
-      text,
-      userName,
-    });
-  } catch (error) {
-    if (onError) {
-      onError(error);
-      return;
-    }
-
-    console.warn(
-      `[trackLatestUserMessageForSlackQuote] Failed to persist latest user message for task run ${runId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
+  await trackLatestUserMessageForReplyQuote({
+    provider: 'slack',
+    runId,
+    text,
+    userName,
+    onError,
+  });
 }
 
 export async function getLatestUserMessage(
   runId: number,
 ): Promise<LatestUserMessage | null> {
+  const current = await getLatestUserMessageForReplyQuote('slack', runId);
+  if (current) {
+    return current;
+  }
+
+  // Pending records created before provider-keyed quote IDs were introduced
+  // use the same Redis key. Upgrade one on read so deploys do not drop it.
   const redis = getRedis();
   const raw = await redis.get(getLatestUserMessageKey(runId));
-  return parseLatestUserMessage(raw);
+  const legacy = parseLatestUserMessage(raw);
+  if (!legacy) {
+    return null;
+  }
+
+  return upgradeLegacyUserMessageForReplyQuote(
+    'slack',
+    runId,
+    raw ?? '',
+    legacy,
+  );
 }
 
 export async function clearLatestUserMessage(runId: number): Promise<void> {
-  try {
-    const redis = getRedis();
-    await redis.del(getLatestUserMessageKey(runId));
-  } catch (error) {
-    console.error(
-      `[clearLatestUserMessage] Failed to clear latest user message for task run ${runId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
+  await clearLatestUserMessageForReplyQuote('slack', runId);
 }
 
 export async function markSlackThreadMessagesDelivered(

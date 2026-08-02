@@ -53,6 +53,15 @@ if data.id ~= ARGV[1] then
 end
 return redis.call('DEL', KEYS[1])
 `;
+
+const UPGRADE_LEGACY_REPLY_QUOTE_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+if raw ~= ARGV[1] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+return 1
+`;
 const CLAIM_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_SCRIPT = `
 local claimedRaw = redis.call('GET', KEYS[2])
 if claimedRaw then
@@ -455,6 +464,33 @@ export async function getLatestUserMessageForReplyQuote(
     getLatestUserMessageForReplyQuoteKey(provider, runId),
   );
   return parseLatestUserMessageForReplyQuote(raw);
+}
+
+export async function upgradeLegacyUserMessageForReplyQuote(
+  provider: ReplyQuoteProvider,
+  runId: number,
+  expectedRaw: string,
+  message: Omit<LatestUserMessageForReplyQuote, 'id'>,
+): Promise<LatestUserMessageForReplyQuote | null> {
+  const stored: LatestUserMessageForReplyQuote = {
+    id: randomUUID(),
+    ...message,
+  };
+  const redis = getRedis();
+  const result = await redis.eval(
+    UPGRADE_LEGACY_REPLY_QUOTE_SCRIPT,
+    1,
+    getLatestUserMessageForReplyQuoteKey(provider, runId),
+    expectedRaw,
+    JSON.stringify(stored),
+    LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_TTL_SECONDS,
+  );
+
+  if (typeof result === 'number' ? result > 0 : Number(result) > 0) {
+    return stored;
+  }
+
+  return getLatestUserMessageForReplyQuote(provider, runId);
 }
 
 export async function claimLatestUserMessageForReplyQuote(

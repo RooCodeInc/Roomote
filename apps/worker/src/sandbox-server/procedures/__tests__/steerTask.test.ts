@@ -146,7 +146,10 @@ describe('steerTask procedure', () => {
       token: 'run-token',
       platformApiUrl: 'https://platform.example.com',
     });
-    mockTrackSlackReplyQuote.mockResolvedValue({ success: true });
+    mockTrackSlackReplyQuote.mockResolvedValue({
+      success: true,
+      quoteId: 'quote-1',
+    });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
 
@@ -331,6 +334,7 @@ describe('steerTask procedure', () => {
   });
 
   it('throws INTERNAL_SERVER_ERROR when steering cannot start', async () => {
+    mockTrackSlackReplyQuote.mockResolvedValueOnce({ success: true });
     const { caller, cancelTaskAndWaitForTurnExit, sendFollowUpPrompt } =
       createCaller({
         sendFollowUpPrompt: () => false,
@@ -353,15 +357,9 @@ describe('steerTask procedure', () => {
       images: undefined,
       userId: 'sender-user-1',
     });
-    expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
-      {
-        token: 'run-token',
-        platformApiUrl: 'https://platform.example.com',
-      },
-      {
-        runId: 1,
-      },
-    );
+    // Tracked through an older API (no quoteId): the rollback stays pending
+    // rather than risking an unscoped clear.
+    expect(mockClearSlackReplyQuote).not.toHaveBeenCalled();
   });
 
   it('throws PRECONDITION_FAILED when the active turn cannot be interrupted', async () => {

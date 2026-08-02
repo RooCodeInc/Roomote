@@ -132,7 +132,7 @@ export const sendPrompt = publicProcedure
     }
 
     if (status?.phase === 'waiting_for_prompt' && !status.sessionId) {
-      let trackedSlackQuote = false;
+      let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
         if (input.source === 'web') {
@@ -175,6 +175,7 @@ export const sendPrompt = publicProcedure
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
+            quoteId: trackedSlackQuote.quoteId,
             logPrefix: 'sendPrompt',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -191,7 +192,7 @@ export const sendPrompt = publicProcedure
       }
     }
 
-    let trackedSlackQuote = false;
+    let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
       if (input.source === 'web') {
@@ -243,6 +244,7 @@ export const sendPrompt = publicProcedure
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
+          quoteId: trackedSlackQuote.quoteId,
           logPrefix: 'sendPrompt',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

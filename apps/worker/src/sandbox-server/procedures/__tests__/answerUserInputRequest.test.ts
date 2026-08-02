@@ -137,7 +137,10 @@ describe('answerUserInputRequest procedure', () => {
       token: 'run-token',
       platformApiUrl: 'https://platform.example.com',
     });
-    mockTrackSlackReplyQuote.mockResolvedValue({ success: true });
+    mockTrackSlackReplyQuote.mockResolvedValue({
+      success: true,
+      quoteId: 'quote-1',
+    });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
 
@@ -336,6 +339,7 @@ describe('answerUserInputRequest procedure', () => {
       },
       {
         runId: 1,
+        quoteId: 'quote-1',
       },
     );
   });
