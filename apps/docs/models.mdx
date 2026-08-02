@@ -214,7 +214,8 @@ model after they can see real task usage.
 ## Reasoning settings
 
 Some models expose reasoning controls. Roomote lets admins set reasoning levels
-for the main model roles: **Low**, **Medium**, **High**, or **Extra high**.
+for the main model roles: **Low**, **Medium**, **High**, **Extra high**, or
+**Max**.
 
 Higher reasoning can improve planning, debugging, and review quality, but it
 can also increase latency and cost. Use it where deeper thinking changes the
@@ -226,8 +227,8 @@ A practical starting point:
 - use **Low** for helper and vision work unless you see quality issues
 - use **High** for code review and advisor work when you want more careful
   analysis
-- reserve **Extra high** for models and workflows where the added cost is
-  justified
+- reserve **Extra high** or **Max** for models and workflows where the added
+  cost is justified
 
 If a model does not support reasoning controls, Roomote hides or ignores the
 reasoning selector for that role.
