@@ -45,7 +45,7 @@ same setup. The concepts map closely:
 | Setup steps         | [`onCreateCommand` / `postCreateCommand`](https://containers.dev/implementors/json_reference/#lifecycle-scripts)   | Repository `commands`                                                   |
 | Forwarded ports     | [`forwardPorts` / `portsAttributes`](https://containers.dev/implementors/json_reference/#port-attributes)          | `ports`                                                                 |
 | Workspace env vars  | [`containerEnv` / `remoteEnv`](https://containers.dev/implementors/json_reference/#variables-in-devcontainer-json) | `env` (and per-command `env`)                                           |
-| Tool customizations | [`customizations`](https://containers.dev/supporting-tools)                                                        | `agentInstructions`, `mcpServers`, `skills`                             |
+| Tool customizations | [`customizations`](https://containers.dev/supporting)                                                              | `agentInstructions`, `mcpServers`, `skills`                             |
 
 The important difference: **Roomote uses its own schema and does not read
 `devcontainer.json`.** The comparison is conceptual. If a repository already has
@@ -173,7 +173,7 @@ cloned onto the shared workspace.
 
 | Field           | Type   | Required | Notes                                                             |
 | --------------- | ------ | -------- | ----------------------------------------------------------------- |
-| `repository`    | string | yes      | `owner/repo` format.                                              |
+| `repository`    | string | yes      | Slash-separated full name, such as `owner/repo`; some providers use additional segments. |
 | `branch`        | string | no       | Branch to check out. Defaults to the repository's default branch. |
 | `tool_versions` | map    | no       | Repo-local tool fallbacks installed via mise.                     |
 | `commands`      | list   | no       | Setup commands for this repository. See [Commands](#commands).    |
@@ -182,7 +182,7 @@ Keep the first environment focused. One repository, or a small set that must be
 cloned together, sets up faster and is easier to debug than a large multi-repo
 environment.
 
-All repositories in one environment must belong to the same source-control
+GitHub repositories in one environment must belong to the same GitHub App
 installation.
 
 ### Commands

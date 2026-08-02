@@ -7,10 +7,11 @@ description: Attach files that Roomote can read directly in chat and the web app
 Roomote can read supported file attachments from the web app and from chat
 threads where you start or continue a Roomote task.
 
-Support varies by chat provider. Slack, Telegram, and Discord can read the
-text-extractable formats below, while Microsoft Teams currently supports image
-attachments only. Slack can also describe one supported video attachment per
-message.
+Support varies by chat provider. The web app, Slack, and Telegram can read the
+formats below. Discord supports images and a smaller text and code subset, but
+not Office documents, PDFs, or presentations. Microsoft Teams currently
+supports image attachments only. Slack can also describe one supported video
+attachment per message.
 
 Use attachments when the file itself is the fastest way to show the problem: a
 bug report export, a config file, a markdown handoff, a spreadsheet, or a PDF
@@ -52,8 +53,9 @@ transport limits vary by surface.
 
 Text, code, spreadsheet, document, and presentation files are read into the
 task as attachment context. Images are passed through as image inputs so
-Roomote can inspect them directly, except `.svg` files, which are read as text
-markup instead of being sent as image inputs.
+Roomote can inspect them directly. `.svg` files are normally read as text
+markup, but Discord treats an SVG reported with the `image/svg+xml` content type
+as an image input.
 
 That means you can ask things like:
 
