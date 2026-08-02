@@ -21,6 +21,7 @@ import {
 import {
   findDiscordDestinationByChannelId,
   findTeamsConversationDisplayName,
+  listTeamsAutomationDestinations,
   findTeamsPrimaryConversation,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
@@ -225,6 +226,15 @@ async function resolveAutomationDestinations(params: {
         slackConnected: params.slackConnected,
       });
 
+      // Platform issue alerts intentionally stop at an explicit target or
+      // Manager Channel; delivery never falls through to a primary conversation.
+      if (
+        key === 'platform_issue_alerts' &&
+        destination?.source === 'primary_conversation'
+      ) {
+        return [key, null] as const;
+      }
+
       if (!destination) {
         return [key, null] as const;
       }
@@ -298,6 +308,7 @@ export async function getBackgroundAgentSettingsCommand(
   automationStatus: Partial<
     Record<BackgroundAutomationKey, AutomationStatusSummary>
   >;
+  teamsConversations: Array<{ conversationId: string; label: string }>;
 }> {
   assertAdmin(auth);
 
@@ -307,6 +318,7 @@ export async function getBackgroundAgentSettingsCommand(
     discordInstallation,
     telegramCredentials,
     teamsPrimaryConversation,
+    teamsConversations,
     sentryConnected,
     recentRuns,
   ] = await Promise.all([
@@ -318,6 +330,7 @@ export async function getBackgroundAgentSettingsCommand(
     }),
     resolveTelegramRuntimeCredentials(),
     findTeamsPrimaryConversation(),
+    listTeamsAutomationDestinations(),
     hasActiveSentryIntegration(),
     listRecentAutomationTasks(),
   ]);
@@ -425,6 +438,7 @@ export async function getBackgroundAgentSettingsCommand(
         ? slackInstallation.teamDomain
         : null,
     },
+    teamsConversations,
     slackChannelAccessWarnings,
     slackChannelDisplayNames,
     resolvedDestinations,

@@ -102,6 +102,7 @@ export type FormState = {
    * Mutually exclusive with Slack/Discord/Telegram destinations.
    */
   suggesterUseTeams: boolean;
+  platformIssueTeamsChannel: string;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string;
   announcerFrequency: AnnouncerFrequency;
@@ -188,8 +189,10 @@ const ANNOUNCER_FIELDS: Array<keyof FormState> = [
   'announcerInstructions',
 ];
 
-const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> =
-  DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts;
+const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts,
+  'platformIssueTeamsChannel',
+];
 
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
@@ -356,6 +359,8 @@ export function buildAutomationSettingsSaveInput(
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
     suggesterUseTelegram: stateToSave.suggesterUseTelegram,
     suggesterUseTeams: stateToSave.suggesterUseTeams,
+    platformIssueTeamsChannel:
+      stateToSave.platformIssueTeamsChannel.trim() || null,
     suggesterRoutingMode: stateToSave.suggesterRoutingMode,
     suggesterRoutingInstructions:
       stateToSave.suggesterRoutingInstructions.trim() || null,

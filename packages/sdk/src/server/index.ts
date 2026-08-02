@@ -164,6 +164,12 @@ export {
 } from './lib/telegram-primary-chat';
 
 export {
+  findTeamsConversationServiceUrl,
+  findTeamsConversationDisplayName,
+  listTeamsAutomationDestinations,
+} from './automations/destination';
+
+export {
   findTeamsPrimaryConversation,
   type TeamsPrimaryConversation,
 } from './lib/teams-primary-conversation';

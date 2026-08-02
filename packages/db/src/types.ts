@@ -482,6 +482,8 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   announcerLastRunAt: Date | null;
   platformIssueSlackChannelId: string | null;
   platformIssueDiscordChannelId: string | null;
+  /** Explicit Teams conversation for platform issue alerts. */
+  platformIssueTeamsChannelId: string | null;
   managerStatsFrequency: ManagerStatsFrequency;
   managerStatsSlackChannelId: string | null;
   managerStatsDiscordChannelId: string | null;

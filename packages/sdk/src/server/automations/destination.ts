@@ -101,6 +101,37 @@ export async function findTeamsConversationServiceUrl(
   return row?.serviceUrl ?? null;
 }
 
+/** Active Teams conversations that have the service URL required for posts. */
+export async function listTeamsAutomationDestinations(): Promise<
+  Array<{ conversationId: string; label: string }>
+> {
+  const rows = await db
+    .select({
+      conversationId: teamsInstallations.conversationId,
+      channelName: teamsInstallations.channelName,
+      teamName: teamsInstallations.teamName,
+    })
+    .from(teamsInstallations)
+    .where(
+      and(
+        eq(teamsInstallations.isActive, true),
+        isNotNull(teamsInstallations.serviceUrl),
+      ),
+    );
+
+  return [
+    ...new Map(
+      rows.map((row) => [
+        row.conversationId,
+        {
+          conversationId: row.conversationId,
+          label: row.channelName ?? row.teamName ?? row.conversationId,
+        },
+      ]),
+    ).values(),
+  ];
+}
+
 /**
  * Resolves where an automation run should report, extending the db-level
  * waterfall (own target -> Slack manager channel) with a primary-conversation

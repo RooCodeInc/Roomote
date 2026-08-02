@@ -2,15 +2,24 @@ const {
   mockCreateDiscordProvider,
   mockDiscordPostMessage,
   mockSlackPostMessage,
+  mockCreateTeamsProvider,
+  mockTeamsPostMessage,
 } = vi.hoisted(() => ({
   mockCreateDiscordProvider: vi.fn(),
   mockDiscordPostMessage: vi.fn(),
   mockSlackPostMessage: vi.fn(),
+  mockCreateTeamsProvider: vi.fn(),
+  mockTeamsPostMessage: vi.fn(),
 }));
 
 vi.mock('../../discord-communication', () => ({
   createDiscordCommunicationProviderFromRuntimeCredentials:
     mockCreateDiscordProvider,
+}));
+
+vi.mock('../../teams-communication', () => ({
+  createTeamsCommunicationProviderFromRuntimeCredentials:
+    mockCreateTeamsProvider,
 }));
 
 // Keep the test hermetic: the Slack fallback path constructs a SlackNotifier
@@ -34,6 +43,7 @@ import {
   deploymentSettings,
   eq,
   slackInstallations,
+  teamsInstallations,
   taskFactory,
   taskPlatformIssueReports,
   taskRuns,
@@ -113,6 +123,8 @@ describe('platform issue alert delivery', () => {
     mockCreateDiscordProvider.mockReset();
     mockDiscordPostMessage.mockReset();
     mockSlackPostMessage.mockReset();
+    mockCreateTeamsProvider.mockReset();
+    mockTeamsPostMessage.mockReset();
     mockCreateDiscordProvider.mockResolvedValue({
       postMessage: mockDiscordPostMessage,
     });
@@ -122,10 +134,14 @@ describe('platform issue alert delivery', () => {
       messageId: 'm1',
     });
     mockSlackPostMessage.mockResolvedValue('1727000000.000100');
+    mockCreateTeamsProvider.mockResolvedValue({
+      postMessage: mockTeamsPostMessage,
+    });
 
     await db.delete(taskPlatformIssueReports);
     await db.delete(deploymentSettings);
     await db.delete(slackInstallations);
+    await db.delete(teamsInstallations);
   });
 
   it('posts the alert to the automation Discord channel when its own destination is Discord', async () => {
@@ -251,5 +267,74 @@ describe('platform issue alert delivery', () => {
     const reportRow = await findReportRow(taskId);
     expect(reportRow?.report).toEqual(REPORT);
     expect(reportRow?.slackPostedAt).toBeNull();
+  });
+
+  it('posts to the explicitly selected Teams conversation with its stored service URL', async () => {
+    const taskId = 'task-platform-issue-teams';
+    const runId = await seedTaskRun(taskId);
+
+    await upsertAutomation(db, {
+      key: 'platform_issue_alerts',
+      enabled: true,
+      targets: [
+        {
+          provider: 'teams',
+          targetKind: 'teams_channel',
+          externalRef: 'teams-conversation',
+        },
+      ],
+    });
+    await db.insert(teamsInstallations).values({
+      installationKey: 'team:teams-conversation',
+      tenantId: 'tenant-1',
+      conversationId: 'teams-conversation',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      botAppId: 'bot-app-1',
+      isActive: true,
+    });
+
+    await recordTaskMessageEnvelope({
+      runId,
+      taskId,
+      envelope: buildReportEnvelope(),
+    });
+
+    expect(mockTeamsPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'teams-conversation',
+        serviceUrl: 'https://smba.trafficmanager.net/amer/',
+        textFormat: 'markdown',
+      }),
+    );
+    expect(mockSlackPostMessage).not.toHaveBeenCalled();
+    const [post] = mockTeamsPostMessage.mock.calls[0] ?? [];
+    expect(post.text).toContain('utm_source=teams');
+  });
+
+  it('does not fall back to an unselected Teams conversation', async () => {
+    const taskId = 'task-platform-issue-no-destination';
+    const runId = await seedTaskRun(taskId);
+
+    await upsertAutomation(db, {
+      key: 'platform_issue_alerts',
+      enabled: false,
+      targets: [],
+    });
+    await db.insert(teamsInstallations).values({
+      installationKey: 'team:unselected-conversation',
+      tenantId: 'tenant-1',
+      conversationId: 'unselected-conversation',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      botAppId: 'bot-app-1',
+      isActive: true,
+    });
+
+    await recordTaskMessageEnvelope({
+      runId,
+      taskId,
+      envelope: buildReportEnvelope(),
+    });
+
+    expect(mockTeamsPostMessage).not.toHaveBeenCalled();
   });
 });

@@ -104,6 +104,7 @@ const state = vi.hoisted(() => ({
         announcerInstructions: null,
         platformIssueSlackChannelId: null,
         platformIssueDiscordChannelId: null,
+        platformIssueTeamsChannelId: null,
       },
       slackChannelDisplayNames: {
         channelAutoStartSlackChannels: {
@@ -174,6 +175,10 @@ const state = vi.hoisted(() => ({
           } | null,
         ]),
       ),
+      teamsConversations: [] as Array<{
+        conversationId: string;
+        label: string;
+      }>,
       recentRuns: {},
       automationStatus: {},
     },
@@ -627,6 +632,28 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText('#automation-reports (Discord)'),
     ).toBeInTheDocument();
+  });
+
+  it('offers installed Teams conversations for platform issue alerts', async () => {
+    state.settingsQuery.data.teamsConversations = [
+      { conversationId: 'teams-alerts', label: 'Engineering · Alerts' },
+    ];
+    (
+      state.settingsQuery.data.settings as Record<string, unknown>
+    ).platformIssueTeamsChannelId = 'teams-alerts';
+
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Expand Alert on Config Errors',
+      }),
+    );
+
+    expect(
+      screen.getByLabelText('Or post alerts to this Teams conversation'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Engineering · Alerts')).toBeInTheDocument();
   });
 
   it('hides the launch mode picker when decision mode is disabled', async () => {

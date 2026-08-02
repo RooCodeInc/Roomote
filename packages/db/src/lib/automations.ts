@@ -1045,6 +1045,9 @@ export function normalizeBackgroundAgentSettings(
     ),
     suggesterTelegramChatId: getAutomationTelegramChatTarget(suggester),
     suggesterTeamsChannelId: getAutomationTeamsChannelTarget(suggester),
+    platformIssueTeamsChannelId: getAutomationTeamsChannelTarget(
+      automationMap.get('platform_issue_alerts'),
+    ),
   } as BackgroundAgentSettings;
 }
 
