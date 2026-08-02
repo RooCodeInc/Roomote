@@ -40,8 +40,10 @@ export async function handleManageCustomAutomations(
     body = { schedule: params.schedule };
   } else if (params.action === 'create' || params.action === 'update') {
     const required = ['name', 'prompt', 'schedule', 'environmentId'] as const;
-    const missing = required.find((key) => !params[key]);
-    if (missing) return errorResult(`${missing} is required`);
+    if (params.action === 'create') {
+      const missing = required.find((key) => !params[key]);
+      if (missing) return errorResult(`${missing} is required`);
+    }
     if (params.action === 'update' && !params.automationId) {
       return errorResult('automationId is required for update');
     }
@@ -50,20 +52,21 @@ export async function handleManageCustomAutomations(
         ? `/${encodeURIComponent(params.automationId!)}`
         : '';
     method = params.action === 'update' ? 'PATCH' : 'POST';
-    body = {
-      name: params.name,
-      prompt: params.prompt,
-      enabled: params.enabled ?? true,
-      schedule: params.schedule,
-      environmentId: params.environmentId,
-      ...(params.targetProvider
-        ? {
-            targetProvider: params.targetProvider,
-            targetChannelId: params.targetChannelId,
-            targetServiceUrl: params.targetServiceUrl,
-          }
-        : {}),
-    };
+    body = Object.fromEntries(
+      Object.entries({
+        name: params.name,
+        prompt: params.prompt,
+        enabled:
+          params.action === 'create'
+            ? (params.enabled ?? true)
+            : params.enabled,
+        schedule: params.schedule,
+        environmentId: params.environmentId,
+        targetProvider: params.targetProvider,
+        targetChannelId: params.targetChannelId,
+        targetServiceUrl: params.targetServiceUrl,
+      }).filter((entry) => entry[1] !== undefined),
+    );
   } else if (params.action === 'delete' || params.action === 'run_now') {
     if (!params.automationId) {
       return errorResult(`automationId is required for ${params.action}`);

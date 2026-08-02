@@ -116,7 +116,9 @@ async function createJobs(queue: Queue): Promise<void> {
 
   await queue.upsertJobScheduler(
     'manager_stats' satisfies ScheduledAutomationJobName,
-    { pattern: '0 * * * 5,6' }, // Hourly on UTC Friday/Saturday.
+    // The runner applies the configured deployment timezone and local-Friday
+    // gate. Tick continuously so UTC date boundaries cannot exclude eastern zones.
+    { every: 60 * 60 * 1000 },
   );
 
   await queue.upsertJobScheduler(

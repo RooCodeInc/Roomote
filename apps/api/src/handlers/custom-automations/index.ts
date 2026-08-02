@@ -45,6 +45,17 @@ const writeSchema = z.object({
   targetServiceUrl: z.string().trim().min(1).max(500).optional(),
 });
 
+const updateSchema = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  prompt: z.string().trim().min(1).max(8_000).optional(),
+  enabled: z.boolean().optional(),
+  schedule: z.string().trim().min(1).max(500).optional(),
+  environmentId: z.string().uuid().optional(),
+  targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
+  targetChannelId: z.string().trim().min(1).max(160).optional(),
+  targetServiceUrl: z.string().trim().min(1).max(500).optional(),
+});
+
 async function requireAdmin(auth: McpAuth): Promise<string | null> {
   let userId: string | null;
   try {
@@ -70,7 +81,10 @@ async function requireAdmin(auth: McpAuth): Promise<string | null> {
 }
 
 function buildTarget(
-  input: z.infer<typeof writeSchema>,
+  input: Pick<
+    z.infer<typeof writeSchema>,
+    'targetProvider' | 'targetChannelId' | 'targetServiceUrl'
+  >,
 ): OptionalAutomationTarget {
   if (!input.targetProvider) return {};
   if (!input.targetChannelId) {
@@ -188,12 +202,20 @@ customAutomationsRouter.post('/', async (c) => {
 });
 
 customAutomationsRouter.patch('/:id', async (c) => {
-  const parsed = writeSchema.safeParse(await c.req.json());
+  const parsed = updateSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
-  if (!(await getCustomAutomationById(c.req.param('id')))) {
+  const existing = await getCustomAutomationById(c.req.param('id'));
+  if (!existing) {
     return c.json({ error: 'Custom automation was not found.' }, 404);
   }
-  const schedule = await resolveWriteSchedule(parsed.data.schedule, adminId(c));
+  const schedule = parsed.data.schedule
+    ? await resolveWriteSchedule(parsed.data.schedule, adminId(c))
+    : {
+        status: 'resolved' as const,
+        scheduleMode: existing.scheduleMode as CustomAutomationScheduleMode,
+        cronExpression: existing.cronExpression,
+        resolution: null,
+      };
   if (schedule.status === 'ambiguous') return c.json(schedule, 409);
   if (parsed.data.targetProvider) {
     const connected = await listConnectedCommunicationProviders();
@@ -204,14 +226,37 @@ customAutomationsRouter.patch('/:id', async (c) => {
       );
     }
   }
+  const existingTarget = existing.target;
+  const targetProvider =
+    parsed.data.targetProvider ??
+    (existingTarget.provider === 'slack' ||
+    existingTarget.provider === 'discord' ||
+    existingTarget.provider === 'teams' ||
+    existingTarget.provider === 'telegram'
+      ? existingTarget.provider
+      : undefined);
+  const targetChannelId =
+    parsed.data.targetChannelId ?? existingTarget.externalRef ?? undefined;
+  const existingServiceUrl =
+    typeof existingTarget.metadata?.serviceUrl === 'string'
+      ? existingTarget.metadata.serviceUrl
+      : undefined;
   const automation = await updateCustomAutomation(c.req.param('id'), {
-    name: parsed.data.name,
-    prompt: parsed.data.prompt,
-    enabled: parsed.data.enabled,
+    name: parsed.data.name ?? existing.name,
+    prompt: parsed.data.prompt ?? existing.prompt,
+    enabled: parsed.data.enabled ?? existing.enabled,
     scheduleMode: schedule.scheduleMode,
     cronExpression: schedule.cronExpression,
-    environmentId: parsed.data.environmentId,
-    target: buildTarget(parsed.data),
+    environmentId: parsed.data.environmentId ?? existing.environmentId ?? '',
+    target:
+      targetProvider && targetChannelId
+        ? buildTarget({
+            targetProvider,
+            targetChannelId,
+            targetServiceUrl:
+              parsed.data.targetServiceUrl ?? existingServiceUrl,
+          })
+        : existingTarget,
   });
   return c.json({ automation, resolution: schedule.resolution });
 });
