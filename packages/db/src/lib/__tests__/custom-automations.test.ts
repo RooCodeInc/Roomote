@@ -5,6 +5,7 @@ import {
   deleteCustomAutomation,
   getCustomAutomationById,
   listCustomAutomations,
+  recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
   updateCustomAutomation,
@@ -98,7 +99,7 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
-  it('lets manual claims bypass the previous-run-active gate', async () => {
+  it('claims a launch while the previous task is still active', async () => {
     const [environment] = await db
       .insert(environments)
       .values({
@@ -125,23 +126,38 @@ describe('custom automations helpers', () => {
       .set({ lastLaunchedTaskId: activeTask.id })
       .where(eq(customAutomations.id, created.id));
 
-    // Scheduled-style claims stay single-flight behind the active task.
-    expect(await tryClaimCustomAutomationLaunch(created.id)).toBeNull();
+    const claim = await tryClaimCustomAutomationLaunch(
+      created.id,
+      created.lastRunAt,
+    );
+    expect(claim).toBeInstanceOf(Date);
 
-    // A manual claim launches despite the active previous task.
-    const manualClaim = await tryClaimCustomAutomationLaunch(created.id, {
-      allowWhilePreviousRunActive: true,
-    });
-    expect(manualClaim).toBeInstanceOf(Date);
-
-    // The claim fence still guards concurrent launches, manual included.
+    // The claim fence still guards concurrent launches.
     expect(
-      await tryClaimCustomAutomationLaunch(created.id, {
-        allowWhilePreviousRunActive: true,
-      }),
+      await tryClaimCustomAutomationLaunch(created.id, created.lastRunAt),
     ).toBeNull();
 
-    await releaseCustomAutomationLaunchClaim(created.id, manualClaim!);
+    await recordCustomAutomationRunOutcome(db, {
+      id: created.id,
+      status: 'succeeded',
+      launchClaimedAt: claim!,
+      lastLaunchedTaskId: activeTask.id,
+    });
+
+    // An evaluator that read the old due state cannot relaunch after the first
+    // evaluator completes and clears its claim.
+    expect(
+      await tryClaimCustomAutomationLaunch(created.id, created.lastRunAt),
+    ).toBeNull();
+
+    const completed = await getCustomAutomationById(created.id);
+    const nextClaim = await tryClaimCustomAutomationLaunch(
+      created.id,
+      completed!.lastRunAt,
+    );
+    expect(nextClaim).toBeInstanceOf(Date);
+
+    await releaseCustomAutomationLaunchClaim(created.id, nextClaim!);
     await deleteCustomAutomation(created.id);
   });
 

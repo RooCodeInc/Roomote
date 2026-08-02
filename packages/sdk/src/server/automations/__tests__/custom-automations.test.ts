@@ -107,9 +107,10 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result.launchedTaskId).toBe('task_abc');
-    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(automation.id, {
-      allowWhilePreviousRunActive: false,
-    });
+    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(
+      automation.id,
+      automation.lastRunAt,
+    );
     expect(isRunDue).toHaveBeenCalledWith(
       expect.objectContaining({
         frequency: 'daily',
@@ -302,16 +303,17 @@ describe('runCustomAutomationNow', () => {
     } as never);
   });
 
-  it('launches with manual trigger, bypassing the previous-run-active gate', async () => {
+  it('launches with a manual trigger', async () => {
     const result = await runCustomAutomationNow(automation.id);
 
     expect(result).toEqual({
       outcome: 'launched',
       taskId: 'task_manual',
     });
-    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(automation.id, {
-      allowWhilePreviousRunActive: true,
-    });
+    expect(tryClaimCustomAutomationLaunch).toHaveBeenCalledWith(
+      automation.id,
+      automation.lastRunAt,
+    );
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         trigger: 'manual',
