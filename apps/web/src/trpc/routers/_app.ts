@@ -665,7 +665,14 @@ const automationsRouter = createRouter({
           'cron',
         ]),
         cronExpression: z.string().trim().max(200).nullable().optional(),
-        model: z.string().trim().min(1).max(200).nullable().optional(),
+        model: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
+          .nullable()
+          .optional(),
         environmentId: z.string().uuid(),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
@@ -700,7 +707,14 @@ const automationsRouter = createRouter({
           'cron',
         ]),
         cronExpression: z.string().trim().max(200).nullable().optional(),
-        model: z.string().trim().min(1).max(200).nullable().optional(),
+        model: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
+          .nullable()
+          .optional(),
         environmentId: z.string().uuid(),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
