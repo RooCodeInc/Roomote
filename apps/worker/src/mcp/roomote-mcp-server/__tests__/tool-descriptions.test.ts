@@ -119,6 +119,25 @@ describe('roomote MCP tool descriptions', () => {
     vi.unstubAllGlobals();
   });
 
+  it('documents every built-in custom automation schedule preset', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      'manage_custom_automations',
+    );
+    const scheduleDescription = getInputSchemaField(
+      automationsTool,
+      'schedule',
+    ).description;
+
+    expect(scheduleDescription).toContain(
+      'built-in presets: off, every_hour, every_6_hours, daily, weekly',
+    );
+    expect(scheduleDescription).toContain(
+      'Prefer a built-in preset when it matches the requested cadence.',
+    );
+  });
+
   it('guides existing product task URLs toward task inspection actions', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');

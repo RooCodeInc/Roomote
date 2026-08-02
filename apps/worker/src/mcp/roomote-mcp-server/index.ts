@@ -9,6 +9,7 @@ import {
   ALL_REPOSITORIES,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
+  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
@@ -104,7 +105,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'A five-field cron expression, preset, or natural-language recurring schedule.',
+          `A five-field cron expression, natural-language recurring schedule, or one of these built-in presets: ${SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES.join(', ')}. Prefer a built-in preset when it matches the requested cadence.`,
         ),
       model: z
         .string()
