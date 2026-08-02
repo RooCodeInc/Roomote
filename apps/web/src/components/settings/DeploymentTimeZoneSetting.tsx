@@ -46,6 +46,7 @@ export function DeploymentTimeZoneSetting() {
   const queryClient = useQueryClient();
   const settings = useQuery(trpc.miscSettings.get.queryOptions());
   const [timeZone, setTimeZone] = useState('UTC');
+  const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
     if (settings.data) {
@@ -57,6 +58,7 @@ export function DeploymentTimeZoneSetting() {
     trpc.miscSettings.setTimeZone.mutationOptions({
       onSuccess: async () => {
         toast.success('Scheduling timezone updated');
+        setIsEditing(false);
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.miscSettings.get.queryKey(),
@@ -70,15 +72,32 @@ export function DeploymentTimeZoneSetting() {
     }),
   );
 
+  const effectiveTimeZone = settings.data?.effectiveTimeZone ?? 'UTC';
+
+  if (!isEditing) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Scheduling timezone:{' '}
+        <span className="font-medium text-foreground">
+          {effectiveTimeZone}
+          {settings.data?.timeZoneSource !== 'explicit' ? ' (inferred)' : ''}
+        </span>{' '}
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto p-0"
+          onClick={() => setIsEditing(true)}
+        >
+          Edit
+        </Button>
+      </p>
+    );
+  }
+
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-4">
-      <div className="space-y-1">
-        <Label>Scheduling timezone</Label>
-        <p className="text-sm text-muted-foreground">
-          All scheduled automations and natural-language schedules use this
-          timezone.
-        </p>
-      </div>
+    <div className="space-y-2">
+      <Label>Scheduling timezone</Label>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Select value={timeZone} onValueChange={setTimeZone}>
           <SelectTrigger className="sm:w-80" aria-label="Scheduling timezone">
@@ -102,11 +121,24 @@ export function DeploymentTimeZoneSetting() {
         >
           Save timezone
         </Button>
+        <Button
+          variant="ghost"
+          disabled={update.isPending}
+          onClick={() => {
+            setTimeZone(
+              settings.data?.timeZone ??
+                settings.data?.effectiveTimeZone ??
+                'UTC',
+            );
+            setIsEditing(false);
+          }}
+        >
+          Cancel
+        </Button>
       </div>
       {settings.data?.timeZoneSource !== 'explicit' ? (
         <p className="text-xs text-muted-foreground">
-          Currently inferred as {settings.data?.effectiveTimeZone ?? 'UTC'}.
-          Save to pin it for this deployment.
+          Save to pin this timezone for the deployment.
         </p>
       ) : null}
     </div>
