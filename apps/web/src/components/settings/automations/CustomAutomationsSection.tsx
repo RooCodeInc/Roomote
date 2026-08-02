@@ -118,12 +118,13 @@ function formFromRow(row: CustomAutomationListItem): CustomAutomationFormState {
   };
 }
 
-function formatNextRun(date: Date, timeZone: string): string {
-  return date.toLocaleString(undefined, {
-    timeZone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
+// The LLM summary usually already names the timezone; only append it when
+// missing so it never shows twice.
+function scheduleSummaryLine(summary: string, timeZone: string): string {
+  const timeZoneLabel = formatTimeZone(timeZone);
+  return summary.includes(timeZoneLabel) || summary.includes(timeZone)
+    ? summary
+    : `${summary} (${timeZoneLabel})`;
 }
 
 function statusLine(row: CustomAutomationListItem): string {
@@ -278,11 +279,7 @@ export function CustomAutomationsSection() {
         }
         setResolvedCron(result.cronExpression);
         setScheduleSummary(
-          `${result.summary} (${formatTimeZone(result.timeZone)})${
-            result.nextRunAt
-              ? ` · next run ${formatNextRun(result.nextRunAt, result.timeZone)}`
-              : ''
-          }`,
+          scheduleSummaryLine(result.summary, result.timeZone),
         );
       },
       onError: (error) => toast.error(error.message),
@@ -303,7 +300,7 @@ export function CustomAutomationsSection() {
     clientParsedCron?.cronExpression ?? resolvedCron;
   const effectiveScheduleSummary =
     clientParsedCron && schedulingTimeZone
-      ? `${clientParsedCron.summary} (${formatTimeZone(schedulingTimeZone)}) · next run ${formatNextRun(clientParsedCron.nextRunAt, schedulingTimeZone)}`
+      ? scheduleSummaryLine(clientParsedCron.summary, schedulingTimeZone)
       : scheduleSummary;
 
   const rows = listQuery.data ?? [];
@@ -320,7 +317,11 @@ export function CustomAutomationsSection() {
       return;
     }
     if (form.scheduleMode === 'cron' && !effectiveResolvedCron) {
-      toast.error('Interpret and confirm the custom schedule first.');
+      toast.error(
+        resolveScheduleMutation.isPending
+          ? 'Still interpreting the schedule, try again in a moment.'
+          : 'Enter a valid schedule first.',
+      );
       return;
     }
     if (form.targetProvider !== 'none' && !form.targetChannelId.trim()) {
@@ -454,43 +455,40 @@ export function CustomAutomationsSection() {
         {form.scheduleMode === 'cron' ? (
           <div className="space-y-2">
             <Label htmlFor="custom-automation-cron">Custom schedule</Label>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input
-                id="custom-automation-cron"
-                className="sm:max-w-md"
-                value={form.cronExpression}
-                disabled={busy || resolveScheduleMutation.isPending}
-                placeholder="Weekdays at 9am or 0 9 * * 1-5"
-                onChange={(event) => {
-                  setResolvedCron(null);
-                  setScheduleSummary(null);
-                  setForm((current) => ({
-                    ...current,
-                    cronExpression: event.target.value,
-                  }));
-                }}
-              />
-              {!clientParsedCron ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={
-                    !form.cronExpression.trim() ||
-                    resolveScheduleMutation.isPending
-                  }
-                  onClick={() =>
-                    resolveScheduleMutation.mutate({
-                      schedule: form.cronExpression,
-                    })
-                  }
-                >
-                  Interpret schedule
-                </Button>
-              ) : null}
-            </div>
-            {effectiveResolvedCron ? (
+            <Input
+              id="custom-automation-cron"
+              className="sm:max-w-md"
+              value={form.cronExpression}
+              disabled={busy}
+              placeholder="Weekdays at 9am or 0 9 * * 1-5"
+              onChange={(event) => {
+                setResolvedCron(null);
+                setScheduleSummary(null);
+                setForm((current) => ({
+                  ...current,
+                  cronExpression: event.target.value,
+                }));
+              }}
+              onBlur={() => {
+                if (
+                  !clientParsedCron &&
+                  !resolvedCron &&
+                  form.cronExpression.trim() &&
+                  !resolveScheduleMutation.isPending
+                ) {
+                  resolveScheduleMutation.mutate({
+                    schedule: form.cronExpression,
+                  });
+                }
+              }}
+            />
+            {resolveScheduleMutation.isPending ? (
               <p className="text-sm text-muted-foreground">
-                {effectiveResolvedCron} · {effectiveScheduleSummary}
+                Interpreting schedule...
+              </p>
+            ) : effectiveScheduleSummary ? (
+              <p className="text-sm text-muted-foreground">
+                {effectiveScheduleSummary}
               </p>
             ) : null}
           </div>
