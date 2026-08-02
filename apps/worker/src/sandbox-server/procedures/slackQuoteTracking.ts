@@ -46,7 +46,7 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
   userName: string | undefined;
   logPrefix: string;
   warn?: (message: string) => void;
-}): Promise<string | null> {
+}): Promise<{ quoteId?: string } | null> {
   const { runId, text, userName, logPrefix, warn } = params;
 
   if (text.trim().length === 0 || typeof runId !== 'number') {
@@ -69,7 +69,7 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
       text,
       userName: userName?.trim() || 'Someone',
     });
-    return result.quoteId ?? null;
+    return result.quoteId ? { quoteId: result.quoteId } : {};
   } catch (error) {
     warn?.(
       `[${logPrefix}] Non-fatal latest user message sync failure for task run ${runId}: ${
@@ -82,7 +82,7 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
 
 export async function clearLatestUserMessageForSlackThreadQuote(params: {
   runId: number | undefined;
-  quoteId: string;
+  quoteId?: string;
   logPrefix: string;
   warn?: (message: string) => void;
 }): Promise<void> {
@@ -105,7 +105,7 @@ export async function clearLatestUserMessageForSlackThreadQuote(params: {
 
     await clearSlackReplyQuote(roomoteConfig, {
       runId,
-      quoteId,
+      ...(quoteId ? { quoteId } : {}),
     });
   } catch (error) {
     warn?.(

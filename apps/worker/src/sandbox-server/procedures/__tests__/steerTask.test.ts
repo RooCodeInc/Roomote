@@ -334,6 +334,7 @@ describe('steerTask procedure', () => {
   });
 
   it('throws INTERNAL_SERVER_ERROR when steering cannot start', async () => {
+    mockTrackSlackReplyQuote.mockResolvedValueOnce({ success: true });
     const { caller, cancelTaskAndWaitForTurnExit, sendFollowUpPrompt } =
       createCaller({
         sendFollowUpPrompt: () => false,
@@ -363,7 +364,6 @@ describe('steerTask procedure', () => {
       },
       {
         runId: 1,
-        quoteId: 'quote-1',
       },
     );
   });

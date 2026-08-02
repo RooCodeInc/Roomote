@@ -76,14 +76,14 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
   });
 
   it('tracks the latest user message through the API when the task run has Slack thread context', async () => {
-    const quoteId = await trackLatestUserMessageForSlackThreadQuote({
+    const trackedQuote = await trackLatestUserMessageForSlackThreadQuote({
       runId: 1,
       text: 'Follow up from web',
       userName: 'Casey',
       logPrefix: 'testProcedure',
     });
 
-    expect(quoteId).toBe('quote-1');
+    expect(trackedQuote).toEqual({ quoteId: 'quote-1' });
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockGetRoomoteConfig).toHaveBeenCalledTimes(1);
     expect(mockTrackSlackReplyQuote).toHaveBeenCalledWith(
@@ -97,6 +97,19 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
         userName: 'Casey',
       },
     );
+  });
+
+  it('preserves tracked state when an older API omits quoteId', async () => {
+    mockTrackSlackReplyQuote.mockResolvedValueOnce({ success: true });
+
+    const trackedQuote = await trackLatestUserMessageForSlackThreadQuote({
+      runId: 1,
+      text: 'Follow up from web',
+      userName: 'Casey',
+      logPrefix: 'testProcedure',
+    });
+
+    expect(trackedQuote).toEqual({});
   });
 
   it('does not leak raw user IDs into the stored Slack quote username', async () => {
@@ -211,6 +224,21 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
         runId: 1,
         quoteId: 'quote-1',
       },
+    );
+  });
+
+  it('uses legacy cleanup when the tracked response had no quoteId', async () => {
+    await clearLatestUserMessageForSlackThreadQuote({
+      runId: 1,
+      logPrefix: 'testProcedure',
+    });
+
+    expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1 },
     );
   });
 });

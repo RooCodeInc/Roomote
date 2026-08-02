@@ -103,10 +103,10 @@ export const answerUserInputRequest = publicProcedure
       .getPendingUserInputRequests?.()
       .find((request) => request.requestId === input.requestId);
 
-    let trackedSlackQuoteId: string | null = null;
+    let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
-      trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote({
+      trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
         runId: ctx.runId,
         text: formatRequestUserInputResponseText(pendingRequest ?? null, {
           resolution: getRequestUserInputResponseResolution(input.answers),
@@ -133,10 +133,10 @@ export const answerUserInputRequest = publicProcedure
         });
       }
     } catch (error) {
-      if (trackedSlackQuoteId) {
+      if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
-          quoteId: trackedSlackQuoteId,
+          quoteId: trackedSlackQuote.quoteId,
           logPrefix: 'answerUserInputRequest',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

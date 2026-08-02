@@ -66,10 +66,10 @@ export const steerTask = publicProcedure
         });
       }
 
-      let trackedSlackQuoteId: string | null = null;
+      let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
-        trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote({
+        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
           text: input.quoteText,
           userName: input.userName,
@@ -97,10 +97,10 @@ export const steerTask = publicProcedure
           stateFilePath: ctx.slackReplySatisfactionStateFile,
         });
       } catch (error) {
-        if (trackedSlackQuoteId) {
+        if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
-            quoteId: trackedSlackQuoteId,
+            quoteId: trackedSlackQuote.quoteId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -123,10 +123,10 @@ export const steerTask = publicProcedure
         });
       }
 
-      let trackedSlackQuoteId: string | null = null;
+      let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
-        trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote({
+        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
           text: input.quoteText,
           userName: input.userName,
@@ -153,10 +153,10 @@ export const steerTask = publicProcedure
           stateFilePath: ctx.slackReplySatisfactionStateFile,
         });
       } catch (error) {
-        if (trackedSlackQuoteId) {
+        if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
-            quoteId: trackedSlackQuoteId,
+            quoteId: trackedSlackQuote.quoteId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -193,10 +193,10 @@ export const steerTask = publicProcedure
       });
     }
 
-    let trackedSlackQuoteId: string | null = null;
+    let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
-      trackedSlackQuoteId = await trackLatestUserMessageForSlackThreadQuote({
+      trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
         runId: ctx.runId,
         text: input.quoteText,
         userName: input.userName,
@@ -223,10 +223,10 @@ export const steerTask = publicProcedure
         stateFilePath: ctx.slackReplySatisfactionStateFile,
       });
     } catch (error) {
-      if (trackedSlackQuoteId) {
+      if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
-          quoteId: trackedSlackQuoteId,
+          quoteId: trackedSlackQuote.quoteId,
           logPrefix: 'steerTask',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });
