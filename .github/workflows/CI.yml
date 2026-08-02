@@ -50,7 +50,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
-            echo "pr_image_version=pr-${{ github.event.pull_request.number }}-${head:0:8}-${base:0:8}" >> "$GITHUB_OUTPUT"
+            echo "pr_image_version=pr-${{ github.event.pull_request.number }}-${head}-${base}" >> "$GITHUB_OUTPUT"
             changed_files="$(git diff --name-only "$base...$head")"
           else
             before="${{ github.event.before }}"
@@ -106,6 +106,24 @@ jobs:
 
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "worker_image_affected=$worker_image_affected" >> "$GITHUB_OUTPUT"
+      - name: Write PR image metadata
+        if: ${{ github.event_name == 'pull_request' && steps.changed-paths.outputs.docs_only != 'true' }}
+        env:
+          WORKER_IMAGE_AFFECTED: ${{ steps.changed-paths.outputs.worker_image_affected }}
+        shell: bash
+        run: |
+          jq -n \
+            --arg worker_image_affected "$WORKER_IMAGE_AFFECTED" \
+            '{workerImageAffected: ($worker_image_affected == "true")}' \
+            > /tmp/pr-image-metadata.json
+      - name: Upload PR image metadata
+        if: ${{ github.event_name == 'pull_request' && steps.changed-paths.outputs.docs_only != 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-image-metadata
+          path: /tmp/pr-image-metadata.json
+          if-no-files-found: error
+          retention-days: 1
 
   lint:
     name: Lint

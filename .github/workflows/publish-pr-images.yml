@@ -82,6 +82,10 @@ jobs:
             echo "CI run ${run_id} has no publishable app image artifact." >&2
             exit 1
           }
+          jq -e '.artifacts[] | select(.name == "pr-image-metadata" and .expired == false)' <<<"$artifacts" >/dev/null || {
+            echo "CI run ${run_id} has no PR image metadata artifact." >&2
+            exit 1
+          }
           worker_artifact=false
           if jq -e '.artifacts[] | select(.name == "pr-image-worker" and .expired == false)' <<<"$artifacts" >/dev/null; then
             worker_artifact=true
@@ -90,7 +94,7 @@ jobs:
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           echo "owner=$owner" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "version=pr-${PR_NUMBER}-${sha:0:8}-${base_sha:0:8}" >> "$GITHUB_OUTPUT"
+          echo "version=pr-${PR_NUMBER}-${sha}-${base_sha}" >> "$GITHUB_OUTPUT"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "worker_artifact=$worker_artifact" >> "$GITHUB_OUTPUT"
           echo "base_version=${base_ref}-${base_sha:0:8}" >> "$GITHUB_OUTPUT"
@@ -142,9 +146,14 @@ jobs:
           echo 'mutable_updated=false' >> "$GITHUB_OUTPUT"
 
           docker load --input '/tmp/images/roomote-app.tar'
+          worker_image_affected="$(jq -r '.workerImageAffected' /tmp/images/pr-image-metadata.json)"
           if [ "$WORKER_ARTIFACT" = 'true' ]; then
             docker load --input '/tmp/images/roomote-worker.tar'
           else
+            [ "$worker_image_affected" = 'false' ] || {
+              echo 'CI marked the worker image as affected but produced no worker artifact.' >&2
+              exit 1
+            }
             docker pull "ghcr.io/${OWNER}/roomote-worker:${BASE_VERSION}"
             docker tag \
               "ghcr.io/${OWNER}/roomote-worker:${BASE_VERSION}" \
