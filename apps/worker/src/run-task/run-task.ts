@@ -2114,6 +2114,7 @@ export const runTask = async ({
     }
 
     let sleepActionTriggered = false;
+    let sleepActionCompleted = false;
 
     if (
       !skipExternalSleepAction &&
@@ -2126,10 +2127,11 @@ export const runTask = async ({
       // dequeue response.
       await scrubSandboxSecretsBeforeSnapshot(logger, { homeDir, runtimeEnv });
 
-      ({ claimed: sleepActionTriggered } = await waitForExternalSleepAction({
-        taskRun,
-        logger,
-      }));
+      ({ claimed: sleepActionTriggered, completed: sleepActionCompleted } =
+        await waitForExternalSleepAction({
+          taskRun,
+          logger,
+        }));
     }
 
     // Fallback: check for pending Linear messages that arrived during the snapshot
@@ -2212,7 +2214,12 @@ export const runTask = async ({
     } else {
       taskCancellation.abortController.abort();
     }
-    return resolvedResult;
+    // BullMQ owns terminal state after a completed snapshot/standby handoff.
+    // Do not let a stale pre-handoff failure overwrite that completion if the
+    // provider leaves this worker alive long enough to return normally.
+    return sleepActionCompleted
+      ? { status: RunStatus.Completed }
+      : resolvedResult;
   } finally {
     activeWorkerCrashContext = null;
   }

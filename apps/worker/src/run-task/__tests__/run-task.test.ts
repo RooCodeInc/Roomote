@@ -1569,6 +1569,10 @@ describe('runTask', () => {
     ['skips the external sleep handoff without a retention deadline', null, 0],
   ])('%s when the task resolves as failed', async (_name, sleepAt, calls) => {
     resolveStatusMock.mockReturnValueOnce({ status: RunStatus.Failed });
+    waitForExternalSleepActionMock.mockResolvedValueOnce({
+      claimed: true,
+      completed: true,
+    });
     waitForShutdownMock.mockImplementationOnce(async () => {
       harnessManagerInstances.at(-1)!.currentSleepAt = sleepAt;
       return {
@@ -1582,7 +1586,7 @@ describe('runTask', () => {
       };
     });
 
-    await runTask({
+    const result = await runTask({
       taskRun: {
         id: 112,
         taskId: 'task-112',
@@ -1618,6 +1622,9 @@ describe('runTask', () => {
     });
 
     expect(waitForExternalSleepActionMock).toHaveBeenCalledTimes(calls);
+    expect(result.status).toBe(
+      calls === 1 ? RunStatus.Completed : RunStatus.Failed,
+    );
   });
 
   it('checks Slack drain during sleep fallback when the worker started before thread ts was persisted', async () => {
