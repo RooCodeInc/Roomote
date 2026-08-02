@@ -66,6 +66,8 @@ AZURE_SANDBOX_REGISTRY_USERNAME=...
 AZURE_SANDBOX_REGISTRY_TOKEN=...
 # Sandbox size (XS/S/M/L/XL; defaults to Roomote's 4 GiB task allocation)
 AZURE_SANDBOX_SIZE=...
+# Egress TLS inspection override (Legacy/Full/Partial/None; default Partial)
+AZURE_SANDBOX_EGRESS_INSPECTION=...
 ```
 
 `AZURE_SANDBOX_DISK_IMAGE` selects the worker disk image. Leave it unset to
@@ -85,11 +87,13 @@ re-adds ports after resume.
 
 ## Egress TLS inspection
 
-The ACA egress proxy can TLS-inspect (MITM) outbound traffic. Roomote currently
-creates task sandboxes with `trafficInspection: Partial`, so with no egress
-rules configured nothing is inspected: package managers (npm, Maven/Gradle,
-pip) see normal public certificate chains, and non-HTTP traffic such as SSH git
-works. The service default (`Full`) resigns all TLS traffic with the proxy CA
+The ACA egress proxy can TLS-inspect (MITM) outbound traffic. Roomote defaults
+to `trafficInspection: Partial`, so with no egress rules configured nothing is
+inspected: package managers (npm, Maven/Gradle, pip) see normal public
+certificate chains, and non-HTTP traffic such as SSH git works. Override this
+with `AZURE_SANDBOX_EGRESS_INSPECTION`, which accepts `Legacy`, `Full`,
+`Partial`, or `None` and passes the selected mode to ACA. The service default
+(`Full`) resigns all TLS traffic with the proxy CA
 (`/etc/ssl/certs/adc-egress-proxy-ca.crt`, preinstalled in the system store
 and referenced by `NODE_EXTRA_CA_CERTS`/`SSL_CERT_FILE`) and blocks non-HTTP
 traffic; choose `Full` only when wiring deny-default egress rules or header
