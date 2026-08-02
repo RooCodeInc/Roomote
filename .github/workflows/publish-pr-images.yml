@@ -30,6 +30,7 @@ jobs:
       base_version: ${{ steps.pr.outputs.base_version }}
       base_sha: ${{ steps.pr.outputs.base_sha }}
       reuse_artifacts: ${{ steps.pr.outputs.reuse_artifacts }}
+      merge_sha: ${{ steps.pr.outputs.merge_sha }}
     steps:
       - name: Resolve PR head
         id: pr
@@ -44,6 +45,7 @@ jobs:
           state="$(jq -r '.state' <<<"$pr")"
           base_ref="$(jq -r '.base.ref' <<<"$pr")"
           base_sha="$(jq -r '.base.sha' <<<"$pr")"
+          merge_sha="$(jq -r '.merge_commit_sha' <<<"$pr")"
           [ "$state" = 'open' ] || {
             echo "Pull request #${PR_NUMBER} is not open." >&2
             exit 1
@@ -56,6 +58,16 @@ jobs:
           esac
           [ "${#sha}" -eq 40 ] || {
             echo "Invalid pull request head SHA length: $sha" >&2
+            exit 1
+          }
+          case "$merge_sha" in
+            '' | null | *[!0-9a-f]*)
+              echo "Invalid pull request merge SHA: $merge_sha" >&2
+              exit 1
+              ;;
+          esac
+          [ "${#merge_sha}" -eq 40 ] || {
+            echo "Invalid pull request merge SHA length: $merge_sha" >&2
             exit 1
           }
           case "$base_ref" in
@@ -101,6 +113,7 @@ jobs:
           echo "base_version=${base_ref}-${base_sha:0:8}" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
           echo "reuse_artifacts=$reuse_artifacts" >> "$GITHUB_OUTPUT"
+          echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
 
   build:
     name: Rebuild ${{ matrix.app }} image
@@ -127,6 +140,17 @@ jobs:
         with:
           ref: refs/pull/${{ github.event.issue.number }}/merge
           persist-credentials: false
+
+      - name: Verify PR merge
+        env:
+          EXPECTED_MERGE_SHA: ${{ needs.prepare.outputs.merge_sha }}
+        shell: bash
+        run: |
+          actual_merge_sha="$(git rev-parse HEAD)"
+          [ "$actual_merge_sha" = "$EXPECTED_MERGE_SHA" ] || {
+            echo "PR merge advanced from $EXPECTED_MERGE_SHA to $actual_merge_sha; run /publish-images again." >&2
+            exit 1
+          }
 
       - name: Read product version
         id: product

@@ -98,6 +98,10 @@ test('GHCR workflow publishes explicitly requested pull request images safely', 
   const fallbackBuild = publishWorkflow.jobs.build;
   assert.match(fallbackBuild.if, /reuse_artifacts != 'true'/);
   assert.equal(fallbackBuild.permissions.packages, undefined);
+  assert.match(
+    fallbackBuild.steps.find((step) => step.name === 'Verify PR merge').run,
+    /EXPECTED_MERGE_SHA/,
+  );
 
   for (const jobName of ['docker-build-app', 'docker-build-worker']) {
     const job = ciWorkflow.jobs[jobName];
