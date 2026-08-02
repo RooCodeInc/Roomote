@@ -2805,8 +2805,9 @@ describe('HarnessManager error status', () => {
     }
   });
 
-  it('treats a provider-error abort as a failed shutdown', async () => {
-    const { harness, manager } = createManager();
+  it('keeps a terminal provider-error abort open for follow-up until normal idle shutdown', async () => {
+    vi.useFakeTimers();
+    const { harness, manager } = createManager({ keepaliveMs: 60_000 });
 
     try {
       manager.initializeWithoutPrompt();
@@ -2835,14 +2836,27 @@ describe('HarnessManager error status', () => {
         payload: ['task-provider-error'],
       } as TaskEvent);
 
+      expect(manager.getStatus()).toMatchObject({
+        phase: 'waiting_for_prompt',
+        lastErrorMessage: 'The provider returned an error: API key is invalid.',
+      });
+      expect(manager.getState().taskAbortedAt).toBeUndefined();
+      expect(manager.getSleepAt()).not.toBeNull();
+
+      vi.advanceTimersByTime(59_000);
+      expect(manager.getStatus().phase).toBe('waiting_for_prompt');
+
+      vi.advanceTimersByTime(1_000);
       await expect(manager.waitForShutdown()).resolves.toMatchObject({
         lastErrorMessage: 'The provider returned an error: API key is invalid.',
         taskAbortedAt: undefined,
       });
-      expect(manager.getSleepAt()).toBeNull();
+      expect(manager.getStatus().phase).toBe('shutting_down');
+      expect(manager.getSleepAt()).not.toBeNull();
     } finally {
       manager.dispose();
       harness.dispose();
+      vi.useRealTimers();
     }
   });
 
@@ -2887,7 +2901,7 @@ describe('HarnessManager error status', () => {
     }
   });
 
-  it('clears lastErrorMessage when a follow-up prompt is sent successfully', () => {
+  it('accepts a follow-up after a terminal provider error', () => {
     const { harness, manager } = createManager();
 
     try {
@@ -2908,15 +2922,21 @@ describe('HarnessManager error status', () => {
             message: {
               ts: Date.now(),
               type: 'say',
-              say: 'error',
-              text: 'temporary glitch',
+              say: 'terminal_provider_error',
+              text: 'The provider returned an error: API key is invalid.',
             },
           },
         ],
       } as TaskEvent);
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskAborted,
+        payload: ['task-error-clear'],
+      } as TaskEvent);
 
+      expect(manager.getStatus().phase).toBe('waiting_for_prompt');
       expect(manager.getStatus().lastErrorMessage).toBeDefined();
-      manager.sendFollowUpPrompt({ prompt: 'retry' });
+      expect(manager.sendFollowUpPrompt({ prompt: 'retry' })).toBe(true);
+      expect(manager.getStatus().phase).toBe('running');
       expect(manager.getStatus().lastErrorMessage).toBeUndefined();
     } finally {
       manager.dispose();
@@ -2953,6 +2973,7 @@ describe('HarnessManager error status', () => {
         lastErrorMessage:
           'OpenCode session creation did not respond within 90s',
       });
+      expect(manager.getSleepAt()).toBeNull();
     } finally {
       manager.dispose();
       harness.dispose();

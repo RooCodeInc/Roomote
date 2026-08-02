@@ -1560,19 +1560,33 @@ describe('runTask', () => {
     );
   });
 
-  it('skips external sleep handoff when the task resolves as failed', async () => {
+  it.each([
+    [
+      'uses the external sleep handoff with a retention deadline',
+      Date.now(),
+      1,
+    ],
+    ['skips the external sleep handoff without a retention deadline', null, 0],
+  ])('%s when the task resolves as failed', async (_name, sleepAt, calls) => {
     resolveStatusMock.mockReturnValueOnce({ status: RunStatus.Failed });
-    waitForShutdownMock.mockResolvedValueOnce({
-      sessionId: 'failed-session',
-      cancelTriggeredAt: undefined,
-      lastMessageAt: Date.now(),
-      taskFinishedAt: undefined,
-      taskAbortedAt: undefined,
-      lastErrorMessage:
-        'The provider returned an error: Input exceeds context window.',
+    waitForExternalSleepActionMock.mockResolvedValueOnce({
+      claimed: true,
+      completed: true,
+    });
+    waitForShutdownMock.mockImplementationOnce(async () => {
+      harnessManagerInstances.at(-1)!.currentSleepAt = sleepAt;
+      return {
+        sessionId: 'failed-session',
+        cancelTriggeredAt: undefined,
+        lastMessageAt: Date.now(),
+        taskFinishedAt: undefined,
+        taskAbortedAt: undefined,
+        lastErrorMessage:
+          'The provider returned an error: Input exceeds context window.',
+      };
     });
 
-    await runTask({
+    const result = await runTask({
       taskRun: {
         id: 112,
         taskId: 'task-112',
@@ -1607,7 +1621,10 @@ describe('runTask', () => {
       } as never,
     });
 
-    expect(waitForExternalSleepActionMock).not.toHaveBeenCalled();
+    expect(waitForExternalSleepActionMock).toHaveBeenCalledTimes(calls);
+    expect(result.status).toBe(
+      calls === 1 ? RunStatus.Completed : RunStatus.Failed,
+    );
   });
 
   it('checks Slack drain during sleep fallback when the worker started before thread ts was persisted', async () => {
