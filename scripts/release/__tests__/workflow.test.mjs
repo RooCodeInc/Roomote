@@ -114,6 +114,7 @@ test('GHCR workflow publishes explicitly requested pull request images safely', 
 
   const prepareScript = publishWorkflow.jobs.prepare.steps[0].run;
   assert.match(prepareScript, /actions\/workflows\/CI\.yml\/runs/);
+  assert.match(prepareScript, /conclusion == "success"/);
   assert.match(prepareScript, /pr-image-app/);
 
   const publisher = publishWorkflow.jobs.publish;
@@ -131,6 +132,7 @@ test('GHCR workflow publishes explicitly requested pull request images safely', 
   ).run;
   assert.match(publishScript, /docker load/);
   assert.match(publishScript, /current_sha/);
+  assert.match(publishScript, /current_base_sha/);
   assert.match(publishScript, /roomote-app roomote-worker/);
   assert.match(publishScript, /BASE_VERSION/);
   assert.equal(

@@ -28,6 +28,7 @@ jobs:
       run_id: ${{ steps.pr.outputs.run_id }}
       worker_artifact: ${{ steps.pr.outputs.worker_artifact }}
       base_version: ${{ steps.pr.outputs.base_version }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
     steps:
       - name: Resolve PR head
         id: pr
@@ -69,16 +70,10 @@ jobs:
             --argjson number "$PR_NUMBER" \
             --arg sha "$sha" \
             --arg base_sha "$base_sha" \
-            '[.[].workflow_runs[] | select(any(.pull_requests[]?; .number == $number and .head.sha == $sha and .base.sha == $base_sha))] | sort_by(.run_number) | reverse | .[0] // empty' \
+            '[.[].workflow_runs[] | select(.status == "completed" and .conclusion == "success") | select(any(.pull_requests[]?; .number == $number and .head.sha == $sha and .base.sha == $base_sha))] | sort_by(.run_number) | reverse | .[0] // empty' \
             <<<"$runs")"
           [ -n "$run" ] || {
-            echo "No CI run found for PR #${PR_NUMBER} at ${sha}." >&2
-            exit 1
-          }
-          status="$(jq -r '.status' <<<"$run")"
-          conclusion="$(jq -r '.conclusion // ""' <<<"$run")"
-          [ "$status" = 'completed' ] && [ "$conclusion" = 'success' ] || {
-            echo "Latest CI run for ${sha} is ${status}/${conclusion:-pending}; wait for CI to pass." >&2
+            echo "No successful CI run found for PR #${PR_NUMBER} at ${sha} against ${base_sha}." >&2
             exit 1
           }
           run_id="$(jq -r '.id' <<<"$run")"
@@ -95,10 +90,11 @@ jobs:
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           echo "owner=$owner" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "version=pr-${PR_NUMBER}-${sha:0:8}" >> "$GITHUB_OUTPUT"
+          echo "version=pr-${PR_NUMBER}-${sha:0:8}-${base_sha:0:8}" >> "$GITHUB_OUTPUT"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "worker_artifact=$worker_artifact" >> "$GITHUB_OUTPUT"
           echo "base_version=${base_ref}-${base_sha:0:8}" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish PR images
@@ -138,6 +134,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           WORKER_ARTIFACT: ${{ needs.prepare.outputs.worker_artifact }}
           BASE_VERSION: ${{ needs.prepare.outputs.base_version }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -161,9 +158,11 @@ jobs:
             docker push "$immutable_ref"
           done
 
-          current_sha="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          if [ "$current_sha" != "$SHA" ]; then
-            echo "PR advanced to $current_sha; leaving movable tags unchanged."
+          current_pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          current_sha="$(jq -r '.head.sha' <<<"$current_pr")"
+          current_base_sha="$(jq -r '.base.sha' <<<"$current_pr")"
+          if [ "$current_sha" != "$SHA" ] || [ "$current_base_sha" != "$BASE_SHA" ]; then
+            echo "PR head or base advanced; leaving movable tags unchanged."
             exit 0
           fi
 

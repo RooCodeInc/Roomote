@@ -50,7 +50,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
-            echo "pr_image_version=pr-${{ github.event.pull_request.number }}-${head:0:8}" >> "$GITHUB_OUTPUT"
+            echo "pr_image_version=pr-${{ github.event.pull_request.number }}-${head:0:8}-${base:0:8}" >> "$GITHUB_OUTPUT"
             changed_files="$(git diff --name-only "$base...$head")"
           else
             before="${{ github.event.before }}"
