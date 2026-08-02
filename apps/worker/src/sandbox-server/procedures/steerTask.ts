@@ -6,7 +6,6 @@ import { getFollowUpWorkflowPhase } from '../../run-task/workflow-phase';
 import {
   clearLatestUserMessageForSlackThreadQuote,
   trackLatestUserMessageForSlackThreadQuote,
-  type TrackedSlackReplyQuote,
 } from './slackQuoteTracking';
 import { recordSandboxPromptSlackTurnStart } from './slackReplyTurnTracking';
 
@@ -67,7 +66,7 @@ export const steerTask = publicProcedure
         });
       }
 
-      let trackedSlackQuote: TrackedSlackReplyQuote | null = null;
+      let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -101,7 +100,7 @@ export const steerTask = publicProcedure
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
-            trackedQuote: trackedSlackQuote,
+            quoteId: trackedSlackQuote.quoteId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -124,7 +123,7 @@ export const steerTask = publicProcedure
         });
       }
 
-      let trackedSlackQuote: TrackedSlackReplyQuote | null = null;
+      let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
         trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -157,7 +156,7 @@ export const steerTask = publicProcedure
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
-            trackedQuote: trackedSlackQuote,
+            quoteId: trackedSlackQuote.quoteId,
             logPrefix: 'steerTask',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -194,7 +193,7 @@ export const steerTask = publicProcedure
       });
     }
 
-    let trackedSlackQuote: TrackedSlackReplyQuote | null = null;
+    let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
       trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -227,7 +226,7 @@ export const steerTask = publicProcedure
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
-          trackedQuote: trackedSlackQuote,
+          quoteId: trackedSlackQuote.quoteId,
           logPrefix: 'steerTask',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

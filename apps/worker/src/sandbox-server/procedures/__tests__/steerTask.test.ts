@@ -357,17 +357,9 @@ describe('steerTask procedure', () => {
       images: undefined,
       userId: 'sender-user-1',
     });
-    expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
-      {
-        token: 'run-token',
-        platformApiUrl: 'https://platform.example.com',
-      },
-      {
-        runId: 1,
-        text: 'Switch directions',
-        userName: 'Someone',
-      },
-    );
+    // Tracked through an older API (no quoteId): the rollback stays pending
+    // rather than risking an unscoped clear.
+    expect(mockClearSlackReplyQuote).not.toHaveBeenCalled();
   });
 
   it('throws PRECONDITION_FAILED when the active turn cannot be interrupted', async () => {

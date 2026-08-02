@@ -53,7 +53,6 @@ vi.mock('@roomote/redis', () => ({
 import {
   claimLatestUserMessageForReplyQuote,
   clearLatestUserMessageForReplyQuote,
-  clearLatestUserMessageForReplyQuoteIfContent,
   clearLatestUserMessageForReplyQuoteIfId,
   completeClaimedLatestUserMessageForReplyQuote,
   getCommunicationMessages,
@@ -467,47 +466,6 @@ describe('communication message queues', () => {
       await expect(
         clearLatestUserMessageForReplyQuoteIfId('discord', 44, 'quote-old'),
       ).resolves.toBe(false);
-    });
-
-    it('atomically clears only when the stored content still matches', async () => {
-      evalMock.mockResolvedValueOnce(1);
-
-      await expect(
-        clearLatestUserMessageForReplyQuoteIfContent('slack', 44, {
-          text: 'Follow up from web',
-          userName: 'Casey',
-        }),
-      ).resolves.toBe(true);
-
-      expect(evalMock).toHaveBeenCalledWith(
-        expect.stringContaining('data.text ~= ARGV[1]'),
-        1,
-        'slack:latest_user_message:44',
-        'Follow up from web',
-        'Casey',
-      );
-    });
-
-    it('does not clear when the stored content no longer matches', async () => {
-      evalMock.mockResolvedValueOnce(0);
-
-      await expect(
-        clearLatestUserMessageForReplyQuoteIfContent('slack', 44, {
-          text: 'An older follow-up',
-          userName: 'Casey',
-        }),
-      ).resolves.toBe(false);
-    });
-
-    it('refuses content clears without text instead of deleting broadly', async () => {
-      await expect(
-        clearLatestUserMessageForReplyQuoteIfContent('slack', 44, {
-          text: '   ',
-          userName: 'Casey',
-        }),
-      ).resolves.toBe(false);
-
-      expect(evalMock).not.toHaveBeenCalled();
     });
   });
 });

@@ -12,7 +12,6 @@ import { publicProcedure } from '../trpc';
 import {
   clearLatestUserMessageForSlackThreadQuote,
   trackLatestUserMessageForSlackThreadQuote,
-  type TrackedSlackReplyQuote,
 } from './slackQuoteTracking';
 import { recordSandboxPromptSlackTurnStart } from './slackReplyTurnTracking';
 import { getFollowUpWorkflowPhase } from '../../run-task/workflow-phase';
@@ -133,7 +132,7 @@ export const sendPrompt = publicProcedure
     }
 
     if (status?.phase === 'waiting_for_prompt' && !status.sessionId) {
-      let trackedSlackQuote: TrackedSlackReplyQuote | null = null;
+      let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
         if (input.source === 'web') {
@@ -176,7 +175,7 @@ export const sendPrompt = publicProcedure
         if (trackedSlackQuote) {
           await clearLatestUserMessageForSlackThreadQuote({
             runId: ctx.runId,
-            trackedQuote: trackedSlackQuote,
+            quoteId: trackedSlackQuote.quoteId,
             logPrefix: 'sendPrompt',
             warn: (message) => ctx.harnessLogger?.warn(message),
           });
@@ -193,7 +192,7 @@ export const sendPrompt = publicProcedure
       }
     }
 
-    let trackedSlackQuote: TrackedSlackReplyQuote | null = null;
+    let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
       if (input.source === 'web') {
@@ -245,7 +244,7 @@ export const sendPrompt = publicProcedure
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
-          trackedQuote: trackedSlackQuote,
+          quoteId: trackedSlackQuote.quoteId,
           logPrefix: 'sendPrompt',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

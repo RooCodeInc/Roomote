@@ -11,7 +11,6 @@ import { publicProcedure } from '../trpc';
 import {
   clearLatestUserMessageForSlackThreadQuote,
   trackLatestUserMessageForSlackThreadQuote,
-  type TrackedSlackReplyQuote,
 } from './slackQuoteTracking';
 
 const requestUserInputAnswersSchema = z.record(
@@ -104,7 +103,7 @@ export const answerUserInputRequest = publicProcedure
       .getPendingUserInputRequests?.()
       .find((request) => request.requestId === input.requestId);
 
-    let trackedSlackQuote: TrackedSlackReplyQuote | null = null;
+    let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
       trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
@@ -137,7 +136,7 @@ export const answerUserInputRequest = publicProcedure
       if (trackedSlackQuote) {
         await clearLatestUserMessageForSlackThreadQuote({
           runId: ctx.runId,
-          trackedQuote: trackedSlackQuote,
+          quoteId: trackedSlackQuote.quoteId,
           logPrefix: 'answerUserInputRequest',
           warn: (message) => ctx.harnessLogger?.warn(message),
         });

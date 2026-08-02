@@ -54,30 +54,6 @@ end
 return redis.call('DEL', KEYS[1])
 `;
 
-/**
- * Compat clear for trackers that never received a quote id (older APIs omit it
- * from track responses): atomically delete the pending quote only while it
- * still holds the tracked text/userName, so an id-less rollback cannot drop a
- * newer follow-up stored in the meantime.
- */
-const CLEAR_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_IF_CONTENT_SCRIPT = `
-local raw = redis.call('GET', KEYS[1])
-if not raw then
-  return 0
-end
-local ok, data = pcall(cjson.decode, raw)
-if not ok or type(data) ~= 'table' then
-  return 0
-end
-if data.text ~= ARGV[1] then
-  return 0
-end
-if ARGV[2] ~= '' and data.userName ~= ARGV[2] then
-  return 0
-end
-return redis.call('DEL', KEYS[1])
-`;
-
 const UPGRADE_LEGACY_REPLY_QUOTE_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 if raw ~= ARGV[1] then
@@ -589,41 +565,6 @@ export async function clearLatestUserMessageForReplyQuote(
         error instanceof Error ? error.message : String(error)
       }`,
     );
-  }
-}
-
-/**
- * Clear the pending reply quote only when Redis still holds the tracked
- * text/userName. Compat path for trackers without a quote id; prefer
- * clearLatestUserMessageForReplyQuoteIfId whenever an id is available.
- */
-export async function clearLatestUserMessageForReplyQuoteIfContent(
-  provider: ReplyQuoteProvider,
-  runId: number,
-  content: { text: string; userName?: string },
-): Promise<boolean> {
-  const trimmedText = content.text.trim();
-  if (!trimmedText) {
-    return false;
-  }
-
-  try {
-    const redis = getRedis();
-    const result = await redis.eval(
-      CLEAR_LATEST_USER_MESSAGE_FOR_REPLY_QUOTE_IF_CONTENT_SCRIPT,
-      1,
-      getLatestUserMessageForReplyQuoteKey(provider, runId),
-      trimmedText,
-      content.userName?.trim() ?? '',
-    );
-    return typeof result === 'number' ? result > 0 : Number(result) > 0;
-  } catch (error) {
-    console.error(
-      `[clearLatestUserMessageForReplyQuoteIfContent] Failed to clear latest user message for ${provider} task run ${runId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return false;
   }
 }
 

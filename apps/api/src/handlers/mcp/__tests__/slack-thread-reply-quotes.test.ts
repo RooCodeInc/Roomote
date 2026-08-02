@@ -5,7 +5,6 @@ import type { Variables } from '../../../types';
 
 const {
   buildThreadReplyImageBlocksMock,
-  clearLatestUserMessageForReplyQuoteIfContentMock,
   clearLatestUserMessageForReplyQuoteIfIdMock,
   clearLatestUserMessageMock,
   getLatestUserMessageMock,
@@ -16,7 +15,6 @@ const {
   taskRunFindFirstMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImageBlocksMock: vi.fn(),
-  clearLatestUserMessageForReplyQuoteIfContentMock: vi.fn(),
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   clearLatestUserMessageMock: vi.fn(),
   getLatestUserMessageMock: vi.fn(),
@@ -87,8 +85,6 @@ vi.mock('@roomote/slack', () => ({
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
-  clearLatestUserMessageForReplyQuoteIfContent:
-    clearLatestUserMessageForReplyQuoteIfContentMock,
   clearLatestUserMessageForReplyQuoteIfId:
     clearLatestUserMessageForReplyQuoteIfIdMock,
   setLatestUserMessageForReplyQuote: vi.fn(),
@@ -314,31 +310,6 @@ describe('Slack thread reply quotes', () => {
       42,
       'quote-1',
     );
-    expect(
-      clearLatestUserMessageForReplyQuoteIfContentMock,
-    ).not.toHaveBeenCalled();
-    expect(clearLatestUserMessageMock).not.toHaveBeenCalled();
-  });
-
-  it('scopes id-less clears by tracked content so a newer quote survives', async () => {
-    const response = await createApp().request('/mcp/clear_reply_quote', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        runId: 42,
-        text: 'Follow up from web',
-        userName: 'Casey',
-      }),
-    });
-
-    expect(response.status).toBe(200);
-    expect(
-      clearLatestUserMessageForReplyQuoteIfContentMock,
-    ).toHaveBeenCalledWith('slack', 42, {
-      text: 'Follow up from web',
-      userName: 'Casey',
-    });
-    expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
     expect(clearLatestUserMessageMock).not.toHaveBeenCalled();
   });
 
@@ -352,8 +323,5 @@ describe('Slack thread reply quotes', () => {
     expect(response.status).toBe(200);
     expect(clearLatestUserMessageMock).toHaveBeenCalledWith(42);
     expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
-    expect(
-      clearLatestUserMessageForReplyQuoteIfContentMock,
-    ).not.toHaveBeenCalled();
   });
 });

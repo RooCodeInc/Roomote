@@ -40,20 +40,13 @@ async function getSlackQuoteTrackingConfig(params: {
   return roomoteConfig;
 }
 
-export interface TrackedSlackReplyQuote {
-  /** Present when the API is new enough to return per-quote ids. */
-  quoteId?: string;
-  text: string;
-  userName: string;
-}
-
 export async function trackLatestUserMessageForSlackThreadQuote(params: {
   runId: number | undefined;
   text: string;
   userName: string | undefined;
   logPrefix: string;
   warn?: (message: string) => void;
-}): Promise<TrackedSlackReplyQuote | null> {
+}): Promise<{ quoteId?: string } | null> {
   const { runId, text, userName, logPrefix, warn } = params;
 
   if (text.trim().length === 0 || typeof runId !== 'number') {
@@ -71,17 +64,12 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
       return null;
     }
 
-    const trackedUserName = userName?.trim() || 'Someone';
     const result = await trackSlackReplyQuote(roomoteConfig, {
       runId,
       text,
-      userName: trackedUserName,
+      userName: userName?.trim() || 'Someone',
     });
-    return {
-      text,
-      userName: trackedUserName,
-      ...(result.quoteId ? { quoteId: result.quoteId } : {}),
-    };
+    return result.quoteId ? { quoteId: result.quoteId } : {};
   } catch (error) {
     warn?.(
       `[${logPrefix}] Non-fatal latest user message sync failure for task run ${runId}: ${
@@ -94,13 +82,17 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
 
 export async function clearLatestUserMessageForSlackThreadQuote(params: {
   runId: number | undefined;
-  trackedQuote: TrackedSlackReplyQuote;
+  quoteId?: string;
   logPrefix: string;
   warn?: (message: string) => void;
 }): Promise<void> {
-  const { runId, trackedQuote, logPrefix, warn } = params;
+  const { runId, quoteId, logPrefix, warn } = params;
 
-  if (typeof runId !== 'number') {
+  // Without a quote id (older APIs omit it from track responses) a rollback
+  // could only clear unscoped, which risks deleting a newer follow-up stored
+  // in the meantime. Leave the quote pending instead; the next follow-up or
+  // delivery consumes it.
+  if (typeof runId !== 'number' || !quoteId) {
     return;
   }
 
@@ -117,11 +109,7 @@ export async function clearLatestUserMessageForSlackThreadQuote(params: {
 
     await clearSlackReplyQuote(roomoteConfig, {
       runId,
-      // Without an id (older API track responses), scope the clear by the
-      // tracked content so it cannot drop a newer follow-up stored since.
-      ...(trackedQuote.quoteId
-        ? { quoteId: trackedQuote.quoteId }
-        : { text: trackedQuote.text, userName: trackedQuote.userName }),
+      quoteId,
     });
   } catch (error) {
     warn?.(
