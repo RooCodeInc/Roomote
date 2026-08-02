@@ -263,6 +263,37 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     );
   });
 
+  it('clears a pending web-reply quote after a successful image-only Discord post', async () => {
+    getLatestUserMessageForReplyQuoteMock.mockResolvedValue({
+      id: 'quote-image',
+      text: 'Take a screenshot',
+      userName: 'Matt Rubens',
+    });
+    buildThreadReplyImagesMock.mockResolvedValue([
+      { url: 'https://example.com/screenshot.png', altText: 'Screenshot' },
+    ]);
+
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: discordTaskRun,
+      parsedBody: { images: [{ artifactId: 'artifact-1' }] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(discordPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      textFormat: 'markdown',
+      images: [
+        { url: 'https://example.com/screenshot.png', altText: 'Screenshot' },
+      ],
+    });
+    expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
+      'discord',
+      44,
+      'quote-image',
+    );
+  });
+
   it('moves the footer to the latest Discord reply', async () => {
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(
       '[Open task](https://app.example.com/task/task-3)',

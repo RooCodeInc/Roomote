@@ -568,9 +568,9 @@ async function sendDiscordThreadReply(params: {
     );
   }
 
-  const pendingQuote = text
-    ? await peekDiscordThreadReplyQuote({ runId: params.taskRun.id })
-    : null;
+  const pendingQuote = await peekDiscordThreadReplyQuote({
+    runId: params.taskRun.id,
+  });
   const textWithQuote =
     text && pendingQuote ? `${pendingQuote.quote}\n\n${text}` : text;
   const footerText = await buildCommunicationThreadReplyFooterTextBestEffort({
