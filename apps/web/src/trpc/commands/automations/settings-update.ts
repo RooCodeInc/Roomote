@@ -396,6 +396,10 @@ export async function updateBackgroundAgentSettingsCommand(
   const managerSlackChannel = shouldUpdateManagerChannel
     ? submittedManagerSlackChannel
     : null;
+  const preservePersistedManagerDiscordChannel =
+    shouldUpdateManagerChannel &&
+    input.managerDiscordChannel === undefined &&
+    !submittedManagerSlackChannel;
   const managerDiscordChannel = shouldUpdateManagerChannel
     ? submittedManagerDiscordChannel
     : null;
@@ -465,7 +469,7 @@ export async function updateBackgroundAgentSettingsCommand(
           existingSettings?.managerSlackChannelId ??
             normalizeSlackChannelIdInput(submittedManagerSlackChannel),
         ),
-    shouldUpdateManagerChannel
+    shouldUpdateManagerChannel && !preservePersistedManagerDiscordChannel
       ? resolveDiscordChannelId({
           field: 'managerDiscordChannel',
           input: managerDiscordChannel,

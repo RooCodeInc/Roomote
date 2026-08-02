@@ -258,6 +258,26 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     }
   }, 15_000);
 
+  it('preserves a Discord manager channel when a legacy manager save omits the Discord field', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerDiscordChannelId: 'D111',
+    });
+    const input = buildInput({
+      savingAutomation: 'managerChannel',
+      managerSlackChannel: null,
+    });
+    delete input.managerDiscordChannel;
+
+    const result = await updateBackgroundAgentSettingsCommand(adminAuth, input);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.managerDiscordChannelId).toBe('D111');
+      expect(result.settings.managerSlackChannelId).toBeNull();
+    }
+  }, 15_000);
+
   it('rejects a Discord manager channel outside the available catalog', async () => {
     const result = await updateBackgroundAgentSettingsCommand(
       adminAuth,
