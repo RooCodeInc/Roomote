@@ -718,6 +718,67 @@ describe('Slack deleted-mention suppression', () => {
     expect(rewrittenPrefill).not.toHaveProperty('kickoffMessage');
   });
 
+  it.each([
+    ['returns a fallback', 'fallback'],
+    ['throws', 'error'],
+  ] as const)(
+    'drops the corrected environment kickoff when rerouting %s',
+    async (_description, outcome) => {
+      const originalEvent = {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      };
+      evalMock
+        .mockResolvedValueOnce(
+          JSON.stringify({
+            agentName: 'Default',
+            workspaceValue: 'env_1',
+            workspaceDisplayName: 'App',
+            kickoffMessage: 'Investigating the issue in App.',
+            workspaceType: 'environment',
+            teamId: 'T123',
+            slackUserId: 'U123',
+            channel: 'C123',
+            confirmMessageTs: '999.000',
+            confirmNonce: 'nonce-1',
+          }),
+        )
+        .mockResolvedValueOnce(JSON.stringify(originalEvent));
+      if (outcome === 'error') {
+        routeTaskMock.mockRejectedValueOnce(new Error('router unavailable'));
+      } else {
+        routeTaskMock.mockResolvedValueOnce({
+          status: 'fallback',
+          reason: 'No confident route',
+        });
+      }
+
+      const result = await handleSlackRoutingCorrection({
+        threadId: '111.222',
+        correctionText: 'Use a different environment',
+        event: originalEvent as never,
+        slackInstallation: { teamId: 'T123' } as never,
+        userMapping: { userId: 'user_1' } as never,
+        slack: new SlackNotifier('xoxb-test') as never,
+      });
+
+      expect(result).toEqual({ handled: true });
+      const rewrittenPrefill = JSON.parse(
+        redisSetMock.mock.calls[0]?.[1] as string,
+      );
+      expect(rewrittenPrefill).toMatchObject({
+        workspaceValue: 'env_1',
+        workspaceDisplayName: 'App',
+        confirmNonce: expect.any(String),
+      });
+      expect(rewrittenPrefill.confirmNonce).not.toBe('nonce-1');
+      expect(rewrittenPrefill).not.toHaveProperty('kickoffMessage');
+    },
+  );
+
   it('starts immediately when all repositories is the only fallback workspace option', async () => {
     environmentsFindManyMock.mockResolvedValue([]);
     routeTaskMock.mockResolvedValueOnce({

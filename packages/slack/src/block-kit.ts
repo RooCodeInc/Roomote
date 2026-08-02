@@ -2379,46 +2379,60 @@ export async function handleSlackRoutingCorrection({
 
   const correctionWithoutMention =
     stripLeadingSlackProductMention(correctionText);
-  const routingFollowUp = await resolveRoutingFollowUp({
-    suggestion: {
-      workspaceValue: oldPrefill.workspaceValue,
-      workspaceDisplayName: oldPrefill.workspaceDisplayName,
-      modelId: oldPrefill.modelId,
-      modelDisplayName: oldPrefill.modelDisplayName,
-    },
-    userResponse: correctionText,
-    userId: userMapping.userId,
-    correctionMessage: {
-      user: event.user,
-      text: correctionWithoutMention,
-    },
-    buildCorrectionContext: async () => {
-      const originalEvent = JSON.parse(claimedEventJson) as SlackEvent;
-      const reroutingTaskDescription = appendAttachmentTextsToPromptText({
+  let routingFollowUp: Awaited<ReturnType<typeof resolveRoutingFollowUp>>;
+  try {
+    routingFollowUp = await resolveRoutingFollowUp({
+      suggestion: {
+        workspaceValue: oldPrefill.workspaceValue,
+        workspaceDisplayName: oldPrefill.workspaceDisplayName,
+        modelId: oldPrefill.modelId,
+        modelDisplayName: oldPrefill.modelDisplayName,
+      },
+      userResponse: correctionText,
+      userId: userMapping.userId,
+      correctionMessage: {
+        user: event.user,
         text: correctionWithoutMention,
-        attachmentTexts: originalEvent.processedAttachmentTexts,
-      });
-      const channelName =
-        (await slack.getChannelName?.(event.channel)) ?? undefined;
+      },
+      buildCorrectionContext: async () => {
+        const originalEvent = JSON.parse(claimedEventJson) as SlackEvent;
+        const reroutingTaskDescription = appendAttachmentTextsToPromptText({
+          text: correctionWithoutMention,
+          attachmentTexts: originalEvent.processedAttachmentTexts,
+        });
+        const channelName =
+          (await slack.getChannelName?.(event.channel)) ?? undefined;
 
-      return buildSlackRoutingContext({
-        userId: userMapping.userId,
-        taskDescription: reroutingTaskDescription,
-        channelName,
-        threadMessages: oldPrefill.threadMessages?.map((message) => ({
-          text: message.text,
-          user: message.user,
-        })),
-        ...(originalEvent.processedImages?.length
-          ? { images: originalEvent.processedImages }
-          : {}),
-        ...(originalEvent.processedVideoDescriptions?.length
-          ? { videoDescriptions: originalEvent.processedVideoDescriptions }
-          : {}),
-        apiBaseUrl: Env.TRPC_URL,
-      });
-    },
-  });
+        return buildSlackRoutingContext({
+          userId: userMapping.userId,
+          taskDescription: reroutingTaskDescription,
+          channelName,
+          threadMessages: oldPrefill.threadMessages?.map((message) => ({
+            text: message.text,
+            user: message.user,
+          })),
+          ...(originalEvent.processedImages?.length
+            ? { images: originalEvent.processedImages }
+            : {}),
+          ...(originalEvent.processedVideoDescriptions?.length
+            ? { videoDescriptions: originalEvent.processedVideoDescriptions }
+            : {}),
+          apiBaseUrl: Env.TRPC_URL,
+        });
+      },
+    });
+  } catch (reRouteError) {
+    console.error(
+      `[RoutingCorrection] Re-routing error: ${reRouteError instanceof Error ? reRouteError.message : String(reRouteError)}`,
+    );
+    routingFollowUp = {
+      intent: 'correct',
+      routingDecision: {
+        status: 'fallback',
+        reason: 'Re-routing failed',
+      },
+    };
+  }
 
   console.log(
     `[RoutingCorrection] Classified follow-up for thread ${threadId}: ${routingFollowUp.intent}`,
@@ -2688,10 +2702,11 @@ export async function handleSlackRoutingCorrection({
     threadId,
     claimedEventJson,
   );
+  const { kickoffMessage: _rejectedKickoff, ...manualPrefill } = oldPrefill;
   await redis.set(
     prefillKey,
     JSON.stringify({
-      ...oldPrefill,
+      ...manualPrefill,
       confirmNonce: randomUUID(),
     } satisfies RoutingPrefillData),
     'EX',
