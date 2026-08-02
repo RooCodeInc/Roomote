@@ -158,16 +158,17 @@ manager-facing updates and suggestions.
 | **CI Failure Triage**        | Automatic repro-and-fix tasks for failing default-branch CI runs | Immediate via webhook                       |
 | **Summarize Merged PRs**     | A digest of recently merged pull requests                        | Daily or weekly                             |
 
-Set **Automation output** first. This is the shared Slack or Discord channel for
-manager-facing posts, suggestions, summaries, and setup alerts. Make sure the
-Roomote app is added to that channel before you save it.
+Set **Automation output** first. This is the shared Slack or Discord Manager
+Channel for manager-facing posts, suggestions, summaries, and setup alerts.
+Make sure the Roomote app can access the channel before you save it.
 
 Each automation card shows a **Reports to** line with the destination the next
 run will use and which setting produced it. Reports go to the automation's own
-channel when one is set, otherwise to the shared Manager Channel. Discord can
-be selected directly for either destination. When neither Slack nor Discord is
-selected, reports can fall back to your primary Microsoft Teams conversation,
-the configured Telegram chat, or the configured Discord channel (see
+channel when one is set, otherwise to the shared Manager Channel. If Slack is
+not connected, fallback selection runs only when no destination is saved or the
+saved destination is a Slack channel. Roomote then checks your primary Microsoft
+Teams conversation, the configured Telegram chat, and the default Discord
+channel in that order (see
 [Communications](/communications#supported-providers) for connecting those
 surfaces).
 
