@@ -2,6 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.30.1 (2026-08-02)
+
+This patch improves custom automation scheduling and keeps Docker sandbox cleanup reliable in restricted deployments.
+
+### Highlights
+
+- Keep Docker sandbox cleanup working through restricted socket proxies so expired orphan task networks are removed without broadening proxy permissions.
+- Schedule custom automations reliably with discoverable built-in hourly, daily, and weekly presets.
+
+### Patch changes
+
+- Keep Docker sandbox cleanup working through restricted socket proxies so expired orphan task networks are removed without broadening proxy permissions.
+- Help agents schedule custom automations reliably by exposing every built-in hourly, daily, and weekly schedule preset through Roomote's management tools.
+
 ## 0.30.0 (2026-08-02)
 
 This release makes custom automations more flexible and reliable while improving task recovery and cross-channel follow-ups.
