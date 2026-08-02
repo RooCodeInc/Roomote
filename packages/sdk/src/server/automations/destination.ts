@@ -103,9 +103,9 @@ export async function findTeamsConversationServiceUrl(
 
 /**
  * Resolves where an automation run should report, extending the db-level
- * waterfall (own target -> Slack manager channel) with a primary-conversation
- * tail for deployments that have no Slack at all: the most recently active
- * Teams conversation, then the configured Telegram primary chat. The tail is
+ * waterfall (own target -> manager channel) with a primary-conversation tail
+ * for deployments that have no Slack at all: the most recently active Teams
+ * conversation, then the configured Telegram primary chat. The tail is
  * deliberately skipped when Slack is connected, so a Slack deployment that
  * simply has not picked a manager channel keeps its explicit
  * "configure a manager channel" nudge instead of surprising another surface.

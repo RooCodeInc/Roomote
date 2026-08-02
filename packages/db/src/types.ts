@@ -436,6 +436,7 @@ type StoredBackgroundAgentSettings = Pick<
   typeof deploymentSettings.$inferSelect,
   | 'id'
   | 'managerSlackChannelId'
+  | 'managerDiscordChannelId'
   | 'globalAgentInstructions'
   | 'timeZone'
   | 'timeZoneUpdatedAt'

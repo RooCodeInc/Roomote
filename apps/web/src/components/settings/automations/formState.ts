@@ -85,6 +85,7 @@ export type FormState = {
   /** Merged, provider-tagged auto-respond rows (Slack and Discord). */
   channelAutoStartChannels: ChannelAutoStartFormRow[];
   managerSlackChannel: string;
+  managerDiscordChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageProjectSlugs: string;
@@ -149,7 +150,10 @@ const CHANNEL_AUTO_START_FIELDS: Array<keyof FormState> = [
   'channelAutoStartChannels',
 ];
 
-const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = ['managerSlackChannel'];
+const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = [
+  'managerSlackChannel',
+  'managerDiscordChannel',
+];
 
 const MANAGER_STATS_FIELDS: Array<keyof FormState> = [
   'managerStatsFrequency',
@@ -344,6 +348,7 @@ export function buildAutomationSettingsSaveInput(
         launchCriteria: row.launchCriteria.trim() || null,
       })),
     managerSlackChannel: stateToSave.managerSlackChannel.trim() || null,
+    managerDiscordChannel: stateToSave.managerDiscordChannel.trim() || null,
     managerStatsFrequency: stateToSave.managerStatsFrequency,
     sentryTriageFrequency: stateToSave.sentryTriageFrequency,
     sentryTriageProjectSlugs:

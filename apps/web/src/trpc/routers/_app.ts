@@ -505,6 +505,13 @@ const automationsRouter = createRouter({
           )
           .optional(),
         managerSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        managerDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         managerStatsFrequency: z.enum(['off', 'weekly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsDiscordChannel: z

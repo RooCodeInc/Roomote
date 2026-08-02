@@ -14,6 +14,7 @@ import { getBackgroundAgentSettingsCommand } from '../settings-read';
 
 const SETTINGS_READ_USER_ID = 'user-settings-read-admin';
 const MANAGER_CHANNEL_ID = 'CMANAGER1';
+const MANAGER_DISCORD_CHANNEL_ID = 'DMANAGER1';
 const STATS_CHANNEL_ID = 'CSTATS111';
 
 const adminAuth: UserAuthSuccess = {
@@ -118,9 +119,10 @@ describe('getBackgroundAgentSettingsCommand Slack fan-out', () => {
       isActive: true,
     });
 
-    await db
-      .insert(deploymentSettings)
-      .values({ managerSlackChannelId: MANAGER_CHANNEL_ID });
+    await db.insert(deploymentSettings).values({
+      managerSlackChannelId: MANAGER_CHANNEL_ID,
+      managerDiscordChannelId: MANAGER_DISCORD_CHANNEL_ID,
+    });
 
     // Only the manager-stats automation reports to its own channel; every
     // other reporting automation falls back to the manager channel.
@@ -171,6 +173,9 @@ describe('getBackgroundAgentSettingsCommand Slack fan-out', () => {
     ).toBeNull();
     expect(result.resolvedDestinations.manager_stats?.channelId).toBe(
       STATS_CHANNEL_ID,
+    );
+    expect(result.settings.managerDiscordChannelId).toBe(
+      MANAGER_DISCORD_CHANNEL_ID,
     );
     expect(result.capabilities.slackConnected).toBe(true);
     expect(result.automationStatus.manager_stats?.enabled).toBe(true);

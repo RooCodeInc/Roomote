@@ -51,6 +51,7 @@ const baseFormState: FormState = {
   conflictResolverInstructions: '',
   channelAutoStartChannels: [],
   managerSlackChannel: '',
+  managerDiscordChannel: '',
   managerStatsFrequency: 'off' as const,
   managerStatsSlackChannel: '',
   managerStatsDiscordChannel: '',
@@ -432,6 +433,21 @@ describe('Automations selection helpers', () => {
 
     expect(saveInput.managerStatsDiscordChannel).toBe('123456789');
     expect(saveInput.managerStatsSlackChannel).toBeNull();
+  });
+
+  it('includes the Discord manager destination in the API save input', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        managerSlackChannel: '',
+        managerDiscordChannel: ' 123456789 ',
+      },
+      baseFormState,
+      'managerChannel',
+    );
+
+    expect(saveInput.managerSlackChannel).toBeNull();
+    expect(saveInput.managerDiscordChannel).toBe('123456789');
   });
 
   it('includes the reviewer all-author setting when saving Review Code', () => {

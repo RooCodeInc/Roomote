@@ -221,9 +221,13 @@ async function maybeNotifyPlatformIssue(params: {
     }),
   ]);
 
-  // When the platform_issue_alerts automation's own destination target is a
-  // Discord channel, the alert belongs there instead of Slack.
-  const discordChannelId = settings.platformIssueDiscordChannelId;
+  // The automation's own destination wins, then the shared manager channel.
+  // Preserve the existing Slack preference when both manager providers exist.
+  const discordChannelId =
+    settings.platformIssueDiscordChannelId ??
+    (!settings.platformIssueSlackChannelId && !settings.managerSlackChannelId
+      ? settings.managerDiscordChannelId
+      : null);
 
   if (discordChannelId) {
     const discord =

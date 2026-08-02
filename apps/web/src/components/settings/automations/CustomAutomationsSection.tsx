@@ -171,10 +171,12 @@ export function CustomAutomationsSection() {
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
   const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
 
-  // New Slack destinations default to the shared manager channel, matching
-  // where the other automations report by default.
+  // New destinations default to the shared manager channel, matching where
+  // the other automations report by default.
   const managerSlackChannelId =
     settingsQuery.data?.settings.managerSlackChannelId ?? '';
+  const managerDiscordChannelId =
+    settingsQuery.data?.settings.managerDiscordChannelId ?? '';
 
   const environmentOptions = useMemo(
     () =>
@@ -544,7 +546,11 @@ export function CustomAutomationsSection() {
                   targetProvider:
                     value as CustomAutomationFormState['targetProvider'],
                   targetChannelId:
-                    value === 'slack' ? managerSlackChannelId : '',
+                    value === 'slack'
+                      ? managerSlackChannelId
+                      : value === 'discord'
+                        ? managerDiscordChannelId
+                        : '',
                   targetServiceUrl: '',
                 }))
               }
@@ -705,7 +711,12 @@ export function CustomAutomationsSection() {
               setEditingId(null);
               setForm({
                 ...EMPTY_FORM,
-                targetChannelId: managerSlackChannelId,
+                targetProvider:
+                  managerDiscordChannelId && !managerSlackChannelId
+                    ? 'discord'
+                    : 'slack',
+                targetChannelId:
+                  managerSlackChannelId || managerDiscordChannelId,
               });
               setResolvedCron(null);
               setScheduleSummary(null);

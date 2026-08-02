@@ -132,6 +132,7 @@ type FieldErrors = Partial<
     | 'channelAutoStartDiscordChannels'
     | 'channelAutoStartInstructions'
     | 'managerSlackChannel'
+    | 'managerDiscordChannel'
     | 'managerStatsSlackChannel'
     | 'suggesterSlackChannel'
     | 'announcerSlackChannel'
@@ -492,7 +493,7 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     id: 'managerChannel',
     label: 'Automation output',
     description:
-      'Shared Slack channel for manager-facing Roomote asks, summaries, and alerts.',
+      'Shared Slack or Discord channel for manager-facing Roomote asks, summaries, and alerts.',
     icon: Users,
   },
   managerStats: {
@@ -701,6 +702,7 @@ function mapSettingsToFormState(
     channelAutoStartSlackChannelNames?: Record<string, string | null>;
     managerSlackChannelId: string | null;
     managerSlackChannelName?: string | null;
+    managerDiscordChannelId: string | null;
     managerStatsFrequency: ManagerStatsFrequency;
     managerStatsSlackChannelId: string | null;
     managerStatsSlackChannelName?: string | null;
@@ -799,6 +801,7 @@ function mapSettingsToFormState(
     ],
     managerSlackChannel:
       settings.managerSlackChannelName ?? settings.managerSlackChannelId ?? '',
+    managerDiscordChannel: settings.managerDiscordChannelId ?? '',
     managerStatsFrequency: settings.managerStatsFrequency,
     managerStatsSlackChannel:
       settings.managerStatsSlackChannelName ??
@@ -1732,6 +1735,9 @@ export function AutomationsSettings() {
   const [managerSlackChannelId, setManagerSlackChannelId] = useState<
     string | null
   >(null);
+  const [managerDiscordChannelId, setManagerDiscordChannelId] = useState<
+    string | null
+  >(null);
   const [savingAutomation, setSavingAutomation] = useState<AutomationId | null>(
     null,
   );
@@ -1823,6 +1829,9 @@ export function AutomationsSettings() {
       setManagerSlackChannelId(
         settingsQuery.data.settings.managerSlackChannelId,
       );
+      setManagerDiscordChannelId(
+        settingsQuery.data.settings.managerDiscordChannelId,
+      );
       return;
     }
 
@@ -1838,6 +1847,9 @@ export function AutomationsSettings() {
       ...settingsQuery.data.slackChannelAccessWarnings,
     });
     setManagerSlackChannelId(settingsQuery.data.settings.managerSlackChannelId);
+    setManagerDiscordChannelId(
+      settingsQuery.data.settings.managerDiscordChannelId,
+    );
   }, [settingsQuery.data]);
 
   const updateMutation = useMutation(
@@ -1858,7 +1870,10 @@ export function AutomationsSettings() {
             toast.error(firstFieldError);
           }
 
-          if (result.fieldErrors.managerSlackChannel) {
+          if (
+            result.fieldErrors.managerSlackChannel ||
+            result.fieldErrors.managerDiscordChannel
+          ) {
             setOpenAutomationIds((prev) => {
               if (prev.has('managerChannel')) {
                 return prev;
@@ -1901,6 +1916,7 @@ export function AutomationsSettings() {
         }
         setSlackChannelAccessWarnings(result.slackChannelAccessWarnings);
         setManagerSlackChannelId(result.settings.managerSlackChannelId);
+        setManagerDiscordChannelId(result.settings.managerDiscordChannelId);
         const mapped = mapSettingsToFormState({
           ...result.settings,
           channelAutoStartSlackChannelNames:
@@ -2239,9 +2255,12 @@ export function AutomationsSettings() {
     [formState?.channelAutoStartChannels],
   );
   const managerChannelIsEnabled = Boolean(
-    formState?.managerSlackChannel.trim(),
+    formState?.managerSlackChannel.trim() ||
+    formState?.managerDiscordChannel.trim(),
   );
-  const managerChannelConfigured = Boolean(managerSlackChannelId);
+  const managerChannelConfigured = Boolean(
+    managerSlackChannelId || managerDiscordChannelId,
+  );
   const managerChannelOptions = useMemo(
     () =>
       buildManagerSlackChannelOptions({
@@ -2254,27 +2273,59 @@ export function AutomationsSettings() {
     managerChannelOptions.find((option) =>
       matchesSlackChannelOption(formState?.managerSlackChannel, option),
     ) ?? null;
-  const managerChannelHasValue = Boolean(formState?.managerSlackChannel.trim());
+  const managerDiscordChannelOptions = useMemo(
+    () =>
+      buildAutomationDiscordDestinationOptions({
+        channels: discordChannelsQuery.data?.channels ?? [],
+        selectedChannelId: formState?.managerDiscordChannel,
+        includeProviderSuffix: capabilities?.slackConnected === true,
+      }),
+    [
+      capabilities?.slackConnected,
+      discordChannelsQuery.data?.channels,
+      formState?.managerDiscordChannel,
+    ],
+  );
+  const selectedManagerDiscordChannelOption =
+    managerDiscordChannelOptions.find(
+      (option) =>
+        option.id ===
+        `${DISCORD_DESTINATION_OPTION_PREFIX}${formState?.managerDiscordChannel}`,
+    ) ?? null;
+  const managerChannelHasValue = Boolean(
+    formState?.managerSlackChannel.trim() ||
+    formState?.managerDiscordChannel.trim(),
+  );
   const showCustomManagerChannelInput =
     isEnteringCustomManagerChannel ||
-    (managerChannelHasValue && !selectedManagerChannelOption);
+    (managerChannelHasValue &&
+      !selectedManagerChannelOption &&
+      !selectedManagerDiscordChannelOption);
   const slackChannelChoices = useMemo(
     () => slackChannelsQuery.data?.channels ?? [],
     [slackChannelsQuery.data?.channels],
   );
   const managerChannelSelectionDisabled = isManagerChannelSelectionDisabled({
-    slackConnected: capabilities?.slackConnected === true,
-    isFetching: slackChannelsQuery.isFetching,
+    slackConnected:
+      capabilities?.slackConnected === true ||
+      capabilities?.discordConnected === true,
+    isFetching:
+      slackChannelsQuery.isFetching || discordChannelsQuery.isFetching,
     hasValue: managerChannelHasValue,
     isConfigured: managerChannelConfigured,
   });
   const managerChannelSelectLabel = showCustomManagerChannelInput
     ? formatSlackChannelValue(formState?.managerSlackChannel) ||
       'Private or manual channel'
-    : selectedManagerChannelOption?.label || 'Select a Slack channel';
+    : selectedManagerDiscordChannelOption?.label ||
+      selectedManagerChannelOption?.label ||
+      (capabilities?.discordConnected
+        ? 'Select a channel'
+        : 'Select a Slack channel');
   const managerChannelSelectValue = showCustomManagerChannelInput
     ? CUSTOM_MANAGER_CHANNEL_SELECT_VALUE
-    : selectedManagerChannelOption?.id;
+    : (selectedManagerDiscordChannelOption?.id ??
+      selectedManagerChannelOption?.id);
   const managerStatsIsEnabled = formState?.managerStatsFrequency !== 'off';
   const sentryConnected = capabilities?.sentryConnected === true;
   const sentryTriageIsEnabled = formState?.sentryTriageFrequency !== 'off';
@@ -2312,6 +2363,7 @@ export function AutomationsSettings() {
     });
   const showManagerChannelMigrationNote =
     !formState?.managerSlackChannel &&
+    !formState?.managerDiscordChannel &&
     new Set(
       [
         settingsQuery.data?.settings.suggesterSlackChannelId,
@@ -2625,6 +2677,15 @@ export function AutomationsSettings() {
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
   const savedManagerChannelLabel = (() => {
+    if (managerDiscordChannelId) {
+      const channelFromList = discordChannelsQuery.data?.channels.find(
+        (channel) => channel.id === managerDiscordChannelId,
+      );
+      return channelFromList
+        ? `${channelFromList.label} (Discord)`
+        : `#${managerDiscordChannelId} (Discord)`;
+    }
+
     const channelFromList = slackChannelChoices.find(
       (channel) => channel.id === managerSlackChannelId,
     );
@@ -2677,11 +2738,14 @@ export function AutomationsSettings() {
         </Alert>
       ) : null}
 
-      {fieldErrors.managerSlackChannel ? (
+      {fieldErrors.managerSlackChannel || fieldErrors.managerDiscordChannel ? (
         <Alert variant="destructive">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <AlertTitle>Manager Channel required</AlertTitle>
-          <AlertDescription>{fieldErrors.managerSlackChannel}</AlertDescription>
+          <AlertDescription>
+            {fieldErrors.managerSlackChannel ??
+              fieldErrors.managerDiscordChannel}
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -3585,7 +3649,7 @@ export function AutomationsSettings() {
                     Where should Roomote post manager-facing updates?
                   </Label>
                   <p className="text-sm text-muted-foreground">
-                    Make sure {slackAppMention} is added to the channel.
+                    Make sure the Roomote app is added to the channel.
                   </p>
                   <div className="max-w-md space-y-2">
                     <div className="flex items-center gap-2">
@@ -3599,6 +3663,7 @@ export function AutomationsSettings() {
                                 ? {
                                     ...prev,
                                     managerSlackChannel: '',
+                                    managerDiscordChannel: '',
                                   }
                                 : prev,
                             );
@@ -3612,6 +3677,25 @@ export function AutomationsSettings() {
                                 ? {
                                     ...prev,
                                     managerSlackChannel: '',
+                                    managerDiscordChannel: '',
+                                  }
+                                : prev,
+                            );
+                            return;
+                          }
+
+                          if (
+                            value.startsWith(DISCORD_DESTINATION_OPTION_PREFIX)
+                          ) {
+                            setIsEnteringCustomManagerChannel(false);
+                            setFormState((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    managerSlackChannel: '',
+                                    managerDiscordChannel: value.slice(
+                                      DISCORD_DESTINATION_OPTION_PREFIX.length,
+                                    ),
                                   }
                                 : prev,
                             );
@@ -3632,6 +3716,7 @@ export function AutomationsSettings() {
                               ? {
                                   ...prev,
                                   managerSlackChannel: selectedChannel.label,
+                                  managerDiscordChannel: '',
                                 }
                               : prev,
                           );
@@ -3640,7 +3725,7 @@ export function AutomationsSettings() {
                       >
                         <SelectTrigger
                           id="manager-channel"
-                          aria-label="Select manager Slack channel"
+                          aria-label="Select manager channel"
                           autoFocus={isEditingManagerChannel}
                           className="w-full"
                         >
@@ -3659,16 +3744,22 @@ export function AutomationsSettings() {
                               <SelectSeparator />
                             </>
                           ) : null}
-                          {slackChannelsQuery.isPending ? (
+                          {slackChannelsQuery.isPending ||
+                          discordChannelsQuery.isPending ? (
                             <SelectItem value="__loading__" disabled>
                               Loading channels...
                             </SelectItem>
-                          ) : slackChannelsQuery.isError ? (
+                          ) : slackChannelsQuery.isError ||
+                            discordChannelsQuery.isError ? (
                             <SelectItem value="__error__" disabled>
                               Could not load channels. Try refreshing.
                             </SelectItem>
-                          ) : managerChannelOptions.length > 0 ? (
-                            managerChannelOptions.map((channel) => (
+                          ) : managerChannelOptions.length > 0 ||
+                            managerDiscordChannelOptions.length > 0 ? (
+                            [
+                              ...managerChannelOptions,
+                              ...managerDiscordChannelOptions,
+                            ].map((channel) => (
                               <SelectItem key={channel.id} value={channel.id}>
                                 {channel.label}
                               </SelectItem>
@@ -3686,28 +3777,36 @@ export function AutomationsSettings() {
                           </SelectItem>
                         </SelectContent>
                       </Select>
-                      {managerChannelOptions.length > 0 && (
+                      {managerChannelOptions.length > 0 ||
+                      managerDiscordChannelOptions.length > 0 ? (
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
-                          aria-label="Refresh Slack channels"
-                          title="Refresh Slack channels"
+                          aria-label="Refresh channels"
+                          title="Refresh channels"
                           disabled={
-                            !capabilities?.slackConnected ||
-                            slackChannelsQuery.isFetching
+                            (!capabilities?.slackConnected &&
+                              !capabilities?.discordConnected) ||
+                            slackChannelsQuery.isFetching ||
+                            discordChannelsQuery.isFetching
                           }
                           onClick={() => {
-                            void slackChannelsQuery.refetch();
+                            void Promise.all([
+                              slackChannelsQuery.refetch(),
+                              discordChannelsQuery.refetch(),
+                            ]);
                           }}
                         >
                           <RefreshCcw
                             className={cn(
-                              slackChannelsQuery.isFetching && 'animate-spin',
+                              (slackChannelsQuery.isFetching ||
+                                discordChannelsQuery.isFetching) &&
+                                'animate-spin',
                             )}
                           />
                         </Button>
-                      )}
+                      ) : null}
                     </div>
                     {showCustomManagerChannelInput ? (
                       <Input
@@ -3719,6 +3818,7 @@ export function AutomationsSettings() {
                               ? {
                                   ...prev,
                                   managerSlackChannel: event.target.value,
+                                  managerDiscordChannel: '',
                                 }
                               : prev,
                           );
@@ -3740,9 +3840,11 @@ export function AutomationsSettings() {
                       slackAppMention={slackAppMention}
                     />
                   ) : null}
-                  {fieldErrors.managerSlackChannel ? (
+                  {fieldErrors.managerSlackChannel ||
+                  fieldErrors.managerDiscordChannel ? (
                     <p className="text-xs text-destructive">
-                      {fieldErrors.managerSlackChannel}
+                      {fieldErrors.managerSlackChannel ??
+                        fieldErrors.managerDiscordChannel}
                     </p>
                   ) : null}
                   {showManagerChannelMigrationNote ? (

@@ -390,8 +390,14 @@ export async function updateBackgroundAgentSettingsCommand(
   const submittedManagerSlackChannel = normalizeOptionalText(
     input.managerSlackChannel ?? null,
   );
+  const submittedManagerDiscordChannel = normalizeOptionalText(
+    input.managerDiscordChannel ?? null,
+  );
   const managerSlackChannel = shouldUpdateManagerChannel
     ? submittedManagerSlackChannel
+    : null;
+  const managerDiscordChannel = shouldUpdateManagerChannel
+    ? submittedManagerDiscordChannel
     : null;
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
   const suggesterRoutingRequiresSlackInstallation =
@@ -425,6 +431,7 @@ export async function updateBackgroundAgentSettingsCommand(
     channelAutoStartChannelResults,
     channelAutoStartDiscordDestinations,
     managerChannelResult,
+    managerDiscordChannelResult,
     ...destinationResolutionEntries
   ] = await Promise.all([
     Promise.all(
@@ -458,6 +465,12 @@ export async function updateBackgroundAgentSettingsCommand(
           existingSettings?.managerSlackChannelId ??
             normalizeSlackChannelIdInput(submittedManagerSlackChannel),
         ),
+    shouldUpdateManagerChannel
+      ? resolveDiscordChannelId({
+          field: 'managerDiscordChannel',
+          input: managerDiscordChannel,
+        })
+      : keepPersistedDiscordChannel(existingSettings.managerDiscordChannelId),
     ...destinationDescriptors.map(async (descriptor) => {
       const shouldUpdate = input.savingAutomation === descriptor.automationId;
       const submitted = submittedDestinations[descriptor.automationId];
@@ -601,6 +614,11 @@ export async function updateBackgroundAgentSettingsCommand(
     if (result.discord.error) {
       fieldErrors[result.discord.error.field] = result.discord.error.message;
     }
+  }
+
+  if (managerDiscordChannelResult.error) {
+    fieldErrors[managerDiscordChannelResult.error.field] =
+      managerDiscordChannelResult.error.message;
   }
 
   for (const result of channelAutoStartChannelResults) {
@@ -840,10 +858,11 @@ export async function updateBackgroundAgentSettingsCommand(
     input.codeQualityAuditorFrequency ?? 'off';
   const ciFailureTriageFrequency = input.ciFailureTriageFrequency ?? 'off';
 
-  // Manager-channel automations resolve their Slack destination as
+  // Manager-channel automations resolve their destination as
   // automation target -> shared manager channel. Enabling one requires a
   // channel at one of those two levels.
-  const sharedManagerChannelId = managerChannelResult.channelId;
+  const sharedManagerChannelId =
+    managerChannelResult.channelId ?? managerDiscordChannelResult.channelId;
   const managerChannelAutomationValidations: Array<{
     key: TriggerableBackgroundAutomationKey;
     frequency: string;
@@ -1092,12 +1111,14 @@ export async function updateBackgroundAgentSettingsCommand(
       .values({
         id: 'default',
         managerSlackChannelId: managerChannelResult.channelId,
+        managerDiscordChannelId: managerDiscordChannelResult.channelId,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: deploymentSettings.id,
         set: {
           managerSlackChannelId: managerChannelResult.channelId,
+          managerDiscordChannelId: managerDiscordChannelResult.channelId,
           updatedAt: now,
         },
       });
