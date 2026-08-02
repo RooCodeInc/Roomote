@@ -68,9 +68,16 @@ export const DUPLICATE_AUTOMATION_NAME_ERROR =
 /**
  * Whether the error (or anything in its cause chain — drizzle wraps the
  * driver error in a DrizzleQueryError) is the Postgres unique violation for
- * the custom automation name index.
+ * the custom automation name index specifically. Both signals are required:
+ * a 23505 on some other constraint is not a duplicate name and must rethrow
+ * to the logged 500 path instead of being mislabeled. The two signals may
+ * live on different levels of the cause chain (wrapper message vs. driver
+ * error fields), so they are accumulated across the walk.
  */
 function isDuplicateNameViolation(error: unknown): boolean {
+  let sawUniqueViolationCode = false;
+  let sawNameUniqueIndex = false;
+
   for (
     let current = error, depth = 0;
     current !== null && current !== undefined && depth < 10;
@@ -83,12 +90,19 @@ function isDuplicateNameViolation(error: unknown): boolean {
       cause?: unknown;
     };
 
+    if (candidate.code === UNIQUE_VIOLATION_CODE) {
+      sawUniqueViolationCode = true;
+    }
+
     if (
-      candidate.code === UNIQUE_VIOLATION_CODE ||
       candidate.constraint === NAME_UNIQUE_INDEX ||
       (typeof candidate.message === 'string' &&
         candidate.message.includes(NAME_UNIQUE_INDEX))
     ) {
+      sawNameUniqueIndex = true;
+    }
+
+    if (sawUniqueViolationCode && sawNameUniqueIndex) {
       return true;
     }
 

@@ -162,6 +162,26 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it('rethrows a 23505 on an unrelated constraint instead of mislabeling it as a duplicate name', async () => {
+      const { app, onError } = createApp();
+      const unrelatedUniqueViolation = Object.assign(
+        new Error(
+          'duplicate key value violates unique constraint "environments_name_unique"',
+        ),
+        { code: '23505', constraint: 'environments_name_unique' },
+      );
+      mockCreateCustomAutomation.mockRejectedValue(unrelatedUniqueViolation);
+
+      const res = await postCreate(app, createBody());
+
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: 'internal_server_error' });
+      expect(onError).toHaveBeenCalledWith(
+        unrelatedUniqueViolation,
+        expect.anything(),
+      );
+    });
+
     it('returns 400 with the message when the automation cap is reached', async () => {
       const { app } = createApp();
       mockCreateCustomAutomation.mockRejectedValue(
