@@ -89,6 +89,7 @@ function buildInput(
     conflictResolverInstructions: null,
     channelAutoStartSlackChannels: [],
     managerSlackChannel: null,
+    managerDiscordChannel: null,
     managerStatsFrequency: 'off',
     managerStatsSlackChannel: null,
     managerStatsDiscordChannel: null,
@@ -203,6 +204,126 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     await db.delete(slackInstallations);
     await db.delete(users);
   });
+
+  it('saves a Discord manager channel without Slack and returns the persisted id', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'managers',
+    });
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C123OLD',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerDiscordChannel: 'D111',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+
+    if (result.success) {
+      expect(result.settings.managerDiscordChannelId).toBe('D111');
+      expect(result.settings.managerSlackChannelId).toBeNull();
+      expect(result.settings.suggesterFrequency).toBe('off');
+      expect(result.settings.announcerFrequency).toBe('off');
+      expect(result.settings.managerStatsFrequency).toBe('off');
+    }
+  }, 15_000);
+
+  it('switches a Discord manager channel to Slack and clears Discord', async () => {
+    await insertSlackInstallation();
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerDiscordChannelId: 'D111',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerSlackChannel: 'C123456NEW',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+
+    if (result.success) {
+      expect(result.settings.managerSlackChannelId).toBe('C123456NEW');
+      expect(result.settings.managerDiscordChannelId).toBeNull();
+    }
+  }, 15_000);
+
+  it('preserves a Discord manager channel when a legacy manager save omits the Discord field', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerDiscordChannelId: 'D111',
+    });
+    const input = buildInput({
+      savingAutomation: 'managerChannel',
+      managerSlackChannel: null,
+    });
+    delete input.managerDiscordChannel;
+
+    const result = await updateBackgroundAgentSettingsCommand(adminAuth, input);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.managerDiscordChannelId).toBe('D111');
+      expect(result.settings.managerSlackChannelId).toBeNull();
+    }
+  }, 15_000);
+
+  it('rejects a Discord manager channel outside the available catalog', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerDiscordChannel: 'D999',
+      }),
+    );
+
+    expect(result.success).toBe(false);
+
+    if (!result.success) {
+      expect(result.fieldErrors.managerDiscordChannel).toBe(
+        'This Discord channel is not available to Roomote.',
+      );
+      expect(result.fieldErrors.general).toBeUndefined();
+    }
+  }, 15_000);
+
+  it('preserves a Discord manager channel on unrelated saves and uses it as the automation destination', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'managers',
+    });
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerDiscordChannelId: 'D111',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+
+    if (result.success) {
+      expect(result.settings.managerDiscordChannelId).toBe('D111');
+      expect(result.settings.managerSlackChannelId).toBeNull();
+      expect(result.settings.managerStatsFrequency).toBe('weekly');
+    }
+  }, 15_000);
 
   it('writes a discord_channel target and clears the Slack one without requiring a Slack installation', async () => {
     await insertAvailableDiscordChannel({

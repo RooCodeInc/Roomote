@@ -222,6 +222,39 @@ describe('platform issue alert delivery', () => {
     expect(reportRow?.slackPostedAt).not.toBeNull();
   });
 
+  it('posts to the Discord manager channel when no automation destination is configured', async () => {
+    const taskId = 'task-platform-issue-discord-manager';
+    const runId = await seedTaskRun(taskId);
+
+    await upsertAutomation(db, {
+      key: 'platform_issue_alerts',
+      enabled: false,
+      targets: [],
+    });
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerDiscordChannelId: 'D999MANAGER',
+    });
+
+    await recordTaskMessageEnvelope({
+      runId,
+      taskId,
+      envelope: buildReportEnvelope(),
+    });
+
+    expect(mockDiscordPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'D999MANAGER',
+        textFormat: 'markdown',
+      }),
+    );
+    expect(mockSlackPostMessage).not.toHaveBeenCalled();
+
+    const reportRow = await findReportRow(taskId);
+    expect(reportRow?.slackPostedAt).not.toBeNull();
+  });
+
   it('leaves the report unposted when the Discord destination has no runtime credentials', async () => {
     const taskId = 'task-platform-issue-no-creds';
     const runId = await seedTaskRun(taskId);

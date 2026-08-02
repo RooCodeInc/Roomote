@@ -1,0 +1,1 @@
+ALTER TABLE "deployment_settings" ADD COLUMN "manager_discord_channel_id" text;
