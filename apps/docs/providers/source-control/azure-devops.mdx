@@ -18,7 +18,9 @@ Create a dedicated Azure DevOps bot or service-account user and give it access
 to the organization, projects, or repositories Roomote should use. Create a PAT
 for that identity with Code read/write permissions appropriate for cloning,
 branch creation, and commits. Enable Build read access for CI Failure Triage and
-Work Items read access for work-item comment triggers.
+Work Items read access for work-item comment triggers. Grant Service Hooks read
+and manage access so Roomote can configure repository, pull-request, work-item,
+and build event delivery.
 
 Save the organization and token in setup, deployment env vars, or local
 `.env.local`. Onboarding only asks for those two values by default:
@@ -62,7 +64,7 @@ Service hook webhook secrets are generated automatically when Roomote
 configures service hooks. Advanced values remain editable later in Settings →
 Source Control.
 
-#### Azure DevOps access
+#### Required API permissions
 
 Azure DevOps does not use Microsoft Entra application permissions for service
 principals. Add the service principal to the Azure DevOps organization, assign

@@ -26,7 +26,10 @@ priority, or discussion.
     Select **Connect Linear**, approve the app in Linear, and return to Roomote.
     Deployments that provide `R_LINEAR_CLIENT_ID`,
     `R_LINEAR_CLIENT_SECRET`, and `R_LINEAR_WEBHOOK_SECRET` in the runtime
-    environment continue to use those values and skip the in-app setup.
+    environment skip Roomote's credential-entry flow, but the Linear app must
+    still use `https://<your-roomote-origin>/api/mcp-oauth/callback` as its OAuth
+    redirect URI and `https://<your-roomote-origin>/api/webhooks/linear` as its
+    `AgentSessionEvent` webhook URL.
   </Step>
   <Step title="Update or remove saved credentials">
     A deployment administrator can return to **Settings > Integrations** and

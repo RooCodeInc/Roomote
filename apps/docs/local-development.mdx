@@ -20,13 +20,15 @@ The full contributor walkthrough lives in the repository
 - **mise** — manages the repository toolchain (Node.js, pnpm, and friends).
 - **OpenCode CLI** — provides the `opencode` binary used to run tasks
   (`npm install -g opencode-ai`).
-- **ngrok** — optional, only when you point `R_PUBLIC_URL` at an ngrok
-  domain; any public HTTPS URL works.
+- **A public HTTPS URL** — set `R_PUBLIC_URL` to a URL that reaches local port
+  13000. An ngrok domain, Cloudflare Tunnel, Tailscale Funnel, or your own
+  domain works. Install ngrok only when you use an ngrok domain.
 
 ## Install and run
 
 ```sh
 mise install && pnpm install
+printf 'R_PUBLIC_URL=https://your-public-domain.example\n' >> .env.local
 pnpm dev
 ```
 
@@ -41,9 +43,9 @@ therefore upload screenshots and other artifacts without direct access to your
 machine's localhost ports. An explicit `S3_PRESIGN_ENDPOINT` continues to take
 precedence when you use separate object storage.
 
-Use a public HTTPS URL, such as an ngrok domain, when testing provider
-callbacks from source control or communications providers. Local-only URLs are
-fine for dashboard work that does not need external callbacks.
+`pnpm dev` requires the public HTTPS URL even when you only plan to use the
+dashboard, because the development stack resolves callback and artifact URLs
+during startup.
 
 Useful process-management commands:
 
