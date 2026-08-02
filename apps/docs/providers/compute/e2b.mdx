@@ -23,6 +23,7 @@ as deployment env vars:
 
 ```sh
 E2B_API_KEY=...
+E2B_TEMPLATE_ID=...
 ```
 
 Optional values:
@@ -34,6 +35,10 @@ E2B_MAX_SANDBOX_TIMEOUT_MS=3600000
 
 Use `E2B_DOMAIN` only for self-hosted or custom E2B clusters. The default E2B
 domain is enough for standard hosted E2B.
+
+When you connect E2B from **Settings > Sandboxes**, Roomote provisions the
+worker template and saves its ID. Environment-only deployments must build or
+provision that worker template separately and set `E2B_TEMPLATE_ID`.
 
 Roomote's provisioned E2B worker template includes Docker and Docker Compose,
 so environments can run [Docker projects](/environments/definition#docker-projects).

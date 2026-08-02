@@ -200,7 +200,7 @@ as per-task auth tokens or workspace paths.
 | `ZAI_REGION`                           | Provider key | Z.AI region: `global` (International) or `china`. Defaults to `global` when unset.                                                      |
 | `ZAI_CODING_PLAN_API_KEY`              | Provider key | Z.AI Coding Plan API key for `zai-coding-plan/...` models. Not a general platform key.                                                  |
 | `ZAI_CODING_PLAN_REGION`               | Provider key | Z.AI Coding Plan region: `global` (International) or `china`. Defaults to `global` when unset.                                          |
-| `OPENCODE_API_KEY`                     | Provider key | OpenCode Zen / Go API key.                                                                                                              |
+| `OPENCODE_API_KEY`                     | Provider key | OpenCode Zen API key.                                                                                                                   |
 | `GEMINI_API_KEY`                       | Provider key | Google Gemini API key. Can also be saved from **Settings > Models**.                                                                    |
 | `GOOGLE_GENERATIVE_AI_API_KEY`         | Provider key | Alternate Google/Gemini provider key forwarded when configured or inferred.                                                             |
 | `AWS_BEARER_TOKEN_BEDROCK`             | Provider key | Amazon Bedrock Mantle API key. Can also be saved from **Settings > Models**.                                                            |
@@ -241,16 +241,24 @@ as per-task auth tokens or workspace paths.
 | `MODAL_ENDPOINT`                     | Optional          | Modal endpoint override.                                                                                                                 |
 | `MODAL_ENVIRONMENT`                  | Optional          | Modal environment name.                                                                                                                  |
 | `MODAL_APP_NAME`                     | Optional          | Modal app name override.                                                                                                                 |
+| `MODAL_BASE_IMAGE_REF`               | Optional          | Base worker image reference used when provisioning Modal sandboxes.                                                                      |
+| `MODAL_REGISTRY_USERNAME`            | Optional          | Username for pulling a private Modal base image.                                                                                          |
+| `MODAL_REGISTRY_PASSWORD`            | Optional          | Password or token for pulling a private Modal base image.                                                                                 |
+| `MODAL_ECR_OIDC_ROLE_ARN`            | Optional          | AWS IAM role ARN used for OIDC-authenticated pulls from Amazon ECR.                                                                       |
+| `MODAL_ECR_REGION`                   | Optional          | AWS region for the ECR registry used with `MODAL_ECR_OIDC_ROLE_ARN`.                                                                      |
 | `MODAL_REGIONS`                      | Optional          | Comma-separated Modal sandbox placement regions (for example `us` or `us-west`). Unset keeps Modal default placement.                    |
 | `MODAL_VM_MEMORY_MIB`                | Optional          | Memory allocated to Modal VM sandboxes used for nested Docker workloads. Defaults to `8192` MiB.                                         |
 | `E2B_API_KEY`                        | E2B               | E2B API key. Can also be saved from **Settings > Sandboxes**.                                                                            |
+| `E2B_TEMPLATE_ID`                    | E2B               | Provisioned worker template ID. Saved automatically by UI setup; required for environment-only setup.                                    |
 | `E2B_DOMAIN`                         | Optional          | E2B domain for self-hosted or custom E2B clusters.                                                                                       |
 | `E2B_MAX_SANDBOX_TIMEOUT_MS`         | Optional          | Maximum E2B sandbox timeout Roomote will request. Defaults to one hour.                                                                  |
 | `DAYTONA_API_KEY`                    | Daytona           | Daytona API key. Can also be saved from **Settings > Sandboxes**.                                                                        |
 | `DAYTONA_API_URL`                    | Optional          | Daytona API URL override.                                                                                                                |
 | `DAYTONA_TARGET`                     | Optional          | Daytona target or region.                                                                                                                |
+| `DAYTONA_SNAPSHOT_NAME`              | Daytona           | Provisioned worker snapshot name. Saved automatically by UI setup; required for environment-only setup.                                  |
 | `BL_API_KEY`                         | Blaxel            | Blaxel API key. Can also be saved from **Settings > Sandboxes**.                                                                         |
 | `BL_WORKSPACE`                       | Blaxel            | Blaxel workspace name.                                                                                                                   |
+| `BLAXEL_IMAGE`                       | Blaxel            | Provisioned worker image name. Saved automatically by UI setup; required for environment-only setup.                                     |
 | `BLAXEL_REGION`                      | Optional          | Blaxel sandbox placement region. Unset lets Blaxel choose the closest region.                                                            |
 | `BLAXEL_STANDBY_MAX_COUNT`           | Optional          | Maximum Blaxel standby sandboxes retained for resume. Defaults to `25`; `0` disables retention.                                          |
 | `BLAXEL_STANDBY_MAX_AGE_HOURS`       | Optional          | Maximum age of a Blaxel standby sandbox. Defaults to `168`, capped at `168`.                                                             |
@@ -403,10 +411,11 @@ apply semantics.
 
 ## Environment variables versus environment settings
 
-Roomote also has **environment variables** inside **Settings > Environments**.
-Those are task workspace variables: they are made available to Roomote tasks
-running in that environment.
+Roomote also has per-environment **environment variables** inside **Settings >
+Environments**. Those task workspace variables are stored with that environment
+and configure the codebase Roomote is working on.
 
-This page is about deployment configuration variables. Deployment variables
-configure Roomote itself; environment variables inside an environment configure
-the codebase Roomote is working on.
+The encrypted deployment variables managed under **Deployment Environment
+Variables** can configure Roomote services and are also available to tasks in
+every environment. Per-environment values can reference them as `$KEY` or
+`${KEY}`, which keeps raw secrets out of environment definitions.

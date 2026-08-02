@@ -29,6 +29,7 @@ scopes are needed.
 
 ```sh
 DAYTONA_API_KEY=...
+DAYTONA_SNAPSHOT_NAME=...
 ```
 
 Optional values:
@@ -40,6 +41,10 @@ DAYTONA_TARGET=...
 
 Use `DAYTONA_API_URL` for custom Daytona endpoints. Use `DAYTONA_TARGET` when
 your account or deployment needs a specific target or region.
+
+When you connect Daytona from **Settings > Sandboxes**, Roomote provisions the
+worker snapshot and saves its name. Environment-only deployments must build or
+provision that worker snapshot separately and set `DAYTONA_SNAPSHOT_NAME`.
 
 Roomote's Daytona worker snapshot includes Docker and Docker Compose, so
 environments can run

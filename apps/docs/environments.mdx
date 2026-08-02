@@ -145,9 +145,10 @@ Keep commands focused on setup, not final verification. Put test expectations
 in agent instructions when you want Roomote to run them before finishing a
 task, and include the exact command, package, or path when it matters.
 
-Use **Don't block setup even if it fails** only for helpful-but-optional
-steps. If the app cannot run without the command, let setup fail so the issue
-is visible.
+Repository setup runs in the background and records command failures as
+readiness warnings, so a task can begin before setup finishes. Review the setup
+status and logs before relying on a failed step; **Don't block setup even if it
+fails** does not currently change whether an ordinary task can start.
 
 ## Use an existing Docker setup
 
@@ -156,12 +157,15 @@ a **Docker project** (`docker_projects` in YAML) instead of duplicating that
 setup as Roomote-managed services. A project can use one or more Compose files
 or build a single Dockerfile. Roomote starts it after the repository is cloned
 and waits for its services to become healthy before repository setup commands
-run.
+run where the sandbox supports health checks. Blaxel starts Compose services
+without the health wait.
 
 Map container ports to named environment ports when a service should have a
 live preview. Compose mappings also identify the service that owns the port.
-Startup is required by default; mark a project optional only when tasks can
-still work usefully without it.
+Startup is required by default. A required project's failure stops later Docker
+projects, but ordinary tasks surface background setup failures as readiness
+warnings rather than blocking task start. Mark a project optional when later
+projects should still start after it fails.
 
 Docker projects are supported by all sandbox providers. They are isolated with
 the task and are removed when the task sandbox is destroyed. They are still
@@ -217,15 +221,15 @@ on the next restart (every overwrite is kept in version history). Removing a
 definition never deletes the environment; it just returns it to normal manual
 management.
 
-Definitions may reference repositories that are not linked yet; the
-environment is created anyway and repository mappings backfill on the next
-startup after linking. Keep secrets out of definition files — the
-per-environment `env` map is stored in plaintext, so use deployment
-environment variables under **Settings > Environments > Deployment Environment
-Variables** for secret values.
+Definitions that reference repositories not yet linked to the deployment are
+skipped. Link every repository, then restart Roomote to apply the definition.
+Keep secrets out of definition files: the per-environment `env` map is stored
+in plaintext. Store secrets as encrypted deployment variables under **Settings
+> Environments > Deployment Environment Variables**, then reference them as
+`$KEY` or `${KEY}` from the environment definition.
 
-See the [self-hosting guide](/self-hosting) for the compose mount pattern and
-operational details.
+See [Mount declarative environments](/self-hosting#mount-declarative-environments)
+for the Compose pattern.
 
 ## Make verification possible
 

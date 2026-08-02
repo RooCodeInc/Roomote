@@ -69,10 +69,11 @@ This is a good fit when:
 
 The tradeoff is that Docker uses the same host that runs the rest of your
 deployment. Heavy tasks can compete with the web app, API, database, queues, or
-other local services. Docker also depends on a restricted socket proxy that
-can create and manage worker containers on the host. The proxy is still
-privileged infrastructure, but the controller does not receive the raw host
-socket and unrelated Docker API sections remain blocked. Docker is not a
+other local services. Installer-managed production deployments use a restricted
+socket proxy that can create and manage worker containers on the host. The
+proxy is still privileged infrastructure, but the controller does not receive
+the raw host socket and unrelated Docker API sections remain blocked. Local
+development Compose mounts the host socket directly instead. Docker is not a
 multi-host scheduler.
 
 Hosted providers move the task sandbox into a provider-managed environment.

@@ -68,8 +68,8 @@ do not need direct network access to the endpoint or the API key.
 
 ## Common issues
 
-- **No models appear.** Confirm the endpoint URL includes the OpenAI `/v1` API
-  path and that the API key can list models when auth is required.
+- **No models appear.** Roomote accepts either the service root or a URL ending
+  in `/v1`. Confirm the API key can list models when auth is required.
 - **Tasks cannot reach the endpoint.** Check DNS, container networking, firewall
   rules, and whether the endpoint is reachable from the Roomote deployment.
 - **Tool calling fails.** Roomote needs models that support tool calling. Confirm

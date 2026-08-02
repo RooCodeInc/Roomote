@@ -68,8 +68,8 @@ your infrastructure monitoring to set the cost per token or per task.
 
 ## Common issues
 
-- **No models appear.** Confirm the endpoint includes `/v1` and that Roomote
-  can call the server's models endpoint.
+- **No models appear.** Roomote accepts either the service root or a URL ending
+  in `/v1`. Confirm Roomote can call the server's models endpoint.
 - **Requests return unauthorized.** Check `VLLM_API_KEY`, its bearer-token
   configuration on vLLM, and any reverse-proxy authentication.
 - **Tasks are slow or queue.** Check GPU memory, batch and concurrency settings,

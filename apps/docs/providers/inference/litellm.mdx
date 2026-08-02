@@ -73,8 +73,8 @@ overrides.
 
 ## Common issues
 
-- **No models appear.** Confirm the endpoint URL includes the LiteLLM `/v1`
-  API path and that the API key can list models.
+- **No models appear.** Roomote accepts either the service root or a URL ending
+  in `/v1`. Confirm the API key can list models.
 - **Tasks cannot reach LiteLLM.** Check DNS, container networking, firewall
   rules, and whether the endpoint is reachable from the Roomote deployment.
 - **Costs are missing or unexpected.** Check LiteLLM's model pricing and

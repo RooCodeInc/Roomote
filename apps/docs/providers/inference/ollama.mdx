@@ -17,9 +17,9 @@ not require an API key. You can also set the endpoint as a deployment variable:
 OLLAMA_BASE_URL=http://ollama:11434
 ```
 
-Use the Ollama service root, not its `/v1` path. The local default is
-`http://127.0.0.1:11434`; in a container deployment, use a hostname that
-Roomote can resolve, such as `http://ollama:11434`.
+Roomote accepts either the Ollama service root or a URL ending in `/v1`. The
+local default is `http://127.0.0.1:11434`; in a container deployment, use a
+hostname that Roomote can resolve, such as `http://ollama:11434`.
 
 After saving the provider, Roomote discovers available Ollama models. Enable the
 models you need and select them using `ollama/<model-name>`, for example

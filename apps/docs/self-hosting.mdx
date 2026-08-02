@@ -34,7 +34,7 @@ By the end of setup, you should have a reachable Roomote URL, sign-in, a
 source-control provider, a ChatGPT subscription or inference provider, at least
 one environment, and a first reviewable Roomote task.
 
-The canonical, always up-to-date guide for operating your own server lives in
+The detailed guide for operating your own server lives in
 [`SELF_HOSTING.md`](https://github.com/RooCodeInc/Roomote/blob/main/SELF_HOSTING.md)
 in the repository.
 
@@ -43,7 +43,7 @@ in the repository.
 SSH into a fresh Ubuntu or Debian server (x86_64 or arm64, 4 GB+ RAM) and run:
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash
+curl -fsSL https://get.roomote.dev | sudo bash
 ```
 
 The installer brings up the full stack from published images and prints a setup
@@ -157,6 +157,24 @@ After you upgrade, Roomote can surface the new release in the web app:
   Caddy container as the HTTPS entrypoint for your app and preview domains, and
   runs the containerized stack in production mode with per-install secrets
   (locally or on a server).
+
+## Mount declarative environments
+
+To provision [environments from definition files](/environments#provision-environments-declaratively),
+mount the directory into the `api` service and point
+`ROOMOTE_ENVIRONMENTS_DIR` at the container path:
+
+```yaml
+services:
+  api:
+    volumes:
+      - ./environments:/roomote/environments:ro
+    environment:
+      ROOMOTE_ENVIRONMENTS_DIR: /roomote/environments
+```
+
+Only the API service reads these files. Restart Roomote after changing them.
+Definitions are skipped until all repositories they reference are linked.
 
 ## Requirements
 

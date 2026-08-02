@@ -1,5 +1,5 @@
 ---
-title: OpenCode Zen / Go
+title: OpenCode Zen
 icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/opencode.svg'
 description: Use OpenCode's routed Zen model service with Roomote.
 ---
@@ -16,15 +16,18 @@ selected models.
 
 ## Configuration
 
-Add **OpenCode Zen / Go** in **Settings > Models** and paste the key, or set:
+Add the **OpenCode Zen / Go** option in **Settings > Models** and paste the key,
+or set:
 
 ```sh
 OPENCODE_API_KEY=...
 ```
 
-Roomote exposes routed models under the `opencode/` prefix and adds a recommended
-set after connection. The preset can use inexpensive routed models for helper
-work and stronger models for coding, planning, vision, and review.
+Roomote exposes routed Zen models under the `opencode/` prefix. OpenCode Go's
+separate `opencode-go/` models and endpoint are not currently supported. In
+task sandboxes, use Zen models that support the OpenAI-compatible chat
+completions endpoint; models that require OpenCode's Anthropic, Gemini, or
+Responses API routes are not currently available through Roomote's gateway.
 
 ## Cost behavior
 

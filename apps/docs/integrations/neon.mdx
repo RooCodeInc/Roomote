@@ -1,17 +1,17 @@
 ---
 title: Neon
-description: Let Roomote inspect Neon databases during a task.
+description: Let Roomote query and manage Neon databases during a task.
 icon: 'https://api.iconify.design/simple-icons:neon.svg?color=currentColor'
 ---
 
-Connect Neon when Roomote needs direct database context from your Neon projects
-while it investigates, plans, or explains a change.
+Connect Neon when Roomote needs to query or manage your Neon projects while it
+investigates, plans, or implements a change.
 
 ## When to use it
 
 - Inspect database state while debugging
 - Answer schema or data questions tied to a task
-- Connect repository work to the database environment it depends on
+- Create or manage projects and branches, run SQL, or change schemas and data
 
 ## How setup works
 
@@ -21,5 +21,7 @@ need it.
 
 ## What to expect
 
-Neon gives Roomote database context inside the task. Keep any repository changes
-and human review on the normal Roomote and Git workflow.
+Neon exposes mutating tools as well as read access. Neon recommends using its
+MCP server only with development and testing projects, not production data.
+Review tool calls carefully and limit the connected account to the projects the
+task needs.

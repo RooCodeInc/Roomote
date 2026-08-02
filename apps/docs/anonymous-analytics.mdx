@@ -6,8 +6,8 @@ description: What anonymous usage data a Roomote deployment can share, how it is
 
 Roomote can share **anonymous telemetry** with the Roomote team to help
 improve the product. This is on by default, controlled entirely by
-deployment admins, and designed so that Roomote-generated identifiers and the
-default payload cannot identify your company, users, code, or repositories.
+deployment admins. Roomote-generated identifiers are random, and the default
+payload excludes direct company, user, code, and repository identifiers.
 
 ## What gets sent
 
@@ -23,8 +23,10 @@ When anonymous telemetry is enabled, your deployment sends:
   for the past week; configured provider types; and enabled built-in
   integrations.
 
-What is **never** sent: names, emails, repository names, task contents,
-prompts, code, tokens, or credentials.
+Roomote does not send names, emails, repository names, task contents, prompts,
+code, tokens, or credentials. Usage events do include configured model provider
+and model identifiers, so avoid identifying names in custom provider labels or
+model slugs.
 
 ## How it is identified
 
