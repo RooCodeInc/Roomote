@@ -17,14 +17,13 @@ priority, or discussion.
 <Steps>
   <Step title="Set up the OAuth app">
     On a self-hosted deployment, an administrator goes to **Settings >
-    Integrations**, selects **Set it up**, and then selects **Create Linear
-    app** to open the pre-filled manifest. The app name defaults to the same
-    `roomote-<deployment-hostname>` convention used by the GitHub setup. After
-    creating the private app, copy its client ID, client secret, and webhook
-    secret back into Roomote. Roomote encrypts the saved credentials.
+    Integrations**, selects **Set up Linear**, and then selects **Create the
+    app** to open the pre-filled manifest. The app name defaults to `Roomote`.
+    After creating the private app, copy its client ID, client secret, and
+    webhook secret back into Roomote. Roomote encrypts the saved credentials.
   </Step>
   <Step title="Connect the workspace">
-    Select **Enable Linear**, approve the app in Linear, and return to Roomote.
+    Select **Connect Linear**, approve the app in Linear, and return to Roomote.
     Deployments that provide `R_LINEAR_CLIENT_ID`,
     `R_LINEAR_CLIENT_SECRET`, and `R_LINEAR_WEBHOOK_SECRET` in the runtime
     environment continue to use those values and skip the in-app setup.

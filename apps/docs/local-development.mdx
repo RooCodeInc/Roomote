@@ -56,9 +56,9 @@ pnpm dev --reset           # start with a database reset
 ## Validation
 
 ```sh
-pnpm lint          # Prettier format check + ESLint
+pnpm lint          # oxfmt check + oxlint + residual workspace ESLint
 pnpm check-types   # TypeScript type checking
-pnpm lint:fast     # Matches the pre-push hook's lint step
+pnpm lint:fast     # oxlint + residual ESLint; matches pre-push lint
 pnpm check-types:fast # Matches the pre-push hook's typecheck step
 pnpm knip          # Also part of the pre-push hook
 pnpm test          # Vitest across all workspaces

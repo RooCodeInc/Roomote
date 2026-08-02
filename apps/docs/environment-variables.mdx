@@ -150,6 +150,7 @@ as per-task auth tokens or workspace paths.
 | `BETTER_AUTH_SECRET`                | Optional                         | Dedicated secret for signing sign-in session cookies. At least 32 characters. Falls back to `ENCRYPTION_KEY` when unset; setting it later invalidates existing sessions. |
 | `ARTIFACT_SIGNING_KEY`              | Production                       | Secret used to sign artifact access. Must be at least 32 characters.                                                                                                     |
 | `ARTIFACT_SIGNING_KEY_PREVIOUS`     | Rotation                         | Previous artifact signing key during rotation.                                                                                                                           |
+| `R_LICENSE_KEY`                     | More than 10 registered users    | Deployment license key for user limits above the free tier.                                                                                                              |
 | `JOB_AUTH_PRIVATE_KEY`              | Production unless auto-generated | Base64-encoded P-256 private key for run and user auth tokens.                                                                                                           |
 | `JOB_AUTH_PUBLIC_KEY`               | Production unless auto-generated | Base64-encoded P-256 public key for run and user auth token verification.                                                                                                |
 | `PREVIEW_AUTH_PRIVATE_KEY`          | Production unless auto-generated | Base64-encoded P-256 private key for preview auth tokens.                                                                                                                |
@@ -178,6 +179,8 @@ as per-task auth tokens or workspace paths.
 | `R_MODEL_ENV_KEYS`                     | Optional     | Comma- or space-separated list of extra provider key env vars to forward to task workers.                                               |
 | `OPENROUTER_API_KEY`                   | Provider key | OpenRouter API key. Can also be saved from **Settings > Models**.                                                                       |
 | `AI_GATEWAY_API_KEY`                   | Provider key | Vercel AI Gateway API key.                                                                                                              |
+| `BASETEN_API_KEY`                      | Provider key | Baseten API key.                                                                                                                        |
+| `TOGETHER_API_KEY`                     | Provider key | Together AI API key.                                                                                                                    |
 | `OPENAI_API_KEY`                       | Provider key | OpenAI API key.                                                                                                                         |
 | `AZURE_API_KEY`                        | Provider key | Azure OpenAI API key.                                                                                                                   |
 | `AZURE_RESOURCE_NAME`                  | Provider config | Azure OpenAI resource name, without the domain or URL.                                                                                |
@@ -257,8 +260,8 @@ as per-task auth tokens or workspace paths.
 | `AZURE_CLIENT_SECRET`                | Optional          | Service principal client secret (with `AZURE_TENANT_ID` + `AZURE_CLIENT_ID`).                     |
 | `AZURE_SANDBOX_REGISTRY_USERNAME`    | Optional          | Username for pulling a private worker image during disk-image provisioning (GHCR: token owner's GitHub username).                     |
 | `AZURE_SANDBOX_REGISTRY_TOKEN`       | Optional          | Token for pulling a private worker image during disk-image provisioning (GHCR: PAT with `read:packages`).                     |
-| `AZURE_SANDBOX_SIZE`                 | Optional          | Default sandbox size: `XS` (0.25/0.5 GiB/5 GiB disk), `S` (0.5/1 GiB/10 GiB disk), `M` (1/2 GiB/20 GiB, default), `L` (2/4/40 GiB), `XL` (4/8/80 GiB). ACA caps memory at cores×2Gi (CPU scales up to fit) and disk at cores×20Gi (clamped).                     |
-| `AZURE_SANDBOX_EGRESS_INSPECTION`    | Optional          | Egress proxy TLS inspection: `Partial` (default — only rule-matched traffic inspected), `Full`, `Legacy`, `None`. Use `Full` only with egress rules/transforms; it TLS-resigns all traffic and blocks non-HTTP.                     |
+| `AZURE_SANDBOX_SIZE`                 | Optional          | Sandbox size override: `XS` (0.25/0.5 GiB/5 GiB disk), `S` (0.5/1 GiB/10 GiB disk), `M` (1/2 GiB/20 GiB), `L` (2/4/40 GiB), `XL` (4/8/80 GiB). When unset, Roomote uses its 4 GiB task allocation. ACA caps memory at cores×2Gi (CPU scales up to fit) and disk at cores×20Gi (clamped).                     |
+| `AZURE_SANDBOX_EGRESS_INSPECTION`    | Optional          | ACA egress TLS inspection override: `Legacy`, `Full`, `Partial`, or `None`. Defaults to `Partial` when unset; configured values are passed to ACA. Use `Full` only with egress rules or transforms because it TLS-resigns all traffic and blocks non-HTTP traffic.                     |
 | `WORKER_RELEASE_CHANNEL`             | Optional          | Worker release channel, `stable` or `preview`, for hosted worker release selection.                                                      |
 | `WORKER_RELEASE_VERSION`             | Optional          | Explicit worker release version for hosted worker bootstrap.                                                                             |
 | `LOCAL_SANDBOX_FILES_DIR`            | Local development | Local override for sandbox bootstrap files. Used only by development workflows.                                                          |
@@ -326,8 +329,6 @@ as per-task auth tokens or workspace paths.
 | `R_DISCORD_BOT_TOKEN`          | Discord           | Discord bot token. The bot and application identity are read from this token.    |
 | `R_DISCORD_GATEWAY_SECRET`     | Discord           | Shared internal secret for Discord event delivery between BullMQ and API. Auto-generated when Discord is saved in the UI if unset, and auto-healed when Discord is already configured without one. |
 | `DISCORD_API_BASE_URL`         | Optional          | Discord REST API base URL override, primarily for testing.                       |
-| `R_SLACK_CLIENT_ID`            | Slack sign-in     | Slack sign-in client ID. `R_SLACK_CLIENT_ID` is also accepted.                   |
-| `R_SLACK_CLIENT_SECRET`        | Slack sign-in     | Slack sign-in client secret. `R_SLACK_CLIENT_SECRET` is also accepted.           |
 | `R_MICROSOFT_CLIENT_ID`        | Microsoft sign-in | Microsoft OAuth client ID.                                                       |
 | `R_MICROSOFT_CLIENT_SECRET`    | Microsoft sign-in | Microsoft OAuth client secret.                                                   |
 | `R_MICROSOFT_TENANT_ID`        | Microsoft sign-in | Microsoft tenant ID. Also accepted as the Azure DevOps tenant ID fallback.       |
