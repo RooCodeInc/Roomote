@@ -6,7 +6,7 @@ import {
 } from './api-client.js';
 import { errorResult } from './tool-result.js';
 
-export type ManageCustomAutomationsParams = {
+type ManageCustomAutomationsParams = {
   action:
     | 'list'
     | 'resolve_schedule'
