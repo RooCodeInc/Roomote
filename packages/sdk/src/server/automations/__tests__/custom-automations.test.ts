@@ -34,6 +34,7 @@ vi.mock('../destination', () => ({
 }));
 
 vi.mock('../scheduling-utils', () => ({
+  DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL: 3,
   isRunDue: vi.fn(),
   resolveSlackWorkspaceTimezone: vi.fn(async () => 'UTC'),
 }));
