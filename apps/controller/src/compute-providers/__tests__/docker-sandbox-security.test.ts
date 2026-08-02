@@ -196,7 +196,11 @@ describe('prepareDockerTaskNetwork', () => {
           },
         ]);
       }
-      if (args[0] === 'inspect' && args[1] === 'apiContainerId') {
+      if (
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === 'apiContainerId'
+      ) {
         return JSON.stringify([
           {
             Config: {
@@ -375,7 +379,11 @@ describe('restoreDockerStandbyNetworking', () => {
           },
         ]);
       }
-      if (args[0] === 'inspect' && args[1] === 'apiContainerId') {
+      if (
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === 'apiContainerId'
+      ) {
         return JSON.stringify([
           {
             Config: { Labels: { 'com.docker.compose.service': 'api' } },
@@ -390,7 +398,11 @@ describe('restoreDockerStandbyNetworking', () => {
           },
         ]);
       }
-      if (args[0] === 'inspect' && args[1] === 'previewContainerId') {
+      if (
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === 'previewContainerId'
+      ) {
         return JSON.stringify([
           {
             Config: {
@@ -450,6 +462,54 @@ describe('restoreDockerStandbyNetworking', () => {
 });
 
 describe('cleanupStaleDockerSandboxes', () => {
+  it('uses container-specific inspection when a stale worker no longer exists', async () => {
+    const taskNetwork = getDockerTaskNetworkName(27);
+    const containerName = 'roomote-worker-27';
+    const nowMs = 20 * 60 * 1_000;
+    const createdAtMs = 1_000;
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (args[0] === 'network' && args[1] === 'ls') {
+        return `${taskNetwork}\n`;
+      }
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === taskNetwork
+      ) {
+        return JSON.stringify([
+          {
+            Labels: {
+              'dev.roomote.sandbox.container': containerName,
+              'dev.roomote.sandbox.managed': 'true',
+              'dev.roomote.sandbox.auto-remove': 'true',
+              'dev.roomote.sandbox.created-at-ms': String(createdAtMs),
+            },
+          },
+        ]);
+      }
+      if (
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === containerName
+      ) {
+        throw new Error(`No such container: ${containerName}`);
+      }
+      return '';
+    });
+
+    await cleanupStaleDockerSandboxes({ nowMs }, runDocker);
+
+    expect(runDocker).toHaveBeenCalledWith([
+      'container',
+      'inspect',
+      containerName,
+    ]);
+    expect(runDocker).not.toHaveBeenCalledWith(['inspect', containerName]);
+    expect(runDocker).toHaveBeenCalledWith(['network', 'rm', taskNetwork], {
+      allowFailure: true,
+    });
+  });
+
   it('removes an old orphan network after disconnecting trusted peers', async () => {
     const taskNetwork = getDockerTaskNetworkName(92);
     const runDocker = vi.fn<DockerCommand>(async (args) => {
@@ -506,7 +566,11 @@ describe('cleanupStaleDockerSandboxes', () => {
       if (args[0] === 'network' && args[1] === 'inspect') {
         return networkInspect;
       }
-      if (args[0] === 'inspect' && args[1] === 'roomote-worker-93') {
+      if (
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === 'roomote-worker-93'
+      ) {
         return JSON.stringify([{ State: { Running: false } }]);
       }
       return '';
@@ -514,6 +578,11 @@ describe('cleanupStaleDockerSandboxes', () => {
 
     await cleanupStaleDockerSandboxes({ nowMs: 20_000 }, runDocker);
 
+    expect(runDocker).toHaveBeenCalledWith([
+      'container',
+      'inspect',
+      'roomote-worker-93',
+    ]);
     expect(runDocker).toHaveBeenCalledWith(['rm', '-f', 'roomote-worker-93'], {
       allowFailure: true,
     });
@@ -562,10 +631,18 @@ describe('cleanupStaleDockerSandboxes', () => {
           },
         ]);
       }
-      if (args[0] === 'inspect' && args[1] === 'roomote-worker-96') {
+      if (
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === 'roomote-worker-96'
+      ) {
         return JSON.stringify([{ State: { Running: true } }]);
       }
-      if (args[0] === 'inspect' && args[1] === 'replacementApi') {
+      if (
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === 'replacementApi'
+      ) {
         return JSON.stringify([
           {
             Config: { Labels: { 'com.docker.compose.service': 'api' } },
@@ -665,7 +742,11 @@ describe('cleanupStaleDockerSandboxes', () => {
             },
           ]);
         }
-        if (args[0] === 'inspect' && args[1] === containerName) {
+        if (
+          args[0] === 'container' &&
+          args[1] === 'inspect' &&
+          args[2] === containerName
+        ) {
           return JSON.stringify([{ State: { Running: true } }]);
         }
         if (args[0] === 'exec') {
@@ -702,7 +783,11 @@ describe('cleanupStaleDockerSandboxes', () => {
           },
         ]);
       }
-      if (args[0] === 'inspect' && args[1] === 'apiContainerId') {
+      if (
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === 'apiContainerId'
+      ) {
         return JSON.stringify([
           {
             Config: { Labels: { 'com.docker.compose.service': 'api' } },
