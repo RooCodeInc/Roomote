@@ -444,6 +444,53 @@ export function CustomAutomationsSection() {
             </Select>
           </div>
 
+          {form.scheduleMode === 'cron' ? (
+            <div className="space-y-2">
+              <Label htmlFor="custom-automation-cron">Custom schedule</Label>
+              <Input
+                id="custom-automation-cron"
+                value={form.cronExpression}
+                disabled={busy}
+                placeholder="Weekdays at 9am or 0 9 * * 1-5"
+                onChange={(event) => {
+                  setResolvedCron(null);
+                  setScheduleSummary(null);
+                  setForm((current) => ({
+                    ...current,
+                    cronExpression: event.target.value,
+                  }));
+                }}
+                onBlur={() => {
+                  const alreadyResolvingThisInput =
+                    resolveScheduleMutation.isPending &&
+                    resolveScheduleMutation.variables?.schedule ===
+                      form.cronExpression;
+                  if (
+                    !clientParsedCron &&
+                    !resolvedCron &&
+                    form.cronExpression.trim() &&
+                    !alreadyResolvingThisInput
+                  ) {
+                    resolveScheduleMutation.mutate({
+                      schedule: form.cronExpression,
+                    });
+                  }
+                }}
+              />
+              {resolveScheduleMutation.isPending ? (
+                <p className="text-sm text-muted-foreground">
+                  Interpreting schedule...
+                </p>
+              ) : effectiveScheduleSummary ? (
+                <p className="text-sm text-muted-foreground">
+                  {effectiveScheduleSummary}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label>Environment</Label>
             <Select
@@ -468,66 +515,21 @@ export function CustomAutomationsSection() {
               </SelectContent>
             </Select>
           </div>
-        </div>
 
-        {form.scheduleMode === 'cron' ? (
           <div className="space-y-2">
-            <Label htmlFor="custom-automation-cron">Custom schedule</Label>
-            <Input
-              id="custom-automation-cron"
-              className="sm:max-w-md"
-              value={form.cronExpression}
+            <Label>Model</Label>
+            <ModelSelect
+              className="w-full"
+              size="default"
+              ariaLabel="Automation model"
+              value={form.model}
+              emptyOptionLabel="Deployment default"
               disabled={busy}
-              placeholder="Weekdays at 9am or 0 9 * * 1-5"
-              onChange={(event) => {
-                setResolvedCron(null);
-                setScheduleSummary(null);
-                setForm((current) => ({
-                  ...current,
-                  cronExpression: event.target.value,
-                }));
-              }}
-              onBlur={() => {
-                const alreadyResolvingThisInput =
-                  resolveScheduleMutation.isPending &&
-                  resolveScheduleMutation.variables?.schedule ===
-                    form.cronExpression;
-                if (
-                  !clientParsedCron &&
-                  !resolvedCron &&
-                  form.cronExpression.trim() &&
-                  !alreadyResolvingThisInput
-                ) {
-                  resolveScheduleMutation.mutate({
-                    schedule: form.cronExpression,
-                  });
-                }
-              }}
+              onValueChange={(value) =>
+                setForm((current) => ({ ...current, model: value }))
+              }
             />
-            {resolveScheduleMutation.isPending ? (
-              <p className="text-sm text-muted-foreground">
-                Interpreting schedule...
-              </p>
-            ) : effectiveScheduleSummary ? (
-              <p className="text-sm text-muted-foreground">
-                {effectiveScheduleSummary}
-              </p>
-            ) : null}
           </div>
-        ) : null}
-
-        <div className="space-y-2">
-          <Label>Model</Label>
-          <ModelSelect
-            className="w-full sm:max-w-md"
-            ariaLabel="Automation model"
-            value={form.model}
-            emptyOptionLabel="Deployment default"
-            disabled={busy}
-            onValueChange={(value) =>
-              setForm((current) => ({ ...current, model: value }))
-            }
-          />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

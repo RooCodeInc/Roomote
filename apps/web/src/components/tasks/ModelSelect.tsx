@@ -25,6 +25,8 @@ type ModelSelectProps = {
    * string value, for pickers where "no override" is a valid choice.
    */
   emptyOptionLabel?: string;
+  /** Trigger size; use 'default' to line up with default-size form controls. */
+  size?: 'sm' | 'default';
 };
 
 // Radix Select items cannot use an empty-string value, so the empty option
@@ -45,6 +47,7 @@ export function ModelSelect({
   className,
   ariaLabel = 'Model',
   emptyOptionLabel,
+  size = 'sm',
 }: ModelSelectProps) {
   const { data, isPending } = useLaunchTaskModels();
   const modelGroups = useMemo(() => {
@@ -75,7 +78,7 @@ export function ModelSelect({
       }
       disabled={disabled || isPending || !data}
     >
-      <SelectTrigger size="sm" className={className} aria-label={ariaLabel}>
+      <SelectTrigger size={size} className={className} aria-label={ariaLabel}>
         <SelectValue placeholder="Model" />
       </SelectTrigger>
       <SelectContent>
