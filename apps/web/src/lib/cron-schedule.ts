@@ -38,10 +38,21 @@ export function tryParseCronSchedule(
     });
     return {
       cronExpression,
-      summary: cronstrue.toString(cronExpression, { verbose: false }),
+      summary: summarizeCronExpression(cronExpression),
       nextRunAt: interval.next().toDate(),
     };
   } catch {
     return null;
   }
+}
+
+// cronstrue renders a plain daily schedule as just "At 09:00 AM"; lead with
+// "Daily" so the cadence reads explicitly, matching the preset labels.
+function summarizeCronExpression(cronExpression: string): string {
+  const summary = cronstrue.toString(cronExpression, { verbose: false });
+  const [, , dayOfMonth, month, dayOfWeek] = cronExpression.split(' ');
+  const isDaily = dayOfMonth === '*' && month === '*' && dayOfWeek === '*';
+  return isDaily && summary.startsWith('At ')
+    ? `Daily ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`
+    : summary;
 }

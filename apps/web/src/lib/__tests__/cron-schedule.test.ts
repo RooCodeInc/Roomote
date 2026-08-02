@@ -20,6 +20,16 @@ describe('tryParseCronSchedule', () => {
     expect(parsed?.nextRunAt.toISOString()).toBe('2026-08-01T13:00:00.000Z');
   });
 
+  it('labels wildcard-date schedules as daily', () => {
+    expect(tryParseCronSchedule('0 9 * * *', 'UTC', NOW)?.summary).toBe(
+      'Daily at 09:00 AM',
+    );
+    // Interval schedules keep cronstrue's own phrasing.
+    expect(tryParseCronSchedule('*/15 * * * *', 'UTC', NOW)?.summary).toBe(
+      'Every 15 minutes',
+    );
+  });
+
   it('normalizes surrounding and repeated whitespace', () => {
     const parsed = tryParseCronSchedule('  0  9 * *  * ', 'UTC', NOW);
     expect(parsed?.cronExpression).toBe('0 9 * * *');
