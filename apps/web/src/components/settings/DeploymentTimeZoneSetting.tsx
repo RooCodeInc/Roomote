@@ -78,10 +78,7 @@ export function DeploymentTimeZoneSetting() {
     return (
       <p className="text-sm text-muted-foreground">
         Scheduling timezone:{' '}
-        <span className="font-medium text-foreground">
-          {effectiveTimeZone}
-          {settings.data?.timeZoneSource !== 'explicit' ? ' (inferred)' : ''}
-        </span>{' '}
+        <span className="font-medium text-foreground">{effectiveTimeZone}</span>{' '}
         <Button
           type="button"
           variant="link"
