@@ -293,6 +293,7 @@ import {
   getBackgroundAgentSettingsCommand,
   listAutomationDiscordChannelsCommand,
   listCustomAutomationsCommand,
+  resolveCustomAutomationScheduleCommand,
   listSlackChannelsCommand,
   triggerCustomAutomationCommand,
   updateBackgroundAgentSettingsCommand,
@@ -375,6 +376,7 @@ import {
 } from '../commands/feature-flags';
 import {
   getMiscSettingsCommand,
+  setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
 import {
@@ -660,7 +662,9 @@ const automationsRouter = createRouter({
           'every_6_hours',
           'daily',
           'weekly',
+          'cron',
         ]),
+        cronExpression: z.string().trim().max(200).nullable().optional(),
         environmentId: z.string().uuid(),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
@@ -692,7 +696,9 @@ const automationsRouter = createRouter({
           'every_6_hours',
           'daily',
           'weekly',
+          'cron',
         ]),
+        cronExpression: z.string().trim().max(200).nullable().optional(),
         environmentId: z.string().uuid(),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
@@ -721,6 +727,11 @@ const automationsRouter = createRouter({
     .input(z.object({ id: z.string().uuid() }))
     .mutation(({ ctx: { auth }, input }) =>
       triggerCustomAutomationCommand(auth, input),
+    ),
+  resolveCustomAutomationSchedule: protectedProcedure
+    .input(z.object({ schedule: z.string().trim().min(1).max(500) }))
+    .mutation(({ ctx: { auth }, input }) =>
+      resolveCustomAutomationScheduleCommand(auth, input),
     ),
 });
 
@@ -2624,6 +2635,11 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setAnonymousAnalyticsCommand(auth, input),
+      ),
+    setTimeZone: protectedProcedure
+      .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setDeploymentTimeZoneCommand(auth, input),
       ),
   }),
 

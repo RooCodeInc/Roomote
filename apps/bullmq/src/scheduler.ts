@@ -146,7 +146,7 @@ async function createJobs(queue: Queue): Promise<void> {
 
   await queue.upsertJobScheduler(
     ScheduledJobName.CustomAutomations,
-    { every: 60 * 60 * 1000 }, // Every 60 minutes.
+    { every: 60 * 1000 }, // Every minute for five-field cron precision.
   );
 
   await queue.upsertJobScheduler(

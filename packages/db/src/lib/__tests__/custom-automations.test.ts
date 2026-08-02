@@ -99,6 +99,42 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
+  it('persists canonical cron schedules and rejects invalid mode combinations', async () => {
+    const [environment] = await db
+      .insert(environments)
+      .values({
+        name: `custom-auto-env-cron-${Date.now()}`,
+        config: { name: 'test', repositories: [] },
+      })
+      .returning();
+
+    const created = await createCustomAutomation({
+      name: `Cron scan ${Date.now()}`,
+      prompt: 'Scan every weekday morning.',
+      enabled: true,
+      scheduleMode: 'cron',
+      cronExpression: '0 9 * * 1-5',
+      environmentId: environment!.id,
+      target: {},
+    });
+    expect(created.scheduleMode).toBe('cron');
+    expect(created.cronExpression).toBe('0 9 * * 1-5');
+
+    await expect(
+      updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: '0 9 * * *',
+        environmentId: environment!.id,
+        target: {},
+      }),
+    ).rejects.toThrow('only valid for a cron schedule');
+
+    await deleteCustomAutomation(created.id);
+  });
+
   it('claims a launch while the previous task is still active', async () => {
     const [environment] = await db
       .insert(environments)

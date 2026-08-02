@@ -63,6 +63,7 @@ import type { ToolResult } from './types.js';
 import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
+import { handleManageCustomAutomations } from './custom-automations.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -76,6 +77,57 @@ export const roomoteMcpServer = new McpServer({
 
 let hasSubmittedAutomationSlackSummary = false;
 const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);
+
+roomoteMcpServer.registerTool(
+  'manage_custom_automations',
+  {
+    title: 'Manage Custom Automations',
+    description:
+      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone.',
+    inputSchema: {
+      action: z.enum([
+        'list',
+        'resolve_schedule',
+        'create',
+        'update',
+        'delete',
+        'run_now',
+      ]),
+      automationId: z
+        .string()
+        .optional()
+        .describe('Required for update, delete, and run_now.'),
+      name: z.string().optional(),
+      prompt: z.string().optional(),
+      enabled: z.boolean().optional(),
+      schedule: z
+        .string()
+        .optional()
+        .describe(
+          'A five-field cron expression, preset, or natural-language recurring schedule.',
+        ),
+      environmentId: z.string().optional(),
+      targetProvider: z
+        .enum(['slack', 'discord', 'teams', 'telegram'])
+        .optional(),
+      targetChannelId: z.string().optional(),
+      targetServiceUrl: z.string().optional(),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  async (params): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+    return handleManageCustomAutomations(params, config);
+  },
+);
 
 roomoteMcpServer.registerTool(
   'get_about_me',

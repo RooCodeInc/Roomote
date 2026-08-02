@@ -1605,6 +1605,9 @@ importers:
       bullmq:
         specifier: ^5.78.0
         version: 5.78.0
+      cron-parser:
+        specifier: 5.6.1
+        version: 5.6.1
       superjson:
         specifier: ^2.2.6
         version: 2.2.6
@@ -7074,6 +7077,11 @@ packages:
   cron-parser@4.9.0:
     resolution: {integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==}
     engines: {node: '>=12.0.0'}
+    deprecated: v4 is no longer maintained, upgrade to v5
+
+  cron-parser@5.6.1:
+    resolution: {integrity: sha512-QBm4o1PwZiuY7KFbVvW7FLC8bozy7YWzv+Fz6KRS7sQghzcbDZCGxr/Bc5b6TQreAoSwuWVP491dIcK0THCX6A==}
+    engines: {node: '>=18'}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -17599,6 +17607,10 @@ snapshots:
       readable-stream: 4.7.0
 
   cron-parser@4.9.0:
+    dependencies:
+      luxon: 3.7.2
+
+  cron-parser@5.6.1:
     dependencies:
       luxon: 3.7.2
 

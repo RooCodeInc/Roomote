@@ -21,6 +21,7 @@ export {
   createCustomAutomationCommand,
   deleteCustomAutomationCommand,
   listCustomAutomationsCommand,
+  resolveCustomAutomationScheduleCommand,
   triggerCustomAutomationCommand,
   updateCustomAutomationCommand,
 } from './custom-automations';

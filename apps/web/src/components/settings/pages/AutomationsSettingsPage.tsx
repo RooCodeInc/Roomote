@@ -1,6 +1,7 @@
 'use client';
 
 import { AutomationsSettings } from '@/components/settings/automations';
+import { DeploymentTimeZoneSetting } from '@/components/settings/DeploymentTimeZoneSetting';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { PRODUCT_NAME } from '@roomote/types';
 
@@ -22,7 +23,10 @@ export function AutomationsSettingsPage() {
         </header>
 
         {isAdmin ? (
-          <AutomationsSettings />
+          <>
+            <DeploymentTimeZoneSetting />
+            <AutomationsSettings />
+          </>
         ) : (
           <Alert>
             <AlertCircle className="size-4" />

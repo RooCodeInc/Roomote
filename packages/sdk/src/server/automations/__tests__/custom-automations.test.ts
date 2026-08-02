@@ -38,6 +38,16 @@ vi.mock('../scheduling-utils', () => ({
   resolveSlackWorkspaceTimezone: vi.fn(async () => 'UTC'),
 }));
 
+vi.mock('../custom-automation-schedule', () => ({
+  resolveDeploymentTimeZone: vi.fn(async () => ({
+    timeZone: 'UTC',
+    source: 'utc_fallback',
+    updatedAt: null,
+  })),
+  validateCronExpression: vi.fn((value: string) => value),
+  isCronRunDue: vi.fn(() => true),
+}));
+
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   db,

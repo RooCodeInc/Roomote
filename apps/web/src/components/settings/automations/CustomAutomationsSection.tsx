@@ -40,6 +40,7 @@ type CustomAutomationFormState = {
   enabled: boolean;
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string;
+  cronExpression: string;
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetChannelId: string;
   targetServiceUrl: string;
@@ -51,6 +52,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   enabled: true,
   scheduleMode: 'daily',
   environmentId: '',
+  cronExpression: '',
   targetProvider: 'slack',
   targetChannelId: '',
   targetServiceUrl: '',
@@ -65,6 +67,7 @@ const SCHEDULE_OPTIONS: Array<{
   { value: 'every_6_hours', label: 'Every 6 hours' },
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
+  { value: 'cron', label: 'Custom schedule' },
 ];
 
 function scheduleLabel(mode: CustomAutomationScheduleMode): string {
@@ -107,6 +110,7 @@ function formFromRow(row: CustomAutomationListItem): CustomAutomationFormState {
     enabled: row.enabled,
     scheduleMode: row.scheduleMode,
     environmentId: row.environmentId ?? '',
+    cronExpression: row.cronExpression ?? '',
     targetProvider: target.provider,
     targetChannelId: target.channelId,
     targetServiceUrl: target.serviceUrl,
@@ -147,6 +151,8 @@ export function CustomAutomationsSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
+  const [resolvedCron, setResolvedCron] = useState<string | null>(null);
+  const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
 
   // New Slack destinations default to the shared manager channel, matching
   // where the other automations report by default.
@@ -194,6 +200,8 @@ export function CustomAutomationsSection() {
         toast.success('Custom automation created');
         setIsCreating(false);
         setForm(EMPTY_FORM);
+        setResolvedCron(null);
+        setScheduleSummary(null);
         await invalidate();
       },
       onError: (error) => {
@@ -208,6 +216,8 @@ export function CustomAutomationsSection() {
         toast.success('Custom automation saved');
         setEditingId(null);
         setForm(EMPTY_FORM);
+        setResolvedCron(null);
+        setScheduleSummary(null);
         await invalidate();
       },
       onError: (error) => {
@@ -247,6 +257,21 @@ export function CustomAutomationsSection() {
       },
     }),
   );
+  const resolveScheduleMutation = useMutation(
+    trpc.automations.resolveCustomAutomationSchedule.mutationOptions({
+      onSuccess: (result) => {
+        if (result.status === 'ambiguous') {
+          setResolvedCron(null);
+          setScheduleSummary(null);
+          toast.message(result.clarification ?? 'Clarify the schedule.');
+          return;
+        }
+        setResolvedCron(result.cronExpression);
+        setScheduleSummary(`${result.summary} (${result.timeZone})`);
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
 
   const rows = listQuery.data ?? [];
   const atCap = rows.length >= MAX_CUSTOM_AUTOMATIONS;
@@ -261,6 +286,10 @@ export function CustomAutomationsSection() {
       toast.error('Choose an environment.');
       return;
     }
+    if (form.scheduleMode === 'cron' && !resolvedCron) {
+      toast.error('Interpret and confirm the custom schedule first.');
+      return;
+    }
     if (form.targetProvider !== 'none' && !form.targetChannelId.trim()) {
       toast.error(
         'Choose a destination channel, or set the destination to None.',
@@ -273,6 +302,7 @@ export function CustomAutomationsSection() {
       prompt: form.prompt,
       enabled: form.enabled,
       scheduleMode: form.scheduleMode,
+      cronExpression: form.scheduleMode === 'cron' ? resolvedCron : null,
       environmentId: form.environmentId,
       ...(form.targetProvider !== 'none'
         ? {
@@ -339,12 +369,14 @@ export function CustomAutomationsSection() {
             <Select
               value={form.scheduleMode}
               disabled={busy}
-              onValueChange={(value) =>
+              onValueChange={(value) => {
+                setResolvedCron(null);
+                setScheduleSummary(null);
                 setForm((current) => ({
                   ...current,
                   scheduleMode: value as CustomAutomationScheduleMode,
-                }))
-              }
+                }));
+              }}
             >
               <SelectTrigger>
                 <SelectValue />
@@ -384,6 +416,48 @@ export function CustomAutomationsSection() {
             </Select>
           </div>
         </div>
+
+        {form.scheduleMode === 'cron' ? (
+          <div className="space-y-2">
+            <Label htmlFor="custom-automation-cron">Custom schedule</Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="custom-automation-cron"
+                value={form.cronExpression}
+                disabled={busy || resolveScheduleMutation.isPending}
+                placeholder="Weekdays at 9am or 0 9 * * 1-5"
+                onChange={(event) => {
+                  setResolvedCron(null);
+                  setScheduleSummary(null);
+                  setForm((current) => ({
+                    ...current,
+                    cronExpression: event.target.value,
+                  }));
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={
+                  !form.cronExpression.trim() ||
+                  resolveScheduleMutation.isPending
+                }
+                onClick={() =>
+                  resolveScheduleMutation.mutate({
+                    schedule: form.cronExpression,
+                  })
+                }
+              >
+                Interpret schedule
+              </Button>
+            </div>
+            {resolvedCron ? (
+              <p className="text-sm text-muted-foreground">
+                {resolvedCron} · {scheduleSummary}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
@@ -520,6 +594,8 @@ export function CustomAutomationsSection() {
                 setIsCreating(false);
                 setEditingId(null);
                 setForm(EMPTY_FORM);
+                setResolvedCron(null);
+                setScheduleSummary(null);
               }}
             >
               Cancel
@@ -558,6 +634,8 @@ export function CustomAutomationsSection() {
                 ...EMPTY_FORM,
                 targetChannelId: managerSlackChannelId,
               });
+              setResolvedCron(null);
+              setScheduleSummary(null);
             }}
           >
             <Plus className="size-4" />
@@ -610,7 +688,10 @@ export function CustomAutomationsSection() {
                       {row.name}
                     </CardTitle>
                     <p className="text-xs text-muted-foreground">
-                      {scheduleLabel(row.scheduleMode)} · {environmentName} ·{' '}
+                      {row.scheduleMode === 'cron'
+                        ? row.cronExpression
+                        : scheduleLabel(row.scheduleMode)}{' '}
+                      · {environmentName} ·{' '}
                       {target.provider === 'none'
                         ? destinationLabel
                         : `${target.provider}:${destinationLabel}`}{' '}
@@ -637,6 +718,8 @@ export function CustomAutomationsSection() {
                         setEditingId(row.id);
                         setIsCreating(false);
                         setForm(formFromRow(row));
+                        setResolvedCron(row.cronExpression ?? null);
+                        setScheduleSummary(null);
                       }}
                     >
                       Edit

@@ -15,7 +15,8 @@ import {
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
-import { isRunDue, resolveSlackWorkspaceTimezone } from './scheduling-utils';
+import { resolveDeploymentTimeZone } from './custom-automation-schedule';
+import { isRunDue } from './scheduling-utils';
 import { postScheduledTriageRoutingDebug } from './triage-routing-debug';
 import {
   emptyJobResult,
@@ -152,15 +153,7 @@ export function createScheduledTriageJob(
         }
 
         const channelId = destination.channelId;
-        const timezone = deployment.slackBotToken
-          ? await resolveSlackWorkspaceTimezone(
-              {
-                slackBotToken: deployment.slackBotToken,
-                slackTeamId: deployment.slackTeamId ?? '',
-              },
-              logPrefix,
-            )
-          : 'UTC';
+        const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
         if (
           !opts.manualTrigger &&

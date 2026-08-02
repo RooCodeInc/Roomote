@@ -376,6 +376,9 @@ vi.mock('@/trpc/client', () => ({
       triggerCustomAutomation: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
       },
+      resolveCustomAutomationSchedule: {
+        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+      },
       updateSettings: {
         mutationOptions: (options?: Record<string, unknown>) => {
           mutations.latestSettingsOptions =

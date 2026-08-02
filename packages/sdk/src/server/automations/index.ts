@@ -3,6 +3,7 @@ export {
   customAutomationsJob,
   runCustomAutomationNow,
 } from './custom-automations';
+export * from './custom-automation-schedule';
 export { ciFailureTriageJob } from './ci-failure-triage';
 export {
   launchCiFailureTriageForFailedRun,
