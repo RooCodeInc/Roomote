@@ -722,12 +722,14 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       return null;
     }
 
-    // Failed shutdowns must reach finishRun so channel integrations can report
-    // the error. Snapshotting would otherwise finalize the run as completed.
+    // Failures without a usable runtime session still need terminal
+    // finalization. A provider error from an existing session is a failed turn
+    // instead, so it remains eligible for the ordinary idle retention path.
     if (
       this.phase === 'shutting_down' &&
       this.state.lastErrorMessage &&
-      !this.state.taskFinishedAt
+      !this.state.taskFinishedAt &&
+      !this.terminalProviderErrorPending
     ) {
       return null;
     }
@@ -1362,15 +1364,12 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     if (payload[0] === this.state.sessionId) {
       this.logger.info(`[HarnessManager] Task aborted: ${payload[0]}`);
 
-      // A provider error is terminal, unlike a user-initiated abort. Preserve
-      // the error and shut down without setting the cancellation stamp so the
-      // worker resolves this run as Failed rather than Canceled.
-      if (this.terminalProviderErrorPending && !this.state.cancelTriggeredAt) {
-        this.triggerShutdown();
-        return;
+      // A terminal provider error ends the current model turn, not the live
+      // task session. Keep its error visible and leave the session available
+      // for follow-ups until the ordinary idle keepalive expires.
+      if (!this.terminalProviderErrorPending || this.state.cancelTriggeredAt) {
+        this.state.taskAbortedAt = Date.now();
       }
-
-      this.state.taskAbortedAt = Date.now();
 
       if (this.runtimeQueuedMessagesCount > 0) {
         // Abort takes priority: never downgrade a deferred abort to completion.

@@ -2085,6 +2085,8 @@ export const runTask = async ({
     //
     // Terminal cancel must skip this handoff: publish no due sleepAt and
     // finish as Canceled instead of becoming a snapshot/standby candidate.
+    // Failed turns still use the ordinary idle retention path so a model or
+    // provider error cannot discard an otherwise healthy workspace.
     //
     // NOTE: Snapshot creation ultimately tears down the provider runtime. Vercel
     // does this as part of snapshot creation, while Modal explicitly terminates
@@ -2097,16 +2099,17 @@ export const runTask = async ({
     // messages). The drain check below is kept as a fallback for edge cases where
     // the snapshot fails or times out but the worker survives.
     const skipSleepAfterTerminalCancel = Boolean(finalState.cancelTriggeredAt);
-    const skipSleepAfterTerminalFailure =
-      resolvedResult.status === RunStatus.Failed;
+    const skipSleepWithoutRetentionDeadline =
+      resolvedResult.status === RunStatus.Failed &&
+      harnessManager.getSleepAt() == null;
     if (skipSleepAfterTerminalCancel) {
       logger.info(
         `[runTask] Skipping external sleep handoff after terminal cancel for task run ${taskRun.id}`,
       );
     }
-    if (skipSleepAfterTerminalFailure) {
+    if (skipSleepWithoutRetentionDeadline && !skipSleepAfterTerminalCancel) {
       logger.info(
-        `[runTask] Skipping external sleep handoff after terminal failure for task run ${taskRun.id}`,
+        `[runTask] Skipping external sleep handoff without a retention deadline for task run ${taskRun.id}`,
       );
     }
 
@@ -2115,7 +2118,7 @@ export const runTask = async ({
     if (
       !skipExternalSleepAction &&
       !skipSleepAfterTerminalCancel &&
-      !skipSleepAfterTerminalFailure
+      !skipSleepWithoutRetentionDeadline
     ) {
       // BullMQ may claim the sleep action and snapshot the filesystem while
       // the handoff helper polls below. The harness has already shut down, so
