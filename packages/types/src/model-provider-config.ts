@@ -377,6 +377,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'baseten/moonshotai/Kimi-K2.7-Code',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'deepseek-v4-flash-0731': 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
       'deepseek-v4-pro': 'baseten/deepseek-ai/DeepSeek-V4-Pro',
       'glm-5-2': 'baseten/zai-org/GLM-5.2',
       'kimi-k3': 'baseten/moonshotai/Kimi-K3',
