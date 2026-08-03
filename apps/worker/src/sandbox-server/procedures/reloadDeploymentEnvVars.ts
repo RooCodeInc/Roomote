@@ -23,6 +23,18 @@ function omitKeys(
   return nextEnv;
 }
 
+function envValuesEqual(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftEntries = Object.entries(left);
+
+  return (
+    leftEntries.length === Object.keys(right).length &&
+    leftEntries.every(([name, value]) => right[name] === value)
+  );
+}
+
 function isSplitResolvedEnv(value: unknown): value is {
   envVars: Record<string, string>;
   modelRuntimeEnv: Record<string, string>;
@@ -94,6 +106,19 @@ export async function applyDeploymentEnvVarsReload(input: {
     ...nextRuntimeEnv,
     ...modelRuntimeEnv,
   });
+
+  if (!envValuesEqual(currentModelRuntimeEnv, modelRuntimeEnv)) {
+    if (!harness.requestReconnect) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Model credentials require a reconnectable harness',
+      });
+    }
+
+    await harness.requestReconnect({
+      reason: 'model runtime environment changed',
+    });
+  }
 
   return {
     names: Object.keys(freshEnvVars).sort((left, right) =>

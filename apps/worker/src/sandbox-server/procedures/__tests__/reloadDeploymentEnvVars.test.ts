@@ -74,12 +74,14 @@ function createCaller(workerEnv?: WorkerEnv, runId = 1) {
     STALE_MODEL_KEY: 'revoked-secret',
   };
   const setCommandEnv = vi.fn();
+  const requestReconnect = vi.fn().mockResolvedValue(undefined);
   const ctx = {
     workingDirectory: '/tmp',
     harness: {
       isConnected: true,
       getCommandEnv: () => ({ ...commandEnv }),
       setCommandEnv,
+      requestReconnect,
     },
     harnessManager: {
       getStatus: () => ({
@@ -101,7 +103,11 @@ function createCaller(workerEnv?: WorkerEnv, runId = 1) {
     workerEnv,
   } as unknown as Context;
 
-  return { caller: appRouter.createCaller(ctx), setCommandEnv };
+  return {
+    caller: appRouter.createCaller(ctx),
+    setCommandEnv,
+    requestReconnect,
+  };
 }
 
 describe('reloadDeploymentEnvVars procedure', () => {
@@ -125,7 +131,7 @@ describe('reloadDeploymentEnvVars procedure', () => {
 
   it('replaces user env vars while preserving service env and shell wiring', async () => {
     const workerEnv = createWorkerEnv();
-    const { caller, setCommandEnv } = createCaller(workerEnv);
+    const { caller, setCommandEnv, requestReconnect } = createCaller(workerEnv);
 
     const result = await caller.commands.reloadDeploymentEnvVars();
 
@@ -181,6 +187,9 @@ describe('reloadDeploymentEnvVars procedure', () => {
       ROOMOTE_TASK_ID: 'task-123',
       ROOMOTE_TASK_TYPE: 'standard',
       CLAUDE_APPEND_SYSTEM_PROMPT: 'follow the system instructions',
+    });
+    expect(requestReconnect).toHaveBeenCalledWith({
+      reason: 'model runtime environment changed',
     });
   });
 

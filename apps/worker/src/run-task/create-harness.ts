@@ -74,7 +74,7 @@ export async function createHarness({
   logger,
   prepareQueuedPromptActorScope,
 }: CreateHarnessOptions): Promise<CreateHarnessResult> {
-  const harnessCommandEnv = buildHarnessCommandEnv(runtimeEnv);
+  let harnessCommandEnv = buildHarnessCommandEnv(runtimeEnv);
   const stampHarnessStarted = () => {
     // Best-effort: do not derail task startup on telemetry failures.
     void sdk.taskRuns
@@ -170,6 +170,9 @@ export async function createHarness({
     logger,
     spawnHarness,
     diagnosticEvents,
+    onCommandEnvChanged: (env) => {
+      harnessCommandEnv = buildHarnessCommandEnv(env);
+    },
   });
   await reconnectableHarness.start({ initialSessionId: harnessSessionId });
   stampHarnessStarted();
