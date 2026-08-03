@@ -330,7 +330,7 @@ describe('UsersSettings', () => {
     });
   });
 
-  it('lists only non-revoked invites and removes revoked ones', async () => {
+  it('lists only open invites and removes revoked or fully used ones', async () => {
     mockSettingsState.current = {
       ...mockSettingsState.current,
       invites: [
@@ -358,6 +358,18 @@ describe('UsersSettings', () => {
           createdAt: new Date('2026-06-01T00:00:00Z'),
           usable: false,
         },
+        {
+          id: 'invite-3',
+          label: 'Used link',
+          role: 'member',
+          maxUses: 2,
+          usedCount: 2,
+          acceptedUserCount: 2,
+          expiresAt: null,
+          revokedAt: null,
+          createdAt: new Date('2026-06-15T00:00:00Z'),
+          usable: false,
+        },
       ],
     };
 
@@ -368,7 +380,13 @@ describe('UsersSettings', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/2 of 5 used/)).toBeInTheDocument();
     expect(screen.queryByText('Invite for Old link')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invite for Used link')).not.toBeInTheDocument();
     expect(screen.queryByText('revoked')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Invites are removed from the list after fully used, to keep things clean.',
+      ),
+    ).toBeInTheDocument();
     // The admin invite is badged; the member invite is not.
     expect(
       within(

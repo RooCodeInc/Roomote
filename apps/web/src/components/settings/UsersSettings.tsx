@@ -251,7 +251,9 @@ export function UsersSettings() {
     license,
   } = settingsQuery.data;
   const adminCount = members.filter((member) => member.role === 'admin').length;
-  const visibleInvites = invites.filter((invite) => invite.revokedAt == null);
+  const visibleInvites = invites.filter(
+    (invite) => invite.revokedAt == null && invite.usedCount < invite.maxUses,
+  );
   const seatsRemaining = license.seatLimit - license.seatsUsed;
   const isAtSeatCapacity = seatsRemaining <= 0;
   const purchasedLicenseExpiringSoon =
@@ -613,6 +615,10 @@ export function UsersSettings() {
             })}
           </div>
         ) : null}
+        <p className="text-sm text-muted-foreground">
+          Invites are removed from the list after fully used, to keep things
+          clean.
+        </p>
       </Section>
 
       <Dialog
