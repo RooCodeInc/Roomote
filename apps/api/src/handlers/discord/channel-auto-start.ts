@@ -29,6 +29,7 @@ import {
   releaseAccountLinkDmSlot,
 } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
+import { rememberPendingDiscordAccountLinkTask } from './pending-account-link-task.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import {
   discordMetadataForChannel,
@@ -214,6 +215,14 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
     const mappedUserId = await findDiscordMappedUserId(message.author.id);
 
     if (!mappedUserId) {
+      await rememberPendingDiscordAccountLinkTask({
+        discordUserId: message.author.id,
+        event,
+      }).catch((error) => {
+        apiLogger.warn(
+          `[DiscordChannelAutoStart] Failed to remember pending task for unlinked user ${message.author.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
       await sendLinkNudgeBestEffort({
         provider,
         discordUserId: message.author.id,
