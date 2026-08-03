@@ -20,7 +20,6 @@ import {
   CardContent,
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   Input,
@@ -31,7 +30,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  SlidersHorizontal,
+  Settings2,
+  Skeleton,
   Switch,
   Textarea,
   Trash2,
@@ -440,14 +440,11 @@ export function CustomAutomationsSection() {
   };
 
   const renderEditor = () => (
-    <DialogContent size="lg">
+    <DialogContent size="4xl" aria-describedby={undefined}>
       <DialogHeader>
         <DialogTitle>
           {editingId ? 'Edit custom automation' : 'New custom automation'}
         </DialogTitle>
-        <DialogDescription>
-          Configure what runs, when it runs, and where the result is sent.
-        </DialogDescription>
       </DialogHeader>
       <div className="space-y-4">
         <div className="space-y-2">
@@ -482,9 +479,9 @@ export function CustomAutomationsSection() {
           />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Cadence</Label>
+        <div className="space-y-2">
+          <Label htmlFor="custom-automation-frequency">Frequency</Label>
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Select
               value={form.scheduleMode}
               disabled={busy}
@@ -497,7 +494,10 @@ export function CustomAutomationsSection() {
                 }));
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger
+                id="custom-automation-frequency"
+                className="w-full sm:w-52"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -508,13 +508,12 @@ export function CustomAutomationsSection() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
 
-          {form.scheduleMode === 'cron' ? (
-            <div className="space-y-2">
-              <Label htmlFor="custom-automation-cron">Custom schedule</Label>
+            {form.scheduleMode === 'cron' ? (
               <Input
                 id="custom-automation-cron"
+                aria-label="Custom schedule"
+                className="flex-1"
                 value={form.cronExpression}
                 disabled={busy}
                 placeholder="Weekdays at 9am or 0 9 * * 1-5"
@@ -543,16 +542,16 @@ export function CustomAutomationsSection() {
                   }
                 }}
               />
-              {resolveScheduleMutation.isPending ? (
-                <p className="text-sm text-muted-foreground">
-                  Interpreting schedule...
-                </p>
-              ) : effectiveScheduleSummary ? (
-                <p className="text-sm text-muted-foreground">
-                  {effectiveScheduleSummary}
-                </p>
-              ) : null}
-            </div>
+            ) : null}
+          </div>
+          {resolveScheduleMutation.isPending ? (
+            <p className="text-sm text-muted-foreground">
+              Interpreting schedule...
+            </p>
+          ) : effectiveScheduleSummary ? (
+            <p className="text-sm text-muted-foreground">
+              {effectiveScheduleSummary}
+            </p>
           ) : null}
         </div>
 
@@ -598,9 +597,9 @@ export function CustomAutomationsSection() {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Destination provider</Label>
+        <div className="space-y-2">
+          <Label htmlFor="custom-automation-destination">Destination</Label>
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Select
               value={form.targetProvider}
               disabled={busy}
@@ -619,7 +618,11 @@ export function CustomAutomationsSection() {
                 }))
               }
             >
-              <SelectTrigger>
+              <SelectTrigger
+                id="custom-automation-destination"
+                aria-label="Destination provider"
+                className="w-full sm:w-40"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -630,92 +633,87 @@ export function CustomAutomationsSection() {
                 <SelectItem value="telegram">Telegram</SelectItem>
               </SelectContent>
             </Select>
-          </div>
 
-          {form.targetProvider === 'none' ? (
-            <div className="space-y-2">
-              <Label>Destination channel</Label>
-              <p className="pt-2 text-sm text-muted-foreground">
+            {form.targetProvider === 'none' ? (
+              <p className="self-center text-sm text-muted-foreground">
                 Results appear only in the task view.
               </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label>Destination channel</Label>
-              {form.targetProvider === 'slack' ? (
-                <SlackChannelSelect
-                  value={form.targetChannelId || null}
-                  options={slackOptions}
-                  disabled={busy}
-                  onChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetChannelId: value ?? '',
-                    }))
-                  }
-                />
-              ) : form.targetProvider === 'discord' ? (
-                <Select
-                  value={form.targetChannelId || undefined}
-                  disabled={busy}
-                  onValueChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetChannelId: value,
-                    }))
-                  }
+            ) : form.targetProvider === 'slack' ? (
+              <SlackChannelSelect
+                id="custom-automation-destination-channel"
+                className="flex-1"
+                value={form.targetChannelId || null}
+                options={slackOptions}
+                disabled={busy}
+                onChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    targetChannelId: value ?? '',
+                  }))
+                }
+              />
+            ) : form.targetProvider === 'discord' ? (
+              <Select
+                value={form.targetChannelId || undefined}
+                disabled={busy}
+                onValueChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    targetChannelId: value,
+                  }))
+                }
+              >
+                <SelectTrigger
+                  aria-label="Destination channel"
+                  className="flex-1"
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select Discord channel" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {discordOptions.map((channel) => (
-                      <SelectItem key={channel.id} value={channel.id}>
-                        {channel.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  value={form.targetChannelId}
-                  disabled={busy}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetChannelId: event.target.value,
-                    }))
-                  }
-                  placeholder={
-                    form.targetProvider === 'teams'
-                      ? 'Teams conversation ID'
-                      : 'Telegram chat ID'
-                  }
-                />
-              )}
-            </div>
-          )}
-        </div>
-
-        {form.targetProvider === 'teams' ? (
-          <div className="space-y-2">
-            <Label htmlFor="custom-automation-service-url">
-              Teams service URL (optional)
-            </Label>
-            <Input
-              id="custom-automation-service-url"
-              value={form.targetServiceUrl}
-              disabled={busy}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  targetServiceUrl: event.target.value,
-                }))
-              }
-              placeholder="https://smba.trafficmanager.net/..."
-            />
+                  <SelectValue placeholder="Select Discord channel" />
+                </SelectTrigger>
+                <SelectContent>
+                  {discordOptions.map((channel) => (
+                    <SelectItem key={channel.id} value={channel.id}>
+                      {channel.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                aria-label="Destination channel"
+                className="flex-1"
+                value={form.targetChannelId}
+                disabled={busy}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    targetChannelId: event.target.value,
+                  }))
+                }
+                placeholder={
+                  form.targetProvider === 'teams'
+                    ? 'Teams conversation ID'
+                    : 'Telegram chat ID'
+                }
+              />
+            )}
+            {form.targetProvider === 'teams' ? (
+              <Input
+                id="custom-automation-service-url"
+                aria-label="Teams service URL"
+                className="flex-1"
+                value={form.targetServiceUrl}
+                disabled={busy}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    targetServiceUrl: event.target.value,
+                  }))
+                }
+                placeholder="Service URL (optional)"
+              />
+            ) : null}
           </div>
-        ) : null}
+        </div>
 
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -747,10 +745,7 @@ export function CustomAutomationsSection() {
   );
 
   return (
-    <section
-      className="order-[-40] col-span-full space-y-3"
-      aria-labelledby="custom-automations-heading"
-    >
+    <section className="space-y-3" aria-labelledby="custom-automations-heading">
       <div className="flex items-start justify-between gap-3 pt-2">
         <div className="space-y-1">
           <h2
@@ -760,7 +755,7 @@ export function CustomAutomationsSection() {
             Custom
           </h2>
           <p className="text-sm text-muted-foreground">
-            Create your own scheduled agent runs with a prompt, cadence,
+            Create your own scheduled agent runs with a prompt, frequency,
             environment, and optional report channel.
           </p>
         </div>
@@ -801,9 +796,24 @@ export function CustomAutomationsSection() {
       </Dialog>
 
       {listQuery.isPending ? (
-        <p className="text-sm text-muted-foreground">
-          Loading custom automations…
-        </p>
+        <Card variant="snug" data-testid="custom-automations-skeleton">
+          <CardContent>
+            <div className="divide-y divide-background">
+              {Array.from({ length: 2 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
+                >
+                  <Skeleton className="mt-0.5 h-5 w-9 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-3 w-full max-w-lg" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : rows.length === 0 && !isCreating ? (
         <p className="text-sm text-muted-foreground">
           No custom automations created yet.
@@ -876,7 +886,7 @@ export function CustomAutomationsSection() {
                           aria-label={`Configure ${row.name}`}
                           onClick={() => editAutomation(row)}
                         >
-                          <SlidersHorizontal />
+                          <Settings2 />
                         </Button>
                       </BasicTooltip>
                       <BasicTooltip content="Delete">
