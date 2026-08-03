@@ -58,15 +58,16 @@ vi.mock('@roomote/db/server', () => ({
   isGitHubCopilotSubscriptionConnected:
     mockIsGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected: mockIsXaiSubscriptionConnected,
+  getPersistedModelProviderEnvironmentVariableNames:
+    mockGetPersistedEnvironmentVariableNames,
+  getPersistedModelProviderEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
   isNull: vi.fn((column) => ({ isNull: column })),
 }));
 
 vi.mock('../environment-variables', () => ({
-  getPersistedEnvironmentVariableNames:
-    mockGetPersistedEnvironmentVariableNames,
-  getPersistedEnvironmentVariableValues:
-    mockGetPersistedEnvironmentVariableValues,
-  upsertDeploymentEnvironmentVariables:
+  deleteModelProviderEnvironmentVariables: mockTxDelete,
+  upsertModelProviderEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
 }));
 
@@ -1159,7 +1160,6 @@ describe('task model provider commands', () => {
     onConflictDoUpdate: txOnConflictDoUpdate,
   }));
   const txInsert = vi.fn(() => ({ values: txValues }));
-  const txDeleteWhere = vi.fn(async () => undefined);
 
   function buildSelectChainMock(rows: unknown[]) {
     return {
@@ -1191,7 +1191,6 @@ describe('task model provider commands', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockTxDelete.mockReturnValue({ where: txDeleteWhere });
 
     for (const name of PROVIDER_ENV_VAR_NAMES) {
       originalEnvValues.set(name, process.env[name]);
@@ -1636,13 +1635,9 @@ describe('task model provider commands', () => {
     });
 
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
-    expect(mockTxDelete).toHaveBeenCalled();
-    expect(txDeleteWhere).toHaveBeenCalledWith({
-      and: [
-        { isNull: 'env.user_id' },
-        { column: 'env.name', values: ['AWS_REGION'] },
-      ],
-    });
+    expect(mockTxDelete).toHaveBeenCalledWith(expect.anything(), [
+      'AWS_REGION',
+    ]);
   });
 
   it('does not delete anything when a blanked optional field was never saved', async () => {
@@ -1729,9 +1724,9 @@ describe('task model provider commands', () => {
       provider: 'xai',
     });
 
-    const { inArray } = await import('@roomote/db/server');
-    expect(mockTxDelete).toHaveBeenCalled();
-    expect(inArray).toHaveBeenCalledWith('env.name', ['XAI_API_KEY']);
+    expect(mockTxDelete).toHaveBeenCalledWith(expect.anything(), [
+      'XAI_API_KEY',
+    ]);
     // Models and runtime stay; only the key was removed.
     expect(txOnConflictDoUpdate).not.toHaveBeenCalled();
   });
@@ -1809,10 +1804,9 @@ describe('task model provider commands', () => {
       provider: 'anthropic',
     });
 
-    const { inArray, isNull } = await import('@roomote/db/server');
-    expect(mockTxDelete).toHaveBeenCalled();
-    expect(inArray).toHaveBeenCalledWith('env.name', ['ANTHROPIC_API_KEY']);
-    expect(isNull).toHaveBeenCalledWith('env.user_id');
+    expect(mockTxDelete).toHaveBeenCalledWith(expect.anything(), [
+      'ANTHROPIC_API_KEY',
+    ]);
 
     const updateSet = txOnConflictDoUpdate.mock.calls[0]?.[0]?.set;
     expect(updateSet.taskModelSettings.models).toEqual([

@@ -50,7 +50,8 @@ export function EnvVars() {
         }
       >
         <p className="text-sm text-muted-foreground">
-          Encrypted variables available to tasks in every environment.
+          Encrypted variables injected into tasks in every environment. Model
+          provider credentials are managed under Models.
         </p>
         {isPending ? (
           <table className="w-full">

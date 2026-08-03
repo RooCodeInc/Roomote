@@ -3667,7 +3667,7 @@ describe('runTask', () => {
       visibleInTranscript: false,
     });
   });
-  it('passes operator model config through the OpenCode runtime env', async () => {
+  it('passes harness-scoped model config through the OpenCode runtime env', async () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
@@ -3679,9 +3679,11 @@ describe('runTask', () => {
         payload: {},
         result: null,
       } as never,
-      envVars: {
+      envVars: {},
+      modelRuntimeEnv: {
         R_MODEL: 'provider-id/model-id',
         R_SMALL_MODEL: 'provider-id/small-model-id',
+        ANTHROPIC_API_KEY: 'model-secret',
       },
       workspacePath: '/tmp/workspace',
       prompt: '',
@@ -3716,6 +3718,7 @@ describe('runTask', () => {
         runtimeEnv: expect.objectContaining({
           R_MODEL: 'provider-id/model-id',
           R_SMALL_MODEL: 'provider-id/small-model-id',
+          ANTHROPIC_API_KEY: 'model-secret',
         }),
       }),
     );

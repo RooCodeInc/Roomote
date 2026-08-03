@@ -2026,6 +2026,41 @@ describe('opencode-server bootstrap', () => {
     expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
   });
 
+  it('keeps harness-only credentials on OpenCode but removes them from child shells', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+    const homeDir = createTempHome();
+    const sharedBashEnvPath = path.join(homeDir, 'roomote-env.sh');
+    fs.writeFileSync(sharedBashEnvPath, '');
+
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        BASH_ENV: sharedBashEnvPath,
+        OPENAI_API_KEY: 'model-secret',
+        ROOMOTE_HARNESS_ONLY_SECRET_NAMES: 'OPENAI_API_KEY',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    expect(commandEnv.OPENAI_API_KEY).toBe('model-secret');
+    expect(commandEnv.ROOMOTE_HARNESS_ONLY_SECRET_NAMES).toBeUndefined();
+    expect(
+      execFileSync(
+        'bash',
+        [
+          '-lc',
+          `printf "%s|" "$OPENAI_API_KEY"; bash -lc 'printf "%s" "$OPENAI_API_KEY"'`,
+        ],
+        {
+          env: commandEnv,
+          encoding: 'utf8',
+        },
+      ),
+    ).toBe('model-secret|');
+  });
+
   it('completes OpenCode plugin seed for the resolved version without network access', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');

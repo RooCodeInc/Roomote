@@ -1,14 +1,12 @@
 import {
-  and,
   db,
   deploymentSettings,
-  environmentVariables,
   eq,
-  inArray,
+  getPersistedModelProviderEnvironmentVariableNames,
+  getPersistedModelProviderEnvironmentVariableValues,
   isChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected,
-  isNull,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
@@ -52,9 +50,8 @@ import {
   getDeploymentTaskModelSettings,
 } from '@/lib/server/task-models';
 import {
-  getPersistedEnvironmentVariableValues,
-  getPersistedEnvironmentVariableNames,
-  upsertDeploymentEnvironmentVariables,
+  deleteModelProviderEnvironmentVariables,
+  upsertModelProviderEnvironmentVariables,
 } from '../environment-variables';
 import {
   fetchModelsDevCatalog,
@@ -303,7 +300,7 @@ export async function getTaskModelSettingsCommand(
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
-    getPersistedEnvironmentVariableNames(),
+    getPersistedModelProviderEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
@@ -421,7 +418,7 @@ export async function getTaskModelProviderSetupCommand(
     xaiSubscriptionConnected,
   ] = await Promise.all([
     getDeploymentRuntimeModelConfig(),
-    getPersistedEnvironmentVariableNames(),
+    getPersistedModelProviderEnvironmentVariableNames(),
     getDeploymentSetupNewState(),
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
@@ -453,7 +450,7 @@ export async function getTaskModelProviderSetupCommand(
   );
 
   const persistedAdditionalEnvValues =
-    await getPersistedEnvironmentVariableValues([
+    await getPersistedModelProviderEnvironmentVariableValues([
       ...new Set([...catalogNonSecretEnvNames, ...openAiCompatibleEnvNames]),
     ]);
 
@@ -489,7 +486,7 @@ export async function autoAddConnectedSubscriptionTaskModels(
 
   return db.transaction(async (tx) => {
     const [persistedEnvVarNames, persistedTaskModels] = await Promise.all([
-      getPersistedEnvironmentVariableNames(tx),
+      getPersistedModelProviderEnvironmentVariableNames(tx),
       getPersistedRawTaskModelSettings(tx),
     ]);
     const connectedProviderIds = new Set<string>([
@@ -638,7 +635,7 @@ export async function saveTaskModelProviderCommand(
     const [currentSetupNewState, persistedEnvVarNames, persistedTaskModels] =
       await Promise.all([
         getDeploymentSetupNewState(tx),
-        getPersistedEnvironmentVariableNames(tx),
+        getPersistedModelProviderEnvironmentVariableNames(tx),
         getPersistedRawTaskModelSettings(tx),
       ]);
     const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
@@ -654,7 +651,7 @@ export async function saveTaskModelProviderCommand(
       });
 
     if (credentialValues.length > 0) {
-      await upsertDeploymentEnvironmentVariables(tx, {
+      await upsertModelProviderEnvironmentVariables(tx, {
         userId: auth.userId,
         values: credentialValues,
       });
@@ -667,14 +664,10 @@ export async function saveTaskModelProviderCommand(
     );
 
     if (clearedPersistedEnvVarNames.length > 0) {
-      await tx
-        .delete(environmentVariables)
-        .where(
-          and(
-            isNull(environmentVariables.userId),
-            inArray(environmentVariables.name, clearedPersistedEnvVarNames),
-          ),
-        );
+      await deleteModelProviderEnvironmentVariables(
+        tx,
+        clearedPersistedEnvVarNames,
+      );
     }
 
     const connectedProviderIds = new Set<string>([
@@ -911,7 +904,7 @@ export async function deleteTaskModelProviderCommand(
       persistedTaskModelSettings,
     ] = await Promise.all([
       getDeploymentRuntimeModelConfig(),
-      getPersistedEnvironmentVariableNames(tx),
+      getPersistedModelProviderEnvironmentVariableNames(tx),
       getDeploymentSetupNewState(tx),
       isChatGptSubscriptionConnected(),
       isXaiSubscriptionConnected(),
@@ -954,14 +947,7 @@ export async function deleteTaskModelProviderCommand(
     const providerEnvVarNames = getSetupModelProviderEnvVarNames(provider);
 
     if (providerEnvVarNames.length > 0) {
-      await tx
-        .delete(environmentVariables)
-        .where(
-          and(
-            isNull(environmentVariables.userId),
-            inArray(environmentVariables.name, providerEnvVarNames),
-          ),
-        );
+      await deleteModelProviderEnvironmentVariables(tx, providerEnvVarNames);
     }
 
     if (xaiKeyOnlyDelete) {
@@ -1018,7 +1004,7 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
     isChatGptSubscriptionConnected(),
     isGitHubCopilotSubscriptionConnected(),
     isXaiSubscriptionConnected(),
-    getPersistedEnvironmentVariableNames(),
+    getPersistedModelProviderEnvironmentVariableNames(),
   ]);
   const providerSetup = buildSetupModelStatus({
     runtimeEnv: process.env,
@@ -1514,8 +1500,11 @@ export async function lookupTaskModelCommand(
   const runtimeOpenRouterKey = process.env.OPENROUTER_API_KEY?.trim();
   const openRouterKey = runtimeOpenRouterKey
     ? runtimeOpenRouterKey
-    : (await getPersistedEnvironmentVariableValues(['OPENROUTER_API_KEY']))
-        .OPENROUTER_API_KEY;
+    : (
+        await getPersistedModelProviderEnvironmentVariableValues([
+          'OPENROUTER_API_KEY',
+        ])
+      ).OPENROUTER_API_KEY;
 
   if (!openRouterKey) {
     return {

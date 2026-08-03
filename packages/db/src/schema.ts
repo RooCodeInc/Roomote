@@ -2873,6 +2873,48 @@ export const environmentVariablesRelations = relations(
 );
 
 /**
+ * model_provider_environment_variables
+ *
+ * Model-provider credentials and configuration persisted by the Models
+ * settings flow. Matching rows remain in environment_variables during the
+ * N-1 compatibility release so the previous application version can roll
+ * back safely.
+ */
+export const modelProviderEnvironmentVariables = pgTable(
+  'model_provider_environment_variables',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    value: encryptedJson<string>('value').notNull(),
+    createdByUserId: text('created_by_user_id').references(() => users.id),
+    lastUpdatedByUserId: text('last_updated_by_user_id').references(
+      () => users.id,
+    ),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('model_provider_environment_variables_name_unique').on(
+      table.name,
+    ),
+  ],
+);
+
+export const modelProviderEnvironmentVariablesRelations = relations(
+  modelProviderEnvironmentVariables,
+  ({ one }) => ({
+    createdByUser: one(users, {
+      fields: [modelProviderEnvironmentVariables.createdByUserId],
+      references: [users.id],
+    }),
+    lastUpdatedByUser: one(users, {
+      fields: [modelProviderEnvironmentVariables.lastUpdatedByUserId],
+      references: [users.id],
+    }),
+  }),
+);
+
+/**
  * deployment_secrets
  *
  * Deployment-owned secrets that Roomote generates and persists itself, such

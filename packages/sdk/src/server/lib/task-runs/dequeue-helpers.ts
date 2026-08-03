@@ -245,22 +245,39 @@ export async function fetchResolvedRuntimeEnvVars(
   options?: {
     sourceControlProvider?: SourceControlProvider;
   },
-): Promise<Record<string, string>> {
+): Promise<{
+  envVars: Record<string, string>;
+  modelRuntimeEnv: Record<string, string>;
+}> {
   const envVars =
     deploymentEnvVars ?? (await loadPersistedDeploymentEnvVarsFromDb());
-  const resolvedModelRuntimeEnv = await resolveSandboxModelRuntimeEnv({
-    deploymentEnvVars: envVars,
-  });
+  // Model-provider credentials resolve from their dedicated store. Generic
+  // task variables must never satisfy or override provider authentication.
+  const resolvedModelRuntimeEnv = await resolveSandboxModelRuntimeEnv();
 
-  return redactControlPlaneEnvVars(
-    redactSourceControlProviderEnvVars(
-      redactInferenceGatewayProviderKeys(
-        withLegacySnapshotModelEnvAliases({
-          ...redactModelRuntimeManagedEnvVars(envVars, resolvedModelRuntimeEnv),
-          ...resolvedModelRuntimeEnv,
-        }),
+  return {
+    envVars: redactControlPlaneEnvVars(
+      redactSourceControlProviderEnvVars(
+        redactModelRuntimeManagedEnvVars(envVars, resolvedModelRuntimeEnv),
+        options?.sourceControlProvider,
       ),
-      options?.sourceControlProvider,
+    ),
+    modelRuntimeEnv: redactControlPlaneEnvVars(
+      redactInferenceGatewayProviderKeys(resolvedModelRuntimeEnv),
+    ),
+  };
+}
+
+export function flattenResolvedRuntimeEnvVars(input: {
+  envVars: Record<string, string>;
+  modelRuntimeEnv: Record<string, string>;
+}): Record<string, string> {
+  return redactControlPlaneEnvVars(
+    redactInferenceGatewayProviderKeys(
+      withLegacySnapshotModelEnvAliases({
+        ...input.envVars,
+        ...input.modelRuntimeEnv,
+      }),
     ),
   );
 }

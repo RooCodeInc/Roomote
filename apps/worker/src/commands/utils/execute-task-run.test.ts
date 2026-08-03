@@ -151,6 +151,7 @@ describe('executeTaskRun', () => {
       })),
     });
     resolveWorkerReleaseMetadataMock.mockReturnValue({
+      envContractVersion: 2,
       workerReleaseTag: 'worker-v1.2.3',
       workerVersion: '1.2.3',
       workerCommit: 'abc123',
@@ -182,6 +183,8 @@ describe('executeTaskRun', () => {
       },
       envVars: {
         FOO: 'bar',
+        R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
+        ANTHROPIC_API_KEY: 'model-secret',
       },
       gitAuthor: {
         name: 'Chris',
@@ -234,6 +237,22 @@ describe('executeTaskRun', () => {
     expect(setupArgs.workspace.envVars).toMatchObject({
       FOO: 'bar',
     });
+    expect(setupArgs.workspace.envVars).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(injectEnvVarsMock).toHaveBeenCalledWith(
+      { FOO: 'bar' },
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(runFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobContext: expect.objectContaining({
+          modelRuntimeEnv: expect.objectContaining({
+            ANTHROPIC_API_KEY: 'model-secret',
+          }),
+        }),
+        userEnvVars: { FOO: 'bar' },
+      }),
+    );
     expect(typeof setupArgs.recordPhase).toBe('function');
     expect(sdkTaskRunsStampMilestoneMock).toHaveBeenCalledWith({
       runId: 42,
@@ -871,13 +890,14 @@ describe('executeTaskRun', () => {
     });
 
     expect(fetchFn).toHaveBeenCalledWith(42, {
+      envContractVersion: 2,
       workerReleaseTag: 'worker-v1.2.3',
       workerVersion: '1.2.3',
       workerCommit: 'abc123',
     });
   });
 
-  it('preserves operator-provided model provider env vars', async () => {
+  it('extracts model provider values from legacy flat responses', async () => {
     const runFn = vi.fn().mockResolvedValue({
       status: RunStatus.Idle,
     });
@@ -920,14 +940,21 @@ describe('executeTaskRun', () => {
     const setupArgs = setupMock.mock.calls[0]?.[0];
     expect(setupArgs.workspace.userEnvVars).toEqual({
       FOO: 'bar',
-      OPENAI_API_KEY: 'sk-original-user-key',
       OPENAI_BASE_URL: 'https://api.openai.com/v1',
     });
     expect(setupArgs.workspace.envVars).toMatchObject({
       FOO: 'bar',
-      OPENAI_API_KEY: 'sk-original-user-key',
       OPENAI_BASE_URL: 'https://api.openai.com/v1',
     });
+    expect(runFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobContext: expect.objectContaining({
+          modelRuntimeEnv: expect.objectContaining({
+            OPENAI_API_KEY: 'sk-original-user-key',
+          }),
+        }),
+      }),
+    );
   });
 
   it('starts the worker heartbeat before setup begins', async () => {

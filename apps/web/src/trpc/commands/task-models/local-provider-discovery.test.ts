@@ -9,8 +9,8 @@ const { mockGetPersistedEnvironmentVariableValues } = vi.hoisted(() => ({
   mockGetPersistedEnvironmentVariableValues: vi.fn(),
 }));
 
-vi.mock('../environment-variables', () => ({
-  getPersistedEnvironmentVariableValues:
+vi.mock('@roomote/db/server', () => ({
+  getPersistedModelProviderEnvironmentVariableValues:
     mockGetPersistedEnvironmentVariableValues,
 }));
 

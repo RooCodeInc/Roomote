@@ -6,6 +6,7 @@ const INSTALLED_WORKER_COMMIT_FILE = '/sandbox/worker/COMMIT';
 const INSTALLED_WORKER_RELEASE_TAG_FILE = '/sandbox/worker/WORKER_RELEASE_TAG';
 
 export interface WorkerReleaseMetadata {
+  envContractVersion?: number;
   sentryRelease?: string;
   workerCommit?: string;
   workerReleaseTag?: string;
@@ -97,6 +98,7 @@ export function resolveWorkerReleaseMetadata(
   const fallbackWorkerRelease = resolveFallbackWorkerRelease(env);
 
   return {
+    envContractVersion: 2,
     sentryRelease:
       workerReleaseTag || fallbackWorkerRelease || installedWorkerCommit,
     workerCommit: installedWorkerCommit,

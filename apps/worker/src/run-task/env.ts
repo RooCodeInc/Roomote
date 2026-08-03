@@ -93,3 +93,17 @@ export function buildOpenCodeHarnessEnv(
 
   return harnessEnv;
 }
+
+export function splitLegacyModelRuntimeEnv(env: Record<string, string>): {
+  envVars: Record<string, string>;
+  modelRuntimeEnv: Record<string, string>;
+} {
+  const modelRuntimeEnv = buildOpenCodeHarnessEnv(env);
+  const envVars = { ...env };
+
+  for (const name of Object.keys(modelRuntimeEnv)) {
+    delete envVars[name];
+  }
+
+  return { envVars, modelRuntimeEnv };
+}

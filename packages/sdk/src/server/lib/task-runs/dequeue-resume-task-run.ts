@@ -25,6 +25,7 @@ import {
   claimJobById,
   fetchEnvVars,
   fetchResolvedRuntimeEnvVars,
+  flattenResolvedRuntimeEnvVars,
   cancelAndReleaseTaskRun,
   createSourceControlTokenForTaskRun,
   type SourceControlRuntimeToken,
@@ -48,6 +49,7 @@ type DequeueResumeTaskRunResult =
       gitHubToken: string;
       sourceControlToken: SourceControlRuntimeToken;
       envVars: Record<string, string>;
+      modelRuntimeEnv?: Record<string, string>;
       harnessInstructions?: string;
       orgAgentInstructions?: string;
       setupOnboardingTask: boolean;
@@ -98,6 +100,7 @@ export const dequeueResumeTaskRun = async (
     workerReleaseTag?: string;
     workerVersion?: string;
     workerCommit?: string;
+    envContractVersion?: number;
   },
   {
     onBootstrapFailure,
@@ -413,10 +416,10 @@ export const dequeueResumeTaskRun = async (
     const gitHubToken =
       sourceControlToken.provider === 'github' ? sourceControlToken.token : '';
 
-    let resolvedEnvVars: Record<string, string>;
+    let resolvedEnv: Awaited<ReturnType<typeof fetchResolvedRuntimeEnvVars>>;
 
     try {
-      resolvedEnvVars = await fetchResolvedRuntimeEnvVars(result.envVars, {
+      resolvedEnv = await fetchResolvedRuntimeEnvVars(result.envVars, {
         sourceControlProvider: sourceControlToken.provider,
       });
     } catch (error) {
@@ -444,7 +447,15 @@ export const dequeueResumeTaskRun = async (
       return undefined;
     }
 
-    result.envVars = { ...resolvedEnvVars, ...sourceControlToken.envVars };
+    result.envVars = {
+      ...(input.envContractVersion === 2
+        ? resolvedEnv.envVars
+        : flattenResolvedRuntimeEnvVars(resolvedEnv)),
+      ...sourceControlToken.envVars,
+    };
+    if (input.envContractVersion === 2) {
+      Object.assign(result, { modelRuntimeEnv: resolvedEnv.modelRuntimeEnv });
+    }
 
     await recordSnapshotResumeBootstrapEvent({
       runId: result.taskRun.id,

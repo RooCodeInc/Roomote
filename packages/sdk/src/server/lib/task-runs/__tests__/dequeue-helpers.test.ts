@@ -104,6 +104,7 @@ import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
 import {
   createSourceControlTokenForTaskRun,
   fetchResolvedRuntimeEnvVars,
+  flattenResolvedRuntimeEnvVars,
   notifyCanceledTaskRunOnSettle,
   redactControlPlaneEnvVars,
   redactSourceControlProviderEnvVars,
@@ -585,14 +586,19 @@ describe('fetchResolvedRuntimeEnvVars', () => {
       MY_APP_CONFIG: 'value',
     });
 
-    expect(envVars).toMatchObject({
+    expect(mockResolveSandboxModelRuntimeEnv).toHaveBeenCalledWith();
+
+    expect(envVars.envVars).toEqual({ MY_APP_CONFIG: 'value' });
+    expect(envVars.modelRuntimeEnv).toMatchObject({
       R_MODEL: 'anthropic/claude-test',
-      ROOMOTE_MODEL: 'anthropic/claude-test',
       R_MODEL_REASONING_EFFORT: 'high',
-      ROOMOTE_MODEL_REASONING_EFFORT: 'high',
       R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
+    expect(flattenResolvedRuntimeEnvVars(envVars)).toMatchObject({
+      ROOMOTE_MODEL: 'anthropic/claude-test',
+      ROOMOTE_MODEL_REASONING_EFFORT: 'high',
       ROOMOTE_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
-      MY_APP_CONFIG: 'value',
     });
   });
 
@@ -605,8 +611,8 @@ describe('fetchResolvedRuntimeEnvVars', () => {
       ROOMOTE_MODEL: 'operator/explicit',
     });
 
-    expect(envVars.ROOMOTE_MODEL).toBe('anthropic/claude-test');
-    expect(envVars.R_MODEL).toBe('anthropic/claude-test');
+    expect(envVars.envVars).not.toHaveProperty('ROOMOTE_MODEL');
+    expect(envVars.modelRuntimeEnv.R_MODEL).toBe('anthropic/claude-test');
   });
 
   it('admits no raw provider keys when the gateway is enabled', async () => {
@@ -621,10 +627,13 @@ describe('fetchResolvedRuntimeEnvVars', () => {
       MY_APP_CONFIG: 'value',
     });
 
-    expect(envVars).not.toHaveProperty('ANTHROPIC_API_KEY');
-    expect(envVars).not.toHaveProperty('OPENAI_API_KEY');
-    expect(envVars.MY_APP_CONFIG).toBe('value');
-    expect(envVars.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
+    expect(mockResolveSandboxModelRuntimeEnv).toHaveBeenCalledWith();
+    expect(envVars.envVars).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(envVars.envVars).not.toHaveProperty('OPENAI_API_KEY');
+    expect(envVars.envVars.MY_APP_CONFIG).toBe('value');
+    expect(envVars.modelRuntimeEnv.R_INFERENCE_GATEWAY_KEYS).toBe(
+      'ANTHROPIC_API_KEY',
+    );
   });
 
   it('admits only resolver-selected provider keys when the resolver returns raw keys', async () => {
@@ -641,12 +650,14 @@ describe('fetchResolvedRuntimeEnvVars', () => {
       STRIPE_API_KEY: 'sk-stripe',
     });
 
-    expect(envVars.ANTHROPIC_API_KEY).toBe('sk-ant');
-    expect(envVars).not.toHaveProperty('OPENAI_API_KEY');
-    expect(envVars).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
-    expect(envVars.AWS_REGION).toBe('us-west-2');
-    expect(envVars.STRIPE_API_KEY).toBe('sk-stripe');
-    expect(envVars).not.toHaveProperty('R_INFERENCE_GATEWAY_KEYS');
+    expect(envVars.modelRuntimeEnv.ANTHROPIC_API_KEY).toBe('sk-ant');
+    expect(envVars.envVars).not.toHaveProperty('OPENAI_API_KEY');
+    expect(envVars.envVars).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
+    expect(envVars.envVars.AWS_REGION).toBe('us-west-2');
+    expect(envVars.envVars.STRIPE_API_KEY).toBe('sk-stripe');
+    expect(envVars.modelRuntimeEnv).not.toHaveProperty(
+      'R_INFERENCE_GATEWAY_KEYS',
+    );
   });
 
   it('treats custom R_MODEL_ENV_KEYS credentials as resolver-managed', async () => {
@@ -663,8 +674,8 @@ describe('fetchResolvedRuntimeEnvVars', () => {
       MY_APP_CONFIG: 'value',
     });
 
-    expect(envVars.CUSTOM_LLM_TOKEN).toBe('selected-token');
-    expect(envVars).not.toHaveProperty('STALE_LLM_TOKEN');
-    expect(envVars.MY_APP_CONFIG).toBe('value');
+    expect(envVars.modelRuntimeEnv.CUSTOM_LLM_TOKEN).toBe('selected-token');
+    expect(envVars.envVars).not.toHaveProperty('STALE_LLM_TOKEN');
+    expect(envVars.envVars.MY_APP_CONFIG).toBe('value');
   });
 });

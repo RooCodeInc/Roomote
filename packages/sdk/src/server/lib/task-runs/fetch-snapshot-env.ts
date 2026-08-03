@@ -8,6 +8,7 @@ import { db, taskRuns, eq } from '@roomote/db/server';
 
 import {
   fetchResolvedRuntimeEnvVars,
+  flattenResolvedRuntimeEnvVars,
   createSourceControlTokenForTaskRun,
 } from './dequeue-helpers';
 
@@ -18,9 +19,10 @@ import {
  */
 export async function fetchSnapshotEnv(
   _auth: AuthTokenContext | RunTokenContext,
-  input: { runId: number },
+  input: { runId: number; envContractVersion?: number },
 ): Promise<{
   envVars: Record<string, string>;
+  modelRuntimeEnv?: Record<string, string>;
   gitHubToken: string;
   sourceControlToken: SourceControlTokenMetadata;
   taskId: string;
@@ -40,7 +42,7 @@ export async function fetchSnapshotEnv(
   // dequeue so gateway-covered provider keys are withheld here too; otherwise
   // a snapshot taken with the flag on would bake raw provider keys into the
   // snapshot's shell env and the persisted image.
-  const envVars = await fetchResolvedRuntimeEnvVars(undefined, {
+  const resolvedEnv = await fetchResolvedRuntimeEnvVars(undefined, {
     sourceControlProvider: resolveSourceControlProviderFromPayload(
       taskRun.payload,
     ),
@@ -79,5 +81,16 @@ export async function fetchSnapshotEnv(
   const gitHubToken =
     sourceControlToken.provider === 'github' ? sourceControlToken.token : '';
 
-  return { envVars, gitHubToken, sourceControlToken, taskId: taskRun.taskId };
+  return {
+    envVars:
+      input.envContractVersion === 2
+        ? resolvedEnv.envVars
+        : flattenResolvedRuntimeEnvVars(resolvedEnv),
+    ...(input.envContractVersion === 2 && {
+      modelRuntimeEnv: resolvedEnv.modelRuntimeEnv,
+    }),
+    gitHubToken,
+    sourceControlToken,
+    taskId: taskRun.taskId,
+  };
 }

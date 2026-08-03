@@ -154,6 +154,8 @@ export type RunTaskCallbacks = {
 export type RunTaskOptions = {
   taskRun: DequeuedTaskRun['taskRun'];
   envVars: Record<string, string | undefined>;
+  /** Model configuration and credentials scoped to the agent harness. */
+  modelRuntimeEnv?: Record<string, string | undefined>;
   /**
    * Snapshot of the dequeue-provided env vars taken before injectEnvVars adds
    * runtime-internal entries (auth bypass values, BASH_ENV, ...). This is the

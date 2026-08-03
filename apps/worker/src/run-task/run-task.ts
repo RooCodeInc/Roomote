@@ -2,6 +2,7 @@ import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
   buildInferenceGatewayUrl,
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
@@ -11,6 +12,7 @@ import {
   isTaskModelIdDisabled,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
+  parseModelProviderEnvKeys,
   RunStatus,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
@@ -652,6 +654,7 @@ function getQueuedSnapshotResumeLinearMessages(
 export const runTask = async ({
   taskRun,
   envVars,
+  modelRuntimeEnv,
   userEnvVars,
   workspacePath,
   usesSharedWorkspaceRoot,
@@ -717,7 +720,21 @@ export const runTask = async ({
       : { ...process.env, ...envVars };
 
     const sanitizedEnv = sanitizeEnv(unsanitizedEnv);
-    const openCodeHarnessEnv = buildOpenCodeHarnessEnv(unsanitizedEnv);
+    const openCodeHarnessEnv = buildOpenCodeHarnessEnv({
+      ...unsanitizedEnv,
+      ...modelRuntimeEnv,
+    });
+    const harnessOnlySecretNames = [
+      ...new Set([
+        ...DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+        ...parseModelProviderEnvKeys(modelRuntimeEnv?.R_MODEL_ENV_KEYS),
+      ]),
+    ].filter((name) => modelRuntimeEnv?.[name] !== undefined);
+
+    if (harnessOnlySecretNames.length > 0) {
+      openCodeHarnessEnv.ROOMOTE_HARNESS_ONLY_SECRET_NAMES =
+        harnessOnlySecretNames.join(',');
+    }
 
     // Org env vars (from the dequeue payload) are merged BEFORE sanitizeEnv
     // so that system-critical vars (HOME, PATH, GH_TOKEN, etc.) from the

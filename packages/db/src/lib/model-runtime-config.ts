@@ -32,10 +32,11 @@ import { getFreshXaiAccessToken } from './xai-subscription';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
+import { stringifyDecryptedEnvVarValue } from './environment-variables';
 import {
-  resolveDeploymentEnvVar,
-  stringifyDecryptedEnvVarValue,
-} from './environment-variables';
+  getPersistedModelProviderEnvironmentVariables,
+  getPersistedModelProviderEnvironmentVariableValues,
+} from './model-provider-environment-variables';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 const DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET = new Set<string>(
@@ -149,8 +150,8 @@ function resolveProviderKeyNames({
 
 /**
  * Resolve a single model-provider env value with the same precedence the task
- * runtime uses: the runtime process env first, then the persisted (encrypted)
- * deployment environment variables.
+ * runtime uses: the runtime process env first, then the dedicated persisted
+ * model-provider values.
  */
 export async function resolveModelProviderEnvValue(
   envVarNames: string | readonly string[],
@@ -170,13 +171,14 @@ export async function resolveModelProviderEnvValue(
     }
   }
 
-  for (const envVarName of names) {
-    const persistedValue = await resolveDeploymentEnvVar(
-      envVarName,
+  const persistedValues =
+    await getPersistedModelProviderEnvironmentVariableValues(
+      names,
       options.executor ?? db,
-      {},
     );
 
+  for (const envVarName of names) {
+    const persistedValue = persistedValues[envVarName];
     const normalizedValue = normalizeConfiguredValue(persistedValue);
 
     if (normalizedValue) {
@@ -189,7 +191,7 @@ export async function resolveModelProviderEnvValue(
 
 type ModelRuntimeEnvOptions = {
   runtimeEnv?: Partial<Record<string, string | undefined>>;
-  deploymentEnvVars?: Record<string, string>;
+  modelProviderEnvVars?: Record<string, string>;
   executor?: DatabaseOrTransaction;
 };
 
@@ -227,10 +229,8 @@ async function resolveModelRuntimeEnv(
     persistedEnvVars,
     { runtimeModelConfig, catalogModels, enabledCatalogModels },
   ] = await Promise.all([
-    resolveEffectiveDeploymentEnvVars({
-      deploymentEnvVars: options.deploymentEnvVars,
-      executor,
-    }),
+    options.modelProviderEnvVars ??
+      getPersistedModelProviderEnvironmentVariables(executor),
     loadPersistedRuntimeModelConfig(executor),
   ]);
   const persistedRuntimeModelConfig = runtimeModelConfig;
