@@ -2774,7 +2774,7 @@ export function AutomationsSettings() {
                     }
                     placeholder="Search"
                     aria-label="Search available automations"
-                    className="h-8 w-44 pl-8 text-sm"
+                    className="h-8 w-36 pl-8 text-sm"
                   />
                 </div>
                 {hasAvailableFilters ? (

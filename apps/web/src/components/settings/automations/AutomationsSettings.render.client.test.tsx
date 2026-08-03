@@ -907,9 +907,11 @@ describe('AutomationsSettings', () => {
     expect(
       await screen.findByRole('dialog', { name: 'Edit custom automation' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Frequency')).toBeInTheDocument();
+    expect(screen.getByText('Schedule')).toBeInTheDocument();
     expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(screen.getByText('Channel')).toBeInTheDocument();
     expect(screen.queryByText('Cadence')).not.toBeInTheDocument();
+    expect(screen.queryByText('Frequency')).not.toBeInTheDocument();
     expect(screen.queryByText('Destination provider')).not.toBeInTheDocument();
     expect(
       screen.queryByText(
