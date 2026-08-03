@@ -1,0 +1,63 @@
+---
+title: Recipe template
+description: A contributor-ready skeleton for documenting a reusable Roomote system.
+icon: file-text
+---
+
+Use this skeleton when contributing a Cookbook recipe. Replace every placeholder
+and remove the comments before opening a pull request. If the recipe comes from
+another team, add a short attribution after the metadata line, such as
+`Recipe from the team at Example.`
+
+````markdown
+---
+title: Outcome-first recipe title
+description: One sentence explaining the finished system and why it matters.
+icon: lucide-icon-name
+---
+
+`Trigger` · `Setup: about N minutes` · `Requires: ...` · `Serves: ...`
+
+<!-- Explain the recurring problem and the outcome this recipe creates. -->
+
+## Ingredients
+
+<!-- List product features, integrations, permissions, environments, and channels. -->
+
+- Ingredient
+
+## Steps
+
+<!-- Use exact labels and Settings paths from the current product. -->
+
+1. First step.
+
+## Paste-ready configuration
+
+<!-- Name the exact field for every paste block. Never include real credentials. -->
+
+```text
+Configuration or prompt
+```
+
+## When it fires
+
+<!-- Use a short, illustrative transcript. Do not present it as a real customer event. -->
+
+> **Source:** Trigger message
+>
+> **Roomote:** Evidence-backed result
+
+## Variations
+
+<!-- Offer useful adaptations without turning them into separate recipes. -->
+
+- Variation
+
+<!-- State provider support, permission boundaries, and other limitations plainly. -->
+
+**Pairs well with:** [Related recipe](/cookbook/example)
+````
+
+Before submitting, test every paste block against the current product and make
+sure the recipe never relies on a prompt alone to enforce a security boundary.

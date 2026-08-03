@@ -93,6 +93,11 @@ automation to test it immediately.
 
 The deployment cap is 25 custom automations.
 
+See [Put maintenance on a schedule and off your mind](/cookbook/scheduled-housekeeping)
+for three copyable custom automation prompts, or
+[draft a product-updates newsletter](/cookbook/product-updates-newsletter) with
+a custom MCP server and a natural-language schedule.
+
 The **Scheduling timezone** setting is available on both the Automations and
 Deployment settings pages. It applies to all scheduled automations and to
 natural-language schedule interpretation. Existing deployments continue using
@@ -135,6 +140,10 @@ A few provider-specific behaviors to know:
 Start with a low-risk channel first. Auto-response can feel noisy if the
 channel mixes casual discussion with requests that should become Roomote
 tasks.
+
+See how channel instructions and launch criteria work together in the
+[vendor outage triage](/cookbook/vendor-outage-triage) and
+[support channel](/cookbook/support-channel) recipes.
 
 ## Manager automations
 
@@ -227,6 +236,9 @@ receives. For Azure DevOps, Roomote ensures the project-scoped
 For Gitea, repository webhook resync includes the `workflow_run` event so
 Actions completions reach Roomote; host matching uses the deployment
 `GITEA_BASE_URL`.
+
+Follow the [CI failure auto-fix recipe](/cookbook/ci-failure-auto-fix) for a
+copyable noise-control configuration.
 
 ## Add instructions to reduce noise
 

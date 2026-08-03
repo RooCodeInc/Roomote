@@ -1,0 +1,76 @@
+---
+title: Send a product-updates newsletter written from what actually shipped
+description: Turn the week's merged product work into a customer-ready Resend draft on a schedule.
+icon: mail
+---
+
+`Schedule` · `Setup: about 30 minutes` · `Requires: admin, custom Resend MCP server` · `Serves: PMs, founders, marketing`
+
+Product-update emails are chronically late because someone has to remember what
+shipped, translate commit-speak into customer language, and then fight the
+email tool. This automation does all three: every week it reads merged PRs
+across your product repositories, writes the newsletter, and creates a draft in
+Resend through a custom MCP server, ready for review. This is based on Bruno's
+setup at Roo.
+
+## Ingredients
+
+- A [custom automation](/automations#custom-automations)
+- An environment covering the product repositories
+- A custom Resend MCP server configured under **Settings > Integrations**, with a Resend API key
+- A report destination such as `#product-updates`, so the draft lands in a replyable thread
+
+## Steps
+
+1. Add the Resend MCP server as a custom integration and confirm its tools are available in the environment.
+2. Create a custom automation named **Product Updates Newsletter**. Choose **Custom schedule**, enter `Mondays at 9am`, and select the environment.
+3. Paste the prompt below.
+4. Set the report destination to `#product-updates`.
+5. Use **Run now** to generate the first draft, then calibrate its tone by replying in the thread.
+
+## Automation prompt
+
+```text
+Write this week's product-updates newsletter.
+
+1. Collect the PRs merged to the default branch in the last 7 days across the
+   product repositories.
+2. Keep only customer-visible changes: features, improvements, and fixes a
+   user would notice. Skip refactors, internal tooling, and dependency bumps.
+3. Write the newsletter:
+   - a one-line subject
+   - a two-sentence introduction
+   - one short section per change: what is new, why it matters, how to try it
+   Use plain language. Do not include ticket numbers or internal codenames.
+4. Using the Resend MCP server, create a DRAFT broadcast with this content for
+   the "Product updates" audience. Do not send it.
+5. Post the draft content and the Resend draft link in this thread for review.
+
+If nothing customer-visible shipped this week, say so in the thread and skip
+the draft. Do not pad the newsletter.
+```
+
+## When it fires
+
+> **Roomote** (`#product-updates`): **This week's newsletter draft is ready.**
+> Three customer-visible changes: scheduling timezones for automations, Discord
+> forum-channel support, and faster environment starts. Draft created in Resend
+> but not sent. Reply here with edits, or send it directly from Resend.
+>
+> **Bruno:** Lead with the timezone setting, and mention that it applies to
+> existing automations too.
+>
+> **Roomote:** Reordered and updated the Resend draft. The timezone section now
+> opens the email and notes that it applies retroactively. Same draft link.
+
+## Variations
+
+- Without Resend, remove step 4 and post ready-to-paste Markdown for any email tool.
+- Run monthly with `first Monday of the month at 9am`.
+- Use separate automations for customer notes and a technical internal changelog.
+
+This recipe showcases custom MCP servers, natural-language scheduling, and
+replyable automation threads. Review the draft before sending it; the automation
+is deliberately instructed to create a draft, not send a broadcast.
+
+**Pairs well with:** [scheduled housekeeping](/cookbook/scheduled-housekeeping)

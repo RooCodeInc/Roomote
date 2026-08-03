@@ -49,6 +49,18 @@
         "pages": ["how-roomote-works", "use-cases", "tasks", "file-attachments"]
       },
       {
+        "group": "Cookbook",
+        "pages": [
+          "cookbook/index",
+          "cookbook/vendor-outage-triage",
+          "cookbook/support-channel",
+          "cookbook/ci-failure-auto-fix",
+          "cookbook/product-updates-newsletter",
+          "cookbook/scheduled-housekeeping",
+          "cookbook/template"
+        ]
+      },
+      {
         "group": "Provider Configuration",
         "pages": [
           {
