@@ -8,12 +8,9 @@ const {
   mockResolveComputeProviderEnvValues,
   selectResultsQueue,
   selectFn,
-  fromFn,
-  whereFn,
   updateFn,
-  setFn,
-  updateWhereFn,
 } = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint; ESLint's own rule is offloaded and reports this directive as unused, which is a false positive
   type AnyMock = Mock<(...args: any[]) => any>;
 
   // Each db.select(...) call consumes one entry; entries resolve in call
@@ -23,7 +20,7 @@ const {
 
   const makeQueryResult = (rows: unknown[]) => {
     const result = Promise.resolve(rows);
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint (see above)
     (result as any).orderBy = () => Promise.resolve(rows);
     return result;
   };
@@ -46,11 +43,7 @@ const {
     mockResolveComputeProviderEnvValues: vi.fn() as AnyMock,
     selectResultsQueue,
     selectFn,
-    fromFn,
-    whereFn,
     updateFn,
-    setFn,
-    updateWhereFn,
   };
 });
 

@@ -33,6 +33,7 @@ const {
   setFn,
   updateFn,
 } = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint; ESLint's own rule is offloaded and reports this directive as unused, which is a false positive
   type AnyMock = Mock<(...args: any[]) => any>;
 
   const andFn: AnyMock = vi.fn(() => 'and-condition');
