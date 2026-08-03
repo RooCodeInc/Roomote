@@ -241,6 +241,7 @@ const mutations = vi.hoisted(() => ({
   connectSlack: vi.fn(),
   updateSettings: vi.fn(),
   triggerAgent: vi.fn(),
+  triggerCustomAutomation: vi.fn(),
   latestSettingsOptions: null as {
     onSuccess?: (
       result: NonNullable<typeof state.nextUpdateSettingsResult>,
@@ -359,11 +360,16 @@ vi.mock('@tanstack/react-query', () => ({
       result: NonNullable<typeof state.nextUpdateSettingsResult>,
     ) => void;
     onError?: (...args: unknown[]) => void;
+    mutationKind?: 'triggerCustomAutomation';
   }) => {
     return {
       isPending: false,
       mutate: vi.fn((variables: unknown) => {
-        mutations.updateSettings(variables);
+        if (_options?.mutationKind === 'triggerCustomAutomation') {
+          mutations.triggerCustomAutomation(variables);
+        } else {
+          mutations.updateSettings(variables);
+        }
       }),
     };
   },
@@ -412,7 +418,10 @@ vi.mock('@/trpc/client', () => ({
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
       },
       triggerCustomAutomation: {
-        mutationOptions: (options?: Record<string, unknown>) => options ?? {},
+        mutationOptions: (options?: Record<string, unknown>) => ({
+          ...options,
+          mutationKind: 'triggerCustomAutomation',
+        }),
       },
       resolveCustomAutomationSchedule: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
@@ -879,7 +888,7 @@ describe('AutomationsSettings', () => {
         updatedAt: new Date('2026-01-01T00:00:00Z'),
       },
     ];
-    render(<AutomationsSettings />);
+    const { rerender } = render(<AutomationsSettings />);
 
     expect(
       await screen.findByRole('switch', {
@@ -891,6 +900,20 @@ describe('AutomationsSettings', () => {
         'Weekly · Production · slack:#roomote-managers · Created by Ada',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
+    ).toBeEnabled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
+    );
+    expect(mutations.triggerCustomAutomation).toHaveBeenCalledWith({
+      id: 'automation-1',
+    });
+    state.customAutomations[0]!.enabled = false;
+    rerender(<AutomationsSettings />);
+    expect(
+      screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
+    ).toBeDisabled();
     expect(
       screen.getByRole('button', {
         name: 'Configure Weekly flaky-test scan',

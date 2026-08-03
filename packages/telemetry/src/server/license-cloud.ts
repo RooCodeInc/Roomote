@@ -147,7 +147,12 @@ export async function syncLicenseWithCloud(input: {
       return { status: 'license_in_use' };
     }
     if (!response.ok) {
-      return { status: 'rejected' };
+      return {
+        status:
+          response.status === 429 || response.status >= 500
+            ? 'failed'
+            : 'rejected',
+      };
     }
 
     const payload = parseResponse(await response.json());
@@ -171,14 +176,20 @@ export async function syncLicenseWithCloud(input: {
     // Compare with the value read before the Cloud request. This makes both
     // scheduled reports and interactive activations safe if another admin
     // changes the configured key while this request is in flight.
-    await update.where(
-      and(
-        eq(deploymentSettings.id, 'default'),
-        settings?.licenseKey == null
-          ? isNull(deploymentSettings.licenseKey)
-          : eq(deploymentSettings.licenseKey, settings.licenseKey),
-      ),
-    );
+    const updatedRows = await update
+      .where(
+        and(
+          eq(deploymentSettings.id, 'default'),
+          settings?.licenseKey == null
+            ? isNull(deploymentSettings.licenseKey)
+            : eq(deploymentSettings.licenseKey, settings.licenseKey),
+        ),
+      )
+      .returning({ id: deploymentSettings.id });
+
+    if (updatedRows.length === 0) {
+      return { status: 'failed' };
+    }
 
     return { status: 'synced' };
   } catch (error) {
