@@ -1,10 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-
 import { useTRPC } from '@/trpc/client';
+import { useDeviceCodeFlow } from '@/hooks/useDeviceCodeFlow';
 import {
   Button,
   Dialog,
@@ -36,125 +33,36 @@ export function GitHubCopilotConnectDialog({
   onConnected?: () => void | Promise<void>;
 }) {
   const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const [deviceAuth, setDeviceAuth] = useState<DeviceAuth | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const pollingRef = useRef(false);
 
-  const startMutation = useMutation(
-    trpc.githubCopilotSubscription.startDeviceAuth.mutationOptions({
-      onSuccess: (result) => {
-        setDeviceAuth(result);
-        setError(null);
+  const { deviceAuth, error, isStartPending, handleOpenChange, restart } =
+    useDeviceCodeFlow<DeviceAuth, { deviceCode: string }>({
+      open,
+      onOpenChange,
+      onConnected,
+      startMutationOptions: (handlers) =>
+        trpc.githubCopilotSubscription.startDeviceAuth.mutationOptions(
+          handlers,
+        ),
+      pollMutationOptions: () =>
+        trpc.githubCopilotSubscription.pollDeviceAuth.mutationOptions(),
+      getPollInput: (auth) => ({ deviceCode: auth.deviceCode }),
+      invalidateQueryKeys: () => [
+        trpc.taskModels.providerSetup.queryKey(),
+        trpc.taskModels.get.queryKey(),
+        trpc.taskModels.launchOptions.queryKey(),
+        trpc.githubCopilotSubscription.status.queryKey(),
+        trpc.subscriptionUsage.list.queryKey(),
+      ],
+      successToast: 'GitHub Copilot subscription connected.',
+      copy: {
+        expired: 'GitHub authorization code expired. Restart the connection.',
+        startFailed: 'Failed to start GitHub authorization.',
+        pollFailed: 'GitHub authorization polling failed.',
       },
-      onError: (mutationError) => setError(mutationError.message),
-    }),
-  );
-  const pollMutation = useMutation(
-    trpc.githubCopilotSubscription.pollDeviceAuth.mutationOptions(),
-  );
-
-  function close(next: boolean) {
-    if (!next) pollingRef.current = false;
-    onOpenChange(next);
-  }
-
-  useEffect(() => {
-    if (!open) {
-      pollingRef.current = false;
-      setDeviceAuth(null);
-      setError(null);
-      return;
-    }
-    if (!deviceAuth && !startMutation.isPending && !startMutation.isError) {
-      startMutation.mutate();
-    }
-  }, [deviceAuth, open, startMutation]);
-
-  useEffect(() => {
-    if (!open || !deviceAuth || pollingRef.current) return;
-    pollingRef.current = true;
-
-    const expiresAt = Date.now() + deviceAuth.expiresInMs;
-
-    const poll = async () => {
-      let intervalMs = deviceAuth.intervalMs;
-      while (pollingRef.current) {
-        if (Date.now() >= expiresAt) {
-          pollingRef.current = false;
-          setError(
-            'GitHub authorization code expired. Restart the connection.',
-          );
-          return;
-        }
-
-        const result = await pollMutation.mutateAsync({
-          deviceCode: deviceAuth.deviceCode,
-        });
-        if (result.status === 'success') {
-          pollingRef.current = false;
-          toast.success('GitHub Copilot subscription connected.');
-          await Promise.all([
-            queryClient.invalidateQueries({
-              queryKey: trpc.taskModels.providerSetup.queryKey(),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: trpc.taskModels.get.queryKey(),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: trpc.taskModels.launchOptions.queryKey(),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: trpc.githubCopilotSubscription.status.queryKey(),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: trpc.subscriptionUsage.list.queryKey(),
-            }),
-          ]);
-          await onConnected?.();
-          close(false);
-          return;
-        }
-        if (result.status === 'failed') {
-          pollingRef.current = false;
-          setError(result.error);
-          return;
-        }
-        // slow_down returns the new absolute poll interval, not a delta.
-        if (result.intervalMs) intervalMs = result.intervalMs;
-
-        const remainingMs = expiresAt - Date.now();
-        if (remainingMs <= 0) {
-          pollingRef.current = false;
-          setError(
-            'GitHub authorization code expired. Restart the connection.',
-          );
-          return;
-        }
-        await new Promise((resolve) =>
-          setTimeout(resolve, Math.min(intervalMs, remainingMs)),
-        );
-      }
-    };
-
-    void poll().catch((pollError: unknown) => {
-      pollingRef.current = false;
-      setError(
-        pollError instanceof Error
-          ? pollError.message
-          : 'GitHub authorization polling failed.',
-      );
     });
-    return () => {
-      pollingRef.current = false;
-    };
-    // The polling lifecycle is intentionally keyed only to the active device
-    // flow; mutation/query objects are recreated by hooks between renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceAuth, open]);
 
   return (
-    <Dialog open={open} onOpenChange={close}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>Connect GitHub Copilot</DialogTitle>
@@ -163,7 +71,7 @@ export function GitHubCopilotConnectDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {deviceAuth ? (
+        {deviceAuth && !error ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
               Open GitHub, then enter this one-time code:
@@ -188,29 +96,23 @@ export function GitHubCopilotConnectDialog({
               Waiting for authorization…
             </p>
           </div>
-        ) : startMutation.isPending ? (
+        ) : isStartPending ? (
           <div className="flex justify-center py-8">
             <Spinner />
           </div>
         ) : null}
 
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {error ? (
+          <p className="text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => close(false)}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
-          {error ? (
-            <Button
-              onClick={() => {
-                setError(null);
-                setDeviceAuth(null);
-                startMutation.reset();
-              }}
-            >
-              Restart
-            </Button>
-          ) : null}
+          {error ? <Button onClick={restart}>Restart</Button> : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>
