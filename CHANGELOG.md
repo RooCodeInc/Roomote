@@ -2,6 +2,24 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.30.2 (2026-08-03)
+
+This patch improves GitHub App recovery and Discord automation follow-ups, refreshes the DeepSeek recommendation, and retires the current experimental toggles.
+
+### Highlights
+
+- Recover from stale GitHub App credentials and reconnect repositories without sync conflicts.
+- Keep Discord automation updates and replies together in dedicated threads.
+- Recommend DeepSeek V4 Flash 0731 across supported providers.
+- Retire the current experimental toggles while preserving their default behavior.
+
+### Patch changes
+
+- Recommend and resolve the dated DeepSeek V4 Flash 0731 model across supported providers.
+- Create a dedicated Discord thread from each automation's first report so later updates and replies stay together.
+- Let administrators remove stale GitHub App credentials and reconnect or refresh repositories without sync conflicts after replacing an installation.
+- Retire the current experimental feature toggles while preserving their default behavior and keeping the settings area ready for future experiments.
+
 ## 0.30.1 (2026-08-02)
 
 This patch improves custom automation scheduling and keeps Docker sandbox cleanup reliable in restricted deployments.
