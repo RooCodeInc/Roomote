@@ -25,6 +25,7 @@ import {
   collectInstanceReportStats,
   dedupeAuthoredPullRequests,
   median,
+  summarizeAutomations,
   summarizePullRequestCohort,
 } from '../instance-report';
 
@@ -63,6 +64,32 @@ describe('instance-report pure helpers', () => {
     expect(median([5])).toBe(5);
     expect(median([1, 3, 5])).toBe(3);
     expect(median([10, 20, 30, 40])).toBe(25);
+  });
+
+  it('summarizes automation totals from dynamic built-in rows', () => {
+    expect(
+      summarizeAutomations({
+        customTotal: 4,
+        customEnabled: 2,
+        builtInRows: [
+          { key: 'review_code', enabled: true },
+          { key: 'future_automation', enabled: true },
+          { key: 'disabled_automation', enabled: false },
+        ],
+      }),
+    ).toEqual({
+      custom: {
+        total: 4,
+        enabled: 2,
+      },
+      builtIn: {
+        enabled: 2,
+        enabledByKey: {
+          review_code: true,
+          future_automation: true,
+        },
+      },
+    });
   });
 
   it('dedupes by repo#number using earliest detection and latest status', () => {
