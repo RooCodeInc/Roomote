@@ -14,7 +14,6 @@ const {
   setFn,
   updateWhereFn,
 } = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   type AnyMock = Mock<(...args: any[]) => any>;
 
   // Each db.select(...) call consumes one entry; entries resolve in call
@@ -24,7 +23,7 @@ const {
 
   const makeQueryResult = (rows: unknown[]) => {
     const result = Promise.resolve(rows);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     (result as any).orderBy = () => Promise.resolve(rows);
     return result;
   };

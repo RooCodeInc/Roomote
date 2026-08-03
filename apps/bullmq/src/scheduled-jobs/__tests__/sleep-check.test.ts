@@ -35,14 +35,13 @@ const {
   selectFn,
   inArrayFn,
 } = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   type AnyMock = Mock<(...args: any[]) => any>;
 
   const returningFn: AnyMock = vi.fn(() => Promise.resolve([]));
   const updateWhereFn: AnyMock = vi.fn(() => {
     const result = Promise.resolve([]);
     // Support both .returning() (optimistic lock) and .catch() (rollback) call patterns.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     (result as any).returning = returningFn;
     return result;
   });
@@ -348,7 +347,7 @@ describe('sleepCheckJob', () => {
     );
     updateWhereFn.mockImplementation(() => {
       const result = Promise.resolve([]);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       (result as any).returning = returningFn;
       return result;
     });

@@ -18,9 +18,7 @@ const STANDBY_PROVIDERS = ['docker', 'blaxel', 'azure'] as const;
 
 // Providers whose retained handles are live instances that can (and must) be
 // re-suspended when found Running with no managing run.
-const RE_SUSPEND_PROVIDERS = [
-  'azure',
-] as const satisfies readonly StandbyProvider[];
+const RE_SUSPEND_PROVIDERS: readonly StandbyProvider[] = ['azure'];
 
 type StandbyProvider = (typeof STANDBY_PROVIDERS)[number];
 

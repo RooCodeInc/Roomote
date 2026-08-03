@@ -33,7 +33,6 @@ const {
   setFn,
   updateFn,
 } = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   type AnyMock = Mock<(...args: any[]) => any>;
 
   const andFn: AnyMock = vi.fn(() => 'and-condition');
