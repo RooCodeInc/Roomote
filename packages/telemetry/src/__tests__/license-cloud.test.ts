@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   resolveLicenseState: vi.fn(),
   findSettings: vi.fn(),
   and: vi.fn(),
+  isNull: vi.fn(),
   updateSet: vi.fn(),
   updateWhere: vi.fn(),
 }));
@@ -26,6 +27,7 @@ vi.mock('@roomote/db/server', () => ({
   deploymentSettings: { id: 'id', licenseKey: 'licenseKey' },
   and: mocks.and,
   eq: vi.fn(),
+  isNull: mocks.isNull,
   getDeploymentLicenseState: mocks.getDeploymentLicenseState,
   getInstanceAnalyticsId: mocks.getInstanceAnalyticsId,
   resolveConfiguredLicenseKey: mocks.resolveConfiguredLicenseKey,

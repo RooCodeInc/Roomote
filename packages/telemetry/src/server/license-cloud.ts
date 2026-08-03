@@ -8,6 +8,7 @@ import {
   getInstanceAnalyticsId,
   resolveConfiguredLicenseKey,
   resolveLicenseState,
+  isNull,
 } from '@roomote/db/server';
 
 import type {
@@ -167,16 +168,17 @@ export async function syncLicenseWithCloud(input: {
       updatedAt: new Date(),
     });
 
-    await (input.licenseKey == null &&
-    settings?.licenseKey != null &&
-    licenseKey === settings.licenseKey.trim()
-      ? update.where(
-          and(
-            eq(deploymentSettings.id, 'default'),
-            eq(deploymentSettings.licenseKey, settings.licenseKey),
-          ),
-        )
-      : update.where(eq(deploymentSettings.id, 'default')));
+    // Compare with the value read before the Cloud request. This makes both
+    // scheduled reports and interactive activations safe if another admin
+    // changes the configured key while this request is in flight.
+    await update.where(
+      and(
+        eq(deploymentSettings.id, 'default'),
+        settings?.licenseKey == null
+          ? isNull(deploymentSettings.licenseKey)
+          : eq(deploymentSettings.licenseKey, settings.licenseKey),
+      ),
+    );
 
     return { status: 'synced' };
   } catch (error) {
