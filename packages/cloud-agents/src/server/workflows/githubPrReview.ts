@@ -85,15 +85,11 @@ function gitLabMergeRequestReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildGitLabMergeRequestReviewPrompt({
     taskSpec,
@@ -111,8 +107,6 @@ function gitLabMergeRequestReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }
 
@@ -167,15 +161,11 @@ function giteaPullRequestReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildGiteaPullRequestReviewPrompt({
     taskSpec,
@@ -193,8 +183,6 @@ function giteaPullRequestReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }
 
@@ -249,15 +237,11 @@ function bitbucketPullRequestReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildBitbucketPullRequestReviewPrompt({
     taskSpec,
@@ -275,8 +259,6 @@ function bitbucketPullRequestReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }
 
@@ -331,15 +313,11 @@ function adoPullRequestReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildAdoPullRequestReviewPrompt({
     taskSpec,
@@ -357,8 +335,6 @@ function adoPullRequestReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }
 
@@ -368,16 +344,12 @@ export async function githubPrReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewOpenTask;
   gitHubToken: string;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -390,8 +362,6 @@ export async function githubPrReview({
         taskRunUrl,
         additionalInstructions,
         attribution,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case 'gitea':
       return giteaPullRequestReview({
@@ -399,8 +369,6 @@ export async function githubPrReview({
         taskRunUrl,
         additionalInstructions,
         attribution,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case 'bitbucket':
       return bitbucketPullRequestReview({
@@ -408,8 +376,6 @@ export async function githubPrReview({
         taskRunUrl,
         additionalInstructions,
         attribution,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case 'ado':
       return adoPullRequestReview({
@@ -417,8 +383,6 @@ export async function githubPrReview({
         taskRunUrl,
         additionalInstructions,
         attribution,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case 'github':
       break;
@@ -584,8 +548,6 @@ export async function githubPrReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 
   return {

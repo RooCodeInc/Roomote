@@ -7,7 +7,6 @@ const { personalPreferencesState, themeState, userState } = vi.hoisted(() => ({
     preferences: {
       colorTheme: 'system' as PersonalColorTheme,
       narrationMode: false,
-      showDebugUI: false,
     },
     isLoading: false,
   },
@@ -42,7 +41,6 @@ describe('PersonalThemeSync', () => {
     personalPreferencesState.preferences = {
       colorTheme: 'system' as PersonalColorTheme,
       narrationMode: false,
-      showDebugUI: false,
     };
     personalPreferencesState.isLoading = false;
     themeState.theme = 'system';
@@ -53,7 +51,6 @@ describe('PersonalThemeSync', () => {
     personalPreferencesState.preferences = {
       colorTheme: 'dark' as PersonalColorTheme,
       narrationMode: false,
-      showDebugUI: false,
     };
     themeState.theme = 'system';
 
@@ -67,7 +64,6 @@ describe('PersonalThemeSync', () => {
     personalPreferencesState.preferences = {
       colorTheme: 'dark' as PersonalColorTheme,
       narrationMode: false,
-      showDebugUI: false,
     };
     themeState.theme = 'system';
 
@@ -102,7 +98,6 @@ describe('PersonalThemeSync', () => {
     personalPreferencesState.preferences = {
       colorTheme: 'light' as PersonalColorTheme,
       narrationMode: false,
-      showDebugUI: false,
     };
     themeState.theme = 'light';
     window.localStorage.removeItem('roomote-color-theme');

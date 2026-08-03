@@ -27,16 +27,12 @@ export async function githubPrReviewFollowUp({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewFollowUpTask;
   gitHubToken: string;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -153,8 +149,6 @@ export async function githubPrReviewFollowUp({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 
   const mentionFollowUpPolicy = buildGitHubMentionFollowUpHarnessInstructions();

@@ -80,15 +80,11 @@ function gitLabMergeRequestSyncReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewSyncTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildGitLabMergeRequestSyncReviewPrompt({
     taskSpec,
@@ -106,8 +102,6 @@ function gitLabMergeRequestSyncReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }
 
@@ -162,15 +156,11 @@ function giteaPullRequestSyncReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewSyncTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildGiteaPullRequestSyncReviewPrompt({
     taskSpec,
@@ -188,8 +178,6 @@ function giteaPullRequestSyncReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }
 
@@ -244,15 +232,11 @@ function bitbucketPullRequestSyncReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewSyncTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildBitbucketPullRequestSyncReviewPrompt({
     taskSpec,
@@ -270,8 +254,6 @@ function bitbucketPullRequestSyncReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }
 
@@ -326,15 +308,11 @@ function adoPullRequestSyncReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPullRequestReviewSyncTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildAdoPullRequestSyncReviewPrompt({
     taskSpec,
@@ -352,8 +330,6 @@ function adoPullRequestSyncReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }
 
@@ -364,8 +340,6 @@ export async function githubPrReviewSync({
   taskRunUrl,
   additionalInstructions,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   runId?: number;
   taskSpec: GithubPullRequestReviewSyncTask;
@@ -373,8 +347,6 @@ export async function githubPrReviewSync({
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -387,8 +359,6 @@ export async function githubPrReviewSync({
         taskRunUrl,
         additionalInstructions,
         attribution,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case 'gitea':
       return giteaPullRequestSyncReview({
@@ -396,8 +366,6 @@ export async function githubPrReviewSync({
         taskRunUrl,
         additionalInstructions,
         attribution,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case 'bitbucket':
       return bitbucketPullRequestSyncReview({
@@ -405,8 +373,6 @@ export async function githubPrReviewSync({
         taskRunUrl,
         additionalInstructions,
         attribution,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case 'ado':
       return adoPullRequestSyncReview({
@@ -414,8 +380,6 @@ export async function githubPrReviewSync({
         taskRunUrl,
         additionalInstructions,
         attribution,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case 'github':
       break;
@@ -607,7 +571,5 @@ export async function githubPrReviewSync({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }

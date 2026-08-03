@@ -27,7 +27,6 @@ vi.mock('@/components/settings/LinkedAccounts', () => ({
 }));
 
 vi.mock('@/components/settings', () => ({
-  ShowDebugUISection: () => <section>Debug UI</section>,
   UserPreferencesSection: () => <section>User preferences</section>,
 }));
 

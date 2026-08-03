@@ -5,8 +5,6 @@ import {
   REDIS_KEYS,
   syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
-import { FeatureFlag } from '@roomote/feature-flags';
-import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
 import { ROUTING_AUTO_CONFIRM_TIMEOUT_MS } from '@roomote/cloud-agents/server';
 import {
   autoConfirmRouting,
@@ -57,12 +55,6 @@ import {
   isFastCommandInvocation,
   processFastAgentMessage,
 } from './fast-agent.js';
-import {
-  buildSlackEvalUnavailableText,
-  isBareEvalCommandInvocation,
-  isEvalCommandInvocation,
-  processEvalCommandMessage,
-} from './eval-command.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
   dispatchSlackThreadFollowUp,
@@ -99,6 +91,35 @@ import {
   type UnmentionedThreadHistoryMessage,
 } from '../../shared/unmentioned-thread-reply.js';
 import { showManualPickerForAutoRouteFallback } from './auto-route-fallback.js';
+
+const REMOVED_EVAL_COMMAND_PATTERN = /^!eval(?:\s|$)/iu;
+
+export function isRemovedEvalCommandInvocation(text: string): boolean {
+  const mentionStrippedText = text
+    .replace(/^\s*<@[^>]+>[\s,:;.-]*/u, '')
+    .trimStart();
+  return REMOVED_EVAL_COMMAND_PATTERN.test(mentionStrippedText);
+}
+
+async function postRemovedEvalCommandMessage(params: {
+  event: SlackEvent;
+  slack: SlackNotifier;
+  userId: string;
+  teamId: string;
+}): Promise<void> {
+  await postSlackThreadMarkdownMessage({
+    slack: params.slack,
+    channel: params.event.channel,
+    threadTs: params.event.thread_ts || params.event.ts,
+    text: 'The `!eval` command is no longer available.',
+    sourceMessageTs: params.event.ts,
+    conversationLog: {
+      userId: params.userId,
+      slackTeamId: params.teamId,
+      source: 'slack_eval_command',
+    },
+  });
+}
 
 async function runSlackAutoConfirm({
   threadId,
@@ -1093,7 +1114,7 @@ async function maybeHandleChannelAutoStart(params: {
     return true;
   }
 
-  const { ackEmoji, completionEmoji } = await resolveSlackReactionNames();
+  const { ackEmoji } = await resolveSlackReactionNames();
 
   if (
     userMapping &&
@@ -1116,36 +1137,14 @@ async function maybeHandleChannelAutoStart(params: {
   if (
     userMapping &&
     typeof channelAutoStartEvent.user === 'string' &&
-    isBareEvalCommandInvocation(channelAutoStartEvent.text)
+    isRemovedEvalCommandInvocation(channelAutoStartEvent.text)
   ) {
-    if (!(await isSlackEvalLauncherEnabled())) {
-      await postSlackThreadMarkdownMessage({
-        slack: context.slack,
-        channel: channelAutoStartEvent.channel,
-        threadTs: channelAutoStartEvent.thread_ts || channelAutoStartEvent.ts,
-        text: buildSlackEvalUnavailableText(),
-        sourceMessageTs: channelAutoStartEvent.ts,
-        conversationLog: {
-          userId: userMapping.userId,
-          slackTeamId: context.teamId,
-          source: 'slack_eval_command',
-        },
-      });
-
-      return true;
-    }
-
-    startEvalCommandResponse({
-      event: { ...channelAutoStartEvent, user: channelAutoStartEvent.user },
-      slackInstallation: context.slackInstallation,
+    await postRemovedEvalCommandMessage({
+      event: channelAutoStartEvent,
       slack: context.slack,
       userId: userMapping.userId,
       teamId: context.teamId,
-      ackEmoji,
-      completionEmoji,
-      errorLogPrefix: `❌ Background eval launch failed for auto-start thread ${channelAutoStartEvent.ts}:`,
     });
-
     return true;
   }
 
@@ -1467,35 +1466,6 @@ function startFastAgentResponse(params: {
   });
 }
 
-function startEvalCommandResponse(params: {
-  event: SlackEvent;
-  slackInstallation: SlackInstallation;
-  slack: SlackNotifier;
-  userId: string;
-  teamId: string;
-  ackEmoji: string;
-  completionEmoji: string;
-  errorLogPrefix: string;
-}): void {
-  const { errorLogPrefix, ...evalParams } = params;
-
-  processEvalCommandMessage(evalParams).catch((error) => {
-    console.error(
-      errorLogPrefix,
-      error instanceof Error ? error.message : String(error),
-    );
-  });
-}
-
-async function isSlackEvalLauncherEnabled(): Promise<boolean> {
-  return await getFeatureFlagEvaluator(getRedis()).evaluate(
-    FeatureFlag.SlackEvalLauncher,
-    {
-      isDeploymentContext: true,
-    },
-  );
-}
-
 async function handleSlackEntryEvent(params: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
@@ -1662,34 +1632,16 @@ async function handleSlackEntryEvent(params: {
     return;
   }
 
-  if (event.type === 'app_mention' && isEvalCommandInvocation(event.text)) {
-    if (!(await isSlackEvalLauncherEnabled())) {
-      await postSlackThreadMarkdownMessage({
-        slack,
-        channel: event.channel,
-        threadTs: threadId,
-        text: buildSlackEvalUnavailableText(),
-        sourceMessageTs: event.ts,
-        conversationLog: {
-          userId: userMapping.userId,
-          slackTeamId: teamId,
-          source: 'slack_eval_command',
-        },
-      });
-      return;
-    }
-
-    startEvalCommandResponse({
+  if (
+    event.type === 'app_mention' &&
+    isRemovedEvalCommandInvocation(event.text)
+  ) {
+    await postRemovedEvalCommandMessage({
       event,
-      slackInstallation,
       slack,
       userId: userMapping.userId,
       teamId,
-      ackEmoji,
-      completionEmoji,
-      errorLogPrefix: `❌ Background eval launch failed for thread ${threadId}:`,
     });
-
     return;
   }
 

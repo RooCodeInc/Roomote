@@ -57,7 +57,6 @@ const adminAuth = {
   name: 'Admin',
   primaryEmail: 'admin@example.com',
   isAdmin: true,
-  featureFlags: {},
   anonymousAnalyticsEnabled: true,
   cloudEnabled: false,
   resource: {

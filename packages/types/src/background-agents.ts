@@ -6,16 +6,6 @@ export type ConflictResolverFrequency =
 
 export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
 
-export const SUGGESTER_ROUTING_MODES = [
-  'manager_channel',
-  'group_by_instructions',
-] as const;
-
-export type SuggesterRoutingMode = (typeof SUGGESTER_ROUTING_MODES)[number];
-
-export const DEFAULT_SUGGESTER_ROUTING_MODE: SuggesterRoutingMode =
-  'manager_channel';
-
 export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 
 export type ManagerStatsFrequency = 'off' | 'weekly';
@@ -46,12 +36,6 @@ export function isChannelAutoStartLaunchMode(
   value: string,
 ): value is ChannelAutoStartLaunchMode {
   return (CHANNEL_AUTO_START_LAUNCH_MODES as readonly string[]).includes(value);
-}
-
-export function isSuggesterRoutingMode(
-  value: string,
-): value is SuggesterRoutingMode {
-  return (SUGGESTER_ROUTING_MODES as readonly string[]).includes(value);
 }
 
 export function isScheduleOnlyBackgroundAutomationFrequency(

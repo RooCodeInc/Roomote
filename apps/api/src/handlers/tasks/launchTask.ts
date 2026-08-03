@@ -185,10 +185,8 @@ export async function launchTask(
   const body = parsedBody.data;
   const requestedType = body.type ?? 'standard';
 
-  // Resolve harness/model/reasoning into a harness pin plus model override,
-  // sharing the same validation the Slack `!eval` launcher uses. This is what
-  // lets `model` actually reach the harness from the API (a bare `harness`
-  // selects the default model otherwise).
+  // Resolve harness/model/reasoning into a harness pin plus model override so
+  // `model` reaches the harness (a bare `harness` selects its default model).
   const harnessSelection = resolveEvalHarnessSelection({
     harness: body.harness,
     model: body.model,

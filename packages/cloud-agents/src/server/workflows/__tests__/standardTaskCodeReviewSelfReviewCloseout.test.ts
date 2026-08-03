@@ -112,38 +112,18 @@ describe('Standard Task code-review self-review closeout', () => {
     );
   });
 
-  it('folds the self-review note into background-proof closeout text when every PR shape is auto-review eligible', () => {
+  it('does not require a self-review note on push-only closeouts', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
-      backgroundProofCaptureEnabled: true,
-      codeReviewsEnabled: true,
-      codeReviewReviewDraftPrs: true,
-      sourceControlProvider: 'github',
-    });
-
-    expect(harnessInstructions).toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you are doing a self-review on GitHub and will follow up here with those results',
-    );
-  });
-
-  it('does not hard-require a self-review note on push-only closeouts even when code reviews and background proof are enabled', () => {
-    const { harnessInstructions } = standardTask({
-      description: 'Implement behavior change',
-      repo: 'Roomote/example-app',
-      taskRunUrl: 'https://example.com/task/123',
-      backgroundProofCaptureEnabled: true,
       codeReviewsEnabled: true,
       sourceControlProvider: 'github',
       prAction: 'push',
     });
 
-    expect(harnessInstructions).toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread. The parent must not load or directly use browser tooling',
-    );
     expect(harnessInstructions).not.toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you are doing a self-review on GitHub and will follow up here with those results',
+      '<code_review_self_review_closeout>',
     );
   });
 
@@ -152,7 +132,6 @@ describe('Standard Task code-review self-review closeout', () => {
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
-      backgroundProofCaptureEnabled: true,
       codeReviewsEnabled: true,
       codeReviewReviewOnCommit: false,
       sourceControlProvider: 'github',
@@ -164,9 +143,6 @@ describe('Standard Task code-review self-review closeout', () => {
     expect(harnessInstructions).not.toContain(
       'are doing a self-review on GitHub',
     );
-    expect(harnessInstructions).toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread. The parent must not load or directly use browser tooling',
-    );
   });
 
   it('keeps decision guidance for draft default delivery when reviewDraftPrs is disabled without hard-appending the note', () => {
@@ -174,7 +150,6 @@ describe('Standard Task code-review self-review closeout', () => {
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
-      backgroundProofCaptureEnabled: true,
       codeReviewsEnabled: true,
       codeReviewReviewOnCommit: true,
       codeReviewReviewDraftPrs: false,
@@ -199,7 +174,6 @@ describe('Standard Task code-review self-review closeout', () => {
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
-      backgroundProofCaptureEnabled: true,
       codeReviewsEnabled: true,
       codeReviewReviewOnCommit: true,
       codeReviewReviewDraftPrs: false,

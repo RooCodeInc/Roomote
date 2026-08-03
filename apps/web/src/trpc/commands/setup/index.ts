@@ -16,13 +16,13 @@ import {
   type EnvironmentConfig,
   normalizeSetupNewState,
 } from '@roomote/types';
-import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@roomote/feature-flags';
 import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
 import {
   captureActivationEnvironmentSaved,
   captureActivationSetupCompleted,
   captureEvent,
 } from '@roomote/telemetry/server';
+import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@/lib/server/anonymous-analytics';
 import {
   AVAILABLE_SETUP_MCP_INTEGRATIONS,
   enqueueTask,

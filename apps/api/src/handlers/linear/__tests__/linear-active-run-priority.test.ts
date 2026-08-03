@@ -72,13 +72,6 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => {
   };
 });
 
-vi.mock('@roomote/feature-flags/server', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@roomote/feature-flags/server')>();
-
-  return actual;
-});
-
 const redisMock = {
   eval: vi.fn().mockResolvedValue(null),
   set: vi.fn().mockResolvedValue('OK'),

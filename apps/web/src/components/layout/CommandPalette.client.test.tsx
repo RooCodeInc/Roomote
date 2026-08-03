@@ -141,9 +141,7 @@ describe('CommandPalette', () => {
     vi.clearAllMocks();
     useUserMock.mockReturnValue({
       isSignedIn: true,
-      user: {
-        featureFlags: {},
-      },
+      user: {},
     });
   });
 

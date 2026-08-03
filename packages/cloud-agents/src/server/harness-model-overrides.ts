@@ -11,7 +11,6 @@ import {
   getTaskModelCatalog,
   isTaskModelIdAllowed,
 } from '@roomote/types';
-import type { MetadataRecord } from '@roomote/feature-flags';
 
 import { DEFAULT_STANDARD_TASK_MODEL } from '../task-runtime-defaults';
 
@@ -160,7 +159,6 @@ export function resolveEffectiveHarnessModelState<T extends TaskSpec>(options: {
   isSnapshotResume: boolean;
   sourceRunHarnessModelOverrides?: HarnessModelOverrides;
   sourceTaskType?: TaskPayloadKind;
-  deploymentMetadata?: MetadataRecord | null;
   deploymentTaskModelSettings?: TaskModelSettings | null;
   deploymentCodeReviewModelId?: string | null;
   deploymentCodeReviewReasoningEffort?: ReasoningEffort | null;

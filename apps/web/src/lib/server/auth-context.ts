@@ -3,11 +3,6 @@ import { APIError } from 'better-auth/api';
 
 import { db, deploymentSettings, eq, invites, users } from '@roomote/db/server';
 import type { UserRole } from '@roomote/types';
-import {
-  evaluateFeatureFlagsFromMetadata,
-  isAnonymousAnalyticsEnabledFromMetadata,
-  normalizeMetadataRecord,
-} from '@roomote/feature-flags';
 import { getManagedDeploymentAccessFromMetadata } from '@roomote/types';
 import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
@@ -28,6 +23,10 @@ import {
 } from './access-policy';
 import { InviteRedemptionFailedError, redeemInvite } from './invites';
 import { assertSeatAvailable, SeatLimitExceededError } from './license';
+import {
+  isAnonymousAnalyticsEnabledFromMetadata,
+  normalizeMetadataRecord,
+} from './anonymous-analytics';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
@@ -406,10 +405,6 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     return authContext;
   }
 
-  const featureFlags = evaluateFeatureFlagsFromMetadata(
-    authContext.deploymentMetadata,
-  );
-
   const anonymousAnalyticsEnabled =
     isTelemetryEnvAllowed() &&
     isAnonymousAnalyticsEnabledFromMetadata(
@@ -424,7 +419,6 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     name: authContext.name,
     primaryEmail: authContext.primaryEmail,
     isAdmin: authContext.isAdmin,
-    featureFlags,
     anonymousAnalyticsEnabled,
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     cookieConsentedAt: authContext.cookieConsentedAt,

@@ -9,7 +9,6 @@ import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const {
   mockEnqueueTask,
-  mockEvaluateFeatureFlag,
   mockFindTaskRun,
   mockFindTaskRunForAccess,
   mockFindTaskRunByIdAndOrgId,
@@ -26,7 +25,6 @@ const {
   mockUpdateTaskRun,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
-  mockEvaluateFeatureFlag: vi.fn(),
   mockFindTaskRun: vi.fn(),
   mockFindTaskRunForAccess: vi.fn(),
   mockFindTaskRunByIdAndOrgId: vi.fn(),
@@ -45,12 +43,6 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
-}));
-
-vi.mock('@roomote/feature-flags/server', () => ({
-  getFeatureFlagEvaluator: vi.fn(() => ({
-    evaluate: mockEvaluateFeatureFlag,
-  })),
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -172,7 +164,6 @@ describe('taskRunsRouter queue message guards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnqueueTask.mockResolvedValue({ id: 99, taskId: 'task-99' });
-    mockEvaluateFeatureFlag.mockResolvedValue(false);
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockFindTaskRunForAccess.mockResolvedValue({ id: 42 });
     mockFindTaskRunByIdAndOrgId.mockResolvedValue({ id: 42 });
@@ -629,7 +620,6 @@ describe('taskRunsRouter queue message guards', () => {
       }),
     ).resolves.toEqual({ id: 99, taskId: 'task-99' });
 
-    expect(mockEvaluateFeatureFlag).not.toHaveBeenCalled();
     expect(mockEnqueueTask).toHaveBeenCalledWith({
       task: {
         type: TaskPayloadKind.StandardTask,

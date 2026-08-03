@@ -271,8 +271,6 @@ export async function slackAppMention({
   taskRunUrl,
   attribution = undefined,
   username: _legacyUsername,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
   codeReviewsEnabled,
   codeReviewReviewOnCommit,
   codeReviewReviewDraftPrs,
@@ -284,8 +282,6 @@ export async function slackAppMention({
   taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
   username?: string;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
   codeReviewsEnabled?: boolean;
   codeReviewReviewOnCommit?: boolean;
   codeReviewReviewDraftPrs?: boolean;
@@ -357,8 +353,6 @@ export async function slackAppMention({
     slackChannel: taskSpec.payload.channel,
     slackThreadTs: taskSpec.payload.thread_ts ?? taskSpec.payload.ts,
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
     codeReviewsEnabled,
     codeReviewReviewOnCommit,
     codeReviewReviewDraftPrs,

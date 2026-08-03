@@ -10,14 +10,6 @@ export interface PreviousSuggestion {
   status: WorkItemStatus;
 }
 
-type SuggestedTaskRouteContext = {
-  destinationChannelName: string;
-  excludedGroupLabels?: string[];
-  groupLabel: string;
-  isFallbackRoute?: boolean;
-  routeInstructions: string;
-};
-
 function buildPreviousSuggestionsSection(
   previousSuggestions: PreviousSuggestion[] | undefined,
 ): string {
@@ -58,7 +50,6 @@ export function buildSuggestedTasksPrompt(input: {
     repositoryFullName: string;
     targetEnvironmentId?: string | null;
   }>;
-  routeContext?: SuggestedTaskRouteContext | null;
   setupGuidance: string | null;
   suggesterInstructions?: string | null;
   previousSuggestions?: PreviousSuggestion[];
@@ -98,22 +89,6 @@ export function buildSuggestedTasksPrompt(input: {
   const recentThreadFeedbackSection = buildRecentThreadFeedbackSection(
     input.recentThreadFeedback,
   );
-  const routeContextSection = input.routeContext
-    ? (() => {
-        const excludedGroups =
-          input.routeContext.excludedGroupLabels &&
-          input.routeContext.excludedGroupLabels.length > 0
-            ? `\nOther defined groups to exclude from this run:\n${input.routeContext.excludedGroupLabels
-                .map((groupLabel) => `- ${groupLabel}`)
-                .join('\n')}`
-            : '';
-        const fallbackLine = input.routeContext.isFallbackRoute
-          ? 'Only surface ideas that are uncategorized, ambiguous, or clearly span multiple groups.'
-          : 'Do not surface ideas that clearly belong to one of the other defined groups.';
-
-        return `\n\nRoute-specific guidance:\nThis run is only for the following idea cluster: ${input.routeContext.groupLabel}\n${input.routeContext.routeInstructions.trim()}\nPost accepted suggestions to ${input.routeContext.destinationChannelName}.\n${fallbackLine}${excludedGroups}`;
-      })()
-    : '';
   const repositoryCoverageSection = repositoryCoverageLines
     ? `\n\nRepository environments:\n${repositoryCoverageLines}`
     : '';
@@ -125,7 +100,6 @@ ${repositoryLines}
 ${repositoryCoverageSection}
 ${setupGuidanceSection}
 ${suggesterInstructionsSection}
-${routeContextSection}
 ${previousSuggestionsSection}
 ${recentThreadFeedbackSection}
 

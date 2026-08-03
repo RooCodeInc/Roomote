@@ -12,7 +12,6 @@ import {
   type AuthStatus,
   PersonalThemeSync,
 } from './providers';
-import { DebugUiAttributeController } from './DebugUiAttributeController';
 import { UserAnalyticsContext } from './UserAnalyticsContext';
 import { TelemetryProvider } from './TelemetryProvider';
 import { CloudConsentGate } from './CloudConsentGate';
@@ -62,7 +61,6 @@ export function RootProviders({
             />
           ) : null}
           <PersonalThemeSync />
-          <DebugUiAttributeController />
           <StatusBanner />
           {children}
           <Toaster />

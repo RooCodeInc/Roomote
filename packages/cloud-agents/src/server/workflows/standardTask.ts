@@ -70,8 +70,6 @@ export function standardTask({
   linkedWorkItems,
   interactiveMode = false,
   requestFormat = 'plain',
-  visualProofAutoScreencastEnabled = false,
-  backgroundProofCaptureEnabled = false,
   codeReviewsEnabled = false,
   codeReviewReviewOnCommit = true,
   codeReviewReviewDraftPrs = true,
@@ -117,8 +115,6 @@ export function standardTask({
   linkedWorkItems?: LinkedWorkItem[];
   interactiveMode?: boolean;
   requestFormat?: 'plain' | 'structured';
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
   /** When true, Code Reviewer automation is enabled for the deployment. */
   codeReviewsEnabled?: boolean;
   /**
@@ -199,11 +195,6 @@ export function standardTask({
       : deliverySkill === 'create-pr'
         ? `For repository-changing work that routes into \`implement-changes\` while Autonomous mode is active, the active \`implement-changes\` workflow stays responsible for the run until the required delivery result is known and must finish through the delegated \`create-pr\` skill. The parent workflow text must not inline raw \`git\`, \`git push\`, or \`gh pr\` mechanics here; let \`create-pr\` own workspace detection, commit and push execution, PR body application, ready-for-review PR creation or refresh, and PR result reporting.${delegatedPrMetadataInstruction} This is the default finish for every Autonomous run when the configured action is ready-for-review PR delivery. ${fixPrOwnershipInstruction} Only skip or change it when Interactive mode is active or the user explicitly instructs a different push/PR path. New pull requests for this run will be opened in the ready-for-review state per the deployment PR delivery setting, and updates preserve the existing state.`
         : `For repository-changing work that routes into \`implement-changes\` while Autonomous mode is active, the active \`implement-changes\` workflow stays responsible for the run until the required delivery result is known and must finish through the delegated \`create-draft-pr\` skill. The parent workflow text must not satisfy draft-PR delivery by inlining raw \`git\`, \`git push\`, or \`gh pr\` mechanics here; let \`create-draft-pr\` own workspace detection, commit and push execution, PR body application, draft PR creation or refresh, and PR result reporting.${delegatedPrMetadataInstruction} This is the default finish for every Autonomous run. ${fixPrOwnershipInstruction} Only skip or change it when Interactive mode is active or the user explicitly instructs a different push/PR path. A request to create, open, or deliver a pull request or merge request is satisfied by draft delivery and is not such an instruction; switch to \`create-pr\` only when the user explicitly asks for a ready-for-review or non-draft pull request, or explicitly invokes the \`$create-pr\` command. New pull requests for this run will be opened in the draft state per the deployment PR delivery setting, and updates preserve the existing state.`;
-  // Background proof delivery only rewrites the Autonomous-mode proof
-  // ordering; Interactive mode keeps the foreground proof-before-pause flow
-  // regardless of the flag.
-  const backgroundProofDeliveryActive =
-    backgroundProofCaptureEnabled && !interactiveMode;
   const sourceControlPlatformLabel = sourceControlProvider
     ? getSourceControlProviderLabel(sourceControlProvider)
     : 'GitHub/GitLab';
@@ -218,28 +209,14 @@ export function standardTask({
     codeReviewReviewOnCommit &&
     deliverySkill !== 'push' &&
     !isSourceControlTaskSurface(taskSurface);
-  // Hard-append the note into background-proof closeout wording only when every
-  // PR shape this run can still deliver is auto-review eligible. Explicit
-  // `$create-pr` / `$create-draft-pr` can flip draft vs ready after the prompt
-  // is built, so ready-only delivery is never "every shape eligible" while
-  // draft automatic review is off — leave those cases to the decision rules.
-  const everyPossiblePrShapeAutoReviewEligible =
-    automaticSelfReviewNoticeGuidanceEnabled && codeReviewReviewDraftPrs;
-  // Coding task must not perform the review. User-facing wording stays first-person.
-  const selfReviewCloseoutNote = everyPossiblePrShapeAutoReviewEligible
-    ? ` and that you are doing a self-review on ${sourceControlPlatformLabel} and will follow up here with those results`
-    : '';
   const draftAutoReviewStatus = codeReviewReviewDraftPrs
     ? 'enabled'
     : 'disabled';
-  const autonomousProofInstruction = backgroundProofDeliveryActive
-    ? `For repository-changing work that routes into \`implement-changes\` while Autonomous mode is active and stays on the parent delivery path, after implementation and validation the active \`implement-changes\` workflow must proceed directly to the delegated delivery skill without waiting for visual proof. Immediately after delegated delivery succeeds, if repository files changed the active workflow must launch the \`capture-visual-proof\` delegation with the task tool's \`background: true\` parameter, then post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread${selfReviewCloseoutNote}. The parent must not load or directly use browser tooling. Launching in the background does not discharge the proof obligation: when the background task's completion notification arrives (a synthetic \`<task ...>\` result injected into the session), the workflow must in that turn verify the uploaded artifact URLs from the report, update the pull request body with the proof screenshots and links via \`manage_source_control\`, and make the proof visible in the conversation thread by sharing screenshots with \`send_chat_reply\` via \`imageArtifactIds\` and using artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-image proof. If the background proof reports a blocker or the notification says the task failed, update the pull request body with a short \`no visual proof: <reason>\` note and say so in the thread. If the run later transitions into \`fix-pr\`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence.`
-    : 'For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must transition into `capture-visual-proof` for one constrained proof step. The parent must not load or directly use browser tooling; carry the delegated screenshot or screencast proof result, or an explicit no-op or blocker result, into the later delivery step instead of bypassing proof or improvising another browser path. If the run later transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence.';
+  const autonomousProofInstruction =
+    'For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must transition into `capture-visual-proof` for one constrained proof step. The parent must not load or directly use browser tooling; carry the delegated screenshot or screencast proof result, or an explicit no-op or blocker result, into the later delivery step instead of bypassing proof or improvising another browser path. If the run later transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence.';
   const primaryImplementationExpectation = interactiveMode
     ? 'In Interactive mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before any final delivery pause, any repository-file change transitions into `capture-visual-proof`, then continue through validation and self-review and pause before push or pull request actions. If the run later transitions into `fix-pr`, let that child skill own push state, delegated proof before PR metadata refresh, and PR-fixer closeout.'
-    : backgroundProofDeliveryActive
-      ? `In Autonomous mode, repository-changing runs keep the active \`implement-changes\` workflow open so that, after implementation and validation, the run proceeds directly to delivery — ${autonomousFinishSummary} — and immediately after delivery succeeds launches \`capture-visual-proof\` in the background with the task tool's \`background: true\` parameter, consuming the background completion notification later in the same thread. ${fixPrOwnershipInstruction}`
-      : `In Autonomous mode, repository-changing runs keep the active \`implement-changes\` workflow open so that, after implementation and before delivery, any repository-file change transitions into \`capture-visual-proof\`, then ${autonomousFinishSummary}. ${fixPrOwnershipInstruction}`;
+    : `In Autonomous mode, repository-changing runs keep the active \`implement-changes\` workflow open so that, after implementation and before delivery, any repository-file change transitions into \`capture-visual-proof\`, then ${autonomousFinishSummary}. ${fixPrOwnershipInstruction}`;
   const requestUserInputGuidance = getRequestUserInputGuidance();
   const linkedWorkItemSection = renderLinkedWorkItemsSection(linkedWorkItems);
   const linkedWorkItemInstructions = linkedWorkItemSection
@@ -348,34 +325,18 @@ ${buildGitHubMessageInstructions()}`
     <rule>Skip this expectation note when the closeout has no PR or merge request link, when you are only refreshing without re-sharing the link, or when the delivered PR/MR is not auto-review eligible (including draft PRs while draft automatic review is disabled).</rule>
   </code_review_self_review_closeout>`
       : '';
-  const screencastAutoClassificationInstruction =
-    visualProofAutoScreencastEnabled
-      ? 'Screencast auto-classification is enabled for this task.'
-      : 'Screencast auto-classification is disabled for this task.';
-  const proofStep = backgroundProofDeliveryActive
-    ? "If the implementation changed repository files, launch the `capture-visual-proof` delegation with the task tool's `background: true` parameter immediately after delegated delivery succeeds, then consume the background completion notification by verifying the uploaded artifact URLs, refreshing the pull request body, and sharing the proof in the conversation thread, unless the active path has transitioned into `fix-pr`, in which case that child skill owns the proof handoff before PR metadata refresh"
-    : 'If the implementation changed repository files, transition into `capture-visual-proof` after implementation and before delivery or any final delivery pause so the delegated proof flow can decide whether screenshots, screencasts, both, or no browser proof apply, unless the active path has transitioned into `fix-pr`, in which case that child skill owns the proof handoff before PR metadata refresh';
+  const proofStep =
+    'If the implementation changed repository files, transition into `capture-visual-proof` after implementation and before delivery or any final delivery pause so the delegated proof flow can decide whether screenshots, screencasts, both, or no browser proof apply, unless the active path has transitioned into `fix-pr`, in which case that child skill owns the proof handoff before PR metadata refresh';
   const deliveryStep = interactiveMode
     ? 'If the work changes repositories, keep the active implementation workflow open through validation and self-review, then pause before push or pull request actions and wait for user direction'
-    : backgroundProofDeliveryActive
-      ? `If the work changes repositories and Autonomous mode is still active, keep the active \`implement-changes\` workflow open and, without waiting for visual proof, ${autonomousFinishSummary}, unless the run has transitioned into \`fix-pr\`, which owns its own push, proof, PR metadata refresh, and PR-fixer closeout sequence`
-      : `If the work changes repositories and Autonomous mode is still active, keep the active \`implement-changes\` workflow open through any required delegated proof and ${autonomousFinishSummary}, unless the run has transitioned into \`fix-pr\`, which owns its own push, proof, PR metadata refresh, and PR-fixer closeout sequence`;
+    : `If the work changes repositories and Autonomous mode is still active, keep the active \`implement-changes\` workflow open through any required delegated proof and ${autonomousFinishSummary}, unless the run has transitioned into \`fix-pr\`, which owns its own push, proof, PR metadata refresh, and PR-fixer closeout sequence`;
   const postValidationDeliveryRule =
     'After validation and self-review, the next required action for repository-changing work is delegated delivery, not final reporting. Failed, skipped, or unavailable validation is reviewer-facing context for delegated delivery; it does not replace the required push or pull-request state when the implementation is still the intended shipped diff.';
-  const deliveryTransitionRule = backgroundProofDeliveryActive
-    ? "For repository-changing `implement-changes` runs that stay on the parent delivery path, after implementation and validation the active workflow must proceed directly to the policy-selected delivery skill without waiting for visual proof, and immediately after delegated delivery succeeds it must launch the `capture-visual-proof` delegation as one constrained proof step with the task tool's `background: true` parameter. The parent workflow must not load or directly use browser tooling."
-    : 'For repository-changing `implement-changes` runs that stay on the parent delivery path, after implementation and before the policy-selected delivery skill, if repository files changed the active workflow must transition into `capture-visual-proof` as one constrained proof step, and the parent workflow must not load or directly use browser tooling.';
-  const proofCompletionRule = backgroundProofDeliveryActive
-    ? "For repository-changing `implement-changes` runs that stay on the parent delivery path, launching `capture-visual-proof` in the background does not discharge the proof obligation. When the background task's completion notification arrives (a synthetic `<task ...>` result injected into the session), the workflow must in that turn verify the uploaded artifact URLs from the report, update the pull request body with the proof screenshots and links via `manage_source_control`, and make the proof visible in the conversation thread by sharing screenshots with `send_chat_reply` via `imageArtifactIds` and using artifact `viewUrl`/`rawUrl` links in the reply text for non-image proof. If the background proof reports a blocker or the notification says the task failed, update the pull request body with a short `no visual proof: <reason>` note and say so in the thread. The wrapper sets the delivery policy, but that active workflow owns both child transitions and must not split them into a second post-completion sequence. When the run transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh and the rest of the PR-fixer closeout."
-    : 'For repository-changing `implement-changes` runs that stay on the parent delivery path, the workflow must not proceed to the delivery skill until `capture-visual-proof` has run or explicitly returned a no-op or blocker result. A proof no-op, non-applicable result, unnecessary result, or blocker is not a final closeout; it must be carried into delegated delivery when repository files changed and Autonomous mode still requires push or pull-request delivery. The wrapper sets the delivery policy, but that active workflow owns both child transitions and must not split them into a second post-completion sequence. When the run transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh and the rest of the PR-fixer closeout.';
-  const initialTodoSeed = backgroundProofDeliveryActive
-    ? `- Read and understand the request and enter the correct initial workflow
-- Explore the repository and gather the needed context
-- Execute the selected workflow end-to-end
-- ${deliveryStep}
-- ${proofStep}
-- Report any material blocker and the exact push/PR outcome when relevant`
-    : `- Read and understand the request and enter the correct initial workflow
+  const deliveryTransitionRule =
+    'For repository-changing `implement-changes` runs that stay on the parent delivery path, after implementation and before the policy-selected delivery skill, if repository files changed the active workflow must transition into `capture-visual-proof` as one constrained proof step, and the parent workflow must not load or directly use browser tooling.';
+  const proofCompletionRule =
+    'For repository-changing `implement-changes` runs that stay on the parent delivery path, the workflow must not proceed to the delivery skill until `capture-visual-proof` has run or explicitly returned a no-op or blocker result. A proof no-op, non-applicable result, unnecessary result, or blocker is not a final closeout; it must be carried into delegated delivery when repository files changed and Autonomous mode still requires push or pull-request delivery. The wrapper sets the delivery policy, but that active workflow owns both child transitions and must not split them into a second post-completion sequence. When the run transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh and the rest of the PR-fixer closeout.';
+  const initialTodoSeed = `- Read and understand the request and enter the correct initial workflow
 - Explore the repository and gather the needed context
 - Execute the selected workflow end-to-end
 - ${proofStep}
@@ -389,7 +350,7 @@ ${buildGitHubMessageInstructions()}`
   <task_context>
     <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : repo}</repository>
     <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel) : 'Single repository workspace.'}</workspace_context>
-    <visual_proof_context>${screencastAutoClassificationInstruction}</visual_proof_context>
+    <visual_proof_context>Screencast auto-classification is disabled for this task.</visual_proof_context>
   </task_context>
 
   ${taskSurfaceContext}

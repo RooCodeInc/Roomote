@@ -1,12 +1,8 @@
-import { FeatureFlag } from '@roomote/feature-flags';
-
 import { getVisiblePrimaryNavItems } from './navigation-items';
-
-const featureFlags = {} as Record<FeatureFlag, boolean>;
 
 describe('getVisiblePrimaryNavItems', () => {
   it('places automations before task history for admins', () => {
-    const items = getVisiblePrimaryNavItems(featureFlags, { isAdmin: true });
+    const items = getVisiblePrimaryNavItems({ isAdmin: true });
 
     expect(items.map((item) => item.href)).toEqual([
       '/',
@@ -17,7 +13,7 @@ describe('getVisiblePrimaryNavItems', () => {
   });
 
   it('hides analytics from non-admins', () => {
-    const items = getVisiblePrimaryNavItems(featureFlags, {
+    const items = getVisiblePrimaryNavItems({
       isAdmin: false,
     });
 
@@ -25,7 +21,7 @@ describe('getVisiblePrimaryNavItems', () => {
   });
 
   it('hides automations from non-admins', () => {
-    const items = getVisiblePrimaryNavItems(featureFlags, {
+    const items = getVisiblePrimaryNavItems({
       isAdmin: false,
     });
 

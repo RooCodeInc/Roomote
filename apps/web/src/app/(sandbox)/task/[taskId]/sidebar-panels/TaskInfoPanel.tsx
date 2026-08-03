@@ -19,7 +19,6 @@ import {
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 
-import { useShowDebugUI } from '@/hooks/useShowDebugUI';
 import { getTaskRunDisplayError } from '@/lib/task-run-errors';
 import { formatInferenceCost } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
@@ -275,8 +274,7 @@ export function TaskInfoPanel({
   const inferenceCostLabel = formatInferenceCost(
     task.inferenceUsage?.costMicroUsd,
   );
-  const { isDebugUIVisible } = useShowDebugUI();
-  const showRuntimeRow = isDebugUIVisible;
+  const showRuntimeRow = false;
   const participants = useMemo(
     () =>
       getTaskParticipants(

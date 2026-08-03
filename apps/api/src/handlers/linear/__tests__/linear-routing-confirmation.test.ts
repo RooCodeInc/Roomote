@@ -73,13 +73,6 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => {
   };
 });
 
-vi.mock('@roomote/feature-flags/server', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@roomote/feature-flags/server')>();
-
-  return actual;
-});
-
 vi.mock('@roomote/redis', () => ({
   getRedis: vi.fn(() => redisMock),
   REDIS_KEYS: {},

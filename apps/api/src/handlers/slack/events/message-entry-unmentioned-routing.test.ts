@@ -53,13 +53,6 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
   }),
 }));
 
-vi.mock('@roomote/feature-flags/server', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@roomote/feature-flags/server')>()),
-  getFeatureFlagEvaluator: () => ({
-    evaluate: vi.fn().mockResolvedValue(false),
-  }),
-}));
-
 vi.mock('@roomote/db/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/db/server')>()),
   db: {},

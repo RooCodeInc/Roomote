@@ -3,7 +3,6 @@ import { renderHook } from '@testing-library/react';
 type PersonalPreferences = {
   colorTheme: 'light' | 'dark' | 'system';
   narrationMode: boolean;
-  showDebugUI: boolean;
 };
 
 type MutationContext = {
@@ -54,7 +53,6 @@ const {
     data: {
       colorTheme: 'system',
       narrationMode: false,
-      showDebugUI: false,
     } as PersonalPreferences | undefined,
     isPending: false,
   },
@@ -113,14 +111,12 @@ describe('usePersonalPreferences', () => {
     queryState.data = {
       colorTheme: 'system',
       narrationMode: false,
-      showDebugUI: false,
     };
     queryState.isPending = false;
     queryClientMock.cancelQueries.mockResolvedValue(undefined);
     queryClientMock.getQueryData.mockReturnValue({
       colorTheme: 'system',
       narrationMode: false,
-      showDebugUI: false,
     });
   });
 
@@ -128,7 +124,6 @@ describe('usePersonalPreferences', () => {
     queryState.data = {
       colorTheme: 'dark',
       narrationMode: true,
-      showDebugUI: true,
     };
 
     const { result } = renderHook(() => usePersonalPreferences());
@@ -136,7 +131,6 @@ describe('usePersonalPreferences', () => {
     expect(result.current.preferences).toEqual({
       colorTheme: 'dark',
       narrationMode: true,
-      showDebugUI: true,
     });
     expect(result.current.isLoading).toBe(false);
   });
@@ -149,7 +143,6 @@ describe('usePersonalPreferences', () => {
     expect(result.current.preferences).toEqual({
       colorTheme: 'system',
       narrationMode: false,
-      showDebugUI: false,
     });
   });
 
@@ -178,7 +171,6 @@ describe('usePersonalPreferences', () => {
       {
         colorTheme: 'dark',
         narrationMode: false,
-        showDebugUI: false,
       },
     );
 
@@ -186,7 +178,6 @@ describe('usePersonalPreferences', () => {
       {
         colorTheme: 'dark',
         narrationMode: false,
-        showDebugUI: false,
       },
       variables,
       context,
@@ -195,7 +186,6 @@ describe('usePersonalPreferences', () => {
       {
         colorTheme: 'dark',
         narrationMode: false,
-        showDebugUI: false,
       },
       null,
       variables,
@@ -210,12 +200,10 @@ describe('usePersonalPreferences', () => {
       updateCall?.[1]({
         colorTheme: 'dark',
         narrationMode: true,
-        showDebugUI: true,
       }),
     ).toEqual({
       colorTheme: 'dark',
       narrationMode: true,
-      showDebugUI: true,
     });
     expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({
       queryKey: preferencesQueryKey,
@@ -226,7 +214,6 @@ describe('usePersonalPreferences', () => {
     queryClientMock.getQueryData.mockReturnValue({
       colorTheme: 'light',
       narrationMode: true,
-      showDebugUI: true,
     });
 
     renderHook(() =>
@@ -253,12 +240,10 @@ describe('usePersonalPreferences', () => {
       rollbackCall?.[1]({
         colorTheme: 'system',
         narrationMode: false,
-        showDebugUI: false,
       }),
     ).toEqual({
       colorTheme: 'light',
       narrationMode: false,
-      showDebugUI: false,
     });
     expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({
       queryKey: preferencesQueryKey,
@@ -285,7 +270,6 @@ describe('usePersonalPreferences', () => {
       {
         colorTheme: 'dark',
         narrationMode: false,
-        showDebugUI: false,
       },
       firstUpdate,
     );
@@ -298,12 +282,10 @@ describe('usePersonalPreferences', () => {
       successCall?.[1]({
         colorTheme: 'dark',
         narrationMode: true,
-        showDebugUI: true,
       }),
     ).toEqual({
       colorTheme: 'dark',
       narrationMode: true,
-      showDebugUI: true,
     });
   });
 
@@ -330,12 +312,10 @@ describe('usePersonalPreferences', () => {
       rollbackCall?.[1]({
         colorTheme: 'dark',
         narrationMode: true,
-        showDebugUI: true,
       }),
     ).toEqual({
       colorTheme: 'system',
       narrationMode: true,
-      showDebugUI: true,
     });
   });
 });

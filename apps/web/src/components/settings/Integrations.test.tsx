@@ -8,7 +8,6 @@ import type {
 } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { toast } from 'sonner';
-import { FeatureFlag } from '@roomote/feature-flags';
 
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 
@@ -44,7 +43,6 @@ const state = vi.hoisted(() => ({
     defaultTeamIdOrSlug?: string;
   },
   isAdmin: true,
-  featureFlags: {} as Partial<Record<FeatureFlag, boolean>>,
   snowflakeConnection: null as null | {
     authStatus?: string | null;
     authMethod: 'key_pair' | 'password';
@@ -160,7 +158,6 @@ vi.mock('sonner', () => ({
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({
     isAdmin: state.isAdmin,
-    featureFlags: state.featureFlags,
   }),
 }));
 
@@ -444,7 +441,6 @@ describe('Integrations settings', () => {
     state.grafanaConnection = null;
     state.vercelConnection = null;
     state.isAdmin = true;
-    state.featureFlags = {};
     state.snowflakeConnection = null;
     state.searchParams = '';
     state.linearOauthSetup.fields = {

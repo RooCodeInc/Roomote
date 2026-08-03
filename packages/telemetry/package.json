@@ -35,8 +35,7 @@
   },
   "dependencies": {
     "@roomote/db": "workspace:^",
-    "@roomote/env": "workspace:^",
-    "@roomote/feature-flags": "workspace:^"
+    "@roomote/env": "workspace:^"
   },
   "devDependencies": {
     "@roomote/config-eslint": "workspace:^",

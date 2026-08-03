@@ -1,15 +1,4 @@
-import { FeatureFlag } from '@roomote/feature-flags';
-
 import type { UserResource } from '@/types';
-
-export const mockFeatureFlags: Record<FeatureFlag, boolean> = {
-  [FeatureFlag.SlackEvalLauncher]: false,
-  [FeatureFlag.ShowDebugUISetting]: false,
-  [FeatureFlag.SuggestionRouting]: false,
-  [FeatureFlag.VisualProofAutoScreencast]: false,
-  [FeatureFlag.BackgroundSubagents]: false,
-  [FeatureFlag.CodeMode]: false,
-};
 
 export const mockUserResource: UserResource = {
   username: 'username',

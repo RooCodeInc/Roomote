@@ -1,5 +1,3 @@
-import type { FeatureFlag } from '@roomote/feature-flags';
-
 import type { UserAuthSuccess } from '@/types';
 
 const { mockFinalChain } = vi.hoisted(() => ({
@@ -36,7 +34,6 @@ function buildMockAuth(
     isAdmin: true,
     name: 'Env Tester',
     primaryEmail: 'env@example.com',
-    featureFlags: {} as Record<FeatureFlag, boolean>,
     resource: {
       username: 'env-tester',
       fullName: 'Env Tester',

@@ -32,7 +32,6 @@ export * from './mcp-tool-client';
 export * from './non-task-provider-usage';
 export * from './router';
 export * from './slack-question-channel-suggestions';
-export * from './suggestion-routing';
 export * from './suggested-tasks-prompt';
 export * from './task-suggestion-prompts';
 export * from './video-agent';

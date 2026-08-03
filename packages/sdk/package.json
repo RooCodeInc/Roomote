@@ -71,7 +71,6 @@
     "@roomote/compute-providers": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:*",
-    "@roomote/feature-flags": "workspace:^",
     "@roomote/gitea": "workspace:^",
     "@roomote/github": "workspace:^",
     "@roomote/gitlab": "workspace:^",

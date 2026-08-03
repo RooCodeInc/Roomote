@@ -55,10 +55,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   normalizeEnabledSetupMcpIntegrationIds: vi.fn(),
 }));
 
-vi.mock('@roomote/feature-flags', () => ({
-  ANONYMOUS_ANALYTICS_METADATA_KEY: 'anonymous_analytics',
-}));
-
 vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
   requestInstancePing: (...args: unknown[]) => mockRequestInstancePing(...args),
 }));
@@ -100,7 +96,6 @@ function buildAuth(overrides: Partial<UserAuthSuccess> = {}): UserAuthSuccess {
     name: 'Admin',
     primaryEmail: 'admin@example.com',
     isAdmin: true,
-    featureFlags: {},
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
     resource: {

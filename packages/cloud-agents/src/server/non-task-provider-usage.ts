@@ -84,8 +84,6 @@ export const NON_TASK_INFERENCE_SURFACES = {
   routerTaskRouting: 'router_task_routing',
   routerRequestedWorkKind: 'router_requested_work_kind',
   slackQuestionChannelSuggestions: 'slack_question_channel_suggestions',
-  suggestionRoutePlanning: 'suggestion_route_planning',
-  suggestionRoutingValidation: 'suggestion_routing_validation',
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
 } as const;

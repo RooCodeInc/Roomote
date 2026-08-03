@@ -140,7 +140,6 @@ function buildMockAuth(
     isAdmin: true,
     name: 'Source Control Tester',
     primaryEmail: 'source-control@example.com',
-    featureFlags: {},
     resource: {},
     ...overrides,
   } as UserAuthSuccess;

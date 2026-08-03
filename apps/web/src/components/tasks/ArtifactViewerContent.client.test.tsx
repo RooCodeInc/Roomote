@@ -164,7 +164,7 @@ import {
 } from './ArtifactViewerContent';
 
 describe('ArtifactViewerContent', () => {
-  it('renders the artifact type as a debug-only label in the toolbar', () => {
+  it('does not render the internal artifact type in the toolbar', () => {
     render(
       <ArtifactViewerContent
         taskId="task-1"
@@ -190,15 +190,7 @@ describe('ArtifactViewerContent', () => {
 
     expect(screen.getByText('Raw')).toBeInTheDocument();
 
-    const artifactType = screen.getByText('Type: visual-proof');
-    expect(artifactType).toBeInTheDocument();
-    expect(artifactType).toHaveClass(
-      'hidden',
-      'debug:inline-flex',
-      'text-xs',
-      'text-muted-foreground',
-      'whitespace-nowrap',
-    );
+    expect(screen.queryByText('Type: visual-proof')).not.toBeInTheDocument();
   });
 
   it('hides the Build action when a markdown plan has no fetched content', () => {

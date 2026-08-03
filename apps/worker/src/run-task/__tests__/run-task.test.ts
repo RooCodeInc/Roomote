@@ -21,7 +21,6 @@ const {
   harnessManagerInstances,
   hasActiveInstallationMock,
   isOrgEnabledMock,
-  mockEvaluateFeatureFlag,
   resolvePackagedSkillsFolderMock,
   resolveStatusMock,
   syncRuntimeGitAuthorMock,
@@ -69,7 +68,6 @@ const {
     .mockResolvedValue({ resumed: false, reason: 'no_pending_messages' }),
   existsSyncMock: vi.fn(),
   getDecryptedKeyMock: vi.fn().mockResolvedValue(undefined),
-  mockEvaluateFeatureFlag: vi.fn().mockResolvedValue(false),
   getMcpServerConfigsMock: vi.fn().mockResolvedValue({ servers: {} }),
   harnessManagerInstances: [] as FakeHarnessManager[],
   hasActiveInstallationMock: vi.fn().mockResolvedValue(false),
@@ -146,9 +144,6 @@ vi.mock('@roomote/sdk/client', () => ({
     linearInstallations: {
       drainLinearMessages: vi.fn(),
       hasActiveInstallation: hasActiveInstallationMock,
-    },
-    featureFlags: {
-      evaluate: mockEvaluateFeatureFlag,
     },
     mcpConnections: {
       getMcpServerConfigs: getMcpServerConfigsMock,
@@ -306,7 +301,6 @@ describe('runTask', () => {
     hasActiveInstallationMock.mockResolvedValue(false);
     isOrgEnabledMock.mockResolvedValue(false);
     getDecryptedKeyMock.mockResolvedValue(undefined);
-    mockEvaluateFeatureFlag.mockResolvedValue(false);
     getMcpServerConfigsMock.mockResolvedValue({ servers: {} });
     drainSlackMessagesMock.mockReset();
     drainSlackMessagesMock.mockResolvedValue({
@@ -527,200 +521,6 @@ describe('runTask', () => {
     );
   });
 
-  it('passes the background subagents flag into the runtime env when enabled for the org', async () => {
-    mockEvaluateFeatureFlag.mockImplementation(async (flag: string) => {
-      return flag === 'BackgroundSubagents';
-    });
-
-    await runTask({
-      taskRun: {
-        id: 103,
-        taskId: 'task-103',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: '',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      harnessSessionId: undefined,
-      workerEnv: {
-        authToken: 'cloud-token',
-        roomoteAppUrl: 'https://api.example.test',
-        trpcUrl: 'https://web.example.test',
-        buildUserFacingEnv: vi.fn(() => ({
-          HOME: '/tmp/home',
-          PATH: '/usr/bin',
-        })),
-      } as never,
-    });
-
-    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith('BackgroundSubagents');
-    expect(createHarnessMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeEnv: expect.objectContaining({
-          OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: '1',
-        }),
-      }),
-    );
-  });
-
-  it('does not set the background subagents env when the flag is disabled', async () => {
-    mockEvaluateFeatureFlag.mockResolvedValue(false);
-
-    await runTask({
-      taskRun: {
-        id: 104,
-        taskId: 'task-104',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: '',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      harnessSessionId: undefined,
-      workerEnv: {
-        authToken: 'cloud-token',
-        roomoteAppUrl: 'https://api.example.test',
-        trpcUrl: 'https://web.example.test',
-        buildUserFacingEnv: vi.fn(() => ({
-          HOME: '/tmp/home',
-          PATH: '/usr/bin',
-        })),
-      } as never,
-    });
-
-    expect(createHarnessMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeEnv: expect.not.objectContaining({
-          OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: expect.anything(),
-        }),
-      }),
-    );
-  });
-
-  it('passes the CodeMode flag into the runtime env when enabled for the org', async () => {
-    mockEvaluateFeatureFlag.mockImplementation(async (flag: string) => {
-      return flag === 'CodeMode';
-    });
-
-    await runTask({
-      taskRun: {
-        id: 106,
-        taskId: 'task-106',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: '',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      harnessSessionId: undefined,
-      workerEnv: {
-        authToken: 'cloud-token',
-        roomoteAppUrl: 'https://api.example.test',
-        trpcUrl: 'https://web.example.test',
-        buildUserFacingEnv: vi.fn(() => ({
-          HOME: '/tmp/home',
-          PATH: '/usr/bin',
-        })),
-      } as never,
-    });
-
-    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith('CodeMode');
-    expect(createHarnessMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeEnv: expect.objectContaining({
-          OPENCODE_EXPERIMENTAL_CODE_MODE: '1',
-        }),
-      }),
-    );
-  });
-
-  it('does not set the CodeMode env when the flag is disabled', async () => {
-    mockEvaluateFeatureFlag.mockResolvedValue(false);
-
-    await runTask({
-      taskRun: {
-        id: 107,
-        taskId: 'task-107',
-        payloadKind: TaskPayloadKind.StandardTask,
-        harness: 'opencode-server',
-        payload: {},
-        result: null,
-      } as never,
-      envVars: {},
-      workspacePath: '/tmp/workspace',
-      prompt: '',
-      harnessInstructions: undefined,
-      agentInstructions: undefined,
-      environmentConfig: undefined,
-      callbacks: {},
-      context: {},
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn(),
-      } as never,
-      harnessSessionId: undefined,
-      workerEnv: {
-        authToken: 'cloud-token',
-        roomoteAppUrl: 'https://api.example.test',
-        trpcUrl: 'https://web.example.test',
-        buildUserFacingEnv: vi.fn(() => ({
-          HOME: '/tmp/home',
-          PATH: '/usr/bin',
-        })),
-      } as never,
-    });
-
-    expect(createHarnessMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runtimeEnv: expect.not.objectContaining({
-          OPENCODE_EXPERIMENTAL_CODE_MODE: expect.anything(),
-        }),
-      }),
-    );
-  });
-
   it('always enables the terminal runtime env and sandbox server', async () => {
     await runTask({
       taskRun: {
@@ -772,8 +572,6 @@ describe('runTask', () => {
   });
 
   it('keeps the task terminal enabled while clearing only reserved reply context env vars', async () => {
-    mockEvaluateFeatureFlag.mockImplementation(async () => false);
-
     await runTask({
       taskRun: {
         id: 104,

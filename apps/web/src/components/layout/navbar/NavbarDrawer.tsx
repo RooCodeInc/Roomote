@@ -17,8 +17,8 @@ import { getVisiblePrimaryNavItems } from '../navigation-items';
 
 export const NavbarDrawer = () => {
   const pathname = usePathname();
-  const { featureFlags, isAdmin } = useAuthorizedUser();
-  const visibleNavItems = getVisiblePrimaryNavItems(featureFlags, { isAdmin });
+  const { isAdmin } = useAuthorizedUser();
+  const visibleNavItems = getVisiblePrimaryNavItems({ isAdmin });
 
   const [open, setOpen] = useState(false);
 

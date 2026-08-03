@@ -1,4 +1,3 @@
-import type { FeatureFlag } from '@roomote/feature-flags';
 import { normalizeTaskModelId } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -116,7 +115,6 @@ function buildMockAuth(
     isAdmin: true,
     name: 'Task Model Tester',
     primaryEmail: 'models@example.com',
-    featureFlags: {} as Record<FeatureFlag, boolean>,
     resource: {
       username: 'task-model-tester',
       fullName: 'Task Model Tester',
