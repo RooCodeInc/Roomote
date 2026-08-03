@@ -200,21 +200,22 @@ describe('Env', () => {
     expect(isRoomoteCloudEnabled('false')).toBe(false);
   });
 
-  it('enables curated integrations by default and accepts an operator override', () => {
+  it('disables curated integrations by default and accepts an operator opt-in', () => {
     const runtimeEnv = { ...process.env };
     delete runtimeEnv.SKIP_ENV_VALIDATION;
     delete runtimeEnv.R_CURATED_INTEGRATIONS_ENABLED;
 
     expect(createRoomoteEnv(runtimeEnv).R_CURATED_INTEGRATIONS_ENABLED).toBe(
-      true,
+      false,
     );
     expect(
       createRoomoteEnv({
         ...runtimeEnv,
-        R_CURATED_INTEGRATIONS_ENABLED: 'false',
+        R_CURATED_INTEGRATIONS_ENABLED: 'true',
       }).R_CURATED_INTEGRATIONS_ENABLED,
-    ).toBe(false);
-    expect(areCuratedIntegrationsEnabled(undefined)).toBe(true);
+    ).toBe(true);
+    expect(areCuratedIntegrationsEnabled(undefined)).toBe(false);
+    expect(areCuratedIntegrationsEnabled('1')).toBe(true);
     expect(areCuratedIntegrationsEnabled('0')).toBe(false);
   });
 

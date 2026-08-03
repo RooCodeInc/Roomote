@@ -45,6 +45,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
       R_APP_URL: 'https://app.roomote.example',
       PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.example',
       TRPC_URL: 'https://api.roomote.example',
+      R_CURATED_INTEGRATIONS_ENABLED: true,
     },
   };
 });

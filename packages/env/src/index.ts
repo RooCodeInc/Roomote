@@ -61,13 +61,6 @@ function optInBoolean() {
     .transform((value) => value === 'true' || value === '1');
 }
 
-function optOutBoolean() {
-  return z
-    .enum(['true', 'false', '1', '0'])
-    .default('true')
-    .transform((value) => value === 'true' || value === '1');
-}
-
 const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
@@ -125,9 +118,10 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
-  // Operator policy for the curated Settings > Integrations catalog. Existing
-  // connections remain stored but cannot be configured or used while disabled.
-  R_CURATED_INTEGRATIONS_ENABLED: optOutBoolean(),
+  // Operator policy for the curated Settings > Integrations catalog. Disabled
+  // by default; operators opt in explicitly. Existing connections remain
+  // stored but cannot be configured or used while disabled.
+  R_CURATED_INTEGRATIONS_ENABLED: optInBoolean(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -576,20 +570,19 @@ export function isRoomoteCloudEnabled(
   );
 }
 
-/** Whether the operator permits curated integrations on this deployment. */
+/**
+ * Whether the operator permits curated integrations on this deployment.
+ * Disabled unless explicitly enabled.
+ */
 export function areCuratedIntegrationsEnabled(
   value: string | boolean | undefined,
 ): boolean {
-  if (value === false) {
-    return false;
-  }
-
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
-    return normalized !== 'false' && normalized !== '0';
+    return normalized === 'true' || normalized === '1';
   }
 
-  return true;
+  return value === true;
 }
 
 /**

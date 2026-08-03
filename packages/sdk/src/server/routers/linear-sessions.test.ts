@@ -11,7 +11,7 @@ const { envState, findConnectionMock, getValidAccessTokenMock } = vi.hoisted(
 vi.mock('@roomote/env', () => ({
   Env: envState,
   areCuratedIntegrationsEnabled: (value: boolean | undefined) =>
-    value !== false,
+    value === true,
 }));
 
 vi.mock('@roomote/db/server', () => ({

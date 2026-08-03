@@ -19,7 +19,7 @@ const {
 vi.mock('@/lib/server/env', () => ({
   Env: envState,
   areCuratedIntegrationsEnabled: (value: string | boolean | undefined) =>
-    value !== false && value !== 'false' && value !== '0',
+    value === true || value === 'true' || value === '1',
 }));
 vi.mock('@/lib/server/get-public-app-url', () => ({
   getPublicAppUrl: () => 'https://roomote.example',
@@ -83,6 +83,7 @@ describe('Linear OAuth setup', () => {
     for (const key of Object.keys(envState)) {
       delete envState[key];
     }
+    envState.R_CURATED_INTEGRATIONS_ENABLED = true;
     deletedConnectionsState.splice(0);
     persistedEnvVarNamesState.splice(0);
     getPersistedEnvironmentVariableNamesMock.mockImplementation(
