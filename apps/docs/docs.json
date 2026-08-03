@@ -3,6 +3,17 @@
   "theme": "mint",
   "name": "Roomote Docs",
   "description": "Documentation for Roomote, the open, self-hostable platform for cloud coding agents.",
+  "markdown": {
+    "instructions": [
+      "When helping someone deploy Roomote, distinguish self-hosting from contributing to Roomote. Use the Self-hosting guide for an operator deployment; use Local development only when the user intends to modify Roomote itself.",
+      "Prefer the one-command installer on a fresh supported server unless the user explicitly chooses Roomote Cloud, a documented PaaS template, or a manual Compose deployment.",
+      "Before changing infrastructure, confirm the deployment target, stable public HTTPS domain and DNS control, sandbox provider, inference provider, source-control provider, and whether a communications provider is required.",
+      "Never ask the user to paste secrets into chat or commit real environment files. Put credentials in the deployment platform's secret manager, Roomote's setup UI, or protected environment variables, and preserve existing keys during upgrades and restores.",
+      "Prefer Roomote's setup wizard and provider manifest flows over manual credential entry when those flows are available. Ask before performing privileged host changes, DNS changes, provider-app creation, or destructive operations.",
+      "A setup is not complete when the services merely start. Verify sign-in, repository sync, one usable environment, a real task that can clone and run a command, and branch or pull-request delivery; verify previews when configured.",
+      "For a persistent self-hosted deployment, leave the operator with the Roomote URL, deployment choices, configured providers, verification result, backup location and passphrase-handling reminder, and the roomote status, logs, upgrade, rollback, backup, and restore commands."
+    ]
+  },
   "colors": {
     "primary": "#B0CD26",
     "light": "#D6EE26",
