@@ -54,9 +54,14 @@ export async function resolveGatewayUpstream(
     return resolveXaiUpstream(provider, upstreamPath, search);
   }
 
+  const hasRuntimeApiKey = provider.envVarNames.some((envVarName) =>
+    process.env[envVarName]?.trim(),
+  );
   const [apiKey, upstreamBaseUrl] = await Promise.all([
     resolveModelProviderEnvValue(provider.envVarNames),
-    resolveProviderUpstreamBaseUrl(provider),
+    resolveProviderUpstreamBaseUrl(provider, {
+      ignoreRuntimeRegion: !hasRuntimeApiKey,
+    }),
   ]);
 
   if (!apiKey && !provider.optionalApiKey) {
@@ -236,6 +241,7 @@ function hasTraversalOrEncodedSlash(upstreamPath: string): boolean {
  */
 async function resolveProviderUpstreamBaseUrl(
   provider: InferenceGatewayProvider,
+  options: { ignoreRuntimeRegion?: boolean } = {},
 ): Promise<string> {
   if (provider.upstreamBaseUrlEnvVarName) {
     const configuredBaseUrl = await resolveModelProviderEnvValue([
@@ -281,8 +287,10 @@ async function resolveProviderUpstreamBaseUrl(
   }
 
   const region =
-    (await resolveModelProviderEnvValue([provider.region.envVarName])) ??
-    provider.region.default;
+    (await resolveModelProviderEnvValue(
+      [provider.region.envVarName],
+      options.ignoreRuntimeRegion ? { runtimeEnv: {} } : {},
+    )) ?? provider.region.default;
 
   // Providers with discrete regional hosts select a base outright; the
   // `{region}` template and its cloud-region pattern do not apply to them.
