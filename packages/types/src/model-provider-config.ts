@@ -491,12 +491,23 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-5': 'anthropic/claude-opus-5',
       'claude-sonnet-5': 'anthropic/claude-sonnet-5',
     }),
-    recommendedRoleModels: {
-      helper: 'anthropic/claude-haiku-4-5',
-      codeReview: 'anthropic/claude-opus-5',
-      explore: 'anthropic/claude-haiku-4-5',
-      planning: 'anthropic/claude-opus-5',
-    },
+    recommendedPresets: [
+      {
+        id: 'default',
+        label: 'Recommended',
+        default: true,
+        roles: {
+          coding: { modelId: 'anthropic/claude-sonnet-5' },
+          helper: { modelId: 'anthropic/claude-haiku-4-5' },
+          codeReview: {
+            modelId: 'anthropic/claude-sonnet-5',
+            reasoningEffort: 'medium',
+          },
+          explore: { modelId: 'anthropic/claude-haiku-4-5' },
+          planning: { modelId: 'anthropic/claude-opus-5' },
+        },
+      },
+    ],
   },
   {
     id: 'moonshotai',
