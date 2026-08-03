@@ -512,6 +512,20 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
+        managerTeamsChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
+        managerTelegramChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         managerStatsFrequency: z.enum(['off', 'weekly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsDiscordChannel: z

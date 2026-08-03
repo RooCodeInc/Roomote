@@ -2,15 +2,29 @@ const {
   mockCreateDiscordProvider,
   mockDiscordPostMessage,
   mockSlackPostMessage,
+  mockCommunicationPostMessage,
+  mockFindTeamsConversationServiceUrl,
 } = vi.hoisted(() => ({
   mockCreateDiscordProvider: vi.fn(),
   mockDiscordPostMessage: vi.fn(),
   mockSlackPostMessage: vi.fn(),
+  mockCommunicationPostMessage: vi.fn(),
+  mockFindTeamsConversationServiceUrl: vi.fn(),
 }));
 
 vi.mock('../../discord-communication', () => ({
   createDiscordCommunicationProviderFromRuntimeCredentials:
     mockCreateDiscordProvider,
+}));
+
+vi.mock('../../communication-providers', () => ({
+  getCommunicationProviderAdapter: vi.fn(async () => ({
+    postMessage: mockCommunicationPostMessage,
+  })),
+}));
+
+vi.mock('../../../automations/destination', () => ({
+  findTeamsConversationServiceUrl: mockFindTeamsConversationServiceUrl,
 }));
 
 // Keep the test hermetic: the Slack fallback path constructs a SlackNotifier
@@ -113,6 +127,8 @@ describe('platform issue alert delivery', () => {
     mockCreateDiscordProvider.mockReset();
     mockDiscordPostMessage.mockReset();
     mockSlackPostMessage.mockReset();
+    mockCommunicationPostMessage.mockReset();
+    mockFindTeamsConversationServiceUrl.mockReset();
     mockCreateDiscordProvider.mockResolvedValue({
       postMessage: mockDiscordPostMessage,
     });
@@ -122,6 +138,10 @@ describe('platform issue alert delivery', () => {
       messageId: 'm1',
     });
     mockSlackPostMessage.mockResolvedValue('1727000000.000100');
+    mockCommunicationPostMessage.mockResolvedValue({ messageId: 'm2' });
+    mockFindTeamsConversationServiceUrl.mockResolvedValue(
+      'https://teams.example.com',
+    );
 
     await db.delete(taskPlatformIssueReports);
     await db.delete(deploymentSettings);
@@ -254,6 +274,54 @@ describe('platform issue alert delivery', () => {
     const reportRow = await findReportRow(taskId);
     expect(reportRow?.slackPostedAt).not.toBeNull();
   });
+
+  it.each([
+    {
+      provider: 'teams' as const,
+      settings: { managerTeamsChannelId: 'teams-manager' },
+      channelId: 'teams-manager',
+      serviceUrl: 'https://teams.example.com',
+    },
+    {
+      provider: 'telegram' as const,
+      settings: { managerTelegramChatId: 'telegram-manager' },
+      channelId: 'telegram-manager',
+      serviceUrl: undefined,
+    },
+  ])(
+    'posts to the $provider manager destination',
+    async ({ provider, settings, channelId, serviceUrl }) => {
+      const taskId = `task-platform-issue-${provider}-manager`;
+      const runId = await seedTaskRun(taskId);
+
+      await upsertAutomation(db, {
+        key: 'platform_issue_alerts',
+        enabled: false,
+        targets: [],
+      });
+      await db.insert(deploymentSettings).values({
+        id: 'default',
+        ...settings,
+      });
+
+      await recordTaskMessageEnvelope({
+        runId,
+        taskId,
+        envelope: buildReportEnvelope(),
+      });
+
+      expect(mockCommunicationPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId,
+          textFormat: 'markdown',
+          ...(serviceUrl ? { serviceUrl } : {}),
+        }),
+      );
+      const [post] = mockCommunicationPostMessage.mock.calls[0] ?? [];
+      expect(post.text).toContain(`utm_source=${provider}`);
+      expect((await findReportRow(taskId))?.slackPostedAt).not.toBeNull();
+    },
+  );
 
   it('leaves the report unposted when the Discord destination has no runtime credentials', async () => {
     const taskId = 'task-platform-issue-no-creds';

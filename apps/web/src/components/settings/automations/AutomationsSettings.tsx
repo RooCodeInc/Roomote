@@ -127,6 +127,8 @@ type FieldErrors = Partial<
     | 'channelAutoStartInstructions'
     | 'managerSlackChannel'
     | 'managerDiscordChannel'
+    | 'managerTeamsChannel'
+    | 'managerTelegramChannel'
     | 'managerStatsSlackChannel'
     | 'suggesterSlackChannel'
     | 'announcerSlackChannel'
@@ -480,7 +482,7 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     id: 'managerChannel',
     label: 'Automation output',
     description:
-      'Shared Slack or Discord channel for manager-facing Roomote asks, summaries, and alerts.',
+      'Shared communication channel for manager-facing Roomote asks, summaries, and alerts.',
     icon: Users,
   },
   managerStats: {
@@ -696,6 +698,8 @@ function mapSettingsToFormState(
     managerSlackChannelId: string | null;
     managerSlackChannelName?: string | null;
     managerDiscordChannelId: string | null;
+    managerTeamsChannelId: string | null;
+    managerTelegramChatId: string | null;
     managerStatsFrequency: ManagerStatsFrequency;
     managerStatsSlackChannelId: string | null;
     managerStatsSlackChannelName?: string | null;
@@ -793,6 +797,8 @@ function mapSettingsToFormState(
     managerSlackChannel:
       settings.managerSlackChannelName ?? settings.managerSlackChannelId ?? '',
     managerDiscordChannel: settings.managerDiscordChannelId ?? '',
+    managerTeamsChannel: settings.managerTeamsChannelId ?? '',
+    managerTelegramChannel: settings.managerTelegramChatId ?? '',
     managerStatsFrequency: settings.managerStatsFrequency,
     managerStatsSlackChannel:
       settings.managerStatsSlackChannelName ??
@@ -1646,6 +1652,12 @@ export function AutomationsSettings() {
   const [managerDiscordChannelId, setManagerDiscordChannelId] = useState<
     string | null
   >(null);
+  const [managerTeamsChannelId, setManagerTeamsChannelId] = useState<
+    string | null
+  >(null);
+  const [managerTelegramChatId, setManagerTelegramChatId] = useState<
+    string | null
+  >(null);
   const [savingAutomation, setSavingAutomation] = useState<AutomationId | null>(
     null,
   );
@@ -1738,6 +1750,12 @@ export function AutomationsSettings() {
       setManagerDiscordChannelId(
         settingsQuery.data.settings.managerDiscordChannelId,
       );
+      setManagerTeamsChannelId(
+        settingsQuery.data.settings.managerTeamsChannelId,
+      );
+      setManagerTelegramChatId(
+        settingsQuery.data.settings.managerTelegramChatId,
+      );
       return;
     }
 
@@ -1756,6 +1774,8 @@ export function AutomationsSettings() {
     setManagerDiscordChannelId(
       settingsQuery.data.settings.managerDiscordChannelId,
     );
+    setManagerTeamsChannelId(settingsQuery.data.settings.managerTeamsChannelId);
+    setManagerTelegramChatId(settingsQuery.data.settings.managerTelegramChatId);
   }, [settingsQuery.data]);
 
   const updateMutation = useMutation(
@@ -1778,7 +1798,9 @@ export function AutomationsSettings() {
 
           if (
             result.fieldErrors.managerSlackChannel ||
-            result.fieldErrors.managerDiscordChannel
+            result.fieldErrors.managerDiscordChannel ||
+            result.fieldErrors.managerTeamsChannel ||
+            result.fieldErrors.managerTelegramChannel
           ) {
             setOpenAutomationIds((prev) => {
               if (prev.has('managerChannel')) {
@@ -1813,6 +1835,8 @@ export function AutomationsSettings() {
         setSlackChannelAccessWarnings(result.slackChannelAccessWarnings);
         setManagerSlackChannelId(result.settings.managerSlackChannelId);
         setManagerDiscordChannelId(result.settings.managerDiscordChannelId);
+        setManagerTeamsChannelId(result.settings.managerTeamsChannelId);
+        setManagerTelegramChatId(result.settings.managerTelegramChatId);
         const mapped = mapSettingsToFormState({
           ...result.settings,
           channelAutoStartSlackChannelNames:
@@ -2159,10 +2183,15 @@ export function AutomationsSettings() {
   );
   const managerChannelIsEnabled = Boolean(
     formState?.managerSlackChannel.trim() ||
-    formState?.managerDiscordChannel.trim(),
+    formState?.managerDiscordChannel.trim() ||
+    formState?.managerTeamsChannel.trim() ||
+    formState?.managerTelegramChannel.trim(),
   );
   const managerChannelConfigured = Boolean(
-    managerSlackChannelId || managerDiscordChannelId,
+    managerSlackChannelId ||
+    managerDiscordChannelId ||
+    managerTeamsChannelId ||
+    managerTelegramChatId,
   );
   const managerChannelOptions = useMemo(
     () =>
@@ -2197,13 +2226,17 @@ export function AutomationsSettings() {
     ) ?? null;
   const managerChannelHasValue = Boolean(
     formState?.managerSlackChannel.trim() ||
-    formState?.managerDiscordChannel.trim(),
+    formState?.managerDiscordChannel.trim() ||
+    formState?.managerTeamsChannel.trim() ||
+    formState?.managerTelegramChannel.trim(),
   );
   const showCustomManagerChannelInput =
     isEnteringCustomManagerChannel ||
     (managerChannelHasValue &&
       !selectedManagerChannelOption &&
-      !selectedManagerDiscordChannelOption);
+      !selectedManagerDiscordChannelOption &&
+      !formState?.managerTeamsChannel &&
+      !formState?.managerTelegramChannel);
   const slackChannelChoices = useMemo(
     () => slackChannelsQuery.data?.channels ?? [],
     [slackChannelsQuery.data?.channels],
@@ -2211,7 +2244,9 @@ export function AutomationsSettings() {
   const managerChannelSelectionDisabled = isManagerChannelSelectionDisabled({
     slackConnected:
       capabilities?.slackConnected === true ||
-      capabilities?.discordConnected === true,
+      capabilities?.discordConnected === true ||
+      capabilities?.teamsConnected === true ||
+      capabilities?.telegramConnected === true,
     isFetching:
       slackChannelsQuery.isFetching || discordChannelsQuery.isFetching,
     hasValue: managerChannelHasValue,
@@ -2219,16 +2254,22 @@ export function AutomationsSettings() {
   });
   const managerChannelSelectLabel = showCustomManagerChannelInput
     ? formatSlackChannelValue(formState?.managerSlackChannel) ||
-      'Private or manual channel'
-    : selectedManagerDiscordChannelOption?.label ||
-      selectedManagerChannelOption?.label ||
-      (capabilities?.discordConnected
-        ? 'Select a channel'
-        : 'Select a Slack channel');
+      'Private Slack channel'
+    : formState?.managerTeamsChannel
+      ? 'Primary conversation (Microsoft Teams)'
+      : formState?.managerTelegramChannel
+        ? 'Primary chat (Telegram)'
+        : selectedManagerDiscordChannelOption?.label ||
+          selectedManagerChannelOption?.label ||
+          'Select a channel';
   const managerChannelSelectValue = showCustomManagerChannelInput
     ? CUSTOM_MANAGER_CHANNEL_SELECT_VALUE
-    : (selectedManagerDiscordChannelOption?.id ??
-      selectedManagerChannelOption?.id);
+    : formState?.managerTeamsChannel
+      ? TEAMS_DESTINATION_OPTION
+      : formState?.managerTelegramChannel
+        ? TELEGRAM_DESTINATION_OPTION
+        : (selectedManagerDiscordChannelOption?.id ??
+          selectedManagerChannelOption?.id);
   const managerStatsIsEnabled = formState?.managerStatsFrequency !== 'off';
   const sentryConnected = capabilities?.sentryConnected === true;
   const sentryTriageIsEnabled = formState?.sentryTriageFrequency !== 'off';
@@ -2267,6 +2308,8 @@ export function AutomationsSettings() {
   const showManagerChannelMigrationNote =
     !formState?.managerSlackChannel &&
     !formState?.managerDiscordChannel &&
+    !formState?.managerTeamsChannel &&
+    !formState?.managerTelegramChannel &&
     new Set(
       [
         settingsQuery.data?.settings.suggesterSlackChannelId,
@@ -2580,6 +2623,14 @@ export function AutomationsSettings() {
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
   const savedManagerChannelLabel = (() => {
+    if (managerTeamsChannelId) {
+      return 'Primary conversation (Microsoft Teams)';
+    }
+
+    if (managerTelegramChatId) {
+      return 'Primary chat (Telegram)';
+    }
+
     if (managerDiscordChannelId) {
       const channelFromList = discordChannelsQuery.data?.channels.find(
         (channel) => channel.id === managerDiscordChannelId,
@@ -2641,13 +2692,18 @@ export function AutomationsSettings() {
         </Alert>
       ) : null}
 
-      {fieldErrors.managerSlackChannel || fieldErrors.managerDiscordChannel ? (
+      {fieldErrors.managerSlackChannel ||
+      fieldErrors.managerDiscordChannel ||
+      fieldErrors.managerTeamsChannel ||
+      fieldErrors.managerTelegramChannel ? (
         <Alert variant="destructive">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <AlertTitle>Manager Channel required</AlertTitle>
           <AlertDescription>
             {fieldErrors.managerSlackChannel ??
-              fieldErrors.managerDiscordChannel}
+              fieldErrors.managerDiscordChannel ??
+              fieldErrors.managerTeamsChannel ??
+              fieldErrors.managerTelegramChannel}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -3557,7 +3613,8 @@ export function AutomationsSettings() {
                       Where should Roomote post manager-facing updates?
                     </Label>
                     <p className="text-sm text-muted-foreground">
-                      Make sure the Roomote app is added to the channel.
+                      Make sure Roomote is connected to the selected
+                      destination.
                     </p>
                     <div className="max-w-md space-y-2">
                       <div className="flex items-center gap-2">
@@ -3572,6 +3629,8 @@ export function AutomationsSettings() {
                                       ...prev,
                                       managerSlackChannel: '',
                                       managerDiscordChannel: '',
+                                      managerTeamsChannel: '',
+                                      managerTelegramChannel: '',
                                     }
                                   : prev,
                               );
@@ -3586,6 +3645,48 @@ export function AutomationsSettings() {
                                       ...prev,
                                       managerSlackChannel: '',
                                       managerDiscordChannel: '',
+                                      managerTeamsChannel: '',
+                                      managerTelegramChannel: '',
+                                    }
+                                  : prev,
+                              );
+                              return;
+                            }
+
+                            if (value === TEAMS_DESTINATION_OPTION) {
+                              const channelId =
+                                settingsQuery.data?.managerDestinationOptions
+                                  .teamsChannelId;
+                              if (!channelId) return;
+                              setIsEnteringCustomManagerChannel(false);
+                              setFormState((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      managerSlackChannel: '',
+                                      managerDiscordChannel: '',
+                                      managerTeamsChannel: channelId,
+                                      managerTelegramChannel: '',
+                                    }
+                                  : prev,
+                              );
+                              return;
+                            }
+
+                            if (value === TELEGRAM_DESTINATION_OPTION) {
+                              const chatId =
+                                settingsQuery.data?.managerDestinationOptions
+                                  .telegramChatId;
+                              if (!chatId) return;
+                              setIsEnteringCustomManagerChannel(false);
+                              setFormState((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      managerSlackChannel: '',
+                                      managerDiscordChannel: '',
+                                      managerTeamsChannel: '',
+                                      managerTelegramChannel: chatId,
                                     }
                                   : prev,
                               );
@@ -3606,6 +3707,8 @@ export function AutomationsSettings() {
                                       managerDiscordChannel: value.slice(
                                         DISCORD_DESTINATION_OPTION_PREFIX.length,
                                       ),
+                                      managerTeamsChannel: '',
+                                      managerTelegramChannel: '',
                                     }
                                   : prev,
                               );
@@ -3627,6 +3730,8 @@ export function AutomationsSettings() {
                                     ...prev,
                                     managerSlackChannel: selectedChannel.label,
                                     managerDiscordChannel: '',
+                                    managerTeamsChannel: '',
+                                    managerTelegramChannel: '',
                                   }
                                 : prev,
                             );
@@ -3654,13 +3759,17 @@ export function AutomationsSettings() {
                                 <SelectSeparator />
                               </>
                             ) : null}
-                            {slackChannelsQuery.isPending ||
-                            discordChannelsQuery.isPending ? (
+                            {(capabilities?.slackConnected &&
+                              slackChannelsQuery.isPending) ||
+                            (capabilities?.discordConnected &&
+                              discordChannelsQuery.isPending) ? (
                               <SelectItem value="__loading__" disabled>
                                 Loading channels...
                               </SelectItem>
-                            ) : slackChannelsQuery.isError ||
-                              discordChannelsQuery.isError ? (
+                            ) : (capabilities?.slackConnected &&
+                                slackChannelsQuery.isError) ||
+                              (capabilities?.discordConnected &&
+                                discordChannelsQuery.isError) ? (
                               <SelectItem value="__error__" disabled>
                                 Could not load channels. Try refreshing.
                               </SelectItem>
@@ -3674,16 +3783,31 @@ export function AutomationsSettings() {
                                   {channel.label}
                                 </SelectItem>
                               ))
-                            ) : (
+                            ) : !settingsQuery.data?.managerDestinationOptions
+                                .teamsChannelId &&
+                              !settingsQuery.data?.managerDestinationOptions
+                                .telegramChatId ? (
                               <SelectItem value="__empty__" disabled>
                                 No channels found.
                               </SelectItem>
-                            )}
+                            ) : null}
+                            {settingsQuery.data?.managerDestinationOptions
+                              .teamsChannelId ? (
+                              <SelectItem value={TEAMS_DESTINATION_OPTION}>
+                                Primary conversation (Microsoft Teams)
+                              </SelectItem>
+                            ) : null}
+                            {settingsQuery.data?.managerDestinationOptions
+                              .telegramChatId ? (
+                              <SelectItem value={TELEGRAM_DESTINATION_OPTION}>
+                                Primary chat (Telegram)
+                              </SelectItem>
+                            ) : null}
                             <SelectSeparator />
                             <SelectItem
                               value={CUSTOM_MANAGER_CHANNEL_SELECT_VALUE}
                             >
-                              Private or manual channel
+                              Private Slack channel
                             </SelectItem>
                           </SelectContent>
                         </Select>
@@ -3729,32 +3853,39 @@ export function AutomationsSettings() {
                                     ...prev,
                                     managerSlackChannel: event.target.value,
                                     managerDiscordChannel: '',
+                                    managerTeamsChannel: '',
+                                    managerTelegramChannel: '',
                                   }
                                 : prev,
                             );
                           }}
-                          placeholder="Enter a private channel name or Slack channel ID"
+                          placeholder="Enter a private Slack channel name or ID"
                           autoCapitalize="off"
                           autoCorrect="off"
                           spellCheck={false}
                         />
                       ) : null}
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Private channels may not appear in the list. Use the
-                      manual option to paste a private channel name or raw Slack
-                      channel ID.
-                    </p>
+                    {showCustomManagerChannelInput ? (
+                      <p className="text-xs text-muted-foreground">
+                        Private Slack channels may not appear in the list. Enter
+                        a private channel name or raw channel ID.
+                      </p>
+                    ) : null}
                     {showManagerSlackChannelWarning ? (
                       <SlackChannelAccessWarning
                         slackAppMention={slackAppMention}
                       />
                     ) : null}
                     {fieldErrors.managerSlackChannel ||
-                    fieldErrors.managerDiscordChannel ? (
+                    fieldErrors.managerDiscordChannel ||
+                    fieldErrors.managerTeamsChannel ||
+                    fieldErrors.managerTelegramChannel ? (
                       <p className="text-xs text-destructive">
                         {fieldErrors.managerSlackChannel ??
-                          fieldErrors.managerDiscordChannel}
+                          fieldErrors.managerDiscordChannel ??
+                          fieldErrors.managerTeamsChannel ??
+                          fieldErrors.managerTelegramChannel}
                       </p>
                     ) : null}
                     {showManagerChannelMigrationNote ? (

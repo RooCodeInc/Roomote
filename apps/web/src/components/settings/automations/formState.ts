@@ -85,6 +85,8 @@ export type FormState = {
   channelAutoStartChannels: ChannelAutoStartFormRow[];
   managerSlackChannel: string;
   managerDiscordChannel: string;
+  managerTeamsChannel: string;
+  managerTelegramChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageProjectSlugs: string;
@@ -150,6 +152,8 @@ const CHANNEL_AUTO_START_FIELDS: Array<keyof FormState> = [
 const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = [
   'managerSlackChannel',
   'managerDiscordChannel',
+  'managerTeamsChannel',
+  'managerTelegramChannel',
 ];
 
 const MANAGER_STATS_FIELDS: Array<keyof FormState> = [
@@ -344,6 +348,8 @@ export function buildAutomationSettingsSaveInput(
       })),
     managerSlackChannel: stateToSave.managerSlackChannel.trim() || null,
     managerDiscordChannel: stateToSave.managerDiscordChannel.trim() || null,
+    managerTeamsChannel: stateToSave.managerTeamsChannel.trim() || null,
+    managerTelegramChannel: stateToSave.managerTelegramChannel.trim() || null,
     managerStatsFrequency: stateToSave.managerStatsFrequency,
     sentryTriageFrequency: stateToSave.sentryTriageFrequency,
     sentryTriageProjectSlugs:

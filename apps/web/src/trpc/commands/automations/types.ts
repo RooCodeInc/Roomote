@@ -30,6 +30,8 @@ export type BackgroundAgentFieldErrorKey =
   | 'channelAutoStartLaunchCriteria'
   | 'managerSlackChannel'
   | 'managerDiscordChannel'
+  | 'managerTeamsChannel'
+  | 'managerTelegramChannel'
   | 'managerStatsSlackChannel'
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
@@ -260,6 +262,8 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   channelAutoStartInstructions?: string | null;
   managerSlackChannel?: string | null;
   managerDiscordChannel?: string | null;
+  managerTeamsChannel?: string | null;
+  managerTelegramChannel?: string | null;
   managerStatsFrequency?: ManagerStatsFrequency;
   managerStatsSlackChannel?: string | null;
   managerStatsDiscordChannel?: string | null;

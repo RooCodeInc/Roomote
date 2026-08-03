@@ -89,6 +89,8 @@ function buildInput(
     channelAutoStartSlackChannels: [],
     managerSlackChannel: null,
     managerDiscordChannel: null,
+    managerTeamsChannel: null,
+    managerTelegramChannel: null,
     managerStatsFrequency: 'off',
     managerStatsSlackChannel: null,
     managerStatsDiscordChannel: null,
@@ -195,11 +197,51 @@ async function getAutomationTargets(key: BackgroundAutomationKey) {
 
 describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   beforeEach(async () => {
+    delete process.env.TELEGRAM_PRIMARY_CHAT_ID;
     await db.delete(automations);
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
     await db.delete(users);
+  });
+
+  it('saves a Telegram manager destination', async () => {
+    process.env.TELEGRAM_PRIMARY_CHAT_ID = 'telegram-manager';
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerTelegramChannel: 'telegram-manager',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.managerTelegramChatId).toBe('telegram-manager');
+      expect(result.settings.managerSlackChannelId).toBeNull();
+      expect(result.settings.managerDiscordChannelId).toBeNull();
+      expect(result.settings.managerTeamsChannelId).toBeNull();
+    }
+  });
+
+  it('preserves Teams and Telegram manager destinations when an older client omits them', async () => {
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerTeamsChannelId: 'teams-manager',
+      managerTelegramChatId: 'telegram-manager',
+    });
+    const input = buildInput({ savingAutomation: 'managerChannel' });
+    delete input.managerTeamsChannel;
+    delete input.managerTelegramChannel;
+
+    const result = await updateBackgroundAgentSettingsCommand(adminAuth, input);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.settings.managerTeamsChannelId).toBe('teams-manager');
+      expect(result.settings.managerTelegramChatId).toBe('telegram-manager');
+    }
   });
 
   it('saves a Discord manager channel without Slack and returns the persisted id', async () => {

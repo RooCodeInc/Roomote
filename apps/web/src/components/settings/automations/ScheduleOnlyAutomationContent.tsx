@@ -40,7 +40,7 @@ export const SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS = {
     description:
       'Review recently merged PRs for concrete security issues and secure-by-default gaps.',
     details: [
-      'Reviews merged PRs since the last run, posts only actionable security follow-up work to the selected Slack channel, and stays quiet when there were no merged PRs in the selected interval.',
+      'Reviews merged PRs since the last run, posts only actionable security follow-up work to the selected report destination, and stays quiet when there were no merged PRs in the selected interval.',
       'Uses the installed `security-review` and `security-best-practices` skills to inspect each merged PR diff before suggesting work.',
     ],
     icon: TriangleAlert,
@@ -53,7 +53,7 @@ export const SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS = {
     description:
       'Review recently merged PRs for maintainability, design, and readability issues worth follow-up work.',
     details: [
-      'Reviews merged PRs since the last run, posts only actionable code quality follow-up work to the selected Slack channel, and stays quiet when there were no merged PRs in the selected interval.',
+      'Reviews merged PRs since the last run, posts only actionable code quality follow-up work to the selected report destination, and stays quiet when there were no merged PRs in the selected interval.',
       'Pushes on maintainability, clarity, file bloat, spaghetti branching, abstraction quality, and wrong-layer logic rather than correctness or security bugs.',
     ],
     icon: SquarePen,

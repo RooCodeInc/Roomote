@@ -188,6 +188,10 @@ export function CustomAutomationsSection() {
     settingsQuery.data?.settings.managerSlackChannelId ?? '';
   const managerDiscordChannelId =
     settingsQuery.data?.settings.managerDiscordChannelId ?? '';
+  const managerTeamsChannelId =
+    settingsQuery.data?.settings.managerTeamsChannelId ?? '';
+  const managerTelegramChatId =
+    settingsQuery.data?.settings.managerTelegramChatId ?? '';
 
   const environmentOptions = useMemo(
     () =>
@@ -614,7 +618,11 @@ export function CustomAutomationsSection() {
                       ? managerSlackChannelId
                       : value === 'discord'
                         ? managerDiscordChannelId
-                        : '',
+                        : value === 'teams'
+                          ? managerTeamsChannelId
+                          : value === 'telegram'
+                            ? managerTelegramChatId
+                            : '',
                   targetServiceUrl: '',
                 }))
               }
@@ -774,12 +782,20 @@ export function CustomAutomationsSection() {
               setEditingId(null);
               setForm({
                 ...EMPTY_FORM,
-                targetProvider:
-                  managerDiscordChannelId && !managerSlackChannelId
+                targetProvider: managerSlackChannelId
+                  ? 'slack'
+                  : managerDiscordChannelId
                     ? 'discord'
-                    : 'slack',
+                    : managerTeamsChannelId
+                      ? 'teams'
+                      : managerTelegramChatId
+                        ? 'telegram'
+                        : 'slack',
                 targetChannelId:
-                  managerSlackChannelId || managerDiscordChannelId,
+                  managerSlackChannelId ||
+                  managerDiscordChannelId ||
+                  managerTeamsChannelId ||
+                  managerTelegramChatId,
               });
               setResolvedCron(null);
               setScheduleSummary(null);

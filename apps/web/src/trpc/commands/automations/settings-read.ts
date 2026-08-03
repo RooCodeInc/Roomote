@@ -20,6 +20,7 @@ import {
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
+  findTelegramPrimaryChatId,
   findTeamsConversationDisplayName,
   findTeamsPrimaryConversation,
   resolveAutomationRuntimeDestination,
@@ -277,6 +278,10 @@ export async function getBackgroundAgentSettingsCommand(
     requiresSlackReconnect: boolean;
     slackWorkspaceDomain: string | null;
   };
+  managerDestinationOptions: {
+    teamsChannelId: string | null;
+    telegramChatId: string | null;
+  };
   slackChannelAccessWarnings: {
     channelAutoStartSlackChannels: string[];
     managerStatsSlackChannel: string | null;
@@ -306,6 +311,7 @@ export async function getBackgroundAgentSettingsCommand(
     slackInstallation,
     discordInstallation,
     telegramCredentials,
+    telegramPrimaryChatId,
     teamsPrimaryConversation,
     sentryConnected,
     recentRuns,
@@ -317,6 +323,7 @@ export async function getBackgroundAgentSettingsCommand(
       columns: { id: true },
     }),
     resolveTelegramRuntimeCredentials(),
+    findTelegramPrimaryChatId(),
     findTeamsPrimaryConversation(),
     hasActiveSentryIntegration(),
     listRecentAutomationTasks(),
@@ -424,6 +431,10 @@ export async function getBackgroundAgentSettingsCommand(
       slackWorkspaceDomain: slackInstallation?.isActive
         ? slackInstallation.teamDomain
         : null,
+    },
+    managerDestinationOptions: {
+      teamsChannelId: teamsPrimaryConversation?.conversationId ?? null,
+      telegramChatId: telegramPrimaryChatId,
     },
     slackChannelAccessWarnings,
     slackChannelDisplayNames,

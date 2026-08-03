@@ -436,6 +436,8 @@ type StoredBackgroundAgentSettings = Pick<
   | 'id'
   | 'managerSlackChannelId'
   | 'managerDiscordChannelId'
+  | 'managerTeamsChannelId'
+  | 'managerTelegramChatId'
   | 'globalAgentInstructions'
   | 'timeZone'
   | 'timeZoneUpdatedAt'

@@ -343,15 +343,16 @@ const DESTINATION_TARGET_KINDS = [
 /**
  * Provider-neutral destination waterfall: the automation's own channel
  * target wins (Slack first when several providers are targeted), otherwise
- * the deployment-wide manager channel (Slack before Discord). The
- * primary-conversation fallbacks for Teams/Telegram/Discord deployments
- * without any Slack live in the sdk runner layer, which owns those surfaces'
- * installation lookups.
+ * the deployment-wide manager channel. The primary-conversation fallbacks for
+ * deployments without a configured manager destination live in the sdk runner
+ * layer, which owns those surfaces' installation lookups.
  */
 export function resolveAutomationDestination(
   automation: Pick<Automation, 'targets'> | undefined,
   managerSlackChannelId: string | null,
   managerDiscordChannelId: string | null,
+  managerTeamsChannelId: string | null = null,
+  managerTelegramChatId: string | null = null,
 ): AutomationDestination | null {
   for (const [provider, targetKind] of DESTINATION_TARGET_KINDS) {
     const channelId = getAutomationTargetRefs(
@@ -373,10 +374,26 @@ export function resolveAutomationDestination(
     };
   }
 
-  return managerDiscordChannelId
+  if (managerDiscordChannelId) {
+    return {
+      provider: 'discord',
+      channelId: managerDiscordChannelId,
+      source: 'manager_channel',
+    };
+  }
+
+  if (managerTeamsChannelId) {
+    return {
+      provider: 'teams',
+      channelId: managerTeamsChannelId,
+      source: 'manager_channel',
+    };
+  }
+
+  return managerTelegramChatId
     ? {
-        provider: 'discord',
-        channelId: managerDiscordChannelId,
+        provider: 'telegram',
+        channelId: managerTelegramChatId,
         source: 'manager_channel',
       }
     : null;
@@ -753,10 +770,11 @@ export type AutomationRuntime = {
   slackChannelId: string | null;
   managerSlackChannelId: string | null;
   managerDiscordChannelId: string | null;
+  managerTeamsChannelId: string | null;
+  managerTelegramChatId: string | null;
   /**
    * Provider-neutral destination waterfall result (own target on any comms
-   * provider, else the manager channel, preferring Slack over Discord). Null
-   * when neither is set;
+   * provider, else the manager channel). Null when neither is set;
    * runners may still fall back to a primary Teams/Telegram/Discord
    * conversation.
    */
@@ -768,9 +786,17 @@ function toAutomationRuntime(params: {
   automation: Automation | undefined;
   managerSlackChannelId: string | null;
   managerDiscordChannelId: string | null;
+  managerTeamsChannelId: string | null;
+  managerTelegramChatId: string | null;
 }): AutomationRuntime {
-  const { key, automation, managerSlackChannelId, managerDiscordChannelId } =
-    params;
+  const {
+    key,
+    automation,
+    managerSlackChannelId,
+    managerDiscordChannelId,
+    managerTeamsChannelId,
+    managerTelegramChatId,
+  } = params;
 
   return {
     key,
@@ -787,10 +813,14 @@ function toAutomationRuntime(params: {
     ),
     managerSlackChannelId,
     managerDiscordChannelId,
+    managerTeamsChannelId,
+    managerTelegramChatId,
     destination: resolveAutomationDestination(
       automation ?? undefined,
       managerSlackChannelId,
       managerDiscordChannelId,
+      managerTeamsChannelId,
+      managerTelegramChatId,
     ),
   };
 }
@@ -806,6 +836,8 @@ export async function getAutomationRuntime(
       columns: {
         managerSlackChannelId: true,
         managerDiscordChannelId: true,
+        managerTeamsChannelId: true,
+        managerTelegramChatId: true,
       },
     }),
   ]);
@@ -815,6 +847,8 @@ export async function getAutomationRuntime(
     automation,
     managerSlackChannelId: settingsRow?.managerSlackChannelId ?? null,
     managerDiscordChannelId: settingsRow?.managerDiscordChannelId ?? null,
+    managerTeamsChannelId: settingsRow?.managerTeamsChannelId ?? null,
+    managerTelegramChatId: settingsRow?.managerTelegramChatId ?? null,
   });
 }
 
@@ -838,6 +872,8 @@ export async function getAutomationRuntimes<
       columns: {
         managerSlackChannelId: true,
         managerDiscordChannelId: true,
+        managerTeamsChannelId: true,
+        managerTelegramChatId: true,
       },
     }),
   ]);
@@ -845,6 +881,8 @@ export async function getAutomationRuntimes<
   const automationMap = buildAutomationMap(automationRows);
   const managerSlackChannelId = settingsRow?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = settingsRow?.managerDiscordChannelId ?? null;
+  const managerTeamsChannelId = settingsRow?.managerTeamsChannelId ?? null;
+  const managerTelegramChatId = settingsRow?.managerTelegramChatId ?? null;
 
   return Object.fromEntries(
     keys.map((key) => [
@@ -854,6 +892,8 @@ export async function getAutomationRuntimes<
         automation: automationMap.get(key),
         managerSlackChannelId,
         managerDiscordChannelId,
+        managerTeamsChannelId,
+        managerTelegramChatId,
       }),
     ]),
   ) as Record<TKey, AutomationRuntime>;
@@ -914,6 +954,8 @@ export function normalizeBackgroundAgentSettings(
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
+  const managerTeamsChannelId = row?.managerTeamsChannelId ?? null;
+  const managerTelegramChatId = row?.managerTelegramChatId ?? null;
   const channelAutoStartTargets = getChannelAutoStartTargets(
     channelAutoStart,
     'slack',
@@ -934,6 +976,8 @@ export function normalizeBackgroundAgentSettings(
     id: row?.id ?? 'default',
     managerSlackChannelId,
     managerDiscordChannelId,
+    managerTeamsChannelId,
+    managerTelegramChatId,
     globalAgentInstructions: row?.globalAgentInstructions ?? null,
     timeZone: row?.timeZone ?? null,
     timeZoneUpdatedAt: row?.timeZoneUpdatedAt ?? null,

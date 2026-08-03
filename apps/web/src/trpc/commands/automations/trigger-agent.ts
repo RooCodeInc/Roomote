@@ -47,7 +47,7 @@ async function assertManualTriggerIsRunnable(
   if (descriptor.usesManagerChannel) {
     if (!destination) {
       throw new Error(
-        `Set a Manager Channel before running ${descriptor.label}.`,
+        `Configure Automation output before running ${descriptor.label}.`,
       );
     }
 
@@ -56,7 +56,7 @@ async function assertManualTriggerIsRunnable(
 
     if (!supportedProviders.includes(destination.provider)) {
       throw new Error(
-        `${descriptor.label} cannot report to ${destination.provider} yet. Choose a Slack channel or the shared Manager Channel.`,
+        `${descriptor.label} cannot report to ${destination.provider} yet. Choose a supported report destination or update the shared Manager Channel.`,
       );
     }
   }

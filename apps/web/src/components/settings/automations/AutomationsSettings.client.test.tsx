@@ -51,6 +51,8 @@ const baseFormState: FormState = {
   channelAutoStartChannels: [],
   managerSlackChannel: '',
   managerDiscordChannel: '',
+  managerTeamsChannel: '',
+  managerTelegramChannel: '',
   managerStatsFrequency: 'off' as const,
   managerStatsSlackChannel: '',
   managerStatsDiscordChannel: '',
@@ -265,6 +267,24 @@ describe('Automations selection helpers', () => {
       },
     ]);
     expect(saveState.managerSlackChannel).toBe('#managers');
+  });
+
+  it('submits Teams and Telegram manager destinations', () => {
+    const teamsInput = buildAutomationSettingsSaveInput(
+      { ...baseFormState, managerTeamsChannel: 'teams-conversation' },
+      baseFormState,
+      'managerChannel',
+    );
+    const telegramInput = buildAutomationSettingsSaveInput(
+      { ...baseFormState, managerTelegramChannel: 'telegram-chat' },
+      baseFormState,
+      'managerChannel',
+    );
+
+    expect(teamsInput.managerTeamsChannel).toBe('teams-conversation');
+    expect(teamsInput.managerTelegramChannel).toBeNull();
+    expect(telegramInput.managerTeamsChannel).toBeNull();
+    expect(telegramInput.managerTelegramChannel).toBe('telegram-chat');
   });
 
   it('sends the persisted channel id for an untouched channel auto-start row so the server resolves it by id instead of by name', () => {
