@@ -15,6 +15,7 @@ import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
+import { resolveTaskModelIdAlias } from './task-models';
 
 /**
  * Task classification vocabulary.
@@ -488,7 +489,7 @@ export function getHarnessModelOverride(
   const override = overrides?.[harness];
 
   return typeof override === 'string' && override.trim().length > 0
-    ? override.trim()
+    ? resolveTaskModelIdAlias(override.trim())
     : undefined;
 }
 
