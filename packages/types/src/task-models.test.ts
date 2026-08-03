@@ -136,6 +136,32 @@ describe('task model settings', () => {
     });
   });
 
+  it('migrates persisted OpenCode DeepSeek Flash model settings', () => {
+    const settings = normalizeTaskModelSettings({
+      models: [
+        {
+          id: 'opencode/deepseek-v4-flash-0731',
+          displayName: 'DeepSeek V4 Flash 0731',
+          family: 'DeepSeek',
+        },
+      ],
+      allowedModelIds: ['opencode/deepseek-v4-flash-0731'],
+      defaultModelId: 'opencode/deepseek-v4-flash-0731',
+    });
+
+    expect(settings).toEqual({
+      models: [
+        {
+          id: 'opencode/deepseek-v4-flash',
+          displayName: 'DeepSeek V4 Flash 0731',
+          family: 'DeepSeek',
+        },
+      ],
+      allowedModelIds: ['opencode/deepseek-v4-flash'],
+      defaultModelId: 'opencode/deepseek-v4-flash',
+    });
+  });
+
   it('uses only enabled models when building launch options', () => {
     const settings = {
       models: DEFAULT_TASK_MODEL_SETTINGS.models,

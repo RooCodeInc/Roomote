@@ -54,6 +54,26 @@ describe('normalizeDeploymentModelConfig', () => {
     });
   });
 
+  it('migrates persisted OpenCode DeepSeek Flash role models', () => {
+    expect(
+      normalizeDeploymentModelConfig({
+        roomoteModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteSmallModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteVisionModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteCodeReviewModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteExploreModel: 'opencode/deepseek-v4-flash-0731',
+        roomotePlanningModel: 'opencode/deepseek-v4-flash-0731',
+      }),
+    ).toMatchObject({
+      roomoteModel: 'opencode/deepseek-v4-flash',
+      roomoteSmallModel: 'opencode/deepseek-v4-flash',
+      roomoteVisionModel: 'opencode/deepseek-v4-flash',
+      roomoteCodeReviewModel: 'opencode/deepseek-v4-flash',
+      roomoteExploreModel: 'opencode/deepseek-v4-flash',
+      roomotePlanningModel: 'opencode/deepseek-v4-flash',
+    });
+  });
+
   it('coerces missing fields to null without dropping model keys', () => {
     expect(
       normalizeDeploymentModelConfig({ roomoteModel: 'openai/gpt-5.4' }),

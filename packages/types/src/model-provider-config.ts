@@ -14,6 +14,7 @@ import {
   ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   getTaskModelProviderId,
   isTaskModelIdDisabled,
+  resolveTaskModelIdAlias,
 } from './task-models';
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -1192,7 +1193,10 @@ export function normalizeDeploymentModelConfig(
   const normalizeEnabledModel = (
     model: string | null | undefined,
   ): string | null => {
-    const normalizedModel = normalizeOptionalString(model);
+    const trimmedModel = normalizeOptionalString(model);
+    const normalizedModel = trimmedModel
+      ? resolveTaskModelIdAlias(trimmedModel)
+      : null;
 
     return normalizedModel && !isTaskModelIdDisabled(normalizedModel)
       ? normalizedModel
