@@ -32,10 +32,6 @@ vi.mock('./prompt-input', () => ({
   PromptInput: () => <div data-testid="prompt-input" />,
 }));
 
-vi.mock('./startup', () => ({
-  Startup: () => <div data-testid="startup" />,
-}));
-
 import { TaskInputStack } from './TaskInputStack';
 
 const baseSession: TaskSession = {
@@ -70,7 +66,7 @@ describe('TaskInputStack', () => {
     });
   });
 
-  it('shows the startup surface instead of the prompt input while booting', () => {
+  it('leaves the input area empty while startup renders in the conversation', () => {
     render(
       <TaskInputStack
         session={{
@@ -84,7 +80,6 @@ describe('TaskInputStack', () => {
       />,
     );
 
-    expect(screen.getByTestId('startup')).toBeInTheDocument();
     expect(screen.queryByTestId('prompt-input')).not.toBeInTheDocument();
   });
 
@@ -100,6 +95,5 @@ describe('TaskInputStack', () => {
     );
 
     expect(screen.getByTestId('prompt-input')).toBeInTheDocument();
-    expect(screen.queryByTestId('startup')).not.toBeInTheDocument();
   });
 });
