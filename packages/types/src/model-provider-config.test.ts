@@ -438,6 +438,37 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ]);
   });
 
+  it("uses each provider's DeepSeek V4 Flash 0731 model slug", () => {
+    const deepSeekFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'DeepSeek V4 Flash 0731',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(deepSeekFlashByProvider).toEqual([
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/deepseek/deepseek-v4-flash-0731',
+      },
+      {
+        providerId: 'vercel',
+        modelId: 'vercel/deepseek/deepseek-v4-flash-0731',
+      },
+      {
+        providerId: 'baseten',
+        modelId: 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
+      },
+      {
+        providerId: 'opencode',
+        modelId: 'opencode/deepseek-v4-flash',
+      },
+    ]);
+  });
+
   it('registers Kimi for Coding as an Anthropic-style API-key provider', () => {
     expect(getSetupModelProvider('kimi-for-coding')).toMatchObject({
       id: 'kimi-for-coding',

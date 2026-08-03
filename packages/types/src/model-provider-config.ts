@@ -579,7 +579,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
       'gemini-3-1-pro': 'opencode/gemini-3.1-pro',
       'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
-      'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash-0731',
+      // Zen serves the dated Flash release under this stable model alias.
+      'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
       'deepseek-v4-pro': 'opencode/deepseek-v4-pro',
       'glm-5-2': 'opencode/glm-5.2',
       'kimi-k3': 'opencode/kimi-k3',
