@@ -403,6 +403,29 @@ export async function spawnAzureWorker(
       )}`,
     );
 
+    if (
+      launchOptions.launchMode === 'task_standby' ||
+      launchOptions.launchMode === 'task_snapshot'
+    ) {
+      // Suspend/resume and snapshot/restore revive previously frozen worker
+      // processes whose runs were finalized while they were away — dead
+      // tokens, and they hold the sandbox-server port, which kills the
+      // incoming worker's boot. Reap them before launch. pkill exits 1 when
+      // nothing matches; that is the common case and not an error.
+      await computeClient
+        .runCommand({
+          instanceId: machine.machineId,
+          cmd: 'pkill',
+          args: ['-f', '/sandbox/worker/dist/worker.js'],
+          signal: AbortSignal.timeout(15_000),
+        })
+        .catch((error) => {
+          console.warn(
+            `[spawnAzureWorker] Pre-launch worker reaper failed for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+    }
+
     await recordMutation({
       provider: 'azure',
       operation: 'run_command',

@@ -35,14 +35,14 @@ const {
   selectFn,
   inArrayFn,
 } = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint; ESLint's own rule is offloaded and reports this directive as unused, which is a false positive
   type AnyMock = Mock<(...args: any[]) => any>;
 
   const returningFn: AnyMock = vi.fn(() => Promise.resolve([]));
   const updateWhereFn: AnyMock = vi.fn(() => {
     const result = Promise.resolve([]);
     // Support both .returning() (optimistic lock) and .catch() (rollback) call patterns.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint (see above)
     (result as any).returning = returningFn;
     return result;
   });
@@ -109,6 +109,18 @@ vi.mock('@roomote/compute-providers', () => ({
     mockGetComputeProviderCapabilities(...args) ?? {
       supportsSnapshots: true,
     },
+  // Mirrors the real adapter error: sleep-check finalizes runs only on a
+  // definitive 404 from this class.
+  AzureDataPlaneError: class AzureDataPlaneError extends Error {
+    constructor(
+      message: string,
+      public readonly status: number,
+      public readonly code?: string,
+    ) {
+      super(message);
+      this.name = 'AzureDataPlaneError';
+    }
+  },
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -336,7 +348,7 @@ describe('sleepCheckJob', () => {
     );
     updateWhereFn.mockImplementation(() => {
       const result = Promise.resolve([]);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint (see above)
       (result as any).returning = returningFn;
       return result;
     });
@@ -892,6 +904,107 @@ describe('sleepCheckJob', () => {
         signal: 'sandbox-destroy',
       }),
     );
+  });
+
+  it('finalizes a run whose azure instance no longer exists instead of retrying forever', async () => {
+    const mockJob = {
+      id: 100,
+      machineId: 'sb-gone',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'azure',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+      sleepAt: new Date(Date.now() + 30 * 60 * 1_000),
+    };
+
+    mockJobQueries({ hardLimitJobs: [mockJob] });
+    const { AzureDataPlaneError } = await import('@roomote/compute-providers');
+    mockGetInstanceStatus.mockRejectedValue(
+      new AzureDataPlaneError('Requested document not found.', 404),
+    );
+
+    await sleepCheckJob();
+
+    expect(mockGetInstanceStatus).toHaveBeenCalledWith({
+      instanceId: 'sb-gone',
+    });
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 100,
+      status: RunStatus.Failed,
+      error: expect.stringContaining('no longer exists'),
+    });
+    // No claim-clearing rollback: the generic retry path must not run, or
+    // the run would be re-evaluated (and fail identically) every minute.
+    expect(setFn).not.toHaveBeenCalledWith({
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    });
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+    expect(mockEnterStandby).not.toHaveBeenCalled();
+  });
+
+  it('completes an idle run whose azure instance no longer exists', async () => {
+    mockJobQueries({
+      dueJobs: [
+        {
+          id: 42,
+          machineId: 'sb-gone-idle',
+          payloadKind: TaskPayloadKind.StandardTask,
+          status: RunStatus.Idle,
+          vendor: 'azure',
+          snapshotId: null,
+          sleepRequestedAt: null,
+          snapshotRequestedAt: null,
+        },
+      ],
+    });
+    const { AzureDataPlaneError } = await import('@roomote/compute-providers');
+    mockGetInstanceStatus.mockRejectedValue(
+      new AzureDataPlaneError('Requested document not found.', 404),
+    );
+    returningFn.mockResolvedValue([{ id: 42 }]);
+
+    await sleepCheckJob();
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 42,
+      status: RunStatus.Completed,
+      error: 'Instance sb-gone-idle no longer exists.',
+    });
+    expect(mockEnterStandby).not.toHaveBeenCalled();
+  });
+
+  it('keeps retrying on transient provider errors instead of finalizing', async () => {
+    const mockJob = {
+      id: 101,
+      machineId: 'sb-flaky',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'azure',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+      sleepAt: new Date(Date.now() + 30 * 60 * 1_000),
+    };
+
+    mockJobQueries({ hardLimitJobs: [mockJob] });
+    const { AzureDataPlaneError } = await import('@roomote/compute-providers');
+    mockGetInstanceStatus.mockRejectedValue(
+      new AzureDataPlaneError('Upstream timeout.', 502),
+    );
+
+    await sleepCheckJob();
+
+    // Transient error: generic catch clears claims so the next tick retries.
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenLastCalledWith({
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    });
   });
 
   it('skips job when optimistic lock fails', async () => {
