@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import Link from 'next/link';
+import Image from 'next/image';
 
 import {
   Avatar,
@@ -15,6 +17,7 @@ import {
   ExternalLink,
   Info,
   LogOut,
+  Settings,
 } from '@/components/system';
 
 import { useUser } from '@/hooks/useUser';
@@ -22,6 +25,7 @@ import { authClient } from '@/lib/auth-client';
 import { DOCS_BASE_URL } from '@/lib/docs';
 import { isParsableProductVersion, toReleaseTag } from '@/lib/product-version';
 import { GITHUB_RELEASES_BASE_URL } from '@/lib/release-links';
+import { SETTINGS_PATHS } from '@/lib/settings';
 import { PERSONAL_THEME_STORAGE_KEY } from '@/types/preferences';
 import { cn } from '@/lib/utils';
 import { useTRPC } from '@/trpc/client';
@@ -33,17 +37,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/system';
-import Image from 'next/image';
 
 export const UserMenu = ({
   portalContainer,
   expanded = false,
   menuSide = 'left',
+  showPersonalSettings = true,
   switchOrgRedirectPath,
 }: {
   portalContainer?: HTMLElement | null;
   expanded?: boolean;
   menuSide?: 'top' | 'right' | 'bottom' | 'left';
+  showPersonalSettings?: boolean;
   switchOrgRedirectPath?: string;
 } = {}) => {
   const { isSignedIn, user } = useUser();
@@ -57,6 +62,7 @@ export const UserMenu = ({
       expanded={expanded}
       menuSide={menuSide}
       portalContainer={portalContainer}
+      showPersonalSettings={showPersonalSettings}
       switchOrgRedirectPath={switchOrgRedirectPath}
       user={user}
     />
@@ -67,11 +73,13 @@ function SignedInUserMenu({
   portalContainer,
   expanded,
   menuSide,
+  showPersonalSettings,
   user,
 }: {
   portalContainer?: HTMLElement | null;
   expanded: boolean;
   menuSide: 'top' | 'right' | 'bottom' | 'left';
+  showPersonalSettings: boolean;
   switchOrgRedirectPath?: string;
   user: NonNullable<ReturnType<typeof useUser>['user']>;
 }) {
@@ -140,8 +148,8 @@ function SignedInUserMenu({
               size="md"
               alt={userDisplayName}
             />
-            <div className="flex flex-1 items-start justify-between">
-              <div className="flex flex-col items-start">
+            <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
+              <div className="flex min-w-0 flex-col items-start">
                 <div className="text-sm font-medium whitespace-nowrap ph-no-capture">
                   {userDisplayName}
                 </div>
@@ -149,6 +157,16 @@ function SignedInUserMenu({
                   {userEmail}
                 </div>
               </div>
+              {showPersonalSettings ? (
+                <DropdownMenuItem asChild className="size-8 justify-center p-0">
+                  <Link
+                    href={SETTINGS_PATHS.personal}
+                    aria-label="Personal settings"
+                  >
+                    <Settings />
+                  </Link>
+                </DropdownMenuItem>
+              ) : null}
             </div>
           </div>
 
