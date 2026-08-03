@@ -1,9 +1,39 @@
 import type { ReactNode } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
+  customAutomations: [] as Array<{
+    id: string;
+    name: string;
+    prompt: string;
+    enabled: boolean;
+    scheduleMode: 'weekly';
+    cronExpression: null;
+    model: null;
+    environmentId: string;
+    target: {
+      provider: 'slack';
+      externalRef: string;
+      metadata?: Record<string, unknown>;
+    };
+    lastRunAt: null;
+    lastSucceededAt: null;
+    lastFailedAt: null;
+    lastError: null;
+    lastLaunchedTaskId: null;
+    createdByName: string;
+    createdAt: Date;
+    updatedAt: Date;
+  }>,
+  environments: [] as Array<{ id: string; name: string }>,
   nextUpdateSettingsResult: null as {
     success: true;
     settings: Record<string, unknown>;
@@ -254,7 +284,7 @@ vi.mock('@tanstack/react-query', () => ({
     }
 
     if (key1 === 'listCustomAutomations') {
-      return { isPending: false, data: [] };
+      return { isPending: false, data: state.customAutomations };
     }
 
     if (queryOptions.queryKey?.[0] === 'taskModels') {
@@ -314,7 +344,7 @@ vi.mock('@tanstack/react-query', () => ({
     ) {
       // environments.list and any leftover channel listszheimer
       if (queryOptions.queryKey?.[0] === 'environments') {
-        return { isPending: false, data: [] };
+        return { isPending: false, data: state.environments };
       }
     }
 
@@ -436,14 +466,22 @@ import { AutomationsSettings } from './AutomationsSettings';
 
 async function openSuggesterCard() {
   fireEvent.click(
-    await screen.findByRole('button', { name: 'Expand Suggest Ideas' }),
+    await screen.findByRole('button', {
+      name: /(?:Set up|Configure) Suggest Ideas/,
+    }),
   );
 }
 
 async function openReviewerCard() {
   fireEvent.click(
-    await screen.findByRole('button', { name: 'Expand Review Code' }),
+    await screen.findByRole('button', {
+      name: /(?:Set up|Configure) Review Code/,
+    }),
   );
+}
+
+function closeAutomationDialog() {
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 }
 
 describe('AutomationsSettings', () => {
@@ -474,6 +512,8 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.reviewCodeInstructions = null;
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
+    state.customAutomations = [];
+    state.environments = [];
     for (const key of Object.keys(
       state.settingsQuery.data.resolvedDestinations,
     )) {
@@ -493,7 +533,7 @@ describe('AutomationsSettings', () => {
 
     expect(
       await screen.findByRole('button', {
-        name: 'Expand Weekly Manager Stats',
+        name: /(?:Set up|Configure) Weekly Manager Stats/,
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
@@ -529,30 +569,38 @@ describe('AutomationsSettings', () => {
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'Expand Weekly Manager Stats',
+        name: /(?:Set up|Configure) Weekly Manager Stats/,
       }),
     );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Expand Triage Sentry Issues' }),
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Expand Triage Dependabot Alerts' }),
-    );
-
     expect(
       screen.getByLabelText('Post summaries to this Slack channel'),
     ).toBeInTheDocument();
     expect(
-      screen.getAllByLabelText('Post follow-up work to this Slack channel')
-        .length,
-    ).toBeGreaterThan(1);
+      screen.getByText('Reports to: not configured — set a Manager Channel.'),
+    ).toBeInTheDocument();
+    closeAutomationDialog();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /(?:Set up|Configure) Triage Sentry Issues/,
+      }),
+    );
     expect(
-      screen.getAllByText('Select a Slack channel').length,
-    ).toBeGreaterThan(0);
+      screen.getByLabelText('Post follow-up work to this Slack channel'),
+    ).toBeInTheDocument();
+    closeAutomationDialog();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /(?:Set up|Configure) Triage Dependabot Alerts/,
+      }),
+    );
+
     expect(
-      screen.getAllByText('Reports to: not configured — set a Manager Channel.')
-        .length,
-    ).toBeGreaterThan(1);
+      screen.getByLabelText('Post follow-up work to this Slack channel'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Select a Slack channel')).toBeInTheDocument();
+    expect(
+      screen.getByText('Reports to: not configured — set a Manager Channel.'),
+    ).toBeInTheDocument();
   });
 
   it('shows a saved Discord destination and a provider-neutral placeholder when Discord is connected', async () => {
@@ -576,19 +624,22 @@ describe('AutomationsSettings', () => {
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'Expand Weekly Manager Stats',
+        name: /(?:Set up|Configure) Weekly Manager Stats/,
       }),
     );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Expand Triage Sentry Issues' }),
-    );
-
-    // The saved Discord channel is the selected destination.
     expect(
       screen.getByText('#automation-reports (Discord)'),
     ).toBeInTheDocument();
+    closeAutomationDialog();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /(?:Set up|Configure) Triage Sentry Issues/,
+      }),
+    );
+
+    // The saved Discord channel is the selected destination.
     // Pickers without a saved value use the provider-neutral placeholder.
-    expect(screen.getAllByText('Select a channel').length).toBeGreaterThan(0);
+    expect(screen.getByText('Select a channel')).toBeInTheDocument();
     expect(
       screen.queryByText('Select a Slack channel'),
     ).not.toBeInTheDocument();
@@ -611,6 +662,11 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Automation output/,
+      }),
+    );
     const destination = await screen.findByRole('button', {
       name: /#automation-reports \(Discord\)/,
     });
@@ -642,7 +698,7 @@ describe('AutomationsSettings', () => {
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'Expand Alert on Config Errors',
+        name: /(?:Set up|Configure) Alert on Config Errors/,
       }),
     );
 
@@ -658,7 +714,7 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     const expandButton = await screen.findByRole('button', {
-      name: 'Expand Auto-respond to channels',
+      name: /(?:Set up|Configure) Auto-respond to channels/,
     });
     fireEvent.click(expandButton);
 
@@ -693,43 +749,84 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows exception-only capability badges from the shared descriptors', async () => {
+  it('does not add capability badges to automation cards', async () => {
     render(<AutomationsSettings />);
 
-    // Dependabot and CodeQL stay GitHub-only; Issue Fixer supports
-    // GitHub/GitLab/Gitea, and manager stats is provider-neutral now and
-    // shows no source-control badge.
-    expect((await screen.findAllByText('GitHub only')).length).toBe(2);
-    // Full chat coverage for the suggester (no limited-comms badge); the other
-    // manager automations already cover all communication providers.
+    await screen.findByText('Triage Dependabot Alerts');
+    expect(screen.queryByText('GitHub only')).toBeNull();
     expect(screen.queryByText('Slack only')).toBeNull();
-    expect(screen.queryByText('Slack · Discord · Telegram only')).toBeNull();
-    expect(screen.queryByText(/Telegram only$/)).toBeNull();
-    // conflict_resolver supports Gitea alongside GitHub, GitLab, and Azure
-    // DevOps. Bitbucket remains excluded because it has no conflict signal or
-    // label-based opt-in. ci_failure_triage covers all five SCM providers, so
-    // it no longer shows a limited-SCM badge.
-    expect(
-      screen.getAllByText('GitHub · GitLab · Azure DevOps · Gitea only').length,
-    ).toBe(1);
-    expect(
-      screen.queryByText(
-        'GitHub · GitLab · Azure DevOps · Bitbucket Cloud only',
-      ),
-    ).toBeNull();
-    // Full coverage shows nothing — absence of a warning is the signal.
-    expect(screen.queryByText('All chat channels')).toBeNull();
-    expect(screen.queryByText('All source control')).toBeNull();
   });
 
-  it('renders the Source Code and Meta automation sections', async () => {
+  it('groups built-in automations into Enabled and Available sections', async () => {
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Enabled')).toBeInTheDocument();
+    expect(screen.getByText('Available')).toBeInTheDocument();
+    expect(screen.queryByText('Source Code automations')).toBeNull();
+    expect(screen.queryByText('Meta automations')).toBeNull();
+  });
+
+  it('opens a built-in automation modal from its existing hash permalink', async () => {
+    window.location.hash = '#reviewer';
+
     render(<AutomationsSettings />);
 
     expect(
-      await screen.findByText('Source Code automations'),
+      await screen.findByRole('dialog', { name: 'Review Code' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Meta automations')).toBeInTheDocument();
-    expect(screen.queryByText('Other automations')).toBeNull();
+  });
+
+  it('renders custom automations as a compact control list and honors their permalinks', async () => {
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Weekly flaky-test scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'weekly',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('switch', {
+        name: 'Toggle Weekly flaky-test scan',
+      }),
+    ).toBeChecked();
+    expect(
+      screen.getByText(
+        'Weekly · Production · slack:#roomote-managers · Created by Ada',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'Configure Weekly flaky-test scan',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Delete Weekly flaky-test scan' }),
+    ).toBeInTheDocument();
+
+    act(() => {
+      window.location.hash = '#custom-automation-automation-1';
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(
+      await screen.findByRole('dialog', { name: 'Edit custom automation' }),
+    ).toBeInTheDocument();
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
