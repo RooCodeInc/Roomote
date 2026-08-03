@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   isNull: vi.fn(),
   updateSet: vi.fn(),
   updateWhere: vi.fn(),
+  updateReturning: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -21,7 +22,11 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: { deploymentSettings: { findFirst: mocks.findSettings } },
     update: vi.fn(() => ({
-      set: mocks.updateSet.mockReturnValue({ where: mocks.updateWhere }),
+      set: mocks.updateSet.mockReturnValue({
+        where: mocks.updateWhere.mockReturnValue({
+          returning: mocks.updateReturning,
+        }),
+      }),
     })),
   },
   deploymentSettings: { id: 'id', licenseKey: 'licenseKey' },
@@ -47,7 +52,7 @@ describe('syncLicenseWithCloud', () => {
     mocks.findSettings.mockResolvedValue({ licenseKey: 'RMLK1.payload.sig' });
     mocks.resolveConfiguredLicenseKey.mockReturnValue('RMLK1.payload.sig');
     mocks.getInstanceAnalyticsId.mockResolvedValue('deployment-123');
-    mocks.updateWhere.mockResolvedValue(undefined);
+    mocks.updateReturning.mockResolvedValue([{ id: 'default' }]);
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -119,6 +124,41 @@ describe('syncLicenseWithCloud', () => {
     expect(mocks.updateSet).not.toHaveBeenCalled();
   });
 
+  it.each([429, 500, 503])(
+    'retries when Cloud responds with HTTP %s',
+    async (status) => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: false,
+        status,
+      } as Response);
+
+      await expect(
+        syncLicenseWithCloud({
+          eventId: 'event-123',
+          observedAt: new Date(),
+          activeUsers: 17,
+        }),
+      ).resolves.toEqual({ status: 'failed' });
+      expect(mocks.updateSet).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a non-retryable Cloud response', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+    } as Response);
+
+    await expect(
+      syncLicenseWithCloud({
+        eventId: 'event-123',
+        observedAt: new Date(),
+        activeUsers: 17,
+      }),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(mocks.updateSet).not.toHaveBeenCalled();
+  });
+
   it('persists an interactive activation key with its lease', async () => {
     mocks.resolveLicenseState.mockReturnValue({
       status: 'valid',
@@ -138,6 +178,18 @@ describe('syncLicenseWithCloud', () => {
     expect(mocks.updateSet).toHaveBeenCalledWith(
       expect.objectContaining({ licenseKey: 'RMLK1.new-payload.sig' }),
     );
+  });
+
+  it('fails when the configured key changes before the lease is persisted', async () => {
+    mocks.updateReturning.mockResolvedValueOnce([]);
+
+    await expect(
+      syncLicenseWithCloud({
+        eventId: 'event-123',
+        observedAt: new Date(),
+        activeUsers: 17,
+      }),
+    ).resolves.toEqual({ status: 'failed' });
   });
 
   it('rejects a successful response with non-scalar entitlements', async () => {
