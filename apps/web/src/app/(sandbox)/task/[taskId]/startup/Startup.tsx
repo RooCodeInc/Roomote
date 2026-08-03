@@ -5,7 +5,6 @@ import { SSEProvider } from 'react-hooks-sse';
 
 import {
   DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
-  RunStatus,
   TaskPayloadKind,
   type RunStatus as RunStatusValue,
 } from '@roomote/types';
