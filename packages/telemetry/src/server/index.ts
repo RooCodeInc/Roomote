@@ -18,6 +18,7 @@ import {
   getUserAnalyticsId,
   taskRuns,
 } from '@roomote/db/server';
+import { isAnonymousAnalyticsEnabledFromMetadata } from '@roomote/feature-flags';
 
 import {
   MAX_TELEMETRY_BATCH_SIZE,
@@ -37,35 +38,6 @@ import {
 const LOG_PREFIX = '[telemetry]';
 const REQUEST_TIMEOUT_MS = 5_000;
 const FLUSH_INTERVAL_MS = 10_000;
-const ANONYMOUS_ANALYTICS_METADATA_KEY = 'anonymous_analytics_enabled';
-
-function coerceToBoolean(value: unknown): boolean {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') return value.toLowerCase() === 'true';
-  if (typeof value === 'number') return value !== 0;
-  return Boolean(value);
-}
-
-function isAnonymousAnalyticsEnabledFromMetadata(
-  metadata: unknown,
-  cloudEnabled: boolean,
-): boolean {
-  if (cloudEnabled) {
-    return true;
-  }
-
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-    return true;
-  }
-
-  const metadataRecord = metadata as Record<string, unknown>;
-  if (!(ANONYMOUS_ANALYTICS_METADATA_KEY in metadataRecord)) {
-    return true;
-  }
-
-  return coerceToBoolean(metadataRecord[ANONYMOUS_ANALYTICS_METADATA_KEY]);
-}
-
 export interface TelemetryEnvInput {
   appEnv: string | undefined;
   releaseVersion: string | undefined;

@@ -89,6 +89,7 @@ function buildAuth(user: typeof users.$inferSelect): UserAuthSuccess {
     userType: 'user',
     userId: user.id,
     isAdmin: true,
+    featureFlags: {},
     name,
     primaryEmail: email,
     anonymousAnalyticsEnabled: false,

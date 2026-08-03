@@ -22,7 +22,7 @@ import {
   captureActivationSetupCompleted,
   captureEvent,
 } from '@roomote/telemetry/server';
-import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@/lib/server/anonymous-analytics';
+import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@roomote/feature-flags';
 import {
   AVAILABLE_SETUP_MCP_INTEGRATIONS,
   enqueueTask,

@@ -1,5 +1,5 @@
 {
-  "name": "@roomote/telemetry",
+  "name": "@roomote/feature-flags",
   "version": "0.0.3",
   "private": true,
   "type": "module",
@@ -35,8 +35,7 @@
   },
   "dependencies": {
     "@roomote/db": "workspace:^",
-    "@roomote/env": "workspace:^",
-    "@roomote/feature-flags": "workspace:^"
+    "ioredis": "^5.10.1"
   },
   "devDependencies": {
     "@roomote/config-eslint": "workspace:^",

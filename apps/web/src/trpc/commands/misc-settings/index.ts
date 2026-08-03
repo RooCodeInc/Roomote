@@ -16,6 +16,11 @@ import {
 } from '@roomote/db/server';
 import { DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getRedis, REDIS_KEYS } from '@roomote/redis';
+import {
+  ANONYMOUS_ANALYTICS_METADATA_KEY,
+  isAnonymousAnalyticsEnabledFromMetadata,
+} from '@roomote/feature-flags';
+import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
 import {
   normalizeTimeZone,
@@ -29,10 +34,6 @@ import {
   isRoomoteCloudEnabled,
 } from '@/lib/server/env';
 import { getS3Client } from '@/lib/server/s3-client';
-import {
-  ANONYMOUS_ANALYTICS_METADATA_KEY,
-  isAnonymousAnalyticsEnabledFromMetadata,
-} from '@/lib/server/anonymous-analytics';
 
 import { assertAdmin } from '../setup/shared';
 import { buildConfiguredCommunicationProviders } from './provider-diagnostics';
@@ -645,6 +646,8 @@ export async function setAnonymousAnalyticsCommand(
       .set({ metadata: nextMetadata, updatedAt: new Date() })
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
   }
+
+  await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
 
   return getMiscSettingsCommand(auth);
 }

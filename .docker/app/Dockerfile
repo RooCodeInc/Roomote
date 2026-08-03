@@ -57,6 +57,7 @@ COPY packages/config-eslint/package.json ./packages/config-eslint/
 COPY packages/config-typescript/package.json ./packages/config-typescript/
 COPY packages/db/package.json ./packages/db/
 COPY packages/env/package.json ./packages/env/
+COPY packages/feature-flags/package.json ./packages/feature-flags/
 COPY packages/github/package.json ./packages/github/
 COPY packages/gitea/package.json ./packages/gitea/
 COPY packages/bitbucket/package.json ./packages/bitbucket/

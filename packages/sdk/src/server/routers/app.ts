@@ -9,6 +9,7 @@ import { linearSessionsRouter } from './linear-sessions';
 import { repositoriesRouter } from './repositories';
 import { taskRunsRouter } from './task-runs';
 import { environmentsRouter } from './environments';
+import { featureFlagsRouter } from './feature-flags';
 import { mcpConnectionsRouter } from './mcp-connections';
 import { userApiKeysRouter } from './user-api-keys';
 import { llmUsageRouter } from './llm-usage';
@@ -22,6 +23,7 @@ export const appRouter = router({
   repositories: repositoriesRouter,
   taskRuns: taskRunsRouter,
   environments: environmentsRouter,
+  featureFlags: featureFlagsRouter,
   mcpConnections: mcpConnectionsRouter,
   userApiKeys: userApiKeysRouter,
   llmUsage: llmUsageRouter,

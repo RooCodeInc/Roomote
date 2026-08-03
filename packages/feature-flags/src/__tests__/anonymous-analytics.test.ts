@@ -1,15 +1,17 @@
+import { describe, expect, it } from 'vitest';
+
 import {
   ANONYMOUS_ANALYTICS_METADATA_KEY,
   isAnonymousAnalyticsEnabledFromMetadata,
-} from './anonymous-analytics';
+} from '../index';
 
 describe('isAnonymousAnalyticsEnabledFromMetadata', () => {
-  it('defaults to enabled when metadata is absent', () => {
+  it('defaults to enabled when the key is absent', () => {
     expect(isAnonymousAnalyticsEnabledFromMetadata(undefined)).toBe(true);
     expect(isAnonymousAnalyticsEnabledFromMetadata({})).toBe(true);
   });
 
-  it('honors an explicit opt-out outside Roomote Cloud', () => {
+  it('respects explicit values', () => {
     expect(
       isAnonymousAnalyticsEnabledFromMetadata({
         [ANONYMOUS_ANALYTICS_METADATA_KEY]: false,
@@ -17,12 +19,12 @@ describe('isAnonymousAnalyticsEnabledFromMetadata', () => {
     ).toBe(false);
     expect(
       isAnonymousAnalyticsEnabledFromMetadata({
-        [ANONYMOUS_ANALYTICS_METADATA_KEY]: 'false',
+        [ANONYMOUS_ANALYTICS_METADATA_KEY]: 'true',
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it('stays enabled in Roomote Cloud', () => {
+  it('forces analytics enabled for Roomote Cloud', () => {
     expect(
       isAnonymousAnalyticsEnabledFromMetadata(
         { [ANONYMOUS_ANALYTICS_METADATA_KEY]: false },

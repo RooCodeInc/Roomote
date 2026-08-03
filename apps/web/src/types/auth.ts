@@ -1,3 +1,4 @@
+import type { FeatureFlagValues } from '@roomote/feature-flags';
 import type { ManagedDeploymentAccess } from '@roomote/types';
 
 /**
@@ -20,6 +21,7 @@ export type AuthorizedUser = {
   name: string | null;
   primaryEmail: string | null;
   isAdmin: boolean;
+  featureFlags: FeatureFlagValues;
   /**
    * Whether anonymous analytics is active for this deployment (admin
    * setting enabled AND the environment allows telemetry). Drives whether

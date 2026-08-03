@@ -101,6 +101,9 @@ const config: KnipConfig = {
     'packages/env': {
       project: ['src/**/*.ts'],
     },
+    'packages/feature-flags': {
+      project: ['src/**/*.ts'],
+    },
     'packages/github': {
       project: ['src/**/*.ts'],
       ignoreBinaries: ['gh'],
