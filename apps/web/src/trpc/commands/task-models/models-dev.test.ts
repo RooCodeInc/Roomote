@@ -233,6 +233,36 @@ describe('lookupModelMetadataFromCatalog', () => {
     expect(result.displayName).toBe('Claude Sonnet 5');
   });
 
+  it('resolves native Bedrock metadata from its provider catalog', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'amazon-bedrock': {
+          models: {
+            'eu.anthropic.claude-sonnet-5': {
+              name: 'Claude Sonnet 5 (EU)',
+              modalities: { input: ['text', 'image'] },
+              limit: { context: 200000 },
+              cost: { input: 3, output: 15 },
+            },
+          },
+        },
+      },
+    });
+
+    const result = lookupModelMetadataFromCatalog(
+      catalog,
+      'amazon-bedrock/eu.anthropic.claude-sonnet-5',
+    );
+
+    expect(result.displayName).toBe('Claude Sonnet 5 (EU)');
+    expect(result.metadata).toEqual({
+      contextWindow: 200000,
+      inputTypes: ['text', 'image'],
+      inputPricePerToken: 3 / 1_000_000,
+      outputPricePerToken: 15 / 1_000_000,
+    });
+  });
+
   it('prefers the vercel gateway entry for vercel-routed models', () => {
     const catalog = buildCatalog({
       gatewayModelsByLowerSlug: {

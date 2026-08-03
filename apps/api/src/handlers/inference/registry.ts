@@ -54,9 +54,21 @@ export async function resolveGatewayUpstream(
     return resolveXaiUpstream(provider, upstreamPath, search);
   }
 
+  const requiresSourceCoupledRegion =
+    provider.region?.envVarName === 'AWS_REGION' &&
+    provider.envVarNames.includes('AWS_BEARER_TOKEN_BEDROCK');
+  const hasRuntimeApiKey =
+    requiresSourceCoupledRegion &&
+    provider.envVarNames.some((envVarName) => process.env[envVarName]?.trim());
   const [apiKey, upstreamBaseUrl] = await Promise.all([
     resolveModelProviderEnvValue(provider.envVarNames),
-    resolveProviderUpstreamBaseUrl(provider),
+    resolveProviderUpstreamBaseUrl(provider, {
+      regionSource: requiresSourceCoupledRegion
+        ? hasRuntimeApiKey
+          ? 'runtime'
+          : 'persisted'
+        : undefined,
+    }),
   ]);
 
   if (!apiKey && !provider.optionalApiKey) {
@@ -236,6 +248,7 @@ function hasTraversalOrEncodedSlash(upstreamPath: string): boolean {
  */
 async function resolveProviderUpstreamBaseUrl(
   provider: InferenceGatewayProvider,
+  options: { regionSource?: 'runtime' | 'persisted' } = {},
 ): Promise<string> {
   if (provider.upstreamBaseUrlEnvVarName) {
     const configuredBaseUrl = await resolveModelProviderEnvValue([
@@ -281,8 +294,12 @@ async function resolveProviderUpstreamBaseUrl(
   }
 
   const region =
-    (await resolveModelProviderEnvValue([provider.region.envVarName])) ??
-    provider.region.default;
+    (options.regionSource === 'runtime'
+      ? process.env[provider.region.envVarName]?.trim() || undefined
+      : await resolveModelProviderEnvValue(
+          [provider.region.envVarName],
+          options.regionSource === 'persisted' ? { runtimeEnv: {} } : {},
+        )) ?? provider.region.default;
 
   // Providers with discrete regional hosts select a base outright; the
   // `{region}` template and its cloud-region pattern do not apply to them.

@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+  AMAZON_BEDROCK_OPENCODE_PROVIDER_ID,
   applyImplicitLiteLlmModelPrefix,
   BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
@@ -775,14 +776,85 @@ function mergeBedrockMantleOpenAiProviderConfig(
   };
 }
 
-function toBedrockMantleRuntimeModelId(modelId: string): string {
-  const prefix = `${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/openai.`;
+function mergeAmazonBedrockProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  const prefix = `${AMAZON_BEDROCK_OPENCODE_PROVIDER_ID}/`;
+  const bedrockModelIds = [
+    ...new Set(
+      modelIds.flatMap((modelId) => {
+        const normalized = modelId?.trim();
 
-  return modelId.startsWith(prefix)
-    ? `${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/${modelId.slice(
-        BEDROCK_MANTLE_OPENCODE_PROVIDER_ID.length + 1,
-      )}`
-    : modelId;
+        return normalized?.startsWith(prefix)
+          ? [normalized.slice(prefix.length)]
+          : [];
+      }),
+    ),
+  ];
+
+  if (bedrockModelIds.length === 0) {
+    return providerConfig;
+  }
+
+  const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
+
+  if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
+    throw new Error(
+      `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
+    );
+  }
+
+  const existingProvider = asRecord(
+    providerConfig[AMAZON_BEDROCK_OPENCODE_PROVIDER_ID],
+  );
+  const existingOptions = asRecord(existingProvider.options);
+  const existingModels = asRecord(existingProvider.models);
+
+  return {
+    ...providerConfig,
+    [AMAZON_BEDROCK_OPENCODE_PROVIDER_ID]: {
+      ...existingProvider,
+      npm: '@ai-sdk/amazon-bedrock',
+      name: 'Amazon Bedrock',
+      options: {
+        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+        ...existingOptions,
+      },
+      models: {
+        ...existingModels,
+        ...Object.fromEntries(
+          bedrockModelIds.map((modelId) => [
+            modelId,
+            {
+              name: modelId,
+              ...asRecord(existingModels[modelId]),
+            },
+          ]),
+        ),
+      },
+    },
+  };
+}
+
+function toBedrockMantleRuntimeModelId(modelId: string): string {
+  const mantlePrefix = `${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/openai.`;
+  const nativePrefix = `${AMAZON_BEDROCK_OPENCODE_PROVIDER_ID}/openai.`;
+
+  if (modelId.startsWith(mantlePrefix)) {
+    return `${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/${modelId.slice(
+      BEDROCK_MANTLE_OPENCODE_PROVIDER_ID.length + 1,
+    )}`;
+  }
+
+  if (modelId.startsWith(nativePrefix)) {
+    return `${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/${modelId.slice(
+      AMAZON_BEDROCK_OPENCODE_PROVIDER_ID.length + 1,
+    )}`;
+  }
+
+  return modelId;
 }
 
 /**
@@ -916,6 +988,23 @@ function mergeInferenceGatewayProviderConfig(
       BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
       gatewayUrl,
       bedrockMantleOpenAiProvider,
+    );
+  }
+
+  const amazonBedrockProvider = getInferenceGatewayProvider(
+    AMAZON_BEDROCK_OPENCODE_PROVIDER_ID,
+  );
+  if (
+    amazonBedrockProvider &&
+    modelIds.some((modelId) =>
+      modelId?.trim().startsWith(`${AMAZON_BEDROCK_OPENCODE_PROVIDER_ID}/`),
+    )
+  ) {
+    merged = rebaseProviderOntoGateway(
+      merged,
+      AMAZON_BEDROCK_OPENCODE_PROVIDER_ID,
+      gatewayUrl,
+      amazonBedrockProvider,
     );
   }
 
@@ -1615,16 +1704,20 @@ function resolveModelBackedOpenCodeConfig(
     : providerReasoningConfig;
   const providerConfig = mergeInferenceGatewayProviderConfig(
     mergeAzureCognitiveServicesProviderConfig(
-      mergeBedrockMantleProviderConfig(
-        mergeBedrockMantleOpenAiProviderConfig(
-          mergeOpenAiCompatibleProviderConfig(
-            mergeOpenRouterVariantAliasModels(
-              providerModelConfig,
-              variantAliases,
+      mergeAmazonBedrockProviderConfig(
+        mergeBedrockMantleProviderConfig(
+          mergeBedrockMantleOpenAiProviderConfig(
+            mergeOpenAiCompatibleProviderConfig(
+              mergeOpenRouterVariantAliasModels(
+                providerModelConfig,
+                variantAliases,
+              ),
+              runtimeEnv,
+              configuredModelIds,
+              visionModel ?? effectiveCodingModel,
             ),
             runtimeEnv,
             configuredModelIds,
-            visionModel ?? effectiveCodingModel,
           ),
           runtimeEnv,
           configuredModelIds,

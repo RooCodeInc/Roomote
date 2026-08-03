@@ -77,6 +77,34 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toBeDefined();
   });
 
+  it('routes native Bedrock OpenAI models through the Mantle Responses provider', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'amazon-bedrock/openai.gpt-5.6-sol',
+        AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+        AWS_REGION: 'eu-west-1',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'AWS_BEARER_TOKEN_BEDROCK',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { models?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['bedrock-mantle-openai']).toMatchObject({
+      options: {
+        baseURL:
+          'https://api.example.com/api/inference/bedrock-mantle-openai/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+      models: {
+        'openai.gpt-5.6-sol': {},
+      },
+    });
+    expect(config.provider['amazon-bedrock']).toBeUndefined();
+  });
+
   it('ignores a disabled launch-time model override', () => {
     const runtimeEnv = {
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
@@ -186,6 +214,43 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.configContent).toContain(
       'https://bedrock-mantle.us-east-1.api.aws/anthropic/v1',
     );
+  });
+
+  it('registers native Amazon Bedrock models without overriding the direct endpoint', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'amazon-bedrock/eu.anthropic.claude-sonnet-5',
+        R_MODEL_REASONING_EFFORT: 'high',
+        AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+        AWS_REGION: 'eu-west-1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider['amazon-bedrock']).toMatchObject({
+      npm: '@ai-sdk/amazon-bedrock',
+      name: 'Amazon Bedrock',
+      options: {
+        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+      },
+      models: {
+        'eu.anthropic.claude-sonnet-5': {
+          name: 'eu.anthropic.claude-sonnet-5',
+          options: {
+            reasoningConfig: {
+              type: 'adaptive',
+              maxReasoningEffort: 'high',
+              display: 'summarized',
+            },
+          },
+        },
+      },
+    });
+    expect(result.configContent).not.toContain('baseURL');
+    expect(result.configContent).not.toContain('bedrock-key');
   });
 
   it('rejects invalid AWS regions before building a provider URL', () => {
@@ -372,6 +437,32 @@ describe('generateOpenCodeConfig provider support', () => {
       },
     });
     expect(config.provider['bedrock-mantle']).toBeUndefined();
+  });
+
+  it('rebases native Amazon Bedrock models onto the gateway', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'amazon-bedrock/eu.anthropic.claude-sonnet-5',
+        AWS_REGION: 'eu-west-1',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'AWS_BEARER_TOKEN_BEDROCK',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider['amazon-bedrock']).toMatchObject({
+      npm: '@ai-sdk/amazon-bedrock',
+      options: {
+        baseURL: 'https://api.example.com/api/inference/amazon-bedrock',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+      models: {
+        'eu.anthropic.claude-sonnet-5': {},
+      },
+    });
   });
 
   it('rebases the openai provider onto the ChatGPT gateway segment in gateway mode', () => {

@@ -115,6 +115,7 @@ describe('inference gateway', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
@@ -431,6 +432,33 @@ describe('inference gateway', () => {
     expect(url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions');
   });
 
+  it('preserves persisted Z.AI region precedence with a runtime API key', async () => {
+    vi.stubEnv('ZAI_API_KEY', 'runtime-provider-key');
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('ZAI_REGION')
+          ? 'china'
+          : 'runtime-provider-key';
+      },
+    );
+
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/zai/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions');
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith(
+      ['ZAI_REGION'],
+      {},
+    );
+  });
+
   it('proxies Z.AI Coding Plan to its international coding endpoint', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(
@@ -660,6 +688,135 @@ describe('inference gateway', () => {
     expect(url).toBe(
       'https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1/messages',
     );
+  });
+
+  it('proxies native Bedrock Converse requests with bearer authentication', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('AWS_REGION')
+          ? 'eu-west-1'
+          : 'provider-secret-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/amazon-bedrock/model/eu.anthropic.claude-sonnet-5/converse',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://bedrock-runtime.eu-west-1.amazonaws.com/model/eu.anthropic.claude-sonnet-5/converse',
+    );
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+  });
+
+  it('uses the persisted Bedrock region when the API key is persisted', async () => {
+    vi.stubEnv('AWS_REGION', 'us-west-2');
+    vi.stubEnv('AWS_BEARER_TOKEN_BEDROCK', '');
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (
+        names: string | readonly string[],
+        options?: { runtimeEnv?: Record<string, string> },
+      ) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        if (nameList.includes('AWS_REGION')) {
+          return options?.runtimeEnv ? 'eu-west-1' : 'us-west-2';
+        }
+
+        return 'provider-secret-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/amazon-bedrock/model/eu.anthropic.claude-sonnet-5/converse',
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(
+      'https://bedrock-runtime.eu-west-1.amazonaws.com/model/eu.anthropic.claude-sonnet-5/converse',
+    );
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith(
+      ['AWS_REGION'],
+      { runtimeEnv: {} },
+    );
+  });
+
+  it('uses the runtime Bedrock region when the API key is configured at runtime', async () => {
+    vi.stubEnv('AWS_REGION', 'us-west-2');
+    vi.stubEnv('AWS_BEARER_TOKEN_BEDROCK', 'runtime-provider-key');
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (
+        names: string | readonly string[],
+        options?: { runtimeEnv?: Record<string, string> },
+      ) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        if (nameList.includes('AWS_REGION')) {
+          return options?.runtimeEnv ? 'eu-west-1' : 'us-west-2';
+        }
+
+        return 'runtime-provider-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/amazon-bedrock/model/us.anthropic.claude-sonnet-5/converse',
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(
+      'https://bedrock-runtime.us-west-2.amazonaws.com/model/us.anthropic.claude-sonnet-5/converse',
+    );
+    expect(
+      mockResolveModelProviderEnvValue.mock.calls.some(([names]) =>
+        (typeof names === 'string' ? [names] : names).includes('AWS_REGION'),
+      ),
+    ).toBe(false);
+  });
+
+  it('uses the default Bedrock region when a runtime API key has no runtime region', async () => {
+    vi.stubEnv('AWS_REGION', '');
+    vi.stubEnv('AWS_BEARER_TOKEN_BEDROCK', 'runtime-provider-key');
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('AWS_REGION')
+          ? 'eu-west-1'
+          : 'runtime-provider-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/amazon-bedrock/model/anthropic.claude-sonnet-5/converse',
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(
+      'https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-sonnet-5/converse',
+    );
+    expect(
+      mockResolveModelProviderEnvValue.mock.calls.some(([names]) =>
+        (typeof names === 'string' ? [names] : names).includes('AWS_REGION'),
+      ),
+    ).toBe(false);
   });
 
   it('proxies Bedrock Mantle OpenAI Responses requests', async () => {

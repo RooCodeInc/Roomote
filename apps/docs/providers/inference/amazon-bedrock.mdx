@@ -1,12 +1,13 @@
 ---
 title: Amazon Bedrock
 icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/bedrock.svg'
-description: Connect Roomote to models served through the Amazon Bedrock Mantle API.
+description: Connect Roomote to native Amazon Bedrock and Bedrock Mantle models.
 ---
 
 Amazon Bedrock provides managed access to models from multiple model developers
-inside AWS. Roomote uses Bedrock's Mantle API-key endpoint, so setup does not
-require long-lived IAM access-key and secret-key credentials.
+inside AWS. Roomote supports both native Bedrock Runtime models and models
+served through Bedrock's Mantle endpoints. Both use a Bedrock API key, so setup
+does not require long-lived IAM access-key and secret-key credentials.
 
 ## Get a Mantle API key
 
@@ -24,9 +25,20 @@ AWS_BEARER_TOKEN_BEDROCK=...
 AWS_REGION=us-east-1
 ```
 
-Roomote exposes supported models with the `bedrock-mantle/` prefix. The region
-defaults to `us-east-1` when omitted. Enable the models your account and region
-can access, then choose the default and role mappings.
+Roomote exposes Mantle models with the `bedrock-mantle/` prefix and OpenCode's
+native Bedrock provider models with the `amazon-bedrock/` prefix. The region
+defaults to `us-east-1` when omitted. Native Claude and other Bedrock Runtime
+models can use regional and cross-region inference-profile prefixes, such as
+`eu.`, `us.`, or `global.`. OpenAI models selected through the native provider
+continue to use Mantle's Responses endpoint automatically. Enable only models
+your account and configured region can access, then choose the default and role
+mappings.
+
+Roomote keeps Mantle models as the recommended defaults. Use native Bedrock
+models when you need standard Bedrock Runtime behavior or a regional inference
+profile that is not available through Mantle. Inference-profile ARNs are not
+supported through Roomote's hosted inference gateway; use the plain model or
+cross-region profile ID instead.
 
 ## Cost behavior
 
@@ -39,7 +51,7 @@ rates on the [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
 
 1. save the Mantle API key and matching region
 2. confirm Amazon Bedrock models appear in **Settings > Models**
-3. enable a model available in that region and assign it to a role
+3. enable a Mantle or native model available in that region and assign it to a role
 4. run a small task and confirm usage appears in the task and AWS account
 
 ## Common issues
@@ -48,5 +60,8 @@ rates on the [Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/).
   access key, and that it was created in the configured region.
 - **A model fails although it is listed.** Confirm the model is available to
   your AWS account in `AWS_REGION` and that any required model access is enabled.
+- **A native Anthropic model is denied.** Complete Anthropic's first-time-use
+  and AWS Marketplace access requirements for Bedrock Runtime. These
+  requirements do not apply to the same model through Mantle.
 - **Costs differ from Roomote's estimate.** AWS may apply regional, caching,
   provisioned-throughput, or model-specific pricing that changes independently.
