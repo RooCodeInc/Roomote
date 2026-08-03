@@ -19,7 +19,7 @@ vi.mock('@/components/system', async (importOriginal) => {
       <div>{children}</div>
     ),
     DropdownMenuItem: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
+      <div data-slot="dropdown-menu-item">{children}</div>
     ),
     DropdownMenuSeparator: () => <hr />,
     DropdownMenuTrigger: ({
@@ -67,9 +67,14 @@ describe('UserMenu', () => {
   it('links to personal settings from the user summary', () => {
     render(<UserMenu />);
 
+    const settingsLink = screen.getByRole('link', {
+      name: 'Personal settings',
+    });
+
+    expect(settingsLink).toHaveAttribute('href', '/settings/personal');
     expect(
-      screen.getByRole('link', { name: 'Personal settings' }),
-    ).toHaveAttribute('href', '/settings/personal');
+      settingsLink.closest('[data-slot="dropdown-menu-item"]'),
+    ).toBeInTheDocument();
   });
 
   it('hides personal settings while setup is incomplete', () => {

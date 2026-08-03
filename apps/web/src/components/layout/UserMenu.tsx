@@ -158,14 +158,14 @@ function SignedInUserMenu({
                 </div>
               </div>
               {showPersonalSettings ? (
-                <Button variant="ghost" size="icon" asChild>
+                <DropdownMenuItem asChild className="size-8 justify-center p-0">
                   <Link
                     href={SETTINGS_PATHS.personal}
                     aria-label="Personal settings"
                   >
                     <Settings />
                   </Link>
-                </Button>
+                </DropdownMenuItem>
               ) : null}
             </div>
           </div>
