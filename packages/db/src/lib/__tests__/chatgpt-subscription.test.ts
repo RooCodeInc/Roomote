@@ -403,6 +403,39 @@ describe('startChatGptDeviceAuth', () => {
   });
 });
 
+describe('classifyDeviceAuthRefusal', () => {
+  it('maps each structured error code to its poll result', async () => {
+    const { classifyDeviceAuthRefusal } =
+      await import('../chatgpt-subscription');
+
+    expect(
+      classifyDeviceAuthRefusal('deviceauth_authorization_pending'),
+    ).toEqual({ status: 'pending' });
+    expect(classifyDeviceAuthRefusal('deviceauth_not_found')).toMatchObject({
+      status: 'failed',
+      reason: 'expired',
+    });
+    expect(classifyDeviceAuthRefusal('deviceauth_forbidden')).toMatchObject({
+      status: 'failed',
+      reason: 'blocked',
+    });
+    // No usable code: stay pending, bounded by the caller's expiry deadline.
+    expect(classifyDeviceAuthRefusal(undefined)).toEqual({ status: 'pending' });
+  });
+
+  it('names the offending code so a blocked deployment is diagnosable', async () => {
+    const { classifyDeviceAuthRefusal } =
+      await import('../chatgpt-subscription');
+
+    const result = classifyDeviceAuthRefusal('deviceauth_org_policy');
+
+    expect(result).toMatchObject({ status: 'failed', reason: 'blocked' });
+    expect(result.status === 'failed' && result.error).toContain(
+      'deviceauth_org_policy',
+    );
+  });
+});
+
 describe('pollChatGptDeviceAuth', () => {
   function makeErrorFetch(status: number, code?: string) {
     return vi.fn().mockResolvedValue({

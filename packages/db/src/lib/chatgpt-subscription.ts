@@ -603,6 +603,42 @@ async function readDeviceAuthErrorCode(
   }
 }
 
+/**
+ * Map a refused device-token poll to a result, keyed only on the structured
+ * `error.code`. The HTTP status is deliberately not part of the decision: the
+ * issuer reuses 403 for both "not entered yet" and refusals no amount of
+ * waiting resolves, so the status alone cannot tell them apart.
+ *
+ * `undefined` means the body carried no usable code, which stays `pending` to
+ * preserve the behavior that shipped before this was classified at all. The
+ * caller stops at the device code's expiry, so that fallback is bounded.
+ *
+ * Pure, so the branch table is testable without an HTTP mock.
+ */
+export function classifyDeviceAuthRefusal(
+  errorCode: string | undefined,
+): ChatGptDevicePollResult {
+  switch (errorCode) {
+    case CHATGPT_DEVICE_AUTH_PENDING_ERROR_CODE:
+      return { status: 'pending' };
+    case CHATGPT_DEVICE_AUTH_NOT_FOUND_ERROR_CODE:
+      return {
+        status: 'failed',
+        reason: 'expired',
+        error:
+          'ChatGPT authorization code expired. Restart the connection to get a new code.',
+      };
+    case undefined:
+      return { status: 'pending' };
+    default:
+      return {
+        status: 'failed',
+        reason: 'blocked',
+        error: `ChatGPT device authorization was refused (${errorCode}).`,
+      };
+  }
+}
+
 export async function pollChatGptDeviceAuth(input: {
   deviceAuthId: string;
   userCode: string;
@@ -629,33 +665,7 @@ export async function pollChatGptDeviceAuth(input: {
   }
 
   if (response.status === 403 || response.status === 404) {
-    const errorCode = await readDeviceAuthErrorCode(response);
-
-    if (errorCode === CHATGPT_DEVICE_AUTH_PENDING_ERROR_CODE) {
-      return { status: 'pending' };
-    }
-
-    if (errorCode === CHATGPT_DEVICE_AUTH_NOT_FOUND_ERROR_CODE) {
-      return {
-        status: 'failed',
-        reason: 'expired',
-        error:
-          'ChatGPT authorization code expired. Restart the connection to get a new code.',
-      };
-    }
-
-    if (!errorCode) {
-      // Unrecognized body shape: keep the pre-existing pending behavior rather
-      // than failing a flow that may still be live. The caller stops at the
-      // device code's expiry, so this cannot spin forever.
-      return { status: 'pending' };
-    }
-
-    return {
-      status: 'failed',
-      reason: 'blocked',
-      error: `ChatGPT device authorization was refused (${errorCode}).`,
-    };
+    return classifyDeviceAuthRefusal(await readDeviceAuthErrorCode(response));
   }
 
   if (!response.ok) {
