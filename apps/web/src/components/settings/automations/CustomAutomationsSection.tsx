@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -231,6 +231,12 @@ export function CustomAutomationsSection() {
     () => connectedDestinationOptions.map((option) => option.value),
     [connectedDestinationOptions],
   );
+  const capabilitiesLoadedRef = useRef(capabilitiesLoaded);
+  const connectedDestinationProvidersRef = useRef(
+    connectedDestinationProviders,
+  );
+  capabilitiesLoadedRef.current = capabilitiesLoaded;
+  connectedDestinationProvidersRef.current = connectedDestinationProviders;
   const visibleDestinationOptions = capabilitiesLoaded
     ? connectedDestinationOptions
     : DESTINATION_OPTIONS.filter(
@@ -466,7 +472,9 @@ export function CustomAutomationsSection() {
         setForm(
           formFromRow(
             row,
-            capabilitiesLoaded ? connectedDestinationProviders : null,
+            capabilitiesLoadedRef.current
+              ? connectedDestinationProvidersRef.current
+              : null,
           ),
         );
         setResolvedCron(row.cronExpression ?? null);
@@ -477,7 +485,7 @@ export function CustomAutomationsSection() {
     openLinkedAutomation();
     window.addEventListener('hashchange', openLinkedAutomation);
     return () => window.removeEventListener('hashchange', openLinkedAutomation);
-  }, [capabilitiesLoaded, connectedDestinationProviders, rows]);
+  }, [rows]);
 
   useEffect(() => {
     if (!capabilitiesLoaded) return;

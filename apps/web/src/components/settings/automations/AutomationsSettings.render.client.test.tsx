@@ -1014,7 +1014,7 @@ describe('AutomationsSettings', () => {
     expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
   });
 
-  it('preserves an existing destination while capabilities are loading', async () => {
+  it('preserves in-progress edits when capabilities finish loading', async () => {
     state.settingsQuery.isPending = true;
     state.customAutomations = [
       {
@@ -1038,7 +1038,7 @@ describe('AutomationsSettings', () => {
       },
     ];
 
-    render(<AutomationsSettings />);
+    const { rerender } = render(<AutomationsSettings />);
 
     fireEvent.click(
       await screen.findByRole('button', {
@@ -1050,6 +1050,20 @@ describe('AutomationsSettings', () => {
       screen.getByRole('combobox', { name: 'Destination provider' }),
     ).toHaveTextContent('Slack');
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Edited while loading' },
+    });
+    state.settingsQuery.isPending = false;
+    rerender(<AutomationsSettings />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Name')).toHaveValue('Edited while loading');
+      expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    });
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Slack');
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
