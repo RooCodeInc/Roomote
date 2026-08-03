@@ -10,6 +10,7 @@ const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
+  customAutomationsPending: false,
   customAutomations: [] as Array<{
     id: string;
     name: string;
@@ -284,7 +285,10 @@ vi.mock('@tanstack/react-query', () => ({
     }
 
     if (key1 === 'listCustomAutomations') {
-      return { isPending: false, data: state.customAutomations };
+      return {
+        isPending: state.customAutomationsPending,
+        data: state.customAutomations,
+      };
     }
 
     if (queryOptions.queryKey?.[0] === 'taskModels') {
@@ -522,6 +526,8 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
     state.customAutomations = [];
+    state.customAutomationsPending = false;
+    state.settingsQuery.isPending = false;
     state.environments = [];
     for (const key of Object.keys(
       state.settingsQuery.data.resolvedDestinations,
@@ -776,6 +782,50 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('Meta automations')).toBeNull();
   });
 
+  it('filters available automations by category and provider-aware search', async () => {
+    render(<AutomationsSettings />);
+
+    const categoryFilter = await screen.findByRole('combobox', {
+      name: 'Filter available automations by category',
+    });
+    expect(categoryFilter).toHaveTextContent('All');
+
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Search available automations' }),
+      { target: { value: 'Discord' } },
+    );
+
+    expect(screen.getByText('Auto-respond to channels')).toBeInTheDocument();
+    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Clear automation filters' }),
+    );
+    expect(screen.getByText('Review Code')).toBeInTheDocument();
+
+    fireEvent.click(categoryFilter);
+    fireEvent.click(await screen.findByRole('option', { name: 'Operations' }));
+    expect(screen.getByText('Triage Sentry Issues')).toBeInTheDocument();
+    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
+  });
+
+  it('shows independent structural skeletons for custom and built-in automations', () => {
+    state.customAutomationsPending = true;
+    state.settingsQuery.isPending = true;
+
+    render(<AutomationsSettings />);
+
+    expect(
+      screen
+        .getByTestId('custom-automations-skeleton')
+        .querySelectorAll('[data-slot="skeleton"]'),
+    ).toHaveLength(6);
+    expect(
+      screen
+        .getByTestId('built-in-automations-skeleton')
+        .querySelectorAll('[data-slot="skeleton"]'),
+    ).toHaveLength(17);
+  });
+
   it('uses plain text empty states for built-in and custom automations', async () => {
     state.settingsQuery.data.settings.channelAutoStartSlackChannels = [];
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
@@ -857,6 +907,17 @@ describe('AutomationsSettings', () => {
     expect(
       await screen.findByRole('dialog', { name: 'Edit custom automation' }),
     ).toBeInTheDocument();
+    expect(screen.getByText('Schedule')).toBeInTheDocument();
+    expect(screen.getByText('Destination')).toBeInTheDocument();
+    expect(screen.getByText('Channel')).toBeInTheDocument();
+    expect(screen.queryByText('Cadence')).not.toBeInTheDocument();
+    expect(screen.queryByText('Frequency')).not.toBeInTheDocument();
+    expect(screen.queryByText('Destination provider')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        'Configure what runs, when it runs, and where the result is sent.',
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {

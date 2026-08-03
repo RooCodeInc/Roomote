@@ -95,6 +95,7 @@ import {
   Play,
   Plus,
   RefreshCcw,
+  Search,
   Select,
   SelectContent,
   SelectItem,
@@ -111,6 +112,7 @@ import {
   Textarea,
   TriangleAlert,
   Users,
+  X,
 } from '@/components/system';
 
 type FieldErrors = Partial<
@@ -228,11 +230,25 @@ type AutomationDefinition = {
   label: string;
   description: string;
   icon: ComponentType<{ className?: string }>;
+  category: AutomationCategory;
+  searchTerms?: string[];
   /** Compact label for the chat surfaces the automation can report to. */
   commsBadge?: string;
   /** Compact label for the source-control providers the automation supports. */
   scmBadge?: string;
 };
+
+type AutomationCategory = 'source-code' | 'communication' | 'operations';
+
+const AUTOMATION_CATEGORY_OPTIONS: Array<{
+  value: AutomationCategory | 'all';
+  label: string;
+}> = [
+  { value: 'all', label: 'All' },
+  { value: 'source-code', label: 'Source code' },
+  { value: 'communication', label: 'Communication' },
+  { value: 'operations', label: 'Operations' },
+];
 
 /**
  * Where an automation's next run will report, as resolved server-side through
@@ -335,12 +351,12 @@ const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
  */
 function getAutomationCapabilityBadges(
   automationKey: BackgroundAutomationKey,
-): Pick<AutomationDefinition, 'commsBadge' | 'scmBadge'> {
+): Pick<AutomationDefinition, 'commsBadge' | 'scmBadge' | 'searchTerms'> {
   const descriptor =
     getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
 
   if (!descriptor) {
-    return {};
+    return { searchTerms: [] };
   }
 
   const comms: readonly CommunicationProvider[] =
@@ -364,6 +380,10 @@ function getAutomationCapabilityBadges(
     : undefined;
 
   return {
+    searchTerms: [
+      ...comms.map(getCommunicationProviderDisplayName),
+      ...scm.map(getSourceControlProviderLabel),
+    ],
     ...(commsBadge ? { commsBadge } : {}),
     ...(scmBadge ? { scmBadge } : {}),
   };
@@ -386,6 +406,7 @@ function getAutomationDefinition(
     label: descriptor.label,
     description: TRIGGERABLE_AUTOMATION_DESCRIPTIONS[automationKey],
     icon,
+    category: automationKey === 'sentry_triage' ? 'operations' : 'source-code',
     ...getAutomationCapabilityBadges(automationKey),
   };
 }
@@ -450,6 +471,7 @@ const SCHEDULE_ONLY_AUTOMATION_DEFINITIONS = Object.fromEntries(
       description:
         SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id].description,
       icon: SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id].icon,
+      category: 'source-code',
       ...getAutomationCapabilityBadges(automation.automationKey),
     },
   ]),
@@ -475,6 +497,8 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     description:
       'Start tasks from selected Slack or Discord channels, each with its own custom instructions.',
     icon: MessagesSquare,
+    category: 'communication',
+    searchTerms: ['Slack', 'Discord'],
   },
   managerChannel: {
     id: 'managerChannel',
@@ -482,6 +506,8 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     description:
       'Shared Slack or Discord channel for manager-facing Roomote asks, summaries, and alerts.',
     icon: Users,
+    category: 'communication',
+    searchTerms: ['Slack', 'Discord'],
   },
   managerStats: {
     ...getAutomationDefinition(
@@ -489,6 +515,7 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
       'manager_stats',
       ChartColumnIncreasing,
     ),
+    category: 'communication',
   },
   sentryTriage: {
     ...getAutomationDefinition('sentryTriage', 'sentry_triage', SentryIcon),
@@ -509,6 +536,8 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     label: 'Review Code',
     description: `Review PRs automatically and on-demand.`,
     icon: GitPullRequest,
+    category: 'source-code',
+    searchTerms: sourceControlProviders.map(getSourceControlProviderLabel),
   },
   conflictResolver: {
     ...getAutomationDefinition(
@@ -519,9 +548,11 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
   },
   suggester: {
     ...getAutomationDefinition('suggester', 'suggester', Lightbulb),
+    category: 'communication',
   },
   announcer: {
     ...getAutomationDefinition('announcer', 'announcer', Megaphone),
+    category: 'communication',
   },
   platformIssueAlerts: {
     id: 'platformIssueAlerts',
@@ -529,6 +560,8 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     description:
       'Alert on Slack or Discord when a task runs into admin-fixable issues.',
     icon: BellElectric,
+    category: 'operations',
+    searchTerms: ['Slack', 'Discord'],
   },
 };
 
@@ -1176,8 +1209,12 @@ function shouldShowChannelAutoStartWarning(params: {
 
 function LoadingSkeleton() {
   return (
-    <div className="space-y-4">
-      {Array.from({ length: 6 }).map((_, index) => (
+    <div
+      className="grid gap-4 md:grid-cols-2"
+      data-testid="built-in-automations-skeleton"
+    >
+      <Skeleton className="col-span-full h-5 w-20" />
+      {Array.from({ length: 4 }).map((_, index) => (
         <Card key={index} className="gap-0 overflow-hidden py-4">
           <CardHeader className="p-0">
             <div className="flex items-start gap-3">
@@ -1434,6 +1471,7 @@ function AutomationCard({
   isOpen,
   onOpenChange,
   iconEnabled,
+  isAvailableMatch = true,
   runAction,
   debugSection,
   footer,
@@ -1445,6 +1483,7 @@ function AutomationCard({
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   iconEnabled: boolean;
+  isAvailableMatch?: boolean;
   runAction?: React.ReactNode;
   debugSection?: React.ReactNode;
   footer?: React.ReactNode;
@@ -1457,6 +1496,10 @@ function AutomationCard({
   const actionLabel = iconEnabled
     ? `Configure ${automation.label}`
     : `Set up ${automation.label}`;
+
+  if (!iconEnabled && !isAvailableMatch) {
+    return null;
+  }
 
   return (
     <div
@@ -1535,6 +1578,7 @@ function ScheduledAutomationCard<TFrequency extends string>({
   isOpen,
   onOpenChange,
   iconEnabled,
+  isAvailableMatch,
   disabled = false,
   debugSection,
   runTooltip,
@@ -1556,6 +1600,7 @@ function ScheduledAutomationCard<TFrequency extends string>({
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   iconEnabled: boolean;
+  isAvailableMatch: boolean;
   disabled?: boolean;
   debugSection?: React.ReactNode;
   runTooltip: string;
@@ -1579,6 +1624,7 @@ function ScheduledAutomationCard<TFrequency extends string>({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       iconEnabled={iconEnabled}
+      isAvailableMatch={isAvailableMatch}
       disabled={disabled}
       debugSection={debugSection}
       runAction={
@@ -1655,6 +1701,10 @@ export function AutomationsSettings() {
   const [isEditingManagerChannel, setIsEditingManagerChannel] = useState(false);
   const [isEnteringCustomManagerChannel, setIsEnteringCustomManagerChannel] =
     useState(false);
+  const [availableCategory, setAvailableCategory] = useState<
+    AutomationCategory | 'all'
+  >('all');
+  const [availableSearch, setAvailableSearch] = useState('');
   const formStateRef = useRef<FormState | null>(null);
   const savedStateRef = useRef<FormState | null>(null);
   const didApplyInitialHashRef = useRef(false);
@@ -2539,6 +2589,28 @@ export function AutomationsSettings() {
     announcer: announcerIsEnabled,
     platformIssueAlerts: isPlatformIssueAlertsEnabled(formState),
   } satisfies Record<AutomationId, boolean>;
+  const normalizedAvailableSearch = availableSearch.trim().toLowerCase();
+  const availableAutomationMatches = new Set(
+    Object.values(AUTOMATION_DEFINITIONS)
+      .filter(
+        (automation) =>
+          !iconEnabled[automation.id] &&
+          (availableCategory === 'all' ||
+            automation.category === availableCategory) &&
+          (!normalizedAvailableSearch ||
+            [
+              automation.label,
+              automation.description,
+              ...(automation.searchTerms ?? []),
+            ]
+              .join(' ')
+              .toLowerCase()
+              .includes(normalizedAvailableSearch)),
+      )
+      .map((automation) => automation.id),
+  );
+  const hasAvailableFilters =
+    availableCategory !== 'all' || Boolean(normalizedAvailableSearch);
 
   const isAutomationSaving = (automationId: AutomationId) =>
     updateMutation.isPending && savingAutomation === automationId;
@@ -2652,6 +2724,8 @@ export function AutomationsSettings() {
         </Alert>
       ) : null}
 
+      <CustomAutomationsSection />
+
       {settingsQuery.isPending || !formState ? (
         <LoadingSkeleton />
       ) : (
@@ -2665,11 +2739,71 @@ export function AutomationsSettings() {
                 No built-in automations enabled yet.
               </p>
             )}
-            <h2 className="order-[-10] col-span-full text-sm font-semibold text-foreground">
-              Available
-            </h2>
+            <div className="order-[-10] col-span-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-sm font-semibold text-foreground">
+                Available
+              </h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={availableCategory}
+                  onValueChange={(value) =>
+                    setAvailableCategory(value as AutomationCategory | 'all')
+                  }
+                >
+                  <SelectTrigger
+                    size="sm"
+                    aria-label="Filter available automations by category"
+                    className="w-36"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AUTOMATION_CATEGORY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={availableSearch}
+                    onChange={(event) =>
+                      setAvailableSearch(event.currentTarget.value)
+                    }
+                    placeholder="Search"
+                    aria-label="Search available automations"
+                    className="h-8 w-36 pl-8 text-sm"
+                  />
+                </div>
+                {hasAvailableFilters ? (
+                  <BasicTooltip content="Clear filters">
+                    <Button
+                      type="button"
+                      size="icon"
+                      className="size-8"
+                      variant="ghost"
+                      aria-label="Clear automation filters"
+                      onClick={() => {
+                        setAvailableCategory('all');
+                        setAvailableSearch('');
+                      }}
+                    >
+                      <X />
+                    </Button>
+                  </BasicTooltip>
+                ) : null}
+              </div>
+            </div>
+            {availableAutomationMatches.size === 0 ? (
+              <p className="order-0 col-span-full text-sm text-muted-foreground">
+                No available automations match these filters.
+              </p>
+            ) : null}
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.reviewer}
+              isAvailableMatch={availableAutomationMatches.has('reviewer')}
               isOpen={openAutomationIds.has('reviewer')}
               onOpenChange={(open) => setAutomationOpen('reviewer', open)}
               iconEnabled={iconEnabled.reviewer}
@@ -2818,6 +2952,9 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isAvailableMatch={availableAutomationMatches.has(
+                    automation.id,
+                  )}
                   isOpen={openAutomationIds.has(automation.id)}
                   onOpenChange={(open) =>
                     setAutomationOpen(automation.id, open)
@@ -2894,6 +3031,9 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.conflictResolver}
+              isAvailableMatch={availableAutomationMatches.has(
+                'conflictResolver',
+              )}
               isOpen={openAutomationIds.has('conflictResolver')}
               onOpenChange={(open) =>
                 setAutomationOpen('conflictResolver', open)
@@ -3100,6 +3240,9 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isAvailableMatch={availableAutomationMatches.has(
+                    automation.id,
+                  )}
                   isOpen={openAutomationIds.has(automation.id)}
                   onOpenChange={(open) =>
                     setAutomationOpen(automation.id, open)
@@ -3212,6 +3355,9 @@ export function AutomationsSettings() {
 
             <ScheduledAutomationCard
               automation={AUTOMATION_DEFINITIONS.dependabotTriage}
+              isAvailableMatch={availableAutomationMatches.has(
+                'dependabotTriage',
+              )}
               isOpen={openAutomationIds.has('dependabotTriage')}
               onOpenChange={(open) =>
                 setAutomationOpen('dependabotTriage', open)
@@ -3287,6 +3433,7 @@ export function AutomationsSettings() {
 
             <ScheduledAutomationCard
               automation={AUTOMATION_DEFINITIONS.codeqlTriage}
+              isAvailableMatch={availableAutomationMatches.has('codeqlTriage')}
               isOpen={openAutomationIds.has('codeqlTriage')}
               onOpenChange={(open) => setAutomationOpen('codeqlTriage', open)}
               iconEnabled={iconEnabled.codeqlTriage}
@@ -3377,6 +3524,9 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isAvailableMatch={availableAutomationMatches.has(
+                    automation.id,
+                  )}
                   isOpen={openAutomationIds.has(automation.id)}
                   onOpenChange={(open) =>
                     setAutomationOpen(automation.id, open)
@@ -3487,10 +3637,11 @@ export function AutomationsSettings() {
               );
             })}
 
-            <CustomAutomationsSection />
-
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.channelAutoStart}
+              isAvailableMatch={availableAutomationMatches.has(
+                'channelAutoStart',
+              )}
               isOpen={openAutomationIds.has('channelAutoStart')}
               onOpenChange={(open) =>
                 setAutomationOpen('channelAutoStart', open)
@@ -3546,6 +3697,9 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.managerChannel}
+              isAvailableMatch={availableAutomationMatches.has(
+                'managerChannel',
+              )}
               isOpen={openAutomationIds.has('managerChannel')}
               onOpenChange={(open) => setAutomationOpen('managerChannel', open)}
               iconEnabled={iconEnabled.managerChannel}
@@ -3814,6 +3968,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.managerStats}
+              isAvailableMatch={availableAutomationMatches.has('managerStats')}
               isOpen={openAutomationIds.has('managerStats')}
               onOpenChange={(open) => setAutomationOpen('managerStats', open)}
               iconEnabled={iconEnabled.managerStats}
@@ -3826,7 +3981,9 @@ export function AutomationsSettings() {
                     variant="ghost"
                     size="icon"
                     onClick={() =>
-                      triggerMutation.mutate({ automationKey: 'manager_stats' })
+                      triggerMutation.mutate({
+                        automationKey: 'manager_stats',
+                      })
                     }
                     disabled={isRunDisabled(
                       'managerStats',
@@ -3898,6 +4055,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.sentryTriage}
+              isAvailableMatch={availableAutomationMatches.has('sentryTriage')}
               isOpen={openAutomationIds.has('sentryTriage')}
               onOpenChange={(open) => setAutomationOpen('sentryTriage', open)}
               iconEnabled={iconEnabled.sentryTriage}
@@ -3914,7 +4072,9 @@ export function AutomationsSettings() {
                     variant="ghost"
                     size="icon"
                     onClick={() =>
-                      triggerMutation.mutate({ automationKey: 'sentry_triage' })
+                      triggerMutation.mutate({
+                        automationKey: 'sentry_triage',
+                      })
                     }
                     disabled={isRunDisabled(
                       'sentryTriage',
@@ -4074,6 +4234,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.suggester}
+              isAvailableMatch={availableAutomationMatches.has('suggester')}
               isOpen={openAutomationIds.has('suggester')}
               onOpenChange={(open) => setAutomationOpen('suggester', open)}
               iconEnabled={iconEnabled.suggester}
@@ -4197,6 +4358,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.announcer}
+              isAvailableMatch={availableAutomationMatches.has('announcer')}
               isOpen={openAutomationIds.has('announcer')}
               onOpenChange={(open) => setAutomationOpen('announcer', open)}
               iconEnabled={iconEnabled.announcer}
@@ -4310,6 +4472,9 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.platformIssueAlerts}
+              isAvailableMatch={availableAutomationMatches.has(
+                'platformIssueAlerts',
+              )}
               isOpen={openAutomationIds.has('platformIssueAlerts')}
               onOpenChange={(open) =>
                 setAutomationOpen('platformIssueAlerts', open)

@@ -21,6 +21,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Skeleton,
 } from '@/components/system';
 
 const FALLBACK_TIME_ZONES = [
@@ -82,6 +83,10 @@ export function DeploymentTimeZoneSetting() {
   );
 
   const effectiveTimeZone = settings.data?.effectiveTimeZone ?? 'UTC';
+
+  if (settings.isPending) {
+    return <Skeleton className="h-5 w-64" />;
+  }
 
   if (!isEditing) {
     return (
