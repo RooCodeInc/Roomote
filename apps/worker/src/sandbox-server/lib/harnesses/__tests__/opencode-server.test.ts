@@ -421,6 +421,134 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it.each(['session.status', 'session.idle'] as const)(
+    'keeps the turn active when %s arrives while a command is running',
+    async (idleEventType) => {
+      const { client, harness } = createHarness();
+      const taskEvents: TaskEvent[] = [];
+
+      harness.subscribe((event) => taskEvents.push(event));
+
+      try {
+        await connectHarness(harness, client);
+
+        expect(
+          harness.sendCommand({
+            commandName: TaskCommandName.StartNewTask,
+            data: { text: 'Run a command.', visibleInTranscript: true },
+          }),
+        ).toBe(true);
+
+        await vi.waitFor(() => {
+          expect(client.promptAsync).toHaveBeenCalledTimes(1);
+        });
+
+        const runningToolPart = {
+          id: 'tool_part_1',
+          sessionID: 'ses_1',
+          messageID: 'msg_1',
+          type: 'tool' as const,
+          callID: 'call_1',
+          tool: 'bash',
+          state: {
+            status: 'running',
+            input: { command: 'sleep 60' },
+            title: 'Run shell command',
+          },
+        };
+
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: runningToolPart },
+        });
+        await client.emit(
+          idleEventType === 'session.status'
+            ? {
+                type: 'session.status',
+                properties: {
+                  sessionID: 'ses_1',
+                  status: { type: 'idle' },
+                },
+              }
+            : {
+                type: 'session.idle',
+                properties: { sessionID: 'ses_1' },
+              },
+        );
+
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(false);
+
+        await client.emit({
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              ...runningToolPart,
+              state: {
+                ...runningToolPart.state,
+                status: 'completed',
+                output: '',
+              },
+            },
+          },
+        });
+        client.messages.mockResolvedValue([createFinalAssistantMessage()]);
+
+        await client.emit({
+          type: 'session.idle',
+          properties: { sessionID: 'ses_1' },
+        });
+
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskCompleted,
+          ),
+        ).toBe(true);
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it('keeps the turn active when idle work verification fails', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Use a tool.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      client.messages.mockRejectedValueOnce(new Error('connection reset'));
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('records inference usage for completed child-session (subagent) assistant messages', async () => {
     const { client, harness } = createHarness();
     const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];
