@@ -1,0 +1,111 @@
+---
+title: Triage customer issues
+description: Give support escalations a repeatable path through production evidence, data, and code.
+contributor: John Stearns
+contributor_company: Roo Vet
+contributor_company_url: https://roo.vet
+---
+
+## Overview
+
+Customer-facing teams post escalations into an operations channel, often from a
+ticketing system. A custom skill teaches Roomote your triage procedure: check
+logs, inspect data, read code, and classify the problem as a product bug, a
+data-state issue, or expected behavior. Roomote answers in the thread with
+evidence, and a PR when the resolution is a code fix. Engineers only see what
+survives triage.
+
+- **Trigger**: Channel event
+- **Setup time**: About 45 minutes
+- **Requires**: Admin access, Slack or Discord, observability or data integration
+- **Serves**: Support, Engineers
+- **Cooked By**: John Stearns from [Roo Vet](https://roo.vet)
+
+## Ingredients
+
+- A channel receiving support escalations, such as `#support-inbound`, with Roomote invited
+- [Auto-respond channels](/automations#channel-automations), or a ticketing workflow that mentions Roomote
+- A [custom skill](/skills#when-to-use-a-custom-skill), enabled for the product environment
+- Observability and data integrations such as [Sentry](/integrations/sentry), [Grafana](/integrations/grafana), [Better Stack](/integrations/better-stack), [Supabase](/integrations/supabase), [Neon](/integrations/neon), or [Snowflake](/integrations/snowflake), or a custom MCP server for your stack
+- An environment for the product repositories, with read-only production credentials where integrations do not cover the required system
+
+## Steps
+
+1. Connect the integrations your triage needs under **Settings > Integrations**.
+2. Under **Settings > Skills**, add the custom skill below and enable it for the environment your product runs in.
+3. Add the escalation channel under **Settings > Automations > Auto-respond to channels** and paste the launch criteria.
+4. Repost a resolved historical ticket and compare Roomote's triage with what actually happened.
+5. Tighten the skill with what you learn. The skill is the control you will keep tuning.
+
+## Custom skill
+
+Create a custom skill with these field values. The Roomote UI stores the slug,
+description, and content separately.
+
+**Slug**
+
+```text
+support-investigation
+```
+
+**Description**
+
+```text
+Use when a customer issue or support escalation needs triage: classify it as a
+product bug, a data-state problem, or expected behavior, then resolve it or
+prepare the escalation.
+```
+
+**Content**
+
+```markdown
+When a support escalation arrives:
+
+1. Restate the problem: which customer, which feature, what they expected,
+   and what actually happened.
+2. Check errors first: search Sentry for exceptions matching the feature and
+   time window. Note anything correlated.
+3. Check the data: query the production database with read-only access to
+   inspect the customer's relevant records. Never write to production.
+4. Read the code path involved, then classify:
+   - Product bug: implement the fix and open a PR; link it in the thread.
+   - Data-state problem: identify the exact records and describe the
+     corrective action for an operator. Do not modify data yourself.
+   - Expected behavior or user error: draft a reply the support agent can
+     send, citing the relevant docs.
+5. Reply in the thread with the classification, evidence (queries run, error
+   links, and code references), and the PR, proposed data fix, or reply draft.
+
+Escalate to an engineer only when the fix needs a product decision or a
+production data change.
+```
+
+## Launch criteria
+
+```text
+Launch for messages describing a specific customer-reported problem or support
+escalation, usually posted by the ticketing bot or a support teammate.
+
+Do not launch for general questions, internal discussion, status updates on
+tickets already being worked, or messages that only link a ticket without
+describing the problem.
+
+If an earlier message about the same ticket already launched, launch again
+only if the customer reports the problem recurring after it was thought
+resolved.
+```
+
+## Variations
+
+- Ask Roomote to propose, but not run, a data-repair script as a reviewed PR against an operations repository.
+- Create separate skills by product area, each with a sharper description so the right one activates.
+- On Teams, have the ticketing workflow mention Roomote and name `support-investigation`; auto-respond is not available there today.
+
+This recipe is most valuable with real log and read-only database access. Grant
+scoped, read-only credentials through integrations or environment variables.
+The skill says never to write to production; admins should also enforce the
+boundary with database roles and MCP tool policies. A prompt is not a security
+boundary.
+
+**Pairs well with:** [vendor outage triage](/cookbook/vendor-outage-triage) ·
+[CI failure auto-fix](/cookbook/ci-failure-auto-fix)

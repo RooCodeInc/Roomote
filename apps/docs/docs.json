@@ -49,6 +49,10 @@
         "pages": ["how-roomote-works", "use-cases", "tasks", "file-attachments"]
       },
       {
+        "group": "Cookbook",
+        "pages": ["cookbook/index", "cookbook/template"]
+      },
+      {
         "group": "Provider Configuration",
         "pages": [
           {

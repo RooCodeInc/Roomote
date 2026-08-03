@@ -1,0 +1,83 @@
+---
+title: Schedule maintenance
+description: Turn flaky-test scans, feature-flag audits, and dependency reviews into recurring Roomote work.
+contributor: Bruno Bergher
+contributor_url: https://github.com/brunobergher
+contributor_company: Roomote
+contributor_company_url: https://roomote.dev
+---
+
+## Overview
+
+Every team has maintenance work that only happens when someone feels guilty:
+flaky tests, stale feature flags, and aging dependencies. A custom automation
+turns each chore into a standing appointment: a prompt, a cadence, and a channel
+where results land in a replyable thread. Once you have built one, you will
+start spotting more work that fits the pattern.
+
+- **Trigger**: Schedule
+- **Setup time**: About 15 minutes
+- **Requires**: Admin access
+- **Serves**: Engineers, Leads
+- **Cooked By**: [Bruno Bergher](https://github.com/brunobergher) from [Roomote](https://roomote.dev)
+
+
+## Ingredients
+
+- One [custom automation](/automations#custom-automations) per chore, within the deployment cap of 25
+- One environment per automation
+- A report destination such as `#eng-maintenance`
+
+## Steps
+
+1. Under **Settings > Automations > Custom automations**, create an automation.
+2. Pick a prompt below, choose a cadence, and select the environment. Natural-language schedules such as `weekdays at 9am` are supported under **Custom schedule**.
+3. Set a report destination so results become a conversation rather than a log line.
+4. Use **Run now** to check the first report, then let the schedule take over.
+5. Reply in the thread to steer a run, for example `Open the PR for item 2`, without changing the automation.
+
+## Prompt: flaky tests
+
+Run weekly:
+
+```text
+Find flaky tests. Look at recent CI runs for tests that failed and then passed
+with no related code change. For each suspect, read the test and identify the
+likely cause: timing, shared state, network, or ordering. Report the top 3 with
+evidence. If one has an obvious, safe fix, open a PR for that one only.
+```
+
+## Prompt: stale feature flags
+
+Run weekly or monthly:
+
+```text
+Audit feature flags. List every flag defined in the codebase. Flag the ones
+that are fully rolled out and effectively always on, referenced nowhere, or
+whose code paths are dead. Report which can be removed and what removing them
+simplifies. Open a cleanup PR for at most one clearly dead flag per run.
+```
+
+## Prompt: dependency review
+
+Run weekly:
+
+```text
+Review our dependencies for updates worth taking: security patches first,
+then major versions of core frameworks. For each candidate, summarize what
+changed upstream and the migration risk for our codebase specifically. Do not
+open PRs. End with a ranked shortlist of updates worth scheduling this sprint.
+```
+
+## Variations
+
+- Create a Monday briefing that summarizes open PRs, stale branches, and work waiting on review.
+- Compare `apps/docs` with customer-visible changes shipped in the last week and report documentation drift.
+- Use a model override for heavyweight audits and the deployment default for cheaper checks.
+
+Custom automations also support five-field cron expressions, **Run now**, and
+replyable result threads. Without a report destination, runs are silent and
+their results appear only in the task view.
+
+**Pairs well with:** [CI failure auto-fix](/cookbook/ci-failure-auto-fix) ·
+[product-updates newsletter](/cookbook/product-updates-newsletter)

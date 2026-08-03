@@ -20,10 +20,10 @@ and assets all live in this directory and do not depend on `@roomote/web`.
 
 ## Local development
 
-Install the Mintlify CLI (`mint`) globally, then run the dev server:
+The docs scripts download a pinned Mintlify CLI automatically, so no global
+install is required. Run the dev server with:
 
 ```bash
-npm install -g mint
 pnpm --filter @roomote/docs dev
 ```
 

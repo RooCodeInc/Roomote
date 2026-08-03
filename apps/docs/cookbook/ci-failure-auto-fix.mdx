@@ -1,0 +1,49 @@
+---
+title: Fix CI failures
+description: Keep the build green by having Roomote verify and fix CI breakages automatically.
+contributor: Matt Rubens
+contributor_url: https://github.com/mrubens
+contributor_company: Roomote
+contributor_company_url: https://roomote.dev
+---
+
+## Overview
+
+When CI fails on your default branch, Roomote reacts immediately. It checks
+that the failure is real, reproduces the failing job inside the repository's
+environment, finds the root cause, opens a PR with the fix, and posts one
+summary to the Manager Channel. The team finds a green PR waiting instead of a
+red branch. This is a built-in automation, so the recipe is one toggle plus
+clear instructions.
+
+- **Trigger**: Webhook
+- **Setup time**: About 10 minutes
+- **Requires**: Admin access, source control, Manager Channel
+- **Serves**: Engineers
+- **Cooked By**: [Matt Rubens](https://github.com/mrubens) from [Roomote](https://roomote.dev)
+
+## Ingredients
+
+- [CI Failure Triage](/automations#manager-automations)
+- A Manager Channel destination configured under **Automation output**
+- An environment for every repository you want triaged. Repositories outside an environment are skipped.
+
+## Steps
+
+1. Set the Manager Channel under **Settings > Automations > Automation output**.
+2. Enable **CI Failure Triage**.
+3. Confirm each repository you care about belongs to a configured environment.
+5. Use **Run now** to test the configuration, or wait for the next default-branch failure.
+
+## Variations
+
+- Keep experimental repositories out of environments to exclude them from triage.
+- Route the summary to a dedicated `#ci-triage` channel instead of the shared Manager Channel.
+
+CI Failure Triage reacts only to failures on the default branch. It supports
+GitHub Actions, GitLab Pipelines, Azure DevOps builds, Bitbucket Pipelines, and
+Gitea Actions. GitLab requires Pipeline Hooks on the webhook, and Bitbucket
+requires the Pipelines OAuth scope.
+
+**Pairs well with:** [scheduled housekeeping](/cookbook/scheduled-housekeeping) ·
+[vendor outage triage](/cookbook/vendor-outage-triage)
