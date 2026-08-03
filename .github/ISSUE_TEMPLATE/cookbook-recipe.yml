@@ -44,9 +44,30 @@ body:
     validations:
       required: true
   - type: input
-    id: attribution
+    id: contributor
     attributes:
-      label: Attribution
-      description: If this recipe comes from another team, name them here. Otherwise leave this blank.
+      label: Contributor
+      description: Name the person or team contributing this recipe.
+    validations:
+      required: true
+  - type: input
+    id: contributor_url
+    attributes:
+      label: Contributor URL
+      description: Link to the contributor's public profile or website, if available.
+    validations:
+      required: false
+  - type: input
+    id: contributor_company
+    attributes:
+      label: Contributor company
+      description: Name of the contributor's company, if applicable.
+    validations:
+      required: false
+  - type: input
+    id: contributor_company_url
+    attributes:
+      label: Contributor company URL
+      description: Link to the contributor's company website, if available.
     validations:
       required: false
