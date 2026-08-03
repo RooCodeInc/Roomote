@@ -4,14 +4,14 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.31.0 (2026-08-03)
 
-This release expands Amazon Bedrock and deployment controls, refreshes Automations and self-hosted licensing, and makes task startup and provider connections more reliable.
+This release expands Amazon Bedrock and deployment controls, refreshes Automations and self-hosted licensing, and adds copyable Cookbook recipes for common workflows.
 
 ### Highlights
 
 - Use native Amazon Bedrock Runtime models alongside Mantle, including regional inference profiles and supported reasoning settings.
 - Find and manage custom and built-in automations through a redesigned, filterable Automations experience.
 - Disable curated integrations through a deployment policy without deleting saved credentials or affecting other provider types.
-- Purchase or renew self-hosted licenses directly from settings with timely seat and expiry guidance.
+- Copy ready-to-use Cookbook recipes for outage triage, support investigations, CI fixes, product updates, and scheduled maintenance.
 
 ### Minor changes
 
@@ -20,6 +20,7 @@ This release expands Amazon Bedrock and deployment controls, refreshes Automatio
 - Let operators use native Amazon Bedrock Runtime models alongside Mantle, including regional inference profiles and supported reasoning settings, without changing existing Mantle configurations.
 - Add direct Roomote Cloud purchase and renewal paths to self-hosted License settings, including low-seat and upcoming-expiry guidance for administrators.
 - Show useful, dismissible product tips alongside task startup progress so users can discover Roomote capabilities while an environment boots.
+- Add a copyable Roomote Cookbook with ready-to-use recipes for vendor outage triage, support investigations, CI failure fixes, product update newsletters, and scheduled maintenance.
 
 ### Patch changes
 
