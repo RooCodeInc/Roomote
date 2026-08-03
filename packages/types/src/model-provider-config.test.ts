@@ -251,6 +251,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'kimi-for-coding',
         'minimax',
         'opencode',
+        'opencode-go',
         'amazon-bedrock',
         'google',
         'xai',
@@ -351,6 +352,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
       { providerId: 'kimi-for-coding', modelId: 'kimi-for-coding/k3' },
       { providerId: 'opencode', modelId: 'opencode/kimi-k3' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/kimi-k3' },
     ]);
   });
 
@@ -368,7 +370,23 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(providersByModel).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.8-max' },
       { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.8-max' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/qwen3.8-max' },
     ]);
+  });
+
+  it('uses the requested OpenCode Go role defaults', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('opencode-go'),
+      ),
+    ).toMatchObject({
+      roomoteModel: 'opencode-go/glm-5.2',
+      roomoteSmallModel: 'opencode-go/gpt-5.6-luna',
+      roomoteVisionModel: 'opencode-go/gpt-5.6-luna',
+      roomoteCodeReviewModel: 'opencode-go/minimax-m3',
+      roomoteExploreModel: 'opencode-go/deepseek-v4-flash',
+      roomotePlanningModel: 'opencode-go/qwen3.8-max',
+    });
   });
 
   it.each([
@@ -407,6 +425,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           modelId: `azure-cognitive-services/${modelId}`,
         },
         { providerId: 'opencode', modelId: `opencode/${modelId}` },
+        ...(modelId === 'gpt-5.6-luna'
+          ? [
+              {
+                providerId: 'opencode-go',
+                modelId: 'opencode-go/gpt-5.6-luna',
+              },
+            ]
+          : []),
         {
           providerId: 'amazon-bedrock',
           modelId: `bedrock-mantle/openai.${modelId}`,
@@ -466,6 +492,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         providerId: 'opencode',
         modelId: 'opencode/deepseek-v4-flash',
+      },
+      {
+        providerId: 'opencode-go',
+        modelId: 'opencode-go/deepseek-v4-flash',
       },
     ]);
   });

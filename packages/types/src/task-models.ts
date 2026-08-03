@@ -29,6 +29,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'kimi-for-coding',
   'minimax',
   'opencode',
+  'opencode-go',
   'amazon-bedrock',
   'google',
   'xai',

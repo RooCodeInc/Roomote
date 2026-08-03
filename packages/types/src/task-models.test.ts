@@ -73,6 +73,9 @@ describe('normalizeTaskModelId', () => {
     expect(normalizeTaskModelId('opencode/big-pickle')).toBe(
       'opencode/big-pickle',
     );
+    expect(normalizeTaskModelId('opencode-go/kimi-k2.7-code')).toBe(
+      'opencode-go/kimi-k2.7-code',
+    );
     expect(
       normalizeTaskModelId('bedrock-mantle/anthropic.claude-sonnet-5'),
     ).toBe('bedrock-mantle/anthropic.claude-sonnet-5');

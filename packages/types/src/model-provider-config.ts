@@ -43,6 +43,9 @@ export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
  */
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
 
+/** Roomote-specific key name for OpenCode Go, kept separate from Zen. */
+export const OPENCODE_GO_API_KEY_ENV_VAR_NAME = 'OPENCODE_GO_API_KEY' as const;
+
 export const SETUP_MODEL_PROVIDER_IDS = [
   'openrouter',
   ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
@@ -564,7 +567,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
   },
   {
     id: 'opencode',
-    label: 'OpenCode Zen / Go',
+    label: 'OpenCode Zen',
     envVarName: 'OPENCODE_API_KEY',
     defaultRoomoteModel: 'opencode/big-pickle',
     authKind: 'api-key',
@@ -598,6 +601,39 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       planning: 'opencode/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
+  },
+  {
+    id: 'opencode-go',
+    label: 'OpenCode Go',
+    envVarName: OPENCODE_GO_API_KEY_ENV_VAR_NAME,
+    credentialHelp: {
+      text: 'Subscribe to OpenCode Go and copy the API key from your OpenCode account.',
+      href: 'https://opencode.ai/auth',
+      linkLabel: 'Open OpenCode account',
+    },
+    defaultRoomoteModel: 'opencode-go/glm-5.2',
+    authKind: 'api-key',
+    // Go serves a broader catalog; only models in Roomote's central curated
+    // recommendation list are suggested here.
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
+      'deepseek-v4-pro': 'opencode-go/deepseek-v4-pro',
+      'glm-5-2': 'opencode-go/glm-5.2',
+      'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
+      'grok-4-5': 'opencode-go/grok-4.5',
+      'kimi-k2-7-code': 'opencode-go/kimi-k2.7-code',
+      'kimi-k3': 'opencode-go/kimi-k3',
+      'mimo-v2-5': 'opencode-go/mimo-v2.5',
+      'minimax-m3': 'opencode-go/minimax-m3',
+      'qwen3-8-max': 'opencode-go/qwen3.8-max',
+    }),
+    recommendedRoleModels: {
+      helper: 'opencode-go/gpt-5.6-luna',
+      vision: 'opencode-go/gpt-5.6-luna',
+      codeReview: 'opencode-go/minimax-m3',
+      explore: 'opencode-go/deepseek-v4-flash',
+      planning: 'opencode-go/qwen3.8-max',
+    },
   },
   {
     // Bedrock's current console issues API keys for the Mantle endpoint. The
