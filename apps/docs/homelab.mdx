@@ -108,7 +108,7 @@ preview.roomote.example.com    A/AAAA  <home public address>
 Forward TCP ports 80 and 443 from the router to the VM, then run:
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash -s -- \
+curl -fsSL https://get.roomote.dev | sudo bash -s -- \
   --domain roomote.example.com
 ```
 
@@ -124,7 +124,7 @@ Install Roomote with Caddy's internal TLS mode because Cloudflare terminates the
 public certificate:
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash -s -- \
+curl -fsSL https://get.roomote.dev | sudo bash -s -- \
   --domain roomote.example.com \
   --tls-mode internal
 ```
