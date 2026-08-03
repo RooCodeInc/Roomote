@@ -432,6 +432,33 @@ describe('inference gateway', () => {
     expect(url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions');
   });
 
+  it('preserves persisted Z.AI region precedence with a runtime API key', async () => {
+    vi.stubEnv('ZAI_API_KEY', 'runtime-provider-key');
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('ZAI_REGION')
+          ? 'china'
+          : 'runtime-provider-key';
+      },
+    );
+
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/zai/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions');
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith(
+      ['ZAI_REGION'],
+      {},
+    );
+  });
+
   it('proxies Z.AI Coding Plan to its international coding endpoint', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(

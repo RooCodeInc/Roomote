@@ -54,13 +54,20 @@ export async function resolveGatewayUpstream(
     return resolveXaiUpstream(provider, upstreamPath, search);
   }
 
-  const hasRuntimeApiKey = provider.envVarNames.some((envVarName) =>
-    process.env[envVarName]?.trim(),
-  );
+  const requiresSourceCoupledRegion =
+    provider.region?.envVarName === 'AWS_REGION' &&
+    provider.envVarNames.includes('AWS_BEARER_TOKEN_BEDROCK');
+  const hasRuntimeApiKey =
+    requiresSourceCoupledRegion &&
+    provider.envVarNames.some((envVarName) => process.env[envVarName]?.trim());
   const [apiKey, upstreamBaseUrl] = await Promise.all([
     resolveModelProviderEnvValue(provider.envVarNames),
     resolveProviderUpstreamBaseUrl(provider, {
-      regionSource: hasRuntimeApiKey ? 'runtime' : 'persisted',
+      regionSource: requiresSourceCoupledRegion
+        ? hasRuntimeApiKey
+          ? 'runtime'
+          : 'persisted'
+        : undefined,
     }),
   ]);
 
