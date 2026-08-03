@@ -3,6 +3,18 @@ import { sdk } from '@roomote/sdk/client';
 import { captureWorkerMessage } from '../../monitoring/sentry';
 
 const HEARTBEAT_SENTRY_THRESHOLD = 3;
+
+/**
+ * Server message (run-token guard) returned when the persisted run is in a
+ * terminal status. The control plane finalizes standby/swept runs while
+ * their workers may still be alive — a suspended-then-woken worker resumes
+ * with a dead token and must terminate itself instead of idling forever as
+ * a zombie (holding the sandbox-server port and killing its successor's
+ * boot). This is authoritative server-side truth, not a transient failure.
+ */
+const RUN_TERMINAL_HEARTBEAT_MESSAGE =
+  'Cannot access resources from a different run';
+
 export const WORKER_HEARTBEAT_RPC_TIMEOUT_MS =
   WORKER_HEARTBEAT_INTERVAL_MS - 5_000;
 
@@ -58,6 +70,21 @@ async function sendHeartbeat({
     hasReportedFailureStreakRef.current = false;
   } catch (error) {
     const heartbeatError = getHeartbeatError(controller, runId, error);
+
+    if (
+      heartbeatError instanceof Error &&
+      heartbeatError.message.includes(RUN_TERMINAL_HEARTBEAT_MESSAGE)
+    ) {
+      logger.warn(
+        `[workerHeartbeat] Task run ${runId} is finalized server-side; terminating this worker.`,
+      );
+      // The run this worker belongs to no longer exists as an active run —
+      // every control-plane call will fail the same way, so graceful
+      // teardown has nothing useful left to do. Exit promptly so the
+      // sandbox is free for its next wake.
+      process.exit(0);
+    }
+
     consecutiveFailureCountRef.current += 1;
     logger.warn(
       `[workerHeartbeat] Failed to update heartbeat for task run ${runId}: ${

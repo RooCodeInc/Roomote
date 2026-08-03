@@ -196,6 +196,36 @@ describe('createWorkerHeartbeatInterval', () => {
     }
   });
 
+  it('terminates the worker when the server reports the run as finalized', async () => {
+    const warn = vi.fn();
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    mockTouchWorkerHeartbeat.mockRejectedValue(
+      new Error('Cannot access resources from a different run'),
+    );
+
+    const interval = createWorkerHeartbeatInterval({
+      runId: 200,
+      logger: { warn } as never,
+    });
+
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(warn).toHaveBeenCalledWith(
+        '[workerHeartbeat] Task run 200 is finalized server-side; terminating this worker.',
+      );
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      // No failure-streak bookkeeping or Sentry noise for an authoritative
+      // terminal signal.
+      expect(captureWorkerMessageMock).not.toHaveBeenCalled();
+    } finally {
+      clearInterval(interval);
+      exitSpy.mockRestore();
+    }
+  });
+
   it('does not start a new heartbeat while the previous request is still pending', async () => {
     const deferred = createDeferred<void>();
     mockTouchWorkerHeartbeat

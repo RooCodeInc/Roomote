@@ -483,6 +483,7 @@ for (const script of [
   'deploy/ci/deployment-smoke.sh',
   'deploy/ci/upgrade-compatibility.sh',
   'deploy/host/tests/backup-restore.integration.sh',
+  'deploy/host/tests/upgrade-failed-pull.sh',
 ]) {
   execFileSync('bash', ['-n', join(root, script)], { stdio: 'pipe' });
 }

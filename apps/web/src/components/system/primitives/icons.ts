@@ -169,7 +169,6 @@ export {
   Shapes,
   Slack,
   Slash,
-  SlidersHorizontal,
   Smile,
   Sparkles,
   Square,
