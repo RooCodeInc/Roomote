@@ -31,9 +31,45 @@ body:
         title: Outcome-first recipe title
         description: One sentence explaining the finished system and why it matters.
         icon: lucide-icon-name
+        contributor: Name or team
+        contributor_url: https://example.com/contributor
+        contributor_company: Company
+        contributor_company_url: https://example.com/company
         ---
 
-        Describe the recipe here...
+        ## Overview
+
+        Explain the recurring problem and the outcome this recipe creates.
+
+        - **Trigger**: Trigger type
+        - **Setup time**: About N minutes
+        - **Requires**: Product access, integrations, permissions
+        - **Serves**: Teams or roles
+        - **Contributor**: Name or team from Company
+
+        ## Ingredients
+
+        - Ingredient
+
+        ## Steps
+
+        1. First step.
+
+        ## Paste-ready configuration
+
+        ```text
+        Configuration or prompt
+        ```
+
+        ## When it fires
+
+        > **Source:** Trigger message
+        >
+        > **Roomote:** Evidence-backed result
+
+        ## Variations
+
+        - Variation
     validations:
       required: true
   - type: textarea

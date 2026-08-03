@@ -11,25 +11,33 @@ contributor_company_url: https://example.com/company
 Use this skeleton when proposing a Cookbook recipe. Replace every placeholder
 and remove the comments before opening a
 [Cookbook recipe issue](https://github.com/RooCodeInc/Roomote/issues/new?template=cookbook-recipe.yml).
-Do not open a pull request unless a maintainer invites you to. If the recipe
-comes from another team, add a short attribution after the metadata line, such as
-`Recipe from the team at Example.`
+Do not open a pull request unless a maintainer invites you to. Fill in the
+contributor fields in the frontmatter and repeat the contributor in the
+Overview metadata. If the recipe comes from another team, use those fields for
+the attribution.
 
 ````markdown
 ---
 title: Outcome-first recipe title
 description: One sentence explaining the finished system and why it matters.
 icon: lucide-icon-name
+contributor: Name or team
+contributor_url: https://example.com/contributor
+contributor_company: Company
+contributor_company_url: https://example.com/company
 ---
 
-`Trigger` · `Setup: about N minutes` · `Requires: ...` · `Serves: ...`
-
-**Contributor:** Name or team
-**Contributor URL:** https://example.com/contributor
-**Contributor company:** Company
-**Contributor company URL:** https://example.com/company
+## Overview
 
 <!-- Explain the recurring problem and the outcome this recipe creates. -->
+
+Overview paragraph.
+
+- **Trigger**: Trigger type
+- **Setup time**: About N minutes
+- **Requires**: Product access, integrations, permissions
+- **Serves**: Teams or roles
+- **Contributor**: [Name or team](https://example.com/contributor) from [Company](https://example.com/company)
 
 ## Ingredients
 
