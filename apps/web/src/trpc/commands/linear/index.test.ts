@@ -7,7 +7,7 @@ const {
   resolveDeploymentEnvVarMock,
   upsertDeploymentEnvironmentVariablesMock,
 } = vi.hoisted(() => ({
-  envState: {} as Record<string, string | undefined>,
+  envState: {} as Record<string, string | boolean | undefined>,
   deletedConnectionsState: [] as Array<{ id: string }>,
   persistedEnvVarNamesState: [] as string[],
   deleteDeploymentEnvironmentVariablesMock: vi.fn(),
@@ -16,7 +16,11 @@ const {
   upsertDeploymentEnvironmentVariablesMock: vi.fn(),
 }));
 
-vi.mock('@/lib/server/env', () => ({ Env: envState }));
+vi.mock('@/lib/server/env', () => ({
+  Env: envState,
+  areCuratedIntegrationsEnabled: (value: string | boolean | undefined) =>
+    value !== false && value !== 'false' && value !== '0',
+}));
 vi.mock('@/lib/server/get-public-app-url', () => ({
   getPublicAppUrl: () => 'https://roomote.example',
 }));
