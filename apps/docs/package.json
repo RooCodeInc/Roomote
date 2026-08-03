@@ -5,11 +5,11 @@
   "scripts": {
     "generate-cookbook-index": "node scripts/generate-cookbook-index.mjs",
     "check-cookbook-index": "node scripts/generate-cookbook-index.mjs --check",
-    "dev": "pnpm run generate-cookbook-index && mint dev",
-    "validate": "pnpm run generate-cookbook-index && mint validate",
-    "check-links": "mint broken-links",
+    "dev": "pnpm run generate-cookbook-index && pnpm dlx --package mint@4.2.650 mint dev",
+    "validate": "pnpm run generate-cookbook-index && pnpm dlx --package mint@4.2.650 mint validate",
+    "check-links": "pnpm dlx --package mint@4.2.650 mint broken-links",
     "check": "pnpm run validate && pnpm run check-links",
-    "build": "pnpm run generate-cookbook-index && mint validate"
+    "build": "pnpm run generate-cookbook-index && pnpm dlx --package mint@4.2.650 mint validate"
   },
   "dependencies": {
     "yaml": "^2.9.0"
