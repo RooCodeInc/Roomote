@@ -260,6 +260,7 @@ function LiveContentInner({
                           environment={session.onboardingEnvironment}
                         />
                       )}
+                      <ProductTips />
                       {bootingTaskRun && (
                         <>
                           <Startup
