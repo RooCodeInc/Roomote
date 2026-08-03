@@ -27,6 +27,13 @@ export async function GET(
   const webEnv = await bootstrapWebRuntimeEnv();
   const webUrl = getPublicAppUrl(webEnv);
   const { token } = await params;
+
+  if (webEnv.R_CURATED_INTEGRATIONS_ENABLED === false) {
+    return NextResponse.redirect(
+      new URL('/error?message=Integrations are disabled', webUrl),
+    );
+  }
+
   const replay = await getMcpOauthReplay(token);
 
   if (!replay) {

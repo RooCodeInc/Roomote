@@ -34,7 +34,8 @@ import { getValidAccessToken } from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 import type { StaticOauthReadiness } from '@/lib/server/mcp-static-oauth';
 import { getDeploymentStaticOauthReadiness } from '@/lib/server/deployment-static-oauth';
-import { Env } from '@/lib/server/env';
+import { Env, areCuratedIntegrationsEnabled } from '@/lib/server/env';
+import { assertCuratedIntegrationsEnabled } from '@/lib/server/curated-integrations';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import type {
   SaveAsanaConnectionInput,
@@ -521,6 +522,12 @@ export async function getDeploymentMcpEnablementsCommand(
   });
 }
 
+export function getCuratedIntegrationsAvailabilityCommand() {
+  return {
+    enabled: areCuratedIntegrationsEnabled(Env.R_CURATED_INTEGRATIONS_ENABLED),
+  };
+}
+
 /**
  * Return public-safe OAuth setup status for integrations that require a
  * deployment-configured client. Credential names and values never leave the
@@ -552,6 +559,10 @@ export async function setDeploymentMcpEnabledCommand(
   input: { mcpId: string; enabled: boolean },
 ) {
   assertAdmin(auth);
+
+  if (input.enabled) {
+    assertCuratedIntegrationsEnabled();
+  }
 
   if (!ALL_DEPLOYMENT_CONTROLLED_APP_IDS.has(input.mcpId)) {
     throw new Error(`Unknown deployment-controlled app: ${input.mcpId}`);
@@ -617,35 +628,6 @@ export async function setDeploymentMcpEnabledCommand(
   }
 
   return result!;
-}
-
-/**
- * Admin: disable every curated integration and remove its connections.
- */
-export async function disableAllIntegrationsCommand(auth: UserAuthSuccess) {
-  assertAdmin(auth);
-
-  const mcpIds = getMcpIntegrationIds();
-  if (mcpIds.length === 0) {
-    return { success: true };
-  }
-
-  await db.transaction(async (tx) => {
-    await tx
-      .update(deploymentMcpEnablements)
-      .set({
-        enabled: false,
-        enabledByUserId: auth.userId,
-        updatedAt: new Date(),
-      })
-      .where(inArray(deploymentMcpEnablements.mcpId, mcpIds));
-
-    await tx
-      .delete(mcpConnections)
-      .where(inArray(mcpConnections.mcpId, mcpIds));
-  });
-
-  return { success: true };
 }
 
 /**
@@ -817,6 +799,7 @@ export async function saveSnowflakeConnectionCommand(
   input: SaveSnowflakeConnectionCommandInput,
 ) {
   assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
 
   const existingConnection = await db.query.mcpConnections.findFirst({
     where: and(
@@ -966,6 +949,7 @@ export async function saveAsanaConnectionCommand(
   input: SaveAsanaConnectionInput,
 ) {
   assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
 
   const existingConnection = await db.query.mcpConnections.findFirst({
     where: and(
@@ -1049,6 +1033,7 @@ export async function saveVercelConnectionCommand(
   input: SaveVercelConnectionInput,
 ) {
   assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
 
   const existingConnection = await db.query.mcpConnections.findFirst({
     where: and(
@@ -1136,6 +1121,7 @@ export async function saveGrafanaConnectionCommand(
   input: SaveGrafanaConnectionInput,
 ) {
   assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
 
   const existingConnection = await db.query.mcpConnections.findFirst({
     where: and(
@@ -1221,6 +1207,7 @@ export async function listDeploymentMcpIntegrationToolsCommand(
   input: { mcpId: string },
 ) {
   assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
   const integration = getMcpIntegration(input.mcpId);
   if (!integration) {
     throw new Error(`Unknown MCP integration: ${input.mcpId}`);
@@ -1247,6 +1234,7 @@ export async function setDeploymentDisabledMcpIntegrationToolsCommand(
   input: { mcpId: string; disabledTools: string[] },
 ) {
   assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
   const integration = getMcpIntegration(input.mcpId);
   if (!integration) {
     throw new Error(`Unknown MCP integration: ${input.mcpId}`);
@@ -1288,6 +1276,7 @@ export async function connectMcpCommand(
   auth: UserAuthSuccess,
   input: { mcpId: string; redirectTo?: string; role?: McpConnectionRole },
 ) {
+  assertCuratedIntegrationsEnabled();
   const integration = getMcpIntegration(input.mcpId);
   if (!integration) {
     throw new Error(`Unknown MCP integration: ${input.mcpId}`);

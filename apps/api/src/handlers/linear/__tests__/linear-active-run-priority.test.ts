@@ -16,6 +16,13 @@ const { createLinearAgentRunMock } = vi.hoisted(() => ({
     .mockResolvedValue({ status: 'ok', runId: 77, taskId: 'task-77' }),
 }));
 
+const envState = vi.hoisted(() => ({
+  R_LINEAR_WEBHOOK_SECRET: 'test-linear-secret',
+  R_APP_URL: 'https://app.roomote.example',
+  PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.example',
+  R_CURATED_INTEGRATIONS_ENABLED: true,
+}));
+
 const {
   findLinearDeploymentMcpConnectionByIdentityMock,
   findLinearUserMcpConnectionByIdentityMock,
@@ -40,11 +47,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
 
   return {
     ...actual,
-    Env: {
-      R_LINEAR_WEBHOOK_SECRET: 'test-linear-secret',
-      R_APP_URL: 'https://app.roomote.example',
-      PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.example',
-    },
+    Env: envState,
   };
 });
 
@@ -276,6 +279,24 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
     app = new Hono();
     app.route('/linear', linear);
     vi.clearAllMocks();
+    envState.R_CURATED_INTEGRATIONS_ENABLED = true;
+  });
+
+  it('acknowledges without processing when curated integrations are disabled', async () => {
+    envState.R_CURATED_INTEGRATIONS_ENABLED = false;
+    const { rawBody, headers } = createSignedRequest(makePayload());
+
+    const response = await app.request('/linear', {
+      method: 'POST',
+      headers,
+      body: rawBody,
+    });
+
+    expect(response.status).toBe(204);
+    expect(createLinearAgentRunMock).not.toHaveBeenCalled();
+    expect(
+      findLinearDeploymentMcpConnectionByIdentityMock,
+    ).not.toHaveBeenCalled();
   });
 
   it('delivers free-text reply to active task run even when routing confirmation key exists in Redis', async () => {

@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 
 const state = vi.hoisted(() => ({
+  integrationsEnabled: true,
   deploymentEnablements: [] as Array<{ mcpId: string; enabled: boolean }>,
   oauthReadiness: [{ mcpId: 'linear', status: 'ready' as const }] as Array<{
     mcpId: string;
@@ -86,7 +87,6 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     connectLinear: vi.fn(),
     disconnectLinear: vi.fn(),
     setDeploymentEnabled: vi.fn(),
-    disableAllIntegrations: vi.fn(),
     connectMcp: vi.fn(),
     disconnectMcp: vi.fn(),
     setDisabledTools: vi.fn(),
@@ -193,6 +193,9 @@ vi.mock('@/hooks/linear', () => ({
 }));
 
 vi.mock('@/hooks/mcp-connections', () => ({
+  useCuratedIntegrationsAvailability: () => ({
+    data: { enabled: state.integrationsEnabled },
+  }),
   useDeploymentMcpEnablements: () => ({
     data: state.deploymentEnablements,
   }),
@@ -216,10 +219,6 @@ vi.mock('@/hooks/mcp-connections', () => ({
     isPending: false,
     mutate: mutations.setDeploymentEnabled,
     variables: undefined,
-  }),
-  useDisableAllIntegrations: () => ({
-    isPending: false,
-    mutate: mutations.disableAllIntegrations,
   }),
   useConnectMcp: () => ({
     isPending: false,
@@ -434,6 +433,7 @@ describe('Integrations settings', () => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
     state.deploymentEnablements = [];
+    state.integrationsEnabled = true;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
     state.userConnections = [];
     state.mcpTools = null;
@@ -829,9 +829,6 @@ describe('Integrations settings', () => {
       screen.getByRole('button', { name: 'Disable Linear' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Disable all' }),
-    ).toBeInTheDocument();
-    expect(
       screen.getByRole('button', { name: 'Connect and enable Better Stack' }),
     ).toBeInTheDocument();
     expect(
@@ -863,31 +860,20 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
-  it('confirms before disabling every integration', () => {
-    mutations.disableAllIntegrations.mockImplementation((_variables, options) =>
-      options?.onSuccess?.(),
-    );
+  it('shows operator policy instead of integration controls when disabled', () => {
+    state.integrationsEnabled = false;
+
     render(<Integrations />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Disable all' }));
-
     expect(
-      screen.getByRole('heading', { name: 'Disable all integrations?' }),
+      screen.getByText('Integrations disabled by deployment operator'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/removes all personal and deployment connections/i),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'Disable all' })[0]!);
-
-    expect(mutations.disableAllIntegrations).toHaveBeenCalledWith(
-      undefined,
-      expect.objectContaining({
-        onSuccess: expect.any(Function),
-        onError: expect.any(Function),
-      }),
-    );
-    expect(toast.success).toHaveBeenCalledWith('All integrations disabled.');
+      screen.queryByRole('heading', { name: 'Connected' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disable Linear' }),
+    ).not.toBeInTheDocument();
   });
 
   it('connects and enables an org-scoped MCP from the integrations page', () => {

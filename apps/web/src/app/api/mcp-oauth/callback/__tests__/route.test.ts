@@ -171,6 +171,22 @@ describe('GET /api/mcp-oauth/callback', () => {
     expect(discoverOAuthEndpointsMock).not.toHaveBeenCalled();
   });
 
+  it('rejects a pending callback when integrations become disabled', async () => {
+    bootstrapWebRuntimeEnvMock.mockResolvedValue({
+      R_APP_URL: 'http://localhost:13000',
+      R_PUBLIC_URL: 'https://customer.example',
+      R_CURATED_INTEGRATIONS_ENABLED: false,
+    });
+
+    const response = await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=callback_failed',
+    );
+    expect(consumeOAuthStateMock).not.toHaveBeenCalled();
+    expect(exchangeCodeForTokensMock).not.toHaveBeenCalled();
+  });
+
   it('falls back to R_APP_URL for token exchange redirect_uri when R_PUBLIC_URL is unset', async () => {
     bootstrapWebRuntimeEnvMock.mockResolvedValue({
       R_APP_URL: 'http://localhost:13000',

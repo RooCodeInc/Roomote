@@ -1,4 +1,5 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
+import { Env, areCuratedIntegrationsEnabled } from '@roomote/env';
 import { isNativeMcpIntegration, MCP_INTEGRATIONS } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -18,6 +19,21 @@ import { snowflakeMcp } from './snowflake';
 import { vercelMcp } from './vercel';
 
 export const mcp = new Hono<{ Variables: Variables }>();
+
+const requireCuratedIntegrations: MiddlewareHandler<{
+  Variables: Variables;
+}> = async (c, next) => {
+  if (!areCuratedIntegrationsEnabled(Env.R_CURATED_INTEGRATIONS_ENABLED)) {
+    return c.notFound();
+  }
+
+  await next();
+};
+
+for (const integration of MCP_INTEGRATIONS) {
+  mcp.use(`/${integration.id}`, requireCuratedIntegrations);
+  mcp.use(`/${integration.id}/*`, requireCuratedIntegrations);
+}
 
 mcp.route('/asana', asanaMcp);
 mcp.route('/grafana', grafanaMcp);

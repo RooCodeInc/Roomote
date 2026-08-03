@@ -1,12 +1,12 @@
 // Queries
 export { useDeploymentMcpEnablements } from './useDeploymentMcpEnablements';
+export { useCuratedIntegrationsAvailability } from './useCuratedIntegrationsAvailability';
 export { useUserMcpConnections } from './useUserMcpConnections';
 export { useMcpConnectionTools } from './useMcpConnectionTools';
 export { useMcpOauthReadiness } from './useMcpOauthReadiness';
 
 // Mutations
 export { useSetDeploymentMcpEnabled } from './useSetDeploymentMcpEnabled';
-export { useDisableAllIntegrations } from './useDisableAllIntegrations';
 export { useConnectMcp } from './useConnectMcp';
 export { useDisconnectMcp } from './useDisconnectMcp';
 export { useAsanaConnection } from './useAsanaConnection';

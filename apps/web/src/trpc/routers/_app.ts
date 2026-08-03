@@ -189,8 +189,8 @@ import {
   takeOverBrowserControlCommand,
 } from '../commands/sandbox-session';
 import {
-  disableAllIntegrationsCommand,
   getDeploymentMcpEnablementsCommand,
+  getCuratedIntegrationsAvailabilityCommand,
   getMcpOauthReadinessCommand,
   setDeploymentMcpEnabledCommand,
   getUserMcpConnectionsCommand,
@@ -1543,6 +1543,10 @@ export const appRouter = createRouter({
   }),
 
   mcpConnections: createRouter({
+    availability: protectedProcedure.query(() =>
+      getCuratedIntegrationsAvailabilityCommand(),
+    ),
+
     deploymentEnablements: protectedProcedure.query(({ ctx: { auth } }) =>
       getDeploymentMcpEnablementsCommand(auth),
     ),
@@ -1556,10 +1560,6 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentMcpEnabledCommand(auth, input),
       ),
-
-    disableAll: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      disableAllIntegrationsCommand(auth),
-    ),
 
     userConnections: protectedProcedure.query(({ ctx: { auth } }) =>
       getUserMcpConnectionsCommand(auth),

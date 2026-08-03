@@ -21,7 +21,7 @@ import {
 import {
   useAsanaConnection,
   useConnectMcp,
-  useDisableAllIntegrations,
+  useCuratedIntegrationsAvailability,
   useDisconnectMcp,
   useGrafanaConnection,
   useDeploymentMcpEnablements,
@@ -44,6 +44,9 @@ import {
 } from '@/types';
 
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
   BasicTooltip,
   Button,
   Card,
@@ -590,22 +593,17 @@ function IntegrationSection({
   title,
   items,
   emptyState,
-  action,
 }: {
   id: string;
   title: string;
   items: IntegrationItem[];
   emptyState?: ReactNode;
-  action?: ReactNode;
 }) {
   return (
     <section aria-labelledby={id} className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h2 id={id} className="text-sm font-semibold text-foreground">
-          {title}
-        </h2>
-        {action}
-      </div>
+      <h2 id={id} className="text-sm font-semibold text-foreground">
+        {title}
+      </h2>
 
       {items.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2">
@@ -1148,13 +1146,13 @@ export function Integrations() {
     integrationName: string;
   } | null>(null);
   const [isLinearOauthSetupOpen, setIsLinearOauthSetupOpen] = useState(false);
-  const [isDisableAllDialogOpen, setIsDisableAllDialogOpen] = useState(false);
 
   const linearInstallation = useLinearInstallation();
   const connectLinear = useConnectLinear(`${pathname}?service=linear`);
   const disconnectLinear = useDisconnectLinear();
 
   const deploymentEnablements = useDeploymentMcpEnablements();
+  const integrationsAvailability = useCuratedIntegrationsAvailability();
   const oauthReadiness = useMcpOauthReadiness();
   const linearOauthStatus = oauthReadiness.data?.find(
     (entry) => entry.mcpId === 'linear',
@@ -1165,7 +1163,6 @@ export function Integrations() {
     isAdmin && (linearOauthUnavailable || isLinearOauthSetupOpen),
   );
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
-  const disableAllIntegrations = useDisableAllIntegrations();
   const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
   const disconnectMcp = useDisconnectMcp();
@@ -1996,6 +1993,18 @@ export function Integrations() {
     });
   };
 
+  if (integrationsAvailability.data?.enabled === false) {
+    return (
+      <Alert>
+        <AlertTitle>Integrations disabled by deployment operator</AlertTitle>
+        <AlertDescription>
+          Curated integrations cannot be connected or used on this Roomote
+          instance.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <McpToolManagementDialog
@@ -2121,68 +2130,10 @@ export function Integrations() {
           deepLinkDialogItem.onAction?.();
         }}
       />
-      <Dialog
-        open={isDisableAllDialogOpen}
-        onOpenChange={setIsDisableAllDialogOpen}
-      >
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>Disable all integrations?</DialogTitle>
-            <DialogDescription>
-              This disconnects every integration for this Roomote instance and
-              removes all personal and deployment connections. This cannot be
-              undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsDisableAllDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={disableAllIntegrations.isPending}
-              onClick={() =>
-                disableAllIntegrations.mutate(undefined, {
-                  onSuccess: () => {
-                    setIsDisableAllDialogOpen(false);
-                    toast.success('All integrations disabled.');
-                  },
-                  onError: (error) =>
-                    toast.error(
-                      error instanceof Error
-                        ? error.message
-                        : 'Failed to disable all integrations.',
-                    ),
-                })
-              }
-            >
-              {disableAllIntegrations.isPending ? <Spinner size="sm" /> : null}
-              Disable all
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <IntegrationSection
         id="installed-integrations"
         title="Connected"
         items={installed}
-        action={
-          isAdmin && installed.length > 0 ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setIsDisableAllDialogOpen(true)}
-            >
-              Disable all
-            </Button>
-          ) : null
-        }
         emptyState={
           <p className="text-sm text-muted-foreground">
             You haven&apos;t connected any integrations yet.
