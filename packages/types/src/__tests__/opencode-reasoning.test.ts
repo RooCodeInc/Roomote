@@ -128,6 +128,24 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     });
   });
 
+  it('maps native Bedrock Claude models like the Anthropic provider', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'amazon-bedrock/eu.anthropic.claude-sonnet-5',
+        'high',
+      ),
+    ).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      effort: 'high',
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'amazon-bedrock/amazon.nova-pro-v1:0',
+        'medium',
+      ),
+    ).toEqual({ reasoningEffort: 'medium' });
+  });
+
   it('maps Copilot Claude budget reasoning to thinking_budget', () => {
     expect(
       buildOpenCodeModelReasoningOptions(

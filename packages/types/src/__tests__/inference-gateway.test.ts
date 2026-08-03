@@ -54,6 +54,26 @@ describe('inference gateway URL builders', () => {
     );
   });
 
+  it('registers native Amazon Bedrock with its regional runtime endpoint', () => {
+    const provider = getInferenceGatewayProvider('amazon-bedrock');
+
+    expect(provider).toMatchObject({
+      envVarNames: ['AWS_BEARER_TOKEN_BEDROCK'],
+      upstreamBaseUrl: 'https://bedrock-runtime.{region}.amazonaws.com',
+      region: { envVarName: 'AWS_REGION', default: 'us-east-1' },
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: ['/model'],
+      allowNestedPaths: true,
+      openCodeBaseUrlSuffix: '',
+    });
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/amazon-bedrock');
+  });
+
   it.each([
     [
       'azure',

@@ -322,6 +322,11 @@ function buildProviderSetupData(
         buildProvider('openrouter', 'OpenRouter', 'OPENROUTER_API_KEY'),
         buildProvider('openai', 'OpenAI', 'OPENAI_API_KEY'),
         buildProvider('anthropic', 'Anthropic', 'ANTHROPIC_API_KEY'),
+        buildProvider(
+          'amazon-bedrock',
+          'Amazon Bedrock',
+          'AWS_BEARER_TOKEN_BEDROCK',
+        ),
         {
           id: 'chatgpt' as SetupModelProviderId,
           label: 'ChatGPT (subscription)',
@@ -1294,6 +1299,37 @@ describe('ModelSettingsSection', () => {
 
       expect(lookupMutateAsyncMock).toHaveBeenCalledWith({
         modelId: 'openai/gpt-5.4-mini',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a fully prefixed Mantle model id in the Amazon Bedrock picker', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['amazon-bedrock'],
+    });
+    lookupMutateAsyncMock.mockResolvedValue({
+      modelId: 'bedrock-mantle/anthropic.claude-opus-4-8',
+      displayName: 'Claude Opus 4.8',
+      family: 'Claude',
+      metadata: null,
+    });
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      fireEvent.change(screen.getByLabelText('New model slug'), {
+        target: { value: 'bedrock-mantle/anthropic.claude-opus-4-8' },
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+
+      expect(lookupMutateAsyncMock).toHaveBeenCalledWith({
+        modelId: 'bedrock-mantle/anthropic.claude-opus-4-8',
       });
     } finally {
       vi.useRealTimers();

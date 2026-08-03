@@ -179,6 +179,13 @@ export function buildOpenCodeModelReasoningOptions(
     return null;
   }
 
+  if (
+    selection.providerID === 'amazon-bedrock' &&
+    selection.modelID.toLowerCase().includes('anthropic.')
+  ) {
+    return buildAnthropicReasoningOptions(selection.modelID, reasoningEffort);
+  }
+
   switch (selection.providerID) {
     case 'openrouter': {
       // OpenRouter only accepts `xhigh` on OpenAI reasoning models; clamp it

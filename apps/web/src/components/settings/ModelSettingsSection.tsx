@@ -471,6 +471,10 @@ function composeNewModelId(
     return '';
   }
 
+  if (modelSlug.startsWith('bedrock-mantle/')) {
+    return modelSlug;
+  }
+
   if (modelSlug.startsWith(`${provider}/`)) {
     modelSlug = modelSlug.slice(provider.length + 1);
   }

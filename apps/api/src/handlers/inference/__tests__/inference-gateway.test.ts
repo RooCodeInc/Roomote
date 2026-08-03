@@ -662,6 +662,33 @@ describe('inference gateway', () => {
     );
   });
 
+  it('proxies native Bedrock Converse requests with bearer authentication', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('AWS_REGION')
+          ? 'eu-west-1'
+          : 'provider-secret-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/amazon-bedrock/model/eu.anthropic.claude-sonnet-5/converse',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://bedrock-runtime.eu-west-1.amazonaws.com/model/eu.anthropic.claude-sonnet-5/converse',
+    );
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+  });
+
   it('proxies Bedrock Mantle OpenAI Responses requests', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(

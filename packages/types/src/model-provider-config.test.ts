@@ -457,9 +457,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(bedrockProvider).toMatchObject({
       label: 'Amazon Bedrock',
       envVarName: 'AWS_BEARER_TOKEN_BEDROCK',
-      envVarLabel: 'Mantle API key',
+      envVarLabel: 'API key',
       credentialHelp: {
-        text: 'Paste a key generated from the Bedrock Mantle API-key console. Switch the AWS console to the same region you enter below before generating it.',
+        text: 'Paste a key generated from the Bedrock API-key console. The same regional key serves native Bedrock and Mantle models.',
         href: 'https://us-east-1.console.aws.amazon.com/bedrock-mantle/api-keys',
         linkLabel: 'Open AWS Bedrock API keys',
       },
