@@ -10,25 +10,47 @@ import {
   type SetupSourceControlStatus,
 } from '@roomote/types';
 
-const { mutateMock, mutationOptionsRef, invalidateQueriesMock } = vi.hoisted(
-  () => ({
-    mutateMock: vi.fn(),
-    mutationOptionsRef: {
-      current: null as {
-        onSuccess?: () => Promise<void> | void;
-        onError?: (error: Error) => void;
-      } | null,
-    },
-    invalidateQueriesMock: vi.fn(async () => undefined),
-  }),
-);
+const {
+  saveMutateMock,
+  clearMutateMock,
+  saveMutationOptionsRef,
+  clearMutationOptionsRef,
+  invalidateQueriesMock,
+} = vi.hoisted(() => ({
+  saveMutateMock: vi.fn(),
+  clearMutateMock: vi.fn(),
+  saveMutationOptionsRef: {
+    current: null as {
+      onSuccess?: () => Promise<void> | void;
+      onError?: (error: Error) => void;
+    } | null,
+  },
+  clearMutationOptionsRef: {
+    current: null as {
+      onSuccess?: () => Promise<void> | void;
+      onError?: (error: Error) => void;
+    } | null,
+  },
+  invalidateQueriesMock: vi.fn(async () => undefined),
+}));
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: undefined }),
-  useMutation: (options: typeof mutationOptionsRef.current) => {
-    mutationOptionsRef.current = options;
+  useMutation: (
+    options:
+      | (NonNullable<typeof saveMutationOptionsRef.current> & {
+          mutationKey?: string[];
+        })
+      | null,
+  ) => {
+    const isClear = options?.mutationKey?.[0] === 'clearConfig';
+    if (isClear) {
+      clearMutationOptionsRef.current = options;
+    } else {
+      saveMutationOptionsRef.current = options;
+    }
     return {
-      mutate: mutateMock,
+      mutate: isClear ? clearMutateMock : saveMutateMock,
       isPending: false,
     };
   },
@@ -64,13 +86,27 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     sourceControl: {
       saveConfig: {
-        mutationOptions: (options: unknown) => options,
+        mutationOptions: (options: object) => ({
+          ...options,
+          mutationKey: ['saveConfig'],
+        }),
+      },
+      clearGitHubConfig: {
+        mutationOptions: (options: object) => ({
+          ...options,
+          mutationKey: ['clearConfig'],
+        }),
       },
       configStatus: {
         queryKey: () => ['sourceControl.configStatus'],
       },
       repositories: {
         queryKey: () => ['sourceControl.repositories'],
+      },
+    },
+    github: {
+      installations: {
+        queryKey: () => ['github.installations'],
       },
     },
     linkedAccounts: {
@@ -118,9 +154,11 @@ function buildConfigStatus(
 
 describe('SourceControlConfigForm', () => {
   beforeEach(() => {
-    mutateMock.mockReset();
+    saveMutateMock.mockReset();
+    clearMutateMock.mockReset();
     invalidateQueriesMock.mockClear();
-    mutationOptionsRef.current = null;
+    saveMutationOptionsRef.current = null;
+    clearMutationOptionsRef.current = null;
     adoLinkedAccountRef.current = { data: undefined, isPending: false };
   });
 
@@ -237,13 +275,56 @@ describe('SourceControlConfigForm', () => {
     expect(screen.getByDisplayValue('saved-slug')).toBeInTheDocument();
 
     await act(async () => {
-      await mutationOptionsRef.current?.onSuccess?.();
+      await saveMutationOptionsRef.current?.onSuccess?.();
     });
 
     await waitFor(() => {
       expect(screen.queryByDisplayValue('new-secret-value')).toBeNull();
       expect(screen.getByDisplayValue(MASKED_VALUE)).toBeInTheDocument();
       expect(screen.getByDisplayValue('saved-slug')).toBeInTheDocument();
+    });
+  });
+
+  it('removes saved GitHub configuration after confirmation', async () => {
+    render(
+      <SourceControlConfigForm
+        provider="github"
+        configStatus={buildConfigStatus([
+          {
+            envVarName: 'R_GITHUB_APP_SLUG',
+            acceptedEnvVarNames: ['R_GITHUB_APP_SLUG'],
+            label: 'GitHub App Slug',
+            runtimeSatisfied: false,
+            savedSatisfied: true,
+            savedValue: 'deleted-app',
+            satisfiedByEnvVarName: 'R_GITHUB_APP_SLUG',
+          },
+        ])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    expect(
+      screen.getByRole('heading', {
+        name: 'Remove GitHub configuration?',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/repositories will be disconnected/),
+    ).toBeInTheDocument();
+
+    const removeButtons = screen.getAllByRole('button', { name: 'Remove' });
+    fireEvent.click(removeButtons.at(-1)!);
+
+    expect(clearMutateMock).toHaveBeenCalledWith();
+
+    await act(async () => {
+      await clearMutationOptionsRef.current?.onSuccess?.();
+    });
+
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+      queryKey: ['github.installations'],
     });
   });
 

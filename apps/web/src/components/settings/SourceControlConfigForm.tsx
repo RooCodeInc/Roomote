@@ -9,7 +9,19 @@ import {
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
-import { Button, Check, Input, Spinner } from '@/components/system';
+import {
+  Button,
+  Check,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Spinner,
+  Trash2,
+} from '@/components/system';
 import {
   useAdoLinkedAccount,
   useAuthenticateAdoAccount,
@@ -102,6 +114,7 @@ export function SourceControlConfigForm({
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
     'pat',
   );
@@ -142,6 +155,28 @@ export function SourceControlConfigForm({
           saveSuccessMessage ?? 'Source-control configuration saved.',
         );
         onSaved?.();
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+  const clearConfig = useMutation(
+    trpc.sourceControl.clearGitHubConfig.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.sourceControl.configStatus.queryKey(),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: trpc.sourceControl.repositories.queryKey(),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: trpc.github.installations.queryKey(),
+        });
+        setValues({});
+        setEditingSavedValues({});
+        setRemoveDialogOpen(false);
+        toast.success('GitHub configuration removed.');
       },
       onError: (error) => {
         toast.error(error.message);
@@ -251,6 +286,9 @@ export function SourceControlConfigForm({
     }
     return nextValue.length > 0;
   });
+  const hasSavedValues =
+    provider === 'github' &&
+    providerStatus.fields.some((field) => field.savedSatisfied);
 
   return (
     <div className="space-y-4">
@@ -420,6 +458,19 @@ export function SourceControlConfigForm({
         })}
       </div>
       <div className="flex items-center gap-2">
+        {hasSavedValues ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setRemoveDialogOpen(true)}
+            disabled={clearConfig.isPending}
+          >
+            <Trash2 />
+            {clearConfig.isPending ? 'Removing...' : 'Remove'}
+            {clearConfig.isPending ? <Spinner /> : null}
+          </Button>
+        ) : null}
         <Button
           type="button"
           size="sm"
@@ -450,12 +501,45 @@ export function SourceControlConfigForm({
               },
             })
           }
-          disabled={isActionDisabled}
+          disabled={isActionDisabled || clearConfig.isPending}
         >
           {saveConfig.isPending ? <Spinner /> : null}
           {hasNewValues ? 'Save configuration' : 'Save'}
         </Button>
       </div>
+      <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>Remove GitHub configuration?</DialogTitle>
+            <DialogDescription>
+              Saved GitHub credentials will be removed from the database.
+              Process environment variables are not affected. Existing GitHub
+              repositories will be disconnected so you can create or configure
+              another GitHub App.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRemoveDialogOpen(false)}
+              disabled={clearConfig.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => clearConfig.mutate()}
+              disabled={clearConfig.isPending}
+            >
+              <Trash2 />
+              {clearConfig.isPending ? 'Removing...' : 'Remove'}
+              {clearConfig.isPending ? <Spinner /> : null}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
