@@ -903,10 +903,16 @@ export class AzureClient implements ComputeProviderClient {
   }
 
   /**
-   * Add the requested ports (anonymous, OnDemand activation so inbound
-   * traffic wakes a suspended sandbox — measured 2026-07-28) and return
+   * Add the requested ports (anonymous, Manual activation) and return
    * deterministic per-port URLs. Re-adding an existing port is a 409, which
    * is treated as success.
+   *
+   * Activation is deliberately NOT OnDemand: OnDemand resumes a suspended
+   * sandbox on ANY inbound traffic (measured 2026-07-28), but Roomote
+   * finalizes standby runs at suspend time — an out-of-band wake resumes a
+   * worker whose run token is dead, the worker exits, and the sandbox idles
+   * Running, invisible to sleep-check (which excludes retained runs). Wake
+   * must stay deliberate (wake prompt / message send → resumeFromStandby).
    */
   private async ensurePorts(
     sandboxId: string,
@@ -920,7 +926,7 @@ export class AzureClient implements ComputeProviderClient {
           body: {
             port,
             auth: { anonymous: true },
-            activationMode: 'OnDemand',
+            activationMode: 'Manual',
           },
           signal,
           abortMessage: `Exposing port ${port} on Azure sandbox ${sandboxId} was aborted`,

@@ -31,6 +31,7 @@ import {
   syncTaskStateFromRuns,
 } from '@roomote/db/server';
 import {
+  AzureDataPlaneError,
   createComputeProviderClient,
   type ComputeProviderClient,
 } from '@roomote/compute-providers';
@@ -445,6 +446,16 @@ export const sleepCheckJob = async () => {
         failed += result.failed;
       }
     } catch (error) {
+      if (isInstanceNotFoundError(error)) {
+        // The instance is gone for good — every future evaluation would fail
+        // the same way (observed as an endless hard_limit retry loop on azure
+        // runs whose sandboxes were deleted out-of-band). Finalize the run
+        // instead of retrying forever.
+        failed += 1;
+        await finalizeRunForMissingInstance(preferredJob, fallbackPath);
+        continue;
+      }
+
       await db
         .update(taskRuns)
         .set({
@@ -882,6 +893,62 @@ async function resolveSweptJobFinalStatus(
   });
 
   return job?.cancelRequestedAt ? RunStatus.Canceled : RunStatus.Failed;
+}
+
+/**
+ * Whether the error definitively means the provider instance no longer
+ * exists (as opposed to a transient API failure). Only definitive not-found
+ * errors may finalize runs; anything else must keep retrying. Azure throws
+ * AzureDataPlaneError 404 for deleted sandboxes; other providers' not-found
+ * shapes can extend this classifier as needed.
+ */
+function isInstanceNotFoundError(error: unknown): boolean {
+  return error instanceof AzureDataPlaneError && error.status === 404;
+}
+
+/**
+ * Finalize a candidate whose provider instance is gone. Mirrors the
+ * not-running branch of the timed/heartbeat handlers: idle runs complete
+ * without a snapshot; anything else fails (or cancels after a stop request).
+ */
+async function finalizeRunForMissingInstance(
+  job: SleepCheckJob,
+  path: SleepCheckPath,
+): Promise<void> {
+  const details = {
+    path,
+    decision: 'instance_not_found',
+    ...buildSleepCheckDetails(job),
+  };
+
+  if (job.status === RunStatus.Idle) {
+    await recordSleepCheckEvent(
+      job,
+      'decision',
+      `${describeSleepCheckPath(path)} found that idle instance ${job.machineId} no longer exists; completing task run #${job.id} without a snapshot.`,
+      details,
+    );
+    await completeIdleJobWithoutSnapshot(
+      job,
+      `Instance ${job.machineId} no longer exists.`,
+      details,
+    );
+    return;
+  }
+
+  const finalStatus = await resolveSweptJobFinalStatus(job.id);
+
+  await recordSleepCheckEvent(
+    job,
+    finalStatus === RunStatus.Canceled ? 'decision' : 'failed',
+    `${describeSleepCheckPath(path)} found that instance ${job.machineId} no longer exists; finalizing task run #${job.id} as ${finalStatus}.`,
+    details,
+  );
+  await finishRun({
+    id: job.id,
+    status: finalStatus,
+    error: `${describeSleepCheckPath(path)} found that instance ${job.machineId} no longer exists`,
+  });
 }
 
 async function handleTimedSleepCandidate(params: {

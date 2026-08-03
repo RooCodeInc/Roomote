@@ -165,7 +165,9 @@ describe('azure adapter contract', () => {
     expect(portAdd?.body).toMatchObject({
       port: 3000,
       auth: { anonymous: true },
-      activationMode: 'OnDemand',
+      // Manual activation: wake stays deliberate; OnDemand wakes orphaned
+      // standby sandboxes on any inbound traffic.
+      activationMode: 'Manual',
     });
   });
 
