@@ -35,10 +35,12 @@ const REACTION_EMOJI_BY_NAME: Record<string, string> = {
 };
 
 export function normalizeReactionEmoji(value: string): string {
-  const normalized = value
-    .trim()
-    .replace(/^:+|:+$/gu, '')
-    .toLowerCase();
+  const trimmed = value.trim();
+  let start = 0;
+  let end = trimmed.length;
+  while (start < end && trimmed.charCodeAt(start) === 58) start += 1;
+  while (end > start && trimmed.charCodeAt(end - 1) === 58) end -= 1;
+  const normalized = trimmed.slice(start, end).toLowerCase();
   return REACTION_EMOJI_BY_NAME[normalized] ?? normalized;
 }
 

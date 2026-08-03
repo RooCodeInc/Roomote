@@ -218,7 +218,7 @@ export async function startNewDiscordTask(input: {
           },
         ];
     const historyAttachments = includeReplyContext
-      ? toDiscordAttachmentsFromHistory(history, {
+      ? toDiscordAttachmentsFromHistory(contextHistory, {
           excludeMessageId: input.queuedMessage.ts,
         })
       : [];

@@ -2035,6 +2035,80 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
+  it('preserves a pending reaction target after account linking', async () => {
+    const eventId =
+      'channel-1:message-target:discord-user-1:white_check_mark:42';
+    const originalEvent = {
+      eventId,
+      eventType: 'MESSAGE_CREATE' as const,
+      receivedAt: '2026-07-12T15:00:00.000Z',
+      reactionTarget: {
+        channelId: 'channel-1',
+        messageId: 'message-target',
+      },
+      payload: {
+        id: eventId,
+        channel_id: 'channel-1',
+        guild_id: 'guild-1',
+        content: '<@bot-1> Act on this',
+        author: { id: 'discord-user-1', username: 'matt' },
+        mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        attachments: [],
+        message_reference: {
+          message_id: 'message-target',
+          channel_id: 'channel-1',
+        },
+      },
+    };
+    mocks.consumeLinkCode.mockResolvedValue('roomote-user-1');
+    mocks.redisGetdel.mockResolvedValue(JSON.stringify(originalEvent));
+    mocks.getChannel.mockImplementation(async (channelId: string) =>
+      channelId === 'dm-1'
+        ? { id: 'dm-1', name: 'Direct message', type: 1 }
+        : {
+            id: 'channel-1',
+            guildId: 'guild-1',
+            name: 'general',
+            type: 0,
+          },
+    );
+    const interaction = {
+      id: 'interaction-link',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'link',
+        type: 1,
+        options: [{ name: 'code', type: 3, value: 'link-abcdefghijklmnop' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          communicationMessageId: 'message-target',
+          communicationAnchorMessageId: 'message-target',
+        }),
+        replyToMessageId: 'message-target',
+        replyToChannelId: 'channel-1',
+        contextThroughMessageId: 'message-target',
+      }),
+    );
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-target',
+      name: '👀',
+    });
+  });
+
   it('requires /link in a DM without consuming the one-shot code', async () => {
     mocks.getChannel.mockResolvedValue({
       id: 'channel-1',

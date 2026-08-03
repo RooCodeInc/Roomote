@@ -230,12 +230,30 @@ async function refreshDiscordUserMappingBestEffort(input: {
   }
 }
 
+type DiscordReactionTarget = { channelId: string; messageId: string };
+
+function getPersistedDiscordReactionTarget(
+  event: DiscordGatewayEvent,
+): DiscordReactionTarget | undefined {
+  const value = event.reactionTarget;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const target = value as Record<string, unknown>;
+  return typeof target.channelId === 'string' &&
+    typeof target.messageId === 'string'
+    ? { channelId: target.channelId, messageId: target.messageId }
+    : undefined;
+}
+
 async function processDiscordGatewayEvent(
   event: DiscordGatewayEvent,
   options: {
-    reactionTarget?: { channelId: string; messageId: string };
+    reactionTarget?: DiscordReactionTarget;
   } = {},
 ) {
+  const reactionTarget =
+    options.reactionTarget ?? getPersistedDiscordReactionTarget(event);
   const reaction = getDiscordReactionAdd(event);
   if (reaction) {
     const resolved = await resolveDiscordProvider();
@@ -259,6 +277,10 @@ async function processDiscordGatewayEvent(
         eventId: event.eventId,
         eventType: 'MESSAGE_CREATE',
         receivedAt: event.receivedAt,
+        reactionTarget: {
+          channelId: reaction.channel_id,
+          messageId: reaction.message_id,
+        },
         payload: {
           id: event.eventId,
           channel_id: reaction.channel_id,
@@ -315,11 +337,11 @@ async function processDiscordGatewayEvent(
   });
   const metadata = discordMetadataForChannel({
     channel,
-    messageId: options.reactionTarget?.messageId ?? event.eventId,
+    messageId: reactionTarget?.messageId ?? event.eventId,
     // Only a real channel message provides an anchor for the task thread;
     // interactions (slash commands, buttons) do not.
-    ...(options.reactionTarget?.messageId
-      ? { anchorMessageId: options.reactionTarget.messageId }
+    ...(reactionTarget?.messageId
+      ? { anchorMessageId: reactionTarget.messageId }
       : message?.id
         ? { anchorMessageId: message.id }
         : {}),
@@ -339,7 +361,7 @@ async function processDiscordGatewayEvent(
   // Auto-respond channels run first, mirroring Slack: a message in a
   // configured channel — mentioned or not, bot- or human-authored — is
   // consumed here and never reaches the mention/task-entry gating below.
-  if (message && !interaction && !options.reactionTarget) {
+  if (message && !interaction && !reactionTarget) {
     const handledAsChannelAutoStart = await maybeHandleDiscordChannelAutoStart({
       event,
       message,
@@ -560,8 +582,8 @@ async function processDiscordGatewayEvent(
       channel,
       discordUserId: sender.id,
       ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-      ...(options.reactionTarget?.messageId
-        ? { replyToMessageId: options.reactionTarget.messageId }
+      ...(reactionTarget?.messageId
+        ? { replyToMessageId: reactionTarget.messageId }
         : message?.id
           ? { replyToMessageId: message.id }
           : {}),
@@ -768,8 +790,8 @@ async function processDiscordGatewayEvent(
           : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
-        ...(options.reactionTarget?.messageId
-          ? { contextThroughMessageId: options.reactionTarget.messageId }
+        ...(reactionTarget?.messageId
+          ? { contextThroughMessageId: reactionTarget.messageId }
           : {}),
         ...(message?.message_reference?.message_id
           ? {
@@ -833,7 +855,7 @@ async function processDiscordGatewayEvent(
     await setLatestInboundMessageId(
       'discord',
       activeRun.id,
-      options.reactionTarget?.messageId ?? queuedMessage.ts,
+      reactionTarget?.messageId ?? queuedMessage.ts,
     );
     // Match Slack: eyes is an intake-only platform ack. Active follow-ups are
     // already durable once queued; agents may still react when turn policy allows.
@@ -872,8 +894,8 @@ async function processDiscordGatewayEvent(
           : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
-        ...(options.reactionTarget?.messageId
-          ? { contextThroughMessageId: options.reactionTarget.messageId }
+        ...(reactionTarget?.messageId
+          ? { contextThroughMessageId: reactionTarget.messageId }
           : {}),
         ...(message?.message_reference?.message_id
           ? {
@@ -961,8 +983,8 @@ async function processDiscordGatewayEvent(
   if (message?.id) {
     try {
       await resolved.provider.addReaction({
-        channelId: options.reactionTarget?.channelId ?? channel.channelId,
-        messageId: options.reactionTarget?.messageId ?? message.id,
+        channelId: reactionTarget?.channelId ?? channel.channelId,
+        messageId: reactionTarget?.messageId ?? message.id,
         name: '👀',
       });
       intakeAckPinned = true;
@@ -995,8 +1017,8 @@ async function processDiscordGatewayEvent(
               : {}),
           }
         : {}),
-      ...(options.reactionTarget?.messageId
-        ? { contextThroughMessageId: options.reactionTarget.messageId }
+      ...(reactionTarget?.messageId
+        ? { contextThroughMessageId: reactionTarget.messageId }
         : {}),
     });
   } catch (error) {

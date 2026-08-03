@@ -8,6 +8,7 @@ import type {
 
 type RawDispatch = {
   t?: string | null;
+  s?: number | null;
   d?: unknown;
 };
 
@@ -281,8 +282,13 @@ export async function handleGatewayDispatch(
   }
 
   const payload = packet.d as RawMessage & RawInteraction & RawReaction;
+  const dispatchSequence =
+    typeof packet.s === 'number' && Number.isSafeInteger(packet.s)
+      ? packet.s
+      : null;
   const reactionEventId =
     eventType === 'MESSAGE_REACTION_ADD' &&
+    dispatchSequence !== null &&
     payload.channel_id &&
     payload.message_id &&
     payload.user_id &&
@@ -292,6 +298,7 @@ export async function handleGatewayDispatch(
           payload.message_id,
           payload.user_id,
           payload.emoji.id ?? payload.emoji.name,
+          dispatchSequence,
         ].join(':')
       : null;
   const eventId = payload.id ?? reactionEventId;

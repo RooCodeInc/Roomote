@@ -11,6 +11,11 @@ describe('reaction emoji matching', () => {
     expect(reactionEmojiMatches(':white_check_mark:', '✅')).toBe(true);
   });
 
+  it('strips long colon runs in linear time', () => {
+    const colons = ':'.repeat(100_000);
+    expect(normalizeReactionEmoji(`${colons}ship_it${colons}`)).toBe('ship_it');
+  });
+
   it('matches provider aliases for the same reaction', () => {
     expect(reactionEmojiMatches('thumbsup', 'like')).toBe(true);
     expect(reactionEmojiMatches(':+1:', '👍')).toBe(true);
