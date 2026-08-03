@@ -115,6 +115,7 @@ describe('inference gateway', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
@@ -753,10 +754,42 @@ describe('inference gateway', () => {
     expect(url).toBe(
       'https://bedrock-runtime.us-west-2.amazonaws.com/model/us.anthropic.claude-sonnet-5/converse',
     );
-    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith(
-      ['AWS_REGION'],
-      {},
+    expect(
+      mockResolveModelProviderEnvValue.mock.calls.some(([names]) =>
+        (typeof names === 'string' ? [names] : names).includes('AWS_REGION'),
+      ),
+    ).toBe(false);
+  });
+
+  it('uses the default Bedrock region when a runtime API key has no runtime region', async () => {
+    vi.stubEnv('AWS_REGION', '');
+    vi.stubEnv('AWS_BEARER_TOKEN_BEDROCK', 'runtime-provider-key');
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('AWS_REGION')
+          ? 'eu-west-1'
+          : 'runtime-provider-key';
+      },
     );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/amazon-bedrock/model/anthropic.claude-sonnet-5/converse',
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(
+      'https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-sonnet-5/converse',
+    );
+    expect(
+      mockResolveModelProviderEnvValue.mock.calls.some(([names]) =>
+        (typeof names === 'string' ? [names] : names).includes('AWS_REGION'),
+      ),
+    ).toBe(false);
   });
 
   it('proxies Bedrock Mantle OpenAI Responses requests', async () => {
