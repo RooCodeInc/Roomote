@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => ({
   attachOutOfBand: vi.fn(),
   releaseOutOfBand: vi.fn(),
   redisSet: vi.fn(),
+  redisEval: vi.fn(),
   redisGet: vi.fn(),
   redisGetdel: vi.fn(),
   redisDel: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('@roomote/redis', async (importOriginal) => {
     ...actual,
     getRedis: () => ({
       set: mocks.redisSet,
+      eval: mocks.redisEval,
       get: mocks.redisGet,
       getdel: mocks.redisGetdel,
       del: mocks.redisDel,
@@ -259,6 +261,7 @@ describe('Discord Gateway event handler', () => {
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
     mocks.redisSet.mockResolvedValue('OK');
+    mocks.redisEval.mockResolvedValue(1);
     mocks.redisGet.mockResolvedValue(null);
     mocks.redisGetdel.mockResolvedValue(null);
     mocks.redisDel.mockResolvedValue(1);
@@ -1820,17 +1823,24 @@ describe('Discord Gateway event handler', () => {
     const unlinkedResponse = await postEvent(originalEvent);
 
     expect(unlinkedResponse.status).toBe(200);
-    const pendingTaskCall = mocks.redisSet.mock.calls.find(
-      ([key]) => key === 'discord:pending_account_link_task:discord-user-1',
+    const pendingTaskCall = mocks.redisEval.mock.calls.find(
+      ([, , key]) => key === 'discord:pending_account_link_task:discord-user-1',
     );
-    expect(pendingTaskCall?.slice(2)).toEqual(['EX', 10 * 60]);
-    expect(JSON.parse(pendingTaskCall?.[1] as string)).toMatchObject(
+    expect(pendingTaskCall?.slice(1, 6)).toEqual([
+      1,
+      'discord:pending_account_link_task:discord-user-1',
+      originalEvent.receivedAt,
+      originalEvent.eventId,
+      expect.any(String),
+    ]);
+    expect(pendingTaskCall?.[6]).toBe(String(10 * 60));
+    expect(JSON.parse(pendingTaskCall?.[5] as string)).toMatchObject(
       originalEvent,
     );
 
     mocks.consumeLinkCode.mockResolvedValue('roomote-user-1');
     mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
-    mocks.redisGetdel.mockResolvedValue(pendingTaskCall?.[1]);
+    mocks.redisGetdel.mockResolvedValue(pendingTaskCall?.[5]);
     const interaction = {
       id: 'interaction-link',
       application_id: 'app-1',
@@ -1896,11 +1906,14 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(500);
-    expect(mocks.redisSet).toHaveBeenCalledWith(
+    expect(mocks.redisEval).toHaveBeenCalledWith(
+      expect.stringContaining('current.receivedAt > ARGV[1]'),
+      1,
       'discord:pending_account_link_task:discord-user-1',
+      originalEvent.receivedAt,
+      originalEvent.eventId,
       JSON.stringify(originalEvent),
-      'EX',
-      10 * 60,
+      String(10 * 60),
     );
     expect(mocks.restoreLinkCode).toHaveBeenCalledWith(
       'link-abcdefghijklmnop',

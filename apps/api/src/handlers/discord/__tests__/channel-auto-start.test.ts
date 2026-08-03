@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     scard: vi.fn(),
     ttl: vi.fn(),
     set: vi.fn(),
+    eval: vi.fn(),
     get: vi.fn(),
     del: vi.fn(),
   },
@@ -158,6 +159,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     mocks.redis.scard.mockResolvedValue(1);
     // Routing lock + nudge dedupe acquire successfully.
     mocks.redis.set.mockResolvedValue('OK');
+    mocks.redis.eval.mockResolvedValue(1);
     mocks.redis.get.mockResolvedValue(null);
     mocks.redis.del.mockResolvedValue(1);
     mocks.getBackgroundAgentSettings.mockResolvedValue(
@@ -304,11 +306,14 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     expect(mocks.postMessage.mock.calls[0]?.[0]?.text).toMatch(
       /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
     );
-    expect(mocks.redis.set).toHaveBeenCalledWith(
+    expect(mocks.redis.eval).toHaveBeenCalledWith(
+      expect.stringContaining('current.receivedAt > ARGV[1]'),
+      1,
       'discord:pending_account_link_task:discord-user-1',
+      '2026-07-17T15:00:00.000Z',
+      'message-1',
       expect.any(String),
-      'EX',
-      10 * 60,
+      String(10 * 60),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.addReaction).not.toHaveBeenCalled();
