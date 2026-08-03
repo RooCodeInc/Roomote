@@ -503,7 +503,10 @@ describe('AutomationsSettings', () => {
     state.nextUpdateSettingsResult = null;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
+    state.settingsQuery.data.capabilities.slackConnected = true;
     state.settingsQuery.data.capabilities.discordConnected = false;
+    state.settingsQuery.data.capabilities.telegramConnected = false;
+    state.settingsQuery.data.capabilities.teamsConnected = false;
     state.discordChannelsQuery.data.channels = [];
     state.settingsQuery.data.settings.managerStatsDiscordChannelId = null;
     state.settingsQuery.data.settings.suggesterDiscordChannelId = null;
@@ -941,6 +944,126 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it('only offers connected providers as custom automation destinations', async () => {
+    state.settingsQuery.data.capabilities.slackConnected = false;
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    state.settingsQuery.data.capabilities.teamsConnected = true;
+    state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+
+    render(<AutomationsSettings />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New' }));
+    const destination = screen.getByRole('combobox', {
+      name: 'Destination provider',
+    });
+    expect(destination).toHaveTextContent('Discord');
+
+    fireEvent.click(destination);
+
+    expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Discord' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Teams' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Slack' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('option', { name: 'Telegram' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('falls back to None when editing a disconnected destination', async () => {
+    state.settingsQuery.data.capabilities.slackConnected = false;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Weekly flaky-test scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'weekly',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Weekly flaky-test scan',
+      }),
+    );
+
+    const destination = screen.getByRole('combobox', {
+      name: 'Destination provider',
+    });
+    expect(destination).toHaveTextContent('None');
+    fireEvent.click(destination);
+    expect(screen.getAllByRole('option')).toHaveLength(1);
+    expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+  });
+
+  it('preserves in-progress edits when capabilities finish loading', async () => {
+    state.settingsQuery.isPending = true;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Weekly flaky-test scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'weekly',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    const { rerender } = render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Weekly flaky-test scan',
+      }),
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Slack');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Edited while loading' },
+    });
+    state.settingsQuery.isPending = false;
+    rerender(<AutomationsSettings />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Name')).toHaveValue('Edited while loading');
+      expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    });
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Slack');
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
