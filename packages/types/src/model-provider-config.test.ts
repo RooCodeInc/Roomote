@@ -334,41 +334,22 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ]);
   });
 
-  it.each([
-    {
-      displayName: 'Qwen3.7 Max',
-      expected: [
-        { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.7-max' },
-        { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.7-max' },
-        {
-          providerId: 'togetherai',
-          modelId: 'togetherai/Qwen/Qwen3.7-Max',
-        },
-      ],
-    },
-    {
-      displayName: 'Qwen3.7 Plus',
-      expected: [
-        { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.7-plus' },
-        { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.7-plus' },
-      ],
-    },
-  ])(
-    'recommends $displayName only from providers that support it',
-    ({ displayName, expected }) => {
-      const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-        (provider) => {
-          const model = provider.suggestedTaskModels.find(
-            (suggestion) => suggestion.displayName === displayName,
-          );
+  it('recommends Qwen3.8 Max only from supported providers', () => {
+    const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'Qwen3.8 Max',
+        );
 
-          return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-        },
-      );
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
 
-      expect(providersByModel).toEqual(expected);
-    },
-  );
+    expect(providersByModel).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.8-max' },
+      { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.8-max' },
+    ]);
+  });
 
   it.each([
     {
