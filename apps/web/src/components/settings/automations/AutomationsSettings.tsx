@@ -2844,6 +2844,9 @@ export function AutomationsSettings() {
             ) : null}
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.callRoomoteViaEmoji}
+              isAvailableMatch={availableAutomationMatches.has(
+                'callRoomoteViaEmoji',
+              )}
               isOpen={openAutomationIds.has('callRoomoteViaEmoji')}
               onOpenChange={(open) =>
                 setAutomationOpen('callRoomoteViaEmoji', open)

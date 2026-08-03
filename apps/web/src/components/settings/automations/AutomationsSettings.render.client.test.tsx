@@ -830,6 +830,9 @@ describe('AutomationsSettings', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Operations' }));
     expect(screen.getByText('Triage Sentry Issues')).toBeInTheDocument();
     expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Call Roomote via emoji'),
+    ).not.toBeInTheDocument();
   });
 
   it('shows independent structural skeletons for custom and built-in automations', () => {
