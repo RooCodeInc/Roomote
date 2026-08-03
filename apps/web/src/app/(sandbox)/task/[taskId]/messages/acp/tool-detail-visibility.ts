@@ -84,9 +84,6 @@ export function hidesExpandedToolResult(
   return (
     isInternalDebugToolCallMessage(msg) ||
     msg.data.kind === 'read' ||
-    msg.data.kind === 'execute' ||
-    msg.data.kind === 'execute_command' ||
-    data.isRead === true ||
-    data.isExecute === true
+    data.isRead === true
   );
 }
