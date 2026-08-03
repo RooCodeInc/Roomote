@@ -24,12 +24,18 @@ type DeviceAuthStartResult = {
   userCode: string;
   verificationUrl: string;
   intervalMs: number;
+  expiresInMs: number;
 };
 
+type DevicePollFailureReason = 'blocked' | 'expired';
+
 type DevicePollResult =
-  | { status: 'pending' }
+  | { status: 'pending'; intervalMs?: number }
   | { status: 'success' }
-  | { status: 'failed'; error: string };
+  | { status: 'failed'; error: string; reason?: DevicePollFailureReason };
+
+const EXPIRED_CODE_ERROR =
+  'ChatGPT authorization code expired. Restart the connection to get a new code.';
 
 type ChatGptConnectDialogProps = {
   open: boolean;
@@ -55,7 +61,19 @@ export function ChatGptConnectDialog({
   );
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [failureReason, setFailureReason] =
+    useState<DevicePollFailureReason | null>(null);
   const pollingRef = useRef(false);
+
+  function stopPolling(
+    message: string,
+    reason: DevicePollFailureReason | null = null,
+  ) {
+    pollingRef.current = false;
+    setPolling(false);
+    setError(message);
+    setFailureReason(reason);
+  }
 
   const startMutation = useMutation(
     trpc.chatgptSubscription.startDeviceAuth.mutationOptions({
@@ -73,44 +91,10 @@ export function ChatGptConnectDialog({
     }),
   );
 
+  // Poll results drive the loop below rather than mutation callbacks, so a
+  // single code path owns both stopping the loop and reporting the outcome.
   const pollMutation = useMutation(
-    trpc.chatgptSubscription.pollDeviceAuth.mutationOptions({
-      onSuccess: async (result: DevicePollResult) => {
-        if (result.status === 'success') {
-          toast.success('ChatGPT subscription connected.');
-          await queryClient.invalidateQueries({
-            queryKey: trpc.taskModels.providerSetup.queryKey(),
-          });
-          await queryClient.invalidateQueries({
-            queryKey: trpc.taskModels.get.queryKey(),
-          });
-          await queryClient.invalidateQueries({
-            queryKey: trpc.taskModels.launchOptions.queryKey(),
-          });
-          await queryClient.invalidateQueries({
-            queryKey: trpc.chatgptSubscription.status.queryKey(),
-          });
-          await queryClient.invalidateQueries({
-            queryKey: trpc.subscriptionUsage.list.queryKey(),
-          });
-          await onConnected?.();
-          handleOpenChange(false);
-        } else if (result.status === 'failed') {
-          setError(result.error);
-          pollingRef.current = false;
-          setPolling(false);
-        }
-      },
-      onError: (mutationError) => {
-        setError(
-          mutationError instanceof Error
-            ? mutationError.message
-            : 'ChatGPT authorization polling failed.',
-        );
-        pollingRef.current = false;
-        setPolling(false);
-      },
-    }),
+    trpc.chatgptSubscription.pollDeviceAuth.mutationOptions(),
   );
 
   useEffect(() => {
@@ -119,6 +103,7 @@ export function ChatGptConnectDialog({
       setPolling(false);
       setDeviceAuth(null);
       setError(null);
+      setFailureReason(null);
       return;
     }
 
@@ -145,24 +130,83 @@ export function ChatGptConnectDialog({
     pollingRef.current = true;
     setPolling(true);
 
+    // The issuer stops accepting the code at this deadline; polling past it
+    // only ever yields `deviceauth_not_found`.
+    const expiresAt = Date.now() + deviceAuth.expiresInMs;
+
     const poll = async () => {
-      while (pollingRef.current && deviceAuth) {
-        await pollMutation.mutateAsync({
+      let intervalMs = deviceAuth.intervalMs;
+
+      while (pollingRef.current) {
+        if (Date.now() >= expiresAt) {
+          stopPolling(EXPIRED_CODE_ERROR, 'expired');
+          return;
+        }
+
+        const result: DevicePollResult = await pollMutation.mutateAsync({
           deviceAuthId: deviceAuth.deviceAuthId,
           userCode: deviceAuth.userCode,
         });
 
         if (!pollingRef.current) {
-          break;
+          return;
+        }
+
+        if (result.status === 'success') {
+          pollingRef.current = false;
+          setPolling(false);
+          toast.success('ChatGPT subscription connected.');
+          await Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: trpc.taskModels.providerSetup.queryKey(),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: trpc.taskModels.get.queryKey(),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: trpc.taskModels.launchOptions.queryKey(),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: trpc.chatgptSubscription.status.queryKey(),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: trpc.subscriptionUsage.list.queryKey(),
+            }),
+          ]);
+          await onConnected?.();
+          handleOpenChange(false);
+          return;
+        }
+
+        if (result.status === 'failed') {
+          stopPolling(result.error, result.reason ?? null);
+          return;
+        }
+
+        // A rate-limited poll returns the interval to back off to.
+        if (result.intervalMs) {
+          intervalMs = result.intervalMs;
+        }
+
+        const remainingMs = expiresAt - Date.now();
+        if (remainingMs <= 0) {
+          stopPolling(EXPIRED_CODE_ERROR, 'expired');
+          return;
         }
 
         await new Promise((resolve) =>
-          setTimeout(resolve, deviceAuth.intervalMs),
+          setTimeout(resolve, Math.min(intervalMs, remainingMs)),
         );
       }
     };
 
-    void poll();
+    void poll().catch((pollError: unknown) => {
+      stopPolling(
+        pollError instanceof Error
+          ? pollError.message
+          : 'ChatGPT authorization polling failed.',
+      );
+    });
 
     return () => {
       pollingRef.current = false;
@@ -179,6 +223,7 @@ export function ChatGptConnectDialog({
   function handleRestart() {
     setDeviceAuth(null);
     setError(null);
+    setFailureReason(null);
     // Clear the prior failed mutation state so the start effect can fire
     // again, then kick off a fresh device-code request.
     startMutation.reset();
@@ -208,12 +253,19 @@ export function ChatGptConnectDialog({
           ) : null}
 
           {error ? (
-            <p className="text-sm text-destructive" role="alert">
-              {error}
-            </p>
+            <div className="space-y-2" role="alert">
+              <p className="text-sm text-destructive">{error}</p>
+              {failureReason === 'blocked' ? (
+                <p className="text-sm text-muted-foreground">
+                  This usually means your ChatGPT workspace policy blocks the
+                  Codex app. Ask an admin of that workspace to allow it, then
+                  restart the connection. Waiting will not clear this.
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
-          {deviceAuth ? (
+          {deviceAuth && !error ? (
             <>
               <div className="space-y-2">
                 <p className="text-sm">

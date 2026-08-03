@@ -5,6 +5,7 @@ import {
   pollChatGptDeviceAuth,
   startChatGptDeviceAuth,
   updateChatGptSubscriptionFastMode,
+  type ChatGptDevicePollFailureReason,
   type ChatGptSubscriptionPublicStatus,
 } from '@roomote/db/server';
 
@@ -39,9 +40,13 @@ export async function startChatGptDeviceAuthCommand(
 }
 
 type PollChatGptDeviceAuthResult =
-  | { status: 'pending' }
+  | { status: 'pending'; intervalMs?: number }
   | { status: 'success' }
-  | { status: 'failed'; error: string };
+  | {
+      status: 'failed';
+      error: string;
+      reason?: ChatGptDevicePollFailureReason;
+    };
 
 export async function pollChatGptDeviceAuthCommand(
   auth: UserAuthSuccess,
@@ -58,10 +63,17 @@ export async function pollChatGptDeviceAuthCommand(
   }
 
   if (result.status === 'failed') {
-    return { status: 'failed', error: result.error };
+    return {
+      status: 'failed',
+      error: result.error,
+      ...(result.reason && { reason: result.reason }),
+    };
   }
 
-  return { status: 'pending' };
+  return {
+    status: 'pending',
+    ...(result.intervalMs && { intervalMs: result.intervalMs }),
+  };
 }
 
 export async function disconnectChatGptSubscriptionCommand(
