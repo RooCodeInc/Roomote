@@ -20,7 +20,7 @@ This release adds OpenCode Go subscriptions, restores convenient automation test
 ### Patch changes
 
 - Let administrators run enabled custom automations on demand from Automations settings, and offer an immediate test run after an automation is created conversationally.
-- Recommend Qwen3.8 Max through supported providers and use OpenCode Zen's supported DeepSeek V4 Flash model identifier. Thanks to @mrubens for contributing the DeepSeek correction.
+- Recommend Qwen3.8 Max through supported providers and use OpenCode Zen's supported DeepSeek V4 Flash model identifier.
 - Retry license usage reports after transient Roomote Cloud failures and report concurrent license-key changes accurately instead of dropping usage observations or reporting a false success.
 
 ## 0.31.0 (2026-08-03)
