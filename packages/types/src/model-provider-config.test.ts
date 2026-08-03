@@ -374,16 +374,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ]);
   });
 
-  it('maps the central DeepSeek V4 Flash recommendation to the Go stable alias', () => {
-    const provider = getSetupModelProvider('opencode-go');
-
-    expect(provider.suggestedTaskModels).toContainEqual({
-      id: 'opencode-go/deepseek-v4-flash',
-      displayName: 'DeepSeek V4 Flash 0731',
-      family: 'DeepSeek',
-    });
-  });
-
   it('uses the requested OpenCode Go role defaults', () => {
     expect(
       buildRecommendedDeploymentModelConfig(
@@ -502,6 +492,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         providerId: 'opencode',
         modelId: 'opencode/deepseek-v4-flash',
+      },
+      {
+        providerId: 'opencode-go',
+        modelId: 'opencode-go/deepseek-v4-flash',
       },
     ]);
   });
