@@ -331,9 +331,7 @@ export async function standbyRetentionJob(
     STANDBY_PROVIDERS.map(async (provider) => ({
       provider,
       removed: await enforceProviderRetention(provider, now),
-      resuspended: (RE_SUSPEND_PROVIDERS as readonly string[]).includes(
-        provider,
-      )
+      resuspended: RE_SUSPEND_PROVIDERS.includes(provider)
         ? await reSuspendOrphanedStandbys(provider)
         : 0,
     })),
