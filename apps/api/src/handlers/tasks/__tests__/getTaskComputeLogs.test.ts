@@ -141,7 +141,7 @@ describe('getTaskComputeLogs', () => {
 
   afterEach(() => {});
 
-  it('returns task task runs with output, skipped reasons, and per-job errors', async () => {
+  it('returns task runs with output, skipped reasons, and per-job errors', async () => {
     mockFindMany.mockResolvedValue([
       {
         id: 101,
