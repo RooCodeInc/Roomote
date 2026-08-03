@@ -19,29 +19,54 @@ const READING_CHARS_PER_SECOND = 10;
 
 export const PRODUCT_TIPS = [
   {
-    title: 'Start from anywhere',
+    title: 'Debug production backward',
     description:
-      'Kick off and continue tasks from connected tools like Slack, Teams, or GitHub. For example, mention Roomote in a bug thread to turn the conversation into a task.',
+      'Ask Roomote to inspect a Sentry issue, deployment logs, or Grafana alert, trace it into the codebase, and prepare the smallest verified fix.',
   },
   {
-    title: 'Share visual context',
+    title: 'Turn failed CI into a fix',
     description:
-      'Attach screenshots or recordings when the details are easier to show than explain. For example, include a checkout error and ask Roomote to reproduce and fix it.',
+      'CI Failure Triage can detect a persistent failure on the default branch, reproduce it in the configured environment, and open a fix PR.',
   },
   {
-    title: 'Plan before building',
+    title: 'Investigate surprising metrics',
     description:
-      'Ask for a repository-grounded plan when a change still has open product or architecture decisions. For example, map a new permissions flow before implementation starts.',
+      'Connect PostHog and ask why a metric moved. Roomote can inspect events, experiments, and feature flags, then trace likely causes into the code.',
   },
   {
-    title: 'Inspect changes live',
+    title: 'Debug with real database state',
     description:
-      'Use the task view to follow progress, open the diff, and preview UI work while the agent runs. For example, review a responsive page before the pull request is ready.',
+      'Use read-only Supabase or Neon access to investigate data-dependent bugs, compare the live schema with application assumptions, and plan a safe fix.',
   },
   {
-    title: 'Continue the conversation',
+    title: 'Build directly from the spec',
     description:
-      'Follow up on a task with corrections or extra context instead of starting over. For example, ask Roomote to tighten a validation rule after reviewing the first pass.',
+      'Point Roomote at a Notion spec or Linear issue and ask it to trace affected code, identify missing decisions, implement the change, and link the PR back.',
+  },
+  {
+    title: 'Turn support into engineering work',
+    description:
+      'Auto-respond in a support or bug channel so new reports become repository-grounded investigations—even when nobody explicitly mentions Roomote.',
+  },
+  {
+    title: 'Triage issues as they arrive',
+    description:
+      'Roomote can investigate each newly opened issue and post a concrete implementation plan with the relevant code paths before anyone picks it up.',
+  },
+  {
+    title: 'Keep old PRs mergeable',
+    description:
+      'Label selected pull requests for automatic conflict resolution. Roomote periodically rebases the work, resolves safe conflicts, and updates the branch.',
+  },
+  {
+    title: 'Audit what just shipped',
+    description:
+      'Run security and code-quality auditors over recently merged PRs to surface high-confidence risks and maintainability problems as follow-up work.',
+  },
+  {
+    title: 'Schedule repository-aware work',
+    description:
+      'Create recurring tasks such as release-readiness checks, dependency audits, or weekly product reports that can inspect your code and connected tools.',
   },
 ] as const;
 
@@ -74,7 +99,6 @@ export function ProductTips() {
   const initialized = useRef(false);
   const [tips, setTips] = useState<ProductTip[]>([]);
   const [tipIndex, setTipIndex] = useState(0);
-  const [secondsUntilNextTip, setSecondsUntilNextTip] = useState(0);
 
   useEffect(() => {
     if (initialized.current) {
@@ -100,22 +124,13 @@ export function ProductTips() {
     }
 
     const durationMs = getTipDisplayDurationMs(tip);
-    const startedAt = Date.now();
-
-    setSecondsUntilNextTip(Math.ceil(durationMs / 1_000));
 
     const timer = window.setTimeout(() => {
       setTipIndex((currentIndex) => (currentIndex + 1) % tips.length);
     }, durationMs);
-    const countdown = window.setInterval(() => {
-      setSecondsUntilNextTip(
-        Math.max(0, Math.ceil((durationMs - (Date.now() - startedAt)) / 1_000)),
-      );
-    }, 1_000);
 
     return () => {
       window.clearTimeout(timer);
-      window.clearInterval(countdown);
     };
   }, [tipIndex, tips]);
 

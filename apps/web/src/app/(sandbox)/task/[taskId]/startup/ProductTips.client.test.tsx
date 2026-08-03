@@ -9,6 +9,8 @@ vi.mock('@/components/ai-elements', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  ArrowRight: () => null,
+  BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   Button: ({
     children,
     onClick,
