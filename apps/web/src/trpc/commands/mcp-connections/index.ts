@@ -620,6 +620,35 @@ export async function setDeploymentMcpEnabledCommand(
 }
 
 /**
+ * Admin: disable every curated integration and remove its connections.
+ */
+export async function disableAllIntegrationsCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const mcpIds = getMcpIntegrationIds();
+  if (mcpIds.length === 0) {
+    return { success: true };
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(deploymentMcpEnablements)
+      .set({
+        enabled: false,
+        enabledByUserId: auth.userId,
+        updatedAt: new Date(),
+      })
+      .where(inArray(deploymentMcpEnablements.mcpId, mcpIds));
+
+    await tx
+      .delete(mcpConnections)
+      .where(inArray(mcpConnections.mcpId, mcpIds));
+  });
+
+  return { success: true };
+}
+
+/**
  * Get MCP connections visible to the current user.
  * This includes user-scoped connections plus deployment-scoped connections.
  */
