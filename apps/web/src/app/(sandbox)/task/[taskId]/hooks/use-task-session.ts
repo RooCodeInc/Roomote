@@ -48,6 +48,8 @@ export type SessionTaskRun = TaskRunDetail & {
   prRepo: string | null;
   prNumber: number | null;
   previewProxyBaseUrl?: string;
+  /** Server-derived: whether a failed start may be relaunched. */
+  canRetryFailedStart?: boolean;
 };
 
 /**

@@ -5,6 +5,7 @@ import { SSEProvider } from 'react-hooks-sse';
 
 import {
   DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
+  RunStatus,
   TaskPayloadKind,
   type RunStatus as RunStatusValue,
 } from '@roomote/types';
@@ -14,7 +15,6 @@ import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
 import { useRetryFailedTaskStart } from '@/hooks/task-runs';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { getTaskRunError } from '@/lib/task-run-errors';
-import { canRelaunchFailedStart } from '@/lib/task-run-retry';
 
 import {
   StartupFailureMessage,
@@ -23,6 +23,30 @@ import {
   type StartupRetryAction,
 } from './StartupMessage';
 import { useStartupProgress } from './useStartupProgress';
+
+/**
+ * Client-side eligibility for start retry. Keep in lockstep with
+ * `isRelaunchableFailedStartPayloadKind` in packages/cloud-agents.
+ */
+function canRelaunchFailedStart(
+  taskRun: Pick<TaskRun, 'payloadKind' | 'status'>,
+): boolean {
+  if (taskRun.status !== RunStatus.Failed) {
+    return false;
+  }
+
+  switch (taskRun.payloadKind) {
+    case TaskPayloadKind.StandardTask:
+    case TaskPayloadKind.Scan:
+    case TaskPayloadKind.SlackAppMention:
+    case TaskPayloadKind.LinearAgentSession:
+    case TaskPayloadKind.GithubPrReviewFollowUp:
+    case TaskPayloadKind.McpRecommendations:
+      return true;
+    default:
+      return false;
+  }
+}
 
 function buildRetryAction(params: {
   taskId: string;

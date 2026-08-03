@@ -13,10 +13,8 @@ import {
   PreviewPaneProvider,
   TaskSidePanelProvider,
   useClosePreviewOnSleep,
-  useSandboxMessages,
 } from './hooks';
 import { getTaskRunDisplayError } from '@/lib/task-run-errors';
-import { canRelaunchFailedStart } from '@/lib/task-run-retry';
 import { useRetryFailedTaskStart } from '@/hooks/task-runs';
 
 import { SidebarActions } from './sidebar-actions';
@@ -44,7 +42,6 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
   const [messagesInitialScrollBehavior, setMessagesInitialScrollBehavior] =
     useState<'smooth' | 'instant'>('smooth');
   const retryFailedStart = useRetryFailedTaskStart();
-  const { messages } = useSandboxMessages();
   const taskFailureFooter = useMemo(() => {
     const displayError = getTaskRunDisplayError(taskRun);
 
@@ -57,17 +54,13 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
       return null;
     }
 
-    // `enqueueTaskRelaunch` refuses a run that already has non-kickoff
-    // messages, because relaunching would redo work the run already did —
-    // a review it posted would post twice. So the retry is only offered
-    // for a start that failed with an empty transcript; a run whose
-    // sandbox came up late keeps its output and is not retryable here (the
-    // provisioning deadline is what keeps it from failing in the first
-    // place). Gating on an empty transcript rather than on message source
-    // is deliberately stricter than the server: it can hide the button for
-    // a kickoff-only run, which the startup view still offers, and it can
-    // never show a button that would only raise an error.
-    const canRetry = canRelaunchFailedStart(taskRun) && messages.length === 0;
+    // The server decides: `enqueueTaskRelaunch` refuses a run that already
+    // produced agent output, because relaunching would redo work it did —
+    // a review it posted would post twice. Reading its verdict rather than
+    // re-deriving the rules here is what keeps the button from appearing
+    // where it would only error, or hiding where a retry would have
+    // worked.
+    const canRetry = taskRun.canRetryFailedStart === true;
 
     return (
       <TaskFailureMessage
@@ -84,7 +77,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
         retryPending={retryFailedStart.isPending}
       />
     );
-  }, [messages.length, retryFailedStart, session.taskId, taskRun]);
+  }, [retryFailedStart, session.taskId, taskRun]);
   const messagesFooter = useMemo(() => {
     const onboardingCompletionFooter = onboardingEnvironment ? (
       <OnboardingCompletionMessage environment={onboardingEnvironment} />

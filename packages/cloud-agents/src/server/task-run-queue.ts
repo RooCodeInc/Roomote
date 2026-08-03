@@ -1724,6 +1724,53 @@ const RELAUNCHABLE_FAILED_START_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> =
     TaskPayloadKind.McpRecommendations,
   ]);
 
+/**
+ * Whether the run's transcript holds anything the agent produced.
+ *
+ * Provider kickoff/start rows (for example Slack "started") are written
+ * before provisioning and must not block restart after a failed start;
+ * anything else means the run did work a relaunch would redo.
+ */
+async function hasNonKickoffTaskMessages(runId: number): Promise<boolean> {
+  const priorHarnessMessage = await db.query.taskMessages.findFirst({
+    where: and(
+      eq(taskMessages.runId, runId),
+      sql`coalesce(${taskMessages.metadata}->>'source', '') <> ${TASK_KICKOFF_MESSAGE_SOURCE}`,
+    ),
+    columns: { id: true },
+  });
+
+  return Boolean(priorHarnessMessage);
+}
+
+/**
+ * Whether `enqueueTaskRelaunch` would accept this run, so a caller can offer
+ * the control only where it works. Deriving it here rather than
+ * re-implementing the rules in the UI is what keeps the button and the
+ * command from disagreeing — a client-side approximation previously either
+ * offered a retry that always errored, or hid one that would have worked.
+ */
+export async function canRetryFailedStart(sourceRun: {
+  id: number;
+  status: TaskRun['status'];
+  payloadKind: TaskRun['payloadKind'];
+  payload: TaskRun['payload'];
+}): Promise<boolean> {
+  if (sourceRun.status !== RunStatus.Failed) {
+    return false;
+  }
+
+  if (!isRelaunchableFailedStartPayloadKind(sourceRun.payloadKind)) {
+    return false;
+  }
+
+  if (!sourceRun.payload?.repo && !sourceRun.payload?.environmentId) {
+    return false;
+  }
+
+  return !(await hasNonKickoffTaskMessages(sourceRun.id));
+}
+
 export function isRelaunchableFailedStartPayloadKind(
   payloadKind: TaskPayloadKind,
 ): boolean {
@@ -1804,17 +1851,7 @@ export async function enqueueTaskRelaunch(
     );
   }
 
-  // Provider kickoff/start rows (for example Slack “started”) are written
-  // before provisioning and must not block restart after a failed start.
-  const priorHarnessMessage = await db.query.taskMessages.findFirst({
-    where: and(
-      eq(taskMessages.runId, sourceRun.id),
-      sql`coalesce(${taskMessages.metadata}->>'source', '') <> ${TASK_KICKOFF_MESSAGE_SOURCE}`,
-    ),
-    columns: { id: true },
-  });
-
-  if (priorHarnessMessage) {
+  if (await hasNonKickoffTaskMessages(sourceRun.id)) {
     throw new Error(
       'Only failed environment starts can be restarted. This run already has task messages.',
     );

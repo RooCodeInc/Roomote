@@ -1,12 +1,10 @@
 import type { ReactNode } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-const { isTaskRunAsleepMock, retryFailedStartMutate, sandboxMessagesMock } =
-  vi.hoisted(() => ({
-    isTaskRunAsleepMock: vi.fn(() => false),
-    retryFailedStartMutate: vi.fn(),
-    sandboxMessagesMock: vi.fn(() => ({ messages: [] as unknown[] })),
-  }));
+const { isTaskRunAsleepMock, retryFailedStartMutate } = vi.hoisted(() => ({
+  isTaskRunAsleepMock: vi.fn(() => false),
+  retryFailedStartMutate: vi.fn(),
+}));
 
 vi.mock('@/components/system', () => ({
   ArrowUpRightIcon: () => <svg aria-hidden="true" />,
@@ -65,7 +63,6 @@ vi.mock('./hooks', () => ({
     <>{children}</>
   ),
   useClosePreviewOnSleep: vi.fn(),
-  useSandboxMessages: sandboxMessagesMock,
 }));
 
 vi.mock('./sidebar-actions', () => ({
@@ -111,7 +108,6 @@ describe('HistoricalContent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     isTaskRunAsleepMock.mockReturnValue(false);
-    sandboxMessagesMock.mockReturnValue({ messages: [] });
   });
 
   it('shows an in-thread waking up message while the task is resuming', () => {
@@ -196,7 +192,7 @@ describe('HistoricalContent', () => {
     ).toBeInTheDocument();
   });
 
-  it('offers a retry on a failed start with nothing in the transcript', () => {
+  it('offers a retry when the server says the start can be relaunched', () => {
     render(
       <HistoricalContent
         session={
@@ -207,6 +203,7 @@ describe('HistoricalContent', () => {
               id: 3734,
               status: 'failed',
               payloadKind: 'standard',
+              canRetryFailedStart: true,
               error: 'The operation was aborted due to timeout',
               result: null,
               snapshotId: null,
@@ -230,13 +227,9 @@ describe('HistoricalContent', () => {
 
   it('offers no retry once the late transcript has landed', () => {
     // The sandbox came up after the provisioning deadline: the run is
-    // failed but the agent's work is in the thread. `enqueueTaskRelaunch`
-    // rejects this run, and relaunching would redo work that already
-    // happened, so the button must not appear.
-    sandboxMessagesMock.mockReturnValue({
-      messages: [{ id: 'msg-1', role: 'assistant' }],
-    });
-
+    // failed but the agent's work is in the thread, so the server refuses
+    // the relaunch (it would redo work that already happened) and reports
+    // canRetryFailedStart: false.
     render(
       <HistoricalContent
         session={
@@ -247,6 +240,7 @@ describe('HistoricalContent', () => {
               id: 3734,
               status: 'failed',
               payloadKind: 'standard',
+              canRetryFailedStart: false,
               error: 'The operation was aborted due to timeout',
               result: null,
               snapshotId: null,
@@ -268,7 +262,7 @@ describe('HistoricalContent', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('offers no retry for a payload kind that cannot be relaunched', () => {
+  it('offers no retry when the run carries no server verdict', () => {
     render(
       <HistoricalContent
         session={
