@@ -15,6 +15,7 @@ const {
   mockIsChatGptSubscriptionConnected,
   mockIsGitHubCopilotSubscriptionConnected,
   mockIsXaiSubscriptionConnected,
+  mockAssertModelProviderApiKeyAuthenticates,
 } = vi.hoisted(() => ({
   mockFindDeploymentSettings: vi.fn(),
   mockInsertDeploymentSettings: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockIsChatGptSubscriptionConnected: vi.fn(),
   mockIsGitHubCopilotSubscriptionConnected: vi.fn(),
   mockIsXaiSubscriptionConnected: vi.fn(),
+  mockAssertModelProviderApiKeyAuthenticates: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -59,6 +61,11 @@ vi.mock('@roomote/db/server', () => ({
     mockIsGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected: mockIsXaiSubscriptionConnected,
   isNull: vi.fn((column) => ({ isNull: column })),
+}));
+
+vi.mock('./provider-credential-check', () => ({
+  assertModelProviderApiKeyAuthenticates:
+    mockAssertModelProviderApiKeyAuthenticates,
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -1207,6 +1214,7 @@ describe('task model provider commands', () => {
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
     mockIsGitHubCopilotSubscriptionConnected.mockResolvedValue(false);
     mockIsXaiSubscriptionConnected.mockResolvedValue(false);
+    mockAssertModelProviderApiKeyAuthenticates.mockResolvedValue(undefined);
     mockPersistedSetupNewState({});
   });
 
@@ -1414,6 +1422,28 @@ describe('task model provider commands', () => {
       }),
     ).rejects.toThrow('Enter your Anthropic API key to save it.');
 
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    expect(txInsert).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing when the provider rejects the API key', async () => {
+    mockAssertModelProviderApiKeyAuthenticates.mockRejectedValue(
+      new Error(
+        'Anthropic rejected the API key (ANTHROPIC_API_KEY), status 401: “invalid x-api-key” Check the value and save it again.',
+      ),
+    );
+
+    await expect(
+      saveTaskModelProviderCommand(buildMockAuth(), {
+        provider: 'anthropic',
+        apiKey: 'sk-ant-revoked',
+      }),
+    ).rejects.toThrow('Anthropic rejected the API key');
+
+    expect(mockAssertModelProviderApiKeyAuthenticates).toHaveBeenCalledWith({
+      provider: expect.objectContaining({ id: 'anthropic' }),
+      apiKey: 'sk-ant-revoked',
+    });
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
     expect(txInsert).not.toHaveBeenCalled();
   });

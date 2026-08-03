@@ -166,6 +166,7 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from '../task-models/auto-add-models';
+import { assertModelProviderApiKeyAuthenticates } from '../task-models/provider-credential-check';
 import { triggerTaskSuggestionsCommand } from '../task-suggestions';
 
 type PersistedSetupNewState = ReturnType<typeof createEmptySetupNewState>;
@@ -1544,6 +1545,12 @@ export async function saveSetupNewModelConfigCommand(
     throw new Error(
       `Connect your ${provider.label} account to continue, or pick a different provider.`,
     );
+  }
+
+  // Prove the key authenticates before anything is written, so the wizard
+  // cannot report a provider connected on a credential the provider rejects.
+  if (!isOauthProvider) {
+    await assertModelProviderApiKeyAuthenticates({ provider, apiKey });
   }
 
   return db.transaction(async (tx) => {

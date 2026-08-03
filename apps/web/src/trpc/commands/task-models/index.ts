@@ -68,6 +68,7 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from './auto-add-models';
+import { assertModelProviderApiKeyAuthenticates } from './provider-credential-check';
 import {
   discoverProviderModels,
   getLocalTaskModelProviderIdFromModelId,
@@ -623,6 +624,14 @@ export async function saveTaskModelProviderCommand(
       `${provider.label} is connected with a subscription account from the Models settings page and does not use an API key.`,
     );
   }
+
+  // Prove the key authenticates before anything is written. A rejected key
+  // used to save cleanly and only surface as a failed task run later, which
+  // read as a Roomote fault rather than a bad credential.
+  await assertModelProviderApiKeyAuthenticates({
+    provider,
+    apiKey: input.apiKey,
+  });
 
   // When remapping a newly named OpenAI-compatible connection,, rewrite the
   // primary base URL key by treating apiKey as the template primary value and
