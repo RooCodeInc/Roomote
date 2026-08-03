@@ -70,21 +70,6 @@ changed upstream and the migration risk for our codebase specifically. Do not
 open PRs. End with a ranked shortlist of updates worth scheduling this sprint.
 ```
 
-## When it fires
-
-> **Roomote** (`#eng-maintenance`): **Weekly flaky-test report: two suspects.**
-> 1. `task-queue.test.ts` > `retries stale jobs` failed in three recent runs
-> with no related changes. It races a real timer against queue polling. Opened
-> **PR #1041** replacing the sleep with a fake timer.
-> 2. `preview-proxy.test.ts` > `streams logs` failed twice because a fixed port
-> collides with parallel CI shards. Decision needed: random port or dedicated
-> shard. Reply if you want the PR.
->
-> **Dana:** Random port, please. Open the PR.
->
-> **Roomote:** Opened **PR #1042** to bind the test proxy to an ephemeral port
-> and pass its address through. Both flaky suspects now have fixes.
-
 ## Variations
 
 - Create a Monday briefing that summarizes open PRs, stale branches, and work waiting on review.

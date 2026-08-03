@@ -96,21 +96,6 @@ only if the customer reports the problem recurring after it was thought
 resolved.
 ```
 
-## When it fires
-
-```
-> **Ticketbot** (app, `#support-inbound`): ACME-4321 · Priority: High. Customer
-> reports the Q3 CSV export downloads as an empty file. Started yesterday.
->
-> **Roomote** (in thread): **Data-state problem, not a bug.** The export
-> pipeline ran clean, but this workspace's Q3 report rows are soft-deleted. The
-> export correctly renders zero rows.
->
-> **Fix for an operator:** restore the affected report rows after confirming
-> with the customer. **Draft reply:** "The Q3 rows were deleted by a workspace
-> admin. We can restore them; reply to confirm."
-```
-
 ## Variations
 
 - Ask Roomote to propose, but not run, a data-repair script as a reviewed PR against an operations repository.

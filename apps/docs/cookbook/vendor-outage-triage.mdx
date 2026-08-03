@@ -79,22 +79,6 @@ A vendor has posted a status incident. Determine whether it affects us:
 Keep it short. The on-call engineer reads this thread. Do not page anyone.
 ```
 
-## When it fires
-
-> **Acme Status** (app, `#vendor-status`): Investigating: elevated error rates
-> on Object Storage API (`us-east-1`). Some requests may fail with 5xx.
->
-> **Roomote** (in thread): **Safe to ignore.** We use Acme Object Storage only
-> in `eu-west-1`; the affected `us-east-1` endpoints are not referenced in the
-> codebase. Uploads and signed URLs are unaffected. No action needed.
->
-> **Acme Status** (app): Update: impact expanded to CDN edge in EU regions.
->
-> **Roomote** (in thread): **Affects us.** EU CDN edge is now impacted. Public
-> asset delivery routes through Acme CDN, so users may see slow or missing
-> images. Suggested action: serve assets from origin until the incident is
-> resolved.
-
 ## Variations
 
 - Name the vendors explicitly in the criteria to ignore feeds subscribed to just in case.
