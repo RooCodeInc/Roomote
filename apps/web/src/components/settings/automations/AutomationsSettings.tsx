@@ -2794,7 +2794,7 @@ export function AutomationsSettings() {
                   <SelectTrigger
                     size="sm"
                     aria-label="Filter available automations by category"
-                    className="w-36"
+                    className="w-40"
                   >
                     <SelectValue />
                   </SelectTrigger>
