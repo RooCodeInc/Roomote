@@ -116,6 +116,51 @@ function buildAnthropicReasoningOptions(
   };
 }
 
+function buildAmazonBedrockReasoningOptions(
+  modelID: string,
+  reasoningEffort: ReasoningEffort,
+): Record<string, unknown> | null {
+  const normalizedModelID = modelID.toLowerCase();
+
+  if (normalizedModelID.includes('anthropic.')) {
+    const mode = resolveAnthropicThinkingMode(modelID);
+
+    if (mode === 'budget') {
+      return {
+        reasoningConfig: {
+          type: 'enabled',
+          budgetTokens: ANTHROPIC_THINKING_BUDGET_TOKENS[reasoningEffort],
+        },
+      };
+    }
+
+    return {
+      reasoningConfig: {
+        type: 'adaptive',
+        maxReasoningEffort:
+          mode === 'adaptive-no-xhigh' && reasoningEffort === 'xhigh'
+            ? 'high'
+            : reasoningEffort,
+        ...(mode === 'adaptive' ? { display: 'summarized' } : {}),
+      },
+    };
+  }
+
+  if (normalizedModelID.includes('amazon.nova')) {
+    return {
+      reasoningConfig: {
+        type: 'enabled',
+        maxReasoningEffort:
+          reasoningEffort === 'low' || reasoningEffort === 'medium'
+            ? reasoningEffort
+            : 'high',
+      },
+    };
+  }
+
+  return null;
+}
+
 function buildGitHubCopilotReasoningOptions(
   modelID: string,
   reasoningEffort: ReasoningEffort,
@@ -179,11 +224,11 @@ export function buildOpenCodeModelReasoningOptions(
     return null;
   }
 
-  if (
-    selection.providerID === 'amazon-bedrock' &&
-    selection.modelID.toLowerCase().includes('anthropic.')
-  ) {
-    return buildAnthropicReasoningOptions(selection.modelID, reasoningEffort);
+  if (selection.providerID === 'amazon-bedrock') {
+    return buildAmazonBedrockReasoningOptions(
+      selection.modelID,
+      reasoningEffort,
+    );
   }
 
   switch (selection.providerID) {

@@ -135,15 +135,45 @@ describe('buildOpenCodeModelReasoningOptions', () => {
         'high',
       ),
     ).toEqual({
-      thinking: { type: 'adaptive', display: 'summarized' },
-      effort: 'high',
+      reasoningConfig: {
+        type: 'adaptive',
+        maxReasoningEffort: 'high',
+        display: 'summarized',
+      },
     });
     expect(
       buildOpenCodeModelReasoningOptions(
-        'amazon-bedrock/amazon.nova-pro-v1:0',
+        'amazon-bedrock/anthropic.claude-haiku-4-5-20251001-v1:0',
+        'high',
+      ),
+    ).toEqual({
+      reasoningConfig: { type: 'enabled', budgetTokens: 16_000 },
+    });
+  });
+
+  it('maps native Bedrock Nova reasoning to supported effort levels', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'amazon-bedrock/us.amazon.nova-2-lite-v1:0',
         'medium',
       ),
-    ).toEqual({ reasoningEffort: 'medium' });
+    ).toEqual({
+      reasoningConfig: { type: 'enabled', maxReasoningEffort: 'medium' },
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'amazon-bedrock/us.amazon.nova-2-lite-v1:0',
+        'max',
+      ),
+    ).toEqual({
+      reasoningConfig: { type: 'enabled', maxReasoningEffort: 'high' },
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'amazon-bedrock/meta.llama3-70b-instruct-v1:0',
+        'medium',
+      ),
+    ).toBeNull();
   });
 
   it('maps Copilot Claude budget reasoning to thinking_budget', () => {

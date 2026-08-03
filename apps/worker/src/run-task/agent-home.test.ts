@@ -240,8 +240,11 @@ describe('generateOpenCodeConfig provider support', () => {
         'eu.anthropic.claude-sonnet-5': {
           name: 'eu.anthropic.claude-sonnet-5',
           options: {
-            thinking: { type: 'adaptive', display: 'summarized' },
-            effort: 'high',
+            reasoningConfig: {
+              type: 'adaptive',
+              maxReasoningEffort: 'high',
+              display: 'summarized',
+            },
           },
         },
       },
