@@ -747,7 +747,8 @@ export const CodeBlock = ({
             className={cn(
               'relative',
               forceDark && variant === 'compact' && 'dark',
-              variant === 'compact' && 'bg-zinc-800 rounded-xl overflow-hidden',
+              variant === 'compact' &&
+                'bg-muted/50 text-foreground rounded-xl overflow-hidden',
               maxHeight && '[&>div]:overflow-visible',
             )}
             style={{

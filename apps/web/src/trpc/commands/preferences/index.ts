@@ -1,4 +1,4 @@
-import { and, db, eq, isNull, users } from '@roomote/db/server';
+import { and, db, eq, isNull, sql, users } from '@roomote/db/server';
 import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
@@ -32,6 +32,10 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
+    showCommandOutput:
+      typeof metadata.show_command_output === 'boolean'
+        ? metadata.show_command_output
+        : DEFAULT_PERSONAL_PREFERENCES.showCommandOutput,
   };
 }
 
@@ -117,34 +121,27 @@ export async function updatePersonalPreferencesCommand(
     nextMetadataRecord.narration_mode = input.narrationMode;
   }
 
+  if (input.showCommandOutput !== undefined) {
+    nextMetadataRecord.show_command_output = input.showCommandOutput;
+  }
+
   if (Object.keys(nextMetadataRecord).length === 0) {
     return getPersonalPreferencesCommand(auth);
   }
 
-  const currentUser = await db.query.users.findFirst({
-    where: eq(users.id, auth.userId),
-    columns: {
-      metadata: true,
-    },
-  });
-  const normalizedMetadata = {
-    ...normalizeMetadata(currentUser?.metadata),
-    ...nextMetadataRecord,
-  };
-
-  const updatedRows = await db
+  const [updatedUser] = await db
     .update(users)
     .set({
-      metadata: normalizedMetadata,
+      metadata: sql`coalesce(${users.metadata}, '{}'::jsonb) || ${JSON.stringify(nextMetadataRecord)}::jsonb`,
       lastSyncAt: new Date(),
       updatedAt: new Date(),
     })
     .where(eq(users.id, auth.userId))
-    .returning({ id: users.id });
+    .returning({ metadata: users.metadata });
 
-  if (updatedRows.length === 0) {
+  if (!updatedUser) {
     throw new Error('Unable to update preferences for the active user.');
   }
 
-  return normalizePersonalPreferences(normalizedMetadata);
+  return normalizePersonalPreferences(normalizeMetadata(updatedUser.metadata));
 }

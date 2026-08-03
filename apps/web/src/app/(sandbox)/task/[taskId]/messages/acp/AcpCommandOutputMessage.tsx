@@ -30,6 +30,7 @@ interface AcpCommandOutputMessageProps {
   canAbort?: boolean;
   abortPending?: boolean;
   onAbort?: () => void;
+  showOutput?: boolean;
 }
 
 function formatCommandDuration(durationMs: number): string {
@@ -58,6 +59,7 @@ export const AcpCommandOutputMessage = ({
   canAbort = false,
   abortPending = false,
   onAbort,
+  showOutput = false,
 }: AcpCommandOutputMessageProps) => {
   const [now, setNow] = useState(() => Date.now());
   const cmd =
@@ -78,6 +80,8 @@ export const AcpCommandOutputMessage = ({
     : undefined;
 
   const output = sanitizeSandboxPathString(cmd.text);
+  const hasOutput = output.trim().length > 0;
+  const outputVisible = showOutput && hasOutput;
 
   const isExitCodePresent = cmd.exitCode !== undefined;
   const isPending =
@@ -128,14 +132,14 @@ export const AcpCommandOutputMessage = ({
           code={output}
           language="bash"
           variant="compact"
-          collapsible={false}
-          defaultCollapsed={false}
-          forceDark={true}
-          renderContent={false}
-          maxHeight={undefined}
+          collapsible={outputVisible}
+          defaultCollapsed={!isPending}
+          renderContent={outputVisible}
+          maxHeight={240}
+          highlight={false}
           command={command ?? ''}
           showCommandCopy
-          showOutputCopy={false}
+          showOutputCopy={outputVisible}
         >
           <CodeBlockHeader className="w-full">
             <CodeBlockTitle>
@@ -160,7 +164,11 @@ export const AcpCommandOutputMessage = ({
                   size="xs"
                   className="mt-0.5 h-6 shrink-0 gap-1 px-1.5 font-sans text-[11px]"
                   disabled={abortPending}
-                  onClick={onAbort}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAbort();
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
                 >
                   <SquareIcon className="size-2.5 fill-current" />
                   {abortPending ? 'Stopping...' : 'Abort'}

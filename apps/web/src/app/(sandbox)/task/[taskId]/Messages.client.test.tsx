@@ -67,6 +67,10 @@ vi.mock('@/hooks/useNarrationMode', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useShowCommandOutput', () => ({
+  useShowCommandOutput: () => ({ enabled: false }),
+}));
+
 vi.mock('./messages/index', () => ({
   SleepWakeMessages: () => <div>Sleep rows</div>,
 }));

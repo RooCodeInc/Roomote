@@ -28,6 +28,7 @@ import {
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
+import { useShowCommandOutput } from '@/hooks/useShowCommandOutput';
 import { Lightbulb, Skeleton } from '@/components/system';
 import { cn } from '@/lib/utils';
 import { useTRPCClient } from '@/trpc/client';
@@ -217,6 +218,7 @@ const MessagesBase = ({
     },
   });
   const { enabled: narrationModeEnabled } = useNarrationMode();
+  const { enabled: commandOutputVisible } = useShowCommandOutput();
   const [suppressedMessageIds, setSuppressedMessageIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -374,6 +376,7 @@ const MessagesBase = ({
         <AcpGroupedToolMessage
           group={block}
           showSubagentPayload={showInternalMessages}
+          showCommandOutput={commandOutputVisible}
         />
       );
 
@@ -406,6 +409,7 @@ const MessagesBase = ({
         canAbortCommand={taskPhase === 'running'}
         commandAbortPending={abortTurn.isPending || abortRequested}
         onAbortCommand={() => abortTurn.mutate()}
+        commandOutputVisible={commandOutputVisible}
         showSubagentPayload={showInternalMessages}
       >
         {block.childBlocks?.length

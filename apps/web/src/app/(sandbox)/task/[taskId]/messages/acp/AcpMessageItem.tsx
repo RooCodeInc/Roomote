@@ -17,6 +17,7 @@ interface AcpMessageItemProps {
   canAbortCommand?: boolean;
   commandAbortPending?: boolean;
   onAbortCommand?: () => void;
+  commandOutputVisible?: boolean;
   showSubagentPayload?: boolean;
   children?: ReactNode;
 }
@@ -29,6 +30,7 @@ function AcpMessageItemBase({
   canAbortCommand,
   commandAbortPending,
   onAbortCommand,
+  commandOutputVisible,
   showSubagentPayload = false,
   children,
 }: AcpMessageItemProps) {
@@ -41,7 +43,7 @@ function AcpMessageItemBase({
       return <AcpTodoSectionMessage msg={msg} />;
     case 'tool_call':
     case 'tool_result': {
-      return msg.data.kind === 'execute' ? (
+      return msg.data.isExecute ? (
         <AcpCommandOutputMessage
           msg={msg}
           ts={msg.ts}
@@ -51,6 +53,7 @@ function AcpMessageItemBase({
           canAbort={canAbortCommand}
           abortPending={commandAbortPending}
           onAbort={onAbortCommand}
+          showOutput={commandOutputVisible}
         />
       ) : (
         <AcpToolMessage msg={msg} showSubagentPayload={showSubagentPayload}>

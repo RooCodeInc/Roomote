@@ -39,14 +39,16 @@ function mergeResultForUpdatedFields(
   const mergedPreferences = currentPreferences ?? DEFAULT_PERSONAL_PREFERENCES;
 
   return {
-    colorTheme:
-      updates.colorTheme === undefined
-        ? mergedPreferences.colorTheme
-        : result.colorTheme,
-    narrationMode:
-      updates.narrationMode === undefined
-        ? mergedPreferences.narrationMode
-        : result.narrationMode,
+    ...mergedPreferences,
+    ...(updates.colorTheme !== undefined
+      ? { colorTheme: result.colorTheme }
+      : {}),
+    ...(updates.narrationMode !== undefined
+      ? { narrationMode: result.narrationMode }
+      : {}),
+    ...(updates.showCommandOutput !== undefined
+      ? { showCommandOutput: result.showCommandOutput }
+      : {}),
   };
 }
 
@@ -62,16 +64,20 @@ function rollbackUpdatedFields(
     context?.optimisticPreferences ?? mergedPreferences;
 
   return {
-    colorTheme:
-      updates.colorTheme !== undefined &&
-      mergedPreferences.colorTheme === optimisticPreferences.colorTheme
-        ? previousPreferences.colorTheme
-        : mergedPreferences.colorTheme,
-    narrationMode:
-      updates.narrationMode !== undefined &&
-      mergedPreferences.narrationMode === optimisticPreferences.narrationMode
-        ? previousPreferences.narrationMode
-        : mergedPreferences.narrationMode,
+    ...mergedPreferences,
+    ...(updates.colorTheme !== undefined &&
+    mergedPreferences.colorTheme === optimisticPreferences.colorTheme
+      ? { colorTheme: previousPreferences.colorTheme }
+      : {}),
+    ...(updates.narrationMode !== undefined &&
+    mergedPreferences.narrationMode === optimisticPreferences.narrationMode
+      ? { narrationMode: previousPreferences.narrationMode }
+      : {}),
+    ...(updates.showCommandOutput !== undefined &&
+    mergedPreferences.showCommandOutput ===
+      optimisticPreferences.showCommandOutput
+      ? { showCommandOutput: previousPreferences.showCommandOutput }
+      : {}),
   };
 }
 

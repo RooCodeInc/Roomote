@@ -31,6 +31,7 @@ import type {
 interface AcpGroupedToolMessageProps {
   group: GroupedToolCallRenderBlock;
   showSubagentPayload?: boolean;
+  showCommandOutput?: boolean;
 }
 
 const GROUPED_TOOL_ITEM_MAX_HEIGHT = 200;
@@ -38,6 +39,7 @@ const GROUPED_TOOL_ITEM_MAX_HEIGHT = 200;
 export function AcpGroupedToolMessage({
   group,
   showSubagentPayload = false,
+  showCommandOutput = false,
 }: AcpGroupedToolMessageProps) {
   const anchorId = messageAnchorId(group.ts);
   const objectSummary = sanitizeSandboxPathString(group.objectSummary);
@@ -94,6 +96,7 @@ export function AcpGroupedToolMessage({
                 );
                 const showItemDetails = !hidesExpandedToolResult(item.msg, {
                   showSubagentPayload,
+                  showCommandOutput,
                 });
 
                 return (
@@ -110,6 +113,7 @@ export function AcpGroupedToolMessage({
                         msg={item.msg}
                         maxHeight={GROUPED_TOOL_ITEM_MAX_HEIGHT}
                         showSubagentPayload={showSubagentPayload}
+                        showCommandOutput={showCommandOutput}
                       />
                     ) : null}
                   </section>

@@ -2,6 +2,7 @@
 
 import { useColorTheme } from '@/hooks/useColorTheme';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
+import { useShowCommandOutput } from '@/hooks/useShowCommandOutput';
 import type { PersonalColorTheme } from '@/types/preferences';
 
 import {
@@ -34,6 +35,12 @@ export function UserPreferencesSection() {
     setColorTheme,
   } = useColorTheme();
   const { enabled, isLoading, isUpdating, setEnabled } = useNarrationMode();
+  const {
+    enabled: commandOutputEnabled,
+    isLoading: isCommandOutputLoading,
+    isUpdating: isCommandOutputUpdating,
+    setEnabled: setCommandOutputEnabled,
+  } = useShowCommandOutput();
   const isThemeDisabled = isThemeLoading || isThemeUpdating;
 
   return (
@@ -81,6 +88,24 @@ export function UserPreferencesSection() {
             <p className="text-sm text-foreground">
               Streamline conversations, keeping only text messages and LLM
               thoughts.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <Switch
+            aria-label="Toggle command output"
+            checked={commandOutputEnabled}
+            disabled={isCommandOutputLoading || isCommandOutputUpdating}
+            onCheckedChange={setCommandOutputEnabled}
+          />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-foreground">
+              Show command output
+            </p>
+            <p className="text-sm text-foreground">
+              Display expandable command output in task conversations. Narration
+              mode still hides command activity.
             </p>
           </div>
         </div>

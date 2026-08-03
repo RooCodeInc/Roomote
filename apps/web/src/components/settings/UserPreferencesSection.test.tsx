@@ -3,20 +3,28 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 
 type PersonalColorTheme = 'light' | 'dark' | 'system';
 
-const { colorThemeState, narrationModeState } = vi.hoisted(() => ({
-  colorThemeState: {
-    colorTheme: 'system' as PersonalColorTheme,
-    isLoading: false,
-    isUpdating: false,
-    setColorTheme: vi.fn(),
-  },
-  narrationModeState: {
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  },
-}));
+const { colorThemeState, narrationModeState, commandOutputState } = vi.hoisted(
+  () => ({
+    colorThemeState: {
+      colorTheme: 'system' as PersonalColorTheme,
+      isLoading: false,
+      isUpdating: false,
+      setColorTheme: vi.fn(),
+    },
+    narrationModeState: {
+      enabled: false,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    },
+    commandOutputState: {
+      enabled: false,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    },
+  }),
+);
 
 vi.mock('@/hooks/useColorTheme', () => ({
   useColorTheme: () => colorThemeState,
@@ -24,6 +32,10 @@ vi.mock('@/hooks/useColorTheme', () => ({
 
 vi.mock('@/hooks/useNarrationMode', () => ({
   useNarrationMode: () => narrationModeState,
+}));
+
+vi.mock('@/hooks/useShowCommandOutput', () => ({
+  useShowCommandOutput: () => commandOutputState,
 }));
 
 vi.mock('@/components/system', () => ({
@@ -108,11 +120,15 @@ describe('UserPreferencesSection', () => {
     narrationModeState.enabled = false;
     narrationModeState.isLoading = false;
     narrationModeState.isUpdating = false;
+    commandOutputState.enabled = false;
+    commandOutputState.isLoading = false;
+    commandOutputState.isUpdating = false;
   });
 
   it('renders user preference controls with the current state', () => {
     colorThemeState.colorTheme = 'dark' as PersonalColorTheme;
     narrationModeState.enabled = true;
+    commandOutputState.enabled = true;
 
     render(<UserPreferencesSection />);
 
@@ -126,16 +142,22 @@ describe('UserPreferencesSection', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Toggle narration mode')).toBeChecked();
+    expect(screen.getByText('Show command output')).toHaveClass(
+      'font-semibold',
+    );
+    expect(screen.getByLabelText('Toggle command output')).toBeChecked();
   });
 
   it('disables controls while the corresponding preference is loading or updating', () => {
     colorThemeState.isLoading = true;
     narrationModeState.isUpdating = true;
+    commandOutputState.isLoading = true;
 
     render(<UserPreferencesSection />);
 
     expect(screen.getByLabelText('Color theme')).toBeDisabled();
     expect(screen.getByLabelText('Toggle narration mode')).toBeDisabled();
+    expect(screen.getByLabelText('Toggle command output')).toBeDisabled();
   });
 
   it('updates the color theme immediately when a different option is selected', () => {
@@ -154,6 +176,14 @@ describe('UserPreferencesSection', () => {
     fireEvent.click(screen.getByLabelText('Toggle narration mode'));
 
     expect(narrationModeState.setEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('updates command output visibility immediately when the switch changes', () => {
+    render(<UserPreferencesSection />);
+
+    fireEvent.click(screen.getByLabelText('Toggle command output'));
+
+    expect(commandOutputState.setEnabled).toHaveBeenCalledWith(true);
   });
 
   it('renders theme choices in a dropdown', () => {
