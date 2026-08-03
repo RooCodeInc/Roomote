@@ -2,12 +2,12 @@ import { headers } from 'next/headers';
 import { APIError } from 'better-auth/api';
 
 import { db, deploymentSettings, eq, invites, users } from '@roomote/db/server';
-import type { UserRole } from '@roomote/types';
 import {
   evaluateFeatureFlagsFromMetadata,
   isAnonymousAnalyticsEnabledFromMetadata,
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
+import type { UserRole } from '@roomote/types';
 import { getManagedDeploymentAccessFromMetadata } from '@roomote/types';
 import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';

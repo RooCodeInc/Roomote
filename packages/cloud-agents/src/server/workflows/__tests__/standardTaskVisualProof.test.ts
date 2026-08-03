@@ -35,116 +35,23 @@ describe('Standard Task visual-proof delegation', () => {
     );
   });
 
-  it('surfaces the screencast auto-classification flag state in harness instructions', () => {
-    const enabledInstructions = standardTask({
-      description: 'Implement behavior change',
-      repo: 'Roomote/example-app',
-      taskRunUrl: 'https://example.com/task/123',
-      visualProofAutoScreencastEnabled: true,
-    }).harnessInstructions;
-    const disabledInstructions = standardTask({
-      description: 'Implement behavior change',
-      repo: 'Roomote/example-app',
-      taskRunUrl: 'https://example.com/task/123',
-      visualProofAutoScreencastEnabled: false,
-    }).harnessInstructions;
-
-    expect(enabledInstructions).toContain(
-      'Screencast auto-classification is enabled for this task.',
-    );
-    expect(disabledInstructions).toContain(
-      'Screencast auto-classification is disabled for this task.',
-    );
-  });
-
-  it('keeps the harness instructions byte-identical when backgroundProofCaptureEnabled is false or omitted', () => {
-    const baseInput = {
-      description: 'Implement behavior change',
-      repo: 'Roomote/example-app',
-      taskRunUrl: 'https://example.com/task/123',
-    };
-
-    const defaultInstructions = standardTask(baseInput).harnessInstructions;
-    const disabledInstructions = standardTask({
-      ...baseInput,
-      backgroundProofCaptureEnabled: false,
-    }).harnessInstructions;
-
-    expect(disabledInstructions).toBe(defaultInstructions);
-    expect(disabledInstructions).not.toContain('background: true');
-    expect(disabledInstructions).not.toContain('completion notification');
-    expect(disabledInstructions).toContain(
-      'after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must transition into `capture-visual-proof` for one constrained proof step',
-    );
-    expect(disabledInstructions).toContain(
-      'the workflow must not proceed to the delivery skill until `capture-visual-proof` has run or explicitly returned a no-op or blocker result',
-    );
-  });
-
-  it('switches autonomous runs to background proof capture after delivery when backgroundProofCaptureEnabled is true', () => {
+  it('keeps screencast auto-classification disabled', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
-      backgroundProofCaptureEnabled: true,
     });
 
-    // Delivery no longer waits on proof.
     expect(harnessInstructions).toContain(
-      'after implementation and validation the active `implement-changes` workflow must proceed directly to the delegated delivery skill without waiting for visual proof',
+      'Screencast auto-classification is disabled for this task.',
     );
+    expect(harnessInstructions).not.toContain('background: true');
+    expect(harnessInstructions).not.toContain('completion notification');
     expect(harnessInstructions).toContain(
-      "launch the `capture-visual-proof` delegation with the task tool's `background: true` parameter",
-    );
-    expect(harnessInstructions).toContain(
-      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread',
-    );
-    // The background launch does not discharge the proof obligation.
-    expect(harnessInstructions).toContain(
-      'Launching in the background does not discharge the proof obligation',
-    );
-    expect(harnessInstructions).toContain(
-      'a synthetic `<task ...>` result injected into the session',
-    );
-    expect(harnessInstructions).toContain(
-      'verify the uploaded artifact URLs from the report, update the pull request body with the proof screenshots and links via `manage_source_control`',
-    );
-    expect(harnessInstructions).toContain(
-      'make the proof visible in the conversation thread by sharing screenshots with `send_chat_reply` via `imageArtifactIds` and using artifact `viewUrl`/`rawUrl` links in the reply text for non-image proof',
-    );
-    expect(harnessInstructions).toContain(
-      'update the pull request body with a short `no visual proof: <reason>` note and say so in the thread',
-    );
-    // The foreground proof-before-delivery ordering is fully replaced.
-    expect(harnessInstructions).not.toContain(
       'after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must transition into `capture-visual-proof` for one constrained proof step',
     );
-    expect(harnessInstructions).not.toContain(
+    expect(harnessInstructions).toContain(
       'the workflow must not proceed to the delivery skill until `capture-visual-proof` has run or explicitly returned a no-op or blocker result',
-    );
-    expect(harnessInstructions).not.toContain(
-      'keep the active `implement-changes` workflow open through any required delegated proof and',
-    );
-  });
-
-  it('keeps Interactive mode on the foreground proof flow even when backgroundProofCaptureEnabled is true', () => {
-    const baseInput = {
-      description: 'Implement behavior change',
-      repo: 'Roomote/example-app',
-      taskRunUrl: 'https://example.com/task/123',
-      interactiveMode: true,
-    };
-
-    const withFlag = standardTask({
-      ...baseInput,
-      backgroundProofCaptureEnabled: true,
-    }).harnessInstructions;
-    const withoutFlag = standardTask(baseInput).harnessInstructions;
-
-    expect(withFlag).toBe(withoutFlag);
-    expect(withFlag).not.toContain('background: true');
-    expect(withFlag).toContain(
-      'In Interactive mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before any final delivery pause, any repository-file change transitions into `capture-visual-proof`',
     );
   });
 

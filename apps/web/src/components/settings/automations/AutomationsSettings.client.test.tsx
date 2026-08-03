@@ -1,5 +1,4 @@
 import {
-  DEFAULT_SUGGESTER_ROUTING_MODE,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
 } from '@roomote/types';
@@ -83,8 +82,6 @@ const baseFormState: FormState = {
   suggesterUseTelegram: false,
   suggesterUseTeams: false,
   suggesterInstructions: '',
-  suggesterRoutingMode: DEFAULT_SUGGESTER_ROUTING_MODE,
-  suggesterRoutingInstructions: '',
   announcerFrequency: 'off' as const,
   announcerSlackChannel: '',
   announcerDiscordChannel: '',
@@ -228,33 +225,6 @@ describe('Automations selection helpers', () => {
     expect(saveInput.reviewerInstructions).toBe(
       'Focus on security boundaries.',
     );
-  });
-
-  it('builds a save state that keeps grouped suggester routing fields isolated to the suggester card', () => {
-    const currentFormState: FormState = {
-      ...baseFormState,
-      announcerFrequency: 'daily',
-      suggesterRoutingMode: 'group_by_instructions',
-      suggesterRoutingInstructions:
-        'Incidents, alerts, and reliability ideas -> #eng-infra',
-    };
-
-    const currentSavedState: FormState = {
-      ...baseFormState,
-      announcerFrequency: 'off',
-    };
-
-    const saveState = buildSaveStateForAutomation(
-      currentFormState,
-      currentSavedState,
-      'suggester',
-    );
-
-    expect(saveState.suggesterRoutingMode).toBe('group_by_instructions');
-    expect(saveState.suggesterRoutingInstructions).toBe(
-      'Incidents, alerts, and reliability ideas -> #eng-infra',
-    );
-    expect(saveState.announcerFrequency).toBe('off');
   });
 
   it('builds a save state that only applies the channel auto-start changes', () => {

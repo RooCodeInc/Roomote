@@ -71,7 +71,6 @@ import {
   userFactory,
 } from '@roomote/db/server';
 import { RunStatus } from '@roomote/types';
-import type { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -90,7 +89,6 @@ function buildMockAuth(
     isAdmin: false,
     name: 'Test User',
     primaryEmail: 'test@test.com',
-    featureFlags: {} as Record<FeatureFlag, boolean>,
     resource: {
       username: 'testuser',
       fullName: 'Test User',

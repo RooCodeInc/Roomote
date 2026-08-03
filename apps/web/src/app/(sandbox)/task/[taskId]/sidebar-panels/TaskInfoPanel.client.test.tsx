@@ -2,46 +2,14 @@ import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 import { TaskPayloadKind } from '@roomote/types';
 
-const {
-  useSandboxMessagesMock,
-  useTaskSummaryMock,
-  userState,
-  showDebugUiState,
-} = vi.hoisted(() => ({
+const { useSandboxMessagesMock, useTaskSummaryMock } = vi.hoisted(() => ({
   useSandboxMessagesMock: vi.fn(),
   useTaskSummaryMock: vi.fn(),
-  userState: {
-    isSignedIn: true,
-    user: {
-      featureFlags: {
-        ShowDebugUISetting: false,
-      },
-    },
-  },
-  showDebugUiState: {
-    isDebugUIVisible: false,
-  },
 }));
 
 vi.mock('../hooks', () => ({
   useSandboxMessages: useSandboxMessagesMock,
   useTaskSummary: useTaskSummaryMock,
-}));
-
-vi.mock('@/hooks/useShowDebugUI', () => ({
-  useShowDebugUI: () => ({
-    isDebugUIVisible: showDebugUiState.isDebugUIVisible,
-    isLoading: false,
-    isUpdating: false,
-    setDebugUIVisible: vi.fn(),
-  }),
-}));
-
-vi.mock('@/hooks/useUser', () => ({
-  useUser: () =>
-    userState.isSignedIn
-      ? { isSignedIn: true as const, user: userState.user }
-      : { isSignedIn: false as const, user: null, authStatus: 'signed-out' },
 }));
 
 vi.mock('streamdown', () => ({
@@ -112,10 +80,6 @@ const baseTaskRun = {
 describe('TaskInfoPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    userState.isSignedIn = true;
-    userState.user.featureFlags.ShowDebugUISetting = false;
-    showDebugUiState.isDebugUIVisible = false;
-
     useSandboxMessagesMock.mockReturnValue({
       messages: [],
       protocol: 'roomote_runtime',
@@ -502,24 +466,7 @@ describe('TaskInfoPanel', () => {
     expect(screen.queryByText('Linked Work')).not.toBeInTheDocument();
   });
 
-  it('shows the runtime row when debug UI is enabled', () => {
-    showDebugUiState.isDebugUIVisible = true;
-
-    render(
-      <TaskInfoPanel
-        active={true}
-        task={baseTask as never}
-        taskRun={baseTaskRun as never}
-        harness="opencode-server"
-        onClose={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('Runtime')).toBeInTheDocument();
-    expect(screen.getByText('OpenCode')).toBeInTheDocument();
-  });
-
-  it('keeps the runtime row hidden when the feature flag is off', () => {
+  it('keeps the runtime row unavailable', () => {
     render(
       <TaskInfoPanel
         active={true}
@@ -531,43 +478,6 @@ describe('TaskInfoPanel', () => {
     );
 
     expect(screen.queryByText('Runtime')).not.toBeInTheDocument();
-  });
-
-  it('keeps the runtime row hidden when the debug UI preference is off', () => {
-    userState.user.featureFlags.ShowDebugUISetting = true;
-
-    render(
-      <TaskInfoPanel
-        active={true}
-        task={baseTask as never}
-        taskRun={baseTaskRun as never}
-        harness="opencode-server"
-        onClose={vi.fn()}
-      />,
-    );
-
-    expect(screen.queryByText('Runtime')).not.toBeInTheDocument();
-  });
-
-  it('falls back to the session harness when the task run harness is absent', () => {
-    showDebugUiState.isDebugUIVisible = true;
-
-    render(
-      <TaskInfoPanel
-        active={true}
-        task={baseTask as never}
-        taskRun={
-          {
-            ...baseTaskRun,
-            harness: undefined,
-          } as never
-        }
-        harness="opencode-server"
-        onClose={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText('OpenCode')).toBeInTheDocument();
   });
 
   it('labels Telegram-started tasks from the communication provider payload', () => {

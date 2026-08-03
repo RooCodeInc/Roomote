@@ -8,7 +8,6 @@ import {
   users,
   workItems,
 } from '@roomote/db/server';
-import { FeatureFlag } from '@roomote/feature-flags';
 import { normalizeSetupNewState } from '@roomote/types';
 
 import type { UserAuthSuccess } from '../src/types';
@@ -90,9 +89,9 @@ function buildAuth(user: typeof users.$inferSelect): UserAuthSuccess {
     userType: 'user',
     userId: user.id,
     isAdmin: true,
+    featureFlags: {},
     name,
     primaryEmail: email,
-    featureFlags: {} as Record<FeatureFlag, boolean>,
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
     cookieConsentedAt: null,

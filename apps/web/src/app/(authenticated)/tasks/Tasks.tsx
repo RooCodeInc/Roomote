@@ -18,7 +18,6 @@ import { DEFAULT_VISIBLE_TASK_WORKFLOWS, getTaskCategoryById } from '@/lib';
 import { cn } from '@/lib/utils';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { useShowDebugUI } from '@/hooks/useShowDebugUI';
 import {
   useTasks,
   useTaskPagination,
@@ -60,8 +59,7 @@ import {
 
 export const Tasks = () => {
   const { userId, isAdmin } = useAuthorizedUser();
-  const { isDebugUIVisible } = useShowDebugUI();
-  const showTaskTypeFilter = isDebugUIVisible;
+  const showTaskTypeFilter = false;
 
   const router = useRouter();
   const searchParams = useSearchParams();

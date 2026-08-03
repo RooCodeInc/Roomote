@@ -1,82 +1,33 @@
-const { mockEvaluateFeatureFlag } = vi.hoisted(() => ({
-  mockEvaluateFeatureFlag: vi.fn(),
-}));
+import { describe, expect, it, vi } from 'vitest';
+import type { AuthTokenContext } from '@roomote/types';
 
-vi.mock('@roomote/feature-flags/server', () => ({
-  FeatureFlag: {
-    BackgroundSubagents: 'BackgroundSubagents',
-  },
-  getFeatureFlagEvaluator: vi.fn(() => ({
-    evaluate: mockEvaluateFeatureFlag,
-  })),
-}));
+vi.mock('@roomote/feature-flags/server', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('@roomote/feature-flags/server')>();
+  return {
+    ...original,
+    getFeatureFlagEvaluator: vi.fn(() => ({ evaluate: vi.fn() })),
+  };
+});
 
 vi.mock('@roomote/redis', () => ({
   getRedis: vi.fn(() => ({ mocked: true })),
 }));
 
-import { FeatureFlag } from '@roomote/feature-flags';
-import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
-
 import { featureFlagsRouter } from './feature-flags';
 
-function createAuthCaller() {
-  const auth: AuthTokenContext = {
-    userId: 'user-1',
-    tokenType: 'auth',
-    version: 1,
-  };
-
-  return featureFlagsRouter.createCaller({ auth });
-}
-
-function createJobCaller() {
-  const auth: RunTokenContext = {
-    runId: 42,
-    userId: 'user-1',
-    principal: 'user',
-    tokenType: 'run',
-    version: 1,
-  };
-
-  return featureFlagsRouter.createCaller({ auth });
-}
+const auth: AuthTokenContext = {
+  userId: 'user-1',
+  tokenType: 'auth',
+  version: 1,
+};
 
 describe('featureFlagsRouter.evaluate', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockEvaluateFeatureFlag.mockResolvedValue(false);
-  });
-
-  it('evaluates deployment flags for auth-token callers', async () => {
-    mockEvaluateFeatureFlag.mockResolvedValue(true);
+  it('rejects every stale runtime feature flag', async () => {
+    const caller = featureFlagsRouter.createCaller({ auth });
 
     await expect(
-      createAuthCaller().evaluate({
-        flag: FeatureFlag.BackgroundSubagents,
-      }),
-    ).resolves.toBe(true);
-
-    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith(
-      'BackgroundSubagents',
-      {
-        isDeploymentContext: true,
-      },
-    );
-  });
-
-  it('evaluates deployment flags for run-token callers', async () => {
-    await expect(
-      createJobCaller().evaluate({
-        flag: FeatureFlag.BackgroundSubagents,
-      }),
-    ).resolves.toBe(false);
-
-    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith(
-      'BackgroundSubagents',
-      {
-        isDeploymentContext: true,
-      },
-    );
+      caller.evaluate({ flag: 'SuggestionRouting' as never }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });

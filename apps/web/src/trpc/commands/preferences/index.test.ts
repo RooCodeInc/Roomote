@@ -9,10 +9,6 @@ vi.mock('@roomote/db/server', () => ({
   users: {},
 }));
 
-vi.mock('@roomote/feature-flags', () => ({
-  FeatureFlag: { ShowDebugUISetting: 'showDebugUISetting' },
-}));
-
 vi.mock('next/headers', () => ({
   headers: async () => new Headers({ cookie: 'session=example' }),
 }));

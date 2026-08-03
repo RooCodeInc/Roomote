@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { FeatureFlag } from '@roomote/feature-flags';
 import { APIError } from 'better-auth/api';
 
 const {
@@ -151,11 +150,7 @@ describe('authorize', () => {
         image: 'https://example.com/avatar.png',
       },
     });
-    mockDeploymentFindFirst.mockResolvedValue({
-      metadata: {
-        suggestion_routing: true,
-      },
-    });
+    mockDeploymentFindFirst.mockResolvedValue({ metadata: {} });
     mockUsersFindFirst.mockResolvedValue({
       id: 'user-1',
       name: 'Jane Admin',
@@ -173,22 +168,6 @@ describe('authorize', () => {
       deletedAt: null,
     });
     mockUpdateWhere.mockResolvedValue([]);
-  });
-
-  it('hydrates feature flags from existing deployment metadata', async () => {
-    const result = await authorize();
-
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      return;
-    }
-
-    expect(result.featureFlags[FeatureFlag.SuggestionRouting]).toBe(true);
-    expect(mockUpdateSet).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        metadata: expect.anything(),
-      }),
-    );
   });
 
   it('exposes an existing cookie acceptance timestamp', async () => {
@@ -225,6 +204,17 @@ describe('authorize', () => {
 
     expect(result.success).toBe(true);
     expect(mockUpdateSet).not.toHaveBeenCalled();
+  });
+
+  it('hydrates an empty feature flag map from stale deployment metadata', async () => {
+    mockDeploymentFindFirst.mockResolvedValue({
+      metadata: { suggestion_routing: true },
+    });
+
+    const result = await authorize();
+
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.featureFlags).toEqual({});
   });
 
   it('keeps an unchanged member with incomplete onboarding read-only', async () => {

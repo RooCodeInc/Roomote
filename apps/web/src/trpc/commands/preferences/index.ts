@@ -1,5 +1,4 @@
 import { and, db, eq, isNull, users } from '@roomote/db/server';
-import { FeatureFlag } from '@roomote/feature-flags';
 import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
@@ -24,11 +23,6 @@ function normalizeMetadata(value: unknown): UserMetadataRecord {
 
 function normalizePersonalPreferences(
   metadata: UserMetadataRecord,
-  {
-    showDebugUISettingEnabled,
-  }: {
-    showDebugUISettingEnabled: boolean;
-  },
 ): PersonalPreferences {
   return {
     colorTheme: isPersonalColorTheme(metadata.color_theme)
@@ -38,10 +32,6 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
-    showDebugUI:
-      showDebugUISettingEnabled && typeof metadata.show_debug_ui === 'boolean'
-        ? metadata.show_debug_ui
-        : DEFAULT_PERSONAL_PREFERENCES.showDebugUI,
   };
 }
 
@@ -57,10 +47,7 @@ export async function getPersonalPreferencesCommand(
 
   const storedMetadata = normalizeMetadata(storedUser?.metadata);
 
-  return normalizePersonalPreferences(storedMetadata, {
-    showDebugUISettingEnabled:
-      auth.featureFlags[FeatureFlag.ShowDebugUISetting] === true,
-  });
+  return normalizePersonalPreferences(storedMetadata);
 }
 
 export async function getPersonalAccountCapabilitiesCommand(
@@ -120,8 +107,6 @@ export async function updatePersonalPreferencesCommand(
   auth: UserAuthSuccess,
   input: PersonalPreferencesUpdate,
 ): Promise<PersonalPreferences> {
-  const showDebugUISettingEnabled =
-    auth.featureFlags[FeatureFlag.ShowDebugUISetting] === true;
   const nextMetadataRecord: UserMetadataRecord = {};
 
   if (input.colorTheme !== undefined) {
@@ -130,12 +115,6 @@ export async function updatePersonalPreferencesCommand(
 
   if (input.narrationMode !== undefined) {
     nextMetadataRecord.narration_mode = input.narrationMode;
-  }
-
-  if (input.showDebugUI !== undefined) {
-    nextMetadataRecord.show_debug_ui = showDebugUISettingEnabled
-      ? input.showDebugUI
-      : false;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {
@@ -167,7 +146,5 @@ export async function updatePersonalPreferencesCommand(
     throw new Error('Unable to update preferences for the active user.');
   }
 
-  return normalizePersonalPreferences(normalizedMetadata, {
-    showDebugUISettingEnabled,
-  });
+  return normalizePersonalPreferences(normalizedMetadata);
 }

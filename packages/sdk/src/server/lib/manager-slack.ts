@@ -11,8 +11,6 @@ import {
   SUGGEST_IDEAS_SETTINGS_HASH,
   SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
 } from '@roomote/types';
-import { db, eq, users } from '@roomote/db/server';
-import { isShowDebugUIEnabledFromMetadata } from '@roomote/feature-flags';
 import { convertSlackLinksToMarkdown } from '@roomote/slack';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
@@ -153,21 +151,6 @@ export async function shouldPostHistoricalThreadFeedbackDebugSnippet(params: {
   logPrefix: string;
   warn: (message: string) => void;
 }) {
-  try {
-    const [user] = await db
-      .select({
-        metadata: users.metadata,
-      })
-      .from(users)
-      .where(eq(users.id, params.userId))
-      .limit(1);
-
-    return isShowDebugUIEnabledFromMetadata(user?.metadata);
-  } catch (error) {
-    params.warn(
-      `${params.logPrefix} Failed to load show-debug-ui preference for user ${params.userId}; skipping historical thread debug snippet: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    return false;
-  }
+  void params;
+  return false;
 }

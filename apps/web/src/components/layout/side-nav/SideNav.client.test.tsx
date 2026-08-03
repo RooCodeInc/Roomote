@@ -103,7 +103,6 @@ const {
       pathname: '/tasks',
       user: {
         isAdmin: true,
-        featureFlags: {},
       },
       isSideNavExpanded: false,
       recentTaskIds: ['task-2', 'task-3', 'task-4', 'task-5'],
@@ -384,7 +383,6 @@ describe('SideNav quick access tasks', () => {
     state.pathname = '/tasks';
     state.user = {
       isAdmin: true,
-      featureFlags: {},
     };
     state.isSideNavExpanded = false;
     state.recentTaskIds = ['task-2', 'task-3', 'task-4', 'task-5'];

@@ -2,14 +2,9 @@
  * Feature flag types and configuration
  */
 
-export enum FeatureFlag {
-  SlackEvalLauncher = 'SlackEvalLauncher',
-  ShowDebugUISetting = 'ShowDebugUISetting',
-  SuggestionRouting = 'SuggestionRouting',
-  VisualProofAutoScreencast = 'VisualProofAutoScreencast',
-  BackgroundSubagents = 'BackgroundSubagents',
-  CodeMode = 'CodeMode',
-}
+export const FeatureFlag = {} as const;
+
+export type FeatureFlag = (typeof FeatureFlag)[keyof typeof FeatureFlag];
 
 export type FeatureFlagValue =
   | boolean
@@ -18,36 +13,11 @@ export type FeatureFlagValue =
   | Record<string, unknown>;
 
 export interface FeatureFlagConfig<T extends FeatureFlagValue = boolean> {
-  /**
-   * The default value to use if the flag is not set in metadata
-   */
   defaultValue: T | (() => T);
-
-  /**
-   * Optional override value that takes precedence over metadata
-   * Useful for gradual rollouts and feature cleanup
-   */
   override?: T | (() => T);
-
-  /**
-   * The key in the metadata jsonb column to look for this flag
-   */
   metadataKey?: string;
-
-  /**
-   * Older metadata keys that should still enable this flag during a
-   * rollout rename. The primary metadataKey takes precedence when both exist.
-   */
   legacyMetadataKeys?: string[];
-
-  /**
-   * Optional description for documentation
-   */
   description?: string;
-
-  /**
-   * Optional admin UI grouping label for segregating related metadata controls.
-   */
   group?: string;
 }
 
@@ -70,29 +40,12 @@ export type FeatureFlagValues = {
   [K in FeatureFlag]: boolean;
 };
 
-/**
- * Evaluation context for feature flags.
- * - isDeploymentContext: true => deployment-wide metadata.
- * - isDeploymentContext: false => userId is required.
- */
 export type FeatureFlagContext =
-  | {
-      isDeploymentContext: true;
-    }
-  | {
-      isDeploymentContext: false;
-      userId: string;
-    };
+  | { isDeploymentContext: true }
+  | { isDeploymentContext: false; userId: string };
 
 export interface MetadataRecord {
-  slack_eval_launcher?: boolean;
-  show_debug_ui_setting?: boolean;
-  show_debug_ui?: boolean;
   queue_parallel_task_limit?: boolean | number | string;
-  suggestion_routing?: boolean;
-  visual_proof_auto_screencast?: boolean;
-  background_subagents?: boolean;
-  opencode_code_mode?: boolean;
   deployment_disabled?: boolean;
   anonymous_analytics_enabled?: boolean;
   [key: string]: unknown;

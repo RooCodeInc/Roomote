@@ -1,19 +1,3 @@
-const { mockDbSelect, mockEq } = vi.hoisted(() => ({
-  mockDbSelect: vi.fn(),
-  mockEq: vi.fn((left: unknown, right: unknown) => [left, right]),
-}));
-
-vi.mock('@roomote/db/server', () => ({
-  db: {
-    select: mockDbSelect,
-  },
-  eq: mockEq,
-  users: {
-    id: 'users.id',
-    metadata: 'users.metadata',
-  },
-}));
-
 import {
   buildAutomationRootSummaryMessage,
   buildAutomationRootSummaryText,
@@ -28,24 +12,8 @@ import {
 describe('manager slack helpers', () => {
   const originalApiUrl = process.env.R_APP_URL;
 
-  function mockMetadataLookup(
-    result:
-      | Array<{ metadata?: Record<string, unknown> | null }>
-      | PromiseLike<Array<{ metadata?: Record<string, unknown> | null }>>,
-  ) {
-    mockDbSelect.mockReturnValue({
-      from: () => ({
-        where: () => ({
-          limit: () => result,
-        }),
-      }),
-    });
-  }
-
   beforeEach(() => {
     process.env.R_APP_URL = 'https://app.example.com';
-    mockDbSelect.mockReset();
-    mockEq.mockClear();
   });
 
   afterEach(() => {
@@ -134,66 +102,8 @@ describe('manager slack helpers', () => {
     });
   });
 
-  it('posts historical thread feedback debug snippets only when show debug UI is enabled', async () => {
-    mockMetadataLookup([
-      {
-        metadata: {
-          show_debug_ui_setting: true,
-          show_debug_ui: true,
-        },
-      },
-    ]);
-
-    await expect(
-      shouldPostHistoricalThreadFeedbackDebugSnippet({
-        userId: 'user-1',
-        logPrefix: '[manager-slack]',
-        warn: vi.fn(),
-      }),
-    ).resolves.toBe(true);
-  });
-
-  it('skips historical thread feedback debug snippets when show debug UI is disabled', async () => {
-    mockMetadataLookup([
-      {
-        metadata: {
-          show_debug_ui_setting: true,
-          show_debug_ui: false,
-        },
-      },
-    ]);
-
-    await expect(
-      shouldPostHistoricalThreadFeedbackDebugSnippet({
-        userId: 'user-1',
-        logPrefix: '[manager-slack]',
-        warn: vi.fn(),
-      }),
-    ).resolves.toBe(false);
-  });
-
-  it('skips historical thread feedback debug snippets when user metadata is missing', async () => {
-    mockMetadataLookup([]);
-
-    await expect(
-      shouldPostHistoricalThreadFeedbackDebugSnippet({
-        userId: 'user-1',
-        logPrefix: '[manager-slack]',
-        warn: vi.fn(),
-      }),
-    ).resolves.toBe(false);
-  });
-
-  it('fails open when show debug UI metadata lookup fails', async () => {
+  it('always skips historical thread feedback debug snippets', async () => {
     const warn = vi.fn();
-
-    mockDbSelect.mockReturnValue({
-      from: () => ({
-        where: () => ({
-          limit: () => Promise.reject(new Error('metadata unavailable')),
-        }),
-      }),
-    });
 
     await expect(
       shouldPostHistoricalThreadFeedbackDebugSnippet({
@@ -202,9 +112,7 @@ describe('manager slack helpers', () => {
         warn,
       }),
     ).resolves.toBe(false);
-    expect(warn).toHaveBeenCalledWith(
-      '[manager-slack] Failed to load show-debug-ui preference for user user-1; skipping historical thread debug snippet: metadata unavailable',
-    );
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

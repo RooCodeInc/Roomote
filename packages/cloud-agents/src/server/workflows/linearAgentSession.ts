@@ -69,8 +69,6 @@ export async function linearAgentSession({
   conflictResolverLabel,
   taskRunUrl,
   attribution = undefined,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
   codeReviewsEnabled,
   codeReviewReviewOnCommit,
   codeReviewReviewDraftPrs,
@@ -81,8 +79,6 @@ export async function linearAgentSession({
   conflictResolverLabel?: string;
   taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
   codeReviewsEnabled?: boolean;
   codeReviewReviewOnCommit?: boolean;
   codeReviewReviewDraftPrs?: boolean;
@@ -130,8 +126,6 @@ export async function linearAgentSession({
     taskRunUrl,
     attribution,
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
     codeReviewsEnabled,
     codeReviewReviewOnCommit,
     codeReviewReviewDraftPrs,

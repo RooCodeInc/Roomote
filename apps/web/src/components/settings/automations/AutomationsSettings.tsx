@@ -5,7 +5,6 @@ import type { ComponentType } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { FeatureFlag } from '@roomote/feature-flags';
 import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   type BackgroundAutomationKey,
@@ -14,7 +13,6 @@ import {
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
-  DEFAULT_SUGGESTER_ROUTING_MODE,
   getCommunicationProviderDisplayName,
   getSourceControlProviderLabel,
   getTriggerableBackgroundAutomationDescriptorByKey,
@@ -27,15 +25,12 @@ import {
   type ScheduleOnlyBackgroundAutomationFrequencyField,
   type ScheduleOnlyBackgroundAutomationId,
   type SourceControlProvider,
-  type SuggesterRoutingMode,
   type TaskState,
   type TaskTrigger,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 
 import { useConnectSlack } from '@/hooks/slack';
-import { useShowDebugUI } from '@/hooks/useShowDebugUI';
-import { useAuthorizedUser } from '@/hooks/useUser';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { cn } from '@/lib/utils';
@@ -99,8 +94,6 @@ import {
   Lightbulb,
   Megaphone,
   Play,
-  RadioGroup,
-  RadioGroupItem,
   RefreshCcw,
   Select,
   SelectContent,
@@ -157,19 +150,12 @@ type FieldErrors = Partial<
     | 'suggesterUseTeams'
     | 'sentryTriageProjectSlugs'
     | 'suggesterInstructions'
-    | 'suggesterRoutingInstructions'
     | 'announcerInstructions'
     | 'reviewerInstructions'
     | 'issueFixerInstructions',
     string
   >
 >;
-
-type SuggestionRoutingPreviewRoute = {
-  groupLabel: string;
-  slackChannelName: string;
-  guidance: string;
-};
 
 type SlackChannelAccessWarnings = {
   channelAutoStartSlackChannels: string[];
@@ -727,8 +713,6 @@ function mapSettingsToFormState(
     suggesterTelegramChatId: string | null;
     suggesterTeamsChannelId: string | null;
     suggesterInstructions: string | null;
-    suggesterRoutingMode: SuggesterRoutingMode;
-    suggesterRoutingInstructions: string | null;
     announcerFrequency: AnnouncerFrequency;
     announcerSlackChannelId: string | null;
     announcerSlackChannelName?: string | null;
@@ -838,9 +822,6 @@ function mapSettingsToFormState(
     suggesterUseTelegram: Boolean(settings.suggesterTelegramChatId),
     suggesterUseTeams: Boolean(settings.suggesterTeamsChannelId),
     suggesterInstructions: settings.suggesterInstructions ?? '',
-    suggesterRoutingMode:
-      settings.suggesterRoutingMode ?? DEFAULT_SUGGESTER_ROUTING_MODE,
-    suggesterRoutingInstructions: settings.suggesterRoutingInstructions ?? '',
     announcerFrequency: settings.announcerFrequency,
     announcerSlackChannel:
       settings.announcerSlackChannelName ??
@@ -1716,20 +1697,13 @@ function ScheduledAutomationCard<TFrequency extends string>({
 }
 
 export function AutomationsSettings() {
-  const user = useAuthorizedUser();
-  const { isDebugUIVisible } = useShowDebugUI();
-  const showAutomationDebugRuns = isDebugUIVisible;
+  const showAutomationDebugRuns = false;
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
   const [formState, setFormState] = useState<FormState | null>(null);
   const [savedState, setSavedState] = useState<FormState | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [suggesterRoutingPreview, setSuggesterRoutingPreview] = useState<
-    SuggestionRoutingPreviewRoute[] | null
-  >(null);
-  const [isEditingSuggesterRouting, setIsEditingSuggesterRouting] =
-    useState(true);
   const [slackChannelAccessWarnings, setSlackChannelAccessWarnings] =
     useState<SlackChannelAccessWarnings>(EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS);
   const [managerSlackChannelId, setManagerSlackChannelId] = useState<
@@ -1750,8 +1724,6 @@ export function AutomationsSettings() {
   const formStateRef = useRef<FormState | null>(null);
   const savedStateRef = useRef<FormState | null>(null);
   const didApplyInitialHashRef = useRef(false);
-  const suggestionRoutingEnabled =
-    user.featureFlags[FeatureFlag.SuggestionRouting] === true;
 
   const connectSlack = useConnectSlack(SETTINGS_PATHS.automations, {
     onSuccess: (url) => {
@@ -1904,16 +1876,6 @@ export function AutomationsSettings() {
         }
 
         setFieldErrors({});
-        if (savingAutomation === 'suggester') {
-          const nextRoutingPreview = result.suggesterRoutingPreview ?? null;
-          setSuggesterRoutingPreview(nextRoutingPreview);
-          setIsEditingSuggesterRouting(
-            !(
-              result.settings.suggesterRoutingMode ===
-                'group_by_instructions' && nextRoutingPreview
-            ),
-          );
-        }
         setSlackChannelAccessWarnings(result.slackChannelAccessWarnings);
         setManagerSlackChannelId(result.settings.managerSlackChannelId);
         setManagerDiscordChannelId(result.settings.managerDiscordChannelId);
@@ -4200,7 +4162,6 @@ export function AutomationsSettings() {
               <Select
                 value={formState.suggesterFrequency}
                 onValueChange={(value) => {
-                  setSuggesterRoutingPreview(null);
                   setFormState((prev) =>
                     prev
                       ? {
@@ -4229,231 +4190,58 @@ export function AutomationsSettings() {
 
               {suggesterIsEnabled ? (
                 <div className="space-y-5">
-                  {!suggestionRoutingEnabled ? (
-                    <>
-                      {renderSlackDestinationField({
-                        field: 'suggesterSlackChannel',
-                        inputId: 'suggester-slack-channel',
-                        label: 'Post suggestions to this Slack channel',
-                        helperText:
-                          'Choose where Roomote should post its suggestion digests.',
-                        savedChannelId:
-                          settingsQuery.data?.settings
-                            .suggesterSlackChannelId ?? null,
-                        savedDiscordChannelId:
-                          settingsQuery.data?.settings
-                            .suggesterDiscordChannelId ?? null,
-                        warningChannelId:
-                          slackChannelAccessWarnings.suggesterSlackChannel,
-                        allowTelegram: true,
-                        savedTelegramSelected: Boolean(
-                          settingsQuery.data?.settings.suggesterTelegramChatId,
-                        ),
-                        allowTeams: true,
-                        savedTeamsSelected: Boolean(
-                          settingsQuery.data?.settings.suggesterTeamsChannelId,
-                        ),
-                      })}
+                  <>
+                    {renderSlackDestinationField({
+                      field: 'suggesterSlackChannel',
+                      inputId: 'suggester-slack-channel',
+                      label: 'Post suggestions to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post its suggestion digests.',
+                      savedChannelId:
+                        settingsQuery.data?.settings.suggesterSlackChannelId ??
+                        null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .suggesterDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.suggesterSlackChannel,
+                      allowTelegram: true,
+                      savedTelegramSelected: Boolean(
+                        settingsQuery.data?.settings.suggesterTelegramChatId,
+                      ),
+                      allowTeams: true,
+                      savedTeamsSelected: Boolean(
+                        settingsQuery.data?.settings.suggesterTeamsChannelId,
+                      ),
+                    })}
 
-                      <div className="space-y-2">
-                        <Label htmlFor="suggester-instructions">
-                          Additional instructions
-                        </Label>
-                        <Textarea
-                          id="suggester-instructions"
-                          value={formState.suggesterInstructions}
-                          onChange={(event) =>
-                            setFormState((prev) =>
-                              prev
-                                ? {
-                                    ...prev,
-                                    suggesterInstructions: event.target.value,
-                                  }
-                                : prev,
-                            )
-                          }
-                          rows={4}
-                          placeholder="Optional guidance for which ideas to prioritize or avoid"
-                        />
-                        {fieldErrors.suggesterInstructions ? (
-                          <p className="text-xs text-destructive">
-                            {fieldErrors.suggesterInstructions}
-                          </p>
-                        ) : null}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <RadioGroup
-                        value={formState.suggesterRoutingMode}
-                        onValueChange={(value) => {
-                          setSuggesterRoutingPreview(null);
-                          setIsEditingSuggesterRouting(true);
+                    <div className="space-y-2">
+                      <Label htmlFor="suggester-instructions">
+                        Additional instructions
+                      </Label>
+                      <Textarea
+                        id="suggester-instructions"
+                        value={formState.suggesterInstructions}
+                        onChange={(event) =>
                           setFormState((prev) =>
                             prev
                               ? {
                                   ...prev,
-                                  suggesterRoutingMode:
-                                    value as SuggesterRoutingMode,
+                                  suggesterInstructions: event.target.value,
                                 }
                               : prev,
-                          );
-                        }}
-                        className="space-y-2"
-                      >
-                        <div className="space-y-2">
-                          <Label
-                            htmlFor="suggester-routing-manager"
-                            className="flex items-center gap-2 cursor-pointer font-normal"
-                          >
-                            <RadioGroupItem
-                              id="suggester-routing-manager"
-                              value="manager_channel"
-                            />
-                            <span>
-                              Post all suggestions to the manager channel
-                            </span>
-                          </Label>
-                          {formState.suggesterRoutingMode ===
-                          'manager_channel' ? (
-                            <div className="space-y-2 pl-6">
-                              <Textarea
-                                id="suggester-instructions"
-                                value={formState.suggesterInstructions}
-                                onChange={(event) =>
-                                  setFormState((prev) =>
-                                    prev
-                                      ? {
-                                          ...prev,
-                                          suggesterInstructions:
-                                            event.target.value,
-                                        }
-                                      : prev,
-                                  )
-                                }
-                                rows={4}
-                                placeholder="Optional guidance for which ideas to prioritize or avoid"
-                              />
-                              {fieldErrors.suggesterInstructions ? (
-                                <p className="text-xs text-destructive">
-                                  {fieldErrors.suggesterInstructions}
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div className="space-y-2">
-                          <Label
-                            htmlFor="suggester-routing-grouped"
-                            className="flex items-center gap-2 cursor-pointer font-normal"
-                          >
-                            <RadioGroupItem
-                              id="suggester-routing-grouped"
-                              value="group_by_instructions"
-                            />
-                            <span>
-                              Group suggestions and post them in different
-                              channels
-                            </span>
-                          </Label>
-                          {formState.suggesterRoutingMode ===
-                          'group_by_instructions' ? (
-                            <div className="space-y-3">
-                              <div className="space-y-2 pl-6">
-                                {suggesterRoutingPreview &&
-                                !isEditingSuggesterRouting ? (
-                                  <>
-                                    <table className="w-full border-collapse text-left">
-                                      <thead>
-                                        <tr className="border-b border-border/70">
-                                          <th className="px-0 py-2 text-sm font-medium">
-                                            Group
-                                          </th>
-                                          <th className="px-0 py-2 text-sm font-medium">
-                                            Description
-                                          </th>
-                                          <th className="px-0 py-2 text-sm font-medium">
-                                            Channel
-                                          </th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {suggesterRoutingPreview.map(
-                                          (route) => (
-                                            <tr
-                                              key={`${route.groupLabel}-${route.slackChannelName}`}
-                                              className="border-b border-border/50 last:border-0"
-                                            >
-                                              <td className="px-0 py-3 text-sm">
-                                                {route.groupLabel}
-                                              </td>
-                                              <td className="px-0 py-3 text-sm text-muted-foreground">
-                                                {route.guidance}
-                                              </td>
-                                              <td className="px-0 py-3 text-sm font-mono">
-                                                {route.slackChannelName}
-                                              </td>
-                                            </tr>
-                                          ),
-                                        )}
-                                      </tbody>
-                                    </table>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      onClick={() =>
-                                        setIsEditingSuggesterRouting(true)
-                                      }
-                                    >
-                                      Edit
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <p className="text-sm text-muted-foreground md:max-w-180">
-                                      Describe how to group ideas (eg by type,
-                                      repo, module) and in what Slack channel to
-                                      post them
-                                    </p>
-                                    <Textarea
-                                      id="suggester-routing-instructions"
-                                      value={
-                                        formState.suggesterRoutingInstructions
-                                      }
-                                      onChange={(event) => {
-                                        setSuggesterRoutingPreview(null);
-                                        setIsEditingSuggesterRouting(true);
-                                        setFormState((prev) =>
-                                          prev
-                                            ? {
-                                                ...prev,
-                                                suggesterRoutingInstructions:
-                                                  event.target.value,
-                                              }
-                                            : prev,
-                                        );
-                                      }}
-                                      rows={8}
-                                      placeholder={`Ideas about incidents, reliability, alerts, and monitoring -> #eng-infra
-Ideas about product polish, UX gaps, and onboarding friction -> #product-eng
-If unclear, send to manager channel.`}
-                                    />
-                                    {fieldErrors.suggesterRoutingInstructions ? (
-                                      <p className="text-xs text-destructive">
-                                        {
-                                          fieldErrors.suggesterRoutingInstructions
-                                        }
-                                      </p>
-                                    ) : null}
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      </RadioGroup>
-                    </>
-                  )}
+                          )
+                        }
+                        rows={4}
+                        placeholder="Optional guidance for which ideas to prioritize or avoid"
+                      />
+                      {fieldErrors.suggesterInstructions ? (
+                        <p className="text-xs text-destructive">
+                          {fieldErrors.suggesterInstructions}
+                        </p>
+                      ) : null}
+                    </div>
+                  </>
                 </div>
               ) : null}
             </div>

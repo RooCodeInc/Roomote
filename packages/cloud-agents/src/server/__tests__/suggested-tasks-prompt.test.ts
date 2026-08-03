@@ -240,34 +240,6 @@ describe('buildSuggestedTasksPrompt', () => {
     expect(prompt).toContain('Include more operator-facing cleanup work');
   });
 
-  it('includes route-specific guidance for grouped suggestion runs', () => {
-    const prompt = buildSuggestedTasksPrompt({
-      repositoryFullNames: ['acme/web'],
-      setupGuidance: null,
-      suggesterInstructions: null,
-      routeContext: {
-        destinationChannelName: '#eng-infra',
-        excludedGroupLabels: ['Product polish', 'Developer experience'],
-        groupLabel: 'Incidents',
-        isFallbackRoute: false,
-        routeInstructions:
-          'Focus on alerts, incidents, monitoring, and reliability follow-up work.',
-      },
-    });
-
-    expect(prompt).toContain('Route-specific guidance:');
-    expect(prompt).toContain(
-      'This run is only for the following idea cluster: Incidents',
-    );
-    expect(prompt).toContain(
-      'Focus on alerts, incidents, monitoring, and reliability follow-up work.',
-    );
-    expect(prompt).toContain('Post accepted suggestions to #eng-infra.');
-    expect(prompt).toContain('Other defined groups to exclude from this run:');
-    expect(prompt).toContain('- Product polish');
-    expect(prompt).toContain('- Developer experience');
-  });
-
   it('truncates long briefs in previous suggestions', () => {
     const longBrief = 'a'.repeat(300);
     const prompt = buildSuggestedTasksPrompt({

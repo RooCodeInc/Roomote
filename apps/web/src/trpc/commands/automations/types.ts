@@ -14,7 +14,6 @@ import type {
   ScheduleOnlyBackgroundAutomationId,
   SentryTriageFrequency,
   SuggesterFrequency,
-  SuggesterRoutingMode,
 } from '@roomote/types';
 
 export type BackgroundAgentFieldErrorKey =
@@ -55,7 +54,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'suggesterUseTeams'
   | 'sentryTriageProjectSlugs'
   | 'suggesterInstructions'
-  | 'suggesterRoutingInstructions'
   | 'announcerInstructions'
   | 'reviewerInstructions'
   | 'issueFixerInstructions';
@@ -283,8 +281,6 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   /** When true, Suggest Ideas delivers to the primary Teams conversation. */
   suggesterUseTeams?: boolean;
   suggesterInstructions: string | null;
-  suggesterRoutingMode?: SuggesterRoutingMode;
-  suggesterRoutingInstructions?: string | null;
   announcerFrequency: AnnouncerFrequency;
   announcerSlackChannel: string | null;
   announcerDiscordChannel?: string | null;

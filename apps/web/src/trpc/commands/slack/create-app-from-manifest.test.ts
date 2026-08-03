@@ -1,5 +1,3 @@
-import type { FeatureFlag } from '@roomote/feature-flags';
-
 import type { UserAuthSuccess } from '@/types';
 
 const {
@@ -54,7 +52,6 @@ function buildMockAuth(
     isAdmin: true,
     name: 'Slack Manifest Tester',
     primaryEmail: 'slack@example.com',
-    featureFlags: {} as Record<FeatureFlag, boolean>,
     resource: {
       username: 'slack-manifest-tester',
       fullName: 'Slack Manifest Tester',

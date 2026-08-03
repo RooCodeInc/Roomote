@@ -4,35 +4,27 @@ import { ExecutionError } from '../../../command-executor';
 import type { StartupLogger } from '../../../logging';
 import { WorkspaceManager, type WorkspaceConfig } from '../../../workspace';
 
-const {
-  mockStartServices,
-  mockStartPortProxies,
-  mockListRepositories,
-  mockEvaluateFeatureFlag,
-} = vi.hoisted(() => ({
-  mockStartServices: vi.fn<() => Promise<ServiceInfo[]>>(),
-  mockStartPortProxies: vi
-    .fn<
-      () => Promise<{
-        servers: [];
-        stop: () => Promise<void>;
-      }>
-    >()
-    .mockResolvedValue({
-      servers: [],
-      stop: async () => {},
-    }),
-  mockListRepositories: vi.fn<() => Promise<Array<{ fullName: string }>>>(),
-  mockEvaluateFeatureFlag: vi.fn<() => Promise<boolean>>(),
-}));
+const { mockStartServices, mockStartPortProxies, mockListRepositories } =
+  vi.hoisted(() => ({
+    mockStartServices: vi.fn<() => Promise<ServiceInfo[]>>(),
+    mockStartPortProxies: vi
+      .fn<
+        () => Promise<{
+          servers: [];
+          stop: () => Promise<void>;
+        }>
+      >()
+      .mockResolvedValue({
+        servers: [],
+        stop: async () => {},
+      }),
+    mockListRepositories: vi.fn<() => Promise<Array<{ fullName: string }>>>(),
+  }));
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     repositories: {
       listRepositories: () => mockListRepositories(),
-    },
-    featureFlags: {
-      evaluate: () => mockEvaluateFeatureFlag(),
     },
   },
 }));
@@ -89,7 +81,6 @@ function createLogger(): StartupLogger {
 describe('initializeRepositories', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEvaluateFeatureFlag.mockResolvedValue(false);
   });
 
   it('prepares only the selected repository subset for scoped multi-repo workspaces', async () => {

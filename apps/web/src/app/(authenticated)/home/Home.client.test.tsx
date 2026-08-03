@@ -7,17 +7,13 @@ import {
 } from '@testing-library/react';
 
 import { ALL_REPOSITORIES } from '@roomote/types';
-import { FeatureFlag } from '@roomote/feature-flags';
 import type { RoutingDecision } from '@roomote/cloud-agents/server';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { AUTO_WORKSPACE_VALUE } from '@/components/tasks/constants';
 
 let currentSearchParams = '';
-let currentFeatureFlags: Record<string, boolean> = {};
 let currentCloudEnabled = false;
 let currentIsAdmin = true;
-let currentShowDebugUI = false;
-let currentShowDebugUILoading = false;
 let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-1', name: 'Primary Env' },
   { id: 'env-2', name: 'Secondary Env' },
@@ -67,7 +63,6 @@ vi.mock('@/hooks/useUser', () => ({
     name: 'Test User',
     primaryEmail: 'test@example.com',
     cloudEnabled: currentCloudEnabled,
-    featureFlags: currentFeatureFlags,
     resource: {
       username: 'tester',
       fullName: 'Test User',
@@ -86,15 +81,6 @@ vi.mock('@/hooks/environments', () => ({
     data: currentEnvironments,
     isPending: currentEnvironmentsPending,
     isSuccess: !currentEnvironmentsPending,
-  }),
-}));
-
-vi.mock('@/hooks/useShowDebugUI', () => ({
-  useShowDebugUI: () => ({
-    isDebugUIVisible: currentShowDebugUI,
-    isLoading: currentShowDebugUILoading,
-    isUpdating: false,
-    setDebugUIVisible: vi.fn(),
   }),
 }));
 
@@ -323,11 +309,8 @@ const routedEnvironmentSuggestionWithDefaultModel: RoutingDecision = {
 describe('Home', () => {
   beforeEach(() => {
     currentSearchParams = '';
-    currentFeatureFlags = {};
     currentCloudEnabled = false;
     currentIsAdmin = true;
-    currentShowDebugUI = false;
-    currentShowDebugUILoading = false;
     currentEnvironments = [
       { id: 'env-1', name: 'Primary Env' },
       { id: 'env-2', name: 'Secondary Env' },
@@ -593,21 +576,12 @@ describe('Home', () => {
   });
 
   it('does not show a model selector when debug UI is enabled', () => {
-    currentFeatureFlags = {
-      [FeatureFlag.ShowDebugUISetting]: true,
-    };
-    currentShowDebugUI = true;
-
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(screen.queryByLabelText('OpenCode model')).not.toBeInTheDocument();
   });
 
   it('ignores previously persisted harnesses on new launches', async () => {
-    currentFeatureFlags = {
-      [FeatureFlag.ShowDebugUISetting]: true,
-    };
-    currentShowDebugUI = true;
     localStorage.setItem(
       'roomote-workspace:deployment',
       JSON.stringify({
@@ -633,11 +607,6 @@ describe('Home', () => {
   });
 
   it('does not persist the default harness after launch', async () => {
-    currentFeatureFlags = {
-      [FeatureFlag.ShowDebugUISetting]: true,
-    };
-    currentShowDebugUI = true;
-
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -669,10 +638,6 @@ describe('Home', () => {
   });
 
   it('uses the OpenCode harness on new launches', async () => {
-    currentFeatureFlags = {
-      [FeatureFlag.ShowDebugUISetting]: true,
-    };
-    currentShowDebugUI = true;
     localStorage.setItem(
       'roomote-workspace:deployment',
       JSON.stringify({
@@ -699,11 +664,6 @@ describe('Home', () => {
   });
 
   it('uses the provided default compute provider when selection is enabled', async () => {
-    currentFeatureFlags = {
-      [FeatureFlag.ShowDebugUISetting]: true,
-    };
-    currentShowDebugUI = true;
-
     render(<Home initialPlaceholderIndex={0} defaultComputeProvider="modal" />);
 
     fireEvent.click(
@@ -721,11 +681,6 @@ describe('Home', () => {
   });
 
   it('does not source-pin selected environment launches from Home when debug UI is enabled', async () => {
-    currentFeatureFlags = {
-      [FeatureFlag.ShowDebugUISetting]: true,
-    };
-    currentShowDebugUI = true;
-
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -753,10 +708,6 @@ describe('Home', () => {
   });
 
   it('does not source-pin environment launches when debug UI is off', async () => {
-    currentFeatureFlags = {
-      [FeatureFlag.ShowDebugUISetting]: true,
-    };
-
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(

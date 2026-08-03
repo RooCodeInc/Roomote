@@ -7,10 +7,7 @@ import {
 } from '@/components/settings/UserProfileSection';
 import { ChangePasswordSection } from '@/components/settings/ChangePasswordSection';
 import { LinkedAccounts } from '@/components/settings/LinkedAccounts';
-import {
-  ShowDebugUISection,
-  UserPreferencesSection,
-} from '@/components/settings';
+import { UserPreferencesSection } from '@/components/settings';
 
 export function PersonalSettingsPage({
   profile,
@@ -32,7 +29,6 @@ export function PersonalSettingsPage({
       ) : null}
       <UserPreferencesSection />
       <LinkedAccounts />
-      <ShowDebugUISection />
     </SettingsShell>
   );
 }

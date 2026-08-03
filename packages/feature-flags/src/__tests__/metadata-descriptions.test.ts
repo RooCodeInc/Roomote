@@ -1,61 +1,31 @@
-import {
-  getBooleanMetadataDescriptorByKey,
-  getFeatureFlagDescriptionByMetadataKey,
-} from '../index';
+import { describe, expect, it } from 'vitest';
 
-describe('getFeatureFlagDescriptionByMetadataKey', () => {
-  it('treats untyped boolean metadata keys as legacy by default', () => {
-    expect(getFeatureFlagDescriptionByMetadataKey('analytics_page')).toBe(null);
-    expect(getBooleanMetadataDescriptorByKey('analytics_page')).toEqual({
+import { getBooleanMetadataDescriptorByKey } from '../index';
+
+describe('metadata descriptions', () => {
+  it.each([
+    'slack_eval_launcher',
+    'show_debug_ui_setting',
+    'show_debug_ui',
+    'suggestion_routing',
+    'visual_proof_auto_screencast',
+    'background_subagents',
+    'opencode_background_subagents',
+    'opencode_code_mode',
+  ])('classifies removed experiment metadata %s as legacy', (key) => {
+    expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
       description: null,
       group: null,
     });
-    expect(getFeatureFlagDescriptionByMetadataKey('thin_proof_capture')).toBe(
-      null,
+  });
+
+  it('retains active deployment-control descriptors', () => {
+    expect(getBooleanMetadataDescriptorByKey('deployment_disabled').kind).toBe(
+      'deployment-control',
     );
     expect(
-      getFeatureFlagDescriptionByMetadataKey('slack_solo_thread_replies'),
-    ).toBeNull();
-    expect(getFeatureFlagDescriptionByMetadataKey('random_harness')).toBeNull();
-    expect(getBooleanMetadataDescriptorByKey('random_harness')).toEqual({
-      kind: 'legacy',
-      description: null,
-      group: null,
-    });
-  });
-
-  it('treats the retired previews_enabled deployment control as legacy', () => {
-    expect(getFeatureFlagDescriptionByMetadataKey('previews_enabled')).toBe(
-      null,
-    );
-    expect(getBooleanMetadataDescriptorByKey('previews_enabled')).toEqual({
-      kind: 'legacy',
-      description: null,
-      group: null,
-    });
-  });
-
-  it('returns descriptions for active boolean metadata controls outside the typed flag enum', () => {
-    expect(getFeatureFlagDescriptionByMetadataKey('deployment_disabled')).toBe(
-      'Disable Roomote access and new task launches for this deployment',
-    );
-    expect(getBooleanMetadataDescriptorByKey('deployment_disabled')).toEqual({
-      kind: 'deployment-control',
-      description:
-        'Disable Roomote access and new task launches for this deployment',
-      group: null,
-    });
-  });
-
-  it('returns null for unknown metadata keys', () => {
-    expect(getFeatureFlagDescriptionByMetadataKey('totally_unknown_flag')).toBe(
-      null,
-    );
-    expect(getBooleanMetadataDescriptorByKey('totally_unknown_flag')).toEqual({
-      kind: 'legacy',
-      description: null,
-      group: null,
-    });
+      getBooleanMetadataDescriptorByKey('anonymous_analytics_enabled').kind,
+    ).toBe('deployment-control');
   });
 });

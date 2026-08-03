@@ -1,21 +1,29 @@
 import { db, deploymentSettings, eq } from '@roomote/db/server';
-import { getRedis } from '@roomote/redis';
 import {
   FeatureFlag,
   FEATURE_FLAG_CONFIG,
   evaluateFeatureFlagFromMetadata,
   getFeatureFlagMetadataKey,
   type MetadataRecord,
+  type FeatureFlagConfig,
 } from '@roomote/feature-flags';
 import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
+import { getRedis } from '@roomote/redis';
 
 import type { UserAuthSuccess } from '@/types';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
-
 type DeploymentMetadataRecord = Record<string, unknown>;
 
-export type ExperimentalFlag = {
+function getConfiguredFlag(flag: FeatureFlag): FeatureFlagConfig {
+  const config = (
+    FEATURE_FLAG_CONFIG as Partial<Record<string, FeatureFlagConfig>>
+  )[flag];
+  if (!config) throw new Error(`Unknown feature flag: ${String(flag)}`);
+  return config;
+}
+
+type ExperimentalFlag = {
   id: FeatureFlag;
   metadataKey: string;
   description: string;
@@ -25,15 +33,20 @@ export type ExperimentalFlag = {
 };
 
 function normalizeMetadata(value: unknown): DeploymentMetadataRecord {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
-  }
-
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return { ...(value as DeploymentMetadataRecord) };
 }
 
+async function getDeploymentMetadata(): Promise<DeploymentMetadataRecord> {
+  const settings = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    columns: { metadata: true },
+  });
+  return normalizeMetadata(settings?.metadata);
+}
+
 function resolveDefaultFlagValue(flag: FeatureFlag): boolean {
-  const config = FEATURE_FLAG_CONFIG[flag];
+  const config = getConfiguredFlag(flag);
   const defaultValue =
     typeof config.defaultValue === 'function'
       ? config.defaultValue()
@@ -47,9 +60,8 @@ function buildExperimentalFlags(
   const metadataRecord = metadata as MetadataRecord;
 
   return (Object.values(FeatureFlag) as FeatureFlag[]).map((flag) => {
-    const config = FEATURE_FLAG_CONFIG[flag];
+    const config = getConfiguredFlag(flag);
     const metadataKey = getFeatureFlagMetadataKey(flag);
-
     return {
       id: flag,
       metadataKey,
@@ -61,31 +73,16 @@ function buildExperimentalFlags(
   });
 }
 
-async function getDeploymentMetadata(): Promise<DeploymentMetadataRecord> {
-  const settings = await db.query.deploymentSettings.findFirst({
-    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-    columns: {
-      metadata: true,
-    },
-  });
-
-  return normalizeMetadata(settings?.metadata);
-}
-
 function assertAdmin(auth: UserAuthSuccess) {
-  if (!auth.isAdmin) {
-    throw new Error('Unauthorized');
-  }
+  if (!auth.isAdmin) throw new Error('Unauthorized');
 }
 
 export async function getExperimentalFlagsCommand(
   auth: UserAuthSuccess,
 ): Promise<ExperimentalFlag[]> {
   assertAdmin(auth);
-
-  const metadata = await getDeploymentMetadata();
-
-  return buildExperimentalFlags(metadata);
+  if (Object.keys(FEATURE_FLAG_CONFIG).length === 0) return [];
+  return buildExperimentalFlags(await getDeploymentMetadata());
 }
 
 export async function updateExperimentalFlagCommand(
@@ -94,26 +91,17 @@ export async function updateExperimentalFlagCommand(
 ): Promise<ExperimentalFlag[]> {
   assertAdmin(auth);
 
-  const metadataKey = getFeatureFlagMetadataKey(input.flag);
-
-  if (!(input.flag in FEATURE_FLAG_CONFIG)) {
-    throw new Error(`Unknown feature flag: ${input.flag}`);
+  if (!Object.hasOwn(FEATURE_FLAG_CONFIG, input.flag)) {
+    throw new Error(`Unknown feature flag: ${String(input.flag)}`);
   }
 
+  const metadataKey = getFeatureFlagMetadataKey(input.flag);
   const existingSettings = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-    columns: {
-      metadata: true,
-    },
+    columns: { metadata: true },
   });
-
   const existingMetadata = normalizeMetadata(existingSettings?.metadata);
-  const nextMetadata: DeploymentMetadataRecord = {
-    ...existingMetadata,
-    [metadataKey]: input.value,
-  };
-
-  const now = new Date();
+  const nextMetadata = { ...existingMetadata, [metadataKey]: input.value };
 
   if (!existingSettings) {
     await db.insert(deploymentSettings).values({
@@ -124,16 +112,10 @@ export async function updateExperimentalFlagCommand(
   } else {
     await db
       .update(deploymentSettings)
-      .set({
-        metadata: nextMetadata,
-        updatedAt: now,
-      })
+      .set({ metadata: nextMetadata, updatedAt: new Date() })
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
   }
 
-  // Invalidate the Redis-cached deployment metadata so the worker/api SDK
-  // evaluator picks up the new value on its next evaluation.
   await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
-
   return buildExperimentalFlags(nextMetadata);
 }

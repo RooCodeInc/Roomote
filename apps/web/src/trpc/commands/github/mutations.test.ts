@@ -1,5 +1,3 @@
-import type { FeatureFlag } from '@roomote/feature-flags';
-
 import type { UserAuthSuccess } from '@/types';
 import { decodeRecord } from '@/lib';
 
@@ -96,7 +94,6 @@ function buildMockAuth(
     isAdmin: true,
     name: 'GitHub Manifest Tester',
     primaryEmail: 'github@example.com',
-    featureFlags: {} as Record<FeatureFlag, boolean>,
     resource: {
       username: 'github-manifest-tester',
       fullName: 'GitHub Manifest Tester',

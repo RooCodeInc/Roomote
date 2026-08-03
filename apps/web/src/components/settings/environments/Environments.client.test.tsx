@@ -18,12 +18,8 @@ import {
   useState,
 } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { FeatureFlag } from '@roomote/feature-flags';
-
-import { mockFeatureFlags } from '@/lib/mock-utils';
 
 const state = vi.hoisted(() => ({
-  featureFlags: {} as Record<FeatureFlag, boolean>,
   createSnapshot: vi.fn().mockResolvedValue({ success: true }),
   clearSnapshot: vi.fn(),
   roomoteConfigured: false,
@@ -95,7 +91,6 @@ vi.mock('sonner', () => ({
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({
     isAdmin: true,
-    featureFlags: state.featureFlags,
   }),
 }));
 
@@ -378,9 +373,6 @@ import { Environments } from './Environments';
 
 describe('Environments', () => {
   beforeEach(() => {
-    state.featureFlags = {
-      ...mockFeatureFlags,
-    };
     state.roomoteConfigured = false;
     state.repositories = [{ id: 'repo-1', fullName: 'acme/api' }];
     state.environments = [

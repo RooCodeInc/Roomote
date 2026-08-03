@@ -1,4 +1,3 @@
-import { FeatureFlag } from '@roomote/feature-flags';
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -97,10 +96,6 @@ vi.mock('@/lib/task-utils', () => ({
 
 import { createStandardTaskRunCommand } from './index';
 
-const featureFlags = Object.fromEntries(
-  Object.values(FeatureFlag).map((flag) => [flag, false]),
-) as Record<FeatureFlag, boolean>;
-
 const auth = {
   success: true,
   userType: 'user',
@@ -108,7 +103,7 @@ const auth = {
   name: 'Test User',
   primaryEmail: 'test@example.com',
   isAdmin: true,
-  featureFlags,
+  featureFlags: {},
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
   cookieConsentedAt: null,

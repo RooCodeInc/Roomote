@@ -647,8 +647,6 @@ export async function setAnonymousAnalyticsCommand(
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
   }
 
-  // Keep the Redis-cached deployment metadata coherent for any evaluator
-  // consumers, mirroring the experimental feature-flag update path.
   await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
 
   return getMiscSettingsCommand(auth);

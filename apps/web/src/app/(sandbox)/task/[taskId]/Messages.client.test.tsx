@@ -17,19 +17,6 @@ const sandboxMessagesState = vi.hoisted(() => ({
   messages: [] as unknown[],
 }));
 
-const userState = vi.hoisted(() => ({
-  isSignedIn: true,
-  user: {
-    featureFlags: {
-      ShowDebugUISetting: false,
-    },
-  },
-}));
-
-const showDebugUiState = vi.hoisted(() => ({
-  enabled: false,
-}));
-
 vi.mock('@/components/ai-elements', () => ({
   Conversation: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
@@ -64,22 +51,6 @@ vi.mock('@/hooks/useNarrationMode', () => ({
     isUpdating: false,
     setEnabled: vi.fn(),
   }),
-}));
-
-vi.mock('@/hooks/useShowDebugUI', () => ({
-  useShowDebugUI: () => ({
-    isDebugUIVisible: showDebugUiState.enabled,
-    isLoading: false,
-    isUpdating: false,
-    setDebugUIVisible: vi.fn(),
-  }),
-}));
-
-vi.mock('@/hooks/useUser', () => ({
-  useUser: () =>
-    userState.isSignedIn
-      ? { isSignedIn: true as const, user: userState.user }
-      : { isSignedIn: false as const, user: null, authStatus: 'signed-out' },
 }));
 
 vi.mock('./messages/index', () => ({
@@ -141,9 +112,6 @@ describe('Messages', () => {
     narrationModeState.enabled = false;
     taskPhaseState.phase = null;
     sandboxMessagesState.messages = [];
-    userState.isSignedIn = true;
-    userState.user.featureFlags.ShowDebugUISetting = false;
-    showDebugUiState.enabled = false;
     mockBuildAcpRenderBlocks.mockReturnValue([]);
   });
 
@@ -226,67 +194,7 @@ describe('Messages', () => {
     );
   });
 
-  it('shows internal transcript rows when the debug UI setting is enabled and turned on', () => {
-    userState.user.featureFlags.ShowDebugUISetting = true;
-    showDebugUiState.enabled = true;
-
-    render(
-      <Messages
-        session={
-          {
-            taskId: 'task-1',
-            prompt: null,
-            taskRun: null,
-          } as never
-        }
-      />,
-    );
-
-    expect(mockBuildAcpRenderBlocks).toHaveBeenCalledWith(
-      [],
-      expect.objectContaining({
-        showInternalMessages: true,
-      }),
-    );
-  });
-
-  it('shows visible timestamps for transcript rows when debug UI is enabled', () => {
-    userState.user.featureFlags.ShowDebugUISetting = true;
-    showDebugUiState.enabled = true;
-    mockBuildAcpRenderBlocks.mockReturnValue([
-      {
-        kind: 'message',
-        msg: {
-          id: 'assistant-message-1',
-          ts: 123,
-          previousTs: 100,
-          role: 'assistant',
-          kind: 'reasoning',
-          partial: false,
-        },
-      },
-    ] as never);
-
-    render(
-      <Messages
-        session={
-          {
-            taskId: 'task-1',
-            prompt: null,
-            taskRun: null,
-          } as never
-        }
-      />,
-    );
-
-    expect(screen.getByText('assistant-message-1')).toBeInTheDocument();
-    expect(screen.getByText('123', { selector: 'time' })).toBeInTheDocument();
-  });
-
   it('does not append a wrapper debug timestamp for the rendered session prompt', () => {
-    userState.user.featureFlags.ShowDebugUISetting = true;
-    showDebugUiState.enabled = true;
-
     render(
       <Messages
         session={
