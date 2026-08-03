@@ -4,6 +4,7 @@ import {
   runningRunStatuses,
   TaskPayloadKind,
   ORPHANED_PENDING_THRESHOLD_MS,
+  populateSnapshotResumeCommunicationMetadata,
   populateSnapshotResumeSlackMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   isTaskResumeCapableComputeProvider,
@@ -493,6 +494,9 @@ export async function restoreTaskRunSnapshotCommand(
     populateSnapshotResumeSlackMetadata(payload, {
       sourcePayload,
       threadTs: sourceTask.slackThreadTs,
+    });
+    populateSnapshotResumeCommunicationMetadata(payload, {
+      sourcePayload,
     });
 
     await inheritSnapshotResumeVisiblePromptFields(

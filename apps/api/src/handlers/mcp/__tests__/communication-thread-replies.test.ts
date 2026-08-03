@@ -304,6 +304,47 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     expect(discordCreateThreadFromMessageMock).not.toHaveBeenCalled();
   });
 
+  it('recovers a missing automation thread from its saved root message', async () => {
+    getTaskAutomationInitiatorKeyMock.mockResolvedValue('custom_automation');
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: {
+        ...discordTaskRun,
+        payload: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'report-root',
+        },
+      },
+      parsedBody: { text: 'Follow-up result', images: [] },
+    });
+
+    expect(discordPostMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ replyToMessageId: 'report-root' }),
+    );
+    expect(discordCreateThreadFromMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'report-root',
+      name: 'Follow-up result',
+    });
+    expect(
+      sqlMock.mock.calls.map(([strings, ...values]) => ({
+        text: Array.from(strings as string[]).join('?'),
+        values,
+      })),
+    ).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining("communicationThreadId' IS NULL"),
+        values: expect.arrayContaining(['report-root']),
+      }),
+    );
+    expect(sqlMock.mock.calls.flatMap((call) => call.slice(1))).toContainEqual(
+      expect.stringContaining(
+        '"communicationThreadId":"automation-thread-1","discordTaskThread":true',
+      ),
+    );
+  });
+
   it('attaches to the investigating opener when only a root message id is present', async () => {
     const response = await maybeSendCommunicationThreadReply({
       taskRun: {
