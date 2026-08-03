@@ -84,7 +84,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Manage Custom Automations',
     description:
-      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone.',
+      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
     inputSchema: {
       action: z.enum([
         'list',
