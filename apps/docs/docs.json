@@ -50,15 +50,7 @@
       },
       {
         "group": "Cookbook",
-        "pages": [
-          "cookbook/index",
-          "cookbook/vendor-outage-triage",
-          "cookbook/support-channel",
-          "cookbook/ci-failure-auto-fix",
-          "cookbook/product-updates-newsletter",
-          "cookbook/scheduled-housekeeping",
-          "cookbook/template"
-        ]
+        "pages": ["cookbook/index", "cookbook/template"]
       },
       {
         "group": "Provider Configuration",

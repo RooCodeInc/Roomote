@@ -1,0 +1,52 @@
+name: Cookbook recipe
+description: Propose a reusable Roomote workflow for the public Cookbook.
+title: "[Cookbook]: "
+labels: ["documentation", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to propose a complete, reusable Roomote workflow for the Cookbook.
+        Start with the [contributing recipes guide](https://docs.roomote.dev/cookbook/template),
+        paste the completed recipe below, and keep credentials, customer data, and
+        private operational details out of the example.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched the existing Cookbook and docs for a duplicate or closely related recipe.
+          required: true
+        - label: I removed secrets, tokens, private keys, customer data, and private repository details.
+          required: true
+        - label: I stated provider support, permission boundaries, and other limitations plainly.
+          required: true
+  - type: textarea
+    id: recipe
+    attributes:
+      label: Recipe
+      description: Paste the completed Markdown recipe from the contributing recipes guide.
+      placeholder: |
+        ---
+        title: Outcome-first recipe title
+        description: One sentence explaining the finished system and why it matters.
+        icon: lucide-icon-name
+        ---
+
+        Describe the recipe here...
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation and limitations
+      description: Explain what you tested, which providers or integrations it requires, and any known limitations.
+    validations:
+      required: true
+  - type: input
+    id: attribution
+    attributes:
+      label: Attribution
+      description: If this recipe comes from another team, name them here. Otherwise leave this blank.
+    validations:
+      required: false
