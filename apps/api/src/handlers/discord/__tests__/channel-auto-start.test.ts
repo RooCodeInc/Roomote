@@ -304,6 +304,12 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     expect(mocks.postMessage.mock.calls[0]?.[0]?.text).toMatch(
       /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
     );
+    expect(mocks.redis.set).toHaveBeenCalledWith(
+      'discord:pending_account_link_task:discord-user-1',
+      expect.any(String),
+      'EX',
+      10 * 60,
+    );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.addReaction).not.toHaveBeenCalled();
   });
