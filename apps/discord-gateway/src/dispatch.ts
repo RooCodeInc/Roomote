@@ -29,6 +29,13 @@ type RawInteraction = {
   data?: { name?: string };
 };
 
+type RawReaction = {
+  user_id?: string;
+  channel_id?: string;
+  message_id?: string;
+  emoji?: { id?: string | null; name?: string | null };
+};
+
 type DispatchDependencies = {
   rest: Pick<REST, 'post'>;
   enqueue: (envelope: DiscordInboundEnvelope) => Promise<boolean>;
@@ -124,6 +131,9 @@ function eventTypeFor(packet: RawDispatch): DiscordInboundEventType | null {
   }
   if (packet.t === 'INTERACTION_CREATE') {
     return 'INTERACTION_CREATE';
+  }
+  if (packet.t === 'MESSAGE_REACTION_ADD') {
+    return 'MESSAGE_REACTION_ADD';
   }
   return null;
 }
@@ -270,8 +280,22 @@ export async function handleGatewayDispatch(
     };
   }
 
-  const payload = packet.d as RawMessage & RawInteraction;
-  if (!payload.id) {
+  const payload = packet.d as RawMessage & RawInteraction & RawReaction;
+  const reactionEventId =
+    eventType === 'MESSAGE_REACTION_ADD' &&
+    payload.channel_id &&
+    payload.message_id &&
+    payload.user_id &&
+    payload.emoji?.name
+      ? [
+          payload.channel_id,
+          payload.message_id,
+          payload.user_id,
+          payload.emoji.id ?? payload.emoji.name,
+        ].join(':')
+      : null;
+  const eventId = payload.id ?? reactionEventId;
+  if (!eventId) {
     return 'ignored';
   }
 
@@ -281,7 +305,7 @@ export async function handleGatewayDispatch(
       : undefined;
 
   const enqueued = await dependencies.enqueue({
-    eventId: payload.id,
+    eventId,
     eventType,
     payload: packet.d,
     receivedAt: (dependencies.now?.() ?? new Date()).toISOString(),

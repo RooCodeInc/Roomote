@@ -33,6 +33,7 @@ import {
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../../logging.js';
+import { getCallRoomoteViaEmojiConfiguration } from '../../call-roomote-via-emoji.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../../tasks/orphaned-work-item-run.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
@@ -47,6 +48,44 @@ import {
   type TaskSuggestionReactionLaunchResult,
   type TaskSuggestionReactionState,
 } from './task-suggestion-reaction-contention.js';
+import { handleMessageOrAppMentionEvent } from './message-entry.js';
+
+export async function maybeCallRoomoteViaEmoji(params: {
+  context: SlackWebhookContext;
+  event: SlackReactionAddedEvent;
+}): Promise<boolean> {
+  const configuration = await getCallRoomoteViaEmojiConfiguration(
+    params.event.reaction,
+  );
+  if (!configuration) {
+    return false;
+  }
+
+  const targetMessage = await params.context.slack.getMessage({
+    channel: params.event.item.channel,
+    messageTs: params.event.item.ts,
+  });
+  if (!targetMessage) {
+    apiLogger.warn(
+      `[SlackWebhook] Could not resolve emoji summon target ${params.event.item.channel}:${params.event.item.ts}`,
+    );
+    return true;
+  }
+
+  await handleMessageOrAppMentionEvent({
+    context: params.context,
+    event: {
+      type: 'app_mention',
+      channel: params.event.item.channel,
+      user: params.event.user,
+      text: `<@${params.context.slackInstallation.botUserId}> ${configuration.prompt}`,
+      ts: params.event.item.ts,
+      thread_ts: targetMessage.thread_ts ?? targetMessage.ts,
+    },
+  });
+
+  return true;
+}
 
 async function postSuggestionLaunchFailureMessage(params: {
   slack: SlackNotifier;
@@ -704,7 +743,6 @@ export async function handleReactionAddedEvent(params: {
   event: SlackReactionAddedEvent;
 }): Promise<void> {
   const { context, event } = params;
-  const reactionNames = await resolveSlackReactionNames();
 
   const isMessageItem = event.item.type === 'message';
   if (!isMessageItem) {
@@ -718,33 +756,39 @@ export async function handleReactionAddedEvent(params: {
     return;
   }
 
-  if (!isThumbsUpReaction(event.reaction)) {
+  if (await maybeCallRoomoteViaEmoji({ context, event })) {
     return;
   }
 
-  apiLogger.debug(
-    `[SetupSuggestionLifecycle] Processing thumbs-up reaction team=${context.teamId} channel=${event.item.channel} messageTs=${event.item.ts} reaction=${event.reaction} user=${event.user}`,
-  );
-  const setupSuggestionLockKey = `${SLACK_SETUP_SUGGESTION_LOCK_PREFIX}${event.item.channel}:${event.item.ts}`;
-  const setupSuggestionHandled = await launchTaskSuggestionTaskWithContention({
-    lockKey: setupSuggestionLockKey,
-    channelId: event.item.channel,
-    messageTs: event.item.ts,
-    launch: () =>
-      launchTaskSuggestionTaskFromReaction({
-        teamId: context.teamId,
-        slack: context.slack,
-        reactionEvent: event,
-        ackEmoji: reactionNames.ackEmoji,
-        completionEmoji: reactionNames.completionEmoji,
-      }),
-  });
+  const reactionNames = await resolveSlackReactionNames();
 
-  if (setupSuggestionHandled) {
+  if (isThumbsUpReaction(event.reaction)) {
     apiLogger.debug(
-      `[SlackWebhook] Setup suggestion reaction handled for ${event.item.channel}:${event.item.ts}`,
+      `[SetupSuggestionLifecycle] Processing thumbs-up reaction team=${context.teamId} channel=${event.item.channel} messageTs=${event.item.ts} reaction=${event.reaction} user=${event.user}`,
     );
-    return;
+    const setupSuggestionLockKey = `${SLACK_SETUP_SUGGESTION_LOCK_PREFIX}${event.item.channel}:${event.item.ts}`;
+    const setupSuggestionHandled = await launchTaskSuggestionTaskWithContention(
+      {
+        lockKey: setupSuggestionLockKey,
+        channelId: event.item.channel,
+        messageTs: event.item.ts,
+        launch: () =>
+          launchTaskSuggestionTaskFromReaction({
+            teamId: context.teamId,
+            slack: context.slack,
+            reactionEvent: event,
+            ackEmoji: reactionNames.ackEmoji,
+            completionEmoji: reactionNames.completionEmoji,
+          }),
+      },
+    );
+
+    if (setupSuggestionHandled) {
+      apiLogger.debug(
+        `[SlackWebhook] Setup suggestion reaction handled for ${event.item.channel}:${event.item.ts}`,
+      );
+      return;
+    }
   }
 
   apiLogger.debug(

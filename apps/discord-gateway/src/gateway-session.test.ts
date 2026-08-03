@@ -13,11 +13,13 @@ import {
 } from './gateway-session';
 
 describe('Discord Gateway intents', () => {
-  it('subscribes to guilds, guild messages, DMs, and message content', () => {
+  it('subscribes to messages and reactions in guilds and DMs', () => {
     expect(DISCORD_GATEWAY_INTENTS).toEqual([
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildMessageReactions,
       GatewayIntentBits.DirectMessages,
+      GatewayIntentBits.DirectMessageReactions,
       GatewayIntentBits.MessageContent,
     ]);
   });
@@ -112,7 +114,9 @@ describe('DiscordGatewaySession durable resume wiring', () => {
       intents:
         GatewayIntentBits.Guilds |
         GatewayIntentBits.GuildMessages |
+        GatewayIntentBits.GuildMessageReactions |
         GatewayIntentBits.DirectMessages |
+        GatewayIntentBits.DirectMessageReactions |
         GatewayIntentBits.MessageContent,
     });
     expect(repository.find).toHaveBeenCalledWith({

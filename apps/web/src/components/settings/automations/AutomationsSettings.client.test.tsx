@@ -32,6 +32,9 @@ import {
 } from './ChannelAutoStartEditor';
 
 const baseFormState: FormState = {
+  callRoomoteViaEmojiEnabled: false,
+  callRoomoteViaEmojiName: '',
+  callRoomoteViaEmojiInstructions: '',
   reviewerEnabled: false,
   reviewerEnvironmentScope: 'all' as const,
   reviewerEnvironmentIds: [] as string[],
@@ -91,6 +94,26 @@ const baseFormState: FormState = {
 };
 
 describe('Automations selection helpers', () => {
+  it('includes emoji trigger settings in its save input', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        callRoomoteViaEmojiEnabled: true,
+        callRoomoteViaEmojiName: ' :white_check_mark: ',
+        callRoomoteViaEmojiInstructions: ' Prioritize safety. ',
+      },
+      baseFormState,
+      'callRoomoteViaEmoji',
+    );
+
+    expect(saveInput).toMatchObject({
+      savingAutomation: 'callRoomoteViaEmoji',
+      callRoomoteViaEmojiEnabled: true,
+      callRoomoteViaEmojiName: ':white_check_mark:',
+      callRoomoteViaEmojiInstructions: 'Prioritize safety.',
+    });
+  });
+
   it('keeps author scope specific when the last author is removed', () => {
     const next = applyReviewerAuthorSelection(
       {

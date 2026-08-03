@@ -65,6 +65,7 @@ import {
 } from '@roomote/cloud-agents/server';
 
 import { apiLogger } from '../../logging.js';
+import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
@@ -1648,7 +1649,7 @@ teams.post('/', async (c) => {
     );
   }
 
-  const activity = parsed.data;
+  let activity = parsed.data;
   const verificationError = await verifyTeamsWebhookAuthorization({
     authorizationHeader: c.req.header('authorization'),
     activity,
@@ -1675,6 +1676,45 @@ teams.post('/', async (c) => {
       `[teams] Ignoring bot-authored Teams activity ${activity.id ?? 'unknown'}`,
     );
     return c.json({ ok: true, ignored: 'bot_activity' });
+  }
+
+  if (activity.type === 'messageReaction') {
+    let configuration: Awaited<
+      ReturnType<typeof getCallRoomoteViaEmojiConfiguration>
+    > = null;
+    for (const reaction of activity.reactionsAdded ?? []) {
+      configuration = await getCallRoomoteViaEmojiConfiguration(reaction.type);
+      if (configuration) {
+        break;
+      }
+    }
+
+    if (!configuration) {
+      return c.json({ ok: true, ignored: 'reaction_not_configured' });
+    }
+
+    const targetMessageId = activity.replyToId?.trim();
+    if (!targetMessageId) {
+      return c.json({ ok: true, ignored: 'reaction_target_missing' });
+    }
+
+    const mentionName = activity.recipient?.name?.trim() || PRODUCT_NAME;
+    const mentionText = `<at>${mentionName}</at>`;
+    activity = {
+      ...activity,
+      type: 'message',
+      id: activity.id ?? randomUUID(),
+      text: `${mentionText} ${configuration.prompt}`,
+      replyToId: targetMessageId,
+      entities: [
+        {
+          type: 'mention',
+          text: mentionText,
+          mentioned: activity.recipient,
+        },
+      ],
+      reactionsAdded: undefined,
+    };
   }
 
   await persistTeamsInstallationFromActivity(activity);

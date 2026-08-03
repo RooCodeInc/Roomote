@@ -451,6 +451,9 @@ export type ChannelAutoStartChannelSettings = {
 };
 
 export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
+  callRoomoteViaEmojiEnabled: boolean;
+  callRoomoteViaEmojiName: string | null;
+  callRoomoteViaEmojiInstructions: string | null;
   channelAutoStartSlackChannels: ChannelAutoStartChannelSettings[];
   channelAutoStartDiscordChannels: ChannelAutoStartChannelSettings[];
   channelAutoStartEnabled: boolean;

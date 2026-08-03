@@ -71,6 +71,15 @@ export const teamsActivitySchema = z
     channelData: teamsActivityChannelDataSchema.optional(),
     entities: z.array(teamsActivityMentionEntitySchema).optional(),
     replyToId: z.string().optional(),
+    reactionsAdded: z
+      .array(
+        z
+          .object({
+            type: z.string(),
+          })
+          .passthrough(),
+      )
+      .optional(),
     attachments: z.array(z.unknown()).optional(),
   })
   .passthrough();

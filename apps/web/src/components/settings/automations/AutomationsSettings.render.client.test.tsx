@@ -70,6 +70,9 @@ const state = vi.hoisted(() => ({
         conflictResolverLabel: 'roomote:auto-resolve-conflicts',
         conflictResolverInstructions: null,
         reviewCodeInstructions: null as string | null,
+        callRoomoteViaEmojiEnabled: false,
+        callRoomoteViaEmojiName: null as string | null,
+        callRoomoteViaEmojiInstructions: null as string | null,
         channelAutoStartSlackChannels: [
           {
             channelId: 'C123BUGS',
@@ -546,6 +549,27 @@ describe('AutomationsSettings', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
+  it('configures Call Roomote via emoji with a name and instructions', async () => {
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Set up Call Roomote via emoji',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('switch', {
+        name: 'Allow emoji reactions to call Roomote',
+      }),
+    );
+
+    expect(screen.getByLabelText('Emoji name')).toHaveAttribute(
+      'placeholder',
+      ':white_check_mark:',
+    );
+    expect(screen.getByLabelText('Additional instructions')).toBeVisible();
   });
 
   it('shows additional instructions for Review Code', async () => {

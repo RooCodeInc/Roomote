@@ -71,6 +71,7 @@ import {
   AlertCircle,
   AlertDescription,
   AlertTitle,
+  AtSignIcon,
   BasicTooltip,
   BellElectric,
   BrandIcon,
@@ -122,6 +123,8 @@ type FieldErrors = Partial<
     | 'conflictResolverLabel'
     | 'conflictResolverMaxPrAgeDays'
     | 'conflictResolverInstructions'
+    | 'callRoomoteViaEmojiName'
+    | 'callRoomoteViaEmojiInstructions'
     | 'channelAutoStartSlackChannels'
     | 'channelAutoStartDiscordChannels'
     | 'channelAutoStartInstructions'
@@ -469,6 +472,13 @@ const SCHEDULE_ONLY_AUTOMATIONS_BY_ID = Object.fromEntries(
 >;
 
 const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
+  callRoomoteViaEmoji: {
+    id: 'callRoomoteViaEmoji',
+    label: 'Call Roomote via emoji',
+    description:
+      'Start or continue work in a Slack, Discord, or Teams thread by reacting with an emoji.',
+    icon: AtSignIcon,
+  },
   channelAutoStart: {
     id: 'channelAutoStart',
     label: 'Auto-respond to channels',
@@ -540,6 +550,8 @@ const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
     ]),
   ),
   'auto-respond-channels': 'channelAutoStart',
+  'call-roomote-via-emoji': 'callRoomoteViaEmoji',
+  'emoji-trigger': 'callRoomoteViaEmoji',
   autorespondchannels: 'channelAutoStart',
   'auto-start-tasks': 'channelAutoStart',
   channelautostart: 'channelAutoStart',
@@ -676,6 +688,9 @@ function mapSettingsToFormState(
       }>;
     };
     reviewCodeInstructions: string | null;
+    callRoomoteViaEmojiEnabled: boolean;
+    callRoomoteViaEmojiName: string | null;
+    callRoomoteViaEmojiInstructions: string | null;
     conflictResolverFrequency: ConflictResolverFrequency;
     conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
     conflictResolverLabel: string;
@@ -742,6 +757,10 @@ function mapSettingsToFormState(
     },
 ): FormState {
   return {
+    callRoomoteViaEmojiEnabled: settings.callRoomoteViaEmojiEnabled,
+    callRoomoteViaEmojiName: settings.callRoomoteViaEmojiName ?? '',
+    callRoomoteViaEmojiInstructions:
+      settings.callRoomoteViaEmojiInstructions ?? '',
     reviewerEnabled: settings.reviewer.enabled,
     reviewerEnvironmentScope: 'all',
     reviewerEnvironmentIds: [],
@@ -1806,6 +1825,17 @@ export function AutomationsSettings() {
               return next;
             });
           }
+
+          if (
+            result.fieldErrors.callRoomoteViaEmojiName ||
+            result.fieldErrors.callRoomoteViaEmojiInstructions
+          ) {
+            setOpenAutomationIds((prev) => {
+              const next = new Set(prev);
+              next.add('callRoomoteViaEmoji');
+              return next;
+            });
+          }
           return;
         }
 
@@ -1931,6 +1961,7 @@ export function AutomationsSettings() {
 
     if (!formState || !savedState) {
       return {
+        callRoomoteViaEmoji: false,
         channelAutoStart: false,
         managerChannel: false,
         managerStats: false,
@@ -1947,6 +1978,11 @@ export function AutomationsSettings() {
     }
 
     return {
+      callRoomoteViaEmoji: isAutomationDirty(
+        formState,
+        savedState,
+        'callRoomoteViaEmoji',
+      ),
       channelAutoStart: isAutomationDirty(
         formState,
         savedState,
@@ -2145,6 +2181,8 @@ export function AutomationsSettings() {
     CHANNEL_AUTO_START_LAUNCH_MODE_OPTIONS;
   const showChannelAutoStartLaunchModePicker = false;
   const reviewerIsEnabled = formState?.reviewerEnabled ?? false;
+  const callRoomoteViaEmojiIsEnabled =
+    formState?.callRoomoteViaEmojiEnabled ?? false;
   const conflictResolverIsEnabled =
     formState?.conflictResolverFrequency !== 'off';
   const channelAutoStartIsEnabled = hasConfiguredChannelAutoStartRows(
@@ -2526,6 +2564,7 @@ export function AutomationsSettings() {
   );
 
   const iconEnabled = {
+    callRoomoteViaEmoji: callRoomoteViaEmojiIsEnabled,
     channelAutoStart: channelAutoStartIsEnabled,
     managerChannel: managerChannelIsEnabled,
     managerStats: managerStatsIsEnabled,
@@ -2668,6 +2707,110 @@ export function AutomationsSettings() {
             <h2 className="order-[-10] col-span-full text-sm font-semibold text-foreground">
               Available
             </h2>
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.callRoomoteViaEmoji}
+              isOpen={openAutomationIds.has('callRoomoteViaEmoji')}
+              onOpenChange={(open) =>
+                setAutomationOpen('callRoomoteViaEmoji', open)
+              }
+              iconEnabled={iconEnabled.callRoomoteViaEmoji}
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.callRoomoteViaEmoji}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'callRoomoteViaEmoji'
+                  }
+                  onSave={() => saveAgent('callRoomoteViaEmoji')}
+                  onReset={() => resetAgent('callRoomoteViaEmoji')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="call-roomote-via-emoji-enabled"
+                    checked={formState.callRoomoteViaEmojiEnabled}
+                    onCheckedChange={(callRoomoteViaEmojiEnabled) =>
+                      setFormState((prev) =>
+                        prev ? { ...prev, callRoomoteViaEmojiEnabled } : prev,
+                      )
+                    }
+                  />
+                  <Label
+                    htmlFor="call-roomote-via-emoji-enabled"
+                    className="text-sm"
+                  >
+                    Allow emoji reactions to call Roomote
+                  </Label>
+                </div>
+
+                {callRoomoteViaEmojiIsEnabled ? (
+                  <div className="space-y-5">
+                    <div className="space-y-2">
+                      <Label htmlFor="call-roomote-via-emoji-name">
+                        Emoji name
+                      </Label>
+                      <Input
+                        id="call-roomote-via-emoji-name"
+                        value={formState.callRoomoteViaEmojiName}
+                        onChange={(event) =>
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  callRoomoteViaEmojiName: event.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        placeholder=":white_check_mark:"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Enter the reaction name, with or without surrounding
+                        colons.
+                      </p>
+                      {fieldErrors.callRoomoteViaEmojiName ? (
+                        <p className="text-xs text-destructive">
+                          {fieldErrors.callRoomoteViaEmojiName}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="call-roomote-via-emoji-instructions">
+                        Additional instructions
+                      </Label>
+                      <Textarea
+                        id="call-roomote-via-emoji-instructions"
+                        value={formState.callRoomoteViaEmojiInstructions}
+                        onChange={(event) =>
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  callRoomoteViaEmojiInstructions:
+                                    event.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        rows={4}
+                        placeholder={
+                          'Optional guidance to add after "Act on this"'
+                        }
+                      />
+                      {fieldErrors.callRoomoteViaEmojiInstructions ? (
+                        <p className="text-xs text-destructive">
+                          {fieldErrors.callRoomoteViaEmojiInstructions}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </AutomationCard>
+
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.reviewer}
               isOpen={openAutomationIds.has('reviewer')}

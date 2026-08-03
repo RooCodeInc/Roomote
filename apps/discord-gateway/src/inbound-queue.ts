@@ -43,7 +43,10 @@ redis.call('HDEL', KEYS[3], ARGV[1])
 return deadLetterId
 `;
 
-export type DiscordInboundEventType = 'MESSAGE_CREATE' | 'INTERACTION_CREATE';
+export type DiscordInboundEventType =
+  | 'MESSAGE_CREATE'
+  | 'INTERACTION_CREATE'
+  | 'MESSAGE_REACTION_ADD';
 
 export type DiscordInboundEnvelope = {
   eventId: string;

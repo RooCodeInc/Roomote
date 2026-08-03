@@ -16,7 +16,9 @@ import type { GatewayStatusStore } from './status';
 export const DISCORD_GATEWAY_INTENTS = [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.GuildMessageReactions,
   GatewayIntentBits.DirectMessages,
+  GatewayIntentBits.DirectMessageReactions,
   GatewayIntentBits.MessageContent,
 ];
 

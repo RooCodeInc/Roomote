@@ -397,6 +397,7 @@ const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA = z.enum(
 );
 
 const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
+  'callRoomoteViaEmoji',
   'channelAutoStart',
   'managerChannel',
   'managerStats',
@@ -481,6 +482,19 @@ const automationsRouter = createRouter({
           conflictResolverMaxPrAgeDaysSchema.optional(),
         conflictResolverLabel: z.string().trim().min(1).max(255),
         conflictResolverInstructions: z.string().max(8_000).nullable(),
+        callRoomoteViaEmojiEnabled: z.boolean().optional(),
+        callRoomoteViaEmojiName: z
+          .string()
+          .trim()
+          .min(1)
+          .max(100)
+          .nullable()
+          .optional(),
+        callRoomoteViaEmojiInstructions: z
+          .string()
+          .max(8_000)
+          .nullable()
+          .optional(),
         channelAutoStartSlackChannels: z
           .array(
             z.object({

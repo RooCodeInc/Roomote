@@ -134,9 +134,40 @@ const discordInteractionCreateDispatchSchema = z
   })
   .passthrough();
 
+const discordReactionAddSchema = z
+  .object({
+    user_id: z.string(),
+    channel_id: z.string(),
+    message_id: z.string(),
+    guild_id: z.string().optional(),
+    emoji: z
+      .object({
+        id: z.string().nullable().optional(),
+        name: z.string().nullable(),
+      })
+      .passthrough(),
+    member: z
+      .object({
+        user: discordUserSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const discordReactionAddDispatchSchema = z
+  .object({
+    op: z.literal(0),
+    t: z.literal('MESSAGE_REACTION_ADD'),
+    s: z.number().int().nullable().optional(),
+    d: discordReactionAddSchema,
+  })
+  .passthrough();
+
 export const discordGatewayDispatchSchema = z.discriminatedUnion('t', [
   discordMessageCreateDispatchSchema,
   discordInteractionCreateDispatchSchema,
+  discordReactionAddDispatchSchema,
 ]);
 
 const discordMessageEnvelopeSchema = z
@@ -159,16 +190,27 @@ const discordInteractionEnvelopeSchema = z
   })
   .passthrough();
 
+const discordReactionAddEnvelopeSchema = z
+  .object({
+    eventId: z.string(),
+    eventType: z.literal('MESSAGE_REACTION_ADD'),
+    payload: discordReactionAddSchema,
+    receivedAt: z.string().datetime(),
+  })
+  .passthrough();
+
 /** Durable envelope forwarded from the Discord Gateway service to the API. */
 export const discordGatewayEventSchema = z.discriminatedUnion('eventType', [
   discordMessageEnvelopeSchema,
   discordInteractionEnvelopeSchema,
+  discordReactionAddEnvelopeSchema,
 ]);
 
 export type DiscordUser = z.infer<typeof discordUserSchema>;
 export type DiscordAttachment = z.infer<typeof discordAttachmentSchema>;
 export type DiscordMessage = z.infer<typeof discordMessageSchema>;
 export type DiscordInteraction = z.infer<typeof discordInteractionSchema>;
+export type DiscordReactionAdd = z.infer<typeof discordReactionAddSchema>;
 export type DiscordGatewayDispatch = z.infer<
   typeof discordGatewayDispatchSchema
 >;
@@ -230,6 +272,12 @@ export function getDiscordInteractionCreate(
   return event.eventType === 'INTERACTION_CREATE' ? event.payload : undefined;
 }
 
+export function getDiscordReactionAdd(
+  event: DiscordGatewayEvent,
+): DiscordReactionAdd | undefined {
+  return event.eventType === 'MESSAGE_REACTION_ADD' ? event.payload : undefined;
+}
+
 export function getDiscordInteractionUser(
   interaction: DiscordInteraction,
 ): DiscordUser | undefined {
@@ -241,6 +289,13 @@ function getEventChannel(event: DiscordGatewayEvent): {
   parentChannelId?: string;
   guildId?: string;
 } {
+  if (event.eventType === 'MESSAGE_REACTION_ADD') {
+    return {
+      channelId: event.payload.channel_id,
+      ...(event.payload.guild_id ? { guildId: event.payload.guild_id } : {}),
+    };
+  }
+
   const data = event.payload;
   const channelId =
     data.channel_id ?? ('channel' in data ? data.channel?.id : undefined);
@@ -267,7 +322,7 @@ export function getDiscordEventCommunicationMetadata(
     communicationProvider: 'discord',
     communicationChannelId: parentChannelId ?? channel.channelId,
     ...(parentChannelId ? { communicationThreadId: channel.channelId } : {}),
-    communicationMessageId: event.payload.id,
+    communicationMessageId: event.eventId,
     ...(channel.guildId ? { communicationGuildId: channel.guildId } : {}),
     ...(message ? { communicationAnchorMessageId: message.id } : {}),
   };
@@ -290,7 +345,8 @@ function isDiscordGatewayEventValue(
   return (
     'eventType' in value &&
     (value.eventType === 'MESSAGE_CREATE' ||
-      value.eventType === 'INTERACTION_CREATE') &&
+      value.eventType === 'INTERACTION_CREATE' ||
+      value.eventType === 'MESSAGE_REACTION_ADD') &&
     'payload' in value
   );
 }

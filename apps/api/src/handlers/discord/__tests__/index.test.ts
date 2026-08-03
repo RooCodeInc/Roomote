@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   fetchThreadHistory: vi.fn(),
   shouldRouteUnmentioned: vi.fn(),
   enqueueGatewayEvent: vi.fn(),
+  callViaEmojiConfig: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -138,6 +139,10 @@ vi.mock('../thread-context.js', () => ({
 
 vi.mock('../unmentioned-thread-reply.js', () => ({
   shouldRouteUnmentionedDiscordThreadReplyToAgent: mocks.shouldRouteUnmentioned,
+}));
+
+vi.mock('../../call-roomote-via-emoji.js', () => ({
+  getCallRoomoteViaEmojiConfiguration: mocks.callViaEmojiConfig,
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -298,6 +303,7 @@ describe('Discord Gateway event handler', () => {
     mocks.shouldRouteUnmentioned.mockResolvedValue(true);
     mocks.queueMessage.mockResolvedValue(true);
     mocks.enqueueGatewayEvent.mockResolvedValue({ jobId: 'event-message-1' });
+    mocks.callViaEmojiConfig.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -355,6 +361,59 @@ describe('Discord Gateway event handler', () => {
       name: 'eyes',
     });
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('turns a configured reaction into a thread task entry', async () => {
+    mocks.callViaEmojiConfig.mockResolvedValue({
+      emoji: 'white_check_mark',
+      prompt: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
+    });
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      name: 'general',
+      type: 0,
+      guildId: 'guild-1',
+    });
+
+    const response = await postEvent({
+      eventId: 'channel-1:message-1:discord-user-1:white_check_mark',
+      eventType: 'MESSAGE_REACTION_ADD',
+      receivedAt: '2026-07-12T15:00:00.000Z',
+      payload: {
+        user_id: 'discord-user-1',
+        channel_id: 'channel-1',
+        message_id: 'message-1',
+        guild_id: 'guild-1',
+        emoji: { id: null, name: 'white_check_mark' },
+        member: {
+          user: { id: 'discord-user-1', username: 'matt' },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.channelAutoStart).not.toHaveBeenCalled();
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'roomote-user-1',
+        queuedMessage: expect.objectContaining({
+          text: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
+        }),
+        metadata: expect.objectContaining({
+          communicationMessageId:
+            'channel-1:message-1:discord-user-1:white_check_mark',
+          communicationAnchorMessageId: 'message-1',
+        }),
+        replyToMessageId: 'message-1',
+        replyToChannelId: 'channel-1',
+      }),
+    );
   });
 
   it('rejects an invalid Gateway secret before claiming the event', async () => {

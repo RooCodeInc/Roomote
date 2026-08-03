@@ -170,3 +170,35 @@ describe('normalizeBackgroundAgentSettings channel auto-start', () => {
     expect(settings.channelAutoStartEnabled).toBe(false);
   });
 });
+
+describe('normalizeBackgroundAgentSettings emoji trigger', () => {
+  it('projects the configured emoji and instructions when enabled', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'call_roomote_via_emoji',
+        enabled: true,
+        instructions: 'Prioritize safety.',
+        settings: { emoji: ':white_check_mark:' },
+        targets: [],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.callRoomoteViaEmojiName).toBe(':white_check_mark:');
+    expect(settings.callRoomoteViaEmojiEnabled).toBe(true);
+    expect(settings.callRoomoteViaEmojiInstructions).toBe('Prioritize safety.');
+  });
+
+  it('preserves the stored emoji when disabled', () => {
+    const settings = normalizeBackgroundAgentSettings(null, [
+      {
+        key: 'call_roomote_via_emoji',
+        enabled: false,
+        settings: { emoji: 'eyes' },
+        targets: [],
+      } as unknown as Automation,
+    ]);
+
+    expect(settings.callRoomoteViaEmojiEnabled).toBe(false);
+    expect(settings.callRoomoteViaEmojiName).toBe('eyes');
+  });
+});
