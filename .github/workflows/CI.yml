@@ -217,6 +217,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Verify a failed image pull preserves deployment metadata
+        run: bash deploy/host/tests/upgrade-failed-pull.sh
       - name: Restore an encrypted bundle onto empty volumes
         run: bash deploy/host/tests/backup-restore.integration.sh
 

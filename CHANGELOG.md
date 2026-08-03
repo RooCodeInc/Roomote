@@ -2,6 +2,40 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.31.0 (2026-08-03)
+
+This release expands Amazon Bedrock and deployment controls, refreshes Automations and self-hosted licensing, and adds copyable Cookbook recipes for common workflows.
+
+### Highlights
+
+- Use native Amazon Bedrock Runtime models alongside Mantle, including regional inference profiles and supported reasoning settings.
+- Find and manage custom and built-in automations through a redesigned, filterable Automations experience.
+- Disable curated integrations through a deployment policy without deleting saved credentials or affecting other provider types.
+- Copy ready-to-use Cookbook recipes for outage triage, support investigations, CI fixes, product updates, and scheduled maintenance.
+
+### Minor changes
+
+- Redesign Automations settings around scannable Custom, Enabled, and Available sections, with permalinked configuration dialogs, responsive custom automation controls, and category and provider-aware filtering.
+- Let deployment operators disable the curated integrations catalog and its existing connections through an environment policy without deleting saved credentials or affecting other provider types.
+- Let operators use native Amazon Bedrock Runtime models alongside Mantle, including regional inference profiles and supported reasoning settings, without changing existing Mantle configurations.
+- Add direct Roomote Cloud purchase and renewal paths to self-hosted License settings, including low-seat and upcoming-expiry guidance for administrators.
+- Show useful, dismissible product tips alongside task startup progress so users can discover Roomote capabilities while an environment boots.
+- Add a copyable Roomote Cookbook with ready-to-use recipes for vendor outage triage, support investigations, CI failure fixes, product update newsletters, and scheduled maintenance.
+
+### Patch changes
+
+- Keep Azure Container Apps sandboxes suspended until Roomote deliberately wakes them, recover cleanly from leftover workers, and stop retrying runs whose sandboxes were deleted. Thanks to @tebieshi for contributing this improvement.
+- Stop ChatGPT subscription connections from waiting forever on expired or blocked device codes, explain why authorization stopped, and offer a clean restart. Thanks to @daniel-lxs for contributing this improvement.
+- Recommend Claude Sonnet 5 at medium reasoning for code review when operators apply supported provider presets, while retaining Opus for planning.
+- Keep Discord task requests through account linking, focus onboarding on the required personal account connection, and preserve automation reply threads when tasks resume.
+- Keep the Users settings invite list focused on links that still have uses remaining while retaining consumed invite records.
+- Add a direct Personal settings shortcut to the signed-in user menu.
+- Make ChatGPT, xAI, and GitHub Copilot device connections handle expiry, rate limits, restarts, and stale polling consistently, with clearer terminal errors across all three providers. Thanks to @daniel-lxs for contributing this improvement.
+- Give sandbox providers more time to finish rate-limited starts before aborting, and offer a retry when a task start fails before producing output.
+- Show terminal command output again in the web task view, with collapsible details and a copy button for easier inspection.
+- Restore the previous deployment metadata and controller after a failed self-hosted image pull so operators can retry upgrades without breaking the next backup.
+- Make UI proof reject obvious visual defects elsewhere in captured frames instead of accepting evidence that only satisfies the focal claim.
+
 ## 0.30.2 (2026-08-03)
 
 This patch improves GitHub App recovery and Discord automation follow-ups, refreshes the DeepSeek recommendation, and retires the current experimental toggles.

@@ -118,6 +118,10 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
+  // Operator policy for the curated Settings > Integrations catalog. Enabled
+  // by default; operators opt out explicitly. Existing connections remain
+  // stored but cannot be configured or used while disabled.
+  R_CURATED_INTEGRATIONS_DISABLED: optInBoolean(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -288,6 +292,12 @@ const serverSchema = {
   // Optional Roomote license key (RMLK1.…). When set, takes precedence over
   // the key stored in deployment_settings via Settings → Users.
   R_LICENSE_KEY: z.string().optional(),
+  // Roomote Cloud endpoint used to activate self-hosted licenses and report
+  // licensed seat usage. This is deliberately distinct from Ping telemetry.
+  R_LICENSE_CLOUD_BASE_URL: z
+    .string()
+    .url()
+    .default('https://cloud.roomote.dev'),
   PREVIEW_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
@@ -528,6 +538,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_MODEL_ENV_KEYS',
   'R_ALLOWED_EMAILS',
   'R_LICENSE_KEY',
+  'R_LICENSE_CLOUD_BASE_URL',
   'R_GITHUB_APP_SLUG',
 ]);
 
@@ -557,6 +568,21 @@ export function isRoomoteCloudEnabled(
   return (
     value === true || (typeof value === 'string' && isEnvFlagEnabled(value))
   );
+}
+
+/**
+ * Whether the operator has switched off curated integrations on this
+ * deployment. Enabled unless explicitly disabled.
+ */
+export function areCuratedIntegrationsDisabled(
+  value: string | boolean | undefined,
+): boolean {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1';
+  }
+
+  return value === true;
 }
 
 /**

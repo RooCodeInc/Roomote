@@ -1,15 +1,25 @@
 import { headers } from 'next/headers';
 import { APIError } from 'better-auth/api';
 
-import { db, deploymentSettings, eq, invites, users } from '@roomote/db/server';
+import {
+  db,
+  deploymentSettings,
+  eq,
+  invites,
+  recordLicenseUsageObservation,
+  users,
+} from '@roomote/db/server';
+import type { UserRole } from '@roomote/types';
 import {
   evaluateFeatureFlagsFromMetadata,
   isAnonymousAnalyticsEnabledFromMetadata,
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
-import type { UserRole } from '@roomote/types';
 import { getManagedDeploymentAccessFromMetadata } from '@roomote/types';
-import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
+import {
+  requestInstancePing,
+  requestLicenseUsageSync,
+} from '@roomote/sdk/server/request-instance-ping';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
 
 import {
@@ -198,6 +208,7 @@ async function ensureDeploymentIdentity({
       }
 
       if (!invitedByInviteId) {
+        await recordLicenseUsageObservation(tx, now);
         return insertRole;
       }
 
@@ -207,6 +218,7 @@ async function ensureDeploymentIdentity({
         throw new InviteRedemptionFailedError();
       }
 
+      await recordLicenseUsageObservation(tx, now);
       return insertRole;
     });
 
@@ -215,6 +227,7 @@ async function ensureDeploymentIdentity({
     // A new admission changes the instance's user counts; refresh the
     // anonymous report instead of waiting for the daily tick.
     void requestInstancePing('user-admitted');
+    void requestLicenseUsageSync('user-admitted');
   } else {
     // Removal deletes the Better Auth user, so a removed user normally can
     // never reach this branch again. If a soft-deleted row's auth user still
@@ -254,7 +267,9 @@ async function ensureDeploymentIdentity({
           .update(users)
           .set({ ...profileUpdate, deletedAt: null, role })
           .where(eq(users.id, userId));
+        await recordLicenseUsageObservation(tx, now);
       });
+      void requestLicenseUsageSync('user-restored');
     } else if (
       existingUser.name !== name ||
       existingUser.email !== email ||

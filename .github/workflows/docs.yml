@@ -1,0 +1,44 @@
+name: Docs
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "apps/docs/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/actions/setup-environment/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "apps/docs/**"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/actions/setup-environment/**"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24.13.1
+  PNPM_VERSION: 10.29.3
+
+jobs:
+  docs:
+    name: Validate docs
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          frozen-lockfile: 'true'
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Check generated Cookbook index
+        run: pnpm --filter @roomote/docs check-cookbook-index
+      - name: Validate docs and links
+        run: pnpm --filter @roomote/docs check

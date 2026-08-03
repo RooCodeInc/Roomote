@@ -11,6 +11,7 @@ import {
 import { LINEAR_ORG_CONNECTION_ROLE } from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
+import { assertCuratedIntegrationsEnabled } from '@/lib/server/curated-integrations';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import type { UserAuthSuccess } from '@/types';
 
@@ -185,6 +186,7 @@ export async function saveLinearOauthSetupCommand(
   input: SaveLinearOauthSetupInput,
 ) {
   assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
   const runtimeEnv = getLinearRuntimeEnv();
 
   const currentValues = await Promise.all(

@@ -70,6 +70,7 @@ vi.mock('@/lib/server', () => ({
     status: 'unlicensed',
     seatLimit: 10,
   })),
+  getEffectiveDeploymentSeatLimit: vi.fn(async () => 10),
   getEnvLicenseKey: getEnvLicenseKeyMock,
   isInviteUsable: vi.fn(() => true),
   listInvites: vi.fn(async () => []),

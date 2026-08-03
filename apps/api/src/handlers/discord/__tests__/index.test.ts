@@ -43,7 +43,9 @@ const mocks = vi.hoisted(() => ({
   attachOutOfBand: vi.fn(),
   releaseOutOfBand: vi.fn(),
   redisSet: vi.fn(),
+  redisEval: vi.fn(),
   redisGet: vi.fn(),
+  redisGetdel: vi.fn(),
   redisDel: vi.fn(),
   buildContinuation: vi.fn(),
   releaseContinuation: vi.fn(),
@@ -59,7 +61,9 @@ vi.mock('@roomote/redis', async (importOriginal) => {
     ...actual,
     getRedis: () => ({
       set: mocks.redisSet,
+      eval: mocks.redisEval,
       get: mocks.redisGet,
+      getdel: mocks.redisGetdel,
       del: mocks.redisDel,
     }),
   };
@@ -257,7 +261,9 @@ describe('Discord Gateway event handler', () => {
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
     mocks.redisSet.mockResolvedValue('OK');
+    mocks.redisEval.mockResolvedValue(1);
     mocks.redisGet.mockResolvedValue(null);
+    mocks.redisGetdel.mockResolvedValue(null);
     mocks.redisDel.mockResolvedValue(1);
     mocks.component.mockResolvedValue('handled');
     mocks.channelAutoStart.mockResolvedValue(false);
@@ -1790,6 +1796,183 @@ describe('Discord Gateway event handler', () => {
     });
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({ text: expect.stringContaining('✅ Linked!') }),
+    );
+  });
+
+  it('continues the most recent task request after linking', async () => {
+    mocks.findMappedUserId.mockResolvedValueOnce(null);
+    mocks.getChannel.mockImplementation(async (channelId: string) =>
+      channelId === 'dm-1'
+        ? { id: 'dm-1', name: 'Direct message', type: 1 }
+        : {
+            id: 'channel-1',
+            guildId: 'guild-1',
+            name: 'general',
+            type: 0,
+          },
+    );
+    const originalEvent = envelope(
+      message({
+        channel_id: 'channel-1',
+        guild_id: 'guild-1',
+        content: '<@bot-1> fix this',
+        mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+      }),
+    );
+
+    const unlinkedResponse = await postEvent(originalEvent);
+
+    expect(unlinkedResponse.status).toBe(200);
+    const pendingTaskCall = mocks.redisEval.mock.calls.find(
+      ([, , key]) => key === 'discord:pending_account_link_task:discord-user-1',
+    );
+    expect(pendingTaskCall?.slice(1, 6)).toEqual([
+      1,
+      'discord:pending_account_link_task:discord-user-1',
+      originalEvent.receivedAt,
+      originalEvent.eventId,
+      expect.any(String),
+    ]);
+    expect(pendingTaskCall?.[6]).toBe(String(10 * 60));
+    expect(JSON.parse(pendingTaskCall?.[5] as string)).toMatchObject(
+      originalEvent,
+    );
+
+    mocks.consumeLinkCode.mockResolvedValue('roomote-user-1');
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
+    mocks.redisGetdel.mockResolvedValue(pendingTaskCall?.[5]);
+    const interaction = {
+      id: 'interaction-link',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'link',
+        type: 1,
+        options: [{ name: 'code', type: 3, value: 'link-abcdefghijklmnop' }],
+      },
+    };
+
+    const linkedResponse = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(linkedResponse.status).toBe(200);
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'roomote-user-1',
+        queuedMessage: expect.objectContaining({
+          text: 'fix this',
+          ts: 'message-1',
+          userId: 'roomote-user-1',
+        }),
+        channel: expect.objectContaining({ channelId: 'channel-1' }),
+      }),
+    );
+    expect(mocks.reply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'I also picked up your most recent task request.',
+        ),
+      }),
+    );
+  });
+
+  it('restores the pending request and link code when continuation fails', async () => {
+    const originalEvent = envelope(message());
+    mocks.consumeLinkCode.mockResolvedValue('roomote-user-1');
+    mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
+    mocks.redisGetdel.mockResolvedValue(JSON.stringify(originalEvent));
+    mocks.startNewTask.mockRejectedValue(new Error('launch failed'));
+    const interaction = {
+      id: 'interaction-link',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'link',
+        type: 1,
+        options: [{ name: 'code', type: 3, value: 'link-abcdefghijklmnop' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(500);
+    expect(mocks.redisEval).toHaveBeenCalledWith(
+      expect.stringContaining('current.receivedAt > ARGV[1]'),
+      1,
+      'discord:pending_account_link_task:discord-user-1',
+      originalEvent.receivedAt,
+      originalEvent.eventId,
+      JSON.stringify(originalEvent),
+      String(10 * 60),
+    );
+    expect(mocks.restoreLinkCode).toHaveBeenCalledWith(
+      'link-abcdefghijklmnop',
+      'roomote-user-1',
+    );
+  });
+
+  it('replays a pending configured-channel request after linking', async () => {
+    const originalEvent = envelope(
+      message({
+        channel_id: 'channel-1',
+        guild_id: 'guild-1',
+        content: 'A new bug report',
+      }),
+    );
+    mocks.consumeLinkCode.mockResolvedValue('roomote-user-1');
+    mocks.redisGetdel.mockResolvedValue(JSON.stringify(originalEvent));
+    mocks.channelAutoStart.mockResolvedValue(true);
+    mocks.getChannel.mockImplementation(async (channelId: string) =>
+      channelId === 'dm-1'
+        ? { id: 'dm-1', name: 'Direct message', type: 1 }
+        : {
+            id: 'channel-1',
+            guildId: 'guild-1',
+            name: 'bugs',
+            type: 0,
+          },
+    );
+    const interaction = {
+      id: 'interaction-link',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'link',
+        type: 1,
+        options: [{ name: 'code', type: 3, value: 'link-abcdefghijklmnop' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.channelAutoStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining(originalEvent),
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'I also picked up your most recent task request.',
+        ),
+      }),
     );
   });
 

@@ -34,6 +34,9 @@ export const BEDROCK_MANTLE_OPENCODE_PROVIDER_ID = 'bedrock-mantle';
 export const BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID =
   'bedrock-mantle-openai';
 
+/** OpenCode's native Amazon Bedrock provider id. */
+export const AMAZON_BEDROCK_OPENCODE_PROVIDER_ID = 'amazon-bedrock';
+
 /** Matches valid cloud regions like `us-east-1`. */
 export const INFERENCE_GATEWAY_REGION_PATTERN =
   /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/u;
@@ -469,6 +472,20 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       authHeader: { name: 'x-api-key' },
       allowedPaths: OPENAI_RESPONSES_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: AMAZON_BEDROCK_OPENCODE_PROVIDER_ID,
+      name: 'Amazon Bedrock',
+      envVarNames: ['AWS_BEARER_TOKEN_BEDROCK'],
+      upstreamBaseUrl: 'https://bedrock-runtime.{region}.amazonaws.com',
+      region: {
+        envVarName: 'AWS_REGION',
+        default: DEFAULT_BEDROCK_MANTLE_REGION,
+      },
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: ['/model'],
+      allowNestedPaths: true,
+      openCodeBaseUrlSuffix: '',
     },
     {
       id: 'openai-compatible',

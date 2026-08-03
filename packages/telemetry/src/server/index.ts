@@ -35,6 +35,11 @@ import {
   buildActivationTaskProperties,
 } from '../index';
 
+export {
+  syncLicenseWithCloud,
+  type LicenseCloudSyncResult,
+} from './license-cloud';
+
 const LOG_PREFIX = '[telemetry]';
 const REQUEST_TIMEOUT_MS = 5_000;
 const FLUSH_INTERVAL_MS = 10_000;
@@ -422,8 +427,8 @@ export async function checkLatestVersion(): Promise<PingVersionCheckResponse | n
 }
 
 /**
- * Sends the daily anonymous instance report. Gated by the analytics
- * setting; never throws. Returns whether the report was accepted.
+ * Sends the daily anonymous instance report. Never throws. Returns whether
+ * the report was accepted.
  */
 export async function sendInstanceReport(
   report: Record<string, unknown>,

@@ -24,6 +24,8 @@ import {
 
 import { db } from '../db';
 import {
+  automations,
+  customAutomations,
   taskRuns,
   deploymentMcpEnablements,
   deploymentSettings,
@@ -125,6 +127,17 @@ export type InstanceReportPullRequests7d = {
   medianTimeToMergeSeconds: number | null;
 };
 
+export type InstanceReportAutomations = {
+  custom: {
+    total: number;
+    enabled: number;
+  };
+  builtIn: {
+    enabled: number;
+    enabledByKey: Record<string, true>;
+  };
+};
+
 /**
  * Anonymous daily instance stats blob sent to the Ping service and forwarded
  * to PostHog. Extensible: add fields freely, never repurpose existing ones.
@@ -175,6 +188,7 @@ export type InstanceReportStats = {
   mcp: {
     enabled: string[];
   };
+  automations: InstanceReportAutomations;
 };
 
 type AuthoredPullRequestRow = {
@@ -206,6 +220,29 @@ function toNumber(value: string | number | null | undefined): number {
   }
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function summarizeAutomations(options: {
+  customTotal: string | number | null | undefined;
+  customEnabled: string | number | null | undefined;
+  builtInRows: Array<{ key: string; enabled: boolean }>;
+}): InstanceReportAutomations {
+  const enabledByKey = Object.fromEntries(
+    options.builtInRows
+      .filter((automation) => automation.enabled)
+      .map((automation) => [automation.key, true] as const),
+  );
+
+  return {
+    custom: {
+      total: toNumber(options.customTotal),
+      enabled: toNumber(options.customEnabled),
+    },
+    builtIn: {
+      enabled: Object.keys(enabledByKey).length,
+      enabledByKey,
+    },
+  };
 }
 
 function getAuthoredPullRequestKey(row: {
@@ -652,6 +689,9 @@ export async function collectInstanceReportStats(
     mcpEnablements,
     mcpConnectionIds,
     pullRequests7d,
+    customAutomationTotals,
+    enabledCustomAutomationTotals,
+    builtInAutomationRows,
   ] = await Promise.all([
     db.query.deploymentSettings.findFirst({
       where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
@@ -767,6 +807,15 @@ export async function collectInstanceReportStats(
       .from(mcpConnections)
       .where(eq(mcpConnections.enabled, true)),
     collectPullRequests7d(now),
+    db.select({ total: count() }).from(customAutomations),
+    db
+      .select({ total: count() })
+      .from(customAutomations)
+      .where(eq(customAutomations.enabled, true)),
+    db
+      .select({ key: automations.key, enabled: automations.enabled })
+      .from(automations)
+      .where(eq(automations.internal, false)),
   ]);
 
   const comms: string[] = [];
@@ -853,5 +902,22 @@ export async function collectInstanceReportStats(
     mcp: {
       enabled: mcpEnabled,
     },
+    automations: summarizeAutomations({
+      customTotal: customAutomationTotals[0]?.total,
+      customEnabled: enabledCustomAutomationTotals[0]?.total,
+      builtInRows: builtInAutomationRows,
+    }),
   };
+}
+
+/** Minimal licensed-usage payload sent even when anonymous analytics is off. */
+export async function collectLicensedUserCount(): Promise<{
+  users: { total: number };
+}> {
+  const [userTotals] = await db
+    .select({ total: count() })
+    .from(users)
+    .where(isNull(users.deletedAt));
+
+  return { users: { total: userTotals?.total ?? 0 } };
 }

@@ -1,11 +1,16 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { invalidateQueriesMock, linkedAccountState, toastWarningMock } =
-  vi.hoisted(() => ({
-    invalidateQueriesMock: vi.fn().mockResolvedValue(undefined),
-    linkedAccountState: { mapping: null as { discordUserId: string } | null },
-    toastWarningMock: vi.fn(),
-  }));
+const {
+  invalidateQueriesMock,
+  linkedAccountState,
+  providerSetupState,
+  toastWarningMock,
+} = vi.hoisted(() => ({
+  invalidateQueriesMock: vi.fn().mockResolvedValue(undefined),
+  linkedAccountState: { mapping: null as { discordUserId: string } | null },
+  providerSetupState: { satisfied: false },
+  toastWarningMock: vi.fn(),
+}));
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), warning: toastWarningMock },
@@ -31,7 +36,7 @@ vi.mock('@tanstack/react-query', () => ({
           ],
           runtimeSatisfied: true,
           savedSatisfied: false,
-          setupSatisfied: false,
+          setupSatisfied: providerSetupState.satisfied,
           discord: {
             installations: [],
           },
@@ -73,8 +78,8 @@ vi.mock('@/hooks/linked-accounts', () => ({
   useDiscordLinkedAccount: () => ({ data: linkedAccountState }),
 }));
 
-vi.mock('@/components/settings/DiscordSetupStatus', () => ({
-  DiscordSetupStatus: () => <div>Connect Discord server</div>,
+vi.mock('@/components/settings/DiscordLinkAccountStep', () => ({
+  DiscordLinkAccountStep: () => <div>Link Discord account step</div>,
 }));
 
 vi.mock('./ProviderSetupExperience', () => ({
@@ -89,6 +94,22 @@ import { StepDiscordSetup } from './StepDiscordSetup';
 describe('StepDiscordSetup', () => {
   beforeEach(() => {
     linkedAccountState.mapping = null;
+    providerSetupState.satisfied = false;
+  });
+
+  it('shows only account linking when Discord is already configured', () => {
+    providerSetupState.satisfied = true;
+
+    render(<StepDiscordSetup onContinue={vi.fn()} onBack={vi.fn()} />);
+
+    expect(
+      screen.getByRole('heading', { name: 'Link Discord Account' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Link Discord account step')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: 'Save and connect Discord' }),
+    ).not.toBeInTheDocument();
   });
 
   it('warns when connection finishing fails and refreshes setup state', async () => {
@@ -109,7 +130,10 @@ describe('StepDiscordSetup', () => {
     expect(invalidateQueriesMock).toHaveBeenCalledWith({
       queryKey: ['linkedAccounts.discord'],
     });
-    expect(screen.getByText('Connect Discord server')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'Link Discord Account' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Link Discord account step')).toBeInTheDocument();
   });
 
   it('continues after account linking without requiring a destination', async () => {

@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { useTelemetry } from '@/hooks/useTelemetry';
 import { useTRPC } from '@/trpc/client';
 import {
   AlertCircle,
@@ -40,6 +41,11 @@ import {
 import { Section } from '@/components/settings';
 import { formatDistanceToNow } from 'date-fns';
 
+const LICENSE_PURCHASE_URL =
+  'https://cloud.roomote.dev/sign-up?utm_source=self-host&utm_medium=settings_users&utm_campaign=license_purchase';
+const LICENSE_PORTAL_URL = 'https://cloud.roomote.dev/';
+const LICENSE_EXPIRY_WARNING_MS = 30 * 24 * 60 * 60 * 1000;
+
 function formatJoinedDate(value: Date | string | null): string {
   if (!value) {
     return '—';
@@ -72,6 +78,7 @@ export function UsersSettings() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { userId: currentUserId, cloudEnabled } = useAuthorizedUser();
+  const { capture } = useTelemetry();
   const settingsQueryKey = trpc.accessPolicy.get.queryKey();
   const settingsQuery = useQuery(trpc.accessPolicy.get.queryOptions());
   const [label, setLabel] = useState('');
@@ -244,8 +251,17 @@ export function UsersSettings() {
     license,
   } = settingsQuery.data;
   const adminCount = members.filter((member) => member.role === 'admin').length;
-  const visibleInvites = invites.filter((invite) => invite.revokedAt == null);
+  const visibleInvites = invites.filter(
+    (invite) => invite.revokedAt == null && invite.usedCount < invite.maxUses,
+  );
   const seatsRemaining = license.seatLimit - license.seatsUsed;
+  const isAtSeatCapacity = seatsRemaining <= 0;
+  const purchasedLicenseExpiringSoon =
+    license.status === 'valid' &&
+    license.licenseId?.startsWith('lic_sh_') === true &&
+    license.expiresAt != null &&
+    new Date(license.expiresAt).getTime() - Date.now() <=
+      LICENSE_EXPIRY_WARNING_MS;
   const licenseBadge =
     license.status === 'valid' ? (
       <Badge variant="success">Licensed</Badge>
@@ -269,10 +285,29 @@ export function UsersSettings() {
     setLicenseKey.mutate({ licenseKey });
   };
 
+  const licensePurchaseButton = (
+    <Button asChild size="sm" variant="outline">
+      <a
+        href={LICENSE_PURCHASE_URL}
+        target="_blank"
+        rel="noreferrer"
+        onClick={() =>
+          capture('license_purchase_cta_clicked', {
+            seatsUsed: license.seatsUsed,
+            seatLimit: license.seatLimit,
+            licenseStatus: license.status,
+          })
+        }
+      >
+        Buy a license on Roomote Cloud
+      </a>
+    </Button>
+  );
+
   const handleCreate = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
 
-    if (createInvite.isPending) {
+    if (createInvite.isPending || isAtSeatCapacity) {
       return;
     }
 
@@ -308,19 +343,43 @@ export function UsersSettings() {
               </p>
             </div>
 
-            {seatsRemaining <= 0 ? (
-              <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+            {seatsRemaining <= 1 ? (
+              <div className="flex flex-col items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                  <p>
+                    {seatsRemaining <= 0
+                      ? 'All seats are in use. New users cannot sign in until a seat is freed or the license limit is raised.'
+                      : 'One seat remaining. Buy a license before inviting more users.'}
+                  </p>
+                </div>
+                {licensePurchaseButton}
+              </div>
+            ) : (
+              <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+                <p className="text-sm text-muted-foreground">
+                  Need more than {license.freeSeatLimit} users?
+                </p>
+                {licensePurchaseButton}
+              </div>
+            )}
+
+            {purchasedLicenseExpiringSoon ? (
+              <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm">
                 <AlertCircle className="mt-0.5 size-4 shrink-0" />
                 <p>
-                  All seats are in use. New users cannot sign in until a seat is
-                  freed or a license key with more seats is added.
+                  This license expires soon.{' '}
+                  <a
+                    className="font-medium underline underline-offset-4"
+                    href={LICENSE_PORTAL_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Refresh the key in Roomote Cloud
+                  </a>{' '}
+                  and replace it here before it expires.
                 </p>
               </div>
-            ) : seatsRemaining === 1 ? (
-              <p className="text-sm text-muted-foreground">
-                One seat remaining. Add a license key to raise the limit before
-                inviting more users.
-              </p>
             ) : null}
 
             {license.fromEnv ? (
@@ -366,8 +425,8 @@ export function UsersSettings() {
             )}
             <p className="text-sm text-muted-foreground">
               Deployments are free for up to {license.freeSeatLimit} users. A
-              license key from the Roomote maintainers unlocks more seats. You
-              can also set <span className="font-mono">R_LICENSE_KEY</span> in
+              license purchased on Roomote Cloud unlocks more seats. Apply it
+              here or set <span className="font-mono">R_LICENSE_KEY</span> in
               the deployment environment.
             </p>
           </div>
@@ -470,7 +529,10 @@ export function UsersSettings() {
                 disabled={createInvite.isPending}
               />
             </div>
-            <Button type="submit" disabled={createInvite.isPending}>
+            <Button
+              type="submit"
+              disabled={createInvite.isPending || isAtSeatCapacity}
+            >
               {createInvite.isPending ? <Spinner /> : null}
               Create invite
             </Button>
@@ -553,6 +615,10 @@ export function UsersSettings() {
             })}
           </div>
         ) : null}
+        <p className="text-sm text-muted-foreground">
+          Invites are removed from the list after fully used, to keep things
+          clean.
+        </p>
       </Section>
 
       <Dialog
@@ -677,48 +743,55 @@ export function UsersSettings() {
             return (
               <div
                 key={member.id}
-                className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
+                className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 py-3 first:pt-0 last:pb-0"
               >
-                <Avatar
-                  imageUrl={member.imageUrl}
-                  name={member.name}
-                  email={member.email}
-                  size="md"
-                  alt={member.name || member.email}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 text-sm font-medium">
-                    <span className="truncate">
-                      {member.name || member.email}
-                    </span>
-                  </p>
-                  <p className="truncate text-sm text-muted-foreground">
-                    <span>{member.email}</span>
-                    {' · Joined '}
-                    {formatJoinedDate(member.createdAt)}
-                  </p>
+                <div className="flex flex-row gap-3 items-start md:items-center">
+                  <Avatar
+                    imageUrl={member.imageUrl}
+                    name={member.name}
+                    email={member.email}
+                    size="md"
+                    alt={member.name || member.email}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 text-sm font-medium">
+                      <span className="truncate">
+                        {member.name || member.email}
+                      </span>
+                    </p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      <span>{member.email}</span>
+                      <span className="hidden md:inline"> · </span>
+                      <span className="block md:inline">
+                        {'Joined '}
+                        {formatJoinedDate(member.createdAt)}
+                      </span>
+                    </p>
+                  </div>
                 </div>
-                {roleLockReason ? (
-                  <BasicTooltip content={roleLockReason}>
-                    <span>{roleSelect}</span>
-                  </BasicTooltip>
-                ) : (
-                  roleSelect
-                )}
-                {removeLockReason ? (
-                  <BasicTooltip content={removeLockReason}>
-                    <span>{removeButton}</span>
-                  </BasicTooltip>
-                ) : (
-                  removeButton
-                )}
-                {resetLockReason ? (
-                  <BasicTooltip content={resetLockReason}>
-                    <span>{resetButton}</span>
-                  </BasicTooltip>
-                ) : (
-                  resetButton
-                )}
+                <div className="flex flex-row gap-3 items-center">
+                  {roleLockReason ? (
+                    <BasicTooltip content={roleLockReason}>
+                      <span>{roleSelect}</span>
+                    </BasicTooltip>
+                  ) : (
+                    roleSelect
+                  )}
+                  {removeLockReason ? (
+                    <BasicTooltip content={removeLockReason}>
+                      <span>{removeButton}</span>
+                    </BasicTooltip>
+                  ) : (
+                    removeButton
+                  )}
+                  {resetLockReason ? (
+                    <BasicTooltip content={resetLockReason}>
+                      <span>{resetButton}</span>
+                    </BasicTooltip>
+                  ) : (
+                    resetButton
+                  )}
+                </div>
               </div>
             );
           })}

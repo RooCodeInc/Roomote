@@ -36,6 +36,7 @@ type LicenseSummary = {
   seatLimit: number;
   seatsUsed: number;
   freeSeatLimit: number;
+  licenseId: string | null;
   licensee: string | null;
   expiresAt: Date | null;
   fromEnv: boolean;
@@ -46,6 +47,7 @@ const unlicensedLicense: LicenseSummary = {
   seatLimit: 10,
   seatsUsed: 1,
   freeSeatLimit: 10,
+  licenseId: null,
   licensee: null,
   expiresAt: null,
   fromEnv: false,
@@ -76,6 +78,7 @@ const {
   mockCreatePasswordResetLink,
   mockSetLicenseKey,
   mockClipboardWriteText,
+  mockCapture,
 } = vi.hoisted(() => ({
   mockAuthorizedUser: {
     current: { userId: 'user-1', cloudEnabled: false },
@@ -92,6 +95,7 @@ const {
         seatLimit: 10,
         seatsUsed: 1,
         freeSeatLimit: 10,
+        licenseId: null,
         licensee: null,
         expiresAt: null,
         fromEnv: false,
@@ -156,6 +160,7 @@ const {
     saved: true,
   })),
   mockClipboardWriteText: vi.fn(async (_value: string) => undefined),
+  mockCapture: vi.fn(),
 }));
 
 vi.mock('sonner', () => ({
@@ -167,6 +172,11 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => mockAuthorizedUser.current,
+  useUser: () => ({ user: { anonymousAnalyticsEnabled: true } }),
+}));
+
+vi.mock('@/hooks/useTelemetry', () => ({
+  useTelemetry: () => ({ capture: mockCapture, enabled: true }),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -320,7 +330,7 @@ describe('UsersSettings', () => {
     });
   });
 
-  it('lists only non-revoked invites and removes revoked ones', async () => {
+  it('lists only open invites and removes revoked or fully used ones', async () => {
     mockSettingsState.current = {
       ...mockSettingsState.current,
       invites: [
@@ -348,6 +358,18 @@ describe('UsersSettings', () => {
           createdAt: new Date('2026-06-01T00:00:00Z'),
           usable: false,
         },
+        {
+          id: 'invite-3',
+          label: 'Used link',
+          role: 'member',
+          maxUses: 2,
+          usedCount: 2,
+          acceptedUserCount: 2,
+          expiresAt: null,
+          revokedAt: null,
+          createdAt: new Date('2026-06-15T00:00:00Z'),
+          usable: false,
+        },
       ],
     };
 
@@ -358,7 +380,13 @@ describe('UsersSettings', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/2 of 5 used/)).toBeInTheDocument();
     expect(screen.queryByText('Invite for Old link')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invite for Used link')).not.toBeInTheDocument();
     expect(screen.queryByText('revoked')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Invites are removed from the list after fully used, to keep things clean.',
+      ),
+    ).toBeInTheDocument();
     // The admin invite is badged; the member invite is not.
     expect(
       within(
@@ -626,6 +654,19 @@ describe('UsersSettings', () => {
 
     expect(await screen.findByText('4 of 10 seats used')).toBeInTheDocument();
     expect(screen.getByText('Free tier')).toBeInTheDocument();
+    const purchaseLink = screen.getByRole('link', {
+      name: 'Buy a license on Roomote Cloud',
+    });
+    expect(purchaseLink).toHaveAttribute(
+      'href',
+      'https://cloud.roomote.dev/sign-up?utm_source=self-host&utm_medium=settings_users&utm_campaign=license_purchase',
+    );
+    fireEvent.click(purchaseLink);
+    expect(mockCapture).toHaveBeenCalledWith('license_purchase_cta_clicked', {
+      seatsUsed: 4,
+      seatLimit: 10,
+      licenseStatus: 'unlicensed',
+    });
     expect(
       screen.queryByRole('button', { name: 'Remove key' }),
     ).not.toBeInTheDocument();
@@ -655,6 +696,9 @@ describe('UsersSettings', () => {
     expect(screen.getByText('Users')).toBeInTheDocument();
     expect(screen.queryByText('License')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('License key')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Buy a license on Roomote Cloud' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows licensed state, at-limit warning, and removes the key', async () => {
@@ -665,6 +709,7 @@ describe('UsersSettings', () => {
         seatLimit: 25,
         seatsUsed: 25,
         freeSeatLimit: 10,
+        licenseId: 'lic_manual',
         licensee: 'Acme Corp',
         expiresAt: null,
         fromEnv: false,
@@ -677,6 +722,12 @@ describe('UsersSettings', () => {
     expect(screen.getByText('25 of 25 seats used')).toBeInTheDocument();
     expect(screen.getByText(/Licensed to Acme Corp/)).toBeInTheDocument();
     expect(screen.getByText(/All seats are in use/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Create invite' }),
+    ).toBeDisabled();
+
+    fireEvent.submit(screen.getByLabelText(/Label/).closest('form')!);
+    expect(mockCreateInvite).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove key' }));
 
@@ -696,6 +747,7 @@ describe('UsersSettings', () => {
         seatLimit: 50,
         seatsUsed: 4,
         freeSeatLimit: 10,
+        licenseId: 'lic_manual',
         licensee: 'Acme Corp',
         expiresAt: null,
         fromEnv: true,
@@ -722,5 +774,30 @@ describe('UsersSettings', () => {
     expect(
       screen.queryByRole('button', { name: 'Remove key' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('points purchased licenses to the Cloud portal when expiry is near', async () => {
+    mockSettingsState.current = {
+      ...mockSettingsState.current,
+      license: {
+        status: 'valid',
+        seatLimit: 100,
+        seatsUsed: 20,
+        freeSeatLimit: 10,
+        licenseId: 'lic_sh_123',
+        licensee: 'Engineering',
+        expiresAt: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000),
+        fromEnv: false,
+      },
+    };
+
+    renderUsersSettings();
+
+    expect(
+      await screen.findByText('This license expires soon.', { exact: false }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Refresh the key in Roomote Cloud' }),
+    ).toHaveAttribute('href', 'https://cloud.roomote.dev/');
   });
 });

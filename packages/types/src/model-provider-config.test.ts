@@ -457,9 +457,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(bedrockProvider).toMatchObject({
       label: 'Amazon Bedrock',
       envVarName: 'AWS_BEARER_TOKEN_BEDROCK',
-      envVarLabel: 'Mantle API key',
+      envVarLabel: 'API key',
       credentialHelp: {
-        text: 'Paste a key generated from the Bedrock Mantle API-key console. Switch the AWS console to the same region you enter below before generating it.',
+        text: 'Paste a key generated from the Bedrock API-key console. The same regional key serves native Bedrock and Mantle models.',
         href: 'https://us-east-1.console.aws.amazon.com/bedrock-mantle/api-keys',
         linkLabel: 'Open AWS Bedrock API keys',
       },
@@ -806,17 +806,76 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteModel: 'anthropic/claude-sonnet-5',
       roomoteSmallModel: 'anthropic/claude-haiku-4-5',
       roomoteVisionModel: null,
-      roomoteCodeReviewModel: 'anthropic/claude-opus-5',
+      roomoteCodeReviewModel: 'anthropic/claude-sonnet-5',
       roomoteExploreModel: 'anthropic/claude-haiku-4-5',
       roomotePlanningModel: 'anthropic/claude-opus-5',
       roomoteModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
-      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: 'medium',
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
     });
   });
+
+  it.each([
+    [
+      'openrouter',
+      'balanced',
+      'openrouter/anthropic/claude-sonnet-5',
+      'openrouter/anthropic/claude-opus-5',
+    ],
+    [
+      'openrouter',
+      'quick-turnaround',
+      'openrouter/anthropic/claude-sonnet-5',
+      'openrouter/anthropic/claude-opus-5',
+    ],
+    [
+      'vercel',
+      undefined,
+      'vercel/anthropic/claude-sonnet-5',
+      'vercel/anthropic/claude-opus-5',
+    ],
+    [
+      'anthropic',
+      undefined,
+      'anthropic/claude-sonnet-5',
+      'anthropic/claude-opus-5',
+    ],
+    [
+      'opencode',
+      undefined,
+      'opencode/claude-sonnet-5',
+      'opencode/claude-opus-5',
+    ],
+    [
+      'amazon-bedrock',
+      undefined,
+      'bedrock-mantle/anthropic.claude-sonnet-5',
+      'bedrock-mantle/anthropic.claude-opus-5',
+    ],
+    [
+      'github-copilot',
+      undefined,
+      'github-copilot/claude-sonnet-5',
+      'github-copilot/claude-opus-5',
+    ],
+  ] as const)(
+    'recommends Sonnet 5 with medium reasoning for %s code review',
+    (providerId, presetId, codeReviewModel, planningModel) => {
+      expect(
+        buildRecommendedDeploymentModelConfig(
+          getSetupModelProvider(providerId),
+          presetId,
+        ),
+      ).toMatchObject({
+        roomoteCodeReviewModel: codeReviewModel,
+        roomoteCodeReviewModelReasoningEffort: 'medium',
+        roomotePlanningModel: planningModel,
+      });
+    },
+  );
 
   it('recommends only the coding default for providers without a role mapping', () => {
     expect(
@@ -873,6 +932,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     const presets = getRecommendedModelPresets({
       defaultRoomoteModel: 'example/coding',
       recommendedRoleModels: { helper: 'example/helper' },
+      recommendedRoleReasoningEfforts: { helper: 'low' },
     });
 
     expect(presets).toEqual([
@@ -882,7 +942,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
         default: true,
         roles: {
           coding: { modelId: 'example/coding' },
-          helper: { modelId: 'example/helper' },
+          helper: { modelId: 'example/helper', reasoningEffort: 'low' },
         },
       },
     ]);

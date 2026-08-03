@@ -347,9 +347,111 @@ describe('getFreshChatGptAccessToken', () => {
   });
 });
 
+describe('startChatGptDeviceAuth', () => {
+  function makeStartFetch(body: Record<string, unknown>) {
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        device_auth_id: 'dev-1',
+        user_code: 'CODE',
+        interval: '5',
+        ...body,
+      }),
+    });
+  }
+
+  it('derives the poll deadline from the issuer expires_at', async () => {
+    const now = Date.parse('2026-07-31T22:04:00.000Z');
+    const fetchImpl = makeStartFetch({
+      expires_at: '2026-07-31T22:19:00.000Z',
+    });
+    const { startChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    const result = await startChatGptDeviceAuth(fetchImpl as never, now);
+
+    expect(result.expiresInMs).toBe(15 * 60 * 1000);
+    expect(result.intervalMs).toBe(5000);
+  });
+
+  it('falls back to the default TTL when expires_at is absent or unparseable', async () => {
+    const now = Date.now();
+    const { startChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    const missing = await startChatGptDeviceAuth(
+      makeStartFetch({}) as never,
+      now,
+    );
+    const garbage = await startChatGptDeviceAuth(
+      makeStartFetch({ expires_at: 'not-a-date' }) as never,
+      now,
+    );
+
+    expect(missing.expiresInMs).toBe(900 * 1000);
+    expect(garbage.expiresInMs).toBe(900 * 1000);
+  });
+
+  it('never returns a non-positive window for an already expired code', async () => {
+    const now = Date.parse('2026-07-31T22:30:00.000Z');
+    const fetchImpl = makeStartFetch({
+      expires_at: '2026-07-31T22:19:00.000Z',
+    });
+    const { startChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    const result = await startChatGptDeviceAuth(fetchImpl as never, now);
+
+    expect(result.expiresInMs).toBeGreaterThan(0);
+  });
+});
+
+describe('classifyDeviceAuthRefusal', () => {
+  it('maps each structured error code to its poll result', async () => {
+    const { classifyDeviceAuthRefusal } =
+      await import('../chatgpt-subscription');
+
+    expect(
+      classifyDeviceAuthRefusal('deviceauth_authorization_pending'),
+    ).toEqual({ status: 'pending' });
+    expect(classifyDeviceAuthRefusal('deviceauth_not_found')).toMatchObject({
+      status: 'failed',
+      reason: 'expired',
+    });
+    expect(classifyDeviceAuthRefusal('deviceauth_forbidden')).toMatchObject({
+      status: 'failed',
+      reason: 'blocked',
+    });
+    // No usable code: stay pending, bounded by the caller's expiry deadline.
+    expect(classifyDeviceAuthRefusal(undefined)).toEqual({ status: 'pending' });
+  });
+
+  it('names the offending code so a blocked deployment is diagnosable', async () => {
+    const { classifyDeviceAuthRefusal } =
+      await import('../chatgpt-subscription');
+
+    const result = classifyDeviceAuthRefusal('deviceauth_org_policy');
+
+    expect(result).toMatchObject({ status: 'failed', reason: 'blocked' });
+    expect(result.status === 'failed' && result.error).toContain(
+      'deviceauth_org_policy',
+    );
+  });
+});
+
 describe('pollChatGptDeviceAuth', () => {
+  function makeErrorFetch(status: number, code?: string) {
+    return vi.fn().mockResolvedValue({
+      status,
+      json: async () => ({
+        error: {
+          message: 'irrelevant prose',
+          type: 'invalid_request_error',
+          code,
+        },
+      }),
+    });
+  }
+
   it('returns pending while the user has not authorized', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue({ status: 403 });
+    const fetchImpl = makeErrorFetch(403, 'deviceauth_authorization_pending');
     const { pollChatGptDeviceAuth } = await import('../chatgpt-subscription');
 
     const result = await pollChatGptDeviceAuth({
@@ -359,6 +461,70 @@ describe('pollChatGptDeviceAuth', () => {
     });
 
     expect(result).toEqual({ status: 'pending' });
+  });
+
+  it('fails as blocked on a 403 that is not the pending code', async () => {
+    const fetchImpl = makeErrorFetch(403, 'deviceauth_forbidden');
+    const { pollChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    const result = await pollChatGptDeviceAuth({
+      deviceAuthId: 'dev-1',
+      userCode: 'CODE',
+      fetchImpl: fetchImpl as never,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result).toMatchObject({ reason: 'blocked' });
+  });
+
+  it('fails as expired when the issuer no longer knows the code', async () => {
+    const fetchImpl = makeErrorFetch(404, 'deviceauth_not_found');
+    const { pollChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    const result = await pollChatGptDeviceAuth({
+      deviceAuthId: 'dev-1',
+      userCode: 'CODE',
+      fetchImpl: fetchImpl as never,
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result).toMatchObject({ reason: 'expired' });
+  });
+
+  it('stays pending when the error body carries no structured code', async () => {
+    const { pollChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    const noCode = await pollChatGptDeviceAuth({
+      deviceAuthId: 'dev-1',
+      userCode: 'CODE',
+      fetchImpl: makeErrorFetch(403) as never,
+    });
+    const unparseable = await pollChatGptDeviceAuth({
+      deviceAuthId: 'dev-1',
+      userCode: 'CODE',
+      fetchImpl: vi.fn().mockResolvedValue({
+        status: 403,
+        json: async () => {
+          throw new Error('not json');
+        },
+      }) as never,
+    });
+
+    expect(noCode).toEqual({ status: 'pending' });
+    expect(unparseable).toEqual({ status: 'pending' });
+  });
+
+  it('backs off instead of failing when polling is rate limited', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ status: 429 });
+    const { pollChatGptDeviceAuth } = await import('../chatgpt-subscription');
+
+    const result = await pollChatGptDeviceAuth({
+      deviceAuthId: 'dev-1',
+      userCode: 'CODE',
+      fetchImpl: fetchImpl as never,
+    });
+
+    expect(result).toEqual({ status: 'pending', intervalMs: 5000 });
   });
 
   it('returns success after exchanging the device authorization code', async () => {

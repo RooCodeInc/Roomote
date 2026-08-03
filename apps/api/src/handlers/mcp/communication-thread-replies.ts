@@ -237,6 +237,15 @@ async function bindLateCommunicationReportThread(params: {
           }
         : {}),
   });
+  const unboundReportCondition = discordThread
+    ? sql`(
+        ${taskRuns.payload}->>'communicationMessageId' IS NULL
+        OR (
+          ${taskRuns.payload}->>'communicationMessageId' = ${params.messageId}
+          AND ${taskRuns.payload}->>'communicationThreadId' IS NULL
+        )
+      )`
+    : sql`${taskRuns.payload}->>'communicationMessageId' IS NULL`;
   await db.transaction(async (tx) => {
     const boundRuns = await tx
       .update(taskRuns)
@@ -244,10 +253,7 @@ async function bindLateCommunicationReportThread(params: {
         payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${patch}::jsonb`,
       })
       .where(
-        and(
-          eq(taskRuns.taskId, params.taskRun.taskId),
-          sql`${taskRuns.payload}->>'communicationMessageId' IS NULL`,
-        ),
+        and(eq(taskRuns.taskId, params.taskRun.taskId), unboundReportCondition),
       )
       .returning({ id: taskRuns.id });
 
@@ -695,8 +701,8 @@ async function sendDiscordThreadReply(params: {
   await bindLateCommunicationReportThread({
     taskRun: params.taskRun,
     provider: 'discord',
-    messageId: reply.messageId,
-    ...(!threadId && !messageId
+    messageId: messageId ?? reply.messageId,
+    ...(!threadId
       ? {
           discordProvider: provider,
           ...(text ? { discordThreadName: text } : {}),

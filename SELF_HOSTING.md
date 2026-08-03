@@ -943,15 +943,25 @@ Roomote is licensed under the Fair Core License 1.0 (FCL-1.0-ALv2, see
 registered user account counts toward the limit, whichever sign-in path or
 surface it uses. Removing a user frees their seat.
 
-To go beyond 10 users, obtain a license key from the Roomote maintainers and
-apply it in either of these ways:
+To go beyond 10 users, [buy a self-hosted license on Roomote
+Cloud](https://cloud.roomote.dev/sign-up) and apply its key in either of these
+ways:
 
 - Enter it in **Settings → Users → License** as an admin, or
 - Set `R_LICENSE_KEY` in the deployment environment (for example
   `.env.production` / Compose). When set, the env var takes precedence over
   any key stored in Settings.
 
-Keys are verified offline; your deployment never phones home.
+Purchased keys are issued annually. While the subscription is active, refresh
+the key in the Roomote Cloud portal and replace the value in Settings or
+`R_LICENSE_KEY` before its displayed expiry date. Keys are verified offline;
+usage reporting does not activate or validate them.
+
+Licensed deployments report the license ID and current registered-user count to
+Roomote's Ping service for subscription billing, even when anonymous analytics
+is disabled. Other instance statistics remain controlled by the anonymous
+analytics setting. Contact [help@roomote.dev](mailto:help@roomote.dev) for teams
+larger than 100 users.
 
 When a deployment is at its seat limit, existing users are unaffected — only
 new sign-ups are blocked until a seat is freed (Settings → Users → remove a

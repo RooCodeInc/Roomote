@@ -21,6 +21,7 @@ import {
 import {
   useAsanaConnection,
   useConnectMcp,
+  useCuratedIntegrationsAvailability,
   useDisconnectMcp,
   useGrafanaConnection,
   useDeploymentMcpEnablements,
@@ -43,6 +44,9 @@ import {
 } from '@/types';
 
 import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
   BasicTooltip,
   Button,
   Card,
@@ -1148,6 +1152,7 @@ export function Integrations() {
   const disconnectLinear = useDisconnectLinear();
 
   const deploymentEnablements = useDeploymentMcpEnablements();
+  const integrationsAvailability = useCuratedIntegrationsAvailability();
   const oauthReadiness = useMcpOauthReadiness();
   const linearOauthStatus = oauthReadiness.data?.find(
     (entry) => entry.mcpId === 'linear',
@@ -1987,6 +1992,18 @@ export function Integrations() {
       },
     });
   };
+
+  if (integrationsAvailability.data?.enabled === false) {
+    return (
+      <Alert>
+        <AlertTitle>Integrations disabled by deployment operator</AlertTitle>
+        <AlertDescription>
+          Curated integrations cannot be connected or used on this Roomote
+          instance.
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   return (
     <div className="space-y-8">

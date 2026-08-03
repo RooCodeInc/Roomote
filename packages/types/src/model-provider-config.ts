@@ -96,6 +96,10 @@ export type RecommendedRoleModels = Partial<
   Record<Exclude<TaskModelRole, 'coding'>, string>
 >;
 
+export type RecommendedRoleReasoningEfforts = Partial<
+  Record<Exclude<TaskModelRole, 'coding'>, ReasoningEffort>
+>;
+
 export type RecommendedPresetRole = {
   modelId: string;
   displayName?: string;
@@ -184,6 +188,8 @@ export type SetupModelProviderDescriptor = {
   recommendedPresets?: readonly RecommendedModelPreset[];
   /** Legacy single-mapping shape used to synthesize a default preset. */
   recommendedRoleModels?: RecommendedRoleModels;
+  /** Optional reasoning levels for roles in the legacy single mapping. */
+  recommendedRoleReasoningEfforts?: RecommendedRoleReasoningEfforts;
 };
 
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
@@ -277,8 +283,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           codeReview: {
-            modelId: 'openrouter/anthropic/claude-opus-5',
-            reasoningEffort: 'high',
+            modelId: 'openrouter/anthropic/claude-sonnet-5',
+            reasoningEffort: 'medium',
           },
           explore: {
             modelId: 'openrouter/google/gemini-3.6-flash',
@@ -303,7 +309,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'low',
           },
           codeReview: {
-            modelId: 'openrouter/anthropic/claude-opus-5',
+            modelId: 'openrouter/anthropic/claude-sonnet-5',
             reasoningEffort: 'medium',
           },
           explore: {
@@ -349,10 +355,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // work follows the coding model ("same as coding").
     recommendedRoleModels: {
       helper: 'vercel/google/gemini-3.6-flash',
-      codeReview: 'vercel/anthropic/claude-opus-5',
+      codeReview: 'vercel/anthropic/claude-sonnet-5',
       explore: 'vercel/google/gemini-3.6-flash',
       planning: 'vercel/anthropic/claude-opus-5',
     },
+    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     id: 'requesty',
@@ -493,10 +500,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedRoleModels: {
       helper: 'anthropic/claude-haiku-4-5',
-      codeReview: 'anthropic/claude-opus-5',
+      codeReview: 'anthropic/claude-sonnet-5',
       explore: 'anthropic/claude-haiku-4-5',
       planning: 'anthropic/claude-opus-5',
     },
+    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     id: 'moonshotai',
@@ -585,10 +593,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     recommendedRoleModels: {
       helper: 'opencode/gemini-3.6-flash',
       vision: 'opencode/claude-sonnet-5',
-      codeReview: 'opencode/claude-opus-5',
+      codeReview: 'opencode/claude-sonnet-5',
       explore: 'opencode/gemini-3.6-flash',
       planning: 'opencode/claude-opus-5',
     },
+    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     // Bedrock's current console issues API keys for the Mantle endpoint. The
@@ -597,9 +606,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'amazon-bedrock',
     label: 'Amazon Bedrock',
     envVarName: 'AWS_BEARER_TOKEN_BEDROCK',
-    envVarLabel: 'Mantle API key',
+    envVarLabel: 'API key',
     credentialHelp: {
-      text: 'Paste a key generated from the Bedrock Mantle API-key console. Switch the AWS console to the same region you enter below before generating it.',
+      text: 'Paste a key generated from the Bedrock API-key console. The same regional key serves native Bedrock and Mantle models.',
       href: 'https://us-east-1.console.aws.amazon.com/bedrock-mantle/api-keys',
       linkLabel: 'Open AWS Bedrock API keys',
     },
@@ -625,10 +634,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedRoleModels: {
       helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
-      codeReview: 'bedrock-mantle/anthropic.claude-opus-5',
+      codeReview: 'bedrock-mantle/anthropic.claude-sonnet-5',
       explore: 'bedrock-mantle/anthropic.claude-haiku-4-5',
       planning: 'bedrock-mantle/anthropic.claude-opus-5',
     },
+    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     // Provider id matches the models.dev/opencode `google` provider (Gemini
@@ -748,10 +758,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
     recommendedRoleModels: {
       helper: 'github-copilot/claude-haiku-4.5',
-      codeReview: 'github-copilot/claude-opus-5',
+      codeReview: 'github-copilot/claude-sonnet-5',
       explore: 'github-copilot/claude-haiku-4.5',
       planning: 'github-copilot/claude-opus-5',
     },
+    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     id: OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -1058,7 +1069,10 @@ const DEFAULT_RECOMMENDED_PRESET_ID = 'default';
 export function getRecommendedModelPresets(
   provider: Pick<
     SetupModelProviderDescriptor,
-    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
+    | 'defaultRoomoteModel'
+    | 'recommendedPresets'
+    | 'recommendedRoleModels'
+    | 'recommendedRoleReasoningEfforts'
   >,
 ): readonly RecommendedModelPreset[] {
   if (provider.recommendedPresets?.length) {
@@ -1074,10 +1088,20 @@ export function getRecommendedModelPresets(
       roles: {
         coding: { modelId: provider.defaultRoomoteModel },
         ...Object.fromEntries(
-          Object.entries(roleModels).map(([role, modelId]) => [
-            role,
-            { modelId },
-          ]),
+          Object.entries(roleModels).map(([role, modelId]) => {
+            const reasoningEffort =
+              provider.recommendedRoleReasoningEfforts?.[
+                role as keyof RecommendedRoleReasoningEfforts
+              ];
+
+            return [
+              role,
+              {
+                modelId,
+                ...(reasoningEffort ? { reasoningEffort } : {}),
+              },
+            ];
+          }),
         ),
       },
     },
@@ -1087,7 +1111,10 @@ export function getRecommendedModelPresets(
 export function getDefaultRecommendedModelPreset(
   provider: Pick<
     SetupModelProviderDescriptor,
-    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
+    | 'defaultRoomoteModel'
+    | 'recommendedPresets'
+    | 'recommendedRoleModels'
+    | 'recommendedRoleReasoningEfforts'
   >,
 ): RecommendedModelPreset {
   const presets = getRecommendedModelPresets(provider);
@@ -1213,7 +1240,10 @@ export function normalizeDeploymentModelConfig(
 export function buildRecommendedDeploymentModelConfig(
   provider: Pick<
     SetupModelProviderDescriptor,
-    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
+    | 'defaultRoomoteModel'
+    | 'recommendedPresets'
+    | 'recommendedRoleModels'
+    | 'recommendedRoleReasoningEfforts'
   >,
   presetId?: string,
 ): DeploymentModelConfig {

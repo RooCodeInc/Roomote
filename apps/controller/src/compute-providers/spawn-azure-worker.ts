@@ -31,6 +31,10 @@ import {
   updateTaskRunMachine,
 } from '../utils';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
+import {
+  COMPUTE_BOOTSTRAP_TIMEOUT_MS,
+  COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
+} from './timeouts';
 
 const AZURE_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
 
@@ -344,8 +348,8 @@ export async function spawnAzureWorker(
     tags: azureTags,
     timeoutMs: azureTimeoutMs,
     localTarballPath,
-    createInstanceTimeoutMs: 180_000,
-    bootstrapTimeoutMs: 120_000,
+    createInstanceTimeoutMs: COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
+    bootstrapTimeoutMs: COMPUTE_BOOTSTRAP_TIMEOUT_MS,
     computeClient,
     onMutation: recordMutation,
     ...launchOptions,
@@ -398,6 +402,29 @@ export async function spawnAzureWorker(
         { machineId: machine.machineId, launchMode: launchOptions.launchMode },
       )}`,
     );
+
+    if (
+      launchOptions.launchMode === 'task_standby' ||
+      launchOptions.launchMode === 'task_snapshot'
+    ) {
+      // Suspend/resume and snapshot/restore revive previously frozen worker
+      // processes whose runs were finalized while they were away — dead
+      // tokens, and they hold the sandbox-server port, which kills the
+      // incoming worker's boot. Reap them before launch. pkill exits 1 when
+      // nothing matches; that is the common case and not an error.
+      await computeClient
+        .runCommand({
+          instanceId: machine.machineId,
+          cmd: 'pkill',
+          args: ['-f', '/sandbox/worker/dist/worker.js'],
+          signal: AbortSignal.timeout(15_000),
+        })
+        .catch((error) => {
+          console.warn(
+            `[spawnAzureWorker] Pre-launch worker reaper failed for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+    }
 
     await recordMutation({
       provider: 'azure',

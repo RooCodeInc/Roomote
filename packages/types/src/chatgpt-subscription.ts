@@ -114,3 +114,27 @@ export const CHATGPT_REFRESH_SAFETY_MARGIN_MS = 10 * 60 * 1000;
  * `expires_in`. Matches opencode's fallback.
  */
 export const CHATGPT_DEFAULT_ACCESS_TOKEN_TTL_MS = 3600 * 1000;
+
+/**
+ * Fallback device-code lifetime (15 minutes) when the device-code endpoint
+ * omits `expires_at` or returns an unparseable value. Matches the ~15 minute
+ * window OpenAI currently issues.
+ */
+export const CHATGPT_DEVICE_CODE_DEFAULT_TTL_MS = 900 * 1000;
+
+/** Poll backoff applied when OpenAI rate-limits the device-token endpoint. */
+export const CHATGPT_POLL_SLOW_DOWN_MS = 5_000;
+
+/**
+ * Structured `error.code` the device-token endpoint returns (alongside HTTP
+ * 403) while the operator has not yet entered the code. Any other 403 code is
+ * terminal, most commonly an org policy that blocks the Codex OAuth app.
+ */
+export const CHATGPT_DEVICE_AUTH_PENDING_ERROR_CODE =
+  'deviceauth_authorization_pending';
+
+/**
+ * Structured `error.code` returned (alongside HTTP 404) for a device code the
+ * issuer no longer recognizes, i.e. expired or already consumed.
+ */
+export const CHATGPT_DEVICE_AUTH_NOT_FOUND_ERROR_CODE = 'deviceauth_not_found';

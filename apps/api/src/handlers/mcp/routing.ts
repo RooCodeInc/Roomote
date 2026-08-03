@@ -1,4 +1,5 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 
 import type { Variables } from '../../types';
 
@@ -15,7 +16,19 @@ import { roomoteMcp } from './roomote';
  */
 export const mcpRouting = new Hono<{ Variables: Variables }>();
 
+const requireCuratedIntegrations: MiddlewareHandler<{
+  Variables: Variables;
+}> = async (c, next) => {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+    return c.notFound();
+  }
+
+  await next();
+};
+
 mcpRouting.route('/roomote', roomoteMcp);
+mcpRouting.use('/linear', requireCuratedIntegrations);
+mcpRouting.use('/linear/*', requireCuratedIntegrations);
 mcpRouting.route(
   '/linear',
   createLinearMcp({

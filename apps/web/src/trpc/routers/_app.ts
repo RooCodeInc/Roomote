@@ -190,6 +190,7 @@ import {
 } from '../commands/sandbox-session';
 import {
   getDeploymentMcpEnablementsCommand,
+  getCuratedIntegrationsAvailabilityCommand,
   getMcpOauthReadinessCommand,
   setDeploymentMcpEnabledCommand,
   getUserMcpConnectionsCommand,
@@ -1542,6 +1543,10 @@ export const appRouter = createRouter({
   }),
 
   mcpConnections: createRouter({
+    availability: protectedProcedure.query(() =>
+      getCuratedIntegrationsAvailabilityCommand(),
+    ),
+
     deploymentEnablements: protectedProcedure.query(({ ctx: { auth } }) =>
       getDeploymentMcpEnablementsCommand(auth),
     ),

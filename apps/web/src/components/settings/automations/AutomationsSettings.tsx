@@ -71,21 +71,20 @@ import {
   AlertCircle,
   AlertDescription,
   AlertTitle,
-  Badge,
   BasicTooltip,
   BellElectric,
   BrandIcon,
   Button,
   Card,
-  CardContent,
   CardHeader,
   CardTitle,
   ChartColumnIncreasing,
   Check,
-  ChevronRight,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   GitMergeConflict,
   GitPullRequest,
   Info,
@@ -94,7 +93,9 @@ import {
   Lightbulb,
   Megaphone,
   Play,
+  Plus,
   RefreshCcw,
+  Search,
   Select,
   SelectContent,
   SelectItem,
@@ -106,10 +107,12 @@ import {
   SquarePen,
   Slack,
   Spinner,
+  Settings2,
   Switch,
   Textarea,
   TriangleAlert,
   Users,
+  X,
 } from '@/components/system';
 
 type FieldErrors = Partial<
@@ -227,11 +230,25 @@ type AutomationDefinition = {
   label: string;
   description: string;
   icon: ComponentType<{ className?: string }>;
+  category: AutomationCategory;
+  searchTerms?: string[];
   /** Compact label for the chat surfaces the automation can report to. */
   commsBadge?: string;
   /** Compact label for the source-control providers the automation supports. */
   scmBadge?: string;
 };
+
+type AutomationCategory = 'source-code' | 'communication' | 'operations';
+
+const AUTOMATION_CATEGORY_OPTIONS: Array<{
+  value: AutomationCategory | 'all';
+  label: string;
+}> = [
+  { value: 'all', label: 'All' },
+  { value: 'source-code', label: 'Source code' },
+  { value: 'communication', label: 'Communication' },
+  { value: 'operations', label: 'Operations' },
+];
 
 /**
  * Where an automation's next run will report, as resolved server-side through
@@ -334,12 +351,12 @@ const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
  */
 function getAutomationCapabilityBadges(
   automationKey: BackgroundAutomationKey,
-): Pick<AutomationDefinition, 'commsBadge' | 'scmBadge'> {
+): Pick<AutomationDefinition, 'commsBadge' | 'scmBadge' | 'searchTerms'> {
   const descriptor =
     getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
 
   if (!descriptor) {
-    return {};
+    return { searchTerms: [] };
   }
 
   const comms: readonly CommunicationProvider[] =
@@ -363,6 +380,10 @@ function getAutomationCapabilityBadges(
     : undefined;
 
   return {
+    searchTerms: [
+      ...comms.map(getCommunicationProviderDisplayName),
+      ...scm.map(getSourceControlProviderLabel),
+    ],
     ...(commsBadge ? { commsBadge } : {}),
     ...(scmBadge ? { scmBadge } : {}),
   };
@@ -385,6 +406,7 @@ function getAutomationDefinition(
     label: descriptor.label,
     description: TRIGGERABLE_AUTOMATION_DESCRIPTIONS[automationKey],
     icon,
+    category: automationKey === 'sentry_triage' ? 'operations' : 'source-code',
     ...getAutomationCapabilityBadges(automationKey),
   };
 }
@@ -449,6 +471,7 @@ const SCHEDULE_ONLY_AUTOMATION_DEFINITIONS = Object.fromEntries(
       description:
         SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id].description,
       icon: SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id].icon,
+      category: 'source-code',
       ...getAutomationCapabilityBadges(automation.automationKey),
     },
   ]),
@@ -474,6 +497,8 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     description:
       'Start tasks from selected Slack or Discord channels, each with its own custom instructions.',
     icon: MessagesSquare,
+    category: 'communication',
+    searchTerms: ['Slack', 'Discord'],
   },
   managerChannel: {
     id: 'managerChannel',
@@ -481,6 +506,8 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     description:
       'Shared Slack or Discord channel for manager-facing Roomote asks, summaries, and alerts.',
     icon: Users,
+    category: 'communication',
+    searchTerms: ['Slack', 'Discord'],
   },
   managerStats: {
     ...getAutomationDefinition(
@@ -488,6 +515,7 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
       'manager_stats',
       ChartColumnIncreasing,
     ),
+    category: 'communication',
   },
   sentryTriage: {
     ...getAutomationDefinition('sentryTriage', 'sentry_triage', SentryIcon),
@@ -508,6 +536,8 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     label: 'Review Code',
     description: `Review PRs automatically and on-demand.`,
     icon: GitPullRequest,
+    category: 'source-code',
+    searchTerms: sourceControlProviders.map(getSourceControlProviderLabel),
   },
   conflictResolver: {
     ...getAutomationDefinition(
@@ -518,9 +548,11 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
   },
   suggester: {
     ...getAutomationDefinition('suggester', 'suggester', Lightbulb),
+    category: 'communication',
   },
   announcer: {
     ...getAutomationDefinition('announcer', 'announcer', Megaphone),
+    category: 'communication',
   },
   platformIssueAlerts: {
     id: 'platformIssueAlerts',
@@ -528,10 +560,18 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     description:
       'Alert on Slack or Discord when a task runs into admin-fixable issues.',
     icon: BellElectric,
+    category: 'operations',
+    searchTerms: ['Slack', 'Discord'],
   },
 };
 
 const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
+  ...Object.fromEntries(
+    Object.keys(AUTOMATION_DEFINITIONS).map((automationId) => [
+      automationId.toLowerCase(),
+      automationId,
+    ]),
+  ),
   'auto-respond-channels': 'channelAutoStart',
   autorespondchannels: 'channelAutoStart',
   'auto-start-tasks': 'channelAutoStart',
@@ -1169,8 +1209,12 @@ function shouldShowChannelAutoStartWarning(params: {
 
 function LoadingSkeleton() {
   return (
-    <div className="space-y-4">
-      {Array.from({ length: 6 }).map((_, index) => (
+    <div
+      className="grid gap-4 md:grid-cols-2"
+      data-testid="built-in-automations-skeleton"
+    >
+      <Skeleton className="col-span-full h-5 w-20" />
+      {Array.from({ length: 4 }).map((_, index) => (
         <Card key={index} className="gap-0 overflow-hidden py-4">
           <CardHeader className="p-0">
             <div className="flex items-start gap-3">
@@ -1427,6 +1471,7 @@ function AutomationCard({
   isOpen,
   onOpenChange,
   iconEnabled,
+  isAvailableMatch = true,
   runAction,
   debugSection,
   footer,
@@ -1438,6 +1483,7 @@ function AutomationCard({
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   iconEnabled: boolean;
+  isAvailableMatch?: boolean;
   runAction?: React.ReactNode;
   debugSection?: React.ReactNode;
   footer?: React.ReactNode;
@@ -1447,25 +1493,63 @@ function AutomationCard({
 }) {
   const Icon = automation.icon;
   const open = !disabled && (alwaysOpen || isOpen);
-  const content = (
-    <>
-      <CardContent className="space-y-4 pl-4 pt-5 md:pl-8">
-        {children}
-        {debugSection}
-      </CardContent>
-      {footer ? (
-        <div className="flex items-center md:pl-8 mt-4">{footer}</div>
-      ) : null}
-    </>
-  );
+  const actionLabel = iconEnabled
+    ? `Configure ${automation.label}`
+    : `Set up ${automation.label}`;
+
+  if (!iconEnabled && !isAvailableMatch) {
+    return null;
+  }
 
   return (
     <div
       id={automation.id}
-      className="scroll-mt-24"
+      className={cn('scroll-mt-24', iconEnabled ? 'order-[-20]' : 'order-0')}
       aria-disabled={disabled || undefined}
     >
-      <Collapsible
+      <Card className={cn('h-full gap-3', disabled && 'opacity-50')}>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="mt-0.5 flex w-[34px] shrink-0 items-start justify-center">
+                <div className="rounded-xl border border-border/70 bg-muted/30 p-2">
+                  <Icon className="size-5" />
+                </div>
+              </div>
+              <div className="min-w-0 space-y-1">
+                <CardTitle className="text-base">{automation.label}</CardTitle>
+                {automation.commsBadge || automation.scmBadge ? (
+                  <p className="text-sm text-foreground">
+                    {[automation.commsBadge, automation.scmBadge]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                ) : null}
+                <p className="text-sm text-muted-foreground">
+                  {automation.description}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {runAction && iconEnabled && !disabled ? runAction : null}
+              <BasicTooltip content={actionLabel}>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label={actionLabel}
+                  disabled={disabled}
+                  onClick={() => onOpenChange(true)}
+                >
+                  {iconEnabled ? <Settings2 /> : <Plus />}
+                </Button>
+              </BasicTooltip>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+
+      <Dialog
         open={open}
         onOpenChange={(nextOpen) => {
           if (!disabled) {
@@ -1473,126 +1557,19 @@ function AutomationCard({
           }
         }}
       >
-        <Card
-          className={cn(
-            'gap-0 overflow-hidden px-4 py-4',
-            disabled && 'opacity-50',
-          )}
-        >
-          <CardHeader className="p-0">
-            <div className="flex items-start gap-3">
-              {alwaysOpen ? (
-                <div className="flex items-start gap-2 grow group pl-2">
-                  <Icon
-                    className={cn(
-                      'mt-1 size-5 shrink-0',
-                      iconEnabled
-                        ? 'text-accent-foreground'
-                        : 'text-muted-foreground/50',
-                    )}
-                  />
-                  <div className="min-w-0 flex-1 space-y-1 pr-2">
-                    <CardTitle className="text-base leading-6 group-hover:text-accent-foreground">
-                      <AutomationTitle automation={automation} />
-                    </CardTitle>
-                    <p className="text-sm opacity-60 group-hover:text-accent-foreground">
-                      {automation.description}
-                    </p>
-                  </div>
-                </div>
-              ) : disabled ? (
-                <div className="flex items-start gap-2 grow cursor-not-allowed">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`${automation.label} is disabled until a Manager Channel is saved`}
-                    className="mt-0.5 shrink-0"
-                    disabled
-                  >
-                    <ChevronRight />
-                  </Button>
-                  <span className="shrink-0 p-1 -mt-0.5 rounded-full size-8 inline-flex items-center justify-center bg-transparent">
-                    <Icon className="size-5 text-muted-foreground/50" />
-                  </span>
-                  <div className="min-w-0 flex-1 space-y-1 pr-2">
-                    <CardTitle className="text-base leading-6">
-                      <AutomationTitle automation={automation} />
-                    </CardTitle>
-                    <p className="text-sm opacity-60">
-                      {automation.description}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <CollapsibleTrigger asChild>
-                  <div className="flex items-start gap-2 cursor-pointer grow group">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`${open ? 'Collapse' : 'Expand'} ${automation.label}`}
-                      className="group mt-0.5 shrink-0"
-                    >
-                      <ChevronRight className="transition-transform duration-200 group-data-[state=open]:rotate-90" />
-                    </Button>
-                    <span
-                      className={cn(
-                        'shrink-0 p-1 -mt-0.5 rounded-full size-8 inline-flex items-center justify-center',
-                        iconEnabled ? 'bg-accent-foreground' : 'bg-transparent',
-                      )}
-                    >
-                      <Icon
-                        className={cn(
-                          'size-5',
-                          iconEnabled
-                            ? 'text-black'
-                            : 'text-muted-foreground/50',
-                        )}
-                      />
-                    </span>
-                    <div className="min-w-0 flex-1 space-y-1 pr-2">
-                      <CardTitle className="text-base leading-6 group-hover:text-accent-foreground">
-                        <AutomationTitle automation={automation} />
-                      </CardTitle>
-                      <p className="text-sm opacity-60 group-hover:text-accent-foreground">
-                        {automation.description}
-                      </p>
-                    </div>
-                  </div>
-                </CollapsibleTrigger>
-              )}
-              {runAction && !disabled ? (
-                <div className="shrink-0">{runAction}</div>
-              ) : null}
-            </div>
-          </CardHeader>
-          {alwaysOpen && !disabled ? (
-            content
-          ) : !disabled ? (
-            <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-slideUp data-[state=open]:animate-slideDown">
-              {content}
-            </CollapsibleContent>
-          ) : null}
-        </Card>
-      </Collapsible>
+        <DialogContent size="lg">
+          <DialogHeader>
+            <DialogTitle>{automation.label}</DialogTitle>
+            <DialogDescription>{automation.description}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {children}
+            {debugSection}
+            {footer ? <div className="flex items-center">{footer}</div> : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
-  );
-}
-
-function AutomationTitle({ automation }: { automation: AutomationDefinition }) {
-  return (
-    <span className="inline-flex flex-wrap items-center gap-2">
-      <span>{automation.label}</span>
-      {automation.commsBadge ? (
-        <Badge variant="outline" className="font-normal text-muted-foreground">
-          {automation.commsBadge}
-        </Badge>
-      ) : null}
-      {automation.scmBadge ? (
-        <Badge variant="outline" className="font-normal text-muted-foreground">
-          {automation.scmBadge}
-        </Badge>
-      ) : null}
-    </span>
   );
 }
 
@@ -1601,6 +1578,7 @@ function ScheduledAutomationCard<TFrequency extends string>({
   isOpen,
   onOpenChange,
   iconEnabled,
+  isAvailableMatch,
   disabled = false,
   debugSection,
   runTooltip,
@@ -1622,6 +1600,7 @@ function ScheduledAutomationCard<TFrequency extends string>({
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   iconEnabled: boolean;
+  isAvailableMatch: boolean;
   disabled?: boolean;
   debugSection?: React.ReactNode;
   runTooltip: string;
@@ -1645,6 +1624,7 @@ function ScheduledAutomationCard<TFrequency extends string>({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       iconEnabled={iconEnabled}
+      isAvailableMatch={isAvailableMatch}
       disabled={disabled}
       debugSection={debugSection}
       runAction={
@@ -1721,6 +1701,10 @@ export function AutomationsSettings() {
   const [isEditingManagerChannel, setIsEditingManagerChannel] = useState(false);
   const [isEnteringCustomManagerChannel, setIsEnteringCustomManagerChannel] =
     useState(false);
+  const [availableCategory, setAvailableCategory] = useState<
+    AutomationCategory | 'all'
+  >('all');
+  const [availableSearch, setAvailableSearch] = useState('');
   const formStateRef = useRef<FormState | null>(null);
   const savedStateRef = useRef<FormState | null>(null);
   const didApplyInitialHashRef = useRef(false);
@@ -2116,6 +2100,13 @@ export function AutomationsSettings() {
         }
         return next;
       });
+
+      if (typeof window !== 'undefined') {
+        const nextUrl = open
+          ? `${window.location.pathname}${window.location.search}#${automationId}`
+          : `${window.location.pathname}${window.location.search}`;
+        window.history.replaceState(null, '', nextUrl);
+      }
     },
     [],
   );
@@ -2598,6 +2589,28 @@ export function AutomationsSettings() {
     announcer: announcerIsEnabled,
     platformIssueAlerts: isPlatformIssueAlertsEnabled(formState),
   } satisfies Record<AutomationId, boolean>;
+  const normalizedAvailableSearch = availableSearch.trim().toLowerCase();
+  const availableAutomationMatches = new Set(
+    Object.values(AUTOMATION_DEFINITIONS)
+      .filter(
+        (automation) =>
+          !iconEnabled[automation.id] &&
+          (availableCategory === 'all' ||
+            automation.category === availableCategory) &&
+          (!normalizedAvailableSearch ||
+            [
+              automation.label,
+              automation.description,
+              ...(automation.searchTerms ?? []),
+            ]
+              .join(' ')
+              .toLowerCase()
+              .includes(normalizedAvailableSearch)),
+      )
+      .map((automation) => automation.id),
+  );
+  const hasAvailableFilters =
+    availableCategory !== 'all' || Boolean(normalizedAvailableSearch);
 
   const isAutomationSaving = (automationId: AutomationId) =>
     updateMutation.isPending && savingAutomation === automationId;
@@ -2711,17 +2724,86 @@ export function AutomationsSettings() {
         </Alert>
       ) : null}
 
+      <CustomAutomationsSection />
+
       {settingsQuery.isPending || !formState ? (
         <LoadingSkeleton />
       ) : (
         <div className="space-y-4">
-          <div className="space-y-3">
-            <h2 className="text-base font-semibold text-foreground">
-              Source Code automations
+          <div className="grid gap-4 md:grid-cols-2">
+            <h2 className="order-[-30] col-span-full text-sm font-semibold text-foreground">
+              Enabled
             </h2>
-
+            {Object.values(iconEnabled).some(Boolean) ? null : (
+              <p className="order-[-20] col-span-full text-sm text-muted-foreground">
+                No built-in automations enabled yet.
+              </p>
+            )}
+            <div className="order-[-10] col-span-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-sm font-semibold text-foreground">
+                Available
+              </h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={availableCategory}
+                  onValueChange={(value) =>
+                    setAvailableCategory(value as AutomationCategory | 'all')
+                  }
+                >
+                  <SelectTrigger
+                    size="sm"
+                    aria-label="Filter available automations by category"
+                    className="w-36"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AUTOMATION_CATEGORY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={availableSearch}
+                    onChange={(event) =>
+                      setAvailableSearch(event.currentTarget.value)
+                    }
+                    placeholder="Search"
+                    aria-label="Search available automations"
+                    className="h-8 w-36 pl-8 text-sm"
+                  />
+                </div>
+                {hasAvailableFilters ? (
+                  <BasicTooltip content="Clear filters">
+                    <Button
+                      type="button"
+                      size="icon"
+                      className="size-8"
+                      variant="ghost"
+                      aria-label="Clear automation filters"
+                      onClick={() => {
+                        setAvailableCategory('all');
+                        setAvailableSearch('');
+                      }}
+                    >
+                      <X />
+                    </Button>
+                  </BasicTooltip>
+                ) : null}
+              </div>
+            </div>
+            {availableAutomationMatches.size === 0 ? (
+              <p className="order-0 col-span-full text-sm text-muted-foreground">
+                No available automations match these filters.
+              </p>
+            ) : null}
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.reviewer}
+              isAvailableMatch={availableAutomationMatches.has('reviewer')}
               isOpen={openAutomationIds.has('reviewer')}
               onOpenChange={(open) => setAutomationOpen('reviewer', open)}
               iconEnabled={iconEnabled.reviewer}
@@ -2870,6 +2952,9 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isAvailableMatch={availableAutomationMatches.has(
+                    automation.id,
+                  )}
                   isOpen={openAutomationIds.has(automation.id)}
                   onOpenChange={(open) =>
                     setAutomationOpen(automation.id, open)
@@ -2946,6 +3031,9 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.conflictResolver}
+              isAvailableMatch={availableAutomationMatches.has(
+                'conflictResolver',
+              )}
               isOpen={openAutomationIds.has('conflictResolver')}
               onOpenChange={(open) =>
                 setAutomationOpen('conflictResolver', open)
@@ -3152,6 +3240,9 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isAvailableMatch={availableAutomationMatches.has(
+                    automation.id,
+                  )}
                   isOpen={openAutomationIds.has(automation.id)}
                   onOpenChange={(open) =>
                     setAutomationOpen(automation.id, open)
@@ -3264,6 +3355,9 @@ export function AutomationsSettings() {
 
             <ScheduledAutomationCard
               automation={AUTOMATION_DEFINITIONS.dependabotTriage}
+              isAvailableMatch={availableAutomationMatches.has(
+                'dependabotTriage',
+              )}
               isOpen={openAutomationIds.has('dependabotTriage')}
               onOpenChange={(open) =>
                 setAutomationOpen('dependabotTriage', open)
@@ -3339,6 +3433,7 @@ export function AutomationsSettings() {
 
             <ScheduledAutomationCard
               automation={AUTOMATION_DEFINITIONS.codeqlTriage}
+              isAvailableMatch={availableAutomationMatches.has('codeqlTriage')}
               isOpen={openAutomationIds.has('codeqlTriage')}
               onOpenChange={(open) => setAutomationOpen('codeqlTriage', open)}
               iconEnabled={iconEnabled.codeqlTriage}
@@ -3429,6 +3524,9 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isAvailableMatch={availableAutomationMatches.has(
+                    automation.id,
+                  )}
                   isOpen={openAutomationIds.has(automation.id)}
                   onOpenChange={(open) =>
                     setAutomationOpen(automation.id, open)
@@ -3539,14 +3637,11 @@ export function AutomationsSettings() {
               );
             })}
 
-            <CustomAutomationsSection />
-
-            <h2 className="pt-2 text-base font-semibold text-foreground">
-              Channel automations
-            </h2>
-
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.channelAutoStart}
+              isAvailableMatch={availableAutomationMatches.has(
+                'channelAutoStart',
+              )}
               isOpen={openAutomationIds.has('channelAutoStart')}
               onOpenChange={(open) =>
                 setAutomationOpen('channelAutoStart', open)
@@ -3600,807 +3695,822 @@ export function AutomationsSettings() {
               />
             </AutomationCard>
 
-            <h2 className="pt-2 text-base font-semibold text-foreground">
-              Automations for Roomote Managers
-            </h2>
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.managerChannel}
+              isAvailableMatch={availableAutomationMatches.has(
+                'managerChannel',
+              )}
+              isOpen={openAutomationIds.has('managerChannel')}
+              onOpenChange={(open) => setAutomationOpen('managerChannel', open)}
+              iconEnabled={iconEnabled.managerChannel}
+            >
+              <div className="space-y-2">
+                {showManagerChannelForm ? (
+                  <>
+                    <Label htmlFor="manager-channel">
+                      Where should Roomote post manager-facing updates?
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Make sure the Roomote app is added to the channel.
+                    </p>
+                    <div className="max-w-md space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={managerChannelSelectValue}
+                          onValueChange={(value) => {
+                            if (value === CLEAR_MANAGER_CHANNEL_SELECT_VALUE) {
+                              setIsEnteringCustomManagerChannel(false);
+                              setFormState((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      managerSlackChannel: '',
+                                      managerDiscordChannel: '',
+                                    }
+                                  : prev,
+                              );
+                              return;
+                            }
 
-            <div id="managerChannel" className="scroll-mt-24 space-y-2 my-8">
-              {showManagerChannelForm ? (
-                <>
-                  <Label htmlFor="manager-channel">
-                    Where should Roomote post manager-facing updates?
-                  </Label>
-                  <p className="text-sm text-muted-foreground">
-                    Make sure the Roomote app is added to the channel.
-                  </p>
-                  <div className="max-w-md space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Select
-                        value={managerChannelSelectValue}
-                        onValueChange={(value) => {
-                          if (value === CLEAR_MANAGER_CHANNEL_SELECT_VALUE) {
+                            if (value === CUSTOM_MANAGER_CHANNEL_SELECT_VALUE) {
+                              setIsEnteringCustomManagerChannel(true);
+                              setFormState((prev) =>
+                                prev && selectedManagerChannelOption
+                                  ? {
+                                      ...prev,
+                                      managerSlackChannel: '',
+                                      managerDiscordChannel: '',
+                                    }
+                                  : prev,
+                              );
+                              return;
+                            }
+
+                            if (
+                              value.startsWith(
+                                DISCORD_DESTINATION_OPTION_PREFIX,
+                              )
+                            ) {
+                              setIsEnteringCustomManagerChannel(false);
+                              setFormState((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      managerSlackChannel: '',
+                                      managerDiscordChannel: value.slice(
+                                        DISCORD_DESTINATION_OPTION_PREFIX.length,
+                                      ),
+                                    }
+                                  : prev,
+                              );
+                              return;
+                            }
+
+                            const selectedChannel = managerChannelOptions.find(
+                              (channel) => channel.id === value,
+                            );
+
+                            if (!selectedChannel) {
+                              return;
+                            }
+
                             setIsEnteringCustomManagerChannel(false);
                             setFormState((prev) =>
                               prev
                                 ? {
                                     ...prev,
-                                    managerSlackChannel: '',
+                                    managerSlackChannel: selectedChannel.label,
                                     managerDiscordChannel: '',
                                   }
                                 : prev,
                             );
-                            return;
-                          }
-
-                          if (value === CUSTOM_MANAGER_CHANNEL_SELECT_VALUE) {
+                          }}
+                          disabled={managerChannelSelectionDisabled}
+                        >
+                          <SelectTrigger
+                            id="manager-channel"
+                            aria-label="Select manager channel"
+                            autoFocus={isEditingManagerChannel}
+                            className="w-full"
+                          >
+                            <span className="truncate text-left">
+                              {managerChannelSelectLabel}
+                            </span>
+                          </SelectTrigger>
+                          <SelectContent align="start">
+                            {managerChannelHasValue ? (
+                              <>
+                                <SelectItem
+                                  value={CLEAR_MANAGER_CHANNEL_SELECT_VALUE}
+                                >
+                                  Clear selection
+                                </SelectItem>
+                                <SelectSeparator />
+                              </>
+                            ) : null}
+                            {slackChannelsQuery.isPending ||
+                            discordChannelsQuery.isPending ? (
+                              <SelectItem value="__loading__" disabled>
+                                Loading channels...
+                              </SelectItem>
+                            ) : slackChannelsQuery.isError ||
+                              discordChannelsQuery.isError ? (
+                              <SelectItem value="__error__" disabled>
+                                Could not load channels. Try refreshing.
+                              </SelectItem>
+                            ) : managerChannelOptions.length > 0 ||
+                              managerDiscordChannelOptions.length > 0 ? (
+                              [
+                                ...managerChannelOptions,
+                                ...managerDiscordChannelOptions,
+                              ].map((channel) => (
+                                <SelectItem key={channel.id} value={channel.id}>
+                                  {channel.label}
+                                </SelectItem>
+                              ))
+                            ) : (
+                              <SelectItem value="__empty__" disabled>
+                                No channels found.
+                              </SelectItem>
+                            )}
+                            <SelectSeparator />
+                            <SelectItem
+                              value={CUSTOM_MANAGER_CHANNEL_SELECT_VALUE}
+                            >
+                              Private or manual channel
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {managerChannelOptions.length > 0 ||
+                        managerDiscordChannelOptions.length > 0 ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Refresh channels"
+                            title="Refresh channels"
+                            disabled={
+                              (!capabilities?.slackConnected &&
+                                !capabilities?.discordConnected) ||
+                              slackChannelsQuery.isFetching ||
+                              discordChannelsQuery.isFetching
+                            }
+                            onClick={() => {
+                              void Promise.all([
+                                slackChannelsQuery.refetch(),
+                                discordChannelsQuery.refetch(),
+                              ]);
+                            }}
+                          >
+                            <RefreshCcw
+                              className={cn(
+                                (slackChannelsQuery.isFetching ||
+                                  discordChannelsQuery.isFetching) &&
+                                  'animate-spin',
+                              )}
+                            />
+                          </Button>
+                        ) : null}
+                      </div>
+                      {showCustomManagerChannelInput ? (
+                        <Input
+                          value={formState.managerSlackChannel}
+                          onChange={(event) => {
                             setIsEnteringCustomManagerChannel(true);
                             setFormState((prev) =>
-                              prev && selectedManagerChannelOption
+                              prev
                                 ? {
                                     ...prev,
-                                    managerSlackChannel: '',
+                                    managerSlackChannel: event.target.value,
                                     managerDiscordChannel: '',
                                   }
                                 : prev,
                             );
-                            return;
-                          }
-
-                          if (
-                            value.startsWith(DISCORD_DESTINATION_OPTION_PREFIX)
-                          ) {
-                            setIsEnteringCustomManagerChannel(false);
-                            setFormState((prev) =>
-                              prev
-                                ? {
-                                    ...prev,
-                                    managerSlackChannel: '',
-                                    managerDiscordChannel: value.slice(
-                                      DISCORD_DESTINATION_OPTION_PREFIX.length,
-                                    ),
-                                  }
-                                : prev,
-                            );
-                            return;
-                          }
-
-                          const selectedChannel = managerChannelOptions.find(
-                            (channel) => channel.id === value,
-                          );
-
-                          if (!selectedChannel) {
-                            return;
-                          }
-
-                          setIsEnteringCustomManagerChannel(false);
-                          setFormState((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  managerSlackChannel: selectedChannel.label,
-                                  managerDiscordChannel: '',
-                                }
-                              : prev,
-                          );
-                        }}
-                        disabled={managerChannelSelectionDisabled}
-                      >
-                        <SelectTrigger
-                          id="manager-channel"
-                          aria-label="Select manager channel"
-                          autoFocus={isEditingManagerChannel}
-                          className="w-full"
-                        >
-                          <span className="truncate text-left">
-                            {managerChannelSelectLabel}
-                          </span>
-                        </SelectTrigger>
-                        <SelectContent align="start">
-                          {managerChannelHasValue ? (
-                            <>
-                              <SelectItem
-                                value={CLEAR_MANAGER_CHANNEL_SELECT_VALUE}
-                              >
-                                Clear selection
-                              </SelectItem>
-                              <SelectSeparator />
-                            </>
-                          ) : null}
-                          {slackChannelsQuery.isPending ||
-                          discordChannelsQuery.isPending ? (
-                            <SelectItem value="__loading__" disabled>
-                              Loading channels...
-                            </SelectItem>
-                          ) : slackChannelsQuery.isError ||
-                            discordChannelsQuery.isError ? (
-                            <SelectItem value="__error__" disabled>
-                              Could not load channels. Try refreshing.
-                            </SelectItem>
-                          ) : managerChannelOptions.length > 0 ||
-                            managerDiscordChannelOptions.length > 0 ? (
-                            [
-                              ...managerChannelOptions,
-                              ...managerDiscordChannelOptions,
-                            ].map((channel) => (
-                              <SelectItem key={channel.id} value={channel.id}>
-                                {channel.label}
-                              </SelectItem>
-                            ))
-                          ) : (
-                            <SelectItem value="__empty__" disabled>
-                              No channels found.
-                            </SelectItem>
-                          )}
-                          <SelectSeparator />
-                          <SelectItem
-                            value={CUSTOM_MANAGER_CHANNEL_SELECT_VALUE}
-                          >
-                            Private or manual channel
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {managerChannelOptions.length > 0 ||
-                      managerDiscordChannelOptions.length > 0 ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          aria-label="Refresh channels"
-                          title="Refresh channels"
-                          disabled={
-                            (!capabilities?.slackConnected &&
-                              !capabilities?.discordConnected) ||
-                            slackChannelsQuery.isFetching ||
-                            discordChannelsQuery.isFetching
-                          }
-                          onClick={() => {
-                            void Promise.all([
-                              slackChannelsQuery.refetch(),
-                              discordChannelsQuery.refetch(),
-                            ]);
                           }}
+                          placeholder="Enter a private channel name or Slack channel ID"
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          spellCheck={false}
+                        />
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Private channels may not appear in the list. Use the
+                      manual option to paste a private channel name or raw Slack
+                      channel ID.
+                    </p>
+                    {showManagerSlackChannelWarning ? (
+                      <SlackChannelAccessWarning
+                        slackAppMention={slackAppMention}
+                      />
+                    ) : null}
+                    {fieldErrors.managerSlackChannel ||
+                    fieldErrors.managerDiscordChannel ? (
+                      <p className="text-xs text-destructive">
+                        {fieldErrors.managerSlackChannel ??
+                          fieldErrors.managerDiscordChannel}
+                      </p>
+                    ) : null}
+                    {showManagerChannelMigrationNote ? (
+                      <Alert variant="light">
+                        <AlertDescription>
+                          Some older automations still point at different Slack
+                          channels. Pick the shared Manager Channel here to
+                          migrate future manager-facing posts onto one
+                          destination.
+                        </AlertDescription>
+                      </Alert>
+                    ) : null}
+                    <div className="flex items-center gap-2 pt-2">
+                      <AutomationFooter
+                        isDirty={isDirty.managerChannel}
+                        isPending={
+                          updateMutation.isPending &&
+                          savingAutomation === 'managerChannel'
+                        }
+                        onSave={() => saveAgent('managerChannel')}
+                        onReset={() => {
+                          resetAgent('managerChannel');
+                          if (managerChannelConfigured) {
+                            setIsEditingManagerChannel(false);
+                          }
+                        }}
+                      />
+                      {managerChannelConfigured &&
+                      isEditingManagerChannel &&
+                      !isDirty.managerChannel ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsEditingManagerChannel(false)}
                         >
-                          <RefreshCcw
-                            className={cn(
-                              (slackChannelsQuery.isFetching ||
-                                discordChannelsQuery.isFetching) &&
-                                'animate-spin',
-                            )}
-                          />
+                          Cancel
                         </Button>
                       ) : null}
                     </div>
-                    {showCustomManagerChannelInput ? (
-                      <Input
-                        value={formState.managerSlackChannel}
-                        onChange={(event) => {
-                          setIsEnteringCustomManagerChannel(true);
-                          setFormState((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  managerSlackChannel: event.target.value,
-                                  managerDiscordChannel: '',
-                                }
-                              : prev,
-                          );
-                        }}
-                        placeholder="Enter a private channel name or Slack channel ID"
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                      />
-                    ) : null}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Private channels may not appear in the list. Use the manual
-                    option to paste a private channel name or raw Slack channel
-                    ID.
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Posting manager-facing updates to{' '}
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 align-baseline text-sm font-normal"
+                      onClick={() => setIsEditingManagerChannel(true)}
+                    >
+                      {savedManagerChannelLabel}
+                      <SquarePen className="size-3.5" />
+                    </Button>
                   </p>
-                  {showManagerSlackChannelWarning ? (
-                    <SlackChannelAccessWarning
-                      slackAppMention={slackAppMention}
-                    />
-                  ) : null}
-                  {fieldErrors.managerSlackChannel ||
-                  fieldErrors.managerDiscordChannel ? (
-                    <p className="text-xs text-destructive">
-                      {fieldErrors.managerSlackChannel ??
-                        fieldErrors.managerDiscordChannel}
-                    </p>
-                  ) : null}
-                  {showManagerChannelMigrationNote ? (
-                    <Alert variant="light">
-                      <AlertDescription>
-                        Some older automations still point at different Slack
-                        channels. Pick the shared Manager Channel here to
-                        migrate future manager-facing posts onto one
-                        destination.
-                      </AlertDescription>
-                    </Alert>
-                  ) : null}
-                  <div className="flex items-center gap-2 pt-2">
-                    <AutomationFooter
-                      isDirty={isDirty.managerChannel}
-                      isPending={
-                        updateMutation.isPending &&
-                        savingAutomation === 'managerChannel'
-                      }
-                      onSave={() => saveAgent('managerChannel')}
-                      onReset={() => {
-                        resetAgent('managerChannel');
-                        if (managerChannelConfigured) {
-                          setIsEditingManagerChannel(false);
-                        }
-                      }}
-                    />
-                    {managerChannelConfigured &&
-                    isEditingManagerChannel &&
-                    !isDirty.managerChannel ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsEditingManagerChannel(false)}
-                      >
-                        Cancel
-                      </Button>
-                    ) : null}
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Posting manager-facing updates to{' '}
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="h-auto p-0 align-baseline text-sm font-normal"
-                    onClick={() => setIsEditingManagerChannel(true)}
-                  >
-                    {savedManagerChannelLabel}
-                    <SquarePen className="size-3.5" />
-                  </Button>
-                </p>
-              )}
-            </div>
-          </div>
+                )}
+              </div>
+            </AutomationCard>
 
-          <AutomationCard
-            automation={AUTOMATION_DEFINITIONS.managerStats}
-            isOpen={openAutomationIds.has('managerStats')}
-            onOpenChange={(open) => setAutomationOpen('managerStats', open)}
-            iconEnabled={iconEnabled.managerStats}
-            debugSection={renderDebugRunsSection('managerStats')}
-            runAction={
-              <BasicTooltip
-                content={getRunTooltip('managerStats', managerStatsIsEnabled)}
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() =>
-                    triggerMutation.mutate({ automationKey: 'manager_stats' })
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.managerStats}
+              isAvailableMatch={availableAutomationMatches.has('managerStats')}
+              isOpen={openAutomationIds.has('managerStats')}
+              onOpenChange={(open) => setAutomationOpen('managerStats', open)}
+              iconEnabled={iconEnabled.managerStats}
+              debugSection={renderDebugRunsSection('managerStats')}
+              runAction={
+                <BasicTooltip
+                  content={getRunTooltip('managerStats', managerStatsIsEnabled)}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      triggerMutation.mutate({
+                        automationKey: 'manager_stats',
+                      })
+                    }
+                    disabled={isRunDisabled(
+                      'managerStats',
+                      managerStatsIsEnabled,
+                    )}
+                  >
+                    <Play />
+                  </Button>
+                </BasicTooltip>
+              }
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.managerStats}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'managerStats'
                   }
-                  disabled={isRunDisabled(
-                    'managerStats',
-                    managerStatsIsEnabled,
+                  onSave={() => saveAgent('managerStats')}
+                  onReset={() => resetAgent('managerStats')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="manager-stats-enabled"
+                    checked={managerStatsIsEnabled}
+                    onCheckedChange={(enabled) =>
+                      setFormState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              managerStatsFrequency: enabled ? 'weekly' : 'off',
+                            }
+                          : prev,
+                      )
+                    }
+                  />
+                  <Label htmlFor="manager-stats-enabled" className="text-sm">
+                    Enabled
+                  </Label>
+                </div>
+
+                {managerStatsIsEnabled ? (
+                  <div className="space-y-5">
+                    {renderSlackDestinationField({
+                      field: 'managerStatsSlackChannel',
+                      inputId: 'manager-stats-slack-channel',
+                      label: 'Post summaries to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post the Friday manager digest.',
+                      savedChannelId:
+                        settingsQuery.data?.settings
+                          .managerStatsSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .managerStatsDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.managerStatsSlackChannel,
+                    })}
+
+                    <p className="text-xs text-muted-foreground md:max-w-160">
+                      Posts a weekly summary on Fridays.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </AutomationCard>
+
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.sentryTriage}
+              isAvailableMatch={availableAutomationMatches.has('sentryTriage')}
+              isOpen={openAutomationIds.has('sentryTriage')}
+              onOpenChange={(open) => setAutomationOpen('sentryTriage', open)}
+              iconEnabled={iconEnabled.sentryTriage}
+              debugSection={renderDebugRunsSection('sentryTriage')}
+              runAction={
+                <BasicTooltip
+                  content={getRunTooltip(
+                    'sentryTriage',
+                    sentryTriageIsEnabled,
+                    sentryTriageBlockedReason,
                   )}
                 >
-                  <Play />
-                </Button>
-              </BasicTooltip>
-            }
-            footer={
-              <AutomationFooter
-                isDirty={isDirty.managerStats}
-                isPending={
-                  updateMutation.isPending &&
-                  savingAutomation === 'managerStats'
-                }
-                onSave={() => saveAgent('managerStats')}
-                onReset={() => resetAgent('managerStats')}
-              />
-            }
-          >
-            <div className="space-y-5">
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="manager-stats-enabled"
-                  checked={managerStatsIsEnabled}
-                  onCheckedChange={(enabled) =>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      triggerMutation.mutate({
+                        automationKey: 'sentry_triage',
+                      })
+                    }
+                    disabled={isRunDisabled(
+                      'sentryTriage',
+                      sentryTriageIsEnabled,
+                      sentryTriageBlockedReason != null,
+                    )}
+                  >
+                    <Play />
+                  </Button>
+                </BasicTooltip>
+              }
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.sentryTriage}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'sentryTriage'
+                  }
+                  saveDisabled={sentryTriageSaveDisabled}
+                  onSave={() => saveAgent('sentryTriage')}
+                  onReset={() => resetAgent('sentryTriage')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <Select
+                  value={formState.sentryTriageFrequency}
+                  onValueChange={(value) => {
+                    const frequency = value as SentryTriageFrequency;
+
+                    if (
+                      !canSelectSentryTriageFrequency({
+                        sentryConnected: sentryConnected,
+                        frequency,
+                      })
+                    ) {
+                      toast.error(
+                        'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.',
+                      );
+                      return;
+                    }
+
                     setFormState((prev) =>
                       prev
                         ? {
                             ...prev,
-                            managerStatsFrequency: enabled ? 'weekly' : 'off',
+                            sentryTriageFrequency: frequency,
                           }
                         : prev,
-                    )
-                  }
-                />
-                <Label htmlFor="manager-stats-enabled" className="text-sm">
-                  Enabled
-                </Label>
-              </div>
-
-              {managerStatsIsEnabled ? (
-                <div className="space-y-5">
-                  {renderSlackDestinationField({
-                    field: 'managerStatsSlackChannel',
-                    inputId: 'manager-stats-slack-channel',
-                    label: 'Post summaries to this Slack channel',
-                    helperText:
-                      'Choose where Roomote should post the Friday manager digest.',
-                    savedChannelId:
-                      settingsQuery.data?.settings.managerStatsSlackChannelId ??
-                      null,
-                    savedDiscordChannelId:
-                      settingsQuery.data?.settings
-                        .managerStatsDiscordChannelId ?? null,
-                    warningChannelId:
-                      slackChannelAccessWarnings.managerStatsSlackChannel,
-                  })}
-
-                  <p className="text-xs text-muted-foreground md:max-w-160">
-                    Posts a weekly summary on Fridays.
-                  </p>
-                </div>
-              ) : null}
-            </div>
-          </AutomationCard>
-
-          <AutomationCard
-            automation={AUTOMATION_DEFINITIONS.sentryTriage}
-            isOpen={openAutomationIds.has('sentryTriage')}
-            onOpenChange={(open) => setAutomationOpen('sentryTriage', open)}
-            iconEnabled={iconEnabled.sentryTriage}
-            debugSection={renderDebugRunsSection('sentryTriage')}
-            runAction={
-              <BasicTooltip
-                content={getRunTooltip(
-                  'sentryTriage',
-                  sentryTriageIsEnabled,
-                  sentryTriageBlockedReason,
-                )}
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() =>
-                    triggerMutation.mutate({ automationKey: 'sentry_triage' })
-                  }
-                  disabled={isRunDisabled(
-                    'sentryTriage',
-                    sentryTriageIsEnabled,
-                    sentryTriageBlockedReason != null,
-                  )}
-                >
-                  <Play />
-                </Button>
-              </BasicTooltip>
-            }
-            footer={
-              <AutomationFooter
-                isDirty={isDirty.sentryTriage}
-                isPending={
-                  updateMutation.isPending &&
-                  savingAutomation === 'sentryTriage'
-                }
-                saveDisabled={sentryTriageSaveDisabled}
-                onSave={() => saveAgent('sentryTriage')}
-                onReset={() => resetAgent('sentryTriage')}
-              />
-            }
-          >
-            <div className="space-y-5">
-              <Select
-                value={formState.sentryTriageFrequency}
-                onValueChange={(value) => {
-                  const frequency = value as SentryTriageFrequency;
-
-                  if (
-                    !canSelectSentryTriageFrequency({
-                      sentryConnected: sentryConnected,
-                      frequency,
-                    })
-                  ) {
-                    toast.error(
-                      'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.',
                     );
-                    return;
-                  }
-
-                  setFormState((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          sentryTriageFrequency: frequency,
+                  }}
+                >
+                  <SelectTrigger
+                    id="sentry-triage-frequency"
+                    aria-label="Triage Sentry Issues schedule"
+                    className="w-full md:w-56"
+                  >
+                    <SelectValue placeholder="Select a schedule" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SENTRY_TRIAGE_FREQUENCY_OPTIONS.map((option) => (
+                      <SelectItem
+                        key={option.value}
+                        value={option.value}
+                        disabled={
+                          !canSelectSentryTriageFrequency({
+                            sentryConnected: sentryConnected,
+                            frequency: option.value,
+                          })
                         }
-                      : prev,
-                  );
-                }}
-              >
-                <SelectTrigger
-                  id="sentry-triage-frequency"
-                  aria-label="Triage Sentry Issues schedule"
-                  className="w-full md:w-56"
-                >
-                  <SelectValue placeholder="Select a schedule" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SENTRY_TRIAGE_FREQUENCY_OPTIONS.map((option) => (
-                    <SelectItem
-                      key={option.value}
-                      value={option.value}
-                      disabled={
-                        !canSelectSentryTriageFrequency({
-                          sentryConnected: sentryConnected,
-                          frequency: option.value,
-                        })
-                      }
-                    >
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                      >
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
-              {!sentryConnected ? (
-                <Alert variant="light" className="md:max-w-160">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                  <AlertTitle>Connect Sentry first</AlertTitle>
-                  <AlertDescription>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                      <span>
-                        Connect the workspace Sentry integration before enabling
-                        scheduled Sentry triage.
-                      </span>
-                      <Button asChild size="sm" variant="outline">
-                        <a
-                          href={`${SETTINGS_PATHS.integrations}?highlight=sentry-mcp`}
-                        >
-                          Configure Sentry
-                        </a>
-                      </Button>
-                    </div>
-                  </AlertDescription>
-                </Alert>
-              ) : null}
+                {!sentryConnected ? (
+                  <Alert variant="light" className="md:max-w-160">
+                    <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                    <AlertTitle>Connect Sentry first</AlertTitle>
+                    <AlertDescription>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <span>
+                          Connect the workspace Sentry integration before
+                          enabling scheduled Sentry triage.
+                        </span>
+                        <Button asChild size="sm" variant="outline">
+                          <a
+                            href={`${SETTINGS_PATHS.integrations}?highlight=sentry-mcp`}
+                          >
+                            Configure Sentry
+                          </a>
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
 
-              {sentryTriageIsEnabled ? (
-                <div className="space-y-5">
-                  {renderSlackDestinationField({
-                    field: 'sentryTriageSlackChannel',
-                    inputId: 'sentry-triage-slack-channel',
-                    label: 'Post follow-up work to this Slack channel',
-                    helperText:
-                      'Choose where Roomote should post actionable Sentry follow-up work.',
-                    savedChannelId:
-                      settingsQuery.data?.settings.sentryTriageSlackChannelId ??
-                      null,
-                    savedDiscordChannelId:
-                      settingsQuery.data?.settings
-                        .sentryTriageDiscordChannelId ?? null,
-                    warningChannelId:
-                      slackChannelAccessWarnings.sentryTriageSlackChannel,
-                  })}
-
-                  <p className="text-xs text-muted-foreground md:max-w-160">
-                    Requires Sentry to be configured in Settings &gt;
-                    Integrations.
-                  </p>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="sentry-triage-projects">
-                      Project slugs
-                    </Label>
-                    <Textarea
-                      id="sentry-triage-projects"
-                      value={formState.sentryTriageProjectSlugs}
-                      onChange={(event) =>
-                        setFormState((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                sentryTriageProjectSlugs: event.target.value,
-                              }
-                            : prev,
-                        )
-                      }
-                      rows={3}
-                      placeholder="Optional, one Sentry project slug per line"
-                    />
-                    <p className="text-xs text-muted-foreground md:max-w-160">
-                      Leave blank to scan all projects available to the Sentry
-                      token.
-                    </p>
-                    {fieldErrors.sentryTriageProjectSlugs ? (
-                      <p className="text-xs text-destructive">
-                        {fieldErrors.sentryTriageProjectSlugs}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </AutomationCard>
-
-          <AutomationCard
-            automation={AUTOMATION_DEFINITIONS.suggester}
-            isOpen={openAutomationIds.has('suggester')}
-            onOpenChange={(open) => setAutomationOpen('suggester', open)}
-            iconEnabled={iconEnabled.suggester}
-            disabled={slackAutomationsDisabled}
-            debugSection={renderDebugRunsSection('suggester')}
-            runAction={
-              <BasicTooltip
-                content={getRunTooltip('suggester', suggesterIsEnabled)}
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() =>
-                    triggerMutation.mutate({ automationKey: 'suggester' })
-                  }
-                  disabled={isRunDisabled('suggester', suggesterIsEnabled)}
-                >
-                  <Play />
-                </Button>
-              </BasicTooltip>
-            }
-            footer={
-              <AutomationFooter
-                isDirty={isDirty.suggester}
-                isPending={
-                  updateMutation.isPending && savingAutomation === 'suggester'
-                }
-                onSave={() => saveAgent('suggester')}
-                onReset={() => resetAgent('suggester')}
-              />
-            }
-          >
-            <div className="space-y-5">
-              <Select
-                value={formState.suggesterFrequency}
-                onValueChange={(value) => {
-                  setFormState((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          suggesterFrequency: value as SuggesterFrequency,
-                        }
-                      : prev,
-                  );
-                }}
-              >
-                <SelectTrigger
-                  id="suggester-frequency"
-                  aria-label="Suggest Ideas schedule"
-                  className="w-full md:w-56"
-                >
-                  <SelectValue placeholder="Select a schedule" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SUGGESTER_FREQUENCY_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {suggesterIsEnabled ? (
-                <div className="space-y-5">
-                  <>
+                {sentryTriageIsEnabled ? (
+                  <div className="space-y-5">
                     {renderSlackDestinationField({
-                      field: 'suggesterSlackChannel',
-                      inputId: 'suggester-slack-channel',
-                      label: 'Post suggestions to this Slack channel',
+                      field: 'sentryTriageSlackChannel',
+                      inputId: 'sentry-triage-slack-channel',
+                      label: 'Post follow-up work to this Slack channel',
                       helperText:
-                        'Choose where Roomote should post its suggestion digests.',
+                        'Choose where Roomote should post actionable Sentry follow-up work.',
                       savedChannelId:
-                        settingsQuery.data?.settings.suggesterSlackChannelId ??
-                        null,
+                        settingsQuery.data?.settings
+                          .sentryTriageSlackChannelId ?? null,
                       savedDiscordChannelId:
                         settingsQuery.data?.settings
-                          .suggesterDiscordChannelId ?? null,
+                          .sentryTriageDiscordChannelId ?? null,
                       warningChannelId:
-                        slackChannelAccessWarnings.suggesterSlackChannel,
-                      allowTelegram: true,
-                      savedTelegramSelected: Boolean(
-                        settingsQuery.data?.settings.suggesterTelegramChatId,
-                      ),
-                      allowTeams: true,
-                      savedTeamsSelected: Boolean(
-                        settingsQuery.data?.settings.suggesterTeamsChannelId,
-                      ),
+                        slackChannelAccessWarnings.sentryTriageSlackChannel,
                     })}
 
+                    <p className="text-xs text-muted-foreground md:max-w-160">
+                      Requires Sentry to be configured in Settings &gt;
+                      Integrations.
+                    </p>
+
                     <div className="space-y-2">
-                      <Label htmlFor="suggester-instructions">
-                        Additional instructions
+                      <Label htmlFor="sentry-triage-projects">
+                        Project slugs
                       </Label>
                       <Textarea
-                        id="suggester-instructions"
-                        value={formState.suggesterInstructions}
+                        id="sentry-triage-projects"
+                        value={formState.sentryTriageProjectSlugs}
                         onChange={(event) =>
                           setFormState((prev) =>
                             prev
                               ? {
                                   ...prev,
-                                  suggesterInstructions: event.target.value,
+                                  sentryTriageProjectSlugs: event.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        rows={3}
+                        placeholder="Optional, one Sentry project slug per line"
+                      />
+                      <p className="text-xs text-muted-foreground md:max-w-160">
+                        Leave blank to scan all projects available to the Sentry
+                        token.
+                      </p>
+                      {fieldErrors.sentryTriageProjectSlugs ? (
+                        <p className="text-xs text-destructive">
+                          {fieldErrors.sentryTriageProjectSlugs}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </AutomationCard>
+
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.suggester}
+              isAvailableMatch={availableAutomationMatches.has('suggester')}
+              isOpen={openAutomationIds.has('suggester')}
+              onOpenChange={(open) => setAutomationOpen('suggester', open)}
+              iconEnabled={iconEnabled.suggester}
+              disabled={slackAutomationsDisabled}
+              debugSection={renderDebugRunsSection('suggester')}
+              runAction={
+                <BasicTooltip
+                  content={getRunTooltip('suggester', suggesterIsEnabled)}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      triggerMutation.mutate({ automationKey: 'suggester' })
+                    }
+                    disabled={isRunDisabled('suggester', suggesterIsEnabled)}
+                  >
+                    <Play />
+                  </Button>
+                </BasicTooltip>
+              }
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.suggester}
+                  isPending={
+                    updateMutation.isPending && savingAutomation === 'suggester'
+                  }
+                  onSave={() => saveAgent('suggester')}
+                  onReset={() => resetAgent('suggester')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <Select
+                  value={formState.suggesterFrequency}
+                  onValueChange={(value) => {
+                    setFormState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            suggesterFrequency: value as SuggesterFrequency,
+                          }
+                        : prev,
+                    );
+                  }}
+                >
+                  <SelectTrigger
+                    id="suggester-frequency"
+                    aria-label="Suggest Ideas schedule"
+                    className="w-full md:w-56"
+                  >
+                    <SelectValue placeholder="Select a schedule" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUGGESTER_FREQUENCY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {suggesterIsEnabled ? (
+                  <div className="space-y-5">
+                    <>
+                      {renderSlackDestinationField({
+                        field: 'suggesterSlackChannel',
+                        inputId: 'suggester-slack-channel',
+                        label: 'Post suggestions to this Slack channel',
+                        helperText:
+                          'Choose where Roomote should post its suggestion digests.',
+                        savedChannelId:
+                          settingsQuery.data?.settings
+                            .suggesterSlackChannelId ?? null,
+                        savedDiscordChannelId:
+                          settingsQuery.data?.settings
+                            .suggesterDiscordChannelId ?? null,
+                        warningChannelId:
+                          slackChannelAccessWarnings.suggesterSlackChannel,
+                        allowTelegram: true,
+                        savedTelegramSelected: Boolean(
+                          settingsQuery.data?.settings.suggesterTelegramChatId,
+                        ),
+                        allowTeams: true,
+                        savedTeamsSelected: Boolean(
+                          settingsQuery.data?.settings.suggesterTeamsChannelId,
+                        ),
+                      })}
+
+                      <div className="space-y-2">
+                        <Label htmlFor="suggester-instructions">
+                          Additional instructions
+                        </Label>
+                        <Textarea
+                          id="suggester-instructions"
+                          value={formState.suggesterInstructions}
+                          onChange={(event) =>
+                            setFormState((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    suggesterInstructions: event.target.value,
+                                  }
+                                : prev,
+                            )
+                          }
+                          rows={4}
+                          placeholder="Optional guidance for which ideas to prioritize or avoid"
+                        />
+                        {fieldErrors.suggesterInstructions ? (
+                          <p className="text-xs text-destructive">
+                            {fieldErrors.suggesterInstructions}
+                          </p>
+                        ) : null}
+                      </div>
+                    </>
+                  </div>
+                ) : null}
+              </div>
+            </AutomationCard>
+
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.announcer}
+              isAvailableMatch={availableAutomationMatches.has('announcer')}
+              isOpen={openAutomationIds.has('announcer')}
+              onOpenChange={(open) => setAutomationOpen('announcer', open)}
+              iconEnabled={iconEnabled.announcer}
+              disabled={slackAutomationsDisabled}
+              debugSection={renderDebugRunsSection('announcer')}
+              runAction={
+                <BasicTooltip
+                  content={getRunTooltip('announcer', announcerIsEnabled)}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      triggerMutation.mutate({ automationKey: 'announcer' })
+                    }
+                    disabled={isRunDisabled('announcer', announcerIsEnabled)}
+                  >
+                    <Play />
+                  </Button>
+                </BasicTooltip>
+              }
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.announcer}
+                  isPending={
+                    updateMutation.isPending && savingAutomation === 'announcer'
+                  }
+                  onSave={() => saveAgent('announcer')}
+                  onReset={() => resetAgent('announcer')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <Select
+                  value={formState.announcerFrequency}
+                  onValueChange={(value) =>
+                    setFormState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            announcerFrequency: value as AnnouncerFrequency,
+                          }
+                        : prev,
+                    )
+                  }
+                >
+                  <SelectTrigger
+                    id="announcer-frequency"
+                    aria-label="Summarize Merged PRs schedule"
+                    className="w-full md:w-56"
+                  >
+                    <SelectValue placeholder="Select a schedule" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ANNOUNCER_FREQUENCY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {announcerIsEnabled ? (
+                  <div className="space-y-5">
+                    {renderSlackDestinationField({
+                      field: 'announcerSlackChannel',
+                      inputId: 'announcer-slack-channel',
+                      label: 'Post summaries to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post merged-PR summaries.',
+                      savedChannelId:
+                        settingsQuery.data?.settings.announcerSlackChannelId ??
+                        null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .announcerDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.announcerSlackChannel,
+                    })}
+
+                    <div className="space-y-2">
+                      <Label htmlFor="announcer-instructions">
+                        Additional instructions
+                      </Label>
+                      <Textarea
+                        id="announcer-instructions"
+                        value={formState.announcerInstructions}
+                        onChange={(event) =>
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  announcerInstructions: event.target.value,
                                 }
                               : prev,
                           )
                         }
                         rows={4}
-                        placeholder="Optional guidance for which ideas to prioritize or avoid"
+                        placeholder="Optional guidance for summary tone and focus"
                       />
-                      {fieldErrors.suggesterInstructions ? (
+                      {fieldErrors.announcerInstructions ? (
                         <p className="text-xs text-destructive">
-                          {fieldErrors.suggesterInstructions}
+                          {fieldErrors.announcerInstructions}
                         </p>
                       ) : null}
                     </div>
-                  </>
-                </div>
-              ) : null}
-            </div>
-          </AutomationCard>
-
-          <AutomationCard
-            automation={AUTOMATION_DEFINITIONS.announcer}
-            isOpen={openAutomationIds.has('announcer')}
-            onOpenChange={(open) => setAutomationOpen('announcer', open)}
-            iconEnabled={iconEnabled.announcer}
-            disabled={slackAutomationsDisabled}
-            debugSection={renderDebugRunsSection('announcer')}
-            runAction={
-              <BasicTooltip
-                content={getRunTooltip('announcer', announcerIsEnabled)}
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() =>
-                    triggerMutation.mutate({ automationKey: 'announcer' })
-                  }
-                  disabled={isRunDisabled('announcer', announcerIsEnabled)}
-                >
-                  <Play />
-                </Button>
-              </BasicTooltip>
-            }
-            footer={
-              <AutomationFooter
-                isDirty={isDirty.announcer}
-                isPending={
-                  updateMutation.isPending && savingAutomation === 'announcer'
-                }
-                onSave={() => saveAgent('announcer')}
-                onReset={() => resetAgent('announcer')}
-              />
-            }
-          >
-            <div className="space-y-5">
-              <Select
-                value={formState.announcerFrequency}
-                onValueChange={(value) =>
-                  setFormState((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          announcerFrequency: value as AnnouncerFrequency,
-                        }
-                      : prev,
-                  )
-                }
-              >
-                <SelectTrigger
-                  id="announcer-frequency"
-                  aria-label="Summarize Merged PRs schedule"
-                  className="w-full md:w-56"
-                >
-                  <SelectValue placeholder="Select a schedule" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ANNOUNCER_FREQUENCY_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {announcerIsEnabled ? (
-                <div className="space-y-5">
-                  {renderSlackDestinationField({
-                    field: 'announcerSlackChannel',
-                    inputId: 'announcer-slack-channel',
-                    label: 'Post summaries to this Slack channel',
-                    helperText:
-                      'Choose where Roomote should post merged-PR summaries.',
-                    savedChannelId:
-                      settingsQuery.data?.settings.announcerSlackChannelId ??
-                      null,
-                    savedDiscordChannelId:
-                      settingsQuery.data?.settings.announcerDiscordChannelId ??
-                      null,
-                    warningChannelId:
-                      slackChannelAccessWarnings.announcerSlackChannel,
-                  })}
-
-                  <div className="space-y-2">
-                    <Label htmlFor="announcer-instructions">
-                      Additional instructions
-                    </Label>
-                    <Textarea
-                      id="announcer-instructions"
-                      value={formState.announcerInstructions}
-                      onChange={(event) =>
-                        setFormState((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                announcerInstructions: event.target.value,
-                              }
-                            : prev,
-                        )
-                      }
-                      rows={4}
-                      placeholder="Optional guidance for summary tone and focus"
-                    />
-                    {fieldErrors.announcerInstructions ? (
-                      <p className="text-xs text-destructive">
-                        {fieldErrors.announcerInstructions}
-                      </p>
-                    ) : null}
                   </div>
-                </div>
-              ) : null}
-            </div>
-          </AutomationCard>
+                ) : null}
+              </div>
+            </AutomationCard>
 
-          <h2 className="pt-2 text-base font-semibold text-foreground">
-            Meta automations
-          </h2>
-
-          <AutomationCard
-            automation={AUTOMATION_DEFINITIONS.platformIssueAlerts}
-            isOpen={openAutomationIds.has('platformIssueAlerts')}
-            onOpenChange={(open) =>
-              setAutomationOpen('platformIssueAlerts', open)
-            }
-            iconEnabled={iconEnabled.platformIssueAlerts}
-            footer={
-              <AutomationFooter
-                isDirty={isDirty.platformIssueAlerts}
-                isPending={
-                  updateMutation.isPending &&
-                  savingAutomation === 'platformIssueAlerts'
-                }
-                onSave={() => saveAgent('platformIssueAlerts')}
-                onReset={() => resetAgent('platformIssueAlerts')}
-              />
-            }
-          >
-            <div className="space-y-5">
-              {renderSlackDestinationField({
-                field: 'platformIssueSlackChannel',
-                inputId: 'platform-issue-slack-channel',
-                label: 'Post alerts to this Slack channel',
-                helperText:
-                  'Choose where Roomote should post configuration issues that need an admin. Leave empty to use the Manager Channel.',
-                savedChannelId:
-                  settingsQuery.data?.settings.platformIssueSlackChannelId ??
-                  null,
-                savedDiscordChannelId:
-                  settingsQuery.data?.settings.platformIssueDiscordChannelId ??
-                  null,
-                warningChannelId:
-                  slackChannelAccessWarnings.platformIssueSlackChannel,
-              })}
-            </div>
-          </AutomationCard>
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.platformIssueAlerts}
+              isAvailableMatch={availableAutomationMatches.has(
+                'platformIssueAlerts',
+              )}
+              isOpen={openAutomationIds.has('platformIssueAlerts')}
+              onOpenChange={(open) =>
+                setAutomationOpen('platformIssueAlerts', open)
+              }
+              iconEnabled={iconEnabled.platformIssueAlerts}
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.platformIssueAlerts}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'platformIssueAlerts'
+                  }
+                  onSave={() => saveAgent('platformIssueAlerts')}
+                  onReset={() => resetAgent('platformIssueAlerts')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                {renderSlackDestinationField({
+                  field: 'platformIssueSlackChannel',
+                  inputId: 'platform-issue-slack-channel',
+                  label: 'Post alerts to this Slack channel',
+                  helperText:
+                    'Choose where Roomote should post configuration issues that need an admin. Leave empty to use the Manager Channel.',
+                  savedChannelId:
+                    settingsQuery.data?.settings.platformIssueSlackChannelId ??
+                    null,
+                  savedDiscordChannelId:
+                    settingsQuery.data?.settings
+                      .platformIssueDiscordChannelId ?? null,
+                  warningChannelId:
+                    slackChannelAccessWarnings.platformIssueSlackChannel,
+                })}
+              </div>
+            </AutomationCard>
+          </div>
         </div>
       )}
     </div>

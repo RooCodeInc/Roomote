@@ -1,0 +1,91 @@
+---
+title: Evaluate outage impact
+description: Filter vendor status noise by comparing each incident with your real code, regions, and feature usage.
+contributor: Matt Rubens
+contributor_url: https://github.com/mrubens
+contributor_company: Roomote
+contributor_company_url: https://roomote.dev
+---
+
+## Overview
+
+Every vendor you depend on publishes status updates, and almost none of them
+affect you, until one does. Pipe them into one channel and let Roomote read each
+incident against your actual code: which SDKs you call, which regions you run
+in, and which features you use. You stop triaging vendor noise by hand and only
+hear about the outages that matter. This is how we run it at Roo.
+
+- **Trigger**: Channel event
+- **Setup time**: About 20 minutes
+- **Requires**: Admin access, Slack or Discord
+- **Serves**: On-call, Support
+- **Cooked By**: [Matt Rubens](https://github.com/mrubens)
+
+## Ingredients
+
+- A Slack or Discord channel such as `#vendor-status` receiving vendor status
+  feeds. Most vendors offer Subscribe via Slack, RSS-to-channel, or
+  email-to-channel.
+- [Auto-respond channels](/automations#channel-automations)
+- An [environment](/environments) covering the repositories that use these
+  vendors
+- Roomote invited to the channel on Slack, or able to see it on Discord
+
+## Steps
+
+1. Create `#vendor-status` and subscribe it to every upstream status page you care about.
+2. Invite Roomote to the channel.
+3. Under **Settings > Automations > Auto-respond to channels**, add the channel.
+4. Paste the launch criteria and instructions below.
+5. Post a fake incident and confirm a task launches. Then post a scheduled-maintenance notice and confirm it does not.
+
+## Launch criteria
+
+Paste this into the channel's **Launch criteria** field:
+
+```text
+Launch only for messages reporting a new incident, a worsening incident, or an
+incident that regressed after being resolved, from one of our upstream vendors.
+
+Do not launch for scheduled-maintenance announcements, "monitoring" or
+"resolved" updates to an incident already investigated, changelog or marketing
+posts, or duplicate notifications about the same incident.
+
+Treat a message as an escalation when it adds affected components, expands
+impact, or reports a worse status than before. When unsure whether an incident
+could plausibly touch something we depend on in production, launch: a wasted
+check is cheaper than a missed outage.
+```
+
+## Instructions
+
+Paste this into the channel's **Instructions** field. Roomote gives these
+instructions to every task launched from the channel.
+
+```text
+A vendor has posted a status incident. Determine whether it affects us:
+
+1. Identify the vendor and the affected components, regions, and features
+   from the message.
+2. Search the codebase for how we actually use this vendor: SDKs, API
+   endpoints, features, and regions we depend on.
+3. Compare our real usage against what the incident says is affected.
+4. Reply in the thread with a clear verdict:
+   - "Affects us": which features or code paths, likely user impact, and a
+     suggested action.
+   - "Safe to ignore": why our usage is not touched.
+
+Keep it short. The on-call engineer reads this thread. Do not page anyone.
+```
+
+## Variations
+
+- Name the vendors explicitly in the criteria to ignore feeds subscribed to just in case.
+- Ask Roomote to describe how to verify recovery whenever the verdict is **Affects us**.
+- Use a multi-repository environment so the usage search covers every service.
+
+Auto-respond channels support Slack and Discord today. On Teams or Telegram,
+forward status events to a supported channel or mention Roomote from a workflow.
+
+**Pairs well with:** [CI failure auto-fix](/cookbook/ci-failure-auto-fix) ·
+[support channel](/cookbook/support-channel)

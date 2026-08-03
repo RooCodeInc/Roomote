@@ -138,4 +138,43 @@ describe('triggerAutoResume', () => {
       }),
     );
   });
+
+  it('preserves Discord reply context when creating a snapshot resume run', async () => {
+    const resolution = createMockResolvedRequest({
+      status: 'resumable',
+      snapshotId: 'snap-preview-discord',
+      taskRun: {
+        ...createMockTaskRun({
+          id: 44,
+          payload: {
+            repo: 'owner/repo',
+            communicationProvider: 'discord',
+            communicationChannelId: 'channel-1',
+            communicationThreadId: 'thread-1',
+            communicationMessageId: 'message-1',
+          },
+        }),
+        port: 3000,
+      },
+    });
+
+    await triggerAutoResume(resolution, {
+      userId: 'viewer-user',
+      tokenType: 'pt',
+      version: 1,
+    });
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationProvider: 'discord',
+            communicationChannelId: 'channel-1',
+            communicationThreadId: 'thread-1',
+            communicationMessageId: 'message-1',
+          }),
+        }),
+      }),
+    );
+  });
 });

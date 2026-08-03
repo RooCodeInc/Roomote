@@ -124,6 +124,7 @@ export {
   MessageSquareIcon,
   MessageSquarePlus,
   MessageSquareText,
+  MessageSquareWarning,
   MessagesSquare,
   Mic,
   MicOff,

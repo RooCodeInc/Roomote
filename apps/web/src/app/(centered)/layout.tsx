@@ -36,7 +36,7 @@ export default function OnboardingLayout({
       surfaceClassName="relative flex items-center justify-center"
     >
       <div className="absolute top-8 right-8 flex items-center gap-2 animate-enter-down">
-        <UserMenu />
+        <UserMenu showPersonalSettings={!redirect.startsWith('/setup')} />
       </div>
       <div className="flex flex-col gap-8">{children}</div>
     </FramedSurface>

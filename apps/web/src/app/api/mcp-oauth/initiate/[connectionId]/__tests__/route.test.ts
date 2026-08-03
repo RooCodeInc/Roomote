@@ -181,6 +181,24 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     });
   });
 
+  it('rejects OAuth before authentication when integrations are disabled', async () => {
+    bootstrapWebRuntimeEnvMock.mockResolvedValue({
+      R_APP_URL: 'http://localhost:13000',
+      R_PUBLIC_URL: 'https://customer.example',
+      R_CURATED_INTEGRATIONS_DISABLED: true,
+    });
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.example/settings?mcp=error&reason=disabled',
+    );
+    expect(authorizeMock).not.toHaveBeenCalled();
+    expect(mcpConnectionsFindFirstMock).not.toHaveBeenCalled();
+  });
+
   it('uses the Linear API OAuth flow instead of Linear MCP OAuth', async () => {
     getMcpIntegrationOauthEndpointsMock.mockReturnValue({
       authorizationEndpoint: 'https://linear.app/oauth/authorize',

@@ -1,0 +1,74 @@
+---
+title: Contributing recipes
+description: Propose a reusable Roomote system for the Cookbook through a repository issue.
+icon: plus
+contributor: Name or team
+contributor_url: https://example.com/contributor
+contributor_company: Company
+contributor_company_url: https://example.com/company
+---
+
+Use this skeleton when proposing a Cookbook recipe. Replace every placeholder
+and remove the comments before opening a
+[Cookbook recipe issue](https://github.com/RooCodeInc/Roomote/issues/new?template=cookbook-recipe.yml).
+Do not open a pull request unless a maintainer invites you to. Fill in the
+contributor fields in the frontmatter and repeat the contributor in the
+Overview metadata. If the recipe comes from another team, use those fields for
+the attribution.
+
+````markdown
+---
+title: Outcome-first recipe title
+description: One sentence explaining the finished system and why it matters.
+icon: lucide-icon-name
+contributor: Name or team
+contributor_url: https://example.com/contributor
+contributor_company: Company
+contributor_company_url: https://example.com/company
+---
+
+## Overview
+
+<!-- Explain the recurring problem and the outcome this recipe creates. -->
+
+Overview paragraph.
+
+- **Trigger**: Trigger type
+- **Setup time**: About N minutes
+- **Requires**: Product access, integrations, permissions
+- **Serves**: Teams or roles
+- **Cooked By**: [Name or team](https://example.com/contributor) from [Company](https://example.com/company)
+
+## Ingredients
+
+<!-- List product features, integrations, permissions, environments, and channels. -->
+
+- Ingredient
+
+## Steps
+
+<!-- Use exact labels and Settings paths from the current product. -->
+
+1. First step.
+
+## Paste-ready configuration
+
+<!-- Name the exact field for every paste block. Never include real credentials. -->
+
+```text
+Configuration or prompt
+```
+
+## Variations
+
+<!-- Offer useful adaptations without turning them into separate recipes. -->
+
+- Variation
+
+<!-- State provider support, permission boundaries, and other limitations plainly. -->
+
+**Pairs well with:** [Related recipe](/cookbook/example)
+````
+
+Before submitting, test every paste block against the current product and make
+sure the recipe never relies on a prompt alone to enforce a security boundary.

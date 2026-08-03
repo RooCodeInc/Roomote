@@ -903,10 +903,19 @@ export class AzureClient implements ComputeProviderClient {
   }
 
   /**
-   * Add the requested ports (anonymous, OnDemand activation so inbound
-   * traffic wakes a suspended sandbox — measured 2026-07-28) and return
-   * deterministic per-port URLs. Re-adding an existing port is a 409, which
-   * is treated as success.
+   * Add the requested ports (anonymous, Manual activation) and return
+   * deterministic per-port URLs. A 409 means the port already exists —
+   * and ports persist across stop/resume, so sandboxes created before
+   * Manual activation shipped would keep OnDemand forever if the conflict
+   * were silently accepted. Conflicts therefore go through a migration
+   * check: legacy (non-Manual) ports are removed and re-added.
+   *
+   * Activation is deliberately NOT OnDemand: OnDemand resumes a suspended
+   * sandbox on ANY inbound traffic (measured 2026-07-28), but Roomote
+   * finalizes standby runs at suspend time — an out-of-band wake resumes a
+   * worker whose run token is dead, the worker exits, and the sandbox idles
+   * Running, invisible to sleep-check (which excludes retained runs). Wake
+   * must stay deliberate (wake prompt / message send → resumeFromStandby).
    */
   private async ensurePorts(
     sandboxId: string,
@@ -920,17 +929,54 @@ export class AzureClient implements ComputeProviderClient {
           body: {
             port,
             auth: { anonymous: true },
-            activationMode: 'OnDemand',
+            activationMode: 'Manual',
           },
           signal,
           abortMessage: `Exposing port ${port} on Azure sandbox ${sandboxId} was aborted`,
         });
       } catch (error) {
         if (!isPortConflict(error)) throw error;
+        await this.migrateLegacyPortActivation(sandboxId, port, signal);
       }
       domains[String(port)] = this.computePortUrl(sandboxId, port);
     }
     return domains;
+  }
+
+  /**
+   * Migrate an existing port to Manual activation. Triggered on a 409 from
+   * ports/add: ports persist across stop/resume, so legacy OnDemand ports
+   * keep waking the sandbox out-of-band on any inbound traffic unless they
+   * are recreated. Uses ports/remove + ports/add — the PUT /ports
+   * replace-all endpoint is unreliable (see service reference). A port
+   * already on Manual is left untouched.
+   */
+  private async migrateLegacyPortActivation(
+    sandboxId: string,
+    port: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const sandbox = await this.getSandbox(sandboxId, signal);
+    const existing = sandbox.ports?.find((p) => p.port === port);
+
+    if (!existing || existing.activationMode === 'Manual') {
+      return;
+    }
+
+    await this.request('POST', `${this.sandboxPath(sandboxId)}/ports/remove`, {
+      body: { port },
+      signal,
+      abortMessage: `Migrating port ${port} on Azure sandbox ${sandboxId} to Manual activation was aborted`,
+    });
+    await this.request('POST', `${this.sandboxPath(sandboxId)}/ports/add`, {
+      body: {
+        port,
+        auth: { anonymous: true },
+        activationMode: 'Manual',
+      },
+      signal,
+      abortMessage: `Re-adding port ${port} with Manual activation on Azure sandbox ${sandboxId} was aborted`,
+    });
   }
 
   /**

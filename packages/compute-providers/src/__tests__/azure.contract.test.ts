@@ -165,7 +165,9 @@ describe('azure adapter contract', () => {
     expect(portAdd?.body).toMatchObject({
       port: 3000,
       auth: { anonymous: true },
-      activationMode: 'OnDemand',
+      // Manual activation: wake stays deliberate; OnDemand wakes orphaned
+      // standby sandboxes on any inbound traffic.
+      activationMode: 'Manual',
     });
   });
 
@@ -236,6 +238,94 @@ describe('azure adapter contract', () => {
       ports: [8080],
     });
     expect(result.domains['8080']).toContain('--8080.');
+  });
+
+  it('migrates a legacy OnDemand port to Manual activation on conflict', async () => {
+    let addAttempts = 0;
+    const { fetchImpl, requests } = createFetchMock({
+      onRequest: (request) => {
+        if (request.url.includes('/ports/add')) {
+          addAttempts += 1;
+          // The legacy add conflicts; the post-remove re-add succeeds.
+          if (addAttempts === 1) {
+            return jsonResponse({ title: 'PortAlreadyExists' }, 409);
+          }
+          return jsonResponse({});
+        }
+        if (
+          request.method === 'GET' &&
+          request.url.includes(`${SANDBOX_ID}?`)
+        ) {
+          return jsonResponse({
+            id: SANDBOX_ID,
+            state: 'Running',
+            ports: [
+              {
+                port: 8080,
+                auth: { anonymous: true },
+                activationMode: 'OnDemand',
+              },
+            ],
+          });
+        }
+        return undefined;
+      },
+    });
+    const client = createClient(fetchImpl);
+
+    const result = await client.getInstanceDomains!({
+      instanceId: SANDBOX_ID,
+      ports: [8080],
+    });
+
+    expect(result.domains['8080']).toContain('--8080.');
+    const portRemove = requests.find((r) => r.url.includes('/ports/remove'));
+    expect(portRemove?.body).toMatchObject({ port: 8080 });
+    const portAdds = requests.filter((r) => r.url.includes('/ports/add'));
+    expect(portAdds).toHaveLength(2);
+    expect(portAdds[1]?.body).toMatchObject({
+      port: 8080,
+      auth: { anonymous: true },
+      activationMode: 'Manual',
+    });
+  });
+
+  it('leaves an existing Manual port untouched on conflict', async () => {
+    const { fetchImpl, requests } = createFetchMock({
+      onRequest: (request) => {
+        if (request.url.includes('/ports/add')) {
+          return jsonResponse({ title: 'PortAlreadyExists' }, 409);
+        }
+        if (
+          request.method === 'GET' &&
+          request.url.includes(`${SANDBOX_ID}?`)
+        ) {
+          return jsonResponse({
+            id: SANDBOX_ID,
+            state: 'Running',
+            ports: [
+              {
+                port: 8080,
+                auth: { anonymous: true },
+                activationMode: 'Manual',
+              },
+            ],
+          });
+        }
+        return undefined;
+      },
+    });
+    const client = createClient(fetchImpl);
+
+    await client.getInstanceDomains!({
+      instanceId: SANDBOX_ID,
+      ports: [8080],
+    });
+
+    expect(requests.some((r) => r.url.includes('/ports/remove'))).toBe(false);
+    expect(requests.filter((r) => r.url.includes('/ports/add'))).toHaveLength(
+      1,
+    );
   });
 
   it('runs a blocking command with cwd and returns output', async () => {

@@ -47,6 +47,7 @@ vi.mock('@/components/system', () => ({
   ThumbsDown: () => null,
   SquareDashedMousePointer: () => null,
   MessageSquareIcon: () => null,
+  MessageSquareWarning: () => null,
   RotateCcw: () => null,
 }));
 
@@ -182,7 +183,7 @@ describe('StartupSequence', () => {
     ).toHaveAttribute('href', 'https://example.com/shot.png');
   });
 
-  it('uses a flex-bounded scroll container when startup content exceeds the available height', () => {
+  it('renders startup content inline without its own scroll surface', () => {
     const { container } = render(
       <StartupSequence
         steps={[
@@ -197,14 +198,8 @@ describe('StartupSequence', () => {
     );
 
     const outerContainer = container.firstChild as HTMLElement | null;
-    const innerContent = outerContainer?.firstChild as HTMLElement | null;
 
-    expect(outerContainer).toHaveClass(
-      'flex-1',
-      'min-h-0',
-      'overflow-y-auto',
-      'p-4',
-    );
-    expect(innerContent).toHaveClass('mx-auto', 'w-full', 'max-w-4xl', 'px-2');
+    expect(outerContainer).toHaveClass('flex', 'flex-col', 'gap-2');
+    expect(outerContainer).not.toHaveClass('overflow-y-auto', 'p-4');
   });
 });

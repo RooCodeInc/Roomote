@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { RunStatus } from '@roomote/types';
-import { MessageSquareWarning } from 'lucide-react';
-import { Sun } from '@/components/system';
+import { MessageSquareWarning, RotateCcw } from 'lucide-react';
+import { Button, Sun } from '@/components/system';
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
 import { FramedSurface } from '@/components/layout';
 
@@ -15,6 +15,7 @@ import {
   useClosePreviewOnSleep,
 } from './hooks';
 import { getTaskRunDisplayError } from '@/lib/task-run-errors';
+import { useRetryFailedTaskStart } from '@/hooks/task-runs';
 
 import { SidebarActions } from './sidebar-actions';
 import { isTaskRunAsleep } from './sidebar-actions/utils';
@@ -40,6 +41,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
   const shouldShowWakeTaskInput = isAsleep && Boolean(taskRun?.snapshotId);
   const [messagesInitialScrollBehavior, setMessagesInitialScrollBehavior] =
     useState<'smooth' | 'instant'>('smooth');
+  const retryFailedStart = useRetryFailedTaskStart();
   const taskFailureFooter = useMemo(() => {
     const displayError = getTaskRunDisplayError(taskRun);
 
@@ -52,8 +54,30 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
       return null;
     }
 
-    return <TaskFailureMessage error={displayError} />;
-  }, [taskRun]);
+    // The server decides: `enqueueTaskRelaunch` refuses a run that already
+    // produced agent output, because relaunching would redo work it did —
+    // a review it posted would post twice. Reading its verdict rather than
+    // re-deriving the rules here is what keeps the button from appearing
+    // where it would only error, or hiding where a retry would have
+    // worked.
+    const canRetry = taskRun.canRetryFailedStart === true;
+
+    return (
+      <TaskFailureMessage
+        error={displayError}
+        onRetry={
+          canRetry
+            ? () =>
+                retryFailedStart.mutate({
+                  taskId: session.taskId,
+                  runId: taskRun.id,
+                })
+            : undefined
+        }
+        retryPending={retryFailedStart.isPending}
+      />
+    );
+  }, [retryFailedStart, session.taskId, taskRun]);
   const messagesFooter = useMemo(() => {
     const onboardingCompletionFooter = onboardingEnvironment ? (
       <OnboardingCompletionMessage environment={onboardingEnvironment} />
@@ -145,7 +169,15 @@ function WakingUpMessage() {
   );
 }
 
-function TaskFailureMessage({ error }: { error: string }) {
+function TaskFailureMessage({
+  error,
+  onRetry,
+  retryPending = false,
+}: {
+  error: string;
+  onRetry?: (() => void) | undefined;
+  retryPending?: boolean;
+}) {
   return (
     <Message from="assistant">
       <MessageContent>
@@ -156,6 +188,19 @@ function TaskFailureMessage({ error }: { error: string }) {
             <div className="text-foreground whitespace-pre-wrap wrap-break-word">
               {error}
             </div>
+            {onRetry && (
+              <div className="pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onRetry}
+                  disabled={retryPending}
+                >
+                  <RotateCcw className="size-4" />
+                  Retry
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </MessageContent>

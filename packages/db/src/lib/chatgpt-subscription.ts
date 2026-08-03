@@ -2,6 +2,9 @@ import { sql } from 'drizzle-orm';
 
 import {
   CHATGPT_DEFAULT_ACCESS_TOKEN_TTL_MS,
+  CHATGPT_DEVICE_AUTH_NOT_FOUND_ERROR_CODE,
+  CHATGPT_DEVICE_AUTH_PENDING_ERROR_CODE,
+  CHATGPT_DEVICE_CODE_DEFAULT_TTL_MS,
   CHATGPT_OAUTH_CLIENT_ID,
   CHATGPT_OAUTH_DEVICE_CODE_ENDPOINT,
   CHATGPT_OAUTH_DEVICE_CALLBACK_REDIRECT_URI,
@@ -10,6 +13,7 @@ import {
   CHATGPT_OAUTH_ISSUER,
   CHATGPT_OAUTH_TOKEN_ENDPOINT,
   CHATGPT_OPENCODE_PROVIDER_ID,
+  CHATGPT_POLL_SLOW_DOWN_MS,
   CHATGPT_REFRESH_SAFETY_MARGIN_MS,
 } from '@roomote/types';
 
@@ -88,11 +92,21 @@ interface DeviceUserCodeResponse {
   device_auth_id: string;
   user_code: string;
   interval: string;
+  /** ISO 8601 timestamp after which the user code stops being accepted. */
+  expires_at?: string;
 }
 
 interface DeviceTokenPendingResponse {
   authorization_code: string;
   code_verifier: string;
+}
+
+/** Error envelope the deviceauth endpoints return on a non-2xx response. */
+interface DeviceAuthErrorResponse {
+  error?: {
+    code?: string;
+    message?: string;
+  };
 }
 
 function parseJwtClaims(token: string): IdTokenClaims | undefined {
@@ -481,15 +495,22 @@ export async function resolveOpenCodeAuthContent(
  * Initiate the OpenAI device-code authorization flow. Returns the user code
  * and verification URL the operator enters in a browser. The caller polls
  * {@link pollChatGptDeviceAuth} with the returned `deviceAuthId` and
- * `userCode` until it resolves to tokens.
+ * `userCode` until it resolves to tokens, and stops once `expiresInMs`
+ * elapses. The issuer stops accepting the code at that point and every later
+ * poll returns `deviceauth_not_found`.
+ *
+ * `expiresInMs` is relative rather than absolute so a clock skew between this
+ * server and the operator's browser cannot expire the code early or late.
  */
 export async function startChatGptDeviceAuth(
   fetchImpl: typeof fetch = fetch,
+  now: number = Date.now(),
 ): Promise<{
   deviceAuthId: string;
   userCode: string;
   verificationUrl: string;
   intervalMs: number;
+  expiresInMs: number;
 }> {
   const response = await fetchImpl(CHATGPT_OAUTH_DEVICE_CODE_ENDPOINT, {
     method: 'POST',
@@ -514,20 +535,110 @@ export async function startChatGptDeviceAuth(
     userCode: data.user_code,
     verificationUrl: CHATGPT_OAUTH_DEVICE_VERIFICATION_URL,
     intervalMs: intervalSeconds * 1000,
+    expiresInMs: resolveDeviceCodeExpiresInMs(data.expires_at, now),
   };
 }
 
+function resolveDeviceCodeExpiresInMs(
+  expiresAt: string | undefined,
+  now: number,
+): number {
+  const parsed = expiresAt ? Date.parse(expiresAt) : Number.NaN;
+
+  if (Number.isNaN(parsed)) {
+    return CHATGPT_DEVICE_CODE_DEFAULT_TTL_MS;
+  }
+
+  // Never hand back a non-positive window; a code that is already expired
+  // should still give the dialog one poll before it reports expiry.
+  return Math.max(parsed - now, 1_000);
+}
+
+/**
+ * Why a poll ended terminally, so the dialog can show guidance the operator
+ * can act on instead of a generic error:
+ * - `blocked`: the issuer refused the app, typically an org policy on the
+ *   ChatGPT workspace. Only an admin of that workspace can clear it.
+ * - `expired`: the code aged out or was already consumed; restart the flow.
+ */
+export type ChatGptDevicePollFailureReason = 'blocked' | 'expired';
+
 export type ChatGptDevicePollResult =
-  | { status: 'pending' }
+  | { status: 'pending'; intervalMs?: number }
   | { status: 'success'; record: ChatGptSubscriptionRecord }
-  | { status: 'failed'; error: string };
+  | {
+      status: 'failed';
+      error: string;
+      reason?: ChatGptDevicePollFailureReason;
+    };
 
 /**
  * Poll the OpenAI device-token endpoint once. Returns `pending` while the
- * operator has not yet completed authorization (HTTP 403/404), `success`
- * with the persisted subscription record once tokens are exchanged, or
- * `failed` on a terminal error.
+ * operator has not yet completed authorization, `success` with the persisted
+ * subscription record once tokens are exchanged, or `failed` on a terminal
+ * error.
+ *
+ * The endpoint signals pending with HTTP 403 and the structured error code
+ * `deviceauth_authorization_pending`, and reuses 403 for refusals that no
+ * amount of waiting resolves (an org policy blocking the OAuth app). Classify
+ * on the structured code rather than the status alone so a blocked deployment
+ * is not rendered as an endless "waiting" spinner. When the body carries no
+ * recognizable code we fall back to `pending`; the caller's expiry deadline
+ * bounds that fallback.
  */
+/**
+ * Read the structured `error.code` from a deviceauth error response, or
+ * `undefined` when the body is absent, unparseable, or carries no code. Only
+ * the code is inspected; the human-readable `message` is not matched on.
+ */
+async function readDeviceAuthErrorCode(
+  response: Response,
+): Promise<string | undefined> {
+  try {
+    const body = (await response.json()) as DeviceAuthErrorResponse;
+    const code = body?.error?.code;
+    return typeof code === 'string' && code.length > 0 ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Map a refused device-token poll to a result, keyed only on the structured
+ * `error.code`. The HTTP status is deliberately not part of the decision: the
+ * issuer reuses 403 for both "not entered yet" and refusals no amount of
+ * waiting resolves, so the status alone cannot tell them apart.
+ *
+ * `undefined` means the body carried no usable code, which stays `pending` to
+ * preserve the behavior that shipped before this was classified at all. The
+ * caller stops at the device code's expiry, so that fallback is bounded.
+ *
+ * Pure, so the branch table is testable without an HTTP mock.
+ */
+export function classifyDeviceAuthRefusal(
+  errorCode: string | undefined,
+): ChatGptDevicePollResult {
+  switch (errorCode) {
+    case CHATGPT_DEVICE_AUTH_PENDING_ERROR_CODE:
+      return { status: 'pending' };
+    case CHATGPT_DEVICE_AUTH_NOT_FOUND_ERROR_CODE:
+      return {
+        status: 'failed',
+        reason: 'expired',
+        error:
+          'ChatGPT authorization code expired. Restart the connection to get a new code.',
+      };
+    case undefined:
+      return { status: 'pending' };
+    default:
+      return {
+        status: 'failed',
+        reason: 'blocked',
+        error: `ChatGPT device authorization was refused (${errorCode}).`,
+      };
+  }
+}
+
 export async function pollChatGptDeviceAuth(input: {
   deviceAuthId: string;
   userCode: string;
@@ -549,8 +660,12 @@ export async function pollChatGptDeviceAuth(input: {
     }),
   });
 
+  if (response.status === 429) {
+    return { status: 'pending', intervalMs: CHATGPT_POLL_SLOW_DOWN_MS };
+  }
+
   if (response.status === 403 || response.status === 404) {
-    return { status: 'pending' };
+    return classifyDeviceAuthRefusal(await readDeviceAuthErrorCode(response));
   }
 
   if (!response.ok) {

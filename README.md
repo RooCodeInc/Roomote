@@ -177,8 +177,8 @@ copy-pasting.
   or bring API keys from any supported provider. Switch models per task. No
   markup on tokens.
 - **Read every line.** The full source is here. Audit it, extend it, fork it.
-- **No per-seat SaaS pricing.** Free for up to 10 users. Need more? Email
-  [help@roomote.dev](mailto:help@roomote.dev) for a license.
+- **No per-seat SaaS pricing.** Free for up to 10 users. Need more? [Buy a
+  self-hosted license on Roomote Cloud](https://cloud.roomote.dev/sign-up).
 
 ---
 
@@ -213,7 +213,9 @@ Need SSO, custom SLAs, or dedicated support? Get in touch:
 It is source-available under the [Fair Core License 1.0](LICENSE) (FCL-1.0-ALv2).
 You can read, modify, and self-host the code. Free for up to 10 users. Larger
 deployments need a license. Email
-[help@roomote.dev](mailto:help@roomote.dev). After the license period, the code
+[help@roomote.dev](mailto:help@roomote.dev) for teams larger than 100 users, or
+[buy a self-hosted license on Roomote Cloud](https://cloud.roomote.dev/sign-up).
+After the license period, the code
 converts to Apache 2.0.
 
 **How is this different from Cursor / Copilot / Claude Code?**
@@ -244,7 +246,8 @@ GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud. Connect one or many.
 Self-hosting is free for up to 10 registered users. You pay your own model
 provider for tokens (or use the models bundled with your ChatGPT subscription).
 Cloud starts at $49/mo, depending on total user count.
-For larger teams, licenses are available by emailing
+For 11–100 users, [buy a self-hosted license on Roomote
+Cloud](https://cloud.roomote.dev/sign-up). For larger teams, email
 [help@roomote.dev](mailto:help@roomote.dev).
 
 **I already pay for ChatGPT Plus. Do I need an API key too?**
@@ -281,7 +284,10 @@ Report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 ## License
 
 [Fair Core License 1.0 (FCL-1.0-ALv2)](LICENSE). Free for up to 10 users.
-Licenses for larger deployments are available by emailing
-[help@roomote.dev](mailto:help@roomote.dev). The license key functionality may
-not be disabled or circumvented. [TRADEMARKS.md](TRADEMARKS.md) covers trademark
-usage.
+Licenses for 11–100 users are available through [Roomote
+Cloud](https://cloud.roomote.dev/sign-up); larger teams can email
+[help@roomote.dev](mailto:help@roomote.dev). Purchased licenses report their
+current user count for subscription billing. Refresh purchased keys annually in
+the Roomote Cloud portal, then replace the key in Settings or `R_LICENSE_KEY`.
+The license key functionality may not be disabled or circumvented.
+[TRADEMARKS.md](TRADEMARKS.md) covers trademark usage.

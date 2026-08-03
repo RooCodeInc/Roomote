@@ -24,6 +24,7 @@ const { state } = vi.hoisted(() => ({
 
 vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
   requestInstancePing: vi.fn(async () => undefined),
+  requestLicenseUsageSync: vi.fn(async () => undefined),
 }));
 
 vi.mock('../auth', () => ({
@@ -104,6 +105,7 @@ vi.mock('@roomote/db/server', () => {
   const telegramUserMappingsTable = {};
 
   return {
+    recordLicenseUsageObservation: vi.fn(async () => undefined),
     and: vi.fn(),
     authUsers: authUsersTable,
     authAccounts: {},

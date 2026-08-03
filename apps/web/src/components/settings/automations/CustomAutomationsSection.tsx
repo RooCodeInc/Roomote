@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -9,25 +9,29 @@ import {
 } from '@roomote/types';
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
-import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
+import { formatTimeZone } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
 import {
   Button,
+  BasicTooltip,
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
   Input,
   Label,
-  Play,
   Plus,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
+  Settings2,
+  Skeleton,
   Switch,
   Textarea,
   Trash2,
@@ -124,6 +128,29 @@ function formFromRow(row: CustomAutomationListItem): CustomAutomationFormState {
   };
 }
 
+function writeInputFromRow(row: CustomAutomationListItem) {
+  const target = targetFromRow(row);
+
+  return {
+    name: row.name,
+    prompt: row.prompt,
+    enabled: row.enabled,
+    scheduleMode: row.scheduleMode,
+    cronExpression: row.cronExpression,
+    model: row.model,
+    environmentId: row.environmentId ?? '',
+    ...(target.provider !== 'none'
+      ? {
+          targetProvider: target.provider,
+          targetChannelId: target.channelId,
+        }
+      : {}),
+    ...(target.provider === 'teams' && target.serviceUrl
+      ? { targetServiceUrl: target.serviceUrl }
+      : {}),
+  };
+}
+
 // The LLM summary usually already names the timezone; only append it when
 // missing so it never shows twice.
 function scheduleSummaryLine(summary: string, timeZone: string): string {
@@ -131,22 +158,6 @@ function scheduleSummaryLine(summary: string, timeZone: string): string {
   return summary.includes(timeZoneLabel) || summary.includes(timeZone)
     ? summary
     : `${summary} (${timeZoneLabel})`;
-}
-
-function statusLine(row: CustomAutomationListItem): string {
-  if (row.lastError) {
-    return `Last error: ${row.lastError}`;
-  }
-
-  if (row.lastSucceededAt) {
-    return `Last ran ${formatDistanceToNowCompact(row.lastSucceededAt)}`;
-  }
-
-  if (row.lastRunAt) {
-    return `Last attempted ${formatDistanceToNowCompact(row.lastRunAt)}`;
-  }
-
-  return 'Never ran';
 }
 
 export function CustomAutomationsSection() {
@@ -237,10 +248,26 @@ export function CustomAutomationsSection() {
         setForm(EMPTY_FORM);
         setResolvedCron(null);
         setScheduleSummary(null);
+        window.history.replaceState(
+          null,
+          '',
+          `${window.location.pathname}${window.location.search}`,
+        );
         await invalidate();
       },
       onError: (error) => {
         toast.error(error.message || 'Failed to save custom automation');
+      },
+    }),
+  );
+
+  const toggleMutation = useMutation(
+    trpc.automations.updateCustomAutomation.mutationOptions({
+      onSuccess: async () => {
+        await invalidate();
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to update custom automation');
       },
     }),
   );
@@ -257,25 +284,6 @@ export function CustomAutomationsSection() {
     }),
   );
 
-  const triggerMutation = useMutation(
-    trpc.automations.triggerCustomAutomation.mutationOptions({
-      onSuccess: async (result) => {
-        if (result.outcome === 'launched') {
-          toast.success('Custom automation started');
-        } else if (result.outcome === 'skipped') {
-          toast.message(result.reason);
-        } else if (result.outcome === 'failed') {
-          toast.error(result.error);
-        } else {
-          toast.success('Custom automation completed');
-        }
-        await invalidate();
-      },
-      onError: (error) => {
-        toast.error(error.message || 'Failed to run custom automation');
-      },
-    }),
-  );
   const resolveScheduleMutation = useMutation(
     trpc.automations.resolveCustomAutomationSchedule.mutationOptions({
       onSuccess: (result, variables) => {
@@ -322,13 +330,66 @@ export function CustomAutomationsSection() {
       ? scheduleSummaryLine(clientParsedCron.summary, schedulingTimeZone)
       : scheduleSummary;
 
-  const rows = listQuery.data ?? [];
+  const rows = useMemo(() => listQuery.data ?? [], [listQuery.data]);
   const atCap = rows.length >= MAX_CUSTOM_AUTOMATIONS;
   const busy =
     createMutation.isPending ||
     updateMutation.isPending ||
     deleteMutation.isPending ||
-    triggerMutation.isPending;
+    toggleMutation.isPending;
+
+  const closeEditor = () => {
+    setIsCreating(false);
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setResolvedCron(null);
+    setScheduleSummary(null);
+    if (window.location.hash.startsWith('#custom-automation-')) {
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}`,
+      );
+    }
+  };
+
+  const editAutomation = (row: CustomAutomationListItem) => {
+    setEditingId(row.id);
+    setIsCreating(false);
+    setForm(formFromRow(row));
+    setResolvedCron(row.cronExpression ?? null);
+    setScheduleSummary(null);
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}#custom-automation-${row.id}`,
+    );
+  };
+
+  useEffect(() => {
+    const openLinkedAutomation = () => {
+      const prefix = '#custom-automation-';
+      if (!window.location.hash.startsWith(prefix)) {
+        return;
+      }
+
+      const row = rows.find(
+        (candidate) =>
+          candidate.id === window.location.hash.slice(prefix.length),
+      );
+      if (row) {
+        setEditingId(row.id);
+        setIsCreating(false);
+        setForm(formFromRow(row));
+        setResolvedCron(row.cronExpression ?? null);
+        setScheduleSummary(null);
+      }
+    };
+
+    openLinkedAutomation();
+    window.addEventListener('hashchange', openLinkedAutomation);
+    return () => window.removeEventListener('hashchange', openLinkedAutomation);
+  }, [rows]);
 
   const saveForm = () => {
     if (!form.environmentId) {
@@ -379,13 +440,13 @@ export function CustomAutomationsSection() {
   };
 
   const renderEditor = () => (
-    <Card variant="snug" className="border-dashed">
-      <CardHeader>
-        <CardTitle className="text-sm font-medium">
+    <DialogContent size="4xl" aria-describedby={undefined}>
+      <DialogHeader>
+        <DialogTitle>
           {editingId ? 'Edit custom automation' : 'New custom automation'}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+        </DialogTitle>
+      </DialogHeader>
+      <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="custom-automation-name">Name</Label>
           <Input
@@ -418,9 +479,9 @@ export function CustomAutomationsSection() {
           />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Cadence</Label>
+        <div className="space-y-2">
+          <Label htmlFor="custom-automation-schedule">Schedule</Label>
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Select
               value={form.scheduleMode}
               disabled={busy}
@@ -433,7 +494,10 @@ export function CustomAutomationsSection() {
                 }));
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger
+                id="custom-automation-schedule"
+                className="w-full sm:w-52"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -444,13 +508,12 @@ export function CustomAutomationsSection() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
 
-          {form.scheduleMode === 'cron' ? (
-            <div className="space-y-2">
-              <Label htmlFor="custom-automation-cron">Custom schedule</Label>
+            {form.scheduleMode === 'cron' ? (
               <Input
                 id="custom-automation-cron"
+                aria-label="Custom schedule"
+                className="flex-1"
                 value={form.cronExpression}
                 disabled={busy}
                 placeholder="Weekdays at 9am or 0 9 * * 1-5"
@@ -479,22 +542,22 @@ export function CustomAutomationsSection() {
                   }
                 }}
               />
-              {resolveScheduleMutation.isPending ? (
-                <p className="text-sm text-muted-foreground">
-                  Interpreting schedule...
-                </p>
-              ) : effectiveScheduleSummary ? (
-                <p className="text-sm text-muted-foreground">
-                  {effectiveScheduleSummary}
-                </p>
-              ) : null}
-            </div>
+            ) : null}
+          </div>
+          {resolveScheduleMutation.isPending ? (
+            <p className="text-sm text-muted-foreground">
+              Interpreting schedule...
+            </p>
+          ) : effectiveScheduleSummary ? (
+            <p className="text-sm text-muted-foreground">
+              {effectiveScheduleSummary}
+            </p>
           ) : null}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Environment</Label>
+        <div className="flex flex-col gap-4 sm:flex-row">
+          <div className="space-y-2 sm:w-52">
+            <Label htmlFor="custom-automation-environment">Environment</Label>
             <Select
               value={form.environmentId || undefined}
               disabled={busy || environmentOptions.length === 0}
@@ -505,7 +568,10 @@ export function CustomAutomationsSection() {
                 }))
               }
             >
-              <SelectTrigger>
+              <SelectTrigger
+                id="custom-automation-environment"
+                className="w-full"
+              >
                 <SelectValue placeholder="Select environment" />
               </SelectTrigger>
               <SelectContent>
@@ -521,7 +587,6 @@ export function CustomAutomationsSection() {
           <div className="space-y-2">
             <Label>Model</Label>
             <ModelSelect
-              className="w-full"
               size="default"
               ariaLabel="Automation model"
               value={form.model}
@@ -534,9 +599,9 @@ export function CustomAutomationsSection() {
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Destination provider</Label>
+        <div className="space-y-2">
+          <Label htmlFor="custom-automation-destination">Destination</Label>
+          <div className="flex flex-col gap-2 sm:flex-row">
             <Select
               value={form.targetProvider}
               disabled={busy}
@@ -555,7 +620,11 @@ export function CustomAutomationsSection() {
                 }))
               }
             >
-              <SelectTrigger>
+              <SelectTrigger
+                id="custom-automation-destination"
+                aria-label="Destination provider"
+                className="w-full sm:w-52"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -566,20 +635,22 @@ export function CustomAutomationsSection() {
                 <SelectItem value="telegram">Telegram</SelectItem>
               </SelectContent>
             </Select>
-          </div>
 
-          {form.targetProvider === 'none' ? (
-            <div className="space-y-2">
-              <Label>Destination channel</Label>
-              <p className="pt-2 text-sm text-muted-foreground">
+            {form.targetProvider === 'none' ? (
+              <p className="self-center text-sm text-muted-foreground">
                 Results appear only in the task view.
               </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label>Destination channel</Label>
-              {form.targetProvider === 'slack' ? (
+            ) : form.targetProvider === 'slack' ? (
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <Label
+                  htmlFor="custom-automation-destination-channel"
+                  className="shrink-0"
+                >
+                  Channel
+                </Label>
                 <SlackChannelSelect
+                  id="custom-automation-destination-channel"
+                  className="flex-1"
                   value={form.targetChannelId || null}
                   options={slackOptions}
                   disabled={busy}
@@ -590,7 +661,10 @@ export function CustomAutomationsSection() {
                     }))
                   }
                 />
-              ) : form.targetProvider === 'discord' ? (
+              </div>
+            ) : form.targetProvider === 'discord' ? (
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <Label className="shrink-0">Channel</Label>
                 <Select
                   value={form.targetChannelId || undefined}
                   disabled={busy}
@@ -601,7 +675,10 @@ export function CustomAutomationsSection() {
                     }))
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger
+                    aria-label="Destination channel"
+                    className="flex-1"
+                  >
                     <SelectValue placeholder="Select Discord channel" />
                   </SelectTrigger>
                   <SelectContent>
@@ -612,8 +689,13 @@ export function CustomAutomationsSection() {
                     ))}
                   </SelectContent>
                 </Select>
-              ) : (
+              </div>
+            ) : (
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <Label className="shrink-0">Channel</Label>
                 <Input
+                  aria-label="Destination channel"
+                  className="flex-1"
                   value={form.targetChannelId}
                   disabled={busy}
                   onChange={(event) =>
@@ -628,30 +710,33 @@ export function CustomAutomationsSection() {
                       : 'Telegram chat ID'
                   }
                 />
-              )}
-            </div>
-          )}
-        </div>
-
-        {form.targetProvider === 'teams' ? (
-          <div className="space-y-2">
-            <Label htmlFor="custom-automation-service-url">
-              Teams service URL (optional)
-            </Label>
-            <Input
-              id="custom-automation-service-url"
-              value={form.targetServiceUrl}
-              disabled={busy}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  targetServiceUrl: event.target.value,
-                }))
-              }
-              placeholder="https://smba.trafficmanager.net/..."
-            />
+              </div>
+            )}
+            {form.targetProvider === 'teams' ? (
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <Label
+                  htmlFor="custom-automation-service-url"
+                  className="shrink-0"
+                >
+                  Service URL
+                </Label>
+                <Input
+                  id="custom-automation-service-url"
+                  className="flex-1"
+                  value={form.targetServiceUrl}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      targetServiceUrl: event.target.value,
+                    }))
+                  }
+                  placeholder="Optional"
+                />
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        </div>
 
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -669,13 +754,7 @@ export function CustomAutomationsSection() {
               type="button"
               variant="outline"
               disabled={busy}
-              onClick={() => {
-                setIsCreating(false);
-                setEditingId(null);
-                setForm(EMPTY_FORM);
-                setResolvedCron(null);
-                setScheduleSummary(null);
-              }}
+              onClick={closeEditor}
             >
               Cancel
             </Button>
@@ -684,21 +763,23 @@ export function CustomAutomationsSection() {
             </Button>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </DialogContent>
   );
 
   return (
-    <div className="space-y-3">
+    <section className="space-y-3" aria-labelledby="custom-automations-heading">
       <div className="flex items-start justify-between gap-3 pt-2">
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-foreground">
-            Custom automations
+          <h2
+            id="custom-automations-heading"
+            className="text-sm font-semibold text-foreground"
+          >
+            Custom
           </h2>
           <p className="text-sm text-muted-foreground">
-            Create your own scheduled agent runs with a prompt, cadence,
-            environment, and optional report channel. Daily and weekly runs fire
-            around local 3am, matching the other automations.
+            Create your own scheduled agent runs with a prompt, frequency,
+            environment, and optional report channel.
           </p>
         </div>
         {!isCreating && !editingId ? (
@@ -728,113 +809,135 @@ export function CustomAutomationsSection() {
         ) : null}
       </div>
 
-      {isCreating || editingId ? renderEditor() : null}
+      <Dialog
+        open={isCreating || Boolean(editingId)}
+        onOpenChange={(open) => {
+          if (!open) closeEditor();
+        }}
+      >
+        {isCreating || editingId ? renderEditor() : null}
+      </Dialog>
 
       {listQuery.isPending ? (
-        <p className="text-sm text-muted-foreground">
-          Loading custom automations…
-        </p>
-      ) : rows.length === 0 && !isCreating ? (
-        <Card variant="snug">
-          <CardContent className="text-muted-foreground">
-            No custom automations yet. Example: every Monday, summarize flaky
-            tests and post to #eng-quality.
+        <Card variant="snug" data-testid="custom-automations-skeleton">
+          <CardContent>
+            <div className="divide-y divide-background">
+              {Array.from({ length: 2 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
+                >
+                  <Skeleton className="mt-0.5 h-5 w-9 rounded-full" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-3 w-full max-w-lg" />
+                  </div>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
+      ) : rows.length === 0 && !isCreating ? (
+        <p className="text-sm text-muted-foreground">
+          No custom automations created yet.
+        </p>
       ) : (
-        <div className="space-y-3">
-          {rows.map((row) => {
-            const environmentName =
-              environmentOptions.find(
-                (environment) => environment.id === row.environmentId,
-              )?.name ?? 'Environment missing';
-            const target = targetFromRow(row);
-            const destinationLabel =
-              target.provider === 'none'
-                ? 'no report channel'
-                : target.provider === 'slack'
-                  ? (slackOptions.find(
-                      (option) =>
-                        option.id === target.channelId ||
-                        option.name === target.channelId,
-                    )?.label ?? target.channelId)
-                  : target.provider === 'discord'
-                    ? (discordOptions.find(
-                        (option) => option.id === target.channelId,
-                      )?.label ?? target.channelId)
-                    : target.channelId;
+        <Card variant="snug">
+          <CardContent>
+            <div className="divide-y divide-background">
+              {rows.map((row) => {
+                const environmentName =
+                  environmentOptions.find(
+                    (environment) => environment.id === row.environmentId,
+                  )?.name ?? 'Environment missing';
+                const target = targetFromRow(row);
+                const destinationLabel =
+                  target.provider === 'none'
+                    ? 'no report channel'
+                    : target.provider === 'slack'
+                      ? (slackOptions.find(
+                          (option) =>
+                            option.id === target.channelId ||
+                            option.name === target.channelId,
+                        )?.label ?? target.channelId)
+                      : target.provider === 'discord'
+                        ? (discordOptions.find(
+                            (option) => option.id === target.channelId,
+                          )?.label ?? target.channelId)
+                        : target.channelId;
 
-            return (
-              <Card key={row.id} variant="snug">
-                <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2">
-                  <div className="space-y-1">
-                    <CardTitle className="text-sm font-medium">
-                      {row.name}
-                    </CardTitle>
-                    <p className="text-xs text-muted-foreground">
-                      {row.scheduleMode === 'cron'
-                        ? row.cronExpression
-                        : scheduleLabel(row.scheduleMode)}{' '}
-                      · {environmentName} ·{' '}
-                      {target.provider === 'none'
-                        ? destinationLabel
-                        : `${target.provider}:${destinationLabel}`}{' '}
-                      · {statusLine(row)}
-                      {row.model ? ` · ${row.model}` : null}
-                      {row.createdByName ? ` · by ${row.createdByName}` : null}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy || !row.enabled}
-                      onClick={() => triggerMutation.mutate({ id: row.id })}
-                      aria-label={`Run ${row.name} now`}
-                    >
-                      <Play className="size-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
+                return (
+                  <div
+                    key={row.id}
+                    className="grid grid-cols-[1fr_auto] gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[auto_1fr_auto] sm:items-start"
+                  >
+                    <Switch
+                      aria-label={`Toggle ${row.name}`}
+                      checked={row.enabled}
                       disabled={busy}
-                      onClick={() => {
-                        setEditingId(row.id);
-                        setIsCreating(false);
-                        setForm(formFromRow(row));
-                        setResolvedCron(row.cronExpression ?? null);
-                        setScheduleSummary(null);
-                      }}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            `Delete custom automation “${row.name}”?`,
-                          )
-                        ) {
-                          deleteMutation.mutate({ id: row.id });
-                        }
-                      }}
-                      aria-label={`Delete ${row.name}`}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
+                      className="col-start-1 row-start-2 mt-0.5 sm:row-start-1"
+                      onCheckedChange={(enabled) =>
+                        toggleMutation.mutate({
+                          id: row.id,
+                          ...writeInputFromRow(row),
+                          enabled,
+                        })
+                      }
+                    />
+                    <div className="col-span-2 row-start-1 min-w-0 space-y-1 sm:col-span-1 sm:col-start-2">
+                      <p className="text-sm font-semibold">{row.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {row.scheduleMode === 'cron'
+                          ? row.cronExpression
+                          : scheduleLabel(row.scheduleMode)}{' '}
+                        · {environmentName} ·{' '}
+                        {target.provider === 'none'
+                          ? destinationLabel
+                          : `${target.provider}:${destinationLabel}`}{' '}
+                        · Created by {row.createdByName ?? 'Unknown'}
+                      </p>
+                    </div>
+                    <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
+                      <BasicTooltip content="Configure">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          disabled={busy}
+                          aria-label={`Configure ${row.name}`}
+                          onClick={() => editAutomation(row)}
+                        >
+                          <Settings2 />
+                        </Button>
+                      </BasicTooltip>
+                      <BasicTooltip content="Delete">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Delete custom automation “${row.name}”?`,
+                              )
+                            ) {
+                              deleteMutation.mutate({ id: row.id });
+                            }
+                          }}
+                          aria-label={`Delete ${row.name}`}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </BasicTooltip>
+                    </div>
                   </div>
-                </CardHeader>
-              </Card>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
       )}
-    </div>
+    </section>
   );
 }

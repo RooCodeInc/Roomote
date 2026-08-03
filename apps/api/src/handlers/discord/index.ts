@@ -59,6 +59,10 @@ import {
 import { handleDiscordComponentInteraction } from './callback-actions.js';
 import { maybeHandleDiscordChannelAutoStart } from './channel-auto-start.js';
 import {
+  claimPendingDiscordAccountLinkTask,
+  rememberPendingDiscordAccountLinkTask,
+} from './pending-account-link-task.js';
+import {
   claimDiscordApiEvent,
   completeDiscordApiEvent,
   discordApiEventLeaseRenewal,
@@ -346,6 +350,28 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       await restoreDiscordLinkCode(command.code!, linkedUserId);
       throw error;
     }
+    const pendingTask = await claimPendingDiscordAccountLinkTask(
+      sender.id,
+    ).catch((error) => {
+      apiLogger.warn(
+        `[discord] Failed to claim pending task after linking user ${sender.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    });
+    if (pendingTask) {
+      try {
+        await processDiscordGatewayEvent(pendingTask);
+      } catch (error) {
+        await Promise.allSettled([
+          rememberPendingDiscordAccountLinkTask({
+            discordUserId: sender.id,
+            event: pendingTask,
+          }),
+          restoreDiscordLinkCode(command.code!, linkedUserId),
+        ]);
+        throw error;
+      }
+    }
     await replyToDiscordEvent({
       provider: resolved.provider,
       applicationId: resolved.applicationId,
@@ -353,6 +379,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       interaction: interactionReplyContext(event),
       text: [
         '✅ Linked! This Discord account is now connected to your Roomote account. Tasks you start here are attributed to you.',
+        ...(pendingTask
+          ? ['I also picked up your most recent task request.']
+          : []),
         DISCORD_HELP_MESSAGE,
       ].join('\n\n'),
       ephemeral: true,
@@ -452,6 +481,15 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         ignored: 'discord_sender_not_linked_unmentioned',
       };
     }
+
+    await rememberPendingDiscordAccountLinkTask({
+      discordUserId: sender.id,
+      event,
+    }).catch((error) => {
+      apiLogger.warn(
+        `[discord] Failed to remember pending task for unlinked user ${sender.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
 
     await promptDiscordAccountLink({
       provider: resolved.provider,

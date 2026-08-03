@@ -22,7 +22,7 @@ import { getTaskRunErrorDisplayMessage } from '@/lib/task-run-errors';
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
 
 import { SandboxLogsTerminal } from '@/components/sandbox';
-import { MessageSquareWarning, RotateCcw } from 'lucide-react';
+import { MessageSquareWarning, RotateCcw } from '@/components/system';
 
 export interface StartupStep {
   status: RunStatus;
@@ -324,32 +324,30 @@ export const StartupSequence = ({
       : -1;
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-4">
-      <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-2 px-2">
-        {steps.map((step, index) => (
-          <div key={`${step.status}-${index}`}>
-            <StartupMessage
-              step={step}
-              isActive={index === steps.length - 1 && !step.completed}
+    <div className="flex flex-col gap-2">
+      {steps.map((step, index) => (
+        <div key={`${step.status}-${index}`}>
+          <StartupMessage
+            step={step}
+            isActive={index === steps.length - 1 && !step.completed}
+          />
+          {index === logInsertIndex && (
+            <SandboxLogsTerminal
+              logs={logs || []}
+              isConnected={logsConnected}
+              error={logsError}
+              className="max-w-2xl py-1 pl-6"
             />
-            {index === logInsertIndex && (
-              <SandboxLogsTerminal
-                logs={logs || []}
-                isConnected={logsConnected}
-                error={logsError}
-                className="max-w-2xl pl-6 py-1"
-              />
-            )}
-          </div>
-        ))}
-        <StartupFailureMessage
-          status={status}
-          error={error}
-          errorCode={errorCode}
-          prompt={prompt}
-          retryAction={retryAction}
-        />
-      </div>
+          )}
+        </div>
+      ))}
+      <StartupFailureMessage
+        status={status}
+        error={error}
+        errorCode={errorCode}
+        prompt={prompt}
+        retryAction={retryAction}
+      />
     </div>
   );
 };

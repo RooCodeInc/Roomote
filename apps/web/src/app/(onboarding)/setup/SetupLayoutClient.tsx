@@ -88,6 +88,7 @@ export function SetupLayoutClient({ children }: { children: React.ReactNode }) {
                 <UserMenu
                   portalContainer={userMenuPortalContainer}
                   menuSide="top"
+                  showPersonalSettings={false}
                 />
               </div>
             </>

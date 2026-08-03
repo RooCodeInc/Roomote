@@ -14,6 +14,13 @@ This section does not list provider categories that have their own setup paths:
 communications providers, source-control providers, inference providers, and
 sandbox providers. Configure those from the provider-specific docs instead.
 
+Deployment operators can prevent every integration in this curated catalog
+from being configured or used by setting
+`R_CURATED_INTEGRATIONS_DISABLED=true` and restarting Roomote. Existing
+connections remain stored but inactive, so unsetting the value restores
+them. This policy does not affect the separate provider categories above or
+MCP servers defined on an environment.
+
 ## Connection patterns
 
 You will usually see one of these setup models:
