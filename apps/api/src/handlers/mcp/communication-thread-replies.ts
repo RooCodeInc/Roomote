@@ -37,6 +37,7 @@ import {
   type CommunicationReplyTaskRun,
   type ParsedThreadReplyBody,
 } from './communication-thread-reply-shared';
+import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 
 const LOG_CONTEXT = 'communicationThreadReplies';
 const TEAMS_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'teams:thread_reply_footer_lock:';
@@ -185,6 +186,8 @@ async function bindLateCommunicationReportThread(params: {
   taskRun: CommunicationReplyTaskRun;
   provider: 'teams' | 'telegram' | 'discord';
   messageId: string;
+  discordProvider?: DiscordCommunicationProvider;
+  discordThreadName?: string;
 }): Promise<void> {
   const channelId = getCommunicationChannelFromTaskPayload(
     params.taskRun.payload,
@@ -204,11 +207,35 @@ async function bindLateCommunicationReportThread(params: {
     return;
   }
 
+  let discordThread: { channelId: string } | null = null;
+  if (params.provider === 'discord' && params.discordProvider) {
+    try {
+      discordThread = await params.discordProvider.createThreadFromMessage({
+        channelId,
+        messageId: params.messageId,
+        name: buildCommunicationTaskThreadName(
+          params.discordThreadName ?? 'Roomote report',
+        ),
+      });
+    } catch (error) {
+      console.error(
+        `[${LOG_CONTEXT}] Failed to create Discord report thread for task ${params.taskRun.taskId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
   const patch = JSON.stringify({
     communicationMessageId: params.messageId,
     ...(params.provider === 'teams'
       ? { communicationThreadId: params.messageId }
-      : {}),
+      : discordThread
+        ? {
+            communicationThreadId: discordThread.channelId,
+            discordTaskThread: true,
+          }
+        : {}),
   });
   await db.transaction(async (tx) => {
     const boundRuns = await tx
@@ -669,6 +696,12 @@ async function sendDiscordThreadReply(params: {
     taskRun: params.taskRun,
     provider: 'discord',
     messageId: reply.messageId,
+    ...(!threadId && !messageId
+      ? {
+          discordProvider: provider,
+          ...(text ? { discordThreadName: text } : {}),
+        }
+      : {}),
   }).catch((error) =>
     console.error(
       `[${LOG_CONTEXT}] Failed to bind Discord report root:`,
