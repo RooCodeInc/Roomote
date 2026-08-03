@@ -73,7 +73,7 @@ function renderTable(recipes) {
       return `| [${escapeTableCell(recipe.title)}](${recipe.slug}) | ${escapeTableCell(recipe.description)} | ${contributor}${company} |`;
     });
 
-  return ['| Recipe | Description | By |', '| --- | --- | --- |', ...rows].join(
+  return ['| Recipe | Use to | By |', '| --- | --- | --- |', ...rows].join(
     '\n',
   );
 }
