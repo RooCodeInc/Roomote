@@ -33,23 +33,7 @@ clear instructions.
 1. Set the Manager Channel under **Settings > Automations > Automation output**.
 2. Enable **CI Failure Triage**.
 3. Confirm each repository you care about belongs to a configured environment.
-4. Add the noise-control instructions below.
 5. Use **Run now** to test the configuration, or wait for the next default-branch failure.
-
-## Additional instructions
-
-Paste this into the automation's **Additional instructions** field:
-
-```text
-Only triage failures in build and test jobs. Ignore the nightly performance
-suite and deploy jobs; deploys are handled by on-call.
-
-Treat a failure as persistent if the same job also failed in the previous run.
-
-Prefer the smallest change that makes CI green. Never skip, disable, or delete
-a test to get there. If the test is wrong, fix the test and say so in the PR
-description.
-```
 
 ## Variations
 

@@ -27,12 +27,12 @@ It's how we actually generate the ones we send every Friday.
 
 - A [custom automation](/automations#custom-automations)
 - An environment covering the product repositories
-- A custom Resend MCP server configured under **Settings > Integrations**, with a Resend API key
+- The Resend MCP server configured under **Settings > Integrations**, with a Resend API key
 - A report destination such as `#product-updates`, so the draft lands in a replyable thread
 
 ## Steps
 
-1. Add the Resend MCP server as a custom integration and confirm its tools are available in the environment.
+1. Add the Resend MCP server and confirm its tools are available in the environment.
 2. Create a custom automation named **Product Updates Newsletter**. Choose **Custom schedule**, enter `Mondays at 9am`, and select the environment.
 3. Paste the prompt below.
 4. Set the report destination to `#product-updates`.
