@@ -6,8 +6,7 @@ const mockEnv = vi.hoisted(() => ({
 
 vi.mock('@roomote/env', () => ({
   Env: mockEnv,
-  areCuratedIntegrationsEnabled: (value: boolean | undefined) =>
-    value === true,
+  areCuratedIntegrationsEnabled: (value: boolean | undefined) => value === true,
 }));
 
 const {
