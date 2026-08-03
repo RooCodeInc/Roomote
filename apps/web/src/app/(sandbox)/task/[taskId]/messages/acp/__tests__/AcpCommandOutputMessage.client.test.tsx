@@ -50,7 +50,7 @@ describe('AcpCommandOutputMessage', () => {
     codeBlockCommandSpy.mockClear();
   });
 
-  it('renders command headers without expandable raw output', () => {
+  it('renders command output blocks as collapsible and collapsed by default', () => {
     const msg: AcpToolResultUiMessage = {
       ...baseMsg,
       text: '$ pnpm test\nPASS src/example.test.ts',
@@ -75,17 +75,17 @@ describe('AcpCommandOutputMessage', () => {
     expect(codeBlockSpy).toHaveBeenCalledTimes(1);
     expect(codeBlockSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        collapsible: false,
-        defaultCollapsed: false,
-        renderContent: false,
-        maxHeight: undefined,
+        collapsible: true,
+        defaultCollapsed: true,
+        renderContent: true,
+        maxHeight: 400,
         showCommandCopy: true,
-        showOutputCopy: false,
+        showOutputCopy: true,
       }),
     );
   });
 
-  it('keeps command output blocks non-collapsible even when there is no output to show', () => {
+  it('does not enable collapsible mode when there is no output to show', () => {
     const msg: AcpToolCallUiMessage = {
       ...baseMsg,
       text: '   \n',

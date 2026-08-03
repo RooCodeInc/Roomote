@@ -46,6 +46,7 @@ export const AcpCommandOutputMessage = ({
 
   const output = sanitizeSandboxPathString(cmd.text);
 
+  const isOutputPresent = output.trim().length > 0;
   const isExitCodePresent = cmd.exitCode !== undefined;
   const isPending =
     status === 'in_progress' || (status === null && !isExitCodePresent);
@@ -69,14 +70,14 @@ export const AcpCommandOutputMessage = ({
           code={output}
           language="bash"
           variant="compact"
-          collapsible={false}
-          defaultCollapsed={false}
+          collapsible={isOutputPresent}
+          defaultCollapsed={isOutputPresent}
           forceDark={true}
-          renderContent={false}
-          maxHeight={undefined}
+          renderContent={isOutputPresent}
+          maxHeight={isOutputPresent ? 400 : undefined}
           command={command ?? ''}
           showCommandCopy
-          showOutputCopy={false}
+          showOutputCopy={isOutputPresent}
         >
           <CodeBlockHeader className="w-full">
             <CodeBlockTitle>
