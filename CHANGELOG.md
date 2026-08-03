@@ -2,6 +2,27 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.32.0 (2026-08-03)
+
+This release adds OpenCode Go subscriptions, restores convenient automation test runs, refreshes recommended models, and makes license syncing more resilient.
+
+### Highlights
+
+- Let operators connect an OpenCode Go subscription independently from OpenCode Zen and use supported Go models across Roomote task roles.
+- Run enabled custom automations on demand and test newly created automations immediately.
+- Use current Qwen and DeepSeek recommendations across supported model providers.
+- Retry license usage reporting after transient Roomote Cloud failures.
+
+### Minor changes
+
+- Let operators connect an OpenCode Go subscription independently from OpenCode Zen and use supported Go models across Roomote task roles.
+
+### Patch changes
+
+- Let administrators run enabled custom automations on demand from Automations settings, and offer an immediate test run after an automation is created conversationally.
+- Recommend Qwen3.8 Max through supported providers and use OpenCode Zen's supported DeepSeek V4 Flash model identifier. Thanks to @mrubens for contributing the DeepSeek correction.
+- Retry license usage reports after transient Roomote Cloud failures and report concurrent license-key changes accurately instead of dropping usage observations or reporting a false success.
+
 ## 0.31.0 (2026-08-03)
 
 This release expands Amazon Bedrock and deployment controls, refreshes Automations and self-hosted licensing, and adds copyable Cookbook recipes for common workflows.
