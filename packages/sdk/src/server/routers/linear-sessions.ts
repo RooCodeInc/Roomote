@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 
 import { TaskPayloadKind } from '@roomote/types';
 import { db, taskRuns, eq } from '@roomote/db/server';
@@ -21,6 +22,10 @@ import {
 } from '../trpc';
 
 async function findActiveConnection() {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+    return null;
+  }
+
   return findLinearDeploymentMcpConnection();
 }
 

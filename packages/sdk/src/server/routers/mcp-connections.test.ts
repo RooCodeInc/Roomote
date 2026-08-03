@@ -1,5 +1,15 @@
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
+const mockEnv = vi.hoisted(() => ({
+  R_CURATED_INTEGRATIONS_DISABLED: false,
+}));
+
+vi.mock('@roomote/env', () => ({
+  Env: mockEnv,
+  areCuratedIntegrationsDisabled: (value: boolean | undefined) =>
+    value === true,
+}));
+
 const {
   mockFindTaskRun,
   mockFindEnablements,
@@ -178,12 +188,23 @@ function buildEnabledOnlyRow(mcpId: string) {
 describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
     mockFindTaskRun.mockResolvedValue({
       actingUserId: null,
     });
     mockFindEnablements.mockResolvedValue([]);
     mockFindConnections.mockResolvedValue([]);
     mockOrderBy.mockResolvedValue([buildJoinedConnectionRow()]);
+  });
+
+  it('returns no curated servers when the operator disables integrations', async () => {
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
+
+    const result = await createCaller().getMcpServerConfigs();
+
+    expect(result).toEqual({ servers: {} });
+    expect(mockSelect).not.toHaveBeenCalled();
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
   });
 
   it('returns Notion proxy config without raw OAuth bearer token', async () => {

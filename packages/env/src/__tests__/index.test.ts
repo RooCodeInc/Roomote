@@ -1,5 +1,6 @@
 import {
   Env,
+  areCuratedIntegrationsDisabled,
   assertSecureBootBinding,
   createRoomoteEnv,
   getActiveInsecureLocalSecrets,
@@ -197,6 +198,25 @@ describe('Env', () => {
     expect(isRoomoteCloudEnabled('true')).toBe(true);
     expect(isRoomoteCloudEnabled('1')).toBe(true);
     expect(isRoomoteCloudEnabled('false')).toBe(false);
+  });
+
+  it('enables curated integrations by default and accepts an operator opt-out', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    delete runtimeEnv.R_CURATED_INTEGRATIONS_DISABLED;
+
+    expect(createRoomoteEnv(runtimeEnv).R_CURATED_INTEGRATIONS_DISABLED).toBe(
+      false,
+    );
+    expect(
+      createRoomoteEnv({
+        ...runtimeEnv,
+        R_CURATED_INTEGRATIONS_DISABLED: 'true',
+      }).R_CURATED_INTEGRATIONS_DISABLED,
+    ).toBe(true);
+    expect(areCuratedIntegrationsDisabled(undefined)).toBe(false);
+    expect(areCuratedIntegrationsDisabled('1')).toBe(true);
+    expect(areCuratedIntegrationsDisabled('0')).toBe(false);
   });
 
   it('accepts valid Ping instance IDs and rejects invalid ones', () => {

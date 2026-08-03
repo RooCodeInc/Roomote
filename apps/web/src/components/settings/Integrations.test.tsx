@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 
 const state = vi.hoisted(() => ({
+  integrationsEnabled: true,
   deploymentEnablements: [] as Array<{ mcpId: string; enabled: boolean }>,
   oauthReadiness: [{ mcpId: 'linear', status: 'ready' as const }] as Array<{
     mcpId: string;
@@ -192,6 +193,9 @@ vi.mock('@/hooks/linear', () => ({
 }));
 
 vi.mock('@/hooks/mcp-connections', () => ({
+  useCuratedIntegrationsAvailability: () => ({
+    data: { enabled: state.integrationsEnabled },
+  }),
   useDeploymentMcpEnablements: () => ({
     data: state.deploymentEnablements,
   }),
@@ -429,6 +433,7 @@ describe('Integrations settings', () => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
     state.deploymentEnablements = [];
+    state.integrationsEnabled = true;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
     state.userConnections = [];
     state.mcpTools = null;
@@ -853,6 +858,22 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('button', { name: 'Configure Vercel' }),
     ).toBeInTheDocument();
+  });
+
+  it('shows operator policy instead of integration controls when disabled', () => {
+    state.integrationsEnabled = false;
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByText('Integrations disabled by deployment operator'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Connected' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disable Linear' }),
+    ).not.toBeInTheDocument();
   });
 
   it('connects and enables an org-scoped MCP from the integrations page', () => {

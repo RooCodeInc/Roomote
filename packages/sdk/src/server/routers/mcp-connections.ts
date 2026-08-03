@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import {
   db,
   desc,
@@ -64,6 +65,10 @@ export const mcpConnectionsRouter = router({
       }),
     )
     .query(async ({ input }) => {
+      if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+        return false;
+      }
+
       // Deployment-scoped enablement: valid for any authenticated
       // principal, including deployment-service-principal run tokens.
       const enablement = await db.query.deploymentMcpEnablements.findFirst({
@@ -133,6 +138,10 @@ export const mcpConnectionsRouter = router({
    * Returns a map of sanitized server names to { url, headers }.
    */
   getMcpServerConfigs: authenticatedProcedure.query(async ({ ctx }) => {
+    if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+      return { servers: {} };
+    }
+
     const actorContext = await resolveActorScopedUserContext(ctx.auth);
 
     const connectionFilters = [];

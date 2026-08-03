@@ -1,5 +1,6 @@
 // Queries
 export { useDeploymentMcpEnablements } from './useDeploymentMcpEnablements';
+export { useCuratedIntegrationsAvailability } from './useCuratedIntegrationsAvailability';
 export { useUserMcpConnections } from './useUserMcpConnections';
 export { useMcpConnectionTools } from './useMcpConnectionTools';
 export { useMcpOauthReadiness } from './useMcpOauthReadiness';
