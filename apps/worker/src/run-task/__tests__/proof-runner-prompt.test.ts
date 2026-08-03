@@ -1,6 +1,30 @@
 import { createProofRunnerAgentPrompt } from '../proof-runner-prompt';
 
 describe('createProofRunnerAgentPrompt', () => {
+  it('requires a full-frame visual quality check before upload', () => {
+    const prompt = createProofRunnerAgentPrompt('http://127.0.0.1:3000');
+
+    expect(prompt).toContain(
+      'Verify both the specific proof sentence and the full captured frame for obvious visual regressions',
+    );
+    expect(prompt).toContain(
+      'inconsistent light/dark theme treatment, unreadable contrast, clipping or overflow, broken layout, unintended loading or error states',
+    );
+    expect(prompt).toContain('styling that conflicts with the surrounding UI');
+    expect(prompt).toContain(
+      'Do not approve or upload an artifact just because its focal element satisfies the proof sentence.',
+    );
+    expect(prompt).toContain(
+      'If the failed self-review is caused by the capture itself, retry the artifact once.',
+    );
+    expect(prompt).toContain(
+      'If the UI is plainly wrong because of the implementation, report that as blocked instead of uploading it as successful proof.',
+    );
+    expect(prompt).toContain(
+      'self-review outcome covering both claim accuracy and full-frame visual quality',
+    );
+  });
+
   it('returns artifact IDs and explicit parent sharing guidance', () => {
     const prompt = createProofRunnerAgentPrompt('http://127.0.0.1:3000');
 
