@@ -49,8 +49,12 @@ function applyHarnessModelOverrides<T extends TaskSpec>(
     task.payload.harnessModelOverrides,
     'opencode-server',
   );
+  const sourceOverride = getHarnessModelOverride(
+    harnessModelOverrides,
+    'opencode-server',
+  );
 
-  if (!harnessModelOverrides || currentOverride) {
+  if (!sourceOverride || currentOverride) {
     return task;
   }
 
@@ -60,7 +64,7 @@ function applyHarnessModelOverrides<T extends TaskSpec>(
       ...task.payload,
       harnessModelOverrides: {
         ...(task.payload.harnessModelOverrides ?? {}),
-        ...harnessModelOverrides,
+        'opencode-server': sourceOverride,
       },
     },
   };

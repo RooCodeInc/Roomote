@@ -54,6 +54,26 @@ describe('normalizeDeploymentModelConfig', () => {
     });
   });
 
+  it('migrates persisted OpenCode DeepSeek Flash role models', () => {
+    expect(
+      normalizeDeploymentModelConfig({
+        roomoteModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteSmallModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteVisionModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteCodeReviewModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteExploreModel: 'opencode/deepseek-v4-flash-0731',
+        roomotePlanningModel: 'opencode/deepseek-v4-flash-0731',
+      }),
+    ).toMatchObject({
+      roomoteModel: 'opencode/deepseek-v4-flash',
+      roomoteSmallModel: 'opencode/deepseek-v4-flash',
+      roomoteVisionModel: 'opencode/deepseek-v4-flash',
+      roomoteCodeReviewModel: 'opencode/deepseek-v4-flash',
+      roomoteExploreModel: 'opencode/deepseek-v4-flash',
+      roomotePlanningModel: 'opencode/deepseek-v4-flash',
+    });
+  });
+
   it('coerces missing fields to null without dropping model keys', () => {
     expect(
       normalizeDeploymentModelConfig({ roomoteModel: 'openai/gpt-5.4' }),
@@ -416,6 +436,37 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       { providerId: 'vercel', modelId: 'vercel/google/gemini-3.6-flash' },
       { providerId: 'opencode', modelId: 'opencode/gemini-3.6-flash' },
       { providerId: 'google', modelId: 'google/gemini-3.6-flash' },
+    ]);
+  });
+
+  it("uses each provider's DeepSeek V4 Flash 0731 model slug", () => {
+    const deepSeekFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'DeepSeek V4 Flash 0731',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(deepSeekFlashByProvider).toEqual([
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/deepseek/deepseek-v4-flash-0731',
+      },
+      {
+        providerId: 'vercel',
+        modelId: 'vercel/deepseek/deepseek-v4-flash-0731',
+      },
+      {
+        providerId: 'baseten',
+        modelId: 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
+      },
+      {
+        providerId: 'opencode',
+        modelId: 'opencode/deepseek-v4-flash',
+      },
     ]);
   });
 

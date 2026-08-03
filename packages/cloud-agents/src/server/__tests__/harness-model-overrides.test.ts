@@ -197,4 +197,20 @@ describe('resolveEffectiveHarnessModelState', () => {
 
     expect(task.payload.reasoningEffort).toBe('xhigh');
   });
+
+  it('migrates a legacy OpenCode model override during snapshot resume', () => {
+    const { model, task } = resolveEffectiveHarnessModelState({
+      task: makeTask(),
+      targetHarness: 'opencode-server',
+      isSnapshotResume: true,
+      sourceRunHarnessModelOverrides: {
+        'opencode-server': 'opencode/deepseek-v4-flash-0731',
+      },
+    });
+
+    expect(model).toBe('opencode/deepseek-v4-flash');
+    expect(task.payload.harnessModelOverrides).toEqual({
+      'opencode-server': 'opencode/deepseek-v4-flash',
+    });
+  });
 });
