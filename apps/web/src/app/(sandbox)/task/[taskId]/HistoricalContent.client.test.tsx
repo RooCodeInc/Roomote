@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-const { isTaskRunAsleepMock, retryFailedStartMutate } = vi.hoisted(() => ({
-  isTaskRunAsleepMock: vi.fn(() => false),
-  retryFailedStartMutate: vi.fn(),
-}));
+const { isTaskRunAsleepMock, retryFailedStartMutate, sandboxMessagesMock } =
+  vi.hoisted(() => ({
+    isTaskRunAsleepMock: vi.fn(() => false),
+    retryFailedStartMutate: vi.fn(),
+    sandboxMessagesMock: vi.fn(() => ({ messages: [] as unknown[] })),
+  }));
 
 vi.mock('@/components/system', () => ({
   ArrowUpRightIcon: () => <svg aria-hidden="true" />,
@@ -63,6 +65,7 @@ vi.mock('./hooks', () => ({
     <>{children}</>
   ),
   useClosePreviewOnSleep: vi.fn(),
+  useSandboxMessages: sandboxMessagesMock,
 }));
 
 vi.mock('./sidebar-actions', () => ({
@@ -108,6 +111,7 @@ describe('HistoricalContent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     isTaskRunAsleepMock.mockReturnValue(false);
+    sandboxMessagesMock.mockReturnValue({ messages: [] });
   });
 
   it('shows an in-thread waking up message while the task is resuming', () => {
@@ -192,10 +196,7 @@ describe('HistoricalContent', () => {
     ).toBeInTheDocument();
   });
 
-  it('offers a retry on a failed start whose work landed after the abort', () => {
-    // The sandbox came up after the provisioning deadline, so the run is
-    // failed but the thread has output — this view, not the startup
-    // sequence, is what the user is looking at.
+  it('offers a retry on a failed start with nothing in the transcript', () => {
     render(
       <HistoricalContent
         session={
@@ -225,6 +226,46 @@ describe('HistoricalContent', () => {
       taskId: 'task-123',
       runId: 3734,
     });
+  });
+
+  it('offers no retry once the late transcript has landed', () => {
+    // The sandbox came up after the provisioning deadline: the run is
+    // failed but the agent's work is in the thread. `enqueueTaskRelaunch`
+    // rejects this run, and relaunching would redo work that already
+    // happened, so the button must not appear.
+    sandboxMessagesMock.mockReturnValue({
+      messages: [{ id: 'msg-1', role: 'assistant' }],
+    });
+
+    render(
+      <HistoricalContent
+        session={
+          {
+            sessionState: 'historical',
+            draftPrompt: null,
+            taskRun: {
+              id: 3734,
+              status: 'failed',
+              payloadKind: 'standard',
+              error: 'The operation was aborted due to timeout',
+              result: null,
+              snapshotId: null,
+              createdAt: new Date('2026-08-03T13:14:56.000Z'),
+              startedAt: null,
+            },
+            taskId: 'task-123',
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(
+      screen.getByText('Task ended because of an error:'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
   });
 
   it('offers no retry for a payload kind that cannot be relaunched', () => {

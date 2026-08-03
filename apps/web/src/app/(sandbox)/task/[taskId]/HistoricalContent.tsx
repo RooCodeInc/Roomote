@@ -13,6 +13,7 @@ import {
   PreviewPaneProvider,
   TaskSidePanelProvider,
   useClosePreviewOnSleep,
+  useSandboxMessages,
 } from './hooks';
 import { getTaskRunDisplayError } from '@/lib/task-run-errors';
 import { canRelaunchFailedStart } from '@/lib/task-run-retry';
@@ -43,6 +44,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
   const [messagesInitialScrollBehavior, setMessagesInitialScrollBehavior] =
     useState<'smooth' | 'instant'>('smooth');
   const retryFailedStart = useRetryFailedTaskStart();
+  const { messages } = useSandboxMessages();
   const taskFailureFooter = useMemo(() => {
     const displayError = getTaskRunDisplayError(taskRun);
 
@@ -55,11 +57,17 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
       return null;
     }
 
-    // A start that failed before producing output shows the startup
-    // sequence's own retry, but a run whose sandbox came up late lands here
-    // instead — with work in the thread and no way to continue. Offer the
-    // same retry so a slow start is recoverable from either view.
-    const canRetry = canRelaunchFailedStart(taskRun);
+    // `enqueueTaskRelaunch` refuses a run that already has non-kickoff
+    // messages, because relaunching would redo work the run already did —
+    // a review it posted would post twice. So the retry is only offered
+    // for a start that failed with an empty transcript; a run whose
+    // sandbox came up late keeps its output and is not retryable here (the
+    // provisioning deadline is what keeps it from failing in the first
+    // place). Gating on an empty transcript rather than on message source
+    // is deliberately stricter than the server: it can hide the button for
+    // a kickoff-only run, which the startup view still offers, and it can
+    // never show a button that would only raise an error.
+    const canRetry = canRelaunchFailedStart(taskRun) && messages.length === 0;
 
     return (
       <TaskFailureMessage
@@ -76,7 +84,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
         retryPending={retryFailedStart.isPending}
       />
     );
-  }, [retryFailedStart, session.taskId, taskRun]);
+  }, [messages.length, retryFailedStart, session.taskId, taskRun]);
   const messagesFooter = useMemo(() => {
     const onboardingCompletionFooter = onboardingEnvironment ? (
       <OnboardingCompletionMessage environment={onboardingEnvironment} />
