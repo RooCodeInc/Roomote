@@ -1,5 +1,6 @@
 import { Env } from '@roomote/env';
 import {
+  and,
   db,
   deploymentSettings,
   eq,
@@ -153,17 +154,29 @@ export async function syncLicenseWithCloud(input: {
       return { status: 'rejected' };
     }
 
-    await db
-      .update(deploymentSettings)
-      .set({
-        licenseCloudState: {
-          ...payload,
-          deploymentId,
-          lastSyncedAt: new Date().toISOString(),
-        },
-        updatedAt: new Date(),
-      })
-      .where(eq(deploymentSettings.id, 'default'));
+    const update = db.update(deploymentSettings).set({
+      // An interactive activation must persist its key and lease together.
+      // This prevents an older scheduled sync from replacing the lease after
+      // the key has changed.
+      ...(input.licenseKey != null && { licenseKey }),
+      licenseCloudState: {
+        ...payload,
+        deploymentId,
+        lastSyncedAt: new Date().toISOString(),
+      },
+      updatedAt: new Date(),
+    });
+
+    await (input.licenseKey == null &&
+    settings?.licenseKey != null &&
+    licenseKey === settings.licenseKey.trim()
+      ? update.where(
+          and(
+            eq(deploymentSettings.id, 'default'),
+            eq(deploymentSettings.licenseKey, settings.licenseKey),
+          ),
+        )
+      : update.where(eq(deploymentSettings.id, 'default')));
 
     return { status: 'synced' };
   } catch (error) {

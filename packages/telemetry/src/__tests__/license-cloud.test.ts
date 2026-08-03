@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   resolveConfiguredLicenseKey: vi.fn(),
   resolveLicenseState: vi.fn(),
   findSettings: vi.fn(),
+  and: vi.fn(),
   updateSet: vi.fn(),
   updateWhere: vi.fn(),
 }));
@@ -22,7 +23,8 @@ vi.mock('@roomote/db/server', () => ({
       set: mocks.updateSet.mockReturnValue({ where: mocks.updateWhere }),
     })),
   },
-  deploymentSettings: { id: 'id' },
+  deploymentSettings: { id: 'id', licenseKey: 'licenseKey' },
+  and: mocks.and,
   eq: vi.fn(),
   getDeploymentLicenseState: mocks.getDeploymentLicenseState,
   getInstanceAnalyticsId: mocks.getInstanceAnalyticsId,
@@ -96,6 +98,7 @@ describe('syncLicenseWithCloud', () => {
         }),
       }),
     );
+    expect(mocks.and).toHaveBeenCalledOnce();
   });
 
   it('does not issue a lease when Cloud reports another installation', async () => {
@@ -112,6 +115,27 @@ describe('syncLicenseWithCloud', () => {
       }),
     ).resolves.toEqual({ status: 'license_in_use' });
     expect(mocks.updateSet).not.toHaveBeenCalled();
+  });
+
+  it('persists an interactive activation key with its lease', async () => {
+    mocks.resolveLicenseState.mockReturnValue({
+      status: 'valid',
+      seatLimit: 25,
+      licenseId: 'lic_123',
+    });
+
+    await expect(
+      syncLicenseWithCloud({
+        eventId: 'event-123',
+        observedAt: new Date(),
+        activeUsers: 17,
+        licenseKey: 'RMLK1.new-payload.sig',
+      }),
+    ).resolves.toEqual({ status: 'synced' });
+
+    expect(mocks.updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ licenseKey: 'RMLK1.new-payload.sig' }),
+    );
   });
 
   it('rejects a successful response with non-scalar entitlements', async () => {

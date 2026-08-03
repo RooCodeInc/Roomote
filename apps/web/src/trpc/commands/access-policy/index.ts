@@ -233,13 +233,15 @@ export async function setLicenseKeyCommand(
     }
   }
 
+  if (licenseKey != null) {
+    // syncLicenseWithCloud persists the new key and its Cloud lease in one
+    // guarded update, so a stale scheduled sync cannot restore an old lease.
+    return { saved: true };
+  }
+
   await db
     .update(deploymentSettings)
-    .set({
-      licenseKey,
-      ...(licenseKey == null && { licenseCloudState: null }),
-      updatedAt: new Date(),
-    })
+    .set({ licenseKey: null, licenseCloudState: null, updatedAt: new Date() })
     .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
 
   return { saved: true };
