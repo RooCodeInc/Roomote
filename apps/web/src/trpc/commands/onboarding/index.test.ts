@@ -57,7 +57,6 @@ function buildAuth(overrides: Partial<UserAuthSuccess> = {}): UserAuthSuccess {
     name: 'User',
     primaryEmail: 'user@example.com',
     isAdmin: false,
-    featureFlags: {},
     anonymousAnalyticsEnabled: false,
     cloudEnabled: false,
     resource: {

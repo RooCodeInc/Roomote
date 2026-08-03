@@ -67,8 +67,6 @@ import {
   resolveWorkspaceSourceControlProvider,
   sql,
 } from '@roomote/db/server';
-import type { MetadataRecord } from '@roomote/feature-flags/server';
-
 import { type Redis, getRedis } from '@roomote/redis';
 import {
   captureActivationTaskCreated,
@@ -356,7 +354,6 @@ async function resolveMatchedHumanActor(
 
 type ResolvedHarnessSelection = {
   harness: CodingHarness;
-  deploymentMetadata?: MetadataRecord | null;
   deploymentTaskModelSettings?:
     | import('@roomote/types').TaskModelSettings
     | null;
@@ -435,7 +432,6 @@ async function resolveRequestedHarness(
   const deployment = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
     columns: {
-      metadata: true,
       taskModelSettings: true,
       runtimeModelConfig: true,
     },
@@ -446,8 +442,6 @@ async function resolveRequestedHarness(
 
   return {
     harness: task.harness ?? DEFAULT_LAUNCH_CODING_HARNESS,
-    deploymentMetadata:
-      (deployment?.metadata as MetadataRecord | null | undefined) ?? null,
     deploymentTaskModelSettings: deployment?.taskModelSettings ?? null,
     deploymentCodeReviewModelId: resolveCodeReviewModelId(
       deploymentModelConfig,
@@ -1396,7 +1390,6 @@ async function enqueueFreshLaunch(
       targetHarness,
       isSnapshotResume: false,
       sourceRunHarnessModelOverrides: undefined,
-      deploymentMetadata: resolvedHarness.deploymentMetadata,
       deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
       deploymentCodeReviewModelId:
         resolvedHarness.deploymentCodeReviewModelId ?? null,
@@ -1856,7 +1849,6 @@ export async function enqueueTaskRelaunch(
     targetHarness,
     isSnapshotResume: false,
     sourceRunHarnessModelOverrides: undefined,
-    deploymentMetadata: resolvedHarness.deploymentMetadata,
     deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
     deploymentCodeReviewModelId:
       resolvedHarness.deploymentCodeReviewModelId ?? null,
@@ -2125,7 +2117,6 @@ async function enqueueSnapshotResume(
     isSnapshotResume: true,
     sourceRunHarnessModelOverrides,
     sourceTaskType,
-    deploymentMetadata: resolvedHarness.deploymentMetadata,
     deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
     deploymentCodeReviewModelId:
       resolvedHarness.deploymentCodeReviewModelId ?? null,

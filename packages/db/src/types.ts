@@ -14,7 +14,6 @@ import type {
   SecurityAuditorFrequency,
   SentryTriageFrequency,
   SuggesterFrequency,
-  SuggesterRoutingMode,
 } from '@roomote/types';
 
 import type {
@@ -473,8 +472,6 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   /** Primary Teams conversation id when Suggest Ideas posts to Teams. */
   suggesterTeamsChannelId: string | null;
   suggesterInstructions: string | null;
-  suggesterRoutingMode: SuggesterRoutingMode;
-  suggesterRoutingInstructions: string | null;
   suggesterLastRunAt: Date | null;
   announcerFrequency: AnnouncerFrequency;
   announcerSlackChannelId: string | null;

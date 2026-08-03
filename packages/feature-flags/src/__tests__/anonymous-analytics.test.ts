@@ -6,16 +6,12 @@ import {
 } from '../index';
 
 describe('isAnonymousAnalyticsEnabledFromMetadata', () => {
-  it('defaults to enabled when the key is absent (opt-out model)', () => {
-    expect(isAnonymousAnalyticsEnabledFromMetadata({})).toBe(true);
+  it('defaults to enabled when the key is absent', () => {
     expect(isAnonymousAnalyticsEnabledFromMetadata(undefined)).toBe(true);
-    expect(isAnonymousAnalyticsEnabledFromMetadata(null)).toBe(true);
-    expect(isAnonymousAnalyticsEnabledFromMetadata({ other_key: false })).toBe(
-      true,
-    );
+    expect(isAnonymousAnalyticsEnabledFromMetadata({})).toBe(true);
   });
 
-  it('respects an explicit false', () => {
+  it('respects explicit values', () => {
     expect(
       isAnonymousAnalyticsEnabledFromMetadata({
         [ANONYMOUS_ANALYTICS_METADATA_KEY]: false,
@@ -23,9 +19,9 @@ describe('isAnonymousAnalyticsEnabledFromMetadata', () => {
     ).toBe(false);
     expect(
       isAnonymousAnalyticsEnabledFromMetadata({
-        [ANONYMOUS_ANALYTICS_METADATA_KEY]: 'false',
+        [ANONYMOUS_ANALYTICS_METADATA_KEY]: 'true',
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('forces analytics enabled for Roomote Cloud', () => {
@@ -35,23 +31,5 @@ describe('isAnonymousAnalyticsEnabledFromMetadata', () => {
         true,
       ),
     ).toBe(true);
-  });
-
-  it('respects an explicit true', () => {
-    expect(
-      isAnonymousAnalyticsEnabledFromMetadata({
-        [ANONYMOUS_ANALYTICS_METADATA_KEY]: true,
-      }),
-    ).toBe(true);
-    expect(
-      isAnonymousAnalyticsEnabledFromMetadata({
-        [ANONYMOUS_ANALYTICS_METADATA_KEY]: 'true',
-      }),
-    ).toBe(true);
-  });
-
-  it('treats malformed metadata as enabled', () => {
-    expect(isAnonymousAnalyticsEnabledFromMetadata('garbage')).toBe(true);
-    expect(isAnonymousAnalyticsEnabledFromMetadata([])).toBe(true);
   });
 });

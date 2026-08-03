@@ -399,10 +399,6 @@ export function ArtifactViewerContent({
                   />
                 </div>
               )}
-
-              <span className="hidden whitespace-nowrap text-xs text-muted-foreground debug:inline-flex">
-                Type: {artifact.artifactType}
-              </span>
             </div>
           </div>
         )}

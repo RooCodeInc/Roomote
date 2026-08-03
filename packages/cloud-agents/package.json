@@ -61,7 +61,6 @@
     "@roomote/auth": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:^",
-    "@roomote/feature-flags": "workspace:^",
     "@roomote/github": "workspace:^",
     "@roomote/redis": "workspace:^",
     "@roomote/telemetry": "workspace:^",

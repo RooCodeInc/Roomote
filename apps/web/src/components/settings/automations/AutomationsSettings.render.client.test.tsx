@@ -1,28 +1,12 @@
 import type { ReactNode } from 'react';
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from '@testing-library/react';
-import { FeatureFlag } from '@roomote/feature-flags';
-
-const groupedRoutingPlaceholder =
-  /Ideas about incidents, reliability, alerts, and monitoring/;
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
-  featureFlags: {} as Partial<Record<FeatureFlag, boolean>>,
   nextUpdateSettingsResult: null as {
     success: true;
     settings: Record<string, unknown>;
-    suggesterRoutingPreview: Array<{
-      groupLabel: string;
-      slackChannelName: string;
-      guidance: string;
-    }> | null;
     reviewer: Record<string, unknown>;
     slackChannelAccessWarnings: Record<string, unknown>;
     slackChannelDisplayNames: Record<string, unknown>;
@@ -97,8 +81,6 @@ const state = vi.hoisted(() => ({
         suggesterTelegramChatId: null,
         suggesterTeamsChannelId: null,
         suggesterInstructions: null,
-        suggesterRoutingMode: 'manager_channel' as const,
-        suggesterRoutingInstructions: null,
         announcerFrequency: 'off' as const,
         announcerSlackChannelId: null,
         announcerDiscordChannelId: null,
@@ -354,16 +336,6 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => queryClient,
 }));
 
-vi.mock('@/hooks/useUser', () => ({
-  useAuthorizedUser: () => ({
-    featureFlags: state.featureFlags,
-  }),
-}));
-
-vi.mock('@/hooks/useShowDebugUI', () => ({
-  useShowDebugUI: () => ({ isDebugUIVisible: false }),
-}));
-
 vi.mock('@/hooks/slack', () => ({
   useConnectSlack: () => ({
     isPending: false,
@@ -477,7 +449,6 @@ async function openReviewerCard() {
 describe('AutomationsSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    state.featureFlags = {};
     state.nextUpdateSettingsResult = null;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
@@ -495,9 +466,6 @@ describe('AutomationsSettings', () => {
       'off' as never;
     state.settingsQuery.data.settings.suggesterFrequency = 'off';
     state.settingsQuery.data.settings.suggesterInstructions = null;
-    state.settingsQuery.data.settings.suggesterRoutingMode =
-      'manager_channel' as const;
-    state.settingsQuery.data.settings.suggesterRoutingInstructions = null;
     state.settingsQuery.data.reviewer.enabled = false;
     state.settingsQuery.data.reviewer.reviewAllPullRequestAuthors = false;
     state.settingsQuery.data.settings.reviewer.reviewAllPullRequestAuthors = false;
@@ -546,7 +514,6 @@ describe('AutomationsSettings', () => {
   });
 
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {
-    state.featureFlags = {};
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
     state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
     state.settingsQuery.data.settings.sentryTriageFrequency = 'daily' as never;
@@ -803,122 +770,5 @@ describe('AutomationsSettings', () => {
         name: 'Group suggestions and post them in different channels',
       }),
     ).not.toBeInTheDocument();
-  });
-
-  it('shows grouped suggester routing controls when the feature flag is enabled', async () => {
-    state.featureFlags = {
-      [FeatureFlag.SuggestionRouting]: true,
-    };
-    state.settingsQuery.data.settings.suggesterFrequency = 'daily' as never;
-
-    render(<AutomationsSettings />);
-    await openSuggesterCard();
-
-    expect(
-      screen.getByRole('radio', {
-        name: 'Post all suggestions to the manager channel',
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('radio', {
-        name: 'Group suggestions and post them in different channels',
-      }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('radio', {
-        name: 'Group suggestions and post them in different channels',
-      }),
-    );
-
-    expect(
-      screen.getByText(
-        'Describe how to group ideas (eg by type, repo, module) and in what Slack channel to post them',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText(groupedRoutingPlaceholder),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByPlaceholderText(managerInstructionsPlaceholder),
-    ).not.toBeInTheDocument();
-  });
-
-  it('shows the grouped routing preview after save and restores editing on demand', async () => {
-    state.featureFlags = {
-      [FeatureFlag.SuggestionRouting]: true,
-    };
-    state.settingsQuery.data.settings.suggesterFrequency = 'daily' as never;
-    state.settingsQuery.data.settings.suggesterRoutingMode =
-      'group_by_instructions' as never;
-    state.settingsQuery.data.settings.suggesterRoutingInstructions =
-      'Incidents -> #eng-infra' as never;
-    state.nextUpdateSettingsResult = {
-      success: true,
-      settings: {
-        ...state.settingsQuery.data.settings,
-        suggesterFrequency: 'daily',
-        suggesterRoutingMode: 'group_by_instructions' as const,
-        suggesterRoutingInstructions:
-          'Incidents, alerts, and reliability ideas -> #eng-infra',
-      },
-      suggesterRoutingPreview: [
-        {
-          groupLabel: 'Incidents',
-          slackChannelName: '#eng-infra',
-          guidance: 'Alerts, outages, and reliability follow-up work.',
-        },
-      ],
-      reviewer: state.settingsQuery.data.reviewer,
-      slackChannelAccessWarnings:
-        state.settingsQuery.data.slackChannelAccessWarnings,
-      slackChannelDisplayNames:
-        state.settingsQuery.data.slackChannelDisplayNames,
-    };
-
-    render(<AutomationsSettings />);
-    await openSuggesterCard();
-
-    const textarea = screen.getByPlaceholderText(groupedRoutingPlaceholder);
-    fireEvent.change(textarea, {
-      target: {
-        value: 'Incidents, alerts, and reliability ideas -> #eng-infra',
-      },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /save/i }));
-    await waitFor(() => {
-      expect(mutations.updateSettings).toHaveBeenCalled();
-      expect(mutations.latestSettingsOptions?.onSuccess).toBeDefined();
-    });
-    await act(async () => {
-      mutations.latestSettingsOptions?.onSuccess?.(
-        state.nextUpdateSettingsResult!,
-      );
-    });
-
-    await waitFor(() => {
-      expect(screen.getByText('Group')).toBeInTheDocument();
-    });
-    expect(screen.getByText('Description')).toBeInTheDocument();
-    expect(screen.getByText('Channel')).toBeInTheDocument();
-    expect(screen.getByText('Incidents')).toBeInTheDocument();
-    expect(screen.getByText('#eng-infra')).toBeInTheDocument();
-    expect(
-      screen.getByText('Alerts, outages, and reliability follow-up work.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByPlaceholderText(groupedRoutingPlaceholder),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-
-    await waitFor(() => {
-      expect(screen.queryByText('Group')).not.toBeInTheDocument();
-    });
-    expect(
-      screen.getByPlaceholderText(groupedRoutingPlaceholder),
-    ).toBeInTheDocument();
   });
 });

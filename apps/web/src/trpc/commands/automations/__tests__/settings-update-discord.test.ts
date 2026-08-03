@@ -9,7 +9,6 @@ import {
   upsertAutomation,
   users,
 } from '@roomote/db/server';
-import type { FeatureFlag } from '@roomote/feature-flags';
 import type { BackgroundAutomationKey } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -52,7 +51,7 @@ const adminAuth: UserAuthSuccess = {
   name: 'Admin',
   primaryEmail: 'admin@example.com',
   isAdmin: true,
-  featureFlags: {} as Record<FeatureFlag, boolean>,
+  featureFlags: {},
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
   cookieConsentedAt: null,
@@ -119,8 +118,6 @@ function buildInput(
     suggesterSlackChannel: null,
     suggesterDiscordChannel: null,
     suggesterInstructions: null,
-    suggesterRoutingMode: 'manager_channel',
-    suggesterRoutingInstructions: null,
     announcerFrequency: 'off',
     announcerSlackChannel: null,
     announcerDiscordChannel: null,

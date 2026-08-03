@@ -25,7 +25,6 @@ import { cn } from '@/lib/utils';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 
 import { useEnvironments } from '@/hooks/environments';
-import { useShowDebugUI } from '@/hooks/useShowDebugUI';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import {
@@ -113,8 +112,7 @@ export function Home({
     managedAccess = DEFAULT_MANAGED_DEPLOYMENT_ACCESS,
   } = useAuthorizedUser();
 
-  const { isDebugUIVisible } = useShowDebugUI();
-  const canSelectBranch = isDebugUIVisible;
+  const canSelectBranch = false;
 
   // Keep option order identical to the setup catalog so the first fallback
   // matches the first visible Sandbox provider row.

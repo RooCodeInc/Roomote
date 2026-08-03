@@ -2,11 +2,9 @@ import {
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_PR_REVIEW_SETTINGS,
-  DEFAULT_SUGGESTER_ROUTING_MODE,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isConflictResolverMaxPrAgeDays,
   type AutomationTarget,
-  type SuggesterRoutingMode,
   type PrReviewSettings,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
@@ -25,8 +23,6 @@ import {
   findTelegramPrimaryChatId,
   resolveAutomationRuntimeDestination,
 } from '@roomote/sdk/server';
-import { validateSuggestionRoutingInstructions } from '@roomote/cloud-agents/server';
-import { FeatureFlag } from '@roomote/feature-flags';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { SlackNotifier } from '@roomote/slack';
 
@@ -81,10 +77,6 @@ import type {
   UpdateBackgroundAgentSettingsInput,
 } from './types';
 
-type SuggestionRoutingPreviewRoute = Awaited<
-  ReturnType<typeof validateSuggestionRoutingInstructions>
->['routes'][number];
-
 function parseSentryProjectSlugs(value: string | null | undefined): string[] {
   return [
     ...new Set(
@@ -111,20 +103,6 @@ function keepPersistedSlackChannel(
     channelName: null,
     error: undefined,
   });
-}
-
-function buildSuggesterAutomationSettings(params: {
-  routingInstructions: string | null;
-  routingMode: SuggesterRoutingMode;
-}): Record<string, string> {
-  return {
-    ...(params.routingInstructions
-      ? { routingInstructions: params.routingInstructions }
-      : {}),
-    ...(params.routingMode !== DEFAULT_SUGGESTER_ROUTING_MODE
-      ? { routingMode: params.routingMode }
-      : {}),
-  };
 }
 
 /**
@@ -221,7 +199,6 @@ export async function updateBackgroundAgentSettingsCommand(
       settings: Awaited<
         ReturnType<typeof getBackgroundAgentSettingsForDeployment>
       >;
-      suggesterRoutingPreview: SuggestionRoutingPreviewRoute[] | null;
       reviewer: {
         id: string;
         enabled: boolean;
@@ -349,32 +326,6 @@ export async function updateBackgroundAgentSettingsCommand(
     fieldErrors.suggesterInstructions = 'Suggestion preferences are too long.';
   }
 
-  if ((input.suggesterRoutingInstructions?.length ?? 0) > 10_000) {
-    fieldErrors.suggesterRoutingInstructions =
-      'Grouping and routing instructions are too long.';
-  }
-
-  const suggestionRoutingEnabled =
-    auth.featureFlags[FeatureFlag.SuggestionRouting] === true;
-  const effectiveSuggesterRoutingMode = suggestionRoutingEnabled
-    ? (input.suggesterRoutingMode ?? DEFAULT_SUGGESTER_ROUTING_MODE)
-    : existingSettings.suggesterRoutingMode;
-  const effectiveSuggesterRoutingInstructions = suggestionRoutingEnabled
-    ? normalizeOptionalText(input.suggesterRoutingInstructions)
-    : existingSettings.suggesterRoutingInstructions;
-  const shouldValidateSuggesterRoutingPreview =
-    suggestionRoutingEnabled &&
-    input.savingAutomation === 'suggester' &&
-    effectiveSuggesterRoutingMode === 'group_by_instructions';
-  let suggesterRoutingPreview: SuggestionRoutingPreviewRoute[] | null = null;
-
-  if (shouldValidateSuggesterRoutingPreview) {
-    if (!effectiveSuggesterRoutingInstructions) {
-      fieldErrors.suggesterRoutingInstructions =
-        'Grouping and routing instructions are required.';
-    }
-  }
-
   const sentryTriageProjectSlugs = input.sentryTriageProjectSlugs ?? null;
 
   if ((sentryTriageProjectSlugs?.length ?? 0) > 4_000) {
@@ -404,9 +355,6 @@ export async function updateBackgroundAgentSettingsCommand(
     ? submittedManagerDiscordChannel
     : null;
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
-  const suggesterRoutingRequiresSlackInstallation =
-    shouldValidateSuggesterRoutingPreview &&
-    Boolean(effectiveSuggesterRoutingInstructions);
   const channelAutoStartRequiresSlackInstallation =
     shouldUpdateChannelAutoStart &&
     channelAutoStartRows.some((row) => Boolean(row.slackChannel));
@@ -416,8 +364,7 @@ export async function updateBackgroundAgentSettingsCommand(
     Boolean(managerSlackChannel) ||
     destinationDescriptors.some((descriptor) =>
       Boolean(submittedDestinations[descriptor.automationId].slackChannel),
-    ) ||
-    suggesterRoutingRequiresSlackInstallation;
+    );
 
   const slackInstallation = requiresSlackInstallation
     ? await findActiveSlackInstallationForOrg()
@@ -703,32 +650,6 @@ export async function updateBackgroundAgentSettingsCommand(
     }
   }
 
-  if (
-    shouldValidateSuggesterRoutingPreview &&
-    effectiveSuggesterRoutingInstructions &&
-    notifier &&
-    !fieldErrors.suggesterRoutingInstructions
-  ) {
-    try {
-      const validation = await validateSuggestionRoutingInstructions({
-        routingInstructions: effectiveSuggesterRoutingInstructions,
-        availableChannels: await notifier.listAccessibleChannels(),
-        userId: auth.userId,
-      });
-
-      if (!validation.isValid) {
-        fieldErrors.suggesterRoutingInstructions =
-          validation.issues[0] ??
-          'Roomote could not confidently map those groups to Slack channels.';
-      } else {
-        suggesterRoutingPreview = validation.routes;
-      }
-    } catch {
-      fieldErrors.suggesterRoutingInstructions =
-        'Roomote could not validate those routing instructions right now.';
-    }
-  }
-
   const resolvedChannelAutoStartRows: ResolvedChannelAutoStartRow[] =
     channelAutoStartRows.flatMap((row, index) => {
       const resolution = channelAutoStartChannelResults[index];
@@ -845,14 +766,8 @@ export async function updateBackgroundAgentSettingsCommand(
   const normalizedSuggesterInstructions = normalizeOptionalText(
     input.suggesterInstructions,
   );
-  const effectiveSuggesterInstructions =
-    effectiveSuggesterRoutingMode === 'group_by_instructions'
-      ? existingSettings.suggesterInstructions
-      : normalizedSuggesterInstructions;
-  const suggesterAutomationSettings = buildSuggesterAutomationSettings({
-    routingMode: effectiveSuggesterRoutingMode,
-    routingInstructions: effectiveSuggesterRoutingInstructions,
-  });
+  const effectiveSuggesterInstructions = normalizedSuggesterInstructions;
+  const suggesterAutomationSettings: Record<string, string> = {};
   const sentryTriageFrequency = input.sentryTriageFrequency ?? 'off';
   const dependabotTriageFrequency = input.dependabotTriageFrequency ?? 'off';
   const codeqlTriageFrequency = input.codeqlTriageFrequency ?? 'off';
@@ -1433,7 +1348,6 @@ export async function updateBackgroundAgentSettingsCommand(
   return {
     success: true,
     settings: maskSlackChannelAutoStartSettings(auth, updatedSettings),
-    suggesterRoutingPreview,
     reviewer: updatedSettings.reviewCodeSettings
       ? mapReviewerSettingsToBackgroundSettings(
           updatedSettings.reviewCodeSettings,

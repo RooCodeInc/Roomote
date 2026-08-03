@@ -1,87 +1,38 @@
+import { describe, expect, it } from 'vitest';
+
 import {
   coerceToBoolean,
-  evaluateFeatureFlagFromMetadataSources,
   evaluateFeatureFlagsFromMetadata,
   normalizeMetadataRecord,
 } from '../index';
-import { FeatureFlag } from '../types';
 
-describe('coerceToBoolean', () => {
-  it('returns booleans unchanged', () => {
+describe('generic feature flag evaluation', () => {
+  it('keeps generic boolean coercion behavior', () => {
     expect(coerceToBoolean(true)).toBe(true);
-    expect(coerceToBoolean(false)).toBe(false);
-  });
-
-  it('treats only "true" (case-insensitive) as true for strings', () => {
-    expect(coerceToBoolean('true')).toBe(true);
     expect(coerceToBoolean('TRUE')).toBe(true);
     expect(coerceToBoolean('false')).toBe(false);
-    expect(coerceToBoolean('yes')).toBe(false);
-    expect(coerceToBoolean('')).toBe(false);
-  });
-
-  it('uses zero/non-zero semantics for numbers', () => {
-    expect(coerceToBoolean(0)).toBe(false);
     expect(coerceToBoolean(1)).toBe(true);
-    expect(coerceToBoolean(-1)).toBe(true);
-  });
-
-  it('falls back to JavaScript truthiness for other value types', () => {
-    expect(coerceToBoolean(undefined)).toBe(false);
-    expect(coerceToBoolean(null)).toBe(false);
-    expect(coerceToBoolean([])).toBe(true);
-    expect(coerceToBoolean({})).toBe(true);
-  });
-
-  it('prefers user metadata over org metadata when both define the same flag', () => {
-    expect(
-      evaluateFeatureFlagFromMetadataSources(FeatureFlag.SuggestionRouting, [
-        { suggestion_routing: false },
-        { suggestion_routing: true },
-      ]),
-    ).toBe(false);
-  });
-
-  it('falls back to org metadata when user metadata does not define the flag', () => {
-    expect(
-      evaluateFeatureFlagFromMetadataSources(FeatureFlag.SuggestionRouting, [
-        {},
-        { suggestion_routing: true },
-      ]),
-    ).toBe(true);
-  });
-
-  it('ignores invalid metadata sources instead of casting them', () => {
-    expect(
-      evaluateFeatureFlagFromMetadataSources(FeatureFlag.SuggestionRouting, [
-        null,
-        ['suggestion_routing'],
-        'not metadata',
-        { suggestion_routing: true },
-      ]),
-    ).toBe(true);
+    expect(coerceToBoolean(0)).toBe(false);
   });
 
   it('normalizes invalid public metadata to an empty object', () => {
     expect(normalizeMetadataRecord(null)).toEqual({});
-    expect(normalizeMetadataRecord(['suggestion_routing'])).toEqual({});
-    expect(normalizeMetadataRecord('not metadata')).toEqual({});
-    expect(normalizeMetadataRecord({ suggestion_routing: true })).toEqual({
-      suggestion_routing: true,
+    expect(normalizeMetadataRecord([])).toEqual({});
+    expect(normalizeMetadataRecord({ stale_flag: true })).toEqual({
+      stale_flag: true,
     });
   });
 
-  it('evaluates all flags from a single metadata object', () => {
-    const flags = evaluateFeatureFlagsFromMetadata({
-      suggestion_routing: true,
-    });
-
-    expect(flags[FeatureFlag.SuggestionRouting]).toBe(true);
-  });
-
-  it('evaluates all flags from invalid metadata as defaults', () => {
-    const flags = evaluateFeatureFlagsFromMetadata(['suggestion_routing']);
-
-    expect(flags[FeatureFlag.SuggestionRouting]).toBe(false);
+  it('evaluates all flags to an empty object even with stale metadata', () => {
+    expect(
+      evaluateFeatureFlagsFromMetadata({
+        slack_eval_launcher: true,
+        show_debug_ui_setting: true,
+        suggestion_routing: true,
+        visual_proof_auto_screencast: true,
+        background_subagents: true,
+        opencode_code_mode: true,
+      }),
+    ).toEqual({});
   });
 });

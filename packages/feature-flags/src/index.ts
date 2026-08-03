@@ -1,10 +1,3 @@
-/**
- * Feature flags package - Client-side exports.
- *
- * This module exports types and configurations that can be used
- * on both client and server side.
- */
-
 import {
   DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
   FEATURE_FLAG_CONFIG,
@@ -12,14 +5,14 @@ import {
 import { normalizeMetadataRecord } from './deployment-previews';
 import {
   FeatureFlag,
-  type MetadataBooleanDescriptor,
-  type MetadataBooleanKind,
+  type FeatureFlagConfig,
   type FeatureFlagValue,
   type FeatureFlagValues,
+  type MetadataBooleanDescriptor,
+  type MetadataBooleanKind,
 } from './types';
 
 export { FeatureFlag } from './types';
-
 export type {
   FeatureFlagConfig,
   FeatureFlagConfigMap,
@@ -30,41 +23,42 @@ export type {
   MetadataBooleanKind,
   MetadataRecord,
 } from './types';
-
 export {
   DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
   FEATURE_FLAG_CONFIG,
 } from './config';
 export { normalizeMetadataRecord } from './deployment-previews';
 
-/**
- * Coerce a value to boolean for boolean flags.
- * This ensures consistent behavior between client and server.
- */
 export function coerceToBoolean(value: unknown): boolean {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-
-  if (typeof value === 'string') {
-    return value.toLowerCase() === 'true';
-  }
-
-  if (typeof value === 'number') {
-    return value !== 0;
-  }
-
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value.toLowerCase() === 'true';
+  if (typeof value === 'number') return value !== 0;
   return Boolean(value);
 }
 
+function getFeatureFlagConfig(flag: FeatureFlag): FeatureFlagConfig {
+  const config = (
+    FEATURE_FLAG_CONFIG as Partial<Record<string, FeatureFlagConfig>>
+  )[flag];
+
+  if (!config) {
+    throw new Error(`Unknown feature flag: ${String(flag)}`);
+  }
+
+  return config;
+}
+
 export function getFeatureFlagMetadataKey(flag: FeatureFlag): string {
-  const config = FEATURE_FLAG_CONFIG[flag];
-  return config.metadataKey || flag.charAt(0).toLowerCase() + flag.slice(1);
+  const config = getFeatureFlagConfig(flag);
+  const flagName = String(flag);
+  return (
+    config.metadataKey || flagName.charAt(0).toLowerCase() + flagName.slice(1)
+  );
 }
 
 export function getFeatureFlagMetadataKeys(flag: FeatureFlag): string[] {
   const primaryMetadataKey = getFeatureFlagMetadataKey(flag);
-  const config = FEATURE_FLAG_CONFIG[flag];
+  const config = getFeatureFlagConfig(flag);
 
   return [
     primaryMetadataKey,
@@ -77,12 +71,9 @@ export function getFeatureFlagMetadataKeys(flag: FeatureFlag): string[] {
 export function getBooleanMetadataDescriptorByKey(
   metadataKey: string,
 ): MetadataBooleanDescriptor {
-  for (const config of Object.values(FEATURE_FLAG_CONFIG) as Array<{
-    metadataKey?: string;
-    legacyMetadataKeys?: string[];
-    description?: string;
-    group?: string;
-  }>) {
+  for (const config of Object.values(
+    FEATURE_FLAG_CONFIG,
+  ) as FeatureFlagConfig[]) {
     if (
       config.metadataKey === metadataKey ||
       config.legacyMetadataKeys?.includes(metadataKey)
@@ -119,7 +110,7 @@ export function evaluateFeatureFlagFromMetadataSources(
   flag: FeatureFlag,
   metadataSources: unknown[],
 ): boolean {
-  const config = FEATURE_FLAG_CONFIG[flag];
+  const config = getFeatureFlagConfig(flag);
 
   if (config.override !== undefined) {
     const overrideValue =
@@ -131,10 +122,6 @@ export function evaluateFeatureFlagFromMetadataSources(
 
   for (const metadataSource of metadataSources) {
     const metadata = normalizeMetadataRecord(metadataSource);
-
-    if (Object.keys(metadata).length === 0) {
-      continue;
-    }
 
     for (const metadataKey of getFeatureFlagMetadataKeys(flag)) {
       if (metadataKey in metadata) {
@@ -153,47 +140,27 @@ export function evaluateFeatureFlagFromMetadataSources(
 export function evaluateFeatureFlagsFromMetadata(
   metadata: unknown,
 ): FeatureFlagValues {
-  const result = {} as FeatureFlagValues;
   const normalizedMetadata = normalizeMetadataRecord(metadata);
 
-  for (const flag of Object.values(FeatureFlag)) {
-    result[flag] = evaluateFeatureFlagFromMetadata(flag, normalizedMetadata);
-  }
-
-  return result;
-}
-
-export function isShowDebugUIEnabledFromMetadata(metadata: unknown): boolean {
-  const normalizedMetadata = normalizeMetadataRecord(metadata);
-
-  return (
-    evaluateFeatureFlagFromMetadata(
-      FeatureFlag.ShowDebugUISetting,
-      normalizedMetadata,
-    ) && coerceToBoolean(normalizedMetadata?.show_debug_ui)
-  );
+  return Object.fromEntries(
+    (Object.values(FeatureFlag) as FeatureFlag[]).map((flag) => [
+      flag,
+      evaluateFeatureFlagFromMetadata(flag, normalizedMetadata),
+    ]),
+  ) as FeatureFlagValues;
 }
 
 export const ANONYMOUS_ANALYTICS_METADATA_KEY =
   'anonymous_analytics_enabled' as const;
 
-/**
- * Anonymous analytics is opt-out: an absent metadata key means enabled.
- * Only an explicit false-y value stored by an admin disables it.
- */
 export function isAnonymousAnalyticsEnabledFromMetadata(
   metadata: unknown,
   cloudEnabled = false,
 ): boolean {
-  if (cloudEnabled) {
-    return true;
-  }
+  if (cloudEnabled) return true;
 
   const normalizedMetadata = normalizeMetadataRecord(metadata);
-
-  if (!(ANONYMOUS_ANALYTICS_METADATA_KEY in normalizedMetadata)) {
-    return true;
-  }
+  if (!(ANONYMOUS_ANALYTICS_METADATA_KEY in normalizedMetadata)) return true;
 
   return coerceToBoolean(normalizedMetadata[ANONYMOUS_ANALYTICS_METADATA_KEY]);
 }

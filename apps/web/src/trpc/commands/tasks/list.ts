@@ -1,18 +1,5 @@
-import { FeatureFlag } from '@roomote/feature-flags';
-
 import type { UserAuthSuccess } from '@/types';
 import { getTasks } from '@/lib/server';
-
-function isTaskTypeFilterEnabled(auth: UserAuthSuccess): boolean {
-  if (auth.featureFlags[FeatureFlag.ShowDebugUISetting] !== true) {
-    return false;
-  }
-
-  const metadata = (auth.resource as { metadata?: { show_debug_ui?: unknown } })
-    .metadata;
-
-  return metadata?.show_debug_ui === true;
-}
 
 export async function getTasksCommand(
   auth: UserAuthSuccess,
@@ -23,7 +10,7 @@ export async function getTasksCommand(
     timePeriod?: Parameters<typeof getTasks>[0]['timePeriod'];
   },
 ) {
-  const allowTaskTypeFilter = isTaskTypeFilterEnabled(auth);
+  const allowTaskTypeFilter = false;
 
   // Default to filtering by the current user when no userId filter is provided.
   // A userId filter with value 'all' explicitly opts out of user filtering.

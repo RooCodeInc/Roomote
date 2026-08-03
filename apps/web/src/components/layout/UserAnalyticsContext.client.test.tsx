@@ -27,7 +27,6 @@ describe('UserAnalyticsContext', () => {
         name: 'Test User',
         primaryEmail: 'test@example.com',
         isAdmin: true,
-        featureFlags: {},
         resource: {
           username: 'test-user',
           fullName: 'Test User',

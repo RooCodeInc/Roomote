@@ -18,19 +18,16 @@ import {
   type SecurityAuditorFrequency,
   type SentryTriageFrequency,
   type SuggesterFrequency,
-  type SuggesterRoutingMode,
   AUTOMATION_DESTINATION_DESCRIPTORS,
   AUTO_RESOLVE_CONFLICTS_LABEL,
   BACKGROUND_AUTOMATION_KEYS,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_PR_REVIEW_SETTINGS,
-  DEFAULT_SUGGESTER_ROUTING_MODE,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isChannelAutoStartLaunchMode,
   isConflictResolverMaxPrAgeDays,
   isInternalAutomationKey,
-  isSuggesterRoutingMode,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 
@@ -874,16 +871,6 @@ function buildAutomationMap(
   return new Map(rows.map((automation) => [automation.key, automation]));
 }
 
-function getSuggesterRoutingMode(
-  automation: Automation | undefined,
-): SuggesterRoutingMode {
-  const routingMode = getAutomationSettingText(automation, 'routingMode');
-
-  return routingMode && isSuggesterRoutingMode(routingMode)
-    ? routingMode
-    : DEFAULT_SUGGESTER_ROUTING_MODE;
-}
-
 function getConflictResolverMaxPrAgeDays(
   automation: Automation | undefined,
 ): ConflictResolverMaxPrAgeDays {
@@ -973,11 +960,6 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(SUGGESTER_FREQUENCIES),
     ),
     suggesterInstructions: suggester?.instructions ?? null,
-    suggesterRoutingMode: getSuggesterRoutingMode(suggester),
-    suggesterRoutingInstructions: getAutomationSettingText(
-      suggester,
-      'routingInstructions',
-    ),
     suggesterLastRunAt: suggester?.lastRunAt ?? null,
 
     announcerFrequency: getAutomationFrequency(

@@ -15,10 +15,6 @@ import {
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
-  FeatureFlag,
-  getFeatureFlagEvaluator,
-} from '@roomote/feature-flags/server';
-import {
   type TaskRun,
   db,
   eq,
@@ -34,7 +30,6 @@ import {
   resolveConfiguredGitHubAppSlug,
   resolveGitHubRoomoteMentionEnabled,
 } from '@roomote/github';
-import { getRedis } from '@roomote/redis';
 
 import { githubPrReview } from './workflows/githubPrReview';
 import { githubPrReviewSync } from './workflows/githubPrReviewSync';
@@ -161,20 +156,6 @@ export async function generatePrompt({
   }));
   const enabledConflictResolverLabel =
     conflictResolverFrequency === 'off' ? undefined : conflictResolverLabel;
-  const featureFlagEvaluator = getFeatureFlagEvaluator(getRedis());
-  const evaluateOrgFeatureFlag = async (flag: FeatureFlag) =>
-    await featureFlagEvaluator
-      .evaluate(flag, {
-        isDeploymentContext: false,
-        userId: taskRun.actingUserId ?? 'deployment',
-      })
-      .catch(() => false);
-  const visualProofAutoScreencastEnabled = await evaluateOrgFeatureFlag(
-    FeatureFlag.VisualProofAutoScreencast,
-  );
-  const backgroundProofCaptureEnabled = await evaluateOrgFeatureFlag(
-    FeatureFlag.BackgroundSubagents,
-  );
   const prAction = await getDeploymentPrAction().catch(() => undefined);
   const reviewCodeSettings = await getReviewCodeAutomationSettings().catch(
     () => null,
@@ -192,8 +173,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
     case TaskPayloadKind.GithubPrReviewSync:
       return githubPrReviewSync({
@@ -203,8 +182,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
 
     // <Workflow: PR review follow-up, Trigger: GitHub>
@@ -215,8 +192,6 @@ export async function generatePrompt({
         taskRunUrl,
         additionalInstructions: reviewCodeInstructions,
         attribution: commitAuthor,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
 
     // <Workflow: PR conflict resolution, Trigger: GitHub>
@@ -225,8 +200,6 @@ export async function generatePrompt({
         taskSpec,
         taskRunUrl,
         attribution: commitAuthor,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
       });
 
     // <Workflow: standard, Trigger: Slack>
@@ -237,8 +210,6 @@ export async function generatePrompt({
         conflictResolverLabel: enabledConflictResolverLabel,
         taskRunUrl,
         attribution: commitAuthor,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
         codeReviewsEnabled,
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
@@ -254,8 +225,6 @@ export async function generatePrompt({
         conflictResolverLabel: enabledConflictResolverLabel,
         taskRunUrl,
         attribution: commitAuthor,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
         codeReviewsEnabled,
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
@@ -399,8 +368,6 @@ export async function generatePrompt({
         interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,
         linkedWorkItems: taskSpec.payload.linkedWorkItems,
-        visualProofAutoScreencastEnabled,
-        backgroundProofCaptureEnabled,
         codeReviewsEnabled,
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,

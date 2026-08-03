@@ -47,13 +47,6 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
   getRedis: () => redisClientMock,
 }));
 
-vi.mock('@roomote/feature-flags/server', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@roomote/feature-flags/server')>()),
-  getFeatureFlagEvaluator: () => ({
-    evaluate: vi.fn().mockResolvedValue(false),
-  }),
-}));
-
 const backgroundAgentSettings = {
   channelAutoStartEnabled: true,
   channelAutoStartSlackChannels: [

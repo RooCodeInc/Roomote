@@ -19,7 +19,6 @@ import {
   SETUP_AUTH_PROVIDER_IDS,
   isSetupModelProviderId,
   isOpenAiCompatibleProviderId,
-  SUGGESTER_ROUTING_MODES,
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
@@ -90,6 +89,7 @@ import {
   getGitHubRoomoteMentionCommand,
   getRepositoriesCommand,
   getSourceControlConfigStatusCommand,
+  clearGitHubConfigCommand,
   saveSourceControlConfigCommand,
   setPrActionCommand,
   setGitHubRoomoteMentionCommand,
@@ -579,8 +579,6 @@ const automationsRouter = createRouter({
          */
         suggesterUseTeams: z.boolean().optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
-        suggesterRoutingMode: z.enum(SUGGESTER_ROUTING_MODES),
-        suggesterRoutingInstructions: z.string().max(10_000).nullable(),
         announcerFrequency: z.enum(['off', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         announcerDiscordChannel: z
@@ -1142,6 +1140,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         saveSourceControlConfigCommand(auth, input),
       ),
+
+    clearGitHubConfig: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      clearGitHubConfigCommand(auth),
+    ),
   }),
 
   slack: createRouter({
@@ -1317,13 +1319,11 @@ export const appRouter = createRouter({
           .object({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             narrationMode: z.boolean().optional(),
-            showDebugUI: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
-              input.narrationMode !== undefined ||
-              input.showDebugUI !== undefined,
+              input.narrationMode !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },

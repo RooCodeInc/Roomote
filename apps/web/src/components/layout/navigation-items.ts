@@ -1,6 +1,5 @@
 import { type LucideIcon } from '@/components/system';
 import { ChartColumnIncreasing, House, Zap } from '@/components/system';
-import { FeatureFlag } from '@roomote/feature-flags';
 import { Rows4 } from 'lucide-react';
 
 interface PrimaryNavItem {
@@ -11,7 +10,6 @@ interface PrimaryNavItem {
   description: string;
   matchExact: boolean;
   matchPaths: string[];
-  featureFlag?: FeatureFlag;
   adminOnly?: boolean;
 }
 
@@ -52,13 +50,8 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
   },
 ];
 
-export function getVisiblePrimaryNavItems(
-  featureFlags: Partial<Record<FeatureFlag, boolean>>,
-  opts: { isAdmin: boolean },
-): PrimaryNavItem[] {
-  return PRIMARY_NAV_ITEMS.filter(
-    (item) =>
-      (!item.featureFlag || featureFlags[item.featureFlag] === true) &&
-      (!item.adminOnly || opts.isAdmin),
-  );
+export function getVisiblePrimaryNavItems(opts: {
+  isAdmin: boolean;
+}): PrimaryNavItem[] {
+  return PRIMARY_NAV_ITEMS.filter((item) => !item.adminOnly || opts.isAdmin);
 }

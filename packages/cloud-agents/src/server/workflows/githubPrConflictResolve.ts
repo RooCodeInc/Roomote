@@ -12,14 +12,10 @@ export function githubPrConflictResolve({
   taskSpec,
   taskRunUrl,
   attribution,
-  visualProofAutoScreencastEnabled,
-  backgroundProofCaptureEnabled,
 }: {
   taskSpec: GithubPrConflictResolveTask;
   taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
-  visualProofAutoScreencastEnabled?: boolean;
-  backgroundProofCaptureEnabled?: boolean;
 }) {
   const {
     payload: { repo, prNumber, prTitle, prUrl, headRef, baseRef },
@@ -55,7 +51,5 @@ export function githubPrConflictResolve({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
-    visualProofAutoScreencastEnabled,
-    backgroundProofCaptureEnabled,
   });
 }

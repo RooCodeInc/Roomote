@@ -47,10 +47,6 @@ function mergeResultForUpdatedFields(
       updates.narrationMode === undefined
         ? mergedPreferences.narrationMode
         : result.narrationMode,
-    showDebugUI:
-      updates.showDebugUI === undefined
-        ? mergedPreferences.showDebugUI
-        : result.showDebugUI,
   };
 }
 
@@ -76,11 +72,6 @@ function rollbackUpdatedFields(
       mergedPreferences.narrationMode === optimisticPreferences.narrationMode
         ? previousPreferences.narrationMode
         : mergedPreferences.narrationMode,
-    showDebugUI:
-      updates.showDebugUI !== undefined &&
-      mergedPreferences.showDebugUI === optimisticPreferences.showDebugUI
-        ? previousPreferences.showDebugUI
-        : mergedPreferences.showDebugUI,
   };
 }
 

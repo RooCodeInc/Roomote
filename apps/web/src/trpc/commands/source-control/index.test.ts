@@ -21,6 +21,8 @@ const {
   mockValidateAdoDelegatedCredentials,
   mockDescribeAdoApiError,
   mockValidateGiteaToken,
+  mockDeleteDeploymentEnvironmentVariables,
+  mockDisableGitHubAppCommand,
   mockEnv,
 } = vi.hoisted(() => ({
   mockEnsureAdoServiceHooksForRepositories: vi.fn(),
@@ -43,6 +45,8 @@ const {
   mockValidateAdoDelegatedCredentials: vi.fn(),
   mockDescribeAdoApiError: vi.fn(),
   mockValidateGiteaToken: vi.fn(),
+  mockDeleteDeploymentEnvironmentVariables: vi.fn(),
+  mockDisableGitHubAppCommand: vi.fn(),
   mockEnv: {
     R_APP_URL: 'https://roomote.example.com',
     R_PUBLIC_URL: undefined as string | undefined,
@@ -121,10 +125,17 @@ vi.mock('../environment-variables', () => ({
   },
   upsertDeploymentEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
+  deleteDeploymentEnvironmentVariables:
+    mockDeleteDeploymentEnvironmentVariables,
+}));
+
+vi.mock('../github/mutations', () => ({
+  disableGitHubAppCommand: mockDisableGitHubAppCommand,
 }));
 
 import {
   assertValidSourceControlConfigInput,
+  clearGitHubConfigCommand,
   getGitHubRoomoteMentionCommand,
   setGitHubRoomoteMentionCommand,
   syncRepositoriesCommand,
@@ -140,7 +151,6 @@ function buildMockAuth(
     isAdmin: true,
     name: 'Source Control Tester',
     primaryEmail: 'source-control@example.com',
-    featureFlags: {},
     resource: {},
     ...overrides,
   } as UserAuthSuccess;
@@ -220,6 +230,7 @@ describe('source-control commands', () => {
       { status: 'created', repositoryFullName: 'acme/Platform/backend' },
     ]);
     mockValidateGiteaToken.mockResolvedValue({ status: 'valid' });
+    mockDisableGitHubAppCommand.mockResolvedValue({ success: true });
     mockResolveAdoOrganization.mockResolvedValue(null);
     mockValidateAdoToken.mockResolvedValue({ status: 'valid' });
     mockValidateAdoEntraCredentials.mockResolvedValue({ status: 'valid' });
@@ -227,6 +238,39 @@ describe('source-control commands', () => {
     mockDescribeAdoApiError.mockImplementation(async (error: unknown) =>
       error instanceof Error ? error.message : String(error),
     );
+  });
+
+  it('clears persisted GitHub credentials and deactivates stale installations', async () => {
+    const auth = buildMockAuth();
+
+    await expect(clearGitHubConfigCommand(auth)).resolves.toEqual({
+      success: true,
+    });
+
+    expect(mockDisableGitHubAppCommand).toHaveBeenCalledWith(auth);
+    expect(mockDeleteDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      expect.anything(),
+      [
+        'R_GITHUB_APP_SLUG',
+        'R_GITHUB_APP_ID',
+        'R_GITHUB_APP_PRIVATE_KEY',
+        'R_GITHUB_CLIENT_ID',
+        'R_GITHUB_CLIENT_SECRET',
+        'R_GITHUB_WEBHOOK_SECRET',
+      ],
+    );
+  });
+
+  it('does not clear GitHub credentials when stale installations cannot be deactivated', async () => {
+    mockDisableGitHubAppCommand.mockResolvedValue({
+      success: false,
+      error: 'Failed to disconnect GitHub.',
+    });
+
+    await expect(clearGitHubConfigCommand(buildMockAuth())).rejects.toThrow(
+      'Failed to disconnect GitHub.',
+    );
+    expect(mockDeleteDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });
 
   it('creates GitLab webhooks during the OAuth-triggered repository sync', async () => {

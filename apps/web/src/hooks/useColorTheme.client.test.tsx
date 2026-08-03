@@ -7,7 +7,6 @@ const { personalPreferencesState } = vi.hoisted(() => ({
     preferences: {
       colorTheme: 'system' as PersonalColorTheme,
       narrationMode: false,
-      showDebugUI: false,
     },
     isLoading: false,
     isUpdating: false,
@@ -35,7 +34,6 @@ describe('useColorTheme', () => {
     personalPreferencesState.preferences = {
       colorTheme: 'system' as PersonalColorTheme,
       narrationMode: false,
-      showDebugUI: false,
     };
     personalPreferencesState.isLoading = false;
     personalPreferencesState.isUpdating = false;
@@ -45,7 +43,6 @@ describe('useColorTheme', () => {
     personalPreferencesState.preferences = {
       colorTheme: 'dark' as PersonalColorTheme,
       narrationMode: true,
-      showDebugUI: false,
     };
 
     const { result } = renderHook(() => useColorTheme());

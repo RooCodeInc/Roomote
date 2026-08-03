@@ -4,7 +4,6 @@
 @source "../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
-@custom-variant debug (&:where([data-debug-ui='true'], [data-debug-ui='true'] *));
 
 @theme inline {
   --color-background: var(--background);

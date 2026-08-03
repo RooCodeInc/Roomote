@@ -20,7 +20,6 @@ import {
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
 } from '@roomote/types';
-import { FeatureFlag } from '@roomote/feature-flags';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -650,9 +649,6 @@ function getQueuedSnapshotResumeLinearMessages(
     : [];
 }
 
-const BACKGROUND_SUBAGENTS_FLAG = FeatureFlag.BackgroundSubagents;
-const CODE_MODE_FLAG = FeatureFlag.CodeMode;
-
 export const runTask = async ({
   taskRun,
   envVars,
@@ -941,32 +937,6 @@ export const runTask = async ({
     } catch (error) {
       logger.warn(
         `[runTask] Failed to fetch user MCP server configs: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    try {
-      const backgroundSubagentsEnabled = await sdk.featureFlags.evaluate(
-        BACKGROUND_SUBAGENTS_FLAG,
-      );
-
-      if (backgroundSubagentsEnabled) {
-        runtimeEnv.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS = '1';
-      }
-    } catch (error) {
-      logger.warn(
-        `[runTask] Failed to evaluate BackgroundSubagents feature flag: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-
-    try {
-      const codeModeEnabled = await sdk.featureFlags.evaluate(CODE_MODE_FLAG);
-
-      if (codeModeEnabled) {
-        runtimeEnv.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
-      }
-    } catch (error) {
-      logger.warn(
-        `[runTask] Failed to evaluate CodeMode feature flag: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 

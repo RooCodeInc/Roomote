@@ -23,7 +23,6 @@
     "@roomote/auth": "workspace:^",
     "@roomote/cloud-agents": "workspace:^",
     "@roomote/communication": "workspace:^",
-    "@roomote/feature-flags": "workspace:^",
     "@roomote/linear": "workspace:^",
     "@roomote/sdk": "workspace:^",
     "@roomote/slack": "workspace:^",

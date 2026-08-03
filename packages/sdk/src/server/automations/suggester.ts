@@ -10,11 +10,6 @@ import {
   eq,
   gte,
 } from '@roomote/db/server';
-import {
-  FeatureFlag,
-  getFeatureFlagEvaluator,
-} from '@roomote/feature-flags/server';
-import { getRedis } from '@roomote/redis';
 import { type WorkItemStatus } from '@roomote/types';
 import {
   buildDestinationTaskPayloadFields,
@@ -28,12 +23,11 @@ import {
 } from './github-deployment-scope';
 import { resolveDeploymentTimeZone } from './custom-automation-schedule';
 import { isRunDue } from './scheduling-utils';
-import { dispatchSuggestionRoutes } from './suggester-route-dispatch';
 import {
-  prepareSuggestionDispatchPlan,
+  dispatchSuggestionScan,
   type RepositoryCoverage,
   type SuggesterDeploymentContext,
-} from './suggester-route-planner';
+} from './suggester-dispatch';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -166,11 +160,6 @@ export async function suggesterJob(
 
   for (const deployment of eligibleDeployments) {
     try {
-      const suggestionRoutingEnabled = await getFeatureFlagEvaluator(
-        getRedis(),
-      ).evaluate(FeatureFlag.SuggestionRouting, {
-        isDeploymentContext: true,
-      });
       const runtime = await getAutomationRuntime('suggester');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
       const destination = await resolveAutomationRuntimeDestination({
@@ -279,44 +268,21 @@ export async function suggesterJob(
         );
       }
 
-      // Grouped multi-channel routing is Slack-only. Discord/Telegram destinations
-      // always take the single-route path and land digests via notifySlack fallback.
-      const useGroupedRouting =
-        suggestionRoutingEnabled &&
-        destination?.provider === 'slack' &&
-        deployment.slackBotToken !== null;
-
-      const routePlan = await prepareSuggestionDispatchPlan({
+      const dispatchResult = await dispatchSuggestionScan({
         deployment,
-        groupedRoutingEnabled: useGroupedRouting,
-        managerChannelId: channelId,
+        channelId,
         now,
-        repositoryCoverage,
-        settings: {
-          suggesterInstructions: runtime.instructions,
-          suggesterRoutingInstructions:
-            typeof runtime.settings.routingInstructions === 'string'
-              ? runtime.settings.routingInstructions
-              : null,
-          suggesterRoutingMode:
-            typeof runtime.settings.routingMode === 'string'
-              ? runtime.settings.routingMode
-              : null,
-        },
-      });
-      const dispatchResult = await dispatchSuggestionRoutes({
-        deployment,
+        suggesterInstructions: runtime.instructions,
         previousSuggestions,
         repositoryCoverage: environmentBackedRepositoryCoverage,
         repositoryFullNames: environmentBackedRepositoryFullNames,
-        routePlan,
         triggerKind: opts.manualTrigger ? 'manual' : 'scheduled',
         destinationPayloadFields: destination
           ? buildDestinationTaskPayloadFields(destination)
           : {},
       });
 
-      if (dispatchResult.successfulRoutes > 0) {
+      if (dispatchResult.successfulScans > 0) {
         processed++;
         result.launchedTaskId ??= dispatchResult.firstLaunchedTaskId;
       }

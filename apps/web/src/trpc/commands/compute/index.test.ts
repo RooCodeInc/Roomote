@@ -1,4 +1,3 @@
-import type { FeatureFlag } from '@roomote/feature-flags';
 import { WORKER_RUNTIME_SCHEMA_VERSION } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -93,7 +92,6 @@ function buildMockAuth(
     isAdmin: true,
     name: 'Compute Tester',
     primaryEmail: 'compute@example.com',
-    featureFlags: {} as Record<FeatureFlag, boolean>,
     resource: {
       username: 'compute-tester',
       fullName: 'Compute Tester',

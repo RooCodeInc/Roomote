@@ -6,7 +6,6 @@ import {
   type ScheduleOnlyBackgroundAutomationFrequency,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
   type ScheduleOnlyBackgroundAutomationId,
-  type SuggesterRoutingMode,
 } from '@roomote/types';
 
 export type ConflictResolverFrequency =
@@ -103,8 +102,6 @@ export type FormState = {
    * Mutually exclusive with Slack/Discord/Telegram destinations.
    */
   suggesterUseTeams: boolean;
-  suggesterRoutingMode: SuggesterRoutingMode;
-  suggesterRoutingInstructions: string;
   announcerFrequency: AnnouncerFrequency;
   announcerInstructions: string;
 } & DestinationChannelFormFields &
@@ -182,8 +179,6 @@ const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterUseTelegram',
   'suggesterUseTeams',
   'suggesterInstructions',
-  'suggesterRoutingMode',
-  'suggesterRoutingInstructions',
 ];
 
 const ANNOUNCER_FIELDS: Array<keyof FormState> = [
@@ -361,9 +356,6 @@ export function buildAutomationSettingsSaveInput(
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
     suggesterUseTelegram: stateToSave.suggesterUseTelegram,
     suggesterUseTeams: stateToSave.suggesterUseTeams,
-    suggesterRoutingMode: stateToSave.suggesterRoutingMode,
-    suggesterRoutingInstructions:
-      stateToSave.suggesterRoutingInstructions.trim() || null,
     announcerFrequency: stateToSave.announcerFrequency,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
     ...buildDestinationChannelSaveInput(stateToSave),

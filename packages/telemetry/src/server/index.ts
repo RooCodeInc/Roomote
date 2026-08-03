@@ -38,7 +38,6 @@ import {
 const LOG_PREFIX = '[telemetry]';
 const REQUEST_TIMEOUT_MS = 5_000;
 const FLUSH_INTERVAL_MS = 10_000;
-
 export interface TelemetryEnvInput {
   appEnv: string | undefined;
   releaseVersion: string | undefined;

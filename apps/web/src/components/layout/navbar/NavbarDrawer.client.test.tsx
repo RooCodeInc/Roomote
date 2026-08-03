@@ -9,7 +9,6 @@ const state = vi.hoisted(() => ({
   pathname: '/',
   user: {
     isAdmin: true,
-    featureFlags: {},
   },
 }));
 

@@ -34,7 +34,6 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({
     isAdmin: state.isAdmin,
     cloudEnabled: state.cloudEnabled,
-    featureFlags: {},
   }),
 }));
 

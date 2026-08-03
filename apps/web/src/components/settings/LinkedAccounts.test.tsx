@@ -1,6 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { FeatureFlag } from '@roomote/feature-flags';
 import {
   isDeploymentScopedMcpIntegration,
   MCP_INTEGRATIONS,
@@ -42,7 +41,6 @@ const state = vi.hoisted(() => ({
   searchParams: '',
   user: {
     isAdmin: true,
-    featureFlags: {} as Partial<Record<FeatureFlag, boolean>>,
   },
   deploymentEnablements: [] as Array<{ mcpId: string; enabled: boolean }>,
   deploymentEnablementsIsPending: false,
@@ -587,7 +585,6 @@ describe('LinkedAccounts settings', () => {
     state.searchParams = '';
     state.user = {
       isAdmin: true,
-      featureFlags: {} as Partial<Record<FeatureFlag, boolean>>,
     };
     state.deploymentEnablements = [
       { mcpId: 'betterstack', enabled: true },

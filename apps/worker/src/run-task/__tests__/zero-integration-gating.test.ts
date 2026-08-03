@@ -12,7 +12,6 @@ const {
   harnessManagerInstances,
   hasActiveInstallationMock,
   isOrgEnabledMock,
-  mockEvaluateFeatureFlag,
   resolvePackagedSkillsFolderMock,
   resolveStatusMock,
   startPollingMock,
@@ -58,7 +57,6 @@ const {
   harnessManagerInstances: [] as Array<EventEmitter>,
   hasActiveInstallationMock: vi.fn().mockResolvedValue(false),
   isOrgEnabledMock: vi.fn().mockResolvedValue(false),
-  mockEvaluateFeatureFlag: vi.fn().mockResolvedValue(false),
   resolvePackagedSkillsFolderMock: vi.fn(() => 'standard'),
   resolveStatusMock: vi.fn(() => ({ status: 'idle' })),
   startPollingMock: vi.fn(),
@@ -116,9 +114,6 @@ vi.mock('@roomote/sdk/client', () => ({
     linearInstallations: {
       drainLinearMessages: vi.fn(),
       hasActiveInstallation: hasActiveInstallationMock,
-    },
-    featureFlags: {
-      evaluate: mockEvaluateFeatureFlag,
     },
     mcpConnections: {
       getMcpServerConfigs: getMcpServerConfigsMock,

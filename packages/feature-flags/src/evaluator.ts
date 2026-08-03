@@ -1,11 +1,11 @@
 import { Redis } from 'ioredis';
 import {
+  and,
   db,
-  users,
   deploymentSettings,
   eq,
   isNull,
-  and,
+  users,
 } from '@roomote/db/server';
 import {
   evaluateFeatureFlagFromMetadata,
@@ -13,11 +13,11 @@ import {
   normalizeMetadataRecord,
 } from './index';
 import { MetadataCache } from './cache';
-import {
-  type FeatureFlag,
-  type FeatureFlagContext,
-  type FeatureFlagValues,
-  type MetadataRecord,
+import type {
+  FeatureFlag,
+  FeatureFlagContext,
+  FeatureFlagValues,
+  MetadataRecord,
 } from './types';
 
 export class FeatureFlagEvaluator {
@@ -27,85 +27,50 @@ export class FeatureFlagEvaluator {
     this.cache = new MetadataCache(redis);
   }
 
-  /**
-   * Evaluate all feature flags for a given context
-   */
   async evaluateAll(context: FeatureFlagContext): Promise<FeatureFlagValues> {
-    const metadata = await this.getMetadata(context);
-    return evaluateFeatureFlagsFromMetadata(metadata);
+    return evaluateFeatureFlagsFromMetadata(await this.getMetadata(context));
   }
 
-  /**
-   * Evaluate a single feature flag for a given context
-   */
   async evaluate(
     flag: FeatureFlag,
     context: FeatureFlagContext,
   ): Promise<boolean> {
-    const metadata = await this.getMetadata(context);
-    return evaluateFeatureFlagFromMetadata(flag, metadata);
+    return evaluateFeatureFlagFromMetadata(
+      flag,
+      await this.getMetadata(context),
+    );
   }
 
-  /**
-   * Get metadata for the appropriate entity (deployment or user)
-   */
   private async getMetadata(
     context: FeatureFlagContext,
   ): Promise<MetadataRecord> {
-    // Narrow using discriminated union to guarantee required IDs
     if (context.isDeploymentContext) {
-      const entityType = 'deployment' as const;
-      const deploymentId = 'default';
+      const cached = await this.cache.get('deployment', 'default');
+      if (cached !== null) return cached;
 
-      // Try to get from cache first
-      const cached = await this.cache.get(entityType, deploymentId);
-      if (cached !== null) {
-        return cached;
-      }
-
-      // Fetch from database
       const deployment = await db.query.deploymentSettings.findFirst({
-        where: eq(deploymentSettings.id, deploymentId),
+        where: eq(deploymentSettings.id, 'default'),
       });
       const metadata = normalizeMetadataRecord(deployment?.metadata);
-
-      // Cache the result
-      await this.cache.set(entityType, deploymentId, metadata);
-
-      return metadata;
-    } else {
-      const entityType = 'user' as const;
-      const userId = context.userId;
-
-      // Try to get from cache first
-      const cached = await this.cache.get(entityType, userId);
-      if (cached !== null) {
-        return cached;
-      }
-
-      // Fetch from database
-      const user = await db.query.users.findFirst({
-        where: and(eq(users.id, userId), isNull(users.deletedAt)),
-      });
-      const metadata = normalizeMetadataRecord(user?.metadata);
-
-      // Cache the result
-      await this.cache.set(entityType, userId, metadata);
-
+      await this.cache.set('deployment', 'default', metadata);
       return metadata;
     }
+
+    const cached = await this.cache.get('user', context.userId);
+    if (cached !== null) return cached;
+
+    const user = await db.query.users.findFirst({
+      where: and(eq(users.id, context.userId), isNull(users.deletedAt)),
+    });
+    const metadata = normalizeMetadataRecord(user?.metadata);
+    await this.cache.set('user', context.userId, metadata);
+    return metadata;
   }
 
-  /**
-   * Invalidate cache for a user
-   */
   async invalidateUserCache(userId: string): Promise<void> {
     await this.cache.invalidate('user', userId);
   }
 
-  /**
-   * Invalidate cache for deployment-wide metadata
-   */
   async invalidateDeploymentCache(): Promise<void> {
     await this.cache.invalidate('deployment', 'default');
   }
@@ -114,10 +79,7 @@ export class FeatureFlagEvaluator {
 let evaluatorInstance: FeatureFlagEvaluator | null = null;
 
 export function getFeatureFlagEvaluator(redis: Redis): FeatureFlagEvaluator {
-  if (!evaluatorInstance) {
-    evaluatorInstance = new FeatureFlagEvaluator(redis);
-  }
-
+  evaluatorInstance ??= new FeatureFlagEvaluator(redis);
   return evaluatorInstance;
 }
 

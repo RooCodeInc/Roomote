@@ -1,7 +1,5 @@
-import { FeatureFlag } from '@roomote/feature-flags';
-
 import type { UserAuthSuccess } from '@/types';
-import { mockFeatureFlags, mockUserResource } from '@/lib/mock-utils';
+import { mockUserResource } from '@/lib/mock-utils';
 
 const { mockGetTasks } = vi.hoisted(() => ({
   mockGetTasks: vi.fn(),
@@ -20,7 +18,6 @@ describe('getTasksCommand', () => {
     userId: 'user-list-test',
     isAdmin: false,
     name: 'List Tester',
-    featureFlags: mockFeatureFlags,
     resource: mockUserResource,
   } as UserAuthSuccess;
 
@@ -148,48 +145,6 @@ describe('getTasksCommand', () => {
       expect.objectContaining({
         allowTaskTypeFilter: false,
         filters: [{ type: 'userId', value: auth.userId, label: auth.userId }],
-      }),
-    );
-  });
-
-  it('passes through task-type filters when debug UI is enabled', async () => {
-    const debugAuth = {
-      ...auth,
-      featureFlags: {
-        ...mockFeatureFlags,
-        [FeatureFlag.ShowDebugUISetting]: true,
-      },
-      resource: {
-        ...mockUserResource,
-        metadata: { show_debug_ui: true },
-      },
-    } as UserAuthSuccess;
-
-    await getTasksCommand(debugAuth, {
-      filters: [
-        {
-          type: 'taskType',
-          value: 'onboarding.task.suggestions',
-          label: 'onboarding.task.suggestions',
-        },
-      ],
-    });
-
-    expect(mockGetTasks).toHaveBeenCalledWith(
-      expect.objectContaining({
-        allowTaskTypeFilter: true,
-        filters: [
-          {
-            type: 'taskType',
-            value: 'onboarding.task.suggestions',
-            label: 'onboarding.task.suggestions',
-          },
-          {
-            type: 'userId',
-            value: debugAuth.userId,
-            label: debugAuth.userId,
-          },
-        ],
       }),
     );
   });

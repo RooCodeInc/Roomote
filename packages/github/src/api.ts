@@ -22,6 +22,7 @@ import {
   eq,
   isNull,
   inArray,
+  or,
   resolveDeploymentEnvVar,
 } from '@roomote/db/server';
 
@@ -686,6 +687,107 @@ export async function syncGitHubInstallation({
 type GitHubInstallationRepository =
   RestEndpointMethodTypes['apps']['listReposAccessibleToInstallation']['response']['data']['repositories'][number];
 
+type SyncableGitHubRepository = Pick<
+  GitHubInstallationRepository,
+  | 'id'
+  | 'name'
+  | 'full_name'
+  | 'description'
+  | 'private'
+  | 'default_branch'
+  | 'clone_url'
+  | 'html_url'
+  | 'permissions'
+>;
+
+export async function upsertGitHubRepository({
+  userId,
+  githubInstallationId,
+  gitHubRepo,
+}: {
+  userId: string;
+  githubInstallationId: string;
+  gitHubRepo: SyncableGitHubRepository;
+}): Promise<Repository> {
+  const values = {
+    sourceControlProvider: DEFAULT_SOURCE_CONTROL_PROVIDER,
+    host: 'github.com',
+    installationId: githubInstallationId,
+    githubRepoId: gitHubRepo.id,
+    externalRepoId: String(gitHubRepo.id),
+    name: gitHubRepo.name,
+    fullName: gitHubRepo.full_name,
+    description: gitHubRepo.description,
+    private: gitHubRepo.private,
+    defaultBranch: gitHubRepo.default_branch,
+    cloneUrl: gitHubRepo.clone_url,
+    htmlUrl: gitHubRepo.html_url,
+    permissions: gitHubRepo.permissions,
+    isActive: true,
+  };
+
+  const [insertedRepository] = await db
+    .insert(repositories)
+    .values({
+      userId: null,
+      linkedByUserId: userId,
+      ...values,
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  if (insertedRepository) {
+    return insertedRepository;
+  }
+
+  // A concurrent sync may have inserted this repository, while historical
+  // rows can conflict on external id or full name even if their GitHub id is
+  // stale. Reconcile whichever persisted identity caused the conflict.
+  const matchingRepositories = await db.query.repositories.findMany({
+    where: and(
+      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+      or(
+        eq(repositories.githubRepoId, gitHubRepo.id),
+        and(
+          eq(repositories.host, 'github.com'),
+          or(
+            eq(repositories.externalRepoId, String(gitHubRepo.id)),
+            eq(repositories.fullName, gitHubRepo.full_name),
+          ),
+        ),
+      ),
+    ),
+  });
+
+  if (matchingRepositories.length === 0) {
+    throw new Error(
+      `GitHub repository conflict could not be reconciled: ${gitHubRepo.full_name}`,
+    );
+  }
+
+  if (matchingRepositories.length > 1) {
+    throw new Error(
+      `GitHub repository identity is ambiguous for ${gitHubRepo.full_name}: matched ${matchingRepositories.length} persisted repositories`,
+    );
+  }
+
+  const existingRepository = matchingRepositories[0]!;
+
+  const [updatedRepository] = await db
+    .update(repositories)
+    .set({ ...values, updatedAt: new Date() })
+    .where(eq(repositories.id, existingRepository.id))
+    .returning();
+
+  if (!updatedRepository) {
+    throw new Error(
+      `GitHub repository could not be updated: ${gitHubRepo.full_name}`,
+    );
+  }
+
+  return updatedRepository;
+}
+
 function isGitHubRepositoryEmpty(
   repository: Pick<GitHubInstallationRepository, 'size' | 'pushed_at'>,
 ) {
@@ -735,62 +837,16 @@ async function syncRepositories({
   // Upsert fetched repositories and set them to active.
   const repos = await pMap(
     reposAccessibleToInstallation,
-    async (gitHubRepo) => {
-      const values = {
-        sourceControlProvider: DEFAULT_SOURCE_CONTROL_PROVIDER,
-        host: 'github.com',
-        installationId: githubInstallation.id,
-        name: gitHubRepo.name,
-        fullName: gitHubRepo.full_name,
-        description: gitHubRepo.description,
-        private: gitHubRepo.private,
-        defaultBranch: gitHubRepo.default_branch,
-        cloneUrl: gitHubRepo.clone_url,
-        htmlUrl: gitHubRepo.html_url,
-        permissions: gitHubRepo.permissions,
-        externalRepoId: String(gitHubRepo.id),
-        isActive: true,
-      };
-
-      const findExistingRepo = () =>
-        db.query.repositories.findFirst({
-          where: and(
-            eq(
-              repositories.sourceControlProvider,
-              DEFAULT_SOURCE_CONTROL_PROVIDER,
-            ),
-            eq(repositories.githubRepoId, gitHubRepo.id),
-          ),
-        });
-
-      const existingRepo = await findExistingRepo();
-
-      if (existingRepo) {
-        await db
-          .update(repositories)
-          .set({ ...values, updatedAt: new Date() })
-          .where(eq(repositories.id, existingRepo.id));
-      } else {
-        await db.insert(repositories).values({
-          userId: null,
-          githubRepoId: gitHubRepo.id,
-          linkedByUserId: userId,
-          ...values,
-        });
-      }
-
-      const syncedRepository = await findExistingRepo();
-
-      return syncedRepository;
-    },
+    (gitHubRepo) =>
+      upsertGitHubRepository({
+        userId,
+        githubInstallationId: githubInstallation.id,
+        gitHubRepo,
+      }),
     { concurrency: CONCURRENCY },
   );
 
-  const filteredRepos = repos.filter(
-    (repo): repo is Repository => typeof repo !== 'undefined',
-  );
-
-  const updatedIds = new Set(filteredRepos.map(({ id }) => id));
+  const updatedIds = new Set(repos.map(({ id }) => id));
   const missingIds = existingIds.filter((id) => !updatedIds.has(id));
 
   if (missingIds.length > 0) {
@@ -800,7 +856,7 @@ async function syncRepositories({
       .where(inArray(repositories.id, missingIds));
   }
 
-  return filteredRepos;
+  return repos;
 }
 
 export async function getRepositoryEmptyStates({

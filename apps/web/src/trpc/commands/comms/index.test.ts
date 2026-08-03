@@ -1,5 +1,3 @@
-import type { FeatureFlag } from '@roomote/feature-flags';
-
 import type { UserAuthSuccess } from '@/types';
 
 const {
@@ -233,7 +231,6 @@ function buildMockAuth(
     isAdmin: true,
     name: 'Comms Tester',
     primaryEmail: 'comms@example.com',
-    featureFlags: {} as Record<FeatureFlag, boolean>,
     resource: {
       username: 'comms-tester',
       fullName: 'Comms Tester',

@@ -23,10 +23,6 @@ vi.mock('@/components/system', () => ({
   Toaster: () => null,
 }));
 
-vi.mock('./DebugUiAttributeController', () => ({
-  DebugUiAttributeController: () => null,
-}));
-
 vi.mock('./UserAnalyticsContext', () => ({
   UserAnalyticsContext: () => null,
 }));

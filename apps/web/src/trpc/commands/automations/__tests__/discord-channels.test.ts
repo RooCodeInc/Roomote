@@ -3,7 +3,6 @@ import {
   discordInstallationChannels,
   discordInstallations,
 } from '@roomote/db/server';
-import type { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -16,7 +15,7 @@ const adminAuth: UserAuthSuccess = {
   name: 'Admin',
   primaryEmail: 'admin@example.com',
   isAdmin: true,
-  featureFlags: {} as Record<FeatureFlag, boolean>,
+  featureFlags: {},
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
   cookieConsentedAt: null,

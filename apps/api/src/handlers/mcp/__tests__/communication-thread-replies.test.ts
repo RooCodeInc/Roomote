@@ -5,37 +5,55 @@ const {
   buildThreadReplyImagesMock,
   clearLatestUserMessageForReplyQuoteIfIdMock,
   discordAddReactionMock,
+  discordCreateThreadFromMessageMock,
   discordEditMessageMock,
   discordPostMessageMock,
+  dbTransactionMock,
   envMock,
+  getTaskAutomationInitiatorKeyMock,
   getLatestInboundMessageIdMock,
   getLatestUserMessageForReplyQuoteMock,
   postMessageMock,
   sendChatActionMock,
   resolveTelegramRuntimeCredentialsMock,
   resolveDiscordRuntimeCredentialsMock,
+  sqlMock,
+  upsertBackgroundAutomationSlackThreadMock,
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImagesMock: vi.fn(),
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   discordAddReactionMock: vi.fn(),
+  discordCreateThreadFromMessageMock: vi.fn(),
   discordEditMessageMock: vi.fn(),
   discordPostMessageMock: vi.fn(),
+  dbTransactionMock: vi.fn(),
   envMock: { R_APP_URL: 'https://app.example.com' },
+  getTaskAutomationInitiatorKeyMock: vi.fn(),
   getLatestInboundMessageIdMock: vi.fn(),
   getLatestUserMessageForReplyQuoteMock: vi.fn(),
   postMessageMock: vi.fn(),
   sendChatActionMock: vi.fn(),
   resolveTelegramRuntimeCredentialsMock: vi.fn(),
   resolveDiscordRuntimeCredentialsMock: vi.fn(),
+  sqlMock: vi.fn(),
+  upsertBackgroundAutomationSlackThreadMock: vi.fn(),
   withThreadReplyFooterLockMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({ Env: envMock }));
 
 vi.mock('@roomote/db/server', () => ({
+  and: vi.fn(),
+  db: { transaction: dbTransactionMock },
+  eq: vi.fn(),
+  getTaskAutomationInitiatorKey: getTaskAutomationInitiatorKeyMock,
   resolveDiscordRuntimeCredentials: resolveDiscordRuntimeCredentialsMock,
   resolveTelegramRuntimeCredentials: resolveTelegramRuntimeCredentialsMock,
+  sql: sqlMock,
+  taskRuns: { id: 'id', payload: 'payload', taskId: 'taskId' },
+  upsertBackgroundAutomationSlackThread:
+    upsertBackgroundAutomationSlackThreadMock,
 }));
 
 vi.mock('@roomote/communication', () => ({
@@ -50,6 +68,7 @@ vi.mock('@roomote/communication', () => ({
     return {
       postMessage: discordPostMessageMock,
       addReaction: discordAddReactionMock,
+      createThreadFromMessage: discordCreateThreadFromMessageMock,
       editMessage: discordEditMessageMock,
     };
   }),
@@ -93,6 +112,7 @@ vi.mock('@roomote/sdk/server', () => ({
       ? {
           postMessage: discordPostMessageMock,
           addReaction: discordAddReactionMock,
+          createThreadFromMessage: discordCreateThreadFromMessageMock,
           editMessage: discordEditMessageMock,
           triggerTyping: vi.fn(async () => undefined),
         }
@@ -165,6 +185,14 @@ const discordTaskRun = {
 describe('maybeSendCommunicationThreadReply (Discord)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    const returning = vi.fn().mockResolvedValue([{ id: 44 }]);
+    const where = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where }));
+    const update = vi.fn(() => ({ set }));
+    dbTransactionMock.mockImplementation(async (callback) =>
+      callback({ update }),
+    );
+    getTaskAutomationInitiatorKeyMock.mockResolvedValue(null);
     resolveDiscordRuntimeCredentialsMock.mockResolvedValue({
       botToken: 'discord-token',
       applicationId: 'application-1',
@@ -173,6 +201,13 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     getLatestUserMessageForReplyQuoteMock.mockResolvedValue(null);
     clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
     discordPostMessageMock.mockResolvedValue({ messageId: 'reply-1' });
+    discordCreateThreadFromMessageMock.mockResolvedValue({
+      channelId: 'automation-thread-1',
+      parentChannelId: 'channel-1',
+      name: 'Automation report',
+      kind: 'thread',
+      messageId: 'reply-1',
+    });
     discordEditMessageMock.mockResolvedValue(undefined);
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(null as never);
     vi.mocked(getThreadReplyFooterRecord).mockResolvedValue(null);
@@ -208,6 +243,65 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       'replyToMessageId',
     );
     expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
+  });
+
+  it('creates and binds a real thread for a late-bound automation report', async () => {
+    getTaskAutomationInitiatorKeyMock.mockResolvedValue('custom_automation');
+
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: {
+        ...discordTaskRun,
+        payload: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          customAutomationId: 'automation-1',
+        },
+      },
+      parsedBody: { text: 'Weekly documentation audit complete', images: [] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(discordPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      text: 'Weekly documentation audit complete',
+      textFormat: 'markdown',
+      images: [],
+    });
+    expect(discordCreateThreadFromMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'reply-1',
+      name: 'Weekly documentation audit complete',
+    });
+    expect(dbTransactionMock).toHaveBeenCalledOnce();
+    expect(sqlMock.mock.calls.flatMap((call) => call.slice(1))).toContainEqual(
+      expect.stringContaining(
+        '"communicationThreadId":"automation-thread-1","discordTaskThread":true',
+      ),
+    );
+    expect(upsertBackgroundAutomationSlackThreadMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        surface: 'discord',
+        automationKey: 'custom_automation',
+        slackChannelId: 'channel-1',
+        threadTs: 'reply-1',
+        metadata: { sourceTaskId: 'task-3' },
+      }),
+    );
+  });
+
+  it('does not create nested threads for later automation updates', async () => {
+    getTaskAutomationInitiatorKeyMock.mockResolvedValue('custom_automation');
+
+    await maybeSendCommunicationThreadReply({
+      taskRun: discordTaskRun,
+      parsedBody: { text: 'Self-review complete', images: [] },
+    });
+
+    expect(discordPostMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: 'thread-1' }),
+    );
+    expect(discordCreateThreadFromMessageMock).not.toHaveBeenCalled();
   });
 
   it('attaches to the investigating opener when only a root message id is present', async () => {

@@ -39,6 +39,7 @@ import {
   getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
+import { disableGitHubAppCommand } from '../github/mutations';
 
 export async function getRepositoriesCommand(
   auth: UserAuthSuccess,
@@ -983,4 +984,22 @@ export async function saveSourceControlConfigCommand(
       configSatisfied: providerStatus.configSatisfied,
     };
   });
+}
+
+export async function clearGitHubConfigCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const disableResult = await disableGitHubAppCommand(auth);
+  if (!disableResult.success) {
+    throw new Error(disableResult.error);
+  }
+
+  const provider = getSetupSourceControlProvider('github');
+  const envVarNames = [
+    ...new Set(provider.fields.flatMap((field) => field.acceptedEnvVarNames)),
+  ];
+
+  await deleteDeploymentEnvironmentVariables(db, envVarNames);
+
+  return { success: true as const };
 }
