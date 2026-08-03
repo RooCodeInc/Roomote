@@ -34,7 +34,7 @@ import {
   useTaskMessageEnvelopes,
 } from './hooks';
 
-import { SnapshotResumeFailureFooter, Startup } from './startup';
+import { ProductTips, SnapshotResumeFailureFooter, Startup } from './startup';
 import { DraftPromptBanner } from './DraftPromptBanner';
 import { Header } from './Header';
 import { HistoricalContent } from './HistoricalContent';
@@ -280,13 +280,17 @@ export default function SandboxPage() {
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <Header session={session} />
-        <Startup
-          runId={taskRun.id}
-          taskId={taskId}
-          initialTaskRun={taskRun}
-          prompt={startupPrompt}
-          onStatusChange={handleBootStatusChange}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
+            <Startup
+              runId={taskRun.id}
+              taskId={taskId}
+              initialTaskRun={taskRun}
+              prompt={startupPrompt}
+              onStatusChange={handleBootStatusChange}
+            />
+          </div>
+        </div>
         {session.draftPrompt && (
           <DraftPromptBanner draftPrompt={session.draftPrompt} />
         )}
@@ -298,13 +302,18 @@ export default function SandboxPage() {
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <Header session={session} />
-        <Startup
-          runId={taskRun.id}
-          taskId={taskId}
-          initialTaskRun={taskRun}
-          prompt={startupPrompt}
-          onStatusChange={handleBootStatusChange}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="mx-auto flex w-full max-w-4xl flex-col gap-2">
+            <Startup
+              runId={taskRun.id}
+              taskId={taskId}
+              initialTaskRun={taskRun}
+              prompt={startupPrompt}
+              onStatusChange={handleBootStatusChange}
+            />
+            <ProductTips />
+          </div>
+        </div>
         {session.draftPrompt && (
           <DraftPromptBanner draftPrompt={session.draftPrompt} />
         )}

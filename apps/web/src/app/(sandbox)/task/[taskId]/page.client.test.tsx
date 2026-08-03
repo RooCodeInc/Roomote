@@ -84,6 +84,7 @@ vi.mock('./hooks', () => ({
 
 vi.mock('./startup', () => ({
   Startup: () => <div data-testid="startup" />,
+  ProductTips: () => <div data-testid="product-tips" />,
   SnapshotResumeFailureFooter: () => (
     <div data-testid="snapshot-resume-failure-footer" />
   ),
@@ -208,6 +209,7 @@ describe('SandboxPage', () => {
     renderPage();
 
     expect(screen.getByTestId('startup')).toBeInTheDocument();
+    expect(screen.getByTestId('product-tips')).toBeInTheDocument();
     expect(screen.queryByTestId('sandbox-provider')).not.toBeInTheDocument();
   });
 
@@ -323,6 +325,7 @@ describe('SandboxPage', () => {
     renderPage();
 
     expect(screen.getByTestId('startup')).toBeInTheDocument();
+    expect(screen.queryByTestId('product-tips')).not.toBeInTheDocument();
     expect(screen.queryByTestId('historical-content')).not.toBeInTheDocument();
     expect(
       screen.queryByTestId('snapshot-resume-failure-footer'),

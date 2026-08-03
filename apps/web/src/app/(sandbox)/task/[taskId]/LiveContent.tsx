@@ -32,6 +32,7 @@ import { ConnectionStatusBanner } from './ErrorFallback';
 import { PendingUserInputRequestStateProvider } from './PendingUserInputRequestPanel';
 import { TaskInputStack } from './TaskInputStack';
 import { OnboardingCompletionMessage } from './OnboardingCompletionMessage';
+import { ProductTips, Startup } from './startup';
 
 interface LiveContentProps {
   session: TaskSession;
@@ -89,6 +90,8 @@ function LiveContentInner({
   }, [onTaskPhaseChange, taskPhase]);
 
   const asleep = isTaskRunAsleep(session.taskRun);
+  const bootingTaskRun =
+    session.sessionState === 'booting' ? session.taskRun : null;
 
   const [messagesInitialScrollBehavior, setMessagesInitialScrollBehavior] =
     useState<'smooth' | 'instant'>('smooth');
@@ -251,11 +254,33 @@ function LiveContentInner({
                   scrollRef={messagesRef}
                   initialScrollBehavior={messagesInitialScrollBehavior}
                   footer={
-                    session.onboardingEnvironment ? (
-                      <OnboardingCompletionMessage
-                        environment={session.onboardingEnvironment}
-                      />
-                    ) : undefined
+                    <>
+                      {session.onboardingEnvironment && (
+                        <OnboardingCompletionMessage
+                          environment={session.onboardingEnvironment}
+                        />
+                      )}
+                      {bootingTaskRun && (
+                        <>
+                          <Startup
+                            runId={bootingTaskRun.id}
+                            taskId={session.taskId}
+                            initialTaskRun={bootingTaskRun}
+                            prompt={
+                              session.prompt &&
+                              session.prompt.visibleInTranscript !== false
+                                ? {
+                                    text: session.prompt.text,
+                                    images: session.prompt.images,
+                                  }
+                                : null
+                            }
+                            onStatusChange={onBootStatusChange}
+                          />
+                          <ProductTips />
+                        </>
+                      )}
+                    </>
                   }
                 />
                 <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-colors border-2 border-background rounded-b-3xl">
@@ -265,7 +290,6 @@ function LiveContentInner({
                       promptInputRef={promptInputRef}
                       onFileSearchOpen={handleFileSearchOpen}
                       onCommandSearchOpen={handleCommandSearchOpen}
-                      onBootStatusChange={onBootStatusChange}
                       scrollToBottom={scrollToBottom}
                     />
                   </PendingUserInputRequestStateProvider>
