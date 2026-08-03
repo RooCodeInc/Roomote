@@ -11,6 +11,16 @@ import {
 } from '@roomote/db/server';
 import type { BackgroundAutomationKey } from '@roomote/types';
 
+const { createTelegramProviderMock } = vi.hoisted(() => ({
+  createTelegramProviderMock: vi.fn(),
+}));
+
+vi.mock('@roomote/sdk/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
+  createTelegramCommunicationProviderFromRuntimeCredentials:
+    createTelegramProviderMock,
+}));
+
 import type { UserAuthSuccess } from '@/types';
 
 import { updateBackgroundAgentSettingsCommand } from '../settings-update';
@@ -198,6 +208,8 @@ async function getAutomationTargets(key: BackgroundAutomationKey) {
 describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   beforeEach(async () => {
     delete process.env.TELEGRAM_PRIMARY_CHAT_ID;
+    createTelegramProviderMock.mockReset();
+    createTelegramProviderMock.mockResolvedValue({});
     await db.delete(automations);
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
@@ -217,12 +229,37 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     );
 
     expect(result.success).toBe(true);
+    expect(createTelegramProviderMock).toHaveBeenCalledTimes(1);
     if (result.success) {
       expect(result.settings.managerTelegramChatId).toBe('telegram-manager');
       expect(result.settings.managerSlackChannelId).toBeNull();
       expect(result.settings.managerDiscordChannelId).toBeNull();
       expect(result.settings.managerTeamsChannelId).toBeNull();
     }
+  });
+
+  it('rejects a Telegram manager destination without active bot credentials', async () => {
+    process.env.TELEGRAM_PRIMARY_CHAT_ID = 'telegram-manager';
+    createTelegramProviderMock.mockResolvedValue(null);
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerChannel',
+        managerTelegramChannel: 'telegram-manager',
+      }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(createTelegramProviderMock).toHaveBeenCalledTimes(1);
+    if (!result.success) {
+      expect(result.fieldErrors.managerTelegramChannel).toBe(
+        'Connect Telegram with active bot credentials and capture a primary chat before using it for manager updates.',
+      );
+    }
+
+    const settings = await db.query.deploymentSettings.findFirst();
+    expect(settings?.managerTelegramChatId ?? null).toBeNull();
   });
 
   it('preserves Teams and Telegram manager destinations when an older client omits them', async () => {

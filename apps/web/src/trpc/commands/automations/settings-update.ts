@@ -18,6 +18,7 @@ import {
   upsertAutomation,
 } from '@roomote/db/server';
 import {
+  createTelegramCommunicationProviderFromRuntimeCredentials,
   findDiscordDestinationByChannelId,
   findTeamsPrimaryConversation,
   findTelegramPrimaryChatId,
@@ -402,9 +403,13 @@ export async function updateBackgroundAgentSettingsCommand(
     managerTelegramChatId
   ) {
     const primaryChatId = await findTelegramPrimaryChatId();
-    if (primaryChatId !== managerTelegramChatId) {
+    const telegram =
+      primaryChatId === managerTelegramChatId
+        ? await createTelegramCommunicationProviderFromRuntimeCredentials()
+        : null;
+    if (!telegram) {
       fieldErrors.managerTelegramChannel =
-        'Connect Telegram and capture a primary chat before using it for manager updates.';
+        'Connect Telegram with active bot credentials and capture a primary chat before using it for manager updates.';
       managerTelegramChatId = null;
     }
   }
