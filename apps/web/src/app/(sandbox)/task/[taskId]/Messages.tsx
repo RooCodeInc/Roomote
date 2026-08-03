@@ -9,6 +9,8 @@ import {
   useState,
   type MutableRefObject,
 } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import type { ScrollToBottom } from 'use-stick-to-bottom';
 
 import {
@@ -26,12 +28,15 @@ import {
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
+import { useShowCommandOutput } from '@/hooks/useShowCommandOutput';
 import { Lightbulb, Skeleton } from '@/components/system';
 import { cn } from '@/lib/utils';
+import { useTRPCClient } from '@/trpc/client';
 
 import {
   useSandboxMessages,
   useSandboxHistoryReady,
+  useSandboxConnectionStatus,
   useSandboxTaskPhase,
   type TaskSession,
 } from './hooks';
@@ -199,7 +204,21 @@ const MessagesBase = ({
   const { messages } = useSandboxMessages();
   const historyReady = useSandboxHistoryReady();
   const taskPhase = useSandboxTaskPhase();
+  const { connected, hasConnectedOnce } = useSandboxConnectionStatus();
+  const trpcClient = useTRPCClient();
+  const [abortRequested, setAbortRequested] = useState(false);
+  const abortTurn = useMutation({
+    mutationFn: () =>
+      trpcClient.sandboxSession.abortTurn.mutate({ taskId: session.taskId }),
+    onSuccess: () => {
+      setAbortRequested(true);
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Unable to stop the running command.');
+    },
+  });
   const { enabled: narrationModeEnabled } = useNarrationMode();
+  const { enabled: commandOutputVisible } = useShowCommandOutput();
   const [suppressedMessageIds, setSuppressedMessageIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -218,6 +237,10 @@ const MessagesBase = ({
   useEffect(() => {
     setSuppressedMessageIds(new Set());
   }, [session.taskId]);
+
+  useEffect(() => {
+    setAbortRequested(false);
+  }, [session.taskId, taskPhase]);
 
   const suppressMessage = useCallback((messageId: string) => {
     setSuppressedMessageIds((prev) => {
@@ -353,6 +376,7 @@ const MessagesBase = ({
         <AcpGroupedToolMessage
           group={block}
           showSubagentPayload={showInternalMessages}
+          showCommandOutput={commandOutputVisible}
         />
       );
 
@@ -380,6 +404,12 @@ const MessagesBase = ({
       <AcpMessageItem
         msg={block.msg}
         onSuppress={suppressMessage}
+        commandConnected={connected}
+        commandConnectionWasEstablished={hasConnectedOnce}
+        canAbortCommand={taskPhase === 'running'}
+        commandAbortPending={abortTurn.isPending || abortRequested}
+        onAbortCommand={() => abortTurn.mutate()}
+        commandOutputVisible={commandOutputVisible}
         showSubagentPayload={showInternalMessages}
       >
         {block.childBlocks?.length

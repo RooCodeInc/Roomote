@@ -7,6 +7,7 @@ type AcpToolUiMessage = AcpToolCallUiMessage | AcpToolResultUiMessage;
 
 interface ToolDetailVisibilityOptions {
   showSubagentPayload?: boolean;
+  showCommandOutput?: boolean;
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -71,6 +72,18 @@ export function hidesExpandedToolResult(
 ): boolean {
   const data = msg.data as unknown as Record<string, unknown>;
 
+  if (isInternalDebugToolCallMessage(msg)) {
+    return true;
+  }
+
+  if (
+    msg.data.kind === 'execute' ||
+    msg.data.kind === 'execute_command' ||
+    data.isExecute === true
+  ) {
+    return options?.showCommandOutput !== true;
+  }
+
   if (isSubagentToolPayload(msg.data)) {
     if (options?.showSubagentPayload === true) {
       return false;
@@ -81,12 +94,5 @@ export function hidesExpandedToolResult(
     );
   }
 
-  return (
-    isInternalDebugToolCallMessage(msg) ||
-    msg.data.kind === 'read' ||
-    msg.data.kind === 'execute' ||
-    msg.data.kind === 'execute_command' ||
-    data.isRead === true ||
-    data.isExecute === true
-  );
+  return msg.data.kind === 'read' || data.isRead === true;
 }

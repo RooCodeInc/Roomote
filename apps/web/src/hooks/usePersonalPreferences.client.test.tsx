@@ -143,6 +143,7 @@ describe('usePersonalPreferences', () => {
     expect(result.current.preferences).toEqual({
       colorTheme: 'system',
       narrationMode: false,
+      showCommandOutput: false,
     });
   });
 
@@ -152,6 +153,14 @@ describe('usePersonalPreferences', () => {
     result.current.setPreferences({ colorTheme: 'dark' });
 
     expect(mutateMock).toHaveBeenCalledWith({ colorTheme: 'dark' });
+  });
+
+  it('updates command output visibility independently', () => {
+    const { result } = renderHook(() => usePersonalPreferences());
+
+    result.current.setPreferences({ showCommandOutput: true });
+
+    expect(mutateMock).toHaveBeenCalledWith({ showCommandOutput: true });
   });
 
   it('optimistically updates and revalidates the preferences cache', async () => {

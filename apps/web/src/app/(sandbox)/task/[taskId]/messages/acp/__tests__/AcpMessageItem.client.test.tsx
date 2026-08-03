@@ -92,6 +92,22 @@ describe('AcpMessageItem tool routing', () => {
     expect(toolMessageSpy).not.toHaveBeenCalled();
   });
 
+  it('renders alternate execute command kinds as command output', () => {
+    const msg = buildToolResult('execute_command', {
+      isExecute: true,
+      command: 'pnpm test',
+      exitCode: 0,
+    });
+
+    render(<AcpMessageItem msg={msg} />);
+
+    expect(screen.getByText('command output')).toBeInTheDocument();
+    expect(commandOutputSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ msg }),
+    );
+    expect(toolMessageSpy).not.toHaveBeenCalled();
+  });
+
   it.each(['read', 'search', 'mcp', 'subagent'])(
     'renders %s tools as standard tool rows',
     (kind) => {

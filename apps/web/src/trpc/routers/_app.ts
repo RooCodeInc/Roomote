@@ -180,6 +180,7 @@ import {
   restoreTaskRunSnapshotCommand,
 } from '../commands/snapshots';
 import {
+  abortSandboxTurnCommand,
   answerSandboxUserInputRequestCommand,
   answerSandboxUserInputRequestInputSchema,
   getSandboxSessionByTaskIdCommand,
@@ -1319,11 +1320,13 @@ export const appRouter = createRouter({
           .object({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             narrationMode: z.boolean().optional(),
+            showCommandOutput: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
-              input.narrationMode !== undefined,
+              input.narrationMode !== undefined ||
+              input.showCommandOutput !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -1834,6 +1837,12 @@ export const appRouter = createRouter({
       .input(answerSandboxUserInputRequestInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         answerSandboxUserInputRequestCommand(auth, input),
+      ),
+
+    abortTurn: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        abortSandboxTurnCommand(auth, input),
       ),
 
     takeOverBrowserControl: protectedProcedure

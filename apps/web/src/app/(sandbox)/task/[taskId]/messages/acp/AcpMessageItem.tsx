@@ -12,6 +12,12 @@ import { AcpUnknownMessage } from './AcpUnknownMessage';
 interface AcpMessageItemProps {
   msg: AcpUiMessage;
   onSuppress?: (messageId: string) => void;
+  commandConnected?: boolean;
+  commandConnectionWasEstablished?: boolean;
+  canAbortCommand?: boolean;
+  commandAbortPending?: boolean;
+  onAbortCommand?: () => void;
+  commandOutputVisible?: boolean;
   showSubagentPayload?: boolean;
   children?: ReactNode;
 }
@@ -19,6 +25,12 @@ interface AcpMessageItemProps {
 function AcpMessageItemBase({
   msg,
   onSuppress,
+  commandConnected,
+  commandConnectionWasEstablished,
+  canAbortCommand,
+  commandAbortPending,
+  onAbortCommand,
+  commandOutputVisible,
   showSubagentPayload = false,
   children,
 }: AcpMessageItemProps) {
@@ -31,11 +43,17 @@ function AcpMessageItemBase({
       return <AcpTodoSectionMessage msg={msg} />;
     case 'tool_call':
     case 'tool_result': {
-      return msg.data.kind === 'execute' ? (
+      return msg.data.isExecute ? (
         <AcpCommandOutputMessage
           msg={msg}
           ts={msg.ts}
           status={msg.data.status}
+          connected={commandConnected}
+          connectionWasEstablished={commandConnectionWasEstablished}
+          canAbort={canAbortCommand}
+          abortPending={commandAbortPending}
+          onAbort={onAbortCommand}
+          showOutput={commandOutputVisible}
         />
       ) : (
         <AcpToolMessage msg={msg} showSubagentPayload={showSubagentPayload}>

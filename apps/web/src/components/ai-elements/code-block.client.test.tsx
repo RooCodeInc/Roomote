@@ -11,6 +11,17 @@ const LONG_COMMAND =
   'gh pr checks 1219 --repo Roomote/example-app --watch --required --interval 5 --json state,name,link';
 
 describe('CodeBlock', () => {
+  it('uses theme colors for compact output', () => {
+    const { container } = render(
+      <CodeBlock code="live output" language="bash" variant="compact" />,
+    );
+
+    const output = container.querySelector('[data-language="bash"] > div');
+
+    expect(output).toHaveClass('bg-muted/50', 'text-foreground');
+    expect(output).not.toHaveClass('bg-zinc-800', 'dark');
+  });
+
   it('does not reserve collapsed header space for an invisible copy button', () => {
     render(
       <CodeBlock

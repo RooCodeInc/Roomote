@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { AcpGroupedToolMessage } from '../AcpGroupedToolMessage';
 import type { GroupedToolCallRenderBlock } from '../render-blocks';
+import type { AcpToolResultUiMessage } from '../types';
 
 const codeBlockSpy = vi.fn();
 
@@ -115,6 +116,34 @@ function buildGroup(): GroupedToolCallRenderBlock {
   };
 }
 
+function buildExecuteGroup(): GroupedToolCallRenderBlock {
+  const group = buildGroup();
+
+  return {
+    ...group,
+    action: 'Running',
+    objectSummary: '2 commands',
+    displayKind: 'execute',
+    items: group.items.map((item, index) => ({
+      ...item,
+      objectLabel: `command ${index + 1}`,
+      displayKind: 'execute',
+      stepKind: null,
+      msg: {
+        ...item.msg,
+        text: `output ${index + 1}`,
+        data: {
+          ...item.msg.data,
+          kind: 'execute_command',
+          isExecute: true,
+          command: `echo ${index + 1}`,
+          output: `output ${index + 1}`,
+        },
+      } as AcpToolResultUiMessage,
+    })),
+  };
+}
+
 describe('AcpGroupedToolMessage', () => {
   beforeEach(() => {
     codeBlockSpy.mockClear();
@@ -130,5 +159,24 @@ describe('AcpGroupedToolMessage', () => {
     expect(screen.getByText('file_b.txt').className).toContain('truncate');
 
     expect(codeBlockSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows grouped command output only when the preference is enabled', () => {
+    const group = buildExecuteGroup();
+    const { rerender } = render(<AcpGroupedToolMessage group={group} />);
+
+    expect(codeBlockSpy).not.toHaveBeenCalled();
+
+    rerender(<AcpGroupedToolMessage group={group} showCommandOutput />);
+
+    expect(codeBlockSpy).toHaveBeenCalledTimes(2);
+    expect(codeBlockSpy).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ code: 'output 1' }),
+    );
+    expect(codeBlockSpy).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ code: 'output 2' }),
+    );
   });
 });

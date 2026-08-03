@@ -16,6 +16,9 @@ const meta: Meta<typeof AcpCommandOutputMessage> = {
     layout: 'padded',
   },
   tags: ['autodocs'],
+  args: {
+    showOutput: true,
+  },
   decorators: [
     (Story) => (
       <div className="w-full max-w-2xl border rounded-lg overflow-hidden bg-background p-4">
@@ -37,7 +40,7 @@ const toolResultMsg = (
 ): AcpToolResultUiMessage =>
   ({
     id: 'story-msg',
-    ts: 0,
+    ts: Date.now(),
     role: 'assistant',
     partial: false,
     sessionId: null,

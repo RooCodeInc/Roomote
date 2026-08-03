@@ -27,21 +27,33 @@ interface AcpToolDetailsProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
   maxHeight?: number;
   showSubagentPayload?: boolean;
+  showCommandOutput?: boolean;
 }
 
 export function AcpToolDetails({
   msg,
   maxHeight = 400,
   showSubagentPayload = false,
+  showCommandOutput = false,
 }: AcpToolDetailsProps) {
-  if (hidesExpandedToolResult(msg, { showSubagentPayload })) {
+  if (
+    hidesExpandedToolResult(msg, {
+      showSubagentPayload,
+      showCommandOutput,
+    })
+  ) {
     return null;
   }
 
   const sanitizedToolData = sanitizeSandboxPathsForDisplay(msg.data);
-  const sanitizedText = msg.text
-    ? sanitizeSandboxPathString(msg.text)
-    : msg.text;
+  const displayText =
+    msg.text ||
+    (msg.kind === 'tool_result' && msg.data.isExecute
+      ? msg.data.output
+      : undefined);
+  const sanitizedText = displayText
+    ? sanitizeSandboxPathString(displayText)
+    : displayText;
   const isSubagent = isSubagentToolPayload(msg.data);
   const subagentPrompt = getSubagentPrompt(msg);
   const subagentLastMessage = getSubagentLastMessage(msg);

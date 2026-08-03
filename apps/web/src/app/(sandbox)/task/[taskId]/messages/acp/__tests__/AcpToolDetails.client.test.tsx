@@ -218,6 +218,42 @@ describe('AcpToolDetails', () => {
     );
   });
 
+  it('shows execute output when command output visibility is enabled', () => {
+    const msg = {
+      ...buildMessage({
+        kind: 'execute_command',
+        title: 'Run command',
+        isExecute: true,
+        command: 'pnpm test',
+        output: 'Tests passed',
+      }),
+      text: '',
+    };
+
+    render(<AcpToolDetails msg={msg} showCommandOutput />);
+
+    expect(codeBlockSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'Tests passed' }),
+    );
+    expect(toolInputSpy).not.toHaveBeenCalled();
+  });
+
+  it('hides execute output when command output visibility is disabled', () => {
+    const msg = buildMessage({
+      kind: 'execute',
+      title: 'Run command',
+      isExecute: true,
+      command: 'pnpm test',
+      output: 'Tests passed',
+    });
+
+    const { container } = render(<AcpToolDetails msg={msg} />);
+
+    expect(container).toBeEmptyDOMElement();
+    expect(codeBlockSpy).not.toHaveBeenCalled();
+    expect(toolInputSpy).not.toHaveBeenCalled();
+  });
+
   it('hides expanded details for Roomote Slack lifecycle tools', () => {
     const { container } = render(
       <AcpToolDetails

@@ -47,6 +47,28 @@ function toolCallUpdate(sequence: number): AcpMessage {
   };
 }
 
+function toolCall(sequence: number): AcpMessage {
+  return {
+    id: `opencode-server:${sequence}`,
+    ts: 1000 + sequence,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+    role: 'tool',
+    kind: 'tool_call',
+    contentBlocks: [],
+    metadata: {
+      sessionId: 'session-opencode',
+      turnId: 'message-opencode',
+    },
+    payload: {
+      toolCallId: 'tool-call-1',
+      kind: 'execute',
+      title: 'Run command',
+      command: 'git push',
+      status: 'in_progress',
+    },
+  };
+}
+
 function subagentActivityUpdate(
   sequence: number,
   lastMessage: string,
@@ -72,6 +94,24 @@ function subagentActivityUpdate(
 }
 
 describe('AcpProtocolService', () => {
+  it('preserves a tool call start time across later updates', () => {
+    const service = new AcpProtocolService();
+    let messages = service.applyOutputEvent([], toolCall(1))!.acpMessages;
+
+    messages = service.applyOutputEvent(
+      messages,
+      toolCallUpdate(20),
+    )!.acpMessages;
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      ts: 1020,
+      startedAt: 1001,
+      kind: 'tool_result',
+      partial: true,
+    });
+  });
+
   it('continues a partial assistant stream after active stream state is rebuilt', () => {
     const service = new AcpProtocolService();
     let messages = service.applyOutputEvent(
