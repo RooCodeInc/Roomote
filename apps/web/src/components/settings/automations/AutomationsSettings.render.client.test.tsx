@@ -1014,6 +1014,44 @@ describe('AutomationsSettings', () => {
     expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
   });
 
+  it('preserves an existing destination while capabilities are loading', async () => {
+    state.settingsQuery.isPending = true;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Weekly flaky-test scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'weekly',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Weekly flaky-test scan',
+      }),
+    );
+
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Slack');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
     state.settingsQuery.data.reviewer.enabled = true;
     state.settingsQuery.data.reviewer.reviewAllPullRequestAuthors = true;

@@ -135,11 +135,13 @@ function targetFromRow(row: CustomAutomationListItem): {
 
 function formFromRow(
   row: CustomAutomationListItem,
-  connectedProviders: readonly AutomationDestinationProvider[],
+  connectedProviders: readonly AutomationDestinationProvider[] | null,
 ): CustomAutomationFormState {
   const target = targetFromRow(row);
   const targetIsConnected =
-    target.provider === 'none' || connectedProviders.includes(target.provider);
+    connectedProviders === null ||
+    target.provider === 'none' ||
+    connectedProviders.includes(target.provider);
   return {
     name: row.name,
     prompt: row.prompt,
@@ -215,17 +217,25 @@ export function CustomAutomationsSection() {
   const managerDiscordChannelId =
     settingsQuery.data?.settings.managerDiscordChannelId ?? '';
   const capabilities = settingsQuery.data?.capabilities;
+  const capabilitiesLoaded = !settingsQuery.isPending && Boolean(capabilities);
   const connectedDestinationOptions = useMemo(
     () =>
-      DESTINATION_OPTIONS.filter(
-        (option) => capabilities?.[option.capability] === true,
-      ),
-    [capabilities],
+      capabilitiesLoaded
+        ? DESTINATION_OPTIONS.filter(
+            (option) => capabilities?.[option.capability] === true,
+          )
+        : [],
+    [capabilities, capabilitiesLoaded],
   );
   const connectedDestinationProviders = useMemo(
     () => connectedDestinationOptions.map((option) => option.value),
     [connectedDestinationOptions],
   );
+  const visibleDestinationOptions = capabilitiesLoaded
+    ? connectedDestinationOptions
+    : DESTINATION_OPTIONS.filter(
+        (option) => option.value === form.targetProvider,
+      );
 
   const environmentOptions = useMemo(
     () =>
@@ -424,7 +434,12 @@ export function CustomAutomationsSection() {
   const editAutomation = (row: CustomAutomationListItem) => {
     setEditingId(row.id);
     setIsCreating(false);
-    setForm(formFromRow(row, connectedDestinationProviders));
+    setForm(
+      formFromRow(
+        row,
+        capabilitiesLoaded ? connectedDestinationProviders : null,
+      ),
+    );
     setResolvedCron(row.cronExpression ?? null);
     setScheduleSummary(null);
     window.history.replaceState(
@@ -448,7 +463,12 @@ export function CustomAutomationsSection() {
       if (row) {
         setEditingId(row.id);
         setIsCreating(false);
-        setForm(formFromRow(row, connectedDestinationProviders));
+        setForm(
+          formFromRow(
+            row,
+            capabilitiesLoaded ? connectedDestinationProviders : null,
+          ),
+        );
         setResolvedCron(row.cronExpression ?? null);
         setScheduleSummary(null);
       }
@@ -457,7 +477,23 @@ export function CustomAutomationsSection() {
     openLinkedAutomation();
     window.addEventListener('hashchange', openLinkedAutomation);
     return () => window.removeEventListener('hashchange', openLinkedAutomation);
-  }, [connectedDestinationProviders, rows]);
+  }, [capabilitiesLoaded, connectedDestinationProviders, rows]);
+
+  useEffect(() => {
+    if (!capabilitiesLoaded) return;
+
+    setForm((current) =>
+      current.targetProvider === 'none' ||
+      connectedDestinationProviders.includes(current.targetProvider)
+        ? current
+        : {
+            ...current,
+            targetProvider: 'none',
+            targetChannelId: '',
+            targetServiceUrl: '',
+          },
+    );
+  }, [capabilitiesLoaded, connectedDestinationProviders]);
 
   const saveForm = () => {
     if (!form.environmentId) {
@@ -697,7 +733,7 @@ export function CustomAutomationsSection() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">None</SelectItem>
-                {connectedDestinationOptions.map((option) => (
+                {visibleDestinationOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -827,7 +863,11 @@ export function CustomAutomationsSection() {
             >
               Cancel
             </Button>
-            <Button type="button" disabled={busy} onClick={saveForm}>
+            <Button
+              type="button"
+              disabled={busy || !capabilitiesLoaded}
+              onClick={saveForm}
+            >
               {editingId ? 'Save' : 'Create'}
             </Button>
           </div>
@@ -855,7 +895,7 @@ export function CustomAutomationsSection() {
           <Button
             type="button"
             size="sm"
-            disabled={busy || atCap}
+            disabled={busy || atCap || !capabilitiesLoaded}
             onClick={() => {
               const managerProvider =
                 managerSlackChannelId &&
