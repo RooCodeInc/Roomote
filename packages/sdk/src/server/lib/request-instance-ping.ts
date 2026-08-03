@@ -10,6 +10,7 @@ import { getRedis } from '@roomote/redis';
  */
 const SCHEDULED_JOBS_QUEUE = 'scheduled-jobs';
 const INSTANCE_PING_JOB = 'InstancePing';
+const LICENSE_USAGE_SYNC_JOB = 'LicenseUsageSync';
 
 let queue: Queue | null = null;
 
@@ -54,6 +55,27 @@ export async function requestInstancePing(reason: string): Promise<void> {
   } catch (error) {
     console.warn(
       `[requestInstancePing] failed to enqueue (reason=${reason}):`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+/**
+ * Requests prompt delivery of durable licensed-usage observations. Unlike
+ * telemetry, missed queue requests are harmless because the scheduler drains
+ * the database outbox again.
+ */
+export async function requestLicenseUsageSync(reason: string): Promise<void> {
+  try {
+    const minuteBucket = Math.floor(Date.now() / 60_000);
+    await getQueue().add(
+      LICENSE_USAGE_SYNC_JOB,
+      { reason },
+      { jobId: `license-usage-sync-request-${minuteBucket}` },
+    );
+  } catch (error) {
+    console.warn(
+      `[requestLicenseUsageSync] failed to enqueue (reason=${reason}):`,
       error instanceof Error ? error.message : error,
     );
   }

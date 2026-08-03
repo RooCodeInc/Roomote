@@ -50,9 +50,6 @@ const config: KnipConfig = {
         'src/**/*.stories.{ts,tsx}',
       ],
       project: ['src/**/*.{ts,tsx}'],
-      // Public capture API for anonymous analytics; kept available for
-      // product code even before the first in-repo consumer lands.
-      ignore: ['src/hooks/useTelemetry.ts'],
       // Used to satisfy vulnerable peer resolution edges in Storybook/Sentry, not imported directly.
       ignoreDependencies: ['webpack'],
     },

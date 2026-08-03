@@ -9,6 +9,8 @@ export enum ScheduledJobName {
   SleepCheck = 'SleepCheck',
   PullRequestAnalyticsSync = 'PullRequestAnalyticsSync',
   InstancePing = 'InstancePing',
+  LicenseUsageSync = 'LicenseUsageSync',
+  LicenseUsageHeartbeat = 'LicenseUsageHeartbeat',
   WebhookCleanup = 'WebhookCleanup',
   StandbyRetention = 'StandbyRetention',
   CustomAutomations = 'custom_automations',

@@ -32,6 +32,7 @@ const {
 
 vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
   requestInstancePing: vi.fn(async () => undefined),
+  requestLicenseUsageSync: vi.fn(async () => undefined),
 }));
 
 vi.mock('next/headers', () => ({
@@ -39,6 +40,7 @@ vi.mock('next/headers', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  recordLicenseUsageObservation: vi.fn(async () => undefined),
   db: {
     query: {
       deploymentSettings: {

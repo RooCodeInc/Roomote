@@ -16,7 +16,7 @@ const LOG_PREFIX = '[instancePing]';
  * 1. Version check against the Ping service (mandatory; carries only the
  *    anonymous instance id + running version). The result is stored for the
  *    in-app "update available" notice.
- * 2. Anonymous instance stats report (covered by the admin opt-out).
+ * 2. Anonymous instance stats report, honoring the admin opt-out.
  *
  * Sends nothing at all in environments where telemetry is not allowed
  * (non-production / no RELEASE_VERSION, unless force-enabled with an explicit

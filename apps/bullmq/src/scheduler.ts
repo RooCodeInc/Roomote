@@ -27,6 +27,7 @@ import {
   refreshSnapshotsJob,
   pullRequestAnalyticsSyncJob,
   instancePingJob,
+  licenseUsageSyncJob,
   webhookCleanupJob,
   standbyRetentionJob,
 } from './scheduled-jobs';
@@ -162,6 +163,24 @@ async function createJobs(queue: Queue): Promise<void> {
   );
 
   await queue.upsertJobScheduler(
+    ScheduledJobName.LicenseUsageSync,
+    { every: 15 * 60 * 1000 }, // Drain durable usage observations promptly.
+  );
+
+  await queue.upsertJobScheduler(
+    ScheduledJobName.LicenseUsageHeartbeat,
+    { every: 24 * 60 * 60 * 1000 }, // Daily billing liveness observation.
+  );
+
+  // An environment-provided license has no Settings mutation to trigger an
+  // activation request, so establish or renew its Cloud lease at startup.
+  await queue.add(
+    ScheduledJobName.LicenseUsageHeartbeat,
+    { reason: 'scheduler-startup' },
+    { jobId: `license-usage-startup-${Date.now()}` },
+  );
+
+  await queue.upsertJobScheduler(
     ScheduledJobName.WebhookCleanup,
     { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
   );
@@ -189,6 +208,10 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return pullRequestAnalyticsSyncJob(job.data ?? {});
     case ScheduledJobName.InstancePing:
       return instancePingJob();
+    case ScheduledJobName.LicenseUsageSync:
+      return licenseUsageSyncJob();
+    case ScheduledJobName.LicenseUsageHeartbeat:
+      return licenseUsageSyncJob({ heartbeat: true });
     case ScheduledJobName.WebhookCleanup:
       return webhookCleanupJob();
     case ScheduledJobName.StandbyRetention:

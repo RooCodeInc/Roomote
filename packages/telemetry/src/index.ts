@@ -115,3 +115,22 @@ export interface PingVersionCheckResponse {
   latestVersion: string | null;
   checkedAt?: string;
 }
+
+export type LicenseEntitlementValue = string | number | boolean;
+
+export interface LicenseUsageReportRequest {
+  contractVersion: 1;
+  deploymentId: string;
+  eventId: string;
+  observedAt: string;
+  appVersion?: string;
+  usage: { activeUsers: number };
+}
+
+export interface LicenseUsageReportResponse {
+  licenseId: string;
+  activationExpiresAt: string;
+  entitlementsVersion: string;
+  entitlements: Record<string, LicenseEntitlementValue>;
+  entitlementsExpiresAt: string;
+}
