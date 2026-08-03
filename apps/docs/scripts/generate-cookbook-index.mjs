@@ -67,7 +67,7 @@ function renderTable(recipes) {
         recipe.contributorUrl,
       );
       const company = recipe.contributorCompany
-        ? ` (${renderLinkedValue(recipe.contributorCompany, recipe.contributorCompanyUrl)})`
+        ? `<br />${renderLinkedValue(recipe.contributorCompany, recipe.contributorCompanyUrl)}`
         : '';
 
       return `| [${escapeTableCell(recipe.title)}](${recipe.slug}) | ${escapeTableCell(recipe.description)} | ${contributor}${company} |`;
