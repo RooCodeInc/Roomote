@@ -1187,6 +1187,25 @@ describe('inference gateway', () => {
     expect(headers.get('authorization')).toBe('Bearer provider-secret-key');
   });
 
+  it('forwards OpenCode Go requests to the subscription endpoint', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/opencode-go/v1/responses',
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
+      'OPENCODE_GO_API_KEY',
+    ]);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://opencode.ai/zen/go/v1/responses');
+
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer provider-secret-key');
+  });
+
   it('preserves the query string on upstream requests', async () => {
     const fetchMock = stubUpstreamFetch();
     const app = createApp(createRunToken());

@@ -1,0 +1,55 @@
+---
+title: OpenCode Go
+icon: 'https://unpkg.com/@lobehub/icons-static-svg@1.94.0/icons/opencode.svg'
+description: Use an OpenCode Go subscription with Roomote.
+---
+
+OpenCode Go is a subscription for a curated catalog of coding models. Use this
+provider when you want Roomote tasks to consume the allowance included with
+your Go plan.
+
+## Subscribe and get an API key
+
+Sign in to [OpenCode](https://opencode.ai/auth), subscribe to Go, and copy your
+API key. OpenCode currently allows one Go subscription per workspace.
+
+## Configuration
+
+Add **OpenCode Go** in **Settings > Models** and paste the key, or set:
+
+```sh
+OPENCODE_GO_API_KEY=...
+```
+
+Roomote uses a separate environment variable so Zen and Go can be configured
+independently. Paste the OpenCode API key issued for the workspace; Roomote
+binds it to OpenCode's `opencode-go` provider at runtime.
+
+Go models use the `opencode-go/` prefix. Connecting the provider adds a curated
+set of eligible models and recommends lower-cost options for helper work.
+
+## Usage behavior
+
+Requests consume the rolling and monthly allowances defined by your Go plan.
+The OpenCode account console is authoritative for current usage and resets. If
+you enable **Use balance** in OpenCode, requests can fall back to your Zen
+balance after the included allowance is exhausted.
+
+See [OpenCode Go documentation](https://opencode.ai/docs/go/) for current
+models, limits, pricing, and retention details.
+
+## Verify setup
+
+1. save `OPENCODE_GO_API_KEY`
+2. confirm OpenCode Go models appear in **Settings > Models**
+3. apply a preset or assign an `opencode-go/...` model manually
+4. run a small task and confirm it appears in OpenCode usage
+
+## Common issues
+
+- **The key is rejected.** Confirm the workspace has an active Go subscription
+  and that you copied its OpenCode API key.
+- **A model is unavailable.** Go's catalog can change; select another model
+  shown in the OpenCode Go console.
+- **Requests stop after sustained use.** Check the plan's rolling, weekly, and
+  monthly allowance windows in OpenCode.

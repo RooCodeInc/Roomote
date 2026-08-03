@@ -404,6 +404,7 @@ common provider keys into worker containers:
 - `ZAI_CODING_PLAN_API_KEY` (Z.AI Coding Plan, `zai-coding-plan/...` models,
   with `ZAI_CODING_PLAN_REGION`)
 - `OPENCODE_API_KEY`
+- `OPENCODE_GO_API_KEY` (OpenCode Go subscription, `opencode-go/...` models)
 
 If your provider uses another env var name, list it in
 `R_MODEL_ENV_KEYS`:

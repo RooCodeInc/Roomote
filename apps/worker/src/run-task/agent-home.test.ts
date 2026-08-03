@@ -316,6 +316,43 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('binds OpenCode Go to its dedicated key in direct mode', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'opencode-go/kimi-k2.7-code',
+        OPENCODE_GO_API_KEY: 'go-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['opencode-go']?.options).toMatchObject({
+      apiKey: '{env:OPENCODE_GO_API_KEY}',
+    });
+    expect(result.configContent).not.toContain('go-key');
+  });
+
+  it('rebases OpenCode Go onto its inference gateway route', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'opencode-go/kimi-k2.7-code',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'OPENCODE_GO_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['opencode-go']?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/opencode-go/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+  });
+
   it('rebases Azure providers onto the inference gateway without a /v1 suffix', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

@@ -1,4 +1,5 @@
 import type { SetupModelProviderId } from './model-provider-config';
+import { OPENCODE_GO_API_KEY_ENV_VAR_NAME } from './model-provider-config';
 import {
   getOpenAiCompatibleProviderInstance,
   isOpenAiCompatibleProviderEnvVarName,
@@ -377,6 +378,19 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       upstreamBaseUrl: 'https://opencode.ai/zen',
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'opencode-go',
+      name: 'OpenCode Go',
+      envVarNames: [OPENCODE_GO_API_KEY_ENV_VAR_NAME],
+      upstreamBaseUrl: 'https://opencode.ai/zen/go',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: [
+        ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+        ...OPENAI_RESPONSES_INFERENCE_PATHS,
+        ...ANTHROPIC_COMPATIBLE_INFERENCE_PATHS,
+      ],
       openCodeBaseUrlSuffix: '/v1',
     },
     {
