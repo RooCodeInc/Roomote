@@ -27,6 +27,10 @@ import {
   updateTaskRunMachine,
 } from '../utils';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
+import {
+  COMPUTE_BOOTSTRAP_TIMEOUT_MS,
+  COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
+} from './timeouts';
 
 export async function spawnBlaxelWorker(
   taskRun: TaskRun,
@@ -120,8 +124,8 @@ export async function spawnBlaxelWorker(
     tags: config.blaxelTags,
     timeoutMs: config.blaxelTimeoutMs,
     localTarballPath: config.localTarballPath,
-    createInstanceTimeoutMs: 180_000,
-    bootstrapTimeoutMs: 120_000,
+    createInstanceTimeoutMs: COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
+    bootstrapTimeoutMs: COMPUTE_BOOTSTRAP_TIMEOUT_MS,
     computeClient,
     onMutation: recordMutation,
     ...launchOptions,

@@ -1,3 +1,4 @@
+import { canRetryFailedStart } from '@roomote/cloud-agents/server';
 import {
   RunStatus,
   TaskPayloadKind,
@@ -572,7 +573,13 @@ async function getResolvedSandboxTaskRunForTaskAccess(
 
   return {
     task: taskById,
-    taskRun,
+    taskRun: {
+      ...taskRun,
+      // Whether `enqueueTaskRelaunch` would accept this run, so the
+      // failure UI can offer retry exactly where it works instead of
+      // approximating the command's rules client-side.
+      canRetryFailedStart: await canRetryFailedStart(taskRun),
+    },
   };
 }
 

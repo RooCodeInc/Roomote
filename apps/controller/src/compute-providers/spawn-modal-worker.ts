@@ -31,6 +31,10 @@ import {
   updateTaskRunMachine,
 } from '../utils';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
+import {
+  COMPUTE_BOOTSTRAP_TIMEOUT_MS,
+  COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
+} from './timeouts';
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
 
@@ -367,8 +371,8 @@ export async function spawnModalWorker(
     tags: modalTags,
     timeoutMs: modalTimeoutMs,
     localTarballPath,
-    createInstanceTimeoutMs: 180_000,
-    bootstrapTimeoutMs: 120_000,
+    createInstanceTimeoutMs: COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
+    bootstrapTimeoutMs: COMPUTE_BOOTSTRAP_TIMEOUT_MS,
     computeClient,
     onMutation: recordMutation,
     ...launchOptions,
