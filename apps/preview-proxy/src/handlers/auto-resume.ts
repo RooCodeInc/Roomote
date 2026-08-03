@@ -2,6 +2,7 @@ import {
   type TaskPayload,
   TaskPayloadKind,
   activeRunStatuses,
+  populateSnapshotResumeCommunicationMetadata,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
   type PreviewTokenContext,
@@ -109,6 +110,9 @@ export async function triggerAutoResume(
     // Slack thread metadata rides along on the source run's payload; the
     // task-level channel bindings stay on the existing task row.
     populateSnapshotResumeSlackMetadata(payload, {
+      sourcePayload: taskRun.payload,
+    });
+    populateSnapshotResumeCommunicationMetadata(payload, {
       sourcePayload: taskRun.payload,
     });
     restoreSnapshotResumeVisiblePromptFields(payload, sourcePayload);
