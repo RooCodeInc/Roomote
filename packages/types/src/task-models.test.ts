@@ -73,6 +73,9 @@ describe('normalizeTaskModelId', () => {
     expect(normalizeTaskModelId('opencode/big-pickle')).toBe(
       'opencode/big-pickle',
     );
+    expect(normalizeTaskModelId('opencode-go/kimi-k2.7-code')).toBe(
+      'opencode-go/kimi-k2.7-code',
+    );
     expect(
       normalizeTaskModelId('bedrock-mantle/anthropic.claude-sonnet-5'),
     ).toBe('bedrock-mantle/anthropic.claude-sonnet-5');
@@ -133,6 +136,32 @@ describe('task model settings', () => {
       models: DEFAULT_TASK_MODEL_SETTINGS.models,
       allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
       defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+    });
+  });
+
+  it('migrates persisted OpenCode DeepSeek Flash model settings', () => {
+    const settings = normalizeTaskModelSettings({
+      models: [
+        {
+          id: 'opencode/deepseek-v4-flash-0731',
+          displayName: 'DeepSeek V4 Flash 0731',
+          family: 'DeepSeek',
+        },
+      ],
+      allowedModelIds: ['opencode/deepseek-v4-flash-0731'],
+      defaultModelId: 'opencode/deepseek-v4-flash-0731',
+    });
+
+    expect(settings).toEqual({
+      models: [
+        {
+          id: 'opencode/deepseek-v4-flash',
+          displayName: 'DeepSeek V4 Flash 0731',
+          family: 'DeepSeek',
+        },
+      ],
+      allowedModelIds: ['opencode/deepseek-v4-flash'],
+      defaultModelId: 'opencode/deepseek-v4-flash',
     });
   });
 

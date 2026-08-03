@@ -66,6 +66,7 @@ const MODEL_PROVIDER_DOC_PATHS: Partial<
   openai: 'providers/inference/openai',
   'openai-compatible': 'providers/inference/openai-compatible',
   opencode: 'providers/inference/opencode',
+  'opencode-go': 'providers/inference/opencode-go',
   openrouter: 'providers/inference/openrouter',
   togetherai: 'providers/inference/together-ai',
   vercel: 'providers/inference/vercel-ai-gateway',

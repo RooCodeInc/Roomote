@@ -54,6 +54,33 @@ describe('inference gateway URL builders', () => {
     );
   });
 
+  it('registers OpenCode Go with its subscription endpoint and API key', () => {
+    const provider = getInferenceGatewayProvider('opencode-go');
+
+    expect(provider).toMatchObject({
+      envVarNames: ['OPENCODE_GO_API_KEY'],
+      upstreamBaseUrl: 'https://opencode.ai/zen/go',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      openCodeBaseUrlSuffix: '/v1',
+    });
+    expect(provider?.allowedPaths).toEqual(
+      expect.arrayContaining([
+        '/v1/chat/completions',
+        '/v1/responses',
+        '/v1/messages',
+      ]),
+    );
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/opencode-go/v1');
+    expect(
+      getInferenceGatewayProviderByEnvVarName('OPENCODE_GO_API_KEY')?.id,
+    ).toBe('opencode-go');
+  });
+
   it('registers native Amazon Bedrock with its regional runtime endpoint', () => {
     const provider = getInferenceGatewayProvider('amazon-bedrock');
 

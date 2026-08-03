@@ -29,6 +29,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'kimi-for-coding',
   'minimax',
   'opencode',
+  'opencode-go',
   'amazon-bedrock',
   'google',
   'xai',
@@ -219,8 +220,18 @@ export function isTaskModelIdDisabled(modelId: string): boolean {
     : false;
 }
 
+const TASK_MODEL_ID_ALIASES: Readonly<Record<string, string>> = {
+  // OpenCode Zen serves this dated release through an undated stable alias.
+  'opencode/deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
+};
+
+/** Rewrites model IDs that Roomote persisted before a provider slug changed. */
+export function resolveTaskModelIdAlias(modelId: string): string {
+  return TASK_MODEL_ID_ALIASES[modelId] ?? modelId;
+}
+
 export function normalizeTaskModelId(modelId: string): string {
-  const trimmedModelId = modelId.trim();
+  const trimmedModelId = resolveTaskModelIdAlias(modelId.trim());
 
   if (
     trimmedModelId &&

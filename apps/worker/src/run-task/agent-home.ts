@@ -38,6 +38,7 @@ import {
   resolveOpenRouterVariantModelAlias,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
@@ -1095,6 +1096,37 @@ function mergeAzureCognitiveServicesProviderConfig(
   };
 }
 
+/**
+ * OpenCode's catalog maps both Zen and Go to OPENCODE_API_KEY. Roomote keeps
+ * their credentials separate, so bind Go to its dedicated env var directly.
+ * Gateway mode replaces this value with the run token later.
+ */
+function mergeOpenCodeGoProviderConfig(
+  providerConfig: Record<string, unknown>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  const providerId = 'opencode-go';
+  if (
+    !modelIds.some((modelId) => modelId?.trim().startsWith(`${providerId}/`))
+  ) {
+    return providerConfig;
+  }
+
+  const existingProvider = asRecord(providerConfig[providerId]);
+  const existingOptions = asRecord(existingProvider.options);
+
+  return {
+    ...providerConfig,
+    [providerId]: {
+      ...existingProvider,
+      options: {
+        apiKey: `{env:${OPENCODE_GO_API_KEY_ENV_VAR_NAME}}`,
+        ...existingOptions,
+      },
+    },
+  };
+}
+
 function normalizeStringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((entry): entry is string => typeof entry === 'string');
@@ -1703,18 +1735,22 @@ function resolveModelBackedOpenCodeConfig(
       )
     : providerReasoningConfig;
   const providerConfig = mergeInferenceGatewayProviderConfig(
-    mergeAzureCognitiveServicesProviderConfig(
-      mergeAmazonBedrockProviderConfig(
-        mergeBedrockMantleProviderConfig(
-          mergeBedrockMantleOpenAiProviderConfig(
-            mergeOpenAiCompatibleProviderConfig(
-              mergeOpenRouterVariantAliasModels(
-                providerModelConfig,
-                variantAliases,
+    mergeOpenCodeGoProviderConfig(
+      mergeAzureCognitiveServicesProviderConfig(
+        mergeAmazonBedrockProviderConfig(
+          mergeBedrockMantleProviderConfig(
+            mergeBedrockMantleOpenAiProviderConfig(
+              mergeOpenAiCompatibleProviderConfig(
+                mergeOpenRouterVariantAliasModels(
+                  providerModelConfig,
+                  variantAliases,
+                ),
+                runtimeEnv,
+                configuredModelIds,
+                visionModel ?? effectiveCodingModel,
               ),
               runtimeEnv,
               configuredModelIds,
-              visionModel ?? effectiveCodingModel,
             ),
             runtimeEnv,
             configuredModelIds,
@@ -1722,7 +1758,6 @@ function resolveModelBackedOpenCodeConfig(
           runtimeEnv,
           configuredModelIds,
         ),
-        runtimeEnv,
         configuredModelIds,
       ),
       configuredModelIds,

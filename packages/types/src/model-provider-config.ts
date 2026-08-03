@@ -14,6 +14,7 @@ import {
   ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   getTaskModelProviderId,
   isTaskModelIdDisabled,
+  resolveTaskModelIdAlias,
 } from './task-models';
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -41,6 +42,9 @@ export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
  * configuration/connect surface only — not a model-id prefix.
  */
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
+
+/** Roomote-specific key name for OpenCode Go, kept separate from Zen. */
+export const OPENCODE_GO_API_KEY_ENV_VAR_NAME = 'OPENCODE_GO_API_KEY' as const;
 
 export const SETUP_MODEL_PROVIDER_IDS = [
   'openrouter',
@@ -345,8 +349,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-2': 'vercel/zai/glm-5.2',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
-      'qwen3-7-max': 'vercel/alibaba/qwen3.7-max',
-      'qwen3-7-plus': 'vercel/alibaba/qwen3.7-plus',
+      'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
       'minimax-m3': 'vercel/minimax/minimax-m3',
       'mimo-v2-5': 'vercel/xiaomi/mimo-v2.5',
       'grok-4-5': 'vercel/xai/grok-4.5',
@@ -405,7 +408,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'glm-5-2': 'togetherai/zai-org/GLM-5.2',
       'kimi-k3': 'togetherai/moonshotai/Kimi-K3',
       'kimi-k2-7-code': 'togetherai/moonshotai/Kimi-K2.7-Code',
-      'qwen3-7-max': 'togetherai/Qwen/Qwen3.7-Max',
       'minimax-m3': 'togetherai/MiniMaxAI/MiniMax-M3',
     }),
   },
@@ -565,7 +567,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
   },
   {
     id: 'opencode',
-    label: 'OpenCode Zen / Go',
+    label: 'OpenCode Zen',
     envVarName: 'OPENCODE_API_KEY',
     defaultRoomoteModel: 'opencode/big-pickle',
     authKind: 'api-key',
@@ -579,7 +581,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
       'gemini-3-1-pro': 'opencode/gemini-3.1-pro',
       'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
-      'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash-0731',
+      // Zen serves the dated Flash release under this stable model alias.
+      'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
       'deepseek-v4-pro': 'opencode/deepseek-v4-pro',
       'glm-5-2': 'opencode/glm-5.2',
       'kimi-k3': 'opencode/kimi-k3',
@@ -598,6 +601,39 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       planning: 'opencode/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
+  },
+  {
+    id: 'opencode-go',
+    label: 'OpenCode Go',
+    envVarName: OPENCODE_GO_API_KEY_ENV_VAR_NAME,
+    credentialHelp: {
+      text: 'Subscribe to OpenCode Go and copy the API key from your OpenCode account.',
+      href: 'https://opencode.ai/auth',
+      linkLabel: 'Open OpenCode account',
+    },
+    defaultRoomoteModel: 'opencode-go/glm-5.2',
+    authKind: 'api-key',
+    // Go serves a broader catalog; only models in Roomote's central curated
+    // recommendation list are suggested here.
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
+      'deepseek-v4-pro': 'opencode-go/deepseek-v4-pro',
+      'glm-5-2': 'opencode-go/glm-5.2',
+      'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
+      'grok-4-5': 'opencode-go/grok-4.5',
+      'kimi-k2-7-code': 'opencode-go/kimi-k2.7-code',
+      'kimi-k3': 'opencode-go/kimi-k3',
+      'mimo-v2-5': 'opencode-go/mimo-v2.5',
+      'minimax-m3': 'opencode-go/minimax-m3',
+      'qwen3-8-max': 'opencode-go/qwen3.8-max',
+    }),
+    recommendedRoleModels: {
+      helper: 'opencode-go/gpt-5.6-luna',
+      vision: 'opencode-go/gpt-5.6-luna',
+      codeReview: 'opencode-go/minimax-m3',
+      explore: 'opencode-go/deepseek-v4-flash',
+      planning: 'opencode-go/qwen3.8-max',
+    },
   },
   {
     // Bedrock's current console issues API keys for the Mantle endpoint. The
@@ -1191,7 +1227,10 @@ export function normalizeDeploymentModelConfig(
   const normalizeEnabledModel = (
     model: string | null | undefined,
   ): string | null => {
-    const normalizedModel = normalizeOptionalString(model);
+    const trimmedModel = normalizeOptionalString(model);
+    const normalizedModel = trimmedModel
+      ? resolveTaskModelIdAlias(trimmedModel)
+      : null;
 
     return normalizedModel && !isTaskModelIdDisabled(normalizedModel)
       ? normalizedModel

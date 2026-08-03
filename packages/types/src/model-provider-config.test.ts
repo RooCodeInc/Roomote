@@ -54,6 +54,26 @@ describe('normalizeDeploymentModelConfig', () => {
     });
   });
 
+  it('migrates persisted OpenCode DeepSeek Flash role models', () => {
+    expect(
+      normalizeDeploymentModelConfig({
+        roomoteModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteSmallModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteVisionModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteCodeReviewModel: 'opencode/deepseek-v4-flash-0731',
+        roomoteExploreModel: 'opencode/deepseek-v4-flash-0731',
+        roomotePlanningModel: 'opencode/deepseek-v4-flash-0731',
+      }),
+    ).toMatchObject({
+      roomoteModel: 'opencode/deepseek-v4-flash',
+      roomoteSmallModel: 'opencode/deepseek-v4-flash',
+      roomoteVisionModel: 'opencode/deepseek-v4-flash',
+      roomoteCodeReviewModel: 'opencode/deepseek-v4-flash',
+      roomoteExploreModel: 'opencode/deepseek-v4-flash',
+      roomotePlanningModel: 'opencode/deepseek-v4-flash',
+    });
+  });
+
   it('coerces missing fields to null without dropping model keys', () => {
     expect(
       normalizeDeploymentModelConfig({ roomoteModel: 'openai/gpt-5.4' }),
@@ -231,6 +251,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'kimi-for-coding',
         'minimax',
         'opencode',
+        'opencode-go',
         'amazon-bedrock',
         'google',
         'xai',
@@ -331,44 +352,42 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
       { providerId: 'kimi-for-coding', modelId: 'kimi-for-coding/k3' },
       { providerId: 'opencode', modelId: 'opencode/kimi-k3' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/kimi-k3' },
     ]);
   });
 
-  it.each([
-    {
-      displayName: 'Qwen3.7 Max',
-      expected: [
-        { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.7-max' },
-        { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.7-max' },
-        {
-          providerId: 'togetherai',
-          modelId: 'togetherai/Qwen/Qwen3.7-Max',
-        },
-      ],
-    },
-    {
-      displayName: 'Qwen3.7 Plus',
-      expected: [
-        { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.7-plus' },
-        { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.7-plus' },
-      ],
-    },
-  ])(
-    'recommends $displayName only from providers that support it',
-    ({ displayName, expected }) => {
-      const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-        (provider) => {
-          const model = provider.suggestedTaskModels.find(
-            (suggestion) => suggestion.displayName === displayName,
-          );
+  it('recommends Qwen3.8 Max only from supported providers', () => {
+    const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'Qwen3.8 Max',
+        );
 
-          return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-        },
-      );
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
 
-      expect(providersByModel).toEqual(expected);
-    },
-  );
+    expect(providersByModel).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.8-max' },
+      { providerId: 'vercel', modelId: 'vercel/alibaba/qwen3.8-max' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/qwen3.8-max' },
+    ]);
+  });
+
+  it('uses the requested OpenCode Go role defaults', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('opencode-go'),
+      ),
+    ).toMatchObject({
+      roomoteModel: 'opencode-go/glm-5.2',
+      roomoteSmallModel: 'opencode-go/gpt-5.6-luna',
+      roomoteVisionModel: 'opencode-go/gpt-5.6-luna',
+      roomoteCodeReviewModel: 'opencode-go/minimax-m3',
+      roomoteExploreModel: 'opencode-go/deepseek-v4-flash',
+      roomotePlanningModel: 'opencode-go/qwen3.8-max',
+    });
+  });
 
   it.each([
     {
@@ -406,6 +425,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
           modelId: `azure-cognitive-services/${modelId}`,
         },
         { providerId: 'opencode', modelId: `opencode/${modelId}` },
+        ...(modelId === 'gpt-5.6-luna'
+          ? [
+              {
+                providerId: 'opencode-go',
+                modelId: 'opencode-go/gpt-5.6-luna',
+              },
+            ]
+          : []),
         {
           providerId: 'amazon-bedrock',
           modelId: `bedrock-mantle/openai.${modelId}`,
@@ -435,6 +462,41 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       { providerId: 'vercel', modelId: 'vercel/google/gemini-3.6-flash' },
       { providerId: 'opencode', modelId: 'opencode/gemini-3.6-flash' },
       { providerId: 'google', modelId: 'google/gemini-3.6-flash' },
+    ]);
+  });
+
+  it("uses each provider's DeepSeek V4 Flash 0731 model slug", () => {
+    const deepSeekFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'DeepSeek V4 Flash 0731',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(deepSeekFlashByProvider).toEqual([
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/deepseek/deepseek-v4-flash-0731',
+      },
+      {
+        providerId: 'vercel',
+        modelId: 'vercel/deepseek/deepseek-v4-flash-0731',
+      },
+      {
+        providerId: 'baseten',
+        modelId: 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
+      },
+      {
+        providerId: 'opencode',
+        modelId: 'opencode/deepseek-v4-flash',
+      },
+      {
+        providerId: 'opencode-go',
+        modelId: 'opencode-go/deepseek-v4-flash',
+      },
     ]);
   });
 

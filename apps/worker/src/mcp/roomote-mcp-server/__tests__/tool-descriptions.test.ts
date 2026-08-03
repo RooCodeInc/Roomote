@@ -138,6 +138,18 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('prompts agents to offer a test run after conversational creation', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      'manage_custom_automations',
+    );
+
+    expect(automationsTool.config.description).toContain(
+      'After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
+    );
+  });
+
   it('guides existing product task URLs toward task inspection actions', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');

@@ -11,6 +11,7 @@ import {
   getCommunicationThreadIdFromTaskPayload,
   getDiscordReactionTargetFromTaskPayload,
   getDiscordIntakeAckReactionTargetFromTaskPayload,
+  getHarnessModelOverride,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
   getTaskToolActionIdFromInvocation,
@@ -652,6 +653,17 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.harnessModelOverrides?.['opencode-server']).toBe(
       'provider-id/model-id',
     );
+  });
+
+  it('resolves legacy OpenCode model aliases from harness overrides', () => {
+    expect(
+      getHarnessModelOverride(
+        {
+          'opencode-server': 'opencode/deepseek-v4-flash-0731',
+        },
+        'opencode-server',
+      ),
+    ).toBe('opencode/deepseek-v4-flash');
   });
 
   it('parses hidden StandardTask bootstrap metadata without changing the description', () => {
