@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 
 import { useTRPC } from '@/trpc/client';
 import { ArrowRight, Button, Spinner } from '@/components/system';
-import { DiscordSetupStatus } from '@/components/settings/DiscordSetupStatus';
+import { DiscordLinkAccountStep } from '@/components/settings/DiscordLinkAccountStep';
 import { useDiscordLinkedAccount } from '@/hooks/linked-accounts';
 
 import {
@@ -15,6 +15,7 @@ import {
   getSetupVisibleFields,
   ProviderSetupExperience,
 } from './ProviderSetupExperience';
+import { StepTitle } from './StepTitle';
 import { SetupFooter } from './SetupFooter';
 
 export function StepDiscordSetup({
@@ -113,8 +114,11 @@ export function StepDiscordSetup({
             }))
           }
         />
-      ) : provider?.discord ? (
-        <DiscordSetupStatus status={provider.discord} />
+      ) : provider && isConfigured ? (
+        <div className="space-y-4">
+          <StepTitle text="Link Discord Account" />
+          <DiscordLinkAccountStep />
+        </div>
       ) : status.isError ? (
         <p className="text-sm text-destructive">
           Unable to load Discord setup. Refresh and try again.
