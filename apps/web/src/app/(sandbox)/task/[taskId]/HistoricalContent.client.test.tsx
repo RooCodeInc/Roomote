@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
-const { isTaskRunAsleepMock } = vi.hoisted(() => ({
+const { isTaskRunAsleepMock, retryFailedStartMutate } = vi.hoisted(() => ({
   isTaskRunAsleepMock: vi.fn(() => false),
+  retryFailedStartMutate: vi.fn(),
 }));
 
 vi.mock('@/components/system', () => ({
@@ -10,14 +11,31 @@ vi.mock('@/components/system', () => ({
   ArrowRight: () => <svg aria-hidden="true" />,
   Badge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
   BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
-  Button: ({ children }: { children: ReactNode }) => (
-    <button>{children}</button>
+  Button: ({
+    children,
+    onClick,
+    disabled,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    disabled?: boolean;
+  }) => (
+    <button onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
   ),
   Check: () => <svg aria-hidden="true" />,
   HelpCircle: () => <svg aria-hidden="true" />,
   Loader2: () => <svg aria-hidden="true" />,
   Sun: () => <svg aria-hidden="true" />,
   X: () => <svg aria-hidden="true" />,
+}));
+
+vi.mock('@/hooks/task-runs', () => ({
+  useRetryFailedTaskStart: () => ({
+    mutate: retryFailedStartMutate,
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -172,6 +190,73 @@ describe('HistoricalContent', () => {
         'Required environment command Install dependencies failed for owner/repo: Command failed with exit code 1',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('offers a retry on a failed start whose work landed after the abort', () => {
+    // The sandbox came up after the provisioning deadline, so the run is
+    // failed but the thread has output — this view, not the startup
+    // sequence, is what the user is looking at.
+    render(
+      <HistoricalContent
+        session={
+          {
+            sessionState: 'historical',
+            draftPrompt: null,
+            taskRun: {
+              id: 3734,
+              status: 'failed',
+              payloadKind: 'standard',
+              error: 'The operation was aborted due to timeout',
+              result: null,
+              snapshotId: null,
+              createdAt: new Date('2026-08-03T13:14:56.000Z'),
+              startedAt: null,
+            },
+            taskId: 'task-123',
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(retryFailedStartMutate).toHaveBeenCalledWith({
+      taskId: 'task-123',
+      runId: 3734,
+    });
+  });
+
+  it('offers no retry for a payload kind that cannot be relaunched', () => {
+    render(
+      <HistoricalContent
+        session={
+          {
+            sessionState: 'historical',
+            draftPrompt: null,
+            taskRun: {
+              id: 3734,
+              status: 'failed',
+              payloadKind: 'snapshot_resume',
+              error: 'The operation was aborted due to timeout',
+              result: null,
+              snapshotId: null,
+              createdAt: new Date('2026-08-03T13:14:56.000Z'),
+              startedAt: null,
+            },
+            taskId: 'task-123',
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(
+      screen.getByText('Task ended because of an error:'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Retry' }),
+    ).not.toBeInTheDocument();
   });
 
   it('prefers an explicit footer over the generic task error footer', () => {
