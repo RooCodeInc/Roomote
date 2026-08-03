@@ -62,18 +62,10 @@ function renderTable(recipes) {
   const rows = recipes
     .sort((left, right) => left.title.localeCompare(right.title))
     .map((recipe) => {
-      const contributor = renderLinkedValue(
-        recipe.contributor,
-        recipe.contributorUrl,
-      );
-      const company = recipe.contributorCompany
-        ? `<br />${renderLinkedValue(recipe.contributorCompany, recipe.contributorCompanyUrl)}`
-        : '';
-
-      return `| [${escapeTableCell(recipe.title)}](${recipe.slug}) | ${escapeTableCell(recipe.description)} | ${contributor}${company} |`;
+      return `| [${escapeTableCell(recipe.title)}](${recipe.slug}) | ${escapeTableCell(recipe.description)} |`;
     });
 
-  return ['| Recipe | Use to | By |', '| --- | --- | --- |', ...rows].join(
+  return ['| Recipe | Use to |', '| --- | --- |', ...rows].join(
     '\n',
   );
 }
