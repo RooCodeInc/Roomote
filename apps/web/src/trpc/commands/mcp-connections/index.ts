@@ -34,7 +34,7 @@ import { getValidAccessToken } from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 import type { StaticOauthReadiness } from '@/lib/server/mcp-static-oauth';
 import { getDeploymentStaticOauthReadiness } from '@/lib/server/deployment-static-oauth';
-import { Env, areCuratedIntegrationsEnabled } from '@/lib/server/env';
+import { Env, areCuratedIntegrationsDisabled } from '@/lib/server/env';
 import { assertCuratedIntegrationsEnabled } from '@/lib/server/curated-integrations';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import type {
@@ -524,7 +524,9 @@ export async function getDeploymentMcpEnablementsCommand(
 
 export function getCuratedIntegrationsAvailabilityCommand() {
   return {
-    enabled: areCuratedIntegrationsEnabled(Env.R_CURATED_INTEGRATIONS_ENABLED),
+    enabled: !areCuratedIntegrationsDisabled(
+      Env.R_CURATED_INTEGRATIONS_DISABLED,
+    ),
   };
 }
 

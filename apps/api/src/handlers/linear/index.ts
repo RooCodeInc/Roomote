@@ -12,7 +12,7 @@ import {
   PRODUCT_NAME,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
-import { Env, areCuratedIntegrationsEnabled } from '@roomote/env';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import {
   type RoutingDebugInfo,
   enqueueTask,
@@ -254,7 +254,7 @@ export const linear = new Hono();
  * The handler must emit a "thought" activity within 10 seconds to acknowledge receipt.
  */
 linear.post('/', async (c) => {
-  if (!areCuratedIntegrationsEnabled(Env.R_CURATED_INTEGRATIONS_ENABLED)) {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
     return c.body(null, 204);
   }
 

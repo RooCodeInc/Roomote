@@ -1,5 +1,5 @@
 import { Hono, type MiddlewareHandler } from 'hono';
-import { Env, areCuratedIntegrationsEnabled } from '@roomote/env';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import { isNativeMcpIntegration, MCP_INTEGRATIONS } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -23,7 +23,7 @@ export const mcp = new Hono<{ Variables: Variables }>();
 const requireCuratedIntegrations: MiddlewareHandler<{
   Variables: Variables;
 }> = async (c, next) => {
-  if (!areCuratedIntegrationsEnabled(Env.R_CURATED_INTEGRATIONS_ENABLED)) {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
     return c.notFound();
   }
 

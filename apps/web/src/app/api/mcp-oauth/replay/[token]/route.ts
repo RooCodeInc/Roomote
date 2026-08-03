@@ -28,7 +28,7 @@ export async function GET(
   const webUrl = getPublicAppUrl(webEnv);
   const { token } = await params;
 
-  if (webEnv.R_CURATED_INTEGRATIONS_ENABLED === false) {
+  if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true) {
     return NextResponse.redirect(
       new URL('/error?message=Integrations are disabled', webUrl),
     );

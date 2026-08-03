@@ -7,17 +7,6 @@ const redisState = vi.hoisted(() => ({
   shouldThrow: false,
 }));
 
-// The curated-integrations policy defaults to disabled; enable it so webhook
-// requests reach handler-level verification instead of the policy short-circuit.
-vi.mock('@roomote/env', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@roomote/env')>();
-
-  return {
-    ...actual,
-    Env: { ...actual.Env, R_CURATED_INTEGRATIONS_ENABLED: true },
-  };
-});
-
 vi.mock('@roomote/redis', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/redis')>();
 

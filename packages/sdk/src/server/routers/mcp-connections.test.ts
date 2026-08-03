@@ -1,12 +1,13 @@
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const mockEnv = vi.hoisted(() => ({
-  R_CURATED_INTEGRATIONS_ENABLED: true,
+  R_CURATED_INTEGRATIONS_DISABLED: false,
 }));
 
 vi.mock('@roomote/env', () => ({
   Env: mockEnv,
-  areCuratedIntegrationsEnabled: (value: boolean | undefined) => value === true,
+  areCuratedIntegrationsDisabled: (value: boolean | undefined) =>
+    value === true,
 }));
 
 const {
@@ -187,7 +188,7 @@ function buildEnabledOnlyRow(mcpId: string) {
 describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockEnv.R_CURATED_INTEGRATIONS_ENABLED = true;
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
     mockFindTaskRun.mockResolvedValue({
       actingUserId: null,
     });
@@ -197,7 +198,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   });
 
   it('returns no curated servers when the operator disables integrations', async () => {
-    mockEnv.R_CURATED_INTEGRATIONS_ENABLED = false;
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
 
     const result = await createCaller().getMcpServerConfigs();
 

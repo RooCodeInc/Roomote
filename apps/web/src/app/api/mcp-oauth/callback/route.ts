@@ -166,7 +166,7 @@ export async function GET(request: NextRequest) {
   const redirectToResult = (result: McpOAuthResult) =>
     redirectWithMcpResult(webUrl, redirectPath, result, state);
 
-  if (webEnv.R_CURATED_INTEGRATIONS_ENABLED === false) {
+  if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true) {
     return redirectToResult({ status: 'error', reason: 'callback_failed' });
   }
 

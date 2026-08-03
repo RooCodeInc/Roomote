@@ -1,6 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { Env, areCuratedIntegrationsEnabled } from '@roomote/env';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import {
   db,
   desc,
@@ -65,7 +65,7 @@ export const mcpConnectionsRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      if (!areCuratedIntegrationsEnabled(Env.R_CURATED_INTEGRATIONS_ENABLED)) {
+      if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
         return false;
       }
 
@@ -138,7 +138,7 @@ export const mcpConnectionsRouter = router({
    * Returns a map of sanitized server names to { url, headers }.
    */
   getMcpServerConfigs: authenticatedProcedure.query(async ({ ctx }) => {
-    if (!areCuratedIntegrationsEnabled(Env.R_CURATED_INTEGRATIONS_ENABLED)) {
+    if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
       return { servers: {} };
     }
 

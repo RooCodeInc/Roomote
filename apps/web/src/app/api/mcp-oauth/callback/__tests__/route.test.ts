@@ -175,7 +175,7 @@ describe('GET /api/mcp-oauth/callback', () => {
     bootstrapWebRuntimeEnvMock.mockResolvedValue({
       R_APP_URL: 'http://localhost:13000',
       R_PUBLIC_URL: 'https://customer.example',
-      R_CURATED_INTEGRATIONS_ENABLED: false,
+      R_CURATED_INTEGRATIONS_DISABLED: true,
     });
 
     const response = await GET(buildRequest('?code=auth-code&state=state-1'));

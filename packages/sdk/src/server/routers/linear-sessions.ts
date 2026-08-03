@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Env, areCuratedIntegrationsEnabled } from '@roomote/env';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 
 import { TaskPayloadKind } from '@roomote/types';
 import { db, taskRuns, eq } from '@roomote/db/server';
@@ -22,7 +22,7 @@ import {
 } from '../trpc';
 
 async function findActiveConnection() {
-  if (!areCuratedIntegrationsEnabled(Env.R_CURATED_INTEGRATIONS_ENABLED)) {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
     return null;
   }
 

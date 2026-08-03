@@ -2,7 +2,7 @@ import type { AuthTokenContext } from '@roomote/types';
 
 const { envState, findConnectionMock, getValidAccessTokenMock } = vi.hoisted(
   () => ({
-    envState: { R_CURATED_INTEGRATIONS_ENABLED: true },
+    envState: { R_CURATED_INTEGRATIONS_DISABLED: false },
     findConnectionMock: vi.fn(),
     getValidAccessTokenMock: vi.fn(),
   }),
@@ -10,7 +10,8 @@ const { envState, findConnectionMock, getValidAccessTokenMock } = vi.hoisted(
 
 vi.mock('@roomote/env', () => ({
   Env: envState,
-  areCuratedIntegrationsEnabled: (value: boolean | undefined) => value === true,
+  areCuratedIntegrationsDisabled: (value: boolean | undefined) =>
+    value === true,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -48,11 +49,11 @@ function createCaller() {
 describe('linearSessionsRouter operator policy', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    envState.R_CURATED_INTEGRATIONS_ENABLED = true;
+    envState.R_CURATED_INTEGRATIONS_DISABLED = false;
   });
 
   it('blocks existing Linear sessions when curated integrations are disabled', async () => {
-    envState.R_CURATED_INTEGRATIONS_ENABLED = false;
+    envState.R_CURATED_INTEGRATIONS_DISABLED = true;
 
     await expect(createCaller().hasActiveConnection()).resolves.toBe(false);
     await expect(

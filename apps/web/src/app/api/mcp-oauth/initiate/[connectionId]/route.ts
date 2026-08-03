@@ -160,7 +160,7 @@ export async function GET(
     DEFAULT_REDIRECT_PATH;
   const replayToken = requestUrl.searchParams.get('replayToken');
 
-  if (webEnv.R_CURATED_INTEGRATIONS_ENABLED === false) {
+  if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true) {
     return NextResponse.redirect(
       withMcpQuery(webUrl, redirectPath, 'error', 'disabled'),
     );
