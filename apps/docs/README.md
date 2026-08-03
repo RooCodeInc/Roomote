@@ -7,8 +7,8 @@ and assets all live in this directory and do not depend on `@roomote/web`.
 
 ## Structure
 
-- `docs.json` — the single source of truth for navigation, theme, branding, and
-  the navbar CTA.
+- `docs.json` — the source of truth for navigation, primary theme configuration,
+  and the navbar CTA.
 - `*.mdx` — the documentation pages. Each page is referenced by its file name
   (without extension) in the `docs.json` navigation. Add `icon` frontmatter
   with a Lucide icon name to show an icon for the page in the sidebar.

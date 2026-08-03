@@ -50,9 +50,9 @@ generates the webhook secret during repository sync.
 
 ## Sync repositories
 
-After the Gitea values are available, open Settings, go to the Environments
-page, and use the Source Control section's Gitea sync button. Roomote lists
-repositories from the Gitea API and stores them as Gitea repository rows.
+After the Gitea values are available, open **Settings > Source Control** and
+refresh Gitea. Roomote lists repositories from the Gitea API and stores them as
+Gitea repository rows.
 
 Gitea-backed tasks clone from the synced repository row, so sync must run
 before launching a Gitea-backed task. Worker tasks route selected Gitea HTTPS

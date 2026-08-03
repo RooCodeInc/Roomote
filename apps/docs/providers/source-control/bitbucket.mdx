@@ -4,14 +4,14 @@ icon: 'https://api.iconify.design/simple-icons:bitbucket.svg?color=currentColor'
 description: Configure Bitbucket Cloud repository sync and pull request webhooks and pipeline failure triage for Roomote.
 ---
 
-Bitbucket Cloud support uses one deployment-scoped OAuth client. The
+Bitbucket Cloud support uses one deployment-scoped OAuth consumer. The
 authorized account's accessible workspaces define the repositories Roomote can
 sync. Bitbucket Server and Data Center are not supported.
 
-## Create a Bitbucket OAuth client
+## Create a Bitbucket OAuth consumer
 
 In the Bitbucket Cloud workspace that owns the repositories, open **Workspace
-settings → Apps and features → OAuth clients**, then create an OAuth client.
+settings → Apps and features → OAuth consumers**, then add a consumer.
 Set its callback URL to:
 
 ```text

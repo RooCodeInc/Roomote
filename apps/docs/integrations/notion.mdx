@@ -1,17 +1,18 @@
 ---
 title: Notion
-description: Bring Notion pages and databases into Roomote tasks.
+description: Read and update Notion pages and databases from Roomote tasks.
 icon: 'https://api.iconify.design/simple-icons:notion.svg?color=currentColor'
 ---
 
 Connect Notion when product specs, runbooks, notes, or operating context already
-live there and Roomote should be able to inspect that material during a task.
+live there and Roomote should be able to read or update that material during a
+task.
 
 ## When to use it
 
 - Pull a spec or runbook into a planning or debugging task
 - Inspect database-backed project context without copying it into the prompt
-- Keep task context close to the docs your team already maintains
+- Create or update pages and databases as part of the requested work
 
 ## How setup works
 
@@ -21,5 +22,6 @@ need it.
 
 ## What to expect
 
-Notion gives Roomote shared document context. The resulting engineering work
-still gets reviewed in the Roomote task view and normal repository workflow.
+Notion's hosted MCP server can read and write content with the connected user's
+permissions. Limit the connected account's access to the content Roomote needs
+and review mutating tool calls carefully.

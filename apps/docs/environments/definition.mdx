@@ -201,7 +201,7 @@ starting long-running services.
 | `cwd`               | string  | no       | Alias for `working_dir`.                                                                                        |
 | `timeout`           | number  | no       | Seconds before the command is killed. Defaults to `600`.                                                        |
 | `retries`           | integer | no       | Extra attempts for a failing command, with a 1-second delay. Use only for idempotent commands. Defaults to `0`. |
-| `continue_on_error` | boolean | no       | When `true`, setup continues even if this command fails. Defaults to `false`.                                   |
+| `continue_on_error` | boolean | no       | Accepted command metadata. Ordinary task setup currently records command failures as warnings and continues regardless. Defaults to `false`. |
 | `detached`          | boolean | no       | Run in the background under supervision. Use for long-running servers. Defaults to `false`.                     |
 | `logfile`           | string  | no       | Path to capture stdout and stderr. Used with `detached: true`.                                                  |
 
@@ -211,8 +211,8 @@ Guidance:
   before finishing" expectations in `agentInstructions` instead.
 - use `detached: true` with a `logfile` for servers such as `pnpm dev`, so the
   process keeps running and its output is debuggable.
-- use `continue_on_error: true` only for helpful-but-optional steps. If the app
-  cannot run without a command, let it fail so the problem is visible.
+- repository setup runs in the background for ordinary tasks. Check setup
+  status and logs for readiness warnings before relying on a failed command.
 
 ## Services
 
@@ -242,8 +242,9 @@ A service name cannot collide with a port name in the same environment.
 
 `docker_projects` runs Docker Compose or Dockerfile definitions already owned
 by a configured repository. Roomote validates the Compose model, builds images,
-starts services with `docker compose up --wait`, and treats startup as required
-unless `required: false` is set.
+and starts services with `docker compose up --wait` where health checks are
+supported. Blaxel starts Compose services without `--wait` because it does not
+support Docker health checks.
 
 Common fields:
 
@@ -255,7 +256,7 @@ Common fields:
 | `working_dir`             | string                    | no       | Relative directory inside the repository. Defaults to `.`.                 |
 | `env`                     | map                       | no       | Variables passed to Compose. Deployment-variable references are supported. |
 | `ports`                   | list                      | no       | Maps container ports to names from the top-level `ports` list.             |
-| `required`                | boolean                   | no       | Fail task startup when the project fails. Defaults to `true`.              |
+| `required`                | boolean                   | no       | Stop later Docker projects when this project fails. Ordinary tasks report the background failure as a readiness warning. Defaults to `true`. |
 | `startup_timeout_seconds` | integer                   | no       | Build and health-wait timeout. Defaults to 600, maximum 3600.              |
 
 For `type: compose`, `files` is a required list of relative Compose file paths.
@@ -333,11 +334,11 @@ ports:
 
 ## Environment variables and tool versions
 
-`env` provides workspace-level variables that every task can read. These are
-workspace variables for the code Roomote is working on, distinct from the
-[deployment environment variables](/environment-variables) that configure
-Roomote itself. Secrets are typically added through the editor rather than
-committed to a definition you share.
+`env` provides workspace-level variables that every task can read. The map is
+stored with the environment definition, so do not put raw secrets in it.
+[Deployment environment variables](/environment-variables) are encrypted and
+available to tasks in every environment as well as to Roomote services. Store
+secrets there, then reference them from `env` as `$KEY` or `${KEY}`.
 
 Tool versions can be set at two levels:
 
