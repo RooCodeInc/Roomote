@@ -41,7 +41,21 @@ vi.mock('./hooks', () => ({
     messages: sandboxMessagesState.messages,
   }),
   useSandboxHistoryReady: () => true,
+  useSandboxConnectionStatus: () => ({
+    connected: true,
+    hasConnectedOnce: true,
+  }),
   useSandboxTaskPhase: () => taskPhaseState.phase,
+}));
+
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: () => ({ isPending: false, mutate: vi.fn() }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPCClient: () => ({
+    sandboxSession: { abortTurn: { mutate: vi.fn() } },
+  }),
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({

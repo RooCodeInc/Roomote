@@ -10,6 +10,8 @@ import type {
 interface AcpUiMessageBase {
   id: string;
   ts: number;
+  /** First event timestamp for a tool call; `ts` continues to track its latest update. */
+  startedAt?: number;
   role: Exclude<TaskMessageRole, null>;
   partial: boolean;
   isTurnCompletion?: boolean;

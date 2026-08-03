@@ -62,6 +62,7 @@ import {
 
 const SANDBOX_PROMPT_TOKEN_TIMEOUT_MS = 15 * 60 * 1000;
 const SANDBOX_PROMPT_TIMEOUT_MS = 30_000;
+const SANDBOX_ABORT_TIMEOUT_MS = 30_000;
 const SANDBOX_RPC_HEALTHCHECK_TIMEOUT_MS = 5_000;
 const requestUserInputAnswersSchema = z.record(
   z.object({
@@ -382,6 +383,65 @@ export async function sendSandboxPromptCommand(
       });
     }
 
+    if (error instanceof TRPCClientError) {
+      throw new TRPCError({
+        code: 'BAD_GATEWAY',
+        message: error.message,
+      });
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export async function abortSandboxTurnCommand(
+  auth: UserAuthSuccess,
+  input: { taskId: string },
+) {
+  const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, input);
+
+  if (!taskRun.sandboxServerUrl) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: 'The task no longer has a live sandbox to stop.',
+    });
+  }
+
+  const authToken = await createRunToken({
+    runId: taskRun.id,
+    userId: auth.userId,
+    timeoutMs: SANDBOX_PROMPT_TOKEN_TIMEOUT_MS,
+  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    SANDBOX_ABORT_TIMEOUT_MS,
+  );
+
+  try {
+    const client = createSandboxServerRpcClient({
+      links: [
+        httpBatchLink({
+          url: `${taskRun.sandboxServerUrl}/trpc`,
+          transformer: superjson,
+          headers: () => ({ Authorization: `Bearer ${authToken}` }),
+          fetch: (url, init) =>
+            fetch(url, { ...init, signal: controller.signal }),
+        }),
+      ],
+    });
+
+    await client.commands.cancelTask.mutate({
+      cancelledBy: {
+        name: getAuthenticatedPromptUserName(auth),
+        source: 'web',
+      },
+    });
+
+    return { success: true as const };
+  } catch (error) {
     if (error instanceof TRPCClientError) {
       throw new TRPCError({
         code: 'BAD_GATEWAY',

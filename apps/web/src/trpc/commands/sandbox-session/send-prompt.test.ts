@@ -1,12 +1,14 @@
 const {
   mockCreateRunToken,
   mockSendPromptMutate,
+  mockCancelTaskMutate,
   mockClaimOutOfBandContext,
   mockSetLatestUserMessageForReplyQuote,
   mockClearLatestUserMessageForReplyQuoteIfId,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockSendPromptMutate: vi.fn(),
+  mockCancelTaskMutate: vi.fn(),
   mockClaimOutOfBandContext: vi.fn(),
   mockSetLatestUserMessageForReplyQuote: vi.fn(),
   mockClearLatestUserMessageForReplyQuoteIfId: vi.fn(),
@@ -43,6 +45,9 @@ vi.mock('@trpc/client', async () => {
     ...actual,
     createTRPCProxyClient: vi.fn(() => ({
       commands: {
+        cancelTask: {
+          mutate: mockCancelTaskMutate,
+        },
         sendPrompt: {
           mutate: mockSendPromptMutate,
         },
@@ -75,6 +80,7 @@ import { RunStatus } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 
 import {
+  abortSandboxTurnCommand,
   sendSandboxPromptCommand,
   sendSandboxPromptInputSchema,
 } from './index';
@@ -118,6 +124,7 @@ describe('sendSandboxPromptCommand', () => {
     );
     mockCreateRunToken.mockResolvedValue('run-token');
     mockSendPromptMutate.mockResolvedValue({ success: true });
+    mockCancelTaskMutate.mockResolvedValue({ success: true });
     mockClaimOutOfBandContext.mockResolvedValue(null);
     mockSetLatestUserMessageForReplyQuote.mockResolvedValue({
       id: 'discord-quote-1',
@@ -125,6 +132,30 @@ describe('sendSandboxPromptCommand', () => {
       userName: 'Test User',
     });
     mockClearLatestUserMessageForReplyQuoteIfId.mockResolvedValue(true);
+  });
+
+  it('aborts the active turn through the server-side sandbox client', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+
+    await expect(
+      abortSandboxTurnCommand(
+        buildMockAuth({ userId: user.id, name: 'Test User' }),
+        { taskId: task.id },
+      ),
+    ).resolves.toEqual({ success: true });
+
+    expect(mockCancelTaskMutate).toHaveBeenCalledWith({
+      cancelledBy: { name: 'Test User', source: 'web' },
+    });
   });
 
   afterEach(() => {

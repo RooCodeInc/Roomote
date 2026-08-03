@@ -180,6 +180,7 @@ import {
   restoreTaskRunSnapshotCommand,
 } from '../commands/snapshots';
 import {
+  abortSandboxTurnCommand,
   answerSandboxUserInputRequestCommand,
   answerSandboxUserInputRequestInputSchema,
   getSandboxSessionByTaskIdCommand,
@@ -1834,6 +1835,12 @@ export const appRouter = createRouter({
       .input(answerSandboxUserInputRequestInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         answerSandboxUserInputRequestCommand(auth, input),
+      ),
+
+    abortTurn: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        abortSandboxTurnCommand(auth, input),
       ),
 
     takeOverBrowserControl: protectedProcedure

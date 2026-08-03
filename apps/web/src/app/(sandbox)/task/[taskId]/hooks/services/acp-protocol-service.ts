@@ -339,6 +339,7 @@ export function toAcpUiMessage(
 
       return {
         ...base,
+        startedAt: normalized.ts,
         role: 'tool',
         kind: 'tool_call',
         text: toolCallPayload.title ?? normalized.text,
@@ -1000,6 +1001,7 @@ export class AcpProtocolService {
 
     next[existingIndex] = {
       ...toolResultMessage,
+      startedAt: existing.startedAt ?? existing.ts,
       text: incomingText || existing.text,
       data: mergeToolResultPayload(existing, toolResultMessage),
       previousTs: existing.previousTs,
@@ -1559,6 +1561,7 @@ export class AcpProtocolService {
             kind: 'tool_result',
             partial: isRunning || !isTerminal,
             ts: event.ts,
+            startedAt: existing.startedAt ?? existing.ts,
             text:
               extractToolResultText(event.payload) ||
               candidate.text ||
