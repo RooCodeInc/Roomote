@@ -497,8 +497,17 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.announcerDiscordChannelId = null;
     state.settingsQuery.data.settings.platformIssueDiscordChannelId = null;
     state.settingsQuery.data.settings.managerSlackChannelId = 'C123MANAGER';
+    state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
+      '#roomote-managers';
     state.settingsQuery.data.settings.managerDiscordChannelId = null;
     state.settingsQuery.data.settings.managerStatsFrequency = 'off' as never;
+    state.settingsQuery.data.settings.channelAutoStartSlackChannels = [
+      {
+        channelId: 'C123BUGS',
+        instructions: 'Treat each message as a bug report.',
+        launchMode: 'always_start' as const,
+      },
+    ];
     state.settingsQuery.data.settings.sentryTriageFrequency = 'off' as never;
     state.settingsQuery.data.settings.dependabotTriageFrequency =
       'off' as never;
@@ -749,12 +758,13 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('does not add capability badges to automation cards', async () => {
+  it('shows provider support as plain text instead of badges', async () => {
     render(<AutomationsSettings />);
 
     await screen.findByText('Triage Dependabot Alerts');
-    expect(screen.queryByText('GitHub only')).toBeNull();
-    expect(screen.queryByText('Slack only')).toBeNull();
+    const providerSupport = screen.getAllByText('GitHub only')[0]!;
+    expect(providerSupport.tagName).toBe('P');
+    expect(providerSupport).toHaveClass('text-sm', 'text-foreground');
   });
 
   it('groups built-in automations into Enabled and Available sections', async () => {
@@ -764,6 +774,26 @@ describe('AutomationsSettings', () => {
     expect(screen.getByText('Available')).toBeInTheDocument();
     expect(screen.queryByText('Source Code automations')).toBeNull();
     expect(screen.queryByText('Meta automations')).toBeNull();
+  });
+
+  it('uses plain text empty states for built-in and custom automations', async () => {
+    state.settingsQuery.data.settings.channelAutoStartSlackChannels = [];
+    state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
+      null as never;
+
+    render(<AutomationsSettings />);
+
+    const builtInEmptyState = await screen.findByText(
+      'No built-in automations enabled yet.',
+    );
+    expect(builtInEmptyState.tagName).toBe('P');
+    expect(builtInEmptyState).toHaveClass('text-sm', 'text-muted-foreground');
+    const customEmptyState = screen.getByText(
+      'No custom automations created yet.',
+    );
+    expect(customEmptyState.tagName).toBe('P');
+    expect(customEmptyState).toHaveClass('text-sm', 'text-muted-foreground');
   });
 
   it('opens a built-in automation modal from its existing hash permalink', async () => {

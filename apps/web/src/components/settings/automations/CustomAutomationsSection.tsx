@@ -761,8 +761,7 @@ export function CustomAutomationsSection() {
           </h2>
           <p className="text-sm text-muted-foreground">
             Create your own scheduled agent runs with a prompt, cadence,
-            environment, and optional report channel. Daily and weekly runs fire
-            around local 3am, matching the other automations.
+            environment, and optional report channel.
           </p>
         </div>
         {!isCreating && !editingId ? (
@@ -806,12 +805,9 @@ export function CustomAutomationsSection() {
           Loading custom automations…
         </p>
       ) : rows.length === 0 && !isCreating ? (
-        <Card variant="snug">
-          <CardContent className="text-muted-foreground">
-            No custom automations yet. Example: every Monday, summarize flaky
-            tests and post to #eng-quality.
-          </CardContent>
-        </Card>
+        <p className="text-sm text-muted-foreground">
+          No custom automations created yet.
+        </p>
       ) : (
         <Card variant="snug">
           <CardContent>

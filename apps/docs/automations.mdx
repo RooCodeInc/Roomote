@@ -78,11 +78,9 @@ Create arbitrary scheduled agent runs with:
 
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
-9am.” Roomote previews the interpreted schedule before saving. A schedule that
-names a day but no time runs at 3am local, matching the daily and weekly
-cadences, and Roomote asks for clarification rather than guessing when the
-recurrence itself is ambiguous. Custom schedules do not support seconds or
-cron macros.
+9am.” Roomote previews the interpreted schedule before saving and asks for
+clarification rather than guessing when the recurrence itself is ambiguous.
+Custom schedules do not support seconds or cron macros.
 
 On each due tick, Roomote launches a normal task with that prompt in that
 environment. When a report destination is set, the run is anchored to that
@@ -93,9 +91,7 @@ chatter in between. Without a destination, the run happens silently and its
 results appear only in the task view. Use **Run now** on an enabled
 automation to test it immediately.
 
-Daily and weekly custom automations use the same local-hour window as the
-other scheduled automations (around 3am in the workspace timezone). Cap is
-25 custom automations per deployment.
+The deployment cap is 25 custom automations.
 
 The **Scheduling timezone** setting is available on both the Automations and
 Deployment settings pages. It applies to all scheduled automations and to
@@ -179,10 +175,10 @@ runs) and posts digests there. You cannot pick an existing Telegram thread —
 Roomote owns the recurring topic. When you select Teams, digests go to the
 primary Teams conversation captured for the deployment.
 
-Cards also show capability badges for what each automation supports today:
-the chat surfaces it can report to and the source-control providers it works
-with. Triage Dependabot Alerts and Triage CodeQL Alerts are GitHub-only by
-nature. CI Failure Triage supports GitHub Actions, GitLab Pipelines, Azure
+Cards also show a plain provider-support line for what each automation supports
+today: the chat surfaces it can report to and the source-control providers it
+works with. Triage Dependabot Alerts and Triage CodeQL Alerts are GitHub-only
+by nature. CI Failure Triage supports GitHub Actions, GitLab Pipelines, Azure
 DevOps builds, Bitbucket Pipelines, and Gitea Actions. Triage Issues supports GitHub, GitLab,
 and Gitea issues.
 Security Auditor, Code Quality Auditor, Weekly Manager

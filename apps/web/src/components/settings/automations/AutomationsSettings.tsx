@@ -1475,6 +1475,13 @@ function AutomationCard({
               </div>
               <div className="min-w-0 space-y-1">
                 <CardTitle className="text-base">{automation.label}</CardTitle>
+                {automation.commsBadge || automation.scmBadge ? (
+                  <p className="text-sm text-foreground">
+                    {[automation.commsBadge, automation.scmBadge]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
+                ) : null}
                 <p className="text-sm text-muted-foreground">
                   {automation.description}
                 </p>
@@ -2653,6 +2660,11 @@ export function AutomationsSettings() {
             <h2 className="order-[-30] col-span-full text-sm font-semibold text-foreground">
               Enabled
             </h2>
+            {Object.values(iconEnabled).some(Boolean) ? null : (
+              <p className="order-[-20] col-span-full text-sm text-muted-foreground">
+                No built-in automations enabled yet.
+              </p>
+            )}
             <h2 className="order-[-10] col-span-full text-sm font-semibold text-foreground">
               Available
             </h2>
