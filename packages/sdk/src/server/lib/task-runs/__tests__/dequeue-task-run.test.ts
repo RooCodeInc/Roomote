@@ -88,6 +88,10 @@ vi.mock('../dequeue-helpers', () => ({
   fetchEnvVars: (...args: unknown[]) => mockFetchEnvVars(...args),
   fetchResolvedRuntimeEnvVars: (...args: unknown[]) =>
     mockFetchResolvedRuntimeEnvVars(...args),
+  flattenResolvedRuntimeEnvVars: (resolved: {
+    envVars: Record<string, string>;
+    modelRuntimeEnv: Record<string, string>;
+  }) => ({ ...resolved.envVars, ...resolved.modelRuntimeEnv }),
   claimJobById: (...args: unknown[]) => mockClaimJobById(...args),
   cancelAndReleaseTaskRun: (...args: unknown[]) =>
     mockCancelAndReleaseTaskRun(...args),
@@ -229,7 +233,10 @@ describe('dequeueTaskRun', () => {
       source: 'app',
       expiresAt: null,
     });
-    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({ RESOLVED_ENV: '1' });
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({
+      envVars: { RESOLVED_ENV: '1' },
+      modelRuntimeEnv: {},
+    });
     mockCancelTaskRun.mockResolvedValue(undefined);
     mockCancelAndReleaseTaskRun.mockResolvedValue(undefined);
     mockReleaseTaskRun.mockResolvedValue(true);
@@ -340,6 +347,27 @@ describe('dequeueTaskRun', () => {
         updatedAt: expect.any(Date),
       }),
     );
+  });
+
+  it('returns generic and model runtime env separately to v2 workers', async () => {
+    const taskRun = makeStandardTaskRun();
+    mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
+    mockTxFindFirstTaskRuns.mockResolvedValue(taskRun);
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({
+      envVars: { MY_APP_CONFIG: 'value' },
+      modelRuntimeEnv: { ANTHROPIC_API_KEY: 'model-secret' },
+    });
+
+    const result = await dequeueTaskRun({ orgId: 'org-1' } as never, {
+      runId: taskRun.id,
+      envContractVersion: 2,
+    });
+
+    expect(result?.envVars).toMatchObject({ MY_APP_CONFIG: 'value' });
+    expect(result?.envVars).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(result?.modelRuntimeEnv).toEqual({
+      ANTHROPIC_API_KEY: 'model-secret',
+    });
   });
 
   it('persists worker runtime metadata when the worker claims the run', async () => {

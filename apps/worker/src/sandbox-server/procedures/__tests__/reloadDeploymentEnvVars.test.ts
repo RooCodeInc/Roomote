@@ -53,6 +53,7 @@ function createWorkerEnv() {
     GH_TOKEN: 'gh-token',
     LEGACY_VALUE: 'old-value',
   });
+  workerEnv.setModelRuntimeEnv({ STALE_MODEL_KEY: 'revoked-secret' });
   workerEnv.addUserEnv({
     NEXT_PUBLIC_API_BASE: 'https://workspace.example.test',
   });
@@ -70,14 +71,17 @@ function createCaller(workerEnv?: WorkerEnv, runId = 1) {
     ROOMOTE_TASK_ID: 'task-123',
     ROOMOTE_TASK_TYPE: 'standard',
     CLAUDE_APPEND_SYSTEM_PROMPT: 'follow the system instructions',
+    STALE_MODEL_KEY: 'revoked-secret',
   };
   const setCommandEnv = vi.fn();
+  const requestReconnect = vi.fn().mockResolvedValue(undefined);
   const ctx = {
     workingDirectory: '/tmp',
     harness: {
       isConnected: true,
       getCommandEnv: () => ({ ...commandEnv }),
       setCommandEnv,
+      requestReconnect,
     },
     harnessManager: {
       getStatus: () => ({
@@ -99,7 +103,11 @@ function createCaller(workerEnv?: WorkerEnv, runId = 1) {
     workerEnv,
   } as unknown as Context;
 
-  return { caller: appRouter.createCaller(ctx), setCommandEnv };
+  return {
+    caller: appRouter.createCaller(ctx),
+    setCommandEnv,
+    requestReconnect,
+  };
 }
 
 describe('reloadDeploymentEnvVars procedure', () => {
@@ -107,8 +115,11 @@ describe('reloadDeploymentEnvVars procedure', () => {
     vi.clearAllMocks();
     resetCredentialWriteBarrierForTesting();
     mockGetResolvedRuntimeEnvVars.mockResolvedValue({
-      OPENAI_API_KEY: 'new-openai-key',
-      ANTHROPIC_API_KEY: 'new-anthropic-key',
+      envVars: { MY_APP_CONFIG: 'new-app-value' },
+      modelRuntimeEnv: {
+        OPENAI_API_KEY: 'new-openai-key',
+        ANTHROPIC_API_KEY: 'new-anthropic-key',
+      },
     });
     mockFindFirstById.mockResolvedValue({ id: 1, taskId: 'task-123' });
     mockInjectEnvVars.mockImplementation(
@@ -120,24 +131,21 @@ describe('reloadDeploymentEnvVars procedure', () => {
 
   it('replaces user env vars while preserving service env and shell wiring', async () => {
     const workerEnv = createWorkerEnv();
-    const { caller, setCommandEnv } = createCaller(workerEnv);
+    const { caller, setCommandEnv, requestReconnect } = createCaller(workerEnv);
 
     const result = await caller.commands.reloadDeploymentEnvVars();
 
     expect(result.success).toBe(true);
-    expect(result.names).toEqual(
-      expect.arrayContaining(['OPENAI_API_KEY', 'ANTHROPIC_API_KEY']),
-    );
-    expect(result.names).toHaveLength(2);
+    expect(result.names).toEqual(['MY_APP_CONFIG']);
     expect(mockGetResolvedRuntimeEnvVars).toHaveBeenCalledWith({
       runId: 1,
+      envContractVersion: 2,
     });
     expect(mockFindFirstById).toHaveBeenCalledWith(1);
     expect(mockInjectEnvVars).toHaveBeenCalledTimes(1);
     expect(mockInjectEnvVars).toHaveBeenCalledWith(
       expect.objectContaining({
-        OPENAI_API_KEY: 'new-openai-key',
-        ANTHROPIC_API_KEY: 'new-anthropic-key',
+        MY_APP_CONFIG: 'new-app-value',
       }),
       { id: 1, taskId: 'task-123' },
       expect.objectContaining({
@@ -150,8 +158,18 @@ describe('reloadDeploymentEnvVars procedure', () => {
     const reloadedEnv = workerEnv.buildUserFacingEnv();
 
     expect(reloadedEnv.DATABASE_URL).toBe('postgres://localhost/test');
-    expect(reloadedEnv.OPENAI_API_KEY).toBe('new-openai-key');
-    expect(reloadedEnv.ANTHROPIC_API_KEY).toBe('new-anthropic-key');
+    expect(reloadedEnv.MY_APP_CONFIG).toBe('new-app-value');
+    expect(reloadedEnv).not.toHaveProperty('OPENAI_API_KEY');
+    expect(reloadedEnv).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(setCommandEnv).toHaveBeenCalledWith(
+      expect.objectContaining({
+        OPENAI_API_KEY: 'new-openai-key',
+        ANTHROPIC_API_KEY: 'new-anthropic-key',
+      }),
+    );
+    expect(setCommandEnv.mock.calls[0]?.[0]).not.toHaveProperty(
+      'STALE_MODEL_KEY',
+    );
     expect(reloadedEnv.GH_TOKEN).toBeUndefined();
     expect(reloadedEnv.NEXT_PUBLIC_API_BASE).toBe(
       'https://workspace.example.test',
@@ -164,10 +182,14 @@ describe('reloadDeploymentEnvVars procedure', () => {
       LC_ALL: 'C.UTF-8',
       OPENAI_API_KEY: 'new-openai-key',
       ANTHROPIC_API_KEY: 'new-anthropic-key',
+      MY_APP_CONFIG: 'new-app-value',
       BASH_ENV: '/tmp/roomote/env.sh',
       ROOMOTE_TASK_ID: 'task-123',
       ROOMOTE_TASK_TYPE: 'standard',
       CLAUDE_APPEND_SYSTEM_PROMPT: 'follow the system instructions',
+    });
+    expect(requestReconnect).toHaveBeenCalledWith({
+      reason: 'model runtime environment changed',
     });
   });
 
@@ -179,6 +201,25 @@ describe('reloadDeploymentEnvVars procedure', () => {
     ).rejects.toMatchObject({
       message: 'Worker environment is not available for live reload',
     });
+  });
+
+  it('keeps model credentials out of generic env for legacy flat responses', async () => {
+    mockGetResolvedRuntimeEnvVars.mockResolvedValue({
+      MY_APP_CONFIG: 'legacy-app-value',
+      OPENAI_API_KEY: 'legacy-model-secret',
+    });
+    const { caller, setCommandEnv } = createCaller(createWorkerEnv());
+
+    await caller.commands.reloadDeploymentEnvVars();
+
+    expect(mockInjectEnvVars).toHaveBeenCalledWith(
+      expect.not.objectContaining({ OPENAI_API_KEY: expect.anything() }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(setCommandEnv).toHaveBeenCalledWith(
+      expect.objectContaining({ OPENAI_API_KEY: 'legacy-model-secret' }),
+    );
   });
 
   it('rejects without writing env files once the credential write barrier is engaged', async () => {

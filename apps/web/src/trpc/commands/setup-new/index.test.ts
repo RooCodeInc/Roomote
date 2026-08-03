@@ -131,6 +131,10 @@ vi.mock('@roomote/db/server', () => ({
   isChatGptSubscriptionConnected: vi.fn(async () => false),
   isGitHubCopilotSubscriptionConnected: vi.fn(async () => false),
   isXaiSubscriptionConnected: vi.fn(async () => false),
+  getPersistedModelProviderEnvironmentVariableNames:
+    mockGetPersistedEnvironmentVariableNames,
+  getPersistedModelProviderEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -178,7 +182,10 @@ vi.mock('@/lib/setup-new', () => ({
 }));
 
 vi.mock('../environment-variables', () => ({
+  deleteModelProviderEnvironmentVariables: vi.fn(),
   upsertDeploymentEnvironmentVariables:
+    mockUpsertDeploymentEnvironmentVariables,
+  upsertModelProviderEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
   getPersistedEnvironmentVariableNames:
     mockGetPersistedEnvironmentVariableNames,

@@ -437,6 +437,10 @@ describe('createHarness', () => {
         url: 'https://actor-b.example/mcp',
       },
     };
+    result.harness.setCommandEnv?.({
+      BASH_ENV: '/home/testuser/.roomote/env.sh',
+      OPENAI_API_KEY: 'sk-fresh-openai',
+    });
 
     await result.harness.requestReconnect?.({
       reason: 'actor-scoped MCP refresh for actor-b',
@@ -448,7 +452,7 @@ describe('createHarness', () => {
         workspacePath: '/tmp/workspace',
         runtimeEnv: {
           BASH_ENV: '/home/testuser/.roomote/env.sh',
-          OPENAI_API_KEY: 'sk-test-openai',
+          OPENAI_API_KEY: 'sk-fresh-openai',
         },
         cancelSignal: expect.any(AbortSignal),
         logger: expect.any(Object),

@@ -48,6 +48,7 @@ import type {
   slackQuickAnswers,
   linearPendingSelections,
   environmentVariables,
+  modelProviderEnvironmentVariables,
   environments,
   environmentConfigVersions,
   environmentRepositoryMappings,
@@ -376,6 +377,18 @@ export type EnvironmentVariable = typeof environmentVariables.$inferSelect;
 
 export type CreateEnvironmentVariable = Omit<
   typeof environmentVariables.$inferInsert,
+  Generated
+>;
+
+/**
+ * modelProviderEnvironmentVariables
+ */
+
+export type ModelProviderEnvironmentVariable =
+  typeof modelProviderEnvironmentVariables.$inferSelect;
+
+export type CreateModelProviderEnvironmentVariable = Omit<
+  typeof modelProviderEnvironmentVariables.$inferInsert,
   Generated
 >;
 

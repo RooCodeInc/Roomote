@@ -242,6 +242,7 @@ const workerReleaseMetadataSchema = z.object({
   workerReleaseTag: z.string().optional(),
   workerVersion: z.string().optional(),
   workerCommit: z.string().optional(),
+  envContractVersion: z.number().int().optional(),
 });
 
 function runTokenOnlyScoped<T extends z.ZodType>(
@@ -1012,11 +1013,18 @@ export const taskRunsRouter = router({
       timestamp: input.timestamp,
     }),
   ),
-  fetchSnapshotEnv: runScoped(z.object({ runId: z.number() }), 'runId').query(
-    ({ ctx, input }) => fetchSnapshotEnv(ctx.auth, input),
-  ),
+  fetchSnapshotEnv: runScoped(
+    z.object({
+      runId: z.number(),
+      envContractVersion: z.number().int().optional(),
+    }),
+    'runId',
+  ).query(({ ctx, input }) => fetchSnapshotEnv(ctx.auth, input)),
   getResolvedRuntimeEnvVars: runScoped(
-    z.object({ runId: z.number() }),
+    z.object({
+      runId: z.number(),
+      envContractVersion: z.number().int().optional(),
+    }),
     'runId',
   ).query(({ ctx, input }) => getResolvedRuntimeEnvVars(ctx.auth, input)),
 

@@ -9,8 +9,8 @@ import {
   type SetupModelProviderId,
   type TaskModelMetadata,
 } from '@roomote/types';
+import { getPersistedModelProviderEnvironmentVariableValues } from '@roomote/db/server';
 
-import { getPersistedEnvironmentVariableValues } from '../environment-variables';
 import { mergeMetadata } from './models-dev';
 
 const LOCAL_PROVIDER_REQUEST_TIMEOUT_MS = 15_000;
@@ -260,7 +260,7 @@ async function resolveLocalProviderConnection(
   input?: LocalProviderConnectionInput,
 ): Promise<LocalProviderConnection | null> {
   const envNames = getLocalProviderConnectionEnv(provider);
-  const persisted = await getPersistedEnvironmentVariableValues([
+  const persisted = await getPersistedModelProviderEnvironmentVariableValues([
     envNames.baseUrl,
     ...(envNames.apiKey ? [envNames.apiKey] : []),
   ]);

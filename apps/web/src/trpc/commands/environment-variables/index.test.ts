@@ -1,7 +1,8 @@
 import type { UserAuthSuccess } from '@/types';
 
-const { mockFinalChain } = vi.hoisted(() => ({
+const { mockFinalChain, mockGetModelProviderNames } = vi.hoisted(() => ({
   mockFinalChain: vi.fn(),
+  mockGetModelProviderNames: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -20,6 +21,7 @@ vi.mock('@roomote/db/server', () => ({
   inArray: vi.fn(),
   not: vi.fn(),
   getTableColumns: () => ({ id: 'env.id', name: 'env.name' }),
+  getPersistedModelProviderEnvironmentVariableNames: mockGetModelProviderNames,
 }));
 
 import { createEnvVarCommand, getEnvVarsCommand } from './index';
@@ -51,6 +53,7 @@ function buildMockAuth(
 describe('environment-variables commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetModelProviderNames.mockResolvedValue([]);
   });
 
   describe('getEnvVarsCommand', () => {
@@ -66,6 +69,23 @@ describe('environment-variables commands', () => {
       await getEnvVarsCommand(buildMockAuth());
 
       expect(mockFinalChain).toHaveBeenCalledTimes(1);
+    });
+
+    it('excludes model-provider and named OpenAI-compatible values', async () => {
+      mockFinalChain.mockResolvedValue([
+        { id: 'task', name: 'MY_APP_TOKEN' },
+        { id: 'model', name: 'TOGETHER_API_KEY' },
+        {
+          id: 'custom-model',
+          name: 'OPENAI_COMPATIBLE_COMPANY_PROXY_API_KEY',
+        },
+        { id: 'declared-custom', name: 'CUSTOM_LLM_TOKEN' },
+      ]);
+      mockGetModelProviderNames.mockResolvedValue(['CUSTOM_LLM_TOKEN']);
+
+      await expect(getEnvVarsCommand(buildMockAuth())).resolves.toEqual([
+        { id: 'task', name: 'MY_APP_TOKEN' },
+      ]);
     });
   });
 
@@ -89,6 +109,30 @@ describe('environment-variables commands', () => {
         }),
       ).rejects.toThrow(
         'is a reserved communications provider variable. Configure it under Settings → Communications.',
+      );
+    });
+
+    it('reserves model-provider variable names during dual-write rollout', async () => {
+      await expect(
+        createEnvVarCommand(buildMockAuth(), {
+          name: 'TOGETHER_API_KEY',
+          value: 'task-key',
+        }),
+      ).rejects.toThrow(
+        'is reserved for model-provider configuration during the compatibility rollout',
+      );
+    });
+
+    it('reserves custom names declared by model-provider configuration', async () => {
+      mockGetModelProviderNames.mockResolvedValue(['CUSTOM_LLM_TOKEN']);
+
+      await expect(
+        createEnvVarCommand(buildMockAuth(), {
+          name: 'CUSTOM_LLM_TOKEN',
+          value: 'task-key',
+        }),
+      ).rejects.toThrow(
+        'is reserved for model-provider configuration during the compatibility rollout',
       );
     });
   });

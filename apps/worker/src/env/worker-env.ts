@@ -143,6 +143,9 @@ export class WorkerEnv {
    */
   private runtimeEnv: Record<string, string> = {};
 
+  /** Reloadable model values that are scoped to the agent harness. */
+  private modelRuntimeEnv: Record<string, string> = {};
+
   /**
    * Launcher-supplied model config and provider keys. These are stable
    * across deployment env reloads because they describe how the harness starts,
@@ -361,6 +364,19 @@ export class WorkerEnv {
 
   getRuntimeEnv(): Record<string, string> {
     return { ...this.runtimeEnv };
+  }
+
+  setModelRuntimeEnv(vars: Record<string, string | undefined>): void {
+    this.modelRuntimeEnv = {};
+    for (const [key, value] of Object.entries(vars)) {
+      if (value !== undefined) {
+        this.modelRuntimeEnv[key] = value;
+      }
+    }
+  }
+
+  getModelRuntimeEnv(): Record<string, string> {
+    return { ...this.modelRuntimeEnv };
   }
 
   /** Set a single system base var. */

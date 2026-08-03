@@ -211,6 +211,13 @@ export async function prepareOpenCodeCommandEnv(options: {
   logger: HarnessLogger;
 }): Promise<{ commandEnv: Record<string, string>; model?: string }> {
   const commandEnv = normalizeOpenCodeRuntimeEnv(options.runtimeEnv);
+  const harnessOnlySecretNames = (
+    commandEnv.ROOMOTE_HARNESS_ONLY_SECRET_NAMES ?? ''
+  )
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name));
+  delete commandEnv.ROOMOTE_HARNESS_ONLY_SECRET_NAMES;
   const parsedMcpServers = Object.fromEntries(
     Object.entries(options.mcpServers ?? {}).flatMap(([name, config]) => {
       const parsedConfig = parseDirectMcpConfig(config);
@@ -269,7 +276,11 @@ export async function prepareOpenCodeCommandEnv(options: {
     logger: options.logger,
   });
 
-  await materializeOpenCodeBashEnvOverlay({ commandEnv, homeDir });
+  await materializeOpenCodeBashEnvOverlay({
+    commandEnv,
+    homeDir,
+    harnessOnlySecretNames,
+  });
 
   // OpenCode always Arborist-installs @opencode-ai/plugin into the config dir
   // and waits on that work when any plugins (including Roomote file plugins)
@@ -309,8 +320,9 @@ function quoteForBash(value: string): string {
 async function materializeOpenCodeBashEnvOverlay(options: {
   commandEnv: Record<string, string>;
   homeDir: string;
+  harnessOnlySecretNames: string[];
 }): Promise<void> {
-  const { commandEnv, homeDir } = options;
+  const { commandEnv, homeDir, harnessOnlySecretNames } = options;
   const inheritedBashEnv = commandEnv.BASH_ENV?.trim();
 
   if (!inheritedBashEnv) {
@@ -320,6 +332,22 @@ async function materializeOpenCodeBashEnvOverlay(options: {
   const dataDir = resolveOpenCodeDataDir(homeDir, commandEnv);
   await fs.mkdir(dataDir, { recursive: true });
   const overlayPath = path.join(dataDir, OPENCODE_BASH_ENV_FILE_NAME);
+  const secretUnsetLines = harnessOnlySecretNames.map(
+    (envVarName) => `unset ${envVarName}`,
+  );
+  const harnessSecretOverlay =
+    secretUnsetLines.length === 0
+      ? []
+      : commandEnv.OPENCODE_COMMAND?.trim()
+        ? [
+            'if [[ "${ROOMOTE_OPENCODE_LAUNCH_ENV_INITIALIZED:-}" == "1" ]]; then',
+            ...secretUnsetLines.map((line) => `  ${line}`),
+            'else',
+            '  export ROOMOTE_OPENCODE_LAUNCH_ENV_INITIALIZED=1',
+            'fi',
+          ]
+        : secretUnsetLines;
+
   await fs.writeFile(
     overlayPath,
     [
@@ -329,6 +357,7 @@ async function materializeOpenCodeBashEnvOverlay(options: {
       ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES.map(
         (envVarName) => `unset ${envVarName}`,
       ),
+      ...harnessSecretOverlay,
       '',
     ].join('\n'),
     { mode: 0o600 },

@@ -39,6 +39,8 @@ import {
   isChatGptSubscriptionConnected,
   isGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected,
+  getPersistedModelProviderEnvironmentVariableNames,
+  getPersistedModelProviderEnvironmentVariableValues,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
@@ -138,9 +140,11 @@ import {
   getSetupBaseStatus,
 } from '../setup/shared';
 import {
+  deleteModelProviderEnvironmentVariables,
   getPersistedEnvironmentVariableNames,
   getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
+  upsertModelProviderEnvironmentVariables,
 } from '../environment-variables';
 import {
   assertTeamsBotCredentialsAuthenticate,
@@ -1289,6 +1293,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeModelConfig,
     persistedRuntimeComputeConfig,
     envVarNames,
+    modelEnvVarNames,
     nonSecretAuthEnvValues,
     nonSecretModelEnvValues,
     nonSecretComputeEnvValues,
@@ -1302,8 +1307,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeModelConfig(),
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
+    getPersistedModelProviderEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
-    getPersistedEnvironmentVariableValues(
+    getPersistedModelProviderEnvironmentVariableValues(
       SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => [
         ...(provider.authKind === 'endpoint' && provider.envVarName
           ? [provider.envVarName]
@@ -1404,7 +1410,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const modelSetup = buildSetupModelStatus({
     runtimeEnv: process.env,
     persistedModelConfig: persistedRuntimeModelConfig,
-    persistedEnvVarNames: envVarNames,
+    persistedEnvVarNames: modelEnvVarNames,
     persistedEnvVarValues: nonSecretModelEnvValues,
     selectedProvider: setupNewState.modelProvider,
     chatgptConnected,
@@ -1550,7 +1556,7 @@ export async function saveSetupNewModelConfigCommand(
     const [currentState, persistedEnvVarNames, persistedTaskModelSettings] =
       await Promise.all([
         getPersistedSetupNewState(tx),
-        getPersistedEnvironmentVariableNames(tx),
+        getPersistedModelProviderEnvironmentVariableNames(tx),
         getPersistedRawTaskModelSettings(tx),
       ]);
     const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
@@ -1568,7 +1574,7 @@ export async function saveSetupNewModelConfigCommand(
         });
 
       if (credentialValues.length > 0) {
-        await upsertDeploymentEnvironmentVariables(tx, {
+        await upsertModelProviderEnvironmentVariables(tx, {
           userId,
           values: credentialValues,
         });
@@ -1581,14 +1587,10 @@ export async function saveSetupNewModelConfigCommand(
       );
 
       if (clearedPersistedEnvVarNames.length > 0) {
-        await tx
-          .delete(environmentVariables)
-          .where(
-            and(
-              isNull(environmentVariables.userId),
-              inArray(environmentVariables.name, clearedPersistedEnvVarNames),
-            ),
-          );
+        await deleteModelProviderEnvironmentVariables(
+          tx,
+          clearedPersistedEnvVarNames,
+        );
       }
     }
 

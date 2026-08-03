@@ -1,10 +1,15 @@
-const { mockResolveDeploymentEnvVar } = vi.hoisted(() => ({
-  mockResolveDeploymentEnvVar: vi.fn(),
-}));
+const { mockGetPersistedModelProviderEnvironmentVariableValues } = vi.hoisted(
+  () => ({
+    mockGetPersistedModelProviderEnvironmentVariableValues: vi.fn(),
+  }),
+);
 
-vi.mock('../environment-variables', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../environment-variables')>()),
-  resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
+vi.mock('../model-provider-environment-variables', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../model-provider-environment-variables')
+  >()),
+  getPersistedModelProviderEnvironmentVariableValues:
+    mockGetPersistedModelProviderEnvironmentVariableValues,
 }));
 
 import { resolveModelProviderEnvValue } from '../model-runtime-config';
@@ -16,7 +21,9 @@ describe('resolveModelProviderEnvValue', () => {
   });
 
   it('checks all runtime aliases before querying persisted values', async () => {
-    mockResolveDeploymentEnvVar.mockResolvedValue('persisted-key');
+    mockGetPersistedModelProviderEnvironmentVariableValues.mockResolvedValue({
+      GEMINI_API_KEY: 'persisted-key',
+    });
 
     const value = await resolveModelProviderEnvValue(
       ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'],
@@ -26,12 +33,16 @@ describe('resolveModelProviderEnvValue', () => {
     );
 
     expect(value).toBe('runtime-alias-key');
-    expect(mockResolveDeploymentEnvVar).not.toHaveBeenCalled();
+    expect(
+      mockGetPersistedModelProviderEnvironmentVariableValues,
+    ).not.toHaveBeenCalled();
   });
 
   it('looks up only the requested persisted key', async () => {
     const executor = {} as DatabaseOrTransaction;
-    mockResolveDeploymentEnvVar.mockResolvedValue('persisted-key');
+    mockGetPersistedModelProviderEnvironmentVariableValues.mockResolvedValue({
+      OPENAI_API_KEY: 'persisted-key',
+    });
 
     const value = await resolveModelProviderEnvValue('OPENAI_API_KEY', {
       runtimeEnv: {},
@@ -39,10 +50,8 @@ describe('resolveModelProviderEnvValue', () => {
     });
 
     expect(value).toBe('persisted-key');
-    expect(mockResolveDeploymentEnvVar).toHaveBeenCalledWith(
-      'OPENAI_API_KEY',
-      executor,
-      {},
-    );
+    expect(
+      mockGetPersistedModelProviderEnvironmentVariableValues,
+    ).toHaveBeenCalledWith(['OPENAI_API_KEY'], executor);
   });
 });

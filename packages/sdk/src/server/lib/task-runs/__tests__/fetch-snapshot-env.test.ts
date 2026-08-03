@@ -30,6 +30,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../dequeue-helpers', () => ({
   fetchResolvedRuntimeEnvVars: mockFetchResolvedRuntimeEnvVars,
+  flattenResolvedRuntimeEnvVars: (resolved: {
+    envVars: Record<string, string>;
+    modelRuntimeEnv: Record<string, string>;
+  }) => ({ ...resolved.envVars, ...resolved.modelRuntimeEnv }),
   createSourceControlTokenForTaskRun: mockCreateSourceControlTokenForTaskRun,
 }));
 
@@ -76,15 +80,20 @@ describe('fetchSnapshotEnv', () => {
     const taskRun = makeTaskRun();
     mockFindFirst.mockResolvedValue(taskRun);
     mockFetchResolvedRuntimeEnvVars.mockResolvedValue({
-      MY_SECRET: 'value123',
+      envVars: { MY_SECRET: 'value123' },
+      modelRuntimeEnv: { ANTHROPIC_API_KEY: 'model-secret' },
     });
     const token = makeGitHubToken('ghs_token_abc');
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue(token);
 
-    const result = await fetchSnapshotEnv(auth, { runId: 42 });
+    const result = await fetchSnapshotEnv(auth, {
+      runId: 42,
+      envContractVersion: 2,
+    });
 
     expect(result).toEqual({
       envVars: { MY_SECRET: 'value123' },
+      modelRuntimeEnv: { ANTHROPIC_API_KEY: 'model-secret' },
       gitHubToken: 'ghs_token_abc',
       sourceControlToken: token,
       taskId: 'task_123',
@@ -119,7 +128,10 @@ describe('fetchSnapshotEnv', () => {
 
     const taskRun = makeTaskRun();
     mockFindFirst.mockResolvedValue(taskRun);
-    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({});
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({
+      envVars: {},
+      modelRuntimeEnv: {},
+    });
     const token = makeGitHubToken('ghs_job_token');
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue(token);
 
@@ -167,7 +179,10 @@ describe('fetchSnapshotEnv', () => {
     };
 
     mockFindFirst.mockResolvedValue(makeTaskRun());
-    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({});
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({
+      envVars: {},
+      modelRuntimeEnv: {},
+    });
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue(
       makeGitHubToken('ghs_token_xyz'),
     );
@@ -189,7 +204,10 @@ describe('fetchSnapshotEnv', () => {
     };
 
     mockFindFirst.mockResolvedValue(makeTaskRun());
-    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({ KEY: 'val' });
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({
+      envVars: { KEY: 'val' },
+      modelRuntimeEnv: {},
+    });
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue(null);
 
     await expect(fetchSnapshotEnv(auth, { runId: 42 })).rejects.toThrow(

@@ -5,11 +5,14 @@ import {
 } from '@roomote/types';
 import { db, eq, taskRuns } from '@roomote/db/server';
 
-import { fetchResolvedRuntimeEnvVars } from './dequeue-helpers';
+import {
+  fetchResolvedRuntimeEnvVars,
+  flattenResolvedRuntimeEnvVars,
+} from './dequeue-helpers';
 
 export async function getResolvedRuntimeEnvVars(
   _auth: AuthTokenContext | RunTokenContext,
-  input: { runId: number },
+  input: { runId: number; envContractVersion?: number },
 ) {
   const taskRun = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, input.runId),
@@ -20,9 +23,13 @@ export async function getResolvedRuntimeEnvVars(
     throw new Error('Task run not found');
   }
 
-  return fetchResolvedRuntimeEnvVars(undefined, {
+  const resolvedEnv = await fetchResolvedRuntimeEnvVars(undefined, {
     sourceControlProvider: resolveSourceControlProviderFromPayload(
       taskRun.payload,
     ),
   });
+
+  return input.envContractVersion === 2
+    ? resolvedEnv
+    : flattenResolvedRuntimeEnvVars(resolvedEnv);
 }

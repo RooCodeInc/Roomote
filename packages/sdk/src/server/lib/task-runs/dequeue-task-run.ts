@@ -24,6 +24,7 @@ import {
   type GitAuthor,
   fetchEnvVars,
   fetchResolvedRuntimeEnvVars,
+  flattenResolvedRuntimeEnvVars,
   cancelAndReleaseTaskRun,
   createSourceControlTokenForTaskRun,
   type SourceControlRuntimeToken,
@@ -82,6 +83,7 @@ type DequeueResult =
       gitHubToken: string;
       sourceControlToken: SourceControlRuntimeToken;
       envVars: Record<string, string>;
+      modelRuntimeEnv?: Record<string, string>;
       orgAgentInstructions?: string;
       setupOnboardingTask: boolean;
       gitAuthor: GitAuthor;
@@ -258,6 +260,7 @@ export const dequeueTaskRun = async (
     workerReleaseTag?: string;
     workerVersion?: string;
     workerCommit?: string;
+    envContractVersion?: number;
   },
   {
     onBootstrapFailure,
@@ -266,7 +269,13 @@ export const dequeueTaskRun = async (
   } = {},
 ) => {
   try {
-    const { runId, workerReleaseTag, workerVersion, workerCommit } = input;
+    const {
+      runId,
+      workerReleaseTag,
+      workerVersion,
+      workerCommit,
+      envContractVersion,
+    } = input;
     const query = claimJobById(runId);
 
     const tag = '[dequeueTaskRun]';
@@ -518,10 +527,10 @@ export const dequeueTaskRun = async (
       }
     }
 
-    let resolvedEnvVars: Record<string, string>;
+    let resolvedEnv: Awaited<ReturnType<typeof fetchResolvedRuntimeEnvVars>>;
 
     try {
-      resolvedEnvVars = await recordBootstrapPhase({
+      resolvedEnv = await recordBootstrapPhase({
         runId: txResult.taskRun.id,
         taskId: txResult.taskRun.taskId,
         label: 'resolveRuntimeEnvVars',
@@ -561,9 +570,14 @@ export const dequeueTaskRun = async (
       gitHubToken,
       sourceControlToken,
       envVars: {
-        ...resolvedEnvVars,
+        ...(envContractVersion === 2
+          ? resolvedEnv.envVars
+          : flattenResolvedRuntimeEnvVars(resolvedEnv)),
         ...sourceControlToken.envVars,
       },
+      ...(envContractVersion === 2 && {
+        modelRuntimeEnv: resolvedEnv.modelRuntimeEnv,
+      }),
       orgAgentInstructions: txResult.orgAgentInstructions,
       setupOnboardingTask:
         slackTaskRunRouting.route.kind === 'setup-onboarding',

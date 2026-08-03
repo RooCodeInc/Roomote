@@ -50,12 +50,14 @@ import {
 
 import { BackgroundEnvironmentSetupController } from './background-environment-setup-controller';
 import { injectEnvVars, writeBashrc } from './env-vars';
+import { splitLegacyModelRuntimeEnv } from '../../run-task/env';
 import { buildServiceContextForPreviewProxy } from './service-context';
 import { finalizeJob, handleTaskRunError } from './task-run-lifecycle';
 
 interface PreparedTaskRunBase {
   taskRun: TaskRun;
   envVars: Record<string, string>;
+  modelRuntimeEnv?: Record<string, string>;
   sourceControlToken?: SourceControlTokenMetadata;
   gitAuthor?: { name: string; email: string };
   setupOnboardingTask?: boolean;
@@ -339,7 +341,19 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       return false;
     }
 
-    const { envVars } = jobContext;
+    const resolvedEnv =
+      jobContext.modelRuntimeEnv === undefined
+        ? splitLegacyModelRuntimeEnv(jobContext.envVars)
+        : {
+            envVars: jobContext.envVars,
+            modelRuntimeEnv: jobContext.modelRuntimeEnv,
+          };
+    const { envVars, modelRuntimeEnv } = resolvedEnv;
+    const effectiveJobContext = {
+      ...jobContext,
+      envVars,
+      modelRuntimeEnv,
+    } as TPrepared;
     taskRun = jobContext.taskRun;
     const runIdForEvents = taskRun.id;
     callbacks = mergeRunTaskCallbacks(
@@ -495,6 +509,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     });
 
     workerEnv.setRuntimeEnv(envVars);
+    workerEnv.setModelRuntimeEnv?.(modelRuntimeEnv);
 
     const serviceContext = buildServiceContextForPreviewProxy(
       taskRun,
@@ -665,7 +680,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     await backgroundEnvironmentSetupController.preflightTaskStart();
 
     const runTaskPromise = runFn({
-      jobContext,
+      jobContext: effectiveJobContext,
       userEnvVars,
       workspace,
       workspacePath,

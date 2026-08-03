@@ -5,6 +5,7 @@ import { sdk } from '@roomote/sdk/client';
 import { injectEnvVars } from '../../commands/utils/env-vars';
 import type { WorkerEnv } from '../../env';
 import { runUnlessCredentialWriteBarrier } from '../../lib';
+import { splitLegacyModelRuntimeEnv } from '../../run-task/env';
 
 import type { Harness } from '../lib/harness';
 import { publicProcedure } from '../trpc';
@@ -22,6 +23,34 @@ function omitKeys(
   return nextEnv;
 }
 
+function envValuesEqual(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftEntries = Object.entries(left);
+
+  return (
+    leftEntries.length === Object.keys(right).length &&
+    leftEntries.every(([name, value]) => right[name] === value)
+  );
+}
+
+function isSplitResolvedEnv(value: unknown): value is {
+  envVars: Record<string, string>;
+  modelRuntimeEnv: Record<string, string>;
+} {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'envVars' in value &&
+    typeof value.envVars === 'object' &&
+    value.envVars !== null &&
+    'modelRuntimeEnv' in value &&
+    typeof value.modelRuntimeEnv === 'object' &&
+    value.modelRuntimeEnv !== null
+  );
+}
+
 /**
  * Fetch the deployment's current env vars and rewrite the sandbox env
  * (env.sh, runtime env, harness command env) from them. Shared by the live
@@ -36,8 +65,8 @@ export async function applyDeploymentEnvVarsReload(input: {
 }): Promise<{ names: string[]; envVars: Record<string, string> }> {
   const { runId, workerEnv, harness } = input;
 
-  const [freshEnvVars, taskRun] = await Promise.all([
-    sdk.taskRuns.getResolvedRuntimeEnvVars({ runId }),
+  const [resolvedEnv, taskRun] = await Promise.all([
+    sdk.taskRuns.getResolvedRuntimeEnvVars({ runId, envContractVersion: 2 }),
     sdk.taskRuns.findFirstById(runId),
   ]);
 
@@ -48,7 +77,13 @@ export async function applyDeploymentEnvVarsReload(input: {
     });
   }
 
+  const normalizedEnv = isSplitResolvedEnv(resolvedEnv)
+    ? resolvedEnv
+    : splitLegacyModelRuntimeEnv(resolvedEnv);
+  const { envVars: freshEnvVars, modelRuntimeEnv } = normalizedEnv;
+
   const currentRuntimeEnv = workerEnv.getRuntimeEnv();
+  const currentModelRuntimeEnv = workerEnv.getModelRuntimeEnv();
   const nextRuntimeEnv: Record<string, string> = { ...freshEnvVars };
 
   await injectEnvVars(nextRuntimeEnv, taskRun, {
@@ -58,17 +93,32 @@ export async function applyDeploymentEnvVarsReload(input: {
   });
 
   workerEnv.setRuntimeEnv(nextRuntimeEnv);
+  workerEnv.setModelRuntimeEnv(modelRuntimeEnv);
 
   const currentCommandEnv = harness.getCommandEnv?.() ?? {};
-  const baseCommandEnv = omitKeys(
-    currentCommandEnv,
-    Object.keys(currentRuntimeEnv),
-  );
+  const baseCommandEnv = omitKeys(currentCommandEnv, [
+    ...Object.keys(currentRuntimeEnv),
+    ...Object.keys(currentModelRuntimeEnv),
+  ]);
 
   harness.setCommandEnv?.({
     ...baseCommandEnv,
     ...nextRuntimeEnv,
+    ...modelRuntimeEnv,
   });
+
+  if (!envValuesEqual(currentModelRuntimeEnv, modelRuntimeEnv)) {
+    if (!harness.requestReconnect) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Model credentials require a reconnectable harness',
+      });
+    }
+
+    await harness.requestReconnect({
+      reason: 'model runtime environment changed',
+    });
+  }
 
   return {
     names: Object.keys(freshEnvVars).sort((left, right) =>

@@ -60,7 +60,7 @@ export async function snapshot({
       gitHubToken: GH_TOKEN,
       sourceControlToken,
       taskId,
-    } = await sdk.taskRuns.fetchSnapshotEnv({ runId });
+    } = await sdk.taskRuns.fetchSnapshotEnv({ runId, envContractVersion: 2 });
 
     const envVars: Record<string, string> = {
       ...fetchedEnvVars,

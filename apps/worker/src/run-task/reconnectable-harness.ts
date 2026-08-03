@@ -48,6 +48,7 @@ interface ReconnectableHarnessConfig {
   maxReconnectAttempts?: number;
   /** Durable breadcrumbs for harness lifecycle transitions; observer-only. */
   diagnosticEvents?: DiagnosticEventRecorder;
+  onCommandEnvChanged?: (env: Record<string, string>) => void;
 }
 
 interface BoundHarnessListeners {
@@ -116,6 +117,9 @@ export class ReconnectableHarness
   private readonly spawnHarness: ReconnectableHarnessConfig['spawnHarness'];
   private readonly maxReconnectAttempts: number;
   private readonly diagnosticEvents: DiagnosticEventRecorder | undefined;
+  private readonly onCommandEnvChanged:
+    | ((env: Record<string, string>) => void)
+    | undefined;
 
   private currentHarness: Harness | null = null;
   private currentSubprocess: ResultPromise | null = null;
@@ -138,6 +142,7 @@ export class ReconnectableHarness
     this.maxReconnectAttempts =
       config.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
     this.diagnosticEvents = config.diagnosticEvents;
+    this.onCommandEnvChanged = config.onCommandEnvChanged;
   }
 
   async start(options?: { initialSessionId?: string }): Promise<void> {
@@ -252,6 +257,7 @@ export class ReconnectableHarness
 
   setCommandEnv(env: Record<string, string>): void {
     this.currentCommandEnv = env;
+    this.onCommandEnvChanged?.(env);
     this.currentHarness?.setCommandEnv?.(env);
   }
 

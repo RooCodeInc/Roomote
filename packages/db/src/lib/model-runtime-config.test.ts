@@ -6,6 +6,8 @@ const {
   mockIsChatGptSubscriptionFastModeEnabled,
   mockResolveGitHubCopilotOpenCodeAuthContent,
   mockGetFreshXaiAccessToken,
+  mockGetPersistedModelProviderEnvironmentVariables,
+  mockGetPersistedModelProviderEnvironmentVariableValues,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockDeploymentSettingsFindFirst: vi.fn(),
@@ -14,6 +16,8 @@ const {
   mockIsChatGptSubscriptionFastModeEnabled: vi.fn(),
   mockResolveGitHubCopilotOpenCodeAuthContent: vi.fn(),
   mockGetFreshXaiAccessToken: vi.fn(),
+  mockGetPersistedModelProviderEnvironmentVariables: vi.fn(),
+  mockGetPersistedModelProviderEnvironmentVariableValues: vi.fn(),
 }));
 
 vi.mock('../encryption', () => ({
@@ -37,6 +41,13 @@ vi.mock('../db', () => ({
 
 vi.mock('./environment-variables', () => ({
   stringifyDecryptedEnvVarValue: (value: unknown) => String(value),
+}));
+
+vi.mock('./model-provider-environment-variables', () => ({
+  getPersistedModelProviderEnvironmentVariables: (...args: unknown[]) =>
+    mockGetPersistedModelProviderEnvironmentVariables(...args),
+  getPersistedModelProviderEnvironmentVariableValues: (...args: unknown[]) =>
+    mockGetPersistedModelProviderEnvironmentVariableValues(...args),
 }));
 
 vi.mock('./chatgpt-subscription', () => ({
@@ -75,6 +86,10 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     mockResolveOpenCodeAuthContent.mockResolvedValue(null);
     mockIsChatGptSubscriptionFastModeEnabled.mockResolvedValue(false);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
+    mockGetPersistedModelProviderEnvironmentVariables.mockResolvedValue({});
+    mockGetPersistedModelProviderEnvironmentVariableValues.mockResolvedValue(
+      {},
+    );
   });
 
   it('prefers real runtime env values over persisted deployment config', async () => {
@@ -91,7 +106,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         R_VISION_MODEL: 'openai/gpt-5.5',
         OPENAI_API_KEY: 'sk-runtime',
       },
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENAI_API_KEY: 'sk-saved',
         ANTHROPIC_API_KEY: 'sk-anthropic',
       },
@@ -119,19 +134,17 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         roomoteVisionModel: null,
       },
     });
-    mockEnvironmentVariablesFindMany.mockResolvedValue([
-      {
-        name: 'ANTHROPIC_API_KEY',
-        value: 'sk-encrypted',
-      },
-    ]);
-    mockDecryptSecrets.mockResolvedValue('sk-persisted');
+    mockGetPersistedModelProviderEnvironmentVariables.mockResolvedValue({
+      ANTHROPIC_API_KEY: 'sk-persisted',
+    });
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
     });
 
-    expect(mockEnvironmentVariablesFindMany).toHaveBeenCalledTimes(1);
+    expect(
+      mockGetPersistedModelProviderEnvironmentVariables,
+    ).toHaveBeenCalledTimes(1);
     expect(env).toEqual({
       R_MODEL: 'anthropic/claude-sonnet-4',
       R_MODEL_REASONING_EFFORT: 'medium',
@@ -153,7 +166,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
         CUSTOM_LLM_TOKEN: 'saved-token',
       },
@@ -177,7 +190,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -209,7 +222,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         R_SMALL_MODEL: 'openrouter/anthropic/claude-sonnet-4',
         OPENROUTER_API_KEY: 'sk-runtime',
       },
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-saved',
       },
     });
@@ -232,7 +245,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -252,7 +265,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -284,7 +297,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -315,7 +328,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
         ANTHROPIC_API_KEY: 'sk-anthropic',
       },
@@ -347,7 +360,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
         ANTHROPIC_API_KEY: 'sk-anthropic',
       },
@@ -379,7 +392,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       runtimeEnv: {
         R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
       },
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -405,7 +418,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       runtimeEnv: {
         R_CODE_REVIEW_MODEL: 'openrouter/anthropic/claude-sonnet-4',
       },
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -429,7 +442,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       runtimeEnv: {
         R_EXPLORE_MODEL: 'openrouter/anthropic/claude-haiku-4',
       },
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -461,7 +474,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       runtimeEnv: {
         R_MODEL_REASONING_EFFORT: 'xhigh',
       },
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -491,7 +504,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       runtimeEnv: {
         R_SMALL_MODEL_REASONING_EFFORT: 'nonsense',
       },
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -535,7 +548,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
       },
     });
@@ -559,7 +572,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         OPENROUTER_API_KEY: 'sk-openrouter',
         ANTHROPIC_API_KEY: 'sk-anthropic',
         OPENAI_API_KEY: 'sk-openai',
@@ -594,7 +607,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {
+      modelProviderEnvVars: {
         AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
         AWS_REGION: 'us-west-2',
         GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
@@ -635,7 +648,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     expect(mockResolveOpenCodeAuthContent).toHaveBeenCalled();
@@ -655,7 +668,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     expect(env.R_CHATGPT_FAST_MODE).toBe('1');
@@ -673,7 +686,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveSandboxModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     // The OAuth record must stay on the control plane; the marker tells the
@@ -690,7 +703,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveSandboxModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
@@ -716,7 +729,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveSandboxModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     expect(env.R_INFERENCE_GATEWAY_GITHUB_COPILOT).toBe('1');
@@ -737,7 +750,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     const env = await resolveSandboxModelRuntimeEnv({
       runtimeEnv: {},
       // No XAI_API_KEY: subscription alone must cover the gateway path.
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     expect(mockGetFreshXaiAccessToken).toHaveBeenCalled();
@@ -760,7 +773,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveSandboxModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_XAI');
@@ -780,7 +793,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     // OpenCode's xAI provider is API-key shaped: inject the access token as
@@ -802,7 +815,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: { XAI_API_KEY: 'sk-byok-key' },
+      modelProviderEnvVars: { XAI_API_KEY: 'sk-byok-key' },
     });
 
     // Match gateway precedence: subscription wins when connected.
@@ -816,7 +829,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      modelProviderEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
     });
 
     expect(mockResolveOpenCodeAuthContent).not.toHaveBeenCalled();
@@ -831,7 +844,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     const env = await resolveEffectiveModelRuntimeEnv({
       runtimeEnv: {},
-      deploymentEnvVars: {},
+      modelProviderEnvVars: {},
     });
 
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
@@ -847,7 +860,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     it('withholds gateway-served keys and advertises them by name when enabled', async () => {
       const env = await resolveSandboxModelRuntimeEnv({
         runtimeEnv: {},
-        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+        modelProviderEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
       });
 
       expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
@@ -860,7 +873,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     it('keeps raw keys for control-plane resolution', async () => {
       const env = await resolveEffectiveModelRuntimeEnv({
         runtimeEnv: {},
-        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+        modelProviderEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
       });
 
       expect(env.ANTHROPIC_API_KEY).toBe('sk-anthropic');
@@ -874,7 +887,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       // for its own code survives into the sandbox.
       const env = await resolveSandboxModelRuntimeEnv({
         runtimeEnv: {},
-        deploymentEnvVars: {
+        modelProviderEnvVars: {
           ANTHROPIC_API_KEY: 'sk-anthropic',
           OPENAI_API_KEY: 'sk-openai-for-user-code',
         },
@@ -924,7 +937,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
       const env = await resolveSandboxModelRuntimeEnv({
         runtimeEnv: {},
-        deploymentEnvVars: {
+        modelProviderEnvVars: {
           OPENROUTER_API_KEY: 'sk-openrouter',
           ANTHROPIC_API_KEY: 'sk-anthropic',
         },
@@ -945,7 +958,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
           R_MODEL_ENV_KEYS:
             'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK,GOOGLE_APPLICATION_CREDENTIALS,MISTRAL_API_KEY',
         },
-        deploymentEnvVars: {
+        modelProviderEnvVars: {
           ANTHROPIC_API_KEY: 'sk-anthropic',
           AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
           GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
@@ -975,7 +988,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
           LITELLM_BASE_URL: 'http://localhost:4000',
           LITELLM_API_KEY: 'litellm-key',
         },
-        deploymentEnvVars: {},
+        modelProviderEnvVars: {},
       });
 
       expect(env.R_MODEL).toBe('litellm/qwen3.6-35b-local');

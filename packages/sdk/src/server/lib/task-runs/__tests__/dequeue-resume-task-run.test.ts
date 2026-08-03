@@ -78,6 +78,10 @@ vi.mock('../dequeue-helpers', () => ({
   fetchEnvVars: (...args: unknown[]) => mockFetchEnvVars(...args),
   fetchResolvedRuntimeEnvVars: (...args: unknown[]) =>
     mockFetchResolvedRuntimeEnvVars(...args),
+  flattenResolvedRuntimeEnvVars: (resolved: {
+    envVars: Record<string, string>;
+    modelRuntimeEnv: Record<string, string>;
+  }) => ({ ...resolved.envVars, ...resolved.modelRuntimeEnv }),
   cancelAndReleaseTaskRun: (...args: unknown[]) =>
     mockCancelAndReleaseTaskRun(...args),
   notifyCanceledTaskRunOnSettle: (...args: unknown[]) =>
@@ -161,7 +165,10 @@ describe('dequeueResumeTaskRun', () => {
       source: 'app',
       expiresAt: null,
     });
-    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({ RESOLVED_ENV: '1' });
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({
+      envVars: { RESOLVED_ENV: '1' },
+      modelRuntimeEnv: {},
+    });
     mockCancelTaskRun.mockResolvedValue(undefined);
     mockCancelAndReleaseTaskRun.mockResolvedValue(undefined);
     mockReleaseTaskRun.mockResolvedValue(true);

@@ -41,6 +41,7 @@ export * from './lib/map-raw-row';
 export * from './lib/legacy-task-inference-usage';
 export * from './lib/deployment-auth-keypairs';
 export * from './lib/environment-variables';
+export * from './lib/model-provider-environment-variables';
 export * from './lib/task-id';
 export * from './lib/task-activity-timestamp';
 export * from './lib/acting-user';
@@ -169,6 +170,8 @@ export {
   trackedMessagesRelations,
   environmentVariables,
   environmentVariablesRelations,
+  modelProviderEnvironmentVariables,
+  modelProviderEnvironmentVariablesRelations,
   deploymentSecrets,
   webhooks,
   environments,
