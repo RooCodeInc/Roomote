@@ -296,6 +296,55 @@ describe('buildDiscordContinuationPrompt', () => {
     expect(result.claimedMessageIds).toEqual(['100']);
   });
 
+  it('orders synthetic reaction turns by their real target message', async () => {
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          {
+            id: '100',
+            user: 'u-alice',
+            username: 'Alice',
+            text: 'Please investigate this failure',
+          },
+          {
+            id: '200',
+            user: 'u-bob',
+            username: 'Bob',
+            text: 'This happened later',
+          },
+        ],
+      }),
+      fetchMessage: vi.fn().mockResolvedValue({
+        provider: 'discord',
+        id: '100',
+        user: 'u-alice',
+        username: 'Alice',
+        text: 'Please investigate this failure',
+        channelId: 'channel-1',
+        fileCount: 0,
+      }),
+    };
+
+    const result = await buildDiscordContinuationPrompt({
+      provider: provider as never,
+      channelId: 'channel-1',
+      replyToMessageId: '100',
+      contextThroughMessageId: '100',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Act on this',
+        user: 'Matt',
+        ts: 'channel-1:100:u-matt:white_check_mark',
+      },
+    });
+
+    expect(result.message.formattedPrompt).toContain(
+      'Alice: Please investigate this failure',
+    );
+    expect(result.message.formattedPrompt).not.toContain('This happened later');
+    expect(result.message.formattedPrompt).toContain('Act on this');
+  });
+
   it('includes an explicit replied-to human message even when already delivered', async () => {
     deliveryMocks.claim.mockResolvedValue([]);
     const provider = {

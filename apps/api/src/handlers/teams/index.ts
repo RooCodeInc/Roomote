@@ -11,6 +11,7 @@ import {
   getTeamsActivityTeamId,
   getTeamsActivityTenantId,
   isTeamsBotAuthoredActivity,
+  isTeamsNativeReactionType,
   isTeamsTaskEntryActivity,
   parseTeamsActivity,
   teamsActivityToQueuedCommunicationMessage,
@@ -1683,6 +1684,9 @@ teams.post('/', async (c) => {
       ReturnType<typeof getCallRoomoteViaEmojiConfiguration>
     > = null;
     for (const reaction of activity.reactionsAdded ?? []) {
+      if (!isTeamsNativeReactionType(reaction.type)) {
+        continue;
+      }
       configuration = await getCallRoomoteViaEmojiConfiguration(reaction.type);
       if (configuration) {
         break;

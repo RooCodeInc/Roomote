@@ -170,6 +170,7 @@ export {
   Slack,
   Slash,
   SlidersHorizontal,
+  Smile,
   Sparkles,
   Square,
   SquareArrowOutUpRight,

@@ -71,7 +71,6 @@ import {
   AlertCircle,
   AlertDescription,
   AlertTitle,
-  AtSignIcon,
   BasicTooltip,
   BellElectric,
   BrandIcon,
@@ -102,6 +101,7 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
+  Smile,
   MessagesSquare,
   Skeleton,
   SquarePen,
@@ -477,7 +477,7 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     label: 'Call Roomote via emoji',
     description:
       'Start or continue work in a Slack, Discord, or Teams thread by reacting with an emoji.',
-    icon: AtSignIcon,
+    icon: Smile,
   },
   channelAutoStart: {
     id: 'channelAutoStart',
@@ -2768,7 +2768,9 @@ export function AutomationsSettings() {
                       />
                       <p className="text-xs text-muted-foreground">
                         Enter the reaction name, with or without surrounding
-                        colons.
+                        colons. Microsoft Teams supports its native Like, Heart,
+                        Laugh, Surprised, Sad, and Angry reactions on messages
+                        posted by Roomote.
                       </p>
                       {fieldErrors.callRoomoteViaEmojiName ? (
                         <p className="text-xs text-destructive">

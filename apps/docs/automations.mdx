@@ -119,6 +119,15 @@ default `Act on this` prompt.
 The teammate adding the reaction must have a linked Roomote account, just as
 they would when mentioning Roomote directly from that communications provider.
 
+Provider support differs slightly:
+
+- Slack supports standard and workspace custom emoji reactions.
+- Discord supports standard and server custom emoji reactions.
+- Microsoft Teams sends reaction activities only for messages posted by
+  Roomote. Teams supports its native `like`, `heart`, `laugh`, `surprised`,
+  `sad`, and `angry` reactions; choose an equivalent configured emoji such as
+  `:thumbsup:` for Like or `:heart:` for Heart.
+
 ## Channel automations
 
 The channel section starts with **Auto-respond to channels**.

@@ -73,10 +73,13 @@ function formatDiscordThreadContextEntry(
 export function formatDiscordThreadContext(input: {
   messages: DiscordThreadHistoryMessage[];
   currentMessageId: string;
+  includeCurrentMessage?: boolean;
 }): string | undefined {
   const earlier = input.messages.filter(
     (message) =>
-      compareDiscordSnowflakes(message.id, input.currentMessageId) < 0 &&
+      (input.includeCurrentMessage
+        ? compareDiscordSnowflakes(message.id, input.currentMessageId) <= 0
+        : compareDiscordSnowflakes(message.id, input.currentMessageId) < 0) &&
       messageHasThreadDeliveryContent(message),
   );
   if (earlier.length === 0) return undefined;
@@ -329,6 +332,11 @@ export async function buildDiscordContinuationPrompt(input: {
    * lives in `channelId` / parent channel.
    */
   replyToChannelId?: string;
+  /**
+   * Real Discord message that the synthetic current turn acts on. Include
+   * history through this message instead of ordering by the synthetic event id.
+   */
+  contextThroughMessageId?: string;
 }): Promise<DiscordContinuationPromptResult> {
   const claimUndelivered = input.claimUndelivered !== false;
   const [historyBase, repliedToMessage] = await Promise.all([
@@ -353,10 +361,16 @@ export async function buildDiscordContinuationPrompt(input: {
     repliedTo: repliedToMessage,
   });
 
+  const contextMessageId =
+    input.contextThroughMessageId ?? input.queuedMessage.ts;
+  const includeContextMessage = Boolean(input.contextThroughMessageId);
+  const isInContext = (messageId: string) =>
+    includeContextMessage
+      ? compareDiscordSnowflakes(messageId, contextMessageId) <= 0
+      : compareDiscordSnowflakes(messageId, contextMessageId) < 0;
   const earlier = history.filter(
     (message) =>
-      compareDiscordSnowflakes(message.id, input.queuedMessage.ts) < 0 &&
-      messageHasThreadDeliveryContent(message),
+      isInContext(message.id) && messageHasThreadDeliveryContent(message),
   );
 
   const ownBotEarlier = earlier.filter(
@@ -419,7 +433,7 @@ export async function buildDiscordContinuationPrompt(input: {
   if (
     repliedToMessage &&
     messageHasThreadDeliveryContent(repliedToMessage) &&
-    compareDiscordSnowflakes(repliedToMessage.id, input.queuedMessage.ts) < 0 &&
+    isInContext(repliedToMessage.id) &&
     !(input.botUserId && repliedToMessage.botId === input.botUserId)
   ) {
     claimedMessages = mergeDiscordRepliedToMessage({
@@ -466,7 +480,8 @@ export async function buildDiscordContinuationPrompt(input: {
     });
   const threadContext = formatDiscordThreadContext({
     messages: threadContextMessages,
-    currentMessageId: input.queuedMessage.ts,
+    currentMessageId: contextMessageId,
+    ...(includeContextMessage ? { includeCurrentMessage: true } : {}),
   });
 
   const replyingToBlock =

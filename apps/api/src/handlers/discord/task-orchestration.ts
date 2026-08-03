@@ -37,6 +37,17 @@ import {
   type DiscordThreadHistoryMessage,
 } from './thread-context.js';
 
+function compareDiscordMessageIds(left: string, right: string): number {
+  try {
+    const leftId = BigInt(left);
+    const rightId = BigInt(right);
+    if (leftId === rightId) return 0;
+    return leftId < rightId ? -1 : 1;
+  } catch {
+    return left.localeCompare(right);
+  }
+}
+
 /**
  * Soft-clear the MESSAGE_CREATE intake 👀 when a path ends without a worker.
  * Platform answers and auto-start skips never hit onStart cleanup.
@@ -99,6 +110,8 @@ export async function startNewDiscordTask(input: {
   replyToMessageId?: string;
   /** Discord `message_reference.channel_id` when present. */
   replyToChannelId?: string;
+  /** Real Discord message included as the endpoint of synthetic reaction context. */
+  contextThroughMessageId?: string;
 }) {
   const existingRun = await findCommunicationTaskRunBySourceEvent({
     provider: 'discord',
@@ -176,11 +189,18 @@ export async function startNewDiscordTask(input: {
       text: input.queuedMessage.text,
       attachments: [],
     };
-    const historyWithTrigger = history.some(
+    const contextThroughMessageId = input.contextThroughMessageId;
+    const contextHistory = contextThroughMessageId
+      ? history.filter(
+          (message) =>
+            compareDiscordMessageIds(message.id, contextThroughMessageId) <= 0,
+        )
+      : history;
+    const historyWithTrigger = contextHistory.some(
       (message) => message.id === triggeringMessage.id,
     )
-      ? history
-      : [...history, triggeringMessage];
+      ? contextHistory
+      : [...contextHistory, triggeringMessage];
     // Full thread launches get the reconstructed transcript; top-level channel
     // reply launches only pass the explicit reply target + current turn.
     const includeReplyContext =
@@ -220,7 +240,8 @@ export async function startNewDiscordTask(input: {
     const threadContext = includeReplyContext
       ? formatDiscordThreadContext({
           messages: historyWithTrigger,
-          currentMessageId: input.queuedMessage.ts,
+          currentMessageId: contextThroughMessageId ?? input.queuedMessage.ts,
+          ...(contextThroughMessageId ? { includeCurrentMessage: true } : {}),
         })
       : undefined;
     const agentPromptPrefix = input.channelAutoStart?.agentPromptPrefix?.trim();

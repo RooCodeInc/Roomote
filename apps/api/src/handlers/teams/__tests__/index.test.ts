@@ -410,7 +410,7 @@ describe('Teams webhook handler', () => {
 
   it('turns a configured reaction into a thread message', async () => {
     callViaEmojiConfigMock.mockResolvedValue({
-      emoji: 'white_check_mark',
+      emoji: 'thumbsup',
       prompt: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
     });
 
@@ -427,7 +427,7 @@ describe('Teams webhook handler', () => {
           text: undefined,
           entities: undefined,
           replyToId: 'activity-root',
-          reactionsAdded: [{ type: 'white_check_mark' }],
+          reactionsAdded: [{ type: 'like' }],
         }),
       ),
     });
@@ -443,6 +443,33 @@ describe('Teams webhook handler', () => {
         threadTs: 'activity-root',
       }),
     );
+  });
+
+  it('ignores reaction types outside the Teams native set', async () => {
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'reaction-unsupported',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'activity-root',
+          reactionsAdded: [{ type: 'white_check_mark' }],
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'reaction_not_configured',
+    });
+    expect(callViaEmojiConfigMock).not.toHaveBeenCalled();
+    expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
   it('queues Teams message activities for matching active task runs', async () => {

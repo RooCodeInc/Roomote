@@ -315,7 +315,7 @@ async function processDiscordGatewayEvent(
   });
   const metadata = discordMetadataForChannel({
     channel,
-    messageId: event.eventId,
+    messageId: options.reactionTarget?.messageId ?? event.eventId,
     // Only a real channel message provides an anchor for the task thread;
     // interactions (slash commands, buttons) do not.
     ...(options.reactionTarget?.messageId
@@ -768,6 +768,9 @@ async function processDiscordGatewayEvent(
           : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
+        ...(options.reactionTarget?.messageId
+          ? { contextThroughMessageId: options.reactionTarget.messageId }
+          : {}),
         ...(message?.message_reference?.message_id
           ? {
               replyToMessageId: message.message_reference.message_id,
@@ -827,7 +830,11 @@ async function processDiscordGatewayEvent(
       await releaseDiscordContinuationClaim(continuationClaim);
       throw error;
     }
-    await setLatestInboundMessageId('discord', activeRun.id, queuedMessage.ts);
+    await setLatestInboundMessageId(
+      'discord',
+      activeRun.id,
+      options.reactionTarget?.messageId ?? queuedMessage.ts,
+    );
     // Match Slack: eyes is an intake-only platform ack. Active follow-ups are
     // already durable once queued; agents may still react when turn policy allows.
     return { ok: true, queued: true, runId: activeRun.id };
@@ -865,6 +872,9 @@ async function processDiscordGatewayEvent(
           : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
+        ...(options.reactionTarget?.messageId
+          ? { contextThroughMessageId: options.reactionTarget.messageId }
+          : {}),
         ...(message?.message_reference?.message_id
           ? {
               replyToMessageId: message.message_reference.message_id,
@@ -984,6 +994,9 @@ async function processDiscordGatewayEvent(
               ? { replyToChannelId: message.message_reference.channel_id }
               : {}),
           }
+        : {}),
+      ...(options.reactionTarget?.messageId
+        ? { contextThroughMessageId: options.reactionTarget.messageId }
         : {}),
     });
   } catch (error) {

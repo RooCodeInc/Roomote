@@ -406,12 +406,12 @@ describe('Discord Gateway event handler', () => {
           text: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
         }),
         metadata: expect.objectContaining({
-          communicationMessageId:
-            'channel-1:message-1:discord-user-1:white_check_mark',
+          communicationMessageId: 'message-1',
           communicationAnchorMessageId: 'message-1',
         }),
         replyToMessageId: 'message-1',
         replyToChannelId: 'channel-1',
+        contextThroughMessageId: 'message-1',
       }),
     );
   });
