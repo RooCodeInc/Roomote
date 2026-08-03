@@ -18,6 +18,7 @@ import {
   upsertAutomation,
 } from '@roomote/db/server';
 import {
+  createTelegramCommunicationProviderFromRuntimeCredentials,
   findDiscordDestinationByChannelId,
   findTeamsPrimaryConversation,
   findTelegramPrimaryChatId,
@@ -344,6 +345,12 @@ export async function updateBackgroundAgentSettingsCommand(
   const submittedManagerDiscordChannel = normalizeOptionalText(
     input.managerDiscordChannel ?? null,
   );
+  const submittedManagerTeamsChannel = normalizeOptionalText(
+    input.managerTeamsChannel ?? null,
+  );
+  const submittedManagerTelegramChannel = normalizeOptionalText(
+    input.managerTelegramChannel ?? null,
+  );
   const managerSlackChannel = shouldUpdateManagerChannel
     ? submittedManagerSlackChannel
     : null;
@@ -354,6 +361,58 @@ export async function updateBackgroundAgentSettingsCommand(
   const managerDiscordChannel = shouldUpdateManagerChannel
     ? submittedManagerDiscordChannel
     : null;
+  const preservePersistedManagerTeamsChannel =
+    shouldUpdateManagerChannel &&
+    input.managerTeamsChannel === undefined &&
+    !submittedManagerSlackChannel &&
+    !submittedManagerDiscordChannel &&
+    !submittedManagerTelegramChannel;
+  const preservePersistedManagerTelegramChannel =
+    shouldUpdateManagerChannel &&
+    input.managerTelegramChannel === undefined &&
+    !submittedManagerSlackChannel &&
+    !submittedManagerDiscordChannel &&
+    !submittedManagerTeamsChannel;
+  let managerTeamsChannelId = shouldUpdateManagerChannel
+    ? preservePersistedManagerTeamsChannel
+      ? existingSettings.managerTeamsChannelId
+      : submittedManagerTeamsChannel
+    : existingSettings.managerTeamsChannelId;
+  let managerTelegramChatId = shouldUpdateManagerChannel
+    ? preservePersistedManagerTelegramChannel
+      ? existingSettings.managerTelegramChatId
+      : submittedManagerTelegramChannel
+    : existingSettings.managerTelegramChatId;
+
+  if (
+    shouldUpdateManagerChannel &&
+    !preservePersistedManagerTeamsChannel &&
+    managerTeamsChannelId
+  ) {
+    const primaryConversation = await findTeamsPrimaryConversation();
+    if (primaryConversation?.conversationId !== managerTeamsChannelId) {
+      fieldErrors.managerTeamsChannel =
+        'Connect Microsoft Teams and capture a primary conversation before using it for manager updates.';
+      managerTeamsChannelId = null;
+    }
+  }
+
+  if (
+    shouldUpdateManagerChannel &&
+    !preservePersistedManagerTelegramChannel &&
+    managerTelegramChatId
+  ) {
+    const primaryChatId = await findTelegramPrimaryChatId();
+    const telegram =
+      primaryChatId === managerTelegramChatId
+        ? await createTelegramCommunicationProviderFromRuntimeCredentials()
+        : null;
+    if (!telegram) {
+      fieldErrors.managerTelegramChannel =
+        'Connect Telegram with active bot credentials and capture a primary chat before using it for manager updates.';
+      managerTelegramChatId = null;
+    }
+  }
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
   const channelAutoStartRequiresSlackInstallation =
     shouldUpdateChannelAutoStart &&
@@ -781,7 +840,10 @@ export async function updateBackgroundAgentSettingsCommand(
   // automation target -> shared manager channel. Enabling one requires a
   // channel at one of those two levels.
   const sharedManagerChannelId =
-    managerChannelResult.channelId ?? managerDiscordChannelResult.channelId;
+    managerChannelResult.channelId ??
+    managerTeamsChannelId ??
+    managerTelegramChatId ??
+    managerDiscordChannelResult.channelId;
   const managerChannelAutomationValidations: Array<{
     key: TriggerableBackgroundAutomationKey;
     frequency: string;
@@ -908,7 +970,7 @@ export async function updateBackgroundAgentSettingsCommand(
       const label = descriptor?.label ?? validation.key;
       fieldErrors[validation.field] =
         fieldErrors[validation.field] ||
-        `Choose a Slack channel before enabling ${label}.`;
+        `Choose a report channel or configure a supported Manager Channel before enabling ${label}.`;
     }
   }
 
@@ -1031,6 +1093,8 @@ export async function updateBackgroundAgentSettingsCommand(
         id: 'default',
         managerSlackChannelId: managerChannelResult.channelId,
         managerDiscordChannelId: managerDiscordChannelResult.channelId,
+        managerTeamsChannelId,
+        managerTelegramChatId,
         updatedAt: now,
       })
       .onConflictDoUpdate({
@@ -1038,6 +1102,8 @@ export async function updateBackgroundAgentSettingsCommand(
         set: {
           managerSlackChannelId: managerChannelResult.channelId,
           managerDiscordChannelId: managerDiscordChannelResult.channelId,
+          managerTeamsChannelId,
+          managerTelegramChatId,
           updatedAt: now,
         },
       });

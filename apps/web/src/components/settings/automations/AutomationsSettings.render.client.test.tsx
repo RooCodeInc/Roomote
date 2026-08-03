@@ -80,6 +80,8 @@ const state = vi.hoisted(() => ({
         channelAutoStartDiscordChannels: [],
         managerSlackChannelId: 'C123MANAGER',
         managerDiscordChannelId: null as string | null,
+        managerTeamsChannelId: null as string | null,
+        managerTelegramChatId: null as string | null,
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
@@ -117,6 +119,10 @@ const state = vi.hoisted(() => ({
         announcerInstructions: null,
         platformIssueSlackChannelId: null,
         platformIssueDiscordChannelId: null,
+      },
+      managerDestinationOptions: {
+        teamsChannelId: null as string | null,
+        telegramChatId: null as string | null,
       },
       slackChannelDisplayNames: {
         channelAutoStartSlackChannels: {
@@ -491,6 +497,10 @@ describe('AutomationsSettings', () => {
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
     state.settingsQuery.data.capabilities.discordConnected = false;
+    state.settingsQuery.data.capabilities.teamsConnected = false;
+    state.settingsQuery.data.capabilities.telegramConnected = false;
+    state.settingsQuery.data.managerDestinationOptions.teamsChannelId = null;
+    state.settingsQuery.data.managerDestinationOptions.telegramChatId = null;
     state.discordChannelsQuery.data.channels = [];
     state.settingsQuery.data.settings.managerStatsDiscordChannelId = null;
     state.settingsQuery.data.settings.suggesterDiscordChannelId = null;
@@ -500,6 +510,8 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
       '#roomote-managers';
     state.settingsQuery.data.settings.managerDiscordChannelId = null;
+    state.settingsQuery.data.settings.managerTeamsChannelId = null;
+    state.settingsQuery.data.settings.managerTelegramChatId = null;
     state.settingsQuery.data.settings.managerStatsFrequency = 'off' as never;
     state.settingsQuery.data.settings.channelAutoStartSlackChannels = [
       {
@@ -684,8 +696,37 @@ describe('AutomationsSettings', () => {
     fireEvent.click(destination);
     expect(screen.getByLabelText('Select manager channel')).toBeInTheDocument();
     expect(
-      screen.getByText('Make sure the Roomote app is added to the channel.'),
+      screen.getByText(
+        'Make sure Roomote is connected to the selected destination.',
+      ),
     ).toBeInTheDocument();
+  });
+
+  it('offers connected Teams and Telegram manager destinations', async () => {
+    state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
+      null as never;
+    state.settingsQuery.data.capabilities.teamsConnected = true;
+    state.settingsQuery.data.capabilities.telegramConnected = true;
+    state.settingsQuery.data.managerDestinationOptions.teamsChannelId =
+      'teams-conversation';
+    state.settingsQuery.data.managerDestinationOptions.telegramChatId =
+      'telegram-chat';
+
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Automation output/,
+      }),
+    );
+    fireEvent.click(screen.getByLabelText('Select manager channel'));
+
+    expect(
+      await screen.findByText('Primary conversation (Microsoft Teams)'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Primary chat (Telegram)')).toBeInTheDocument();
+    expect(screen.getByText('Private Slack channel')).toBeInTheDocument();
   });
 
   it('offers the platform issue alerts destination picker with a saved Discord channel selected', async () => {

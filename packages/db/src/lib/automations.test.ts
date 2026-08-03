@@ -81,6 +81,35 @@ describe('resolveAutomationDestination', () => {
       source: 'manager_channel',
     });
   });
+
+  it('resolves Teams and Telegram manager destinations', () => {
+    expect(
+      resolveAutomationDestination(
+        undefined,
+        null,
+        null,
+        'TEAMS-MANAGER',
+        null,
+      ),
+    ).toEqual({
+      provider: 'teams',
+      channelId: 'TEAMS-MANAGER',
+      source: 'manager_channel',
+    });
+    expect(
+      resolveAutomationDestination(
+        undefined,
+        null,
+        null,
+        null,
+        'TELEGRAM-MANAGER',
+      ),
+    ).toEqual({
+      provider: 'telegram',
+      channelId: 'TELEGRAM-MANAGER',
+      source: 'manager_channel',
+    });
+  });
 });
 
 describe('normalizeBackgroundAgentSettings channel auto-start', () => {
@@ -90,6 +119,16 @@ describe('normalizeBackgroundAgentSettings channel auto-start', () => {
     } as Parameters<typeof normalizeBackgroundAgentSettings>[0]);
 
     expect(settings.managerDiscordChannelId).toBe('D-MANAGER');
+  });
+
+  it('projects Teams and Telegram manager channels', () => {
+    const settings = normalizeBackgroundAgentSettings({
+      managerTeamsChannelId: 'TEAMS-MANAGER',
+      managerTelegramChatId: 'TELEGRAM-MANAGER',
+    } as Parameters<typeof normalizeBackgroundAgentSettings>[0]);
+
+    expect(settings.managerTeamsChannelId).toBe('TEAMS-MANAGER');
+    expect(settings.managerTelegramChatId).toBe('TELEGRAM-MANAGER');
   });
 
   it('projects Slack and Discord auto-respond rows separately, ordered by metadata', () => {

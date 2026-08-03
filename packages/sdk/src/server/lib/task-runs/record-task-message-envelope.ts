@@ -34,6 +34,7 @@ import {
 import {
   type AcpPersistedEnvelope,
   type ShowWidgetFallbackDelivery,
+  type CommunicationProvider,
   ACP_ENVELOPE_EVENT_TYPES,
   asBoolean,
   asRecord,
@@ -57,6 +58,8 @@ import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import { withSandboxServerRpcClient } from '../auth/sandbox-server-rpc';
 import { extractShowWidgetFallbackDelivery } from './show-widget-fallback-delivery';
 import { syncTaskCommunicationThreadTitleBestEffort } from '../task-thread-title-sync';
+import { getCommunicationProviderAdapter } from '../communication-providers';
+import { findTeamsConversationServiceUrl } from '../../automations/destination';
 
 interface RecordTaskMessageEnvelopeInput {
   runId: number;
@@ -162,7 +165,7 @@ function getPlatformIssueReportFromToolPayload(
 
 function buildPlatformIssueTaskUrl(
   taskId: string,
-  utmSource: 'slack' | 'discord',
+  utmSource: CommunicationProvider,
 ): string {
   const url = new URL(`/task/${taskId}`, process.env.R_APP_URL);
 
@@ -176,7 +179,7 @@ function buildPlatformIssueTaskUrl(
 function buildPlatformIssueAlertText(params: {
   taskId: string;
   report: { title: string; summary: string };
-  utmSource: 'slack' | 'discord';
+  utmSource: CommunicationProvider;
 }): string {
   const taskUrl = buildPlatformIssueTaskUrl(params.taskId, params.utmSource);
 
@@ -228,6 +231,62 @@ async function maybeNotifyPlatformIssue(params: {
     (!settings.platformIssueSlackChannelId && !settings.managerSlackChannelId
       ? settings.managerDiscordChannelId
       : null);
+
+  const nonSlackManagerDestination =
+    !settings.platformIssueSlackChannelId &&
+    !settings.platformIssueDiscordChannelId &&
+    !settings.managerSlackChannelId &&
+    !settings.managerDiscordChannelId
+      ? settings.managerTeamsChannelId
+        ? {
+            provider: 'teams' as const,
+            channelId: settings.managerTeamsChannelId,
+          }
+        : settings.managerTelegramChatId
+          ? {
+              provider: 'telegram' as const,
+              channelId: settings.managerTelegramChatId,
+            }
+          : null
+      : null;
+
+  if (nonSlackManagerDestination) {
+    const adapter = await getCommunicationProviderAdapter(
+      nonSlackManagerDestination.provider,
+    );
+    const serviceUrl =
+      nonSlackManagerDestination.provider === 'teams'
+        ? await findTeamsConversationServiceUrl(
+            nonSlackManagerDestination.channelId,
+          )
+        : null;
+
+    if (
+      !adapter ||
+      (nonSlackManagerDestination.provider === 'teams' && !serviceUrl)
+    ) {
+      console.warn(
+        `[recordTaskMessageEnvelope] ${nonSlackManagerDestination.provider} manager destination is unavailable, skipping platform issue alert for task ${params.taskId}`,
+      );
+      return;
+    }
+
+    await adapter.postMessage({
+      channelId: nonSlackManagerDestination.channelId,
+      ...(serviceUrl ? { serviceUrl } : {}),
+      text: degradeSlackMrkdwnToMarkdown(
+        buildPlatformIssueAlertText({
+          taskId: params.taskId,
+          report: params.report,
+          utmSource: nonSlackManagerDestination.provider,
+        }),
+      ),
+      textFormat: 'markdown',
+    });
+
+    await markPlatformIssueReportPosted(params.reportRowId);
+    return;
+  }
 
   if (discordChannelId) {
     const discord =

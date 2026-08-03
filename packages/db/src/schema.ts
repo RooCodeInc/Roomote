@@ -202,6 +202,8 @@ export const deploymentSettings = pgTable('deployment_settings', {
   // projection (built from the automations table) on top.
   managerSlackChannelId: text('manager_slack_channel_id'),
   managerDiscordChannelId: text('manager_discord_channel_id'),
+  managerTeamsChannelId: text('manager_teams_channel_id'),
+  managerTelegramChatId: text('manager_telegram_chat_id'),
   globalAgentInstructions: text('global_agent_instructions'),
   // Null preserves the legacy Slack-workspace timezone lookup (UTC fallback)
   // until an admin explicitly pins a deployment-wide scheduling timezone.
