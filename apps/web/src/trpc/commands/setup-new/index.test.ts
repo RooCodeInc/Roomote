@@ -18,6 +18,7 @@ const {
   mockGetLinkedTelegramAccount,
   mockGetLinkedDiscordAccount,
   mockGetTeamsIntegrationStatus,
+  mockInvalidateTelegramRuntimeCredentialsCache,
 } = vi.hoisted(() => ({
   mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockTxSelect: vi.fn(),
@@ -41,6 +42,7 @@ const {
   mockGetLinkedTelegramAccount: vi.fn(),
   mockGetLinkedDiscordAccount: vi.fn(),
   mockGetTeamsIntegrationStatus: vi.fn(),
+  mockInvalidateTelegramRuntimeCredentialsCache: vi.fn(),
 }));
 
 vi.mock('@/lib/server/setup-funnel-telemetry', () => ({
@@ -145,6 +147,8 @@ vi.mock('@roomote/db/server', () => ({
     identityErrorCode: null,
   })),
   invalidateTeamsBotRuntimeCredentialsCache: vi.fn(),
+  invalidateTelegramRuntimeCredentialsCache:
+    mockInvalidateTelegramRuntimeCredentialsCache,
   slackInstallations: {},
   slackUserMappings: {},
   sql: vi.fn(),
@@ -517,6 +521,9 @@ describe('setup funnel milestone commands', () => {
         provider: 'telegram',
       },
     ]);
+    expect(
+      mockInvalidateTelegramRuntimeCredentialsCache,
+    ).toHaveBeenCalledOnce();
   });
 });
 

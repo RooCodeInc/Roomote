@@ -34,6 +34,7 @@ import {
   resolveDeploymentEnvVar,
   purgeSavedDeploymentWorkerImage,
   resolveTelegramRuntimeCredentials,
+  invalidateTelegramRuntimeCredentialsCache,
   resolveDiscordRuntimeCredentials,
   invalidateTeamsBotRuntimeCredentialsCache,
   isChatGptSubscriptionConnected,
@@ -2384,6 +2385,9 @@ export async function trackSetupCommsStateCommand(
       });
     }
   } else {
+    if (input.provider === 'telegram') {
+      invalidateTelegramRuntimeCredentialsCache();
+    }
     const status =
       input.provider === 'telegram'
         ? await getLinkedTelegramAccountCommand(auth)

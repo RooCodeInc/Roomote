@@ -84,7 +84,8 @@ export function evaluateSetupFunnelMilestones(input: {
   const authProvider =
     input.setupNewState.authProvider ??
     input.authSetup.runtimeConfiguredProvider ??
-    input.authSetup.selectedProvider;
+    input.authSetup.selectedProvider ??
+    input.authSetup.preselectedProvider;
   const authProviderStatus = input.authSetup.providers.find(
     (provider) => provider.id === authProvider,
   );
@@ -122,7 +123,8 @@ export function evaluateSetupFunnelMilestones(input: {
     input.setupNewState.sourceControlProvider ??
     input.sourceControlSetup.runtimeConfiguredProvider ??
     input.sourceControlSetup.connectedProvider ??
-    input.sourceControlSetup.selectedProvider;
+    input.sourceControlSetup.selectedProvider ??
+    input.sourceControlSetup.preselectedProvider;
   const sourceControlProviderStatus = input.sourceControlSetup.providers.find(
     (provider) => provider.provider === sourceControlProvider,
   );

@@ -132,8 +132,9 @@ describe('setup funnel telemetry', () => {
     const setupNewState = createEmptySetupNewState();
     const authSetup = {
       selectedProvider: null,
-      runtimeConfiguredProvider: 'slack',
-      providers: [{ id: 'slack', setupSatisfied: true }],
+      runtimeConfiguredProvider: null,
+      preselectedProvider: 'microsoft',
+      providers: [{ id: 'microsoft', setupSatisfied: true }],
     } as unknown as SetupAuthStatus;
     const modelSetup = {
       setupSatisfied: true,
@@ -143,10 +144,11 @@ describe('setup funnel telemetry', () => {
     } as unknown as SetupModelStatus;
     const sourceControlSetup = {
       selectedProvider: null,
-      runtimeConfiguredProvider: 'github',
-      connectedProvider: 'github',
-      setupSatisfied: true,
-      providers: [{ provider: 'github', configStepSatisfied: true }],
+      runtimeConfiguredProvider: null,
+      connectedProvider: null,
+      preselectedProvider: 'gitlab',
+      setupSatisfied: false,
+      providers: [{ provider: 'gitlab', configStepSatisfied: true }],
     } as unknown as SetupSourceControlStatus;
     const computeSetup = {
       selectedProvider: 'docker',
@@ -157,7 +159,7 @@ describe('setup funnel telemetry', () => {
 
     const milestones = evaluateSetupFunnelMilestones({
       setupNewState,
-      hasSlack: true,
+      hasSlack: false,
       authSetup,
       modelSetup,
       sourceControlSetup,
@@ -168,10 +170,12 @@ describe('setup funnel telemetry', () => {
       expect.arrayContaining([
         expect.objectContaining({
           milestone: 'comms_configured',
+          provider: 'microsoft',
           preexisting: true,
         }),
         expect.objectContaining({
-          milestone: 'source_control_authed',
+          milestone: 'source_control_configured',
+          provider: 'gitlab',
           preexisting: true,
         }),
         expect.objectContaining({
