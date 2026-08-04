@@ -347,7 +347,7 @@ vi.mock('@tanstack/react-query', () => ({
       (Array.isArray(queryOptions.queryKey) &&
         queryOptions.queryKey.includes('environments'))
     ) {
-      // environments.list and any leftover channel listszheimer
+      // environments.list and any leftover channel list keys
       if (queryOptions.queryKey?.[0] === 'environments') {
         return { isPending: false, data: state.environments };
       }
