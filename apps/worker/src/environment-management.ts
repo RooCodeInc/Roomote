@@ -4,12 +4,9 @@ import {
   resolveEnvironmentManagementMode,
 } from '@roomote/types';
 
-export {
-  environmentManagementActions,
-  resolveEnvironmentManagementMode,
-} from '@roomote/types';
+export { resolveEnvironmentManagementMode } from '@roomote/types';
 
-export const ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE =
+const ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE =
   'ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE';
 
 export function buildEnvironmentManagementRuntimeEnv(
