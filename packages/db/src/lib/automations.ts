@@ -902,6 +902,7 @@ export function normalizeBackgroundAgentSettings(
   const conflictResolver = automationMap.get('conflict_resolver');
   const suggester = automationMap.get('suggester');
   const announcer = automationMap.get('announcer');
+  const callRoomoteViaEmoji = automationMap.get('call_roomote_via_emoji');
   const channelAutoStart = automationMap.get('slack_channel_auto_start');
   const managerStats = automationMap.get('manager_stats');
   const sentryTriage = automationMap.get('sentry_triage');
@@ -968,6 +969,15 @@ export function normalizeBackgroundAgentSettings(
     ),
     announcerInstructions: announcer?.instructions ?? null,
     announcerLastRunAt: announcer?.lastRunAt ?? null,
+
+    callRoomoteViaEmojiEnabled:
+      callRoomoteViaEmoji?.enabled === true &&
+      Boolean(getAutomationSettingText(callRoomoteViaEmoji, 'emoji')),
+    callRoomoteViaEmojiName: getAutomationSettingText(
+      callRoomoteViaEmoji,
+      'emoji',
+    ),
+    callRoomoteViaEmojiInstructions: callRoomoteViaEmoji?.instructions ?? null,
 
     channelAutoStartSlackChannels: channelAutoStartTargets,
     channelAutoStartDiscordChannels: channelAutoStartDiscordTargets,

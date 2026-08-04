@@ -64,6 +64,9 @@ const DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID = Object.fromEntries(
 >;
 
 export type FormState = {
+  callRoomoteViaEmojiEnabled: boolean;
+  callRoomoteViaEmojiName: string;
+  callRoomoteViaEmojiInstructions: string;
   reviewerEnabled: boolean;
   reviewerEnvironmentScope: ReviewerEnvironmentScope;
   reviewerEnvironmentIds: string[];
@@ -108,6 +111,7 @@ export type FormState = {
   ScheduleOnlyAutomationFormFields;
 
 export type AutomationId =
+  | 'callRoomoteViaEmoji'
   | 'channelAutoStart'
   | 'managerChannel'
   | 'managerStats'
@@ -134,6 +138,12 @@ const REVIEWER_FIELDS: Array<keyof FormState> = [
   'reviewerInstructions',
   'reviewerRelayReviewResultsToTask',
   'reviewerRelayUserIds',
+];
+
+const CALL_ROOMOTE_VIA_EMOJI_FIELDS: Array<keyof FormState> = [
+  'callRoomoteViaEmojiEnabled',
+  'callRoomoteViaEmojiName',
+  'callRoomoteViaEmojiInstructions',
 ];
 
 const CONFLICT_RESOLVER_FIELDS: Array<keyof FormState> = [
@@ -206,6 +216,7 @@ const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
 ) as Record<ScheduleOnlyBackgroundAutomationId, Array<keyof FormState>>;
 
 const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
+  callRoomoteViaEmoji: CALL_ROOMOTE_VIA_EMOJI_FIELDS,
   channelAutoStart: CHANNEL_AUTO_START_FIELDS,
   managerChannel: MANAGER_CHANNEL_FIELDS,
   managerStats: MANAGER_STATS_FIELDS,
@@ -304,6 +315,10 @@ export function buildAutomationSettingsSaveInput(
 
   return {
     savingAutomation: automationId,
+    callRoomoteViaEmojiEnabled: stateToSave.callRoomoteViaEmojiEnabled,
+    callRoomoteViaEmojiName: stateToSave.callRoomoteViaEmojiName.trim() || null,
+    callRoomoteViaEmojiInstructions:
+      stateToSave.callRoomoteViaEmojiInstructions.trim() || null,
     reviewerEnabled: stateToSave.reviewerEnabled,
     reviewerEnvironmentScope: 'all' as const,
     reviewerEnvironmentIds: [],

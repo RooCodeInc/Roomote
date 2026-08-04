@@ -16,7 +16,9 @@ import type { GatewayStatusStore } from './status';
 export const DISCORD_GATEWAY_INTENTS = [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.GuildMessageReactions,
   GatewayIntentBits.DirectMessages,
+  GatewayIntentBits.DirectMessageReactions,
   GatewayIntentBits.MessageContent,
 ];
 
@@ -182,6 +184,8 @@ export class DiscordGatewaySession {
         await handleGatewayDispatch(data, {
           getBotRoleId: (guildId) => this.botRoleIds.get(guildId),
           getBotUsername: () => this.botUsername,
+          getSessionDedupeScope: () =>
+            resumeStore.getSessionDedupeScope(shardId),
           rest,
           getBotUserId: () => this.botUserId,
           getCachedChannel: (channelId) => this.channelCache.get(channelId),

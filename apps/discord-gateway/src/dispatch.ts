@@ -8,6 +8,7 @@ import type {
 
 type RawDispatch = {
   t?: string | null;
+  s?: number | null;
   d?: unknown;
 };
 
@@ -29,6 +30,13 @@ type RawInteraction = {
   data?: { name?: string };
 };
 
+type RawReaction = {
+  user_id?: string;
+  channel_id?: string;
+  message_id?: string;
+  emoji?: { id?: string | null; name?: string | null };
+};
+
 type DispatchDependencies = {
   rest: Pick<REST, 'post'>;
   enqueue: (envelope: DiscordInboundEnvelope) => Promise<boolean>;
@@ -39,6 +47,8 @@ type DispatchDependencies = {
   /** The bot's managed role id for a guild, when known. */
   getBotRoleId?: (guildId: string) => string | null | undefined;
   getBotUsername?: () => string | undefined;
+  /** Stable across resumes, distinct after Discord creates a new session. */
+  getSessionDedupeScope?: () => string | undefined;
   /**
    * Forward an unmentioned guild message when Gateway channel metadata could
    * not be resolved. The durable API consumer performs its own authoritative
@@ -124,6 +134,9 @@ function eventTypeFor(packet: RawDispatch): DiscordInboundEventType | null {
   }
   if (packet.t === 'INTERACTION_CREATE') {
     return 'INTERACTION_CREATE';
+  }
+  if (packet.t === 'MESSAGE_REACTION_ADD') {
+    return 'MESSAGE_REACTION_ADD';
   }
   return null;
 }
@@ -270,8 +283,30 @@ export async function handleGatewayDispatch(
     };
   }
 
-  const payload = packet.d as RawMessage & RawInteraction;
-  if (!payload.id) {
+  const payload = packet.d as RawMessage & RawInteraction & RawReaction;
+  const dispatchSequence =
+    typeof packet.s === 'number' && Number.isSafeInteger(packet.s)
+      ? packet.s
+      : null;
+  const sessionDedupeScope = dependencies.getSessionDedupeScope?.();
+  const reactionEventId =
+    eventType === 'MESSAGE_REACTION_ADD' &&
+    dispatchSequence !== null &&
+    payload.channel_id &&
+    payload.message_id &&
+    payload.user_id &&
+    payload.emoji?.name
+      ? [
+          payload.channel_id,
+          payload.message_id,
+          payload.user_id,
+          payload.emoji.id ?? payload.emoji.name,
+          ...(sessionDedupeScope ? [sessionDedupeScope] : []),
+          dispatchSequence,
+        ].join(':')
+      : null;
+  const eventId = payload.id ?? reactionEventId;
+  if (!eventId) {
     return 'ignored';
   }
 
@@ -281,7 +316,7 @@ export async function handleGatewayDispatch(
       : undefined;
 
   const enqueued = await dependencies.enqueue({
-    eventId: payload.id,
+    eventId,
     eventType,
     payload: packet.d,
     receivedAt: (dependencies.now?.() ?? new Date()).toISOString(),

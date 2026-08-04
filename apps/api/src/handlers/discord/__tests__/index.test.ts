@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   fetchThreadHistory: vi.fn(),
   shouldRouteUnmentioned: vi.fn(),
   enqueueGatewayEvent: vi.fn(),
+  callViaEmojiConfig: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -138,6 +139,10 @@ vi.mock('../thread-context.js', () => ({
 
 vi.mock('../unmentioned-thread-reply.js', () => ({
   shouldRouteUnmentionedDiscordThreadReplyToAgent: mocks.shouldRouteUnmentioned,
+}));
+
+vi.mock('../../call-roomote-via-emoji.js', () => ({
+  getCallRoomoteViaEmojiConfiguration: mocks.callViaEmojiConfig,
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -298,6 +303,7 @@ describe('Discord Gateway event handler', () => {
     mocks.shouldRouteUnmentioned.mockResolvedValue(true);
     mocks.queueMessage.mockResolvedValue(true);
     mocks.enqueueGatewayEvent.mockResolvedValue({ jobId: 'event-message-1' });
+    mocks.callViaEmojiConfig.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -355,6 +361,59 @@ describe('Discord Gateway event handler', () => {
       name: 'eyes',
     });
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('turns a configured reaction into a thread task entry', async () => {
+    mocks.callViaEmojiConfig.mockResolvedValue({
+      emoji: 'white_check_mark',
+      prompt: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
+    });
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      name: 'general',
+      type: 0,
+      guildId: 'guild-1',
+    });
+
+    const response = await postEvent({
+      eventId: 'channel-1:message-1:discord-user-1:white_check_mark',
+      eventType: 'MESSAGE_REACTION_ADD',
+      receivedAt: '2026-07-12T15:00:00.000Z',
+      payload: {
+        user_id: 'discord-user-1',
+        channel_id: 'channel-1',
+        message_id: 'message-1',
+        guild_id: 'guild-1',
+        emoji: { id: null, name: 'white_check_mark' },
+        member: {
+          user: { id: 'discord-user-1', username: 'matt' },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.channelAutoStart).not.toHaveBeenCalled();
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'roomote-user-1',
+        queuedMessage: expect.objectContaining({
+          text: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
+        }),
+        metadata: expect.objectContaining({
+          communicationMessageId: 'message-1',
+          communicationAnchorMessageId: 'message-1',
+        }),
+        replyToMessageId: 'message-1',
+        replyToChannelId: 'channel-1',
+        contextThroughMessageId: 'message-1',
+      }),
+    );
   });
 
   it('rejects an invalid Gateway secret before claiming the event', async () => {
@@ -1974,6 +2033,80 @@ describe('Discord Gateway event handler', () => {
         ),
       }),
     );
+  });
+
+  it('preserves a pending reaction target after account linking', async () => {
+    const eventId =
+      'channel-1:message-target:discord-user-1:white_check_mark:42';
+    const originalEvent = {
+      eventId,
+      eventType: 'MESSAGE_CREATE' as const,
+      receivedAt: '2026-07-12T15:00:00.000Z',
+      reactionTarget: {
+        channelId: 'channel-1',
+        messageId: 'message-target',
+      },
+      payload: {
+        id: eventId,
+        channel_id: 'channel-1',
+        guild_id: 'guild-1',
+        content: '<@bot-1> Act on this',
+        author: { id: 'discord-user-1', username: 'matt' },
+        mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        attachments: [],
+        message_reference: {
+          message_id: 'message-target',
+          channel_id: 'channel-1',
+        },
+      },
+    };
+    mocks.consumeLinkCode.mockResolvedValue('roomote-user-1');
+    mocks.redisGetdel.mockResolvedValue(JSON.stringify(originalEvent));
+    mocks.getChannel.mockImplementation(async (channelId: string) =>
+      channelId === 'dm-1'
+        ? { id: 'dm-1', name: 'Direct message', type: 1 }
+        : {
+            id: 'channel-1',
+            guildId: 'guild-1',
+            name: 'general',
+            type: 0,
+          },
+    );
+    const interaction = {
+      id: 'interaction-link',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'link',
+        type: 1,
+        options: [{ name: 'code', type: 3, value: 'link-abcdefghijklmnop' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          communicationMessageId: 'message-target',
+          communicationAnchorMessageId: 'message-target',
+        }),
+        replyToMessageId: 'message-target',
+        replyToChannelId: 'channel-1',
+        contextThroughMessageId: 'message-target',
+      }),
+    );
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-target',
+      name: '👀',
+    });
   });
 
   it('requires /link in a DM without consuming the one-shot code', async () => {
