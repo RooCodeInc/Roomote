@@ -235,7 +235,9 @@ describe('AuthForm', () => {
   });
 
   it('hides account creation and points at an admin without an invite', () => {
-    render(<AuthForm />);
+    render(
+      <AuthForm accountLinkHelpText="Need an invite? [Talk to us](https://discord.gg/example)." />,
+    );
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Continue with email' }),
@@ -249,6 +251,7 @@ describe('AuthForm', () => {
       screen.getByText(/Need an account\? Forgot your password\?/),
     ).toBeVisible();
     expect(screen.getByText(/Ask your admin\./)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Talk to us' })).toBeVisible();
   });
 
   it('can hide the account and password help copy for bootstrap sign-up', () => {
