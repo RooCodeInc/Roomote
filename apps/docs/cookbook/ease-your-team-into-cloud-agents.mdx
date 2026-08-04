@@ -28,7 +28,6 @@ the results.
 
 - A healthy [environment](/environments) for the team's main repositories
 - Two Slack channels, such as `#factory` and `#ask-roomote`, with Roomote invited
-- The **Custom Emoji Reaction** automation
 - The **Review Code** automation
 - One or two leaders willing to use Roomote where the team can watch
 
@@ -42,13 +41,14 @@ the results.
    mentions, or configure [auto-response](/automations#channel-automations) once
    the channel's purpose is clear. Encourage questions such as where a behavior
    lives, how a flow works, or which tests cover a change.
-3. Enable **Custom Emoji Reaction** with an unmistakable emoji. Let leaders use
-   it first on a few well-scoped messages so teammates can see what the reaction
-   starts and where the result appears before trying it themselves.
-4. Enable **Review Code** for pull requests from authors other than Roomote.
-   Keep automatic draft reviews off at first. Roomote adds a second opinion
-   without taking control of the pull request, which lets engineers compare its
-   comments with their own review and build trust gradually.
+3. Have a leader ask Roomote to add an unmistakable custom emoji reaction to a
+   specific Slack message. This small, visible action shows that Roomote can help
+   with more than code without asking the team to configure another automation.
+4. Enable **Review Code**, then turn on **Review PRs not created by Roomote** so
+   it includes pull requests opened by engineers. Keep automatic draft reviews
+   off at first. Roomote adds a second opinion without taking control of the pull
+   request, which lets engineers compare its comments with their own review and
+   build trust gradually.
 5. Keep the first tasks read-only. Ask for explanations, investigation, and
    review before asking Roomote to change code. When the team is comfortable,
    let a leader demonstrate one small implementation and walk through the diff,
@@ -77,6 +77,10 @@ still be missing? Do not change code.
 ```text
 Explain why this service exists and which other parts of the system call it.
 Keep the answer short and link to the relevant code.
+```
+
+```text
+Add the :eyes: reaction to the message linked below. Do not post a reply.
 ```
 
 ## Variations

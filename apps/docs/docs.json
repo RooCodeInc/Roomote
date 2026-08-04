@@ -50,11 +50,7 @@
       },
       {
         "group": "Cookbook",
-        "pages": [
-          "cookbook/index",
-          "cookbook/ease-your-team-into-cloud-agents",
-          "cookbook/template"
-        ]
+        "pages": ["cookbook/index", "cookbook/template"]
       },
       {
         "group": "Provider Configuration",
