@@ -389,6 +389,7 @@ export async function processActiveRunMessage(
   prefetchedThreadMessages?: SlackThreadMessage[],
 ): Promise<void> {
   const threadId = event.thread_ts || event.ts;
+  const deliveryTs = event.deliveryTs ?? event.ts;
   const pendingRequest = await getPendingSlackRequestUserInput(threadId);
   const deliveryTracker = new SlackThreadDeliveryTracker(
     event.channel,
@@ -446,7 +447,7 @@ export async function processActiveRunMessage(
       ]);
     const messageText = stripLeadingSlackProductMention(normalizedMessageText);
     const currentMessageFiles = resolveCurrentSlackMessageFiles({
-      currentMessageTs: event.ts,
+      currentMessageTs: deliveryTs,
       eventFiles: event.files,
       messages: promptReadyThreadMessages.messages,
     });
@@ -481,8 +482,10 @@ export async function processActiveRunMessage(
       formattedPrompt,
       turnPolicy,
     } = await deliveryTracker.buildContinuationPrompt({
-      currentMessageTs: event.ts,
+      currentMessageTs: deliveryTs,
       currentMessageText: currentMessageTextWithVideoDescriptions,
+      excludedContextTimestamps:
+        deliveryTs === event.ts ? undefined : [event.ts],
       resolveCurrentMessageText: (claimedMessages) =>
         buildResolvedCurrentMessageText({
           slack,
@@ -538,7 +541,7 @@ export async function processActiveRunMessage(
       await deliveryTracker.rollback().catch(() => {});
       throw error;
     }
-    deliveryTracker.track(event.ts);
+    deliveryTracker.trackAll([event.ts, deliveryTs]);
 
     apiLogger.debug(
       `✅ Successfully queued message for active task run ${activeRun.id}`,

@@ -86,6 +86,8 @@ export interface SlackEvent {
   text: string;
   authoredText?: string;
   ts: string;
+  /** Internal turn ID when an event is synthesized from another Slack event. */
+  deliveryTs?: string;
   thread_ts?: string;
   bot_id?: string;
   app_id?: string;

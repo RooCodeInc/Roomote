@@ -51,6 +51,7 @@ export async function processSnapshotResume(
   completionEmoji: string,
   botUserId?: string,
 ): Promise<boolean> {
+  const deliveryTs = event.deliveryTs ?? event.ts;
   const deliveryTracker = new SlackThreadDeliveryTracker(
     event.channel,
     threadId,
@@ -81,7 +82,7 @@ export async function processSnapshotResume(
     ]);
   const messageText = stripLeadingSlackProductMention(normalizedMessageText);
   const currentMessageFiles = resolveCurrentSlackMessageFiles({
-    currentMessageTs: event.ts,
+    currentMessageTs: deliveryTs,
     eventFiles: event.files,
     messages: promptReadyThreadMessages.messages,
   });
@@ -116,8 +117,9 @@ export async function processSnapshotResume(
     formattedPrompt,
     turnPolicy,
   } = await deliveryTracker.buildContinuationPrompt({
-    currentMessageTs: event.ts,
+    currentMessageTs: deliveryTs,
     currentMessageText: currentMessageTextWithVideoDescriptions,
+    excludedContextTimestamps: deliveryTs === event.ts ? undefined : [event.ts],
     resolveCurrentMessageText: (claimedMessages) =>
       buildResolvedCurrentMessageText({
         slack,
@@ -234,7 +236,7 @@ export async function processSnapshotResume(
       channelId: event.channel,
       threadTs: threadId,
     });
-    deliveryTracker.track(event.ts);
+    deliveryTracker.trackAll([event.ts, deliveryTs]);
     return true;
   } catch (error) {
     await deliveryTracker.rollback().catch(() => {});

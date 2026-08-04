@@ -78,9 +78,11 @@ export async function maybeCallRoomoteViaEmoji(params: {
       type: 'app_mention',
       channel: params.event.item.channel,
       user: params.event.user,
-      text: `<@${params.context.slackInstallation.botUserId}> ${configuration.prompt}`,
+      text: `<@${params.context.slackInstallation.botUserId}> ${configuration.prompt}\n\nMessage to act on:\n${targetMessage.text}`,
       ts: params.event.item.ts,
+      deliveryTs: params.event.event_ts,
       thread_ts: targetMessage.thread_ts ?? targetMessage.ts,
+      files: targetMessage.files,
     },
   });
 
