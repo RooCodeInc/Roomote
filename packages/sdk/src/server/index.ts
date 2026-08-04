@@ -255,6 +255,7 @@ export {
   type SourceControlPullRequestMutationInput,
   type SourceControlPullRequestMutationResult,
 } from './lib/pull-requests/source-control-pull-requests';
+export { resolveSourceControlProviderForRepositoryFromPayload } from './lib/pull-requests/source-control-pull-request-shared';
 export {
   readSourceControlPullRequestForTaskRun,
   sourceControlPullRequestReadInputSchema,

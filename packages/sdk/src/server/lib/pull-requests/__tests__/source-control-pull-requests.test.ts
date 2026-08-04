@@ -192,7 +192,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     );
   });
 
-  it('creates a GitLab merge request through the deployment token', async () => {
+  it('creates a GitLab merge request in a GitHub-primary mixed task', async () => {
     mockGetDeploymentPrAction.mockResolvedValue('create');
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
@@ -214,9 +214,11 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
 
     const result = await createOrUpdateSourceControlPullRequestForTaskRun({
       taskRun: makeTaskRun({
-        repo: 'acme/backend',
-        sourceControlProvider: 'gitlab',
-      }),
+        repo: 'acme/frontend',
+        selectedRepositories: ['acme/frontend', 'acme/backend'],
+        sourceControlProvider: 'github',
+        repositoryProviders: { 'acme/backend': 'gitlab' },
+      } as unknown as TaskRun['payload']),
       input: {
         action: 'create_or_update_pull_request',
         repositoryFullName: 'acme/backend',
@@ -226,7 +228,6 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
         body: 'Body',
         labels: ['roomote'],
         assignees: [],
-        sourceControlProvider: 'gitlab',
       },
       fetchImpl,
     });

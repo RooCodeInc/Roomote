@@ -1249,7 +1249,7 @@ export async function validateConfigCommand(
 
       if (!hasAccess) {
         errors.push(
-          `Repository '${repo.repository}' is not accessible. Ensure it is installed via the GitHub App.`,
+          `Repository '${repo.repository}' is not accessible. Ensure it is connected through its source-control provider.`,
         );
         return; // skip branch check if repo itself is inaccessible
       }

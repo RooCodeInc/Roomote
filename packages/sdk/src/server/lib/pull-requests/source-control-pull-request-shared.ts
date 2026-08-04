@@ -10,6 +10,8 @@ import {
   ALL_REPOSITORIES,
   environmentConfigSchema,
   getSourceControlProviderLabel,
+  normalizeSourceControlProvider,
+  resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
 import { isGitLabOAuthAccessToken } from '@roomote/gitlab';
@@ -34,6 +36,29 @@ export type RepositoryRow = {
   fullName: string;
   htmlUrl: string;
 };
+
+export function resolveSourceControlProviderForRepositoryFromPayload(
+  payload: Record<string, unknown>,
+  repositoryFullName: string,
+): SourceControlProvider {
+  const repositoryProviders = payload.repositoryProviders;
+
+  if (
+    repositoryProviders &&
+    typeof repositoryProviders === 'object' &&
+    !Array.isArray(repositoryProviders)
+  ) {
+    const repositoryProvider = (repositoryProviders as Record<string, unknown>)[
+      repositoryFullName
+    ];
+
+    if (repositoryProvider !== undefined) {
+      return normalizeSourceControlProvider(repositoryProvider);
+    }
+  }
+
+  return resolveSourceControlProviderFromPayload(payload);
+}
 
 /**
  * Shared provider-resolution and name/url plumbing for the provider-neutral

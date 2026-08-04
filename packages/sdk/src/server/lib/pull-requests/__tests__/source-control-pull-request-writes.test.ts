@@ -128,7 +128,7 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     );
   });
 
-  it('replies to a GitLab discussion through the deployment token', async () => {
+  it('replies to a GitLab discussion in a GitHub-primary mixed task', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
       externalRepoId: '101',
@@ -141,16 +141,17 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
 
     const result = await writeSourceControlPullRequestForTaskRun({
       taskRun: makeTaskRun({
-        repo: 'acme/backend',
-        sourceControlProvider: 'gitlab',
-      }),
+        repo: 'acme/frontend',
+        selectedRepositories: ['acme/frontend', 'acme/backend'],
+        sourceControlProvider: 'github',
+        repositoryProviders: { 'acme/backend': 'gitlab' },
+      } as unknown as TaskRun['payload']),
       input: {
         action: 'reply_to_pull_request_comment',
         repositoryFullName: 'acme/backend',
         prNumber: 42,
         threadId: 'abc123',
         body: 'Thanks, fixed.',
-        sourceControlProvider: 'gitlab',
       },
       fetchImpl,
     });

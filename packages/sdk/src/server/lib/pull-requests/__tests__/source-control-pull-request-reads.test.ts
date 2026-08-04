@@ -223,7 +223,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     });
   });
 
-  it('reads GitLab merge request details through the deployment token', async () => {
+  it('reads a GitLab merge request in a GitHub-primary mixed task', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
       externalRepoId: '101',
@@ -253,14 +253,15 @@ describe('readSourceControlPullRequestForTaskRun', () => {
 
     const result = await readSourceControlPullRequestForTaskRun({
       taskRun: makeTaskRun({
-        repo: 'acme/backend',
-        sourceControlProvider: 'gitlab',
-      }),
+        repo: 'acme/frontend',
+        selectedRepositories: ['acme/frontend', 'acme/backend'],
+        sourceControlProvider: 'github',
+        repositoryProviders: { 'acme/backend': 'gitlab' },
+      } as unknown as TaskRun['payload']),
       input: {
         action: 'get_pull_request',
         repositoryFullName: 'acme/backend',
         prNumber: 42,
-        sourceControlProvider: 'gitlab',
       },
       fetchImpl,
     });
@@ -1163,15 +1164,17 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     ).rejects.toThrow('prNumber is required for get_pull_request.');
   });
 
-  it('rejects reads whose provider does not match the task payload', async () => {
+  it('rejects an explicit provider that conflicts with the repository map', async () => {
     const fetchImpl = vi.fn();
 
     await expect(
       readSourceControlPullRequestForTaskRun({
         taskRun: makeTaskRun({
-          repo: 'acme/backend',
-          sourceControlProvider: 'gitlab',
-        }),
+          repo: 'acme/frontend',
+          selectedRepositories: ['acme/frontend', 'acme/backend'],
+          sourceControlProvider: 'github',
+          repositoryProviders: { 'acme/backend': 'gitlab' },
+        } as unknown as TaskRun['payload']),
         input: {
           action: 'get_pull_request',
           repositoryFullName: 'acme/backend',

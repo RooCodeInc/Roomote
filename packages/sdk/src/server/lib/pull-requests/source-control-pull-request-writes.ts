@@ -4,7 +4,6 @@ import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
   resolveSourceControlHostFromPayload,
-  resolveSourceControlProviderFromPayload,
   sourceControlProviderSchema,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -28,6 +27,7 @@ import {
   formatResponseBody,
   getPayloadRecord,
   resolveRepositoryRow,
+  resolveSourceControlProviderForRepositoryFromPayload,
   splitRepositoryFullName,
   type FetchImpl,
   type RepositoryRow,
@@ -233,8 +233,10 @@ export async function writeSourceControlPullRequestForTaskRun({
   assertWriteInputFields(input);
 
   const payloadRecord = getPayloadRecord(taskRun.payload);
-  const payloadProvider =
-    resolveSourceControlProviderFromPayload(payloadRecord);
+  const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
+    payloadRecord,
+    input.repositoryFullName,
+  );
   const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
   const provider = input.sourceControlProvider ?? payloadProvider;
 

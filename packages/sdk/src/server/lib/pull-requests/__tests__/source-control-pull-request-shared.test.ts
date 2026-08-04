@@ -4,7 +4,36 @@ vi.mock('@roomote/gitlab', () => ({
   isGitLabOAuthAccessToken: (token: string) => token === 'oauth-token',
 }));
 
-import { buildGitLabTokenHeader } from '../source-control-pull-request-shared';
+import {
+  buildGitLabTokenHeader,
+  resolveSourceControlProviderForRepositoryFromPayload,
+} from '../source-control-pull-request-shared';
+
+describe('resolveSourceControlProviderForRepositoryFromPayload', () => {
+  it('prefers the target repository provider over the task primary provider', () => {
+    expect(
+      resolveSourceControlProviderForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          repositoryProviders: { 'acme/backend': 'gitlab' },
+        },
+        'acme/backend',
+      ),
+    ).toBe('gitlab');
+  });
+
+  it('falls back to the task primary provider when the repository is unmapped', () => {
+    expect(
+      resolveSourceControlProviderForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          repositoryProviders: { 'acme/backend': 'gitlab' },
+        },
+        'acme/frontend',
+      ),
+    ).toBe('github');
+  });
+});
 
 describe('buildGitLabTokenHeader', () => {
   it('uses the Bearer authorization header for OAuth tokens', () => {
