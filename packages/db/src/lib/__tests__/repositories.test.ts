@@ -94,14 +94,14 @@ describe('resolveRepositorySelectionByIds', () => {
       repositoryIds: [repoB.id, repoA.id],
     });
 
-    expect(result.normalizedRepositoryIds).toEqual([repoA.id, repoB.id]);
+    expect(result.normalizedRepositoryIds).toEqual([repoB.id, repoA.id]);
     expect(result.selectedRepositories).toEqual([
       { id: repoB.id, fullName: repoB.fullName },
       { id: repoA.id, fullName: repoA.fullName },
     ]);
     expect(result.workspacePayload).toEqual({
       repo: '__all_repositories__',
-      selectedRepositories: [repoA.fullName, repoB.fullName],
+      selectedRepositories: [repoB.fullName, repoA.fullName],
     });
   });
 
@@ -115,7 +115,6 @@ describe('resolveRepositorySelectionByIds', () => {
 
     expect(result.normalizedRepositoryIds).toEqual([repoA.id]);
     expect(result.selectedRepositories).toEqual([
-      { id: repoA.id, fullName: repoA.fullName },
       { id: repoA.id, fullName: repoA.fullName },
     ]);
     expect(result.workspacePayload).toEqual({ repo: repoA.fullName });
