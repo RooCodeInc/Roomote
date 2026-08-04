@@ -32,6 +32,7 @@ import {
   XIcon,
 } from '@/components/system';
 
+import { generateClientUuid } from '@/lib/client-uuid';
 import { cn } from '@/lib/utils';
 
 import {
@@ -389,7 +390,7 @@ export const PromptInput = ({
 
         for (const file of capped) {
           next.push({
-            id: crypto.randomUUID(),
+            id: generateClientUuid(),
             type: 'file',
             url: URL.createObjectURL(file),
             mediaType: file.type,
@@ -646,7 +647,7 @@ export const PromptInput = ({
       add: (incoming: SourceDocumentUIPart[] | SourceDocumentUIPart) => {
         const array = Array.isArray(incoming) ? incoming : [incoming];
         setReferencedSources((prev) =>
-          prev.concat(array.map((s) => ({ ...s, id: crypto.randomUUID() }))),
+          prev.concat(array.map((s) => ({ ...s, id: generateClientUuid() }))),
         );
       },
       remove: (id: string) => {
