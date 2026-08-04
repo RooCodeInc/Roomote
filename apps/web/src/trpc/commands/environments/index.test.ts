@@ -466,6 +466,24 @@ describe('environment repository validation', () => {
     expect(mockGetBranches).not.toHaveBeenCalled();
   });
 
+  it('uses provider-neutral guidance when repository access fails', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({ where: async () => [] }),
+    });
+    mockCheckRepoAccess.mockResolvedValue(false);
+
+    const result = await validateConfigCommand(buildMockAuth(), {
+      config: {
+        name: 'GitLab Test',
+        repositories: [{ repository: 'acme/backend' }],
+      },
+    });
+
+    expect(result.errors).toEqual([
+      "Repository 'acme/backend' is not accessible. Ensure it is connected through its source-control provider.",
+    ]);
+  });
+
   it('continues warning when a GitHub branch is missing', async () => {
     mockDbSelect.mockReturnValueOnce({
       from: () => ({

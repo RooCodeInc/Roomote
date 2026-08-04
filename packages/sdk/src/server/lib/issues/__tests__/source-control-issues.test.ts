@@ -147,6 +147,60 @@ describe('manageSourceControlIssueForTaskRun', () => {
     });
   });
 
+  it('routes a GitLab issue in a GitHub-primary mixed task', async () => {
+    mockResolveRepositoryRow.mockResolvedValue({
+      id: 'repo-1',
+      sourceControlProvider: 'gitlab',
+      host: null,
+      installationId: null,
+      externalRepoId: '123',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    mockResolveGitLabProviderContext.mockResolvedValue({
+      projectId: '123',
+      token: 'server-side-token',
+      apiBaseUrl: 'https://gitlab.com/api/v4',
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          iid: 9,
+          title: 'Broken checkout',
+          state: 'opened',
+          web_url: 'https://gitlab.com/acme/backend/-/issues/9',
+          author: { username: 'alice' },
+          labels: [],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const mixedTaskRun = taskRun('github');
+    mixedTaskRun.payload = {
+      repo: 'acme/frontend',
+      selectedRepositories: ['acme/frontend', 'acme/backend'],
+      sourceControlProvider: 'github',
+      repositoryProviders: { 'acme/backend': 'gitlab' },
+    } as unknown as TaskRun['payload'];
+
+    const result = await manageSourceControlIssueForTaskRun({
+      taskRun: mixedTaskRun,
+      input: {
+        action: 'get_issue',
+        repositoryFullName: 'acme/backend',
+        issueNumber: 9,
+      },
+      fetchImpl,
+    });
+
+    expect(mockResolveRepositoryRow).toHaveBeenCalledWith({
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      host: undefined,
+    });
+    expect(result).toMatchObject({ provider: 'gitlab', number: 9 });
+  });
+
   it('posts a Gitea issue comment with server-resolved credentials', async () => {
     mockResolveRepositoryRow.mockResolvedValue({
       id: 'repo-2',

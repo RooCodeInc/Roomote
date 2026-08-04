@@ -2,13 +2,13 @@ import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
   resolveSourceControlHostFromPayload,
-  resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 
 import {
   assertRepositoryInTaskRunScope,
   getPayloadRecord,
   resolveRepositoryRow,
+  resolveSourceControlProviderForRepositoryFromPayload,
   type FetchImpl,
 } from '../pull-requests/source-control-pull-request-shared';
 import { getIssueProviderOperations } from './source-control-issue-providers';
@@ -39,7 +39,10 @@ export async function manageSourceControlIssueForTaskRun({
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlIssueResult> {
   const payload = getPayloadRecord(taskRun.payload);
-  const payloadProvider = resolveSourceControlProviderFromPayload(payload);
+  const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
+    payload,
+    input.repositoryFullName,
+  );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {
