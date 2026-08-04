@@ -238,6 +238,12 @@ the last upgrade without touching the database; the pre-upgrade bundle plus
 application and schema versions are visible under Settings -> Deployment ->
 Diagnostics.
 
+Use `roomote upgrade` instead of updating application image references alone.
+The upgrade refreshes the release's Compose and Caddy configuration together;
+mixing newer application images with an older Caddyfile can leave routes used
+by the new controller unavailable until the deployment configuration is also
+updated.
+
 `roomote upgrade` prunes old Roomote images after a successful upgrade. It
 keeps the current release plus the newest local Roomote image tags for a total
 of `ROOMOTE_IMAGE_RETENTION_RELEASES` retained tags (default `3`); set that
