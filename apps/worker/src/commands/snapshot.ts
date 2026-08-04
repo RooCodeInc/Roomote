@@ -17,6 +17,7 @@ import {
 
 import { setup } from './setup';
 import { injectEnvVars } from './utils/env-vars';
+import { resolveRepositoryProvidersFromPayload } from './utils/repository-providers';
 import { scrubSandboxSecretsBeforeSnapshot } from './utils/scrub-sandbox-secrets';
 import { findRuntimeEnvironmentConfig } from './utils/workspace-config';
 
@@ -82,6 +83,7 @@ export async function snapshot({
     await injectEnvVars(envVars, undefined, { sourceControlToken });
 
     const environmentConfig = await findRuntimeEnvironmentConfig(environmentId);
+    const taskRun = await sdk.taskRuns.findFirstById(runId);
 
     if (!environmentConfig) {
       throw new Error(`Environment not found`);
@@ -99,6 +101,9 @@ export async function snapshot({
         taskRunType: TaskPayloadKind.SnapshotEnvironment,
         sourceControlProvider:
           sourceControlToken?.provider ?? DEFAULT_SOURCE_CONTROL_PROVIDER,
+        repositoryProviders: resolveRepositoryProvidersFromPayload(
+          taskRun?.payload,
+        ),
       },
       logger: startupLogger,
       workerEnv,

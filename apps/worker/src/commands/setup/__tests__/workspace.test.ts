@@ -140,6 +140,73 @@ describe('initializeRepositories', () => {
     );
   });
 
+  it('resolves repository providers from the map before the scalar fallback', async () => {
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    const prepareRepositorySpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareRepository')
+      .mockImplementation(async (repo) => `/tmp/${repo}`);
+
+    await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'repository_set',
+        repositories: ['acme/github-app', 'acme/gitlab-app'],
+      },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      sourceControlProvider: 'github',
+      repositoryProviders: {
+        'acme/gitlab-app': 'gitlab',
+      },
+    });
+
+    expect(prepareRepositorySpy).toHaveBeenCalledWith(
+      'acme/github-app',
+      undefined,
+      undefined,
+      false,
+      false,
+      {},
+    );
+    expect(prepareRepositorySpy).toHaveBeenCalledWith(
+      'acme/gitlab-app',
+      undefined,
+      undefined,
+      false,
+      false,
+      { sourceControlProvider: 'gitlab' },
+    );
+  });
+
+  it('uses a mapped provider for a single-repository workspace', async () => {
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    const prepareRepositorySpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareRepository')
+      .mockResolvedValue('/tmp/acme/app');
+
+    await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'repository',
+        repository: 'acme/app',
+      },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      repositoryProviders: { 'acme/app': 'gitlab' },
+    });
+
+    expect(prepareRepositorySpy).toHaveBeenCalledWith(
+      'acme/app',
+      undefined,
+      undefined,
+      false,
+      false,
+      { sourceControlProvider: 'gitlab' },
+    );
+  });
+
   it('continues scoped multi-repo workspace setup when at least one selected repository prepares successfully', async () => {
     const logger = createLogger();
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
@@ -234,6 +301,44 @@ describe('initializeRepositories', () => {
       expect.stringContaining(
         'Skipped 1 repository while preparing the all-repositories workspace and continued with 1 prepared repository: acme/api',
       ),
+    );
+  });
+
+  it('applies mapped providers to repositories discovered for all-repositories workspaces', async () => {
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    mockListRepositories.mockResolvedValue([
+      { fullName: 'acme/github-app' },
+      { fullName: 'acme/gitlab-app' },
+    ]);
+    const prepareRepositorySpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareRepository')
+      .mockImplementation(async (repo) => `/tmp/${repo}`);
+
+    await initializeRepositories(createLogger(), {
+      workspace: { type: 'all_repositories' },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      repositoryProviders: { 'acme/gitlab-app': 'gitlab' },
+    });
+
+    expect(mockListRepositories).toHaveBeenCalledTimes(1);
+    expect(prepareRepositorySpy).toHaveBeenCalledWith(
+      'acme/github-app',
+      undefined,
+      undefined,
+      false,
+      false,
+      {},
+    );
+    expect(prepareRepositorySpy).toHaveBeenCalledWith(
+      'acme/gitlab-app',
+      undefined,
+      undefined,
+      false,
+      false,
+      { sourceControlProvider: 'gitlab' },
     );
   });
 
@@ -418,6 +523,49 @@ describe('initializeRepositories', () => {
         sourceSha: undefined,
       },
       {},
+    );
+  });
+
+  it('passes repository provider overrides to environment preparation', async () => {
+    vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
+      undefined,
+    );
+    const prepareEnvironmentRepositoriesSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'prepareEnvironmentRepositories')
+      .mockResolvedValue({ repoPaths: {} });
+    vi.spyOn(
+      WorkspaceManager.prototype,
+      'installWorkspaceToolVersions',
+    ).mockResolvedValue(undefined);
+
+    await initializeRepositories(createLogger(), {
+      workspace: {
+        type: 'environment',
+        environmentId: 'env_123',
+        environmentConfig: {
+          name: 'Mixed Providers',
+          repositories: [
+            { repository: 'acme/github-app' },
+            { repository: 'acme/gitlab-app' },
+          ],
+        },
+      } as WorkspaceConfig,
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+      sourceControlProvider: 'github',
+      repositoryProviders: {
+        'acme/gitlab-app': 'gitlab',
+      },
+    });
+
+    expect(prepareEnvironmentRepositoriesSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      false,
+      false,
+      expect.any(Object),
+      {
+        repositoryProviders: { 'acme/gitlab-app': 'gitlab' },
+      },
     );
   });
 });
