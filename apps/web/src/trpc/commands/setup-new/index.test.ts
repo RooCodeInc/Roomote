@@ -1239,6 +1239,34 @@ describe('setup-new onboarding task start command', () => {
     );
   });
 
+  it('rejects selected repositories with duplicate full names', async () => {
+    vi.mocked(getRepositories).mockResolvedValue([
+      {
+        id: 'repo-github',
+        fullName: 'group/project',
+        sourceControlProvider: 'github',
+      },
+      {
+        id: 'repo-gitlab',
+        fullName: 'group/project',
+        sourceControlProvider: 'gitlab',
+      },
+    ] as Awaited<ReturnType<typeof getRepositories>>);
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: {
+        selectedRepositoryIds: ['repo-github', 'repo-gitlab'],
+      },
+    });
+
+    await expect(
+      startSetupNewOnboardingTaskCommand(buildMockAuth()),
+    ).rejects.toThrow(
+      'The selected repositories include multiple entries named "group/project".',
+    );
+    expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
   it('launches with bootstrap instructions instead of blocking when every selected repo is empty', async () => {
     const { getRepositoryEmptyStates } = await import('@roomote/github');
     vi.mocked(getRepositoryEmptyStates).mockResolvedValue(

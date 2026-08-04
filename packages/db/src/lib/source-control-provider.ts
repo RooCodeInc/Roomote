@@ -51,7 +51,7 @@ function toRepositoryProviderMap(
 
     if (matches.length > 1 && hostMatches.length !== 1) {
       console.warn(
-        `[resolveWorkspaceRepositoryProviders] Omitting ambiguous repository ${fullName}; matched ${matches.length} active rows.`,
+        `[resolveWorkspaceRepositoryProviders] Omitting ambiguous repository ${fullName}; matched ${matches.length} rows.`,
       );
       continue;
     }
@@ -81,12 +81,7 @@ async function resolveProvidersByFullNames(
       sourceControlProvider: repositories.sourceControlProvider,
     })
     .from(repositories)
-    .where(
-      and(
-        eq(repositories.isActive, true),
-        inArray(repositories.fullName, fullNames),
-      ),
-    );
+    .where(inArray(repositories.fullName, fullNames));
 
   return toRepositoryProviderMap(rows, fullNames, sourceControlHost);
 }

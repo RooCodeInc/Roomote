@@ -5,6 +5,20 @@ type RepositoryReference = {
   fullName: string;
 };
 
+export function assertUniqueRepositoryFullNames(
+  repositoryFullNames: string[],
+): void {
+  const duplicateRepository = repositoryFullNames.find(
+    (repository, index) => repositoryFullNames.indexOf(repository) !== index,
+  );
+
+  if (duplicateRepository) {
+    throw new Error(
+      `The selected repositories include multiple entries named "${duplicateRepository}". Select only one because task workspaces identify repositories by full name.`,
+    );
+  }
+}
+
 export const ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_PLACEHOLDER =
   'Optional agent guidance, like what services in a monorepo to set up or context that may be missing from the repo itself';
 
@@ -121,6 +135,7 @@ export function buildEnvironmentDefinitionWorkspacePayload(
   repo: string;
   selectedRepositories?: string[];
 } {
+  assertUniqueRepositoryFullNames(repositoryFullNames);
   const normalizedRepositories = [...new Set(repositoryFullNames)];
   const primaryRepository = normalizedRepositories[0];
 

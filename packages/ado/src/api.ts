@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  filterRepositoryNamesForSourceControlProvider,
   stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -1483,14 +1484,10 @@ async function resolveAdoRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
   const filterForAdo = (repositoryNames: string[]) => {
-    const repositoryProviders = (
-      taskRun.payload as { repositoryProviders?: Record<string, string> }
-    ).repositoryProviders;
-
-    return repositoryNames.filter(
-      (repositoryName) =>
-        repositoryProviders?.[repositoryName] === undefined ||
-        repositoryProviders[repositoryName] === ADO_PROVIDER,
+    return filterRepositoryNamesForSourceControlProvider(
+      taskRun.payload,
+      repositoryNames,
+      ADO_PROVIDER,
     );
   };
 

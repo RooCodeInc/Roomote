@@ -11,6 +11,7 @@ import {
   environmentConfigSchema,
   getSourceControlProviderLabel,
   normalizeSourceControlProvider,
+  resolveRepositoryProvidersFromPayload,
   resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
@@ -42,20 +43,18 @@ export function resolveSourceControlProviderForRepositoryFromPayload(
   payload: Record<string, unknown>,
   repositoryFullName: string,
 ): SourceControlProvider {
-  const repositoryProviders = payload.repositoryProviders;
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
 
-  if (
-    repositoryProviders &&
-    typeof repositoryProviders === 'object' &&
-    !Array.isArray(repositoryProviders)
-  ) {
-    const repositoryProvider = (repositoryProviders as Record<string, unknown>)[
-      repositoryFullName
-    ];
+  if (repositoryProviders) {
+    const repositoryProvider = repositoryProviders[repositoryFullName];
 
-    if (repositoryProvider !== undefined) {
-      return normalizeSourceControlProvider(repositoryProvider);
+    if (repositoryProvider === undefined) {
+      throw new Error(
+        `Repository ${repositoryFullName} is not mapped to a source control provider.`,
+      );
     }
+
+    return normalizeSourceControlProvider(repositoryProvider);
   }
 
   return resolveSourceControlProviderFromPayload(payload);
@@ -65,6 +64,12 @@ export function resolveSourceControlHostForRepositoryFromPayload(
   payload: Record<string, unknown>,
   repositoryFullName: string,
 ): string | undefined {
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+  if (repositoryProviders?.[repositoryFullName] !== undefined) {
+    return undefined;
+  }
+
   const repositoryProvider =
     resolveSourceControlProviderForRepositoryFromPayload(
       payload,

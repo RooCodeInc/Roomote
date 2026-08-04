@@ -153,6 +153,32 @@ export function resolveSourceControlProviderFromPayload(payload: {
   return normalizeSourceControlProvider(payload.sourceControlProvider);
 }
 
+export function resolveRepositoryProvidersFromPayload(payload: {
+  repositoryProviders?: unknown;
+}): Record<string, SourceControlProvider> | undefined {
+  const parsed = z
+    .record(sourceControlProviderSchema)
+    .safeParse(payload.repositoryProviders);
+
+  return parsed.success && Object.keys(parsed.data).length > 0
+    ? parsed.data
+    : undefined;
+}
+
+export function filterRepositoryNamesForSourceControlProvider(
+  payload: { repositoryProviders?: unknown },
+  repositoryNames: string[],
+  provider: SourceControlProvider,
+): string[] {
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+  return repositoryProviders
+    ? repositoryNames.filter(
+        (repositoryName) => repositoryProviders[repositoryName] === provider,
+      )
+    : repositoryNames;
+}
+
 /**
  * Reads the optional `sourceControlHost` field from a task payload. Returns
  * the trimmed host, or undefined when the payload carries no usable host so

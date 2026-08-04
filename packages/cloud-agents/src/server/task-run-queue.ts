@@ -1802,6 +1802,13 @@ async function stampWorkspaceSourceControlProviders(
     primaryProvider &&
     (spansProviders || payload.sourceControlProvider === undefined)
   ) {
+    if (
+      spansProviders ||
+      (payload.sourceControlProvider !== undefined &&
+        payload.sourceControlProvider !== primaryProvider)
+    ) {
+      payload.sourceControlHost = undefined;
+    }
     payload.sourceControlProvider = primaryProvider;
   }
 }
@@ -2015,17 +2022,21 @@ function inheritSnapshotResumeSourceControlStamps(
     sourceControlHost?: unknown;
   };
 
-  if (payload.sourceControlProvider === undefined) {
-    const provider = sourceControlProviderSchema.safeParse(
-      source.sourceControlProvider,
-    );
+  const inheritsProvider = payload.sourceControlProvider === undefined;
+  const provider = sourceControlProviderSchema.safeParse(
+    source.sourceControlProvider,
+  );
 
+  if (inheritsProvider) {
     if (provider.success) {
       payload.sourceControlProvider = provider.data;
     }
   }
 
-  if (payload.repositoryProviders === undefined) {
+  const usesSourceProvider =
+    provider.success && payload.sourceControlProvider === provider.data;
+
+  if (usesSourceProvider && payload.repositoryProviders === undefined) {
     const repositoryProviders = z
       .record(sourceControlProviderSchema)
       .safeParse(source.repositoryProviders);
@@ -2035,7 +2046,11 @@ function inheritSnapshotResumeSourceControlStamps(
     }
   }
 
-  if (payload.sourceControlHost === undefined) {
+  if (
+    inheritsProvider &&
+    provider.success &&
+    payload.sourceControlHost === undefined
+  ) {
     const host =
       typeof source.sourceControlHost === 'string'
         ? source.sourceControlHost.trim()

@@ -596,32 +596,18 @@ function mergeProviderTokens(
   );
 }
 
-/**
- * Creates a source-control token for the task run with retry logic.
- * Retries up to {@link SOURCE_CONTROL_TOKEN_MAX_RETRIES} times with
- * exponential backoff (1s, 2s, 4s) to handle transient provider API failures.
- * Returns null if all attempts fail (caller should handle the error).
- */
-export async function createSourceControlTokenForTaskRun(
+async function createProviderTokenWithRetry(
   taskRun: TaskRun,
+  provider: SourceControlProvider,
   logPrefix: string,
-  {
-    maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
-    baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
-  } = {},
+  maxRetries: number,
+  baseDelayMs: number,
 ): Promise<SourceControlRuntimeToken | null> {
-  const providers = await resolveTaskRunSourceControlProviders(taskRun);
-  const label = providers.map(getSourceControlProviderLabel).join(' + ');
+  const label = getSourceControlProviderLabel(provider);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const tokens: SourceControlRuntimeToken[] = [];
-
-      for (const provider of providers) {
-        tokens.push(await createProviderToken(taskRun, provider));
-      }
-
-      return mergeProviderTokens(tokens);
+      return await createProviderToken(taskRun, provider);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
@@ -640,6 +626,54 @@ export async function createSourceControlTokenForTaskRun(
   }
 
   return null;
+}
+
+/**
+ * Creates a source-control token for the task run with retry logic.
+ * Retries up to {@link SOURCE_CONTROL_TOKEN_MAX_RETRIES} times with
+ * exponential backoff (1s, 2s, 4s) to handle transient provider API failures.
+ * Returns null if all attempts fail (caller should handle the error).
+ */
+export async function createSourceControlTokenForTaskRun(
+  taskRun: TaskRun,
+  logPrefix: string,
+  {
+    maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
+    baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
+  } = {},
+): Promise<SourceControlRuntimeToken | null> {
+  const providers = await resolveTaskRunSourceControlProviders(taskRun);
+
+  // GitLab scoped tokens create revocable remote resources. Mint them last so
+  // a later provider failure cannot orphan a successful GitLab token set.
+  const mintOrder = [
+    ...providers.filter((provider) => provider !== 'gitlab'),
+    ...providers.filter((provider) => provider === 'gitlab'),
+  ];
+  const tokensByProvider = new Map<
+    SourceControlProvider,
+    SourceControlRuntimeToken
+  >();
+
+  for (const provider of mintOrder) {
+    const token = await createProviderTokenWithRetry(
+      taskRun,
+      provider,
+      logPrefix,
+      maxRetries,
+      baseDelayMs,
+    );
+
+    if (!token) {
+      return null;
+    }
+
+    tokensByProvider.set(provider, token);
+  }
+
+  return mergeProviderTokens(
+    providers.map((provider) => tokensByProvider.get(provider)!),
+  );
 }
 
 /**

@@ -112,6 +112,17 @@ describe('environment definition helpers', () => {
     });
   });
 
+  it('rejects duplicate repository names before building a workspace', () => {
+    expect(() =>
+      buildEnvironmentDefinitionWorkspacePayload([
+        'group/project',
+        'group/project',
+      ]),
+    ).toThrow(
+      'The selected repositories include multiple entries named "group/project".',
+    );
+  });
+
   it('deduplicates repository selections without changing their order', () => {
     expect(
       normalizeRepositorySelection([

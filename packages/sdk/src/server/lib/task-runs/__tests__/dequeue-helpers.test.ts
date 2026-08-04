@@ -451,7 +451,7 @@ describe('createSourceControlTokenForTaskRun', () => {
     );
   });
 
-  it('retries the whole mapped-provider operation and returns no partial token', async () => {
+  it('retries only the failing provider and returns no partial token', async () => {
     mockCreateTaskRunScopedGitLabTokens.mockRejectedValue(
       new Error('GitLab unavailable'),
     );
@@ -477,8 +477,43 @@ describe('createSourceControlTokenForTaskRun', () => {
       );
 
       expect(result).toBeNull();
-      expect(mockCreateTaskRunWorkerGitHubToken).toHaveBeenCalledTimes(2);
+      expect(mockCreateTaskRunWorkerGitHubToken).toHaveBeenCalledTimes(1);
       expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalledTimes(2);
+    } finally {
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('does not mint GitLab scoped tokens before a later provider succeeds', async () => {
+    mockCreateTaskRunAdoCredentials.mockRejectedValue(
+      new Error('Azure DevOps unavailable'),
+    );
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: 'group/project',
+          sourceControlProvider: 'gitlab',
+          repositoryProviders: {
+            'group/project': 'gitlab',
+            'acme/Platform/backend': 'ado',
+          },
+          description: 'Work across providers',
+        } as TaskRun['payload']),
+        '[test]',
+        { maxRetries: 2, baseDelayMs: 0 },
+      );
+
+      expect(result).toBeNull();
+      expect(mockCreateTaskRunAdoCredentials).toHaveBeenCalledTimes(2);
+      expect(mockCreateTaskRunScopedGitLabTokens).not.toHaveBeenCalled();
     } finally {
       consoleWarnSpy.mockRestore();
       consoleErrorSpy.mockRestore();

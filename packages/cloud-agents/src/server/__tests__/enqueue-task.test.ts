@@ -938,17 +938,14 @@ describe('enqueueTask snapshot resume', () => {
     ).toBe('gitea');
     expect(
       (resumeRun.payload as { sourceControlHost?: string }).sourceControlHost,
-    ).toBe('dev.azure.com');
+    ).toBeUndefined();
     expect(
       (
         resumeRun.payload as {
           repositoryProviders?: Record<string, string>;
         }
       ).repositoryProviders,
-    ).toEqual({
-      'acme/widgets': 'ado',
-      'group/web': 'gitlab',
-    });
+    ).toBeUndefined();
   });
 
   it('rejects a resume without a source run id', async () => {
@@ -1410,6 +1407,7 @@ describe('enqueueTask source-control provider stamping', () => {
         'acme/Platform/mixed-web': 'ado',
       },
     });
+    expect(run.payload.sourceControlHost).toBeUndefined();
   });
 
   it('stamps mixed selected repositories in selection order', async () => {
@@ -1502,6 +1500,8 @@ describe('enqueueTask source-control provider stamping', () => {
           prTitle: 'Support mixed environments',
           prUrl: 'https://github.com/octo/pr-target/pull/1082',
           headSha: 'a'.repeat(40),
+          sourceControlProvider: 'gitea',
+          sourceControlHost: 'gitea.example.com',
         },
       } as Extract<TaskSpec, { type: 'github_pr_review' }>,
       initiator: { kind: 'automation', key: 'review_code' },
@@ -1526,6 +1526,7 @@ describe('enqueueTask source-control provider stamping', () => {
         'octo/pr-target': 'gitea',
       },
     });
+    expect(run.payload.sourceControlHost).toBeUndefined();
   });
 
   it('recomputes mixed-provider stamps for a failed-start relaunch', async () => {

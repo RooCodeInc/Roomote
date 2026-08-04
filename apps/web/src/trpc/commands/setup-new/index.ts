@@ -63,6 +63,7 @@ import {
   TaskPayloadKind,
   resolveEvalHarnessSelection,
   type ComputeProvider,
+  assertUniqueRepositoryFullNames,
   type DeploymentModelConfig,
   deriveWorkerImageFromReleaseVersion,
   getSetupAuthProvider,
@@ -302,6 +303,10 @@ async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
       sourceControlProvider: repository.sourceControlProvider,
     });
   }
+
+  assertUniqueRepositoryFullNames(
+    selectedRepositories.map((repository) => repository.fullName),
+  );
 
   return {
     normalizedRepositoryIds: normalizeRepositorySelection(selectedRepositories),

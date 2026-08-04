@@ -23,8 +23,8 @@ describe('resolveSourceControlProviderForRepositoryFromPayload', () => {
     ).toBe('gitlab');
   });
 
-  it('falls back to the task primary provider when the repository is unmapped', () => {
-    expect(
+  it('rejects repositories omitted from a provider map', () => {
+    expect(() =>
       resolveSourceControlProviderForRepositoryFromPayload(
         {
           sourceControlProvider: 'github',
@@ -32,7 +32,9 @@ describe('resolveSourceControlProviderForRepositoryFromPayload', () => {
         },
         'acme/frontend',
       ),
-    ).toBe('github');
+    ).toThrow(
+      'Repository acme/frontend is not mapped to a source control provider.',
+    );
   });
 });
 
@@ -50,17 +52,32 @@ describe('resolveSourceControlHostForRepositoryFromPayload', () => {
     ).toBeUndefined();
   });
 
-  it('keeps the scalar host for repositories on the primary provider', () => {
+  it('keeps the scalar host for legacy payloads without a provider map', () => {
     expect(
       resolveSourceControlHostForRepositoryFromPayload(
         {
           sourceControlProvider: 'github',
           sourceControlHost: 'github.com',
-          repositoryProviders: { 'acme/backend': 'gitlab' },
         },
         'acme/frontend',
       ),
     ).toBe('github.com');
+  });
+
+  it('does not apply a scalar host to a mapped primary repository', () => {
+    expect(
+      resolveSourceControlHostForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          sourceControlHost: 'github.enterprise.example',
+          repositoryProviders: {
+            'acme/frontend': 'github',
+            'acme/backend': 'gitlab',
+          },
+        },
+        'acme/frontend',
+      ),
+    ).toBeUndefined();
   });
 });
 

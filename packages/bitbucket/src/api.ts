@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  filterRepositoryNamesForSourceControlProvider,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -755,14 +756,10 @@ async function resolveBitbucketRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
   const filterForBitbucket = (repositoryNames: string[]) => {
-    const repositoryProviders = (
-      taskRun.payload as { repositoryProviders?: Record<string, string> }
-    ).repositoryProviders;
-
-    return repositoryNames.filter(
-      (repositoryName) =>
-        repositoryProviders?.[repositoryName] === undefined ||
-        repositoryProviders[repositoryName] === BITBUCKET_PROVIDER,
+    return filterRepositoryNamesForSourceControlProvider(
+      taskRun.payload,
+      repositoryNames,
+      BITBUCKET_PROVIDER,
     );
   };
 

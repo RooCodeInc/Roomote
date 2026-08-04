@@ -153,7 +153,7 @@ describe('createTaskRunGitHubToken', () => {
     });
   });
 
-  it('still rejects unknown selected repository names', async () => {
+  it('ignores selected repository names omitted from a provider map', async () => {
     mockFindMany.mockResolvedValue([
       {
         fullName: 'ExampleOrg/example-backend',
@@ -177,9 +177,7 @@ describe('createTaskRunGitHubToken', () => {
           },
         } as TaskRun['payload']),
       ),
-    ).rejects.toThrow(
-      'Selected repositories not found for task run 123: unknown/repository',
-    );
+    ).resolves.toBe('ghs_test_token');
   });
 
   it('uses the environment repositories installation for environment tasks', async () => {

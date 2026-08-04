@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  filterRepositoryNamesForSourceControlProvider,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -917,14 +918,10 @@ function filterRepositorySelectionForGitLab(
   taskRun: TaskRun,
   repositoryNames: string[],
 ): string[] {
-  const repositoryProviders = (
-    taskRun.payload as { repositoryProviders?: Record<string, string> }
-  ).repositoryProviders;
-
-  return repositoryNames.filter(
-    (repositoryName) =>
-      repositoryProviders?.[repositoryName] === undefined ||
-      repositoryProviders[repositoryName] === GITLAB_PROVIDER,
+  return filterRepositoryNamesForSourceControlProvider(
+    taskRun.payload,
+    repositoryNames,
+    GITLAB_PROVIDER,
   );
 }
 
