@@ -56,6 +56,12 @@ describe('Resend OAuth', () => {
       connectionMode: 'oauth',
       serverMode: 'upstream_proxy',
       oauthScopes: ['full_access'],
+      oauthEndpoints: {
+        authorizationEndpoint: 'https://api.resend.com/oauth/authorize',
+        tokenEndpoint: 'https://api.resend.com/oauth/token',
+        registrationEndpoint: 'https://api.resend.com/oauth/register',
+        tokenEndpointAuthMethod: 'none',
+      },
     });
     expect(getMcpIntegrationConnectionScope('resend')).toBe('deployment');
     expect(getMcpIntegrationDefaultDisabledTools('resend')).toEqual(

@@ -244,6 +244,8 @@ export type McpIntegrationOAuthClientEnv = {
 export type McpIntegrationOAuthEndpoints = {
   authorizationEndpoint: string;
   tokenEndpoint: string;
+  registrationEndpoint?: string;
+  tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod;
 };
 
 export type McpIntegrationAuthorizationParameter = {
@@ -459,6 +461,12 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     connectionScope: 'deployment',
     connectionMode: 'oauth',
     serverMode: 'upstream_proxy',
+    oauthEndpoints: {
+      authorizationEndpoint: 'https://api.resend.com/oauth/authorize',
+      tokenEndpoint: 'https://api.resend.com/oauth/token',
+      registrationEndpoint: 'https://api.resend.com/oauth/register',
+      tokenEndpointAuthMethod: 'none',
+    },
     oauthScopes: ['full_access'],
     defaultDisabledTools: [...RESEND_DEFAULT_DISABLED_TOOL_NAMES],
     instructions:

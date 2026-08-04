@@ -297,7 +297,12 @@ describe('GET /api/mcp-oauth/callback', () => {
       name: 'Resend',
       url: 'https://mcp.resend.com/mcp',
     });
-    getMcpIntegrationOauthEndpointsMock.mockReturnValue(undefined);
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://api.resend.com/oauth/authorize',
+      tokenEndpoint: 'https://api.resend.com/oauth/token',
+      registrationEndpoint: 'https://api.resend.com/oauth/register',
+      tokenEndpointAuthMethod: 'none',
+    });
     isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
     getMcpIntegrationDefaultDisabledToolsMock.mockReturnValue([
       'send-email',
