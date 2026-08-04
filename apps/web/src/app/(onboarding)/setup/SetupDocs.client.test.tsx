@@ -54,6 +54,7 @@ describe('SetupDocs', () => {
     ['opencode', 'opencode'],
     ['opencode-go', 'opencode-go'],
     ['openrouter', 'openrouter'],
+    ['requesty', 'requesty'],
     ['togetherai', 'together-ai'],
     ['vercel', 'vercel-ai-gateway'],
     ['vllm', 'vllm'],
