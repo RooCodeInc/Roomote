@@ -635,6 +635,71 @@ describe('taskRunsRouter queue message guards', () => {
     });
   });
 
+  it('rejects user-authenticated environment management launches', async () => {
+    await expect(
+      createAuthCaller().enqueue({
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          payload: {
+            repo: 'acme/api',
+            description: 'Manage the environment',
+            environmentManagementMode: 'create',
+          },
+        },
+        initiator: { kind: 'user', userId: 'user-1' },
+        workflow: 'standard',
+        surface: 'api',
+        trigger: 'manual',
+      }),
+    ).rejects.toThrow(
+      'Environment management launches must use a trusted server launch path.',
+    );
+
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects indirect environment management markers and workflows', async () => {
+    const commonInput = {
+      task: {
+        type: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'acme/api',
+          description: 'Manage the environment',
+        },
+      },
+      initiator: { kind: 'user' as const, userId: 'user-1' },
+      surface: 'api' as const,
+      trigger: 'manual' as const,
+    };
+
+    await expect(
+      createAuthCaller().enqueue({
+        ...commonInput,
+        task: {
+          ...commonInput.task,
+          payload: {
+            ...commonInput.task.payload,
+            verifiesEnvironmentId: '3e675f73-5f32-41c4-b90d-7f9fbcf42831',
+          },
+        },
+        workflow: 'standard',
+      }),
+    ).rejects.toThrow(
+      'Environment management launches must use a trusted server launch path.',
+    );
+
+    await expect(
+      createAuthCaller().enqueue({
+        ...commonInput,
+        workflow: 'setup_onboarding',
+      }),
+    ).rejects.toThrow(
+      'Environment management launches must use a trusted server launch path.',
+    );
+
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('rejects launches without an initiator', async () => {
     await expect(
       createAuthCaller().enqueue({
