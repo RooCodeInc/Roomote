@@ -11,6 +11,8 @@ export { useConnectMcp } from './useConnectMcp';
 export { useDisconnectMcp } from './useDisconnectMcp';
 export { useAsanaConnection } from './useAsanaConnection';
 export { useSaveAsanaConnection } from './useSaveAsanaConnection';
+export { useGranolaConnection } from './useGranolaConnection';
+export { useSaveGranolaConnection } from './useSaveGranolaConnection';
 export { useSaveGrafanaConnection } from './useSaveGrafanaConnection';
 export { useSaveSnowflakeConnection } from './useSaveSnowflakeConnection';
 export { useSnowflakeConnection } from './useSnowflakeConnection';

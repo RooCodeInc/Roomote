@@ -137,6 +137,7 @@
           "integrations/better-stack",
           "integrations/braintrust",
           "integrations/grafana",
+          "integrations/granola",
           "integrations/jira",
           "integrations/linear",
           "integrations/monday",

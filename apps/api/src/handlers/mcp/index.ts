@@ -10,6 +10,7 @@ import { environmentsRouter } from '../environments';
 import { customAutomationsRouter } from '../custom-automations';
 import { tasksRouter } from '../tasks';
 import { createIntegrationMcpProxy } from './integration-mcp';
+import { granolaMcp } from './granola';
 import { grafanaMcp } from './grafana';
 import { getIntegrationMcpProxyOptions } from './integration-mcp-policy';
 import { linearMcp } from './linear';
@@ -36,6 +37,7 @@ for (const integration of MCP_INTEGRATIONS) {
 }
 
 mcp.route('/asana', asanaMcp);
+mcp.route('/granola', granolaMcp);
 mcp.route('/grafana', grafanaMcp);
 mcp.route('/linear', linearMcp);
 mcp.route('/snowflake', snowflakeMcp);

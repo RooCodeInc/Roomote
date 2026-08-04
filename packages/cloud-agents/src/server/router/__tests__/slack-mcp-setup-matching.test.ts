@@ -65,6 +65,7 @@ describe('matchSlackMcpSetupService', () => {
       ['https://vercel.com/acme-team/my-app', 'vercel'],
       ['https://resend.com/emails/123', 'resend'],
       ['https://resend.com/domains/example.com', 'resend'],
+      ['https://notes.granola.ai/d/meeting-id', 'granola'],
     ])('matches %s to %s', (url, serviceId) => {
       expect(matchServiceIdForUrl(url)).toBe(serviceId);
     });

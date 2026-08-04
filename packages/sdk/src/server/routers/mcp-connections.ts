@@ -17,6 +17,7 @@ import {
   getMcpIntegrationUpstreamUrl,
   MCP_INTEGRATIONS,
   isMcpConnectionAsanaConfig,
+  isMcpConnectionGranolaConfig,
   isMcpConnectionGrafanaConfig,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
@@ -323,6 +324,7 @@ export const mcpConnectionsRouter = router({
         } else if (
           isMcpConnectionSnowflakeConfig(authConfig) ||
           isMcpConnectionAsanaConfig(authConfig) ||
+          isMcpConnectionGranolaConfig(authConfig) ||
           isMcpConnectionVercelConfig(authConfig) ||
           isMcpConnectionGrafanaConfig(authConfig)
         ) {

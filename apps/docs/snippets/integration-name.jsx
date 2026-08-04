@@ -4,6 +4,7 @@ export function IntegrationName({ href, icon, name }) {
     e2b: '/logo/integrations/e2b.svg',
     blaxel: '/logo/integrations/blaxel.svg',
     azure: '/logo/integrations/azure.svg',
+    granola: '/logo/integrations/granola.svg',
     monday: '/logo/integrations/monday.svg',
   };
   const iconSrc =

@@ -1,0 +1,39 @@
+---
+title: Granola
+description: Give Roomote read-only access to shared Granola meeting context.
+icon: '/logo/integrations/granola.svg'
+---
+
+Connect Granola when decisions, action items, and implementation context live in
+your meeting notes and you want that context available in Roomote tasks.
+
+## When to use it
+
+- Browse past meetings for relevant decisions and discussions
+- Read meeting notes and transcripts while planning or implementing work
+- Find action items, attendees, and related meeting folders during follow-up work
+
+## How setup works
+
+A deployment operator connects Granola once from **Settings > Integrations**
+with an API key. Granola API keys require a Business or Enterprise plan.
+
+Prefer a **workspace API key** from **Granola Settings > Connectors > Workspace
+API keys**. Workspace keys belong to the workspace rather than an individual,
+do not expire, and cannot read ordinary private notes. They can read:
+
+- notes visible to everyone in the workspace, including the Team space
+- notes in spaces where **Allow Granola API access** is enabled
+
+Granola enables API access by default for newly created spaces. Review
+**Settings > Spaces** and turn it off anywhere Roomote should not read notes.
+
+If a workspace key is not available, create a personal key from **Settings >
+Connectors > API keys** and select only **Public notes**, leaving **Personal
+notes** unchecked.
+
+## What to expect
+
+The built-in Granola connection is read-only. Roomote can list and read the
+notes, folders, meeting details, and transcripts allowed by the configured key,
+but it cannot modify Granola content or manage Granola webhooks.

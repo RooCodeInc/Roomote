@@ -36,6 +36,14 @@ export type SaveAsanaConnectionInput = z.infer<
   typeof saveAsanaConnectionSchema
 >;
 
+export const saveGranolaConnectionSchema = z.object({
+  apiKey: z.string().transform((value) => value.trim()),
+});
+
+export type SaveGranolaConnectionInput = z.infer<
+  typeof saveGranolaConnectionSchema
+>;
+
 export const saveVercelConnectionSchema = z.object({
   accessToken: z.string().transform((value) => value.trim()),
   defaultTeamIdOrSlug: z
