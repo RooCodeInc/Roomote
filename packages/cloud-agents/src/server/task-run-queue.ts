@@ -122,11 +122,17 @@ export function shouldCaptureActivationTaskCreatedEvent(input: {
   taskType: TaskPayloadKind;
   workflow: TaskWorkflow;
   initiator: TaskInitiator;
+  sourceRunId?: number | null;
+  environmentDefinitionId?: string;
+  verifiesEnvironmentId?: string;
 }): boolean {
   return (
     input.initiator.kind === 'user' &&
     input.workflow === 'standard' &&
-    input.taskType !== TaskPayloadKind.SnapshotEnvironment
+    input.taskType !== TaskPayloadKind.SnapshotEnvironment &&
+    input.sourceRunId == null &&
+    input.environmentDefinitionId == null &&
+    input.verifiesEnvironmentId == null
   );
 }
 
@@ -1585,6 +1591,11 @@ async function enqueueFreshLaunch(
       taskType: taskRun.payloadKind,
       workflow,
       initiator,
+      sourceRunId: taskWithHarnessOverrides.sourceRunId,
+      environmentDefinitionId:
+        taskWithHarnessOverrides.payload.environmentDefinitionId,
+      verifiesEnvironmentId:
+        taskWithHarnessOverrides.payload.verifiesEnvironmentId,
     })
   ) {
     void captureActivationTaskCreated({
