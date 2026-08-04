@@ -2,6 +2,29 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.33.0 (2026-08-04)
+
+This release adds new ways to connect and invoke Roomote, gives deployments clearer account-linking guidance, and improves automation and Amazon Bedrock model discovery.
+
+### Highlights
+
+- Start Roomote from existing Slack, Discord, and Microsoft Teams conversations with an administrator-configured emoji reaction.
+- Connect Resend with safe inspection-oriented defaults and explicit controls for sensitive actions.
+- Add deployment-specific account-linking guidance across chat, source control, and sign-in surfaces.
+- Keep Amazon Bedrock models visible and organized under one provider section in model settings.
+
+### Minor changes
+
+- Let administrators configure an emoji that starts Roomote from an existing Slack, Discord, or Microsoft Teams conversation, reusing the normal task flow and preserving the reacting user's account attribution.
+- Add Resend as a deployment-wide integration with inspection-oriented access by default and explicit administrator controls for sensitive email, credential, automation, contact, domain, and webhook actions.
+- Let administrators add deployment-specific account-linking guidance that appears alongside Roomote's built-in instructions in source-control comments, Discord, Telegram, and the sign-in page.
+
+### Patch changes
+
+- Keep Amazon Bedrock Mantle models visible after settings reload and group native Bedrock and Mantle entries under one Amazon Bedrock section instead of showing duplicate headings.
+- Make routine Discord release announcements shorter and suppress link-preview cards while keeping the release notes link available.
+- Make automations the highest-priority onboarding prompt for users who have not enabled one, and link the Automations page directly to practical Cookbook recipes.
+
 ## 0.32.1 (2026-08-04)
 
 This patch restores licensed Cloud seat limits and keeps custom automation destinations limited to connected communication providers.
