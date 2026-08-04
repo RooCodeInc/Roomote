@@ -77,11 +77,16 @@ describe('Resend OAuth', () => {
       'update-automation',
       'send-event',
       'create-api-key',
+      'remove-api-key',
       'create-contact-property',
       'update-contact-property',
       'remove-contact-property',
+      'update-domain',
+      'remove-domain',
+      'create-webhook',
+      'update-webhook',
     ]);
-    expect(RESEND_DEFAULT_DISABLED_TOOL_NAMES).toHaveLength(18);
+    expect(RESEND_DEFAULT_DISABLED_TOOL_NAMES).toHaveLength(23);
     expect(getMcpIntegrationDefaultDisabledTools('resend')).not.toContain(
       'cancel-email',
     );
