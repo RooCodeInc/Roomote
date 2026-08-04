@@ -423,6 +423,37 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     });
   });
 
+  it('returns Granola proxy config without exposing the API key', async () => {
+    mockOrderBy.mockResolvedValue([
+      buildJoinedConnectionRow({
+        id: 'conn-granola',
+        userId: null,
+        mcpId: 'granola',
+        authConfig: {
+          type: 'granola',
+          encryptedApiKey: 'enc:secret',
+        },
+      }),
+    ]);
+
+    const result = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    expect(getValidAccessToken).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      servers: {
+        granola: {
+          url: 'https://api.preview.roomote.run/api/mcp/granola',
+          headers: {
+            'X-MCP-Client': 'Roomote',
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('enc:secret');
+  });
+
   it('returns Vercel proxy config without requesting OAuth tokens', async () => {
     mockOrderBy.mockResolvedValue([
       buildJoinedConnectionRow({

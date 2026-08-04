@@ -36,6 +36,7 @@ import {
   pullRequestAnalyticsOverviewInputSchema,
   filterSchema,
   saveAsanaConnectionSchema,
+  saveGranolaConnectionSchema,
   saveGrafanaConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
@@ -195,11 +196,13 @@ import {
   setDeploymentMcpEnabledCommand,
   getUserMcpConnectionsCommand,
   getAsanaConnectionCommand,
+  getGranolaConnectionCommand,
   getGrafanaConnectionCommand,
   getSnowflakeConnectionCommand,
   getVercelConnectionCommand,
   listDeploymentMcpIntegrationToolsCommand,
   saveAsanaConnectionCommand,
+  saveGranolaConnectionCommand,
   saveGrafanaConnectionCommand,
   saveSnowflakeConnectionCommand,
   saveVercelConnectionCommand,
@@ -1592,6 +1595,10 @@ export const appRouter = createRouter({
       getAsanaConnectionCommand(auth),
     ),
 
+    granolaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getGranolaConnectionCommand(auth),
+    ),
+
     grafanaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getGrafanaConnectionCommand(auth),
     ),
@@ -1652,6 +1659,12 @@ export const appRouter = createRouter({
       .input(saveAsanaConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
         saveAsanaConnectionCommand(auth, input),
+      ),
+
+    saveGranolaConnection: protectedProcedure
+      .input(saveGranolaConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveGranolaConnectionCommand(auth, input),
       ),
 
     saveGrafanaConnection: protectedProcedure

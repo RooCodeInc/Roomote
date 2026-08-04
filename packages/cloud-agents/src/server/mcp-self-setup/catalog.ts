@@ -160,9 +160,9 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
   },
   granola: {
     capabilities: [
-      'Search meeting notes for relevant discussions and decisions',
-      'Read meeting details and transcripts for implementation context',
-      'Review folders, attendees, and action items during follow-up work',
+      'Browse workspace meeting notes for relevant discussions and decisions',
+      'Read meeting details and transcripts through a deployment API key',
+      'Keep access read-only and limited by the Granola key configuration',
     ],
   },
   supermemory: {

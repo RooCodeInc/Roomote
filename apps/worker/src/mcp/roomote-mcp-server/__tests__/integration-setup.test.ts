@@ -50,10 +50,13 @@ describe('integration setup guide', () => {
     );
   });
 
-  it('documents the user-scoped read-only Granola setup flow', () => {
+  it('documents the deployment-scoped read-only Granola setup flow', () => {
     expect(INTEGRATION_SETUP_CONTENT).toContain('# Granola');
     expect(INTEGRATION_SETUP_CONTENT).toContain(
-      'Each user connects their own Granola account via OAuth.',
+      'That operator connects Granola once for the deployment with a Granola API key.',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'If using a personal API key instead, create it with only Public notes selected.',
     );
     expect(INTEGRATION_SETUP_CONTENT).toContain(
       'The built-in connection is read-only.',

@@ -24,10 +24,12 @@ import {
   useCuratedIntegrationsAvailability,
   useDisconnectMcp,
   useGrafanaConnection,
+  useGranolaConnection,
   useDeploymentMcpEnablements,
   useMcpOauthReadiness,
   useSaveAsanaConnection,
   useSaveGrafanaConnection,
+  useSaveGranolaConnection,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
   useSetDeploymentMcpEnabled,
@@ -39,6 +41,7 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 import {
   saveAsanaConnectionSchema,
   saveGrafanaConnectionSchema,
+  saveGranolaConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
 } from '@/types';
@@ -89,7 +92,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   grafana:
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:
-    'Roomote will be able to search meeting notes, transcripts, decisions, and action items.',
+    'Roomote will use one deployment-wide Granola connection to browse meeting notes, transcripts, decisions, and action items.',
   github:
     'Roomote will be able to inspect PRs, issues, and repository context.',
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
@@ -207,6 +210,10 @@ type AsanaFormState = {
   accessToken: string;
 };
 
+type GranolaFormState = {
+  apiKey: string;
+};
+
 type GrafanaFormState = {
   baseUrl: string;
   serviceAccountToken: string;
@@ -240,6 +247,12 @@ function buildEmptySnowflakeForm(): SnowflakeFormState {
 function buildEmptyAsanaForm(): AsanaFormState {
   return {
     accessToken: '',
+  };
+}
+
+function buildEmptyGranolaForm(): GranolaFormState {
+  return {
+    apiKey: '',
   };
 }
 
@@ -302,6 +315,20 @@ function getAsanaFieldErrors(
 
   return {
     accessToken: fieldErrors.accessToken,
+  };
+}
+
+function getGranolaFieldErrors(
+  result: ReturnType<typeof saveGranolaConnectionSchema.safeParse>,
+): Partial<Record<keyof GranolaFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  const fieldErrors = result.error.flatten().fieldErrors;
+
+  return {
+    apiKey: fieldErrors.apiKey,
   };
 }
 
@@ -924,6 +951,65 @@ function AsanaConnectionFields({
   );
 }
 
+function GranolaConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankApiKey,
+  onFieldChange,
+}: {
+  form: GranolaFormState;
+  fieldErrors: Partial<Record<keyof GranolaFormState, string[]>>;
+  formError: string | null;
+  allowBlankApiKey: boolean;
+  onFieldChange: (field: keyof GranolaFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="granola-api-key">Granola API Key</Label>
+        <Input
+          id="granola-api-key"
+          type="password"
+          placeholder="Enter your Granola API key"
+          value={form.apiKey}
+          onChange={(event) => onFieldChange('apiKey', event.target.value)}
+          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          We strongly recommend a Granola workspace API key. Workspace keys can
+          read public notes and spaces where &quot;Allow Granola API
+          access&quot; is enabled. New spaces enable API access by default, so
+          admins should review space settings before connecting.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          You can also use a personal API key with Public notes selected and
+          Personal notes left unchecked.
+        </p>
+        {allowBlankApiKey ? (
+          <p className="text-sm text-muted-foreground">
+            Leave blank to keep the existing API key.
+          </p>
+        ) : null}
+        {fieldErrors.apiKey ? (
+          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
+        ) : null}
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
 function GrafanaConnectionFields({
   form,
   fieldErrors,
@@ -1119,6 +1205,14 @@ export function Integrations() {
     Partial<Record<keyof AsanaFormState, string[]>>
   >({});
   const [asanaFormError, setAsanaFormError] = useState<string | null>(null);
+  const [isGranolaDialogOpen, setIsGranolaDialogOpen] = useState(false);
+  const [granolaForm, setGranolaForm] = useState<GranolaFormState>(
+    buildEmptyGranolaForm(),
+  );
+  const [granolaFieldErrors, setGranolaFieldErrors] = useState<
+    Partial<Record<keyof GranolaFormState, string[]>>
+  >({});
+  const [granolaFormError, setGranolaFormError] = useState<string | null>(null);
   const [isGrafanaDialogOpen, setIsGrafanaDialogOpen] = useState(false);
   const [grafanaForm, setGrafanaForm] = useState<GrafanaFormState>(
     buildEmptyGrafanaForm(),
@@ -1172,6 +1266,7 @@ export function Integrations() {
   const disconnectMcp = useDisconnectMcp();
   const saveAsanaConnection = useSaveAsanaConnection();
   const saveGrafanaConnection = useSaveGrafanaConnection();
+  const saveGranolaConnection = useSaveGranolaConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
   const saveVercelConnection = useSaveVercelConnection();
   const asanaConnectionSummary = useMemo(() => {
@@ -1185,6 +1280,18 @@ export function Integrations() {
     asanaConnectionSummary?.authStatus === 'authenticated';
   const asanaConnection = useAsanaConnection(
     isAdmin && (isAsanaConnected || isAsanaDialogOpen),
+  );
+  const granolaConnectionSummary = useMemo(() => {
+    const connection = (userMcpConnections.data ?? []).find(
+      (entry) => entry.mcpId === 'granola',
+    );
+
+    return connection;
+  }, [userMcpConnections.data]);
+  const isGranolaConnected =
+    granolaConnectionSummary?.authStatus === 'authenticated';
+  const granolaConnection = useGranolaConnection(
+    isAdmin && (isGranolaConnected || isGranolaDialogOpen),
   );
   const grafanaConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
@@ -1238,6 +1345,20 @@ export function Integrations() {
     setAsanaFormError(null);
     setAsanaForm(buildEmptyAsanaForm());
   }, [asanaConnection.isPending, isAsanaConnected, isAsanaDialogOpen]);
+
+  useEffect(() => {
+    if (!isGranolaDialogOpen) {
+      return;
+    }
+
+    if (granolaConnection.isPending && isGranolaConnected) {
+      return;
+    }
+
+    setGranolaFieldErrors({});
+    setGranolaFormError(null);
+    setGranolaForm(buildEmptyGranolaForm());
+  }, [granolaConnection.isPending, isGranolaConnected, isGranolaDialogOpen]);
 
   useEffect(() => {
     if (!isSnowflakeDialogOpen) {
@@ -1453,6 +1574,26 @@ export function Integrations() {
             });
           }
 
+          if (integration.id === 'granola') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: userConnectionMap.get(integration.id),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveGranolaConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isGranolaDialogOpen,
+              connectionPending: granolaConnection.isPending,
+              canConfigure: isAdmin,
+              canManageTools: isAdmin,
+              openDialog: () => setIsGranolaDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           if (integration.id === 'snowflake') {
             return buildAdminConfiguredIntegrationItem({
               integration,
@@ -1652,6 +1793,7 @@ export function Integrations() {
     disconnectLinear,
     disconnectMcp,
     grafanaConnection.isPending,
+    granolaConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
     linearOauthSetup.isPending,
@@ -1660,9 +1802,11 @@ export function Integrations() {
     oauthReadiness.isPending,
     isAdmin,
     isGrafanaDialogOpen,
+    isGranolaDialogOpen,
     isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveGrafanaConnection.isPending,
+    saveGranolaConnection.isPending,
     saveVercelConnection.isPending,
     deploymentEnablements.data,
     pathname,
@@ -1754,6 +1898,21 @@ export function Integrations() {
     setAsanaFormError(null);
   };
 
+  const handleGranolaFieldChange = (
+    field: keyof GranolaFormState,
+    value: string,
+  ) => {
+    setGranolaForm((current) => ({ ...current, [field]: value }));
+    setGranolaFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      return { ...current, [field]: undefined };
+    });
+    setGranolaFormError(null);
+  };
+
   const handleGrafanaFieldChange = (
     field: keyof GrafanaFormState,
     value: string,
@@ -1795,6 +1954,19 @@ export function Integrations() {
     }
 
     setAsanaForm(buildEmptyAsanaForm());
+  };
+
+  const handleGranolaDialogOpenChange = (open: boolean) => {
+    setIsGranolaDialogOpen(open);
+
+    setGranolaFieldErrors({});
+    setGranolaFormError(null);
+
+    if (!open) {
+      return;
+    }
+
+    setGranolaForm(buildEmptyGranolaForm());
   };
 
   const handleSnowflakeDialogOpenChange = (open: boolean) => {
@@ -1874,6 +2046,42 @@ export function Integrations() {
       },
       onError: (error) => {
         setAsanaFormError(error.message);
+      },
+    });
+  };
+
+  const handleGranolaSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveGranolaConnectionSchema.safeParse({
+      apiKey: granolaForm.apiKey,
+    });
+    if (!parsed.success) {
+      setGranolaFieldErrors(getGranolaFieldErrors(parsed));
+      return;
+    }
+
+    if (!isGranolaConnected && parsed.data.apiKey.length === 0) {
+      setGranolaFieldErrors({
+        apiKey: ['API key is required'],
+      });
+      return;
+    }
+
+    setGranolaFieldErrors({});
+    setGranolaFormError(null);
+
+    saveGranolaConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isGranolaConnected
+            ? 'Granola connection updated for this deployment.'
+            : 'Granola connected for this deployment.',
+        );
+        handleGranolaDialogOpenChange(false);
+      },
+      onError: (error) => {
+        setGranolaFormError(error.message);
       },
     });
   };
@@ -2047,6 +2255,29 @@ export function Integrations() {
           formError={asanaFormError}
           allowBlankToken={isAsanaConnected}
           onFieldChange={handleAsanaFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="Granola"
+        open={isGranolaDialogOpen}
+        onOpenChange={handleGranolaDialogOpenChange}
+        isEditing={isGranolaConnected}
+        isPending={saveGranolaConnection.isPending}
+        isLoading={isGranolaConnected && granolaConnection.isPending}
+        description={
+          <>
+            Store a Granola API key for this deployment. The secret stays
+            encrypted server-side.
+          </>
+        }
+        onSubmit={handleGranolaSubmit}
+      >
+        <GranolaConnectionFields
+          form={granolaForm}
+          fieldErrors={granolaFieldErrors}
+          formError={granolaFormError}
+          allowBlankApiKey={isGranolaConnected}
+          onFieldChange={handleGranolaFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
       <AdminConfiguredIntegrationDialog

@@ -124,6 +124,16 @@ export interface McpConnectionAsanaConfig {
 }
 
 /**
+ * Deployment-scoped Granola connection config stored in mcpConnections.authConfig.
+ *
+ * The API key is expected to be encrypted before persistence.
+ */
+export interface McpConnectionGranolaConfig {
+  type: 'granola';
+  encryptedApiKey: string;
+}
+
+/**
  * Organization-scoped Vercel connection config stored in mcpConnections.authConfig.
  *
  * The bearer token is expected to be encrypted before persistence.
@@ -157,6 +167,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionOAuthConfig
   | McpConnectionSnowflakeConfig
   | McpConnectionAsanaConfig
+  | McpConnectionGranolaConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
   | Record<string, never>;
@@ -482,13 +493,13 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'granola',
     name: 'Granola',
-    url: 'https://mcp.granola.ai/mcp',
-    description: `Search meeting notes, transcripts, decisions, and action items from ${PRODUCT_NAME} tasks`,
+    description: `Connect Granola so your agents can browse meeting notes, transcripts, decisions, and action items from ${PRODUCT_NAME} tasks`,
     icon: 'granola',
-    serverMode: 'upstream_proxy',
-    oauthScopeMode: 'read-only',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'native',
     instructions:
-      "Use Granola to search and read the connected user's meeting notes, transcripts, folders, decisions, and action items. Granola follows the user's active workspace and exposes read-only tools.",
+      'Use Granola to browse and read meeting notes, transcripts, folders, decisions, and action items through the deployment API key. The built-in tools are read-only.',
   },
   {
     id: 'supermemory',
@@ -795,6 +806,19 @@ export function isMcpConnectionAsanaConfig(
     typeof authConfig === 'object' &&
     'type' in authConfig &&
     authConfig.type === 'asana',
+  );
+}
+
+export function isMcpConnectionGranolaConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionGranolaConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'granola' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string',
   );
 }
 

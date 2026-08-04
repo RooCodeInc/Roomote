@@ -34,7 +34,7 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   grafana:
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:
-    'Roomote will be able to search meeting notes, transcripts, decisions, and action items.',
+    'Roomote will be able to browse workspace meeting notes, transcripts, decisions, and action items through a deployment API key.',
   sentry:
     'Roomote will be able to inspect Sentry issue context and run scheduled Sentry triage through MCP.',
   posthog:

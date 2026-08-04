@@ -48,15 +48,17 @@ describe('monday.com OAuth', () => {
   });
 });
 
-describe('Granola OAuth', () => {
-  it('uses the hosted MCP with a user-scoped read-only connection', () => {
+describe('Granola API key connection', () => {
+  it('uses a deployment-scoped native MCP with admin-managed credentials', () => {
     expect(getMcpIntegration('granola')).toMatchObject({
       name: 'Granola',
-      url: 'https://mcp.granola.ai/mcp',
-      serverMode: 'upstream_proxy',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'native',
     });
-    expect(getMcpIntegrationConnectionScope('granola')).toBe('user');
-    expect(getMcpIntegrationOauthScopeMode('granola')).toBe('read-only');
+    expect(getMcpIntegration('granola')?.url).toBeUndefined();
+    expect(getMcpIntegrationConnectionScope('granola')).toBe('deployment');
+    expect(getMcpIntegrationOauthScopeMode('granola')).toBeUndefined();
     expect(getMcpIntegrationDefaultDisabledTools('granola')).toEqual([]);
   });
 });

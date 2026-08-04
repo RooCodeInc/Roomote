@@ -113,11 +113,11 @@ Once connected, I can access AI evaluation and logging data during tasks.
 
 # Granola
 
-Granola uses OAuth:
+Granola uses an admin-managed API key:
 1. A deployment operator enables Granola from Settings > Integrations.
-2. Each user connects their own Granola account via OAuth.
+2. That operator connects Granola once for the deployment with a Granola API key.
 
-Once connected, I can search and read the user's meeting notes, folders, transcripts, decisions, and action items from their active Granola workspace. The built-in connection is read-only.
+Prefer a workspace API key, which cannot read ordinary private notes. Workspace keys can read public notes and notes in spaces where Allow Granola API access is enabled. If using a personal API key instead, create it with only Public notes selected. Once connected, I can browse and read accessible meeting notes, folders, transcripts, decisions, and action items. The built-in connection is read-only.
 
 # Asana
 

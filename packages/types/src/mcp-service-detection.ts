@@ -262,7 +262,7 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
     id: 'granola',
     name: 'Granola',
-    availabilityKind: 'curated_oauth',
+    availabilityKind: 'admin_configured',
     hostSuffixes: ['notes.granola.ai'],
     deploymentSettingsPath: '/settings/integrations',
     userSettingsPath: '/settings/personal',

@@ -17,6 +17,7 @@ import {
   getMcpIntegrationDefaultDisabledTools,
   type McpConnectionRole,
   isMcpConnectionAsanaConfig,
+  isMcpConnectionGranolaConfig,
   isMcpConnectionGrafanaConfig,
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
@@ -40,6 +41,7 @@ import { assertCuratedIntegrationsEnabled } from '@/lib/server/curated-integrati
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import type {
   SaveAsanaConnectionInput,
+  SaveGranolaConnectionInput,
   SaveGrafanaConnectionInput,
   SaveSnowflakeConnectionInput,
   SaveVercelConnectionInput,
@@ -751,6 +753,29 @@ export async function getAsanaConnectionCommand(auth: UserAuthSuccess) {
   };
 }
 
+export async function getGranolaConnectionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'granola'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionGranolaConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return {
+    authStatus: connection.authStatus,
+  };
+}
+
 export async function getVercelConnectionCommand(
   auth: UserAuthSuccess,
 ): Promise<VercelConnectionData | null> {
@@ -1020,6 +1045,90 @@ export async function saveAsanaConnectionCommand(
     .insert(deploymentMcpEnablements)
     .values({
       mcpId: 'asana',
+      enabled: true,
+      enabledByUserId: auth.userId,
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        updatedAt: new Date(),
+      },
+    });
+
+  return {
+    authStatus: 'authenticated' as const,
+  };
+}
+
+export async function saveGranolaConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveGranolaConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'granola'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+    },
+  });
+
+  const existingConfig = isMcpConnectionGranolaConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedApiKey =
+    input.apiKey.length > 0
+      ? encrypt(input.apiKey)
+      : existingConfig?.encryptedApiKey;
+
+  if (!nextEncryptedApiKey) {
+    throw new Error(
+      'Granola API key is required when no Granola key is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'granola' as const,
+    encryptedApiKey: nextEncryptedApiKey,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'granola',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'granola',
       enabled: true,
       enabledByUserId: auth.userId,
     })
