@@ -766,7 +766,9 @@ export class WorkspaceManager {
       sourceBranch?: string;
       sourceSha?: string;
     },
-    options: Pick<PrepareRepositoryOptions, 'sourceControlProvider'> = {},
+    options: Pick<PrepareRepositoryOptions, 'sourceControlProvider'> & {
+      repositoryProviders?: Record<string, SourceControlProvider>;
+    } = {},
   ): Promise<{
     repoPaths: Record<string, string>;
   }> {
@@ -794,7 +796,9 @@ export class WorkspaceManager {
           preserveGitState,
           cleanupLegacyPaths,
           {
-            sourceControlProvider: options.sourceControlProvider,
+            sourceControlProvider:
+              options.repositoryProviders?.[repoConfig.repository] ??
+              options.sourceControlProvider,
             toolVersionsConfig: repoConfig.tool_versions,
             setDefaultRemote: false,
           },

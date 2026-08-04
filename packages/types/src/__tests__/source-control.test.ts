@@ -2,6 +2,7 @@ import {
   buildPullRequestUrl,
   buildRepositoryCloneUrl,
   buildSourceControlTokenMetadata,
+  filterRepositoryNamesForSourceControlProvider,
   getSourceControlTokenEnvVar,
   normalizeSourceControlProvider,
   parsePullRequestUrl,
@@ -34,6 +35,38 @@ describe('source control provider helpers', () => {
         sourceControlProvider: 'ado',
       }),
     ).toBe('ado');
+  });
+
+  it('uses provider maps as an authoritative repository allowlist', () => {
+    const repositoryNames = ['octo/api', 'group/web', 'unknown/repository'];
+    const payload = {
+      repositoryProviders: {
+        'octo/api': 'github',
+        'group/web': 'gitlab',
+      },
+    };
+
+    expect(
+      filterRepositoryNamesForSourceControlProvider(
+        payload,
+        repositoryNames,
+        'github',
+      ),
+    ).toEqual(['octo/api']);
+    expect(
+      filterRepositoryNamesForSourceControlProvider(
+        payload,
+        repositoryNames,
+        'gitlab',
+      ),
+    ).toEqual(['group/web']);
+    expect(
+      filterRepositoryNamesForSourceControlProvider(
+        {},
+        repositoryNames,
+        'github',
+      ),
+    ).toEqual(repositoryNames);
   });
 
   it('maps providers to their runtime token environment variable', () => {

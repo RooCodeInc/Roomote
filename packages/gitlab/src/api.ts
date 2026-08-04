@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  filterRepositoryNamesForSourceControlProvider,
+  resolveRepositoryProvidersFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -913,6 +915,17 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
   return [...new Set(repositoryNames.filter(Boolean))];
 }
 
+function filterRepositorySelectionForGitLab(
+  taskRun: TaskRun,
+  repositoryNames: string[],
+): string[] {
+  return filterRepositoryNamesForSourceControlProvider(
+    taskRun.payload,
+    repositoryNames,
+    GITLAB_PROVIDER,
+  );
+}
+
 async function resolveGitLabRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[]> {
@@ -927,9 +940,12 @@ async function resolveGitLabRepositoryNamesForTaskRun(
       );
     }
 
-    return normalizeRepositorySelection(
-      environment.config.repositories.map(
-        (repository) => repository.repository,
+    return filterRepositorySelectionForGitLab(
+      taskRun,
+      normalizeRepositorySelection(
+        environment.config.repositories.map(
+          (repository) => repository.repository,
+        ),
       ),
     );
   }
@@ -940,12 +956,25 @@ async function resolveGitLabRepositoryNamesForTaskRun(
     );
 
     if (selectedRepositories.length > 0) {
-      return selectedRepositories;
+      return filterRepositorySelectionForGitLab(taskRun, selectedRepositories);
     }
   }
 
   if (taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES) {
     return [taskRun.payload.repo];
+  }
+
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(
+    taskRun.payload,
+  );
+  if (repositoryProviders) {
+    const mappedRepositories = Object.entries(repositoryProviders)
+      .filter(([, provider]) => provider === GITLAB_PROVIDER)
+      .map(([repositoryName]) => repositoryName);
+
+    if (mappedRepositories.length > 0) {
+      return mappedRepositories;
+    }
   }
 
   throw new Error(

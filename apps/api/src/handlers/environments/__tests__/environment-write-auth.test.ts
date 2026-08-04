@@ -162,6 +162,45 @@ describe.each([
   });
 });
 
+describe.each([
+  ['createEnvironment', 'POST', '/environments'],
+  ['updateEnvironment', 'PATCH', '/environments/env-1'],
+] as const)('%s config validation', (_name, method, path) => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects duplicate repositories before lookup or persistence', async () => {
+    const app = createApp({
+      userId: 'user-1',
+      tokenType: 'auth',
+      version: 1,
+    });
+    const response = await app.request(path, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        config: {
+          name: 'Duplicate repository',
+          repositories: [
+            { repository: 'acme/api' },
+            { repository: 'acme/api' },
+          ],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'Invalid environment configuration: Duplicate repository: acme/api',
+    });
+    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
+    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
+    expect(mockEnvironmentInsertValues).not.toHaveBeenCalled();
+  });
+});
+
 describe('createEnvironment attribution', () => {
   beforeEach(() => {
     vi.clearAllMocks();

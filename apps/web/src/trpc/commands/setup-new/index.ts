@@ -1,9 +1,7 @@
 import * as GitHub from '@roomote/github';
+import { TRPCError } from '@trpc/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import {
-  resolveEnvironmentSourceControlProvider,
-  resolveSingleSourceControlProvider,
-} from '@/lib/server/source-control-provider';
+import { resolveEnvironmentSourceControlProvider } from '@/lib/server/source-control-provider';
 import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
@@ -67,6 +65,7 @@ import {
   TaskPayloadKind,
   resolveEvalHarnessSelection,
   type ComputeProvider,
+  assertUniqueRepositoryFullNames,
   type DeploymentModelConfig,
   deriveWorkerImageFromReleaseVersion,
   getSetupAuthProvider,
@@ -306,7 +305,10 @@ async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
     const repository = availableRepositoriesById.get(repositoryId);
 
     if (!repository) {
-      throw new Error('Selected repositories are no longer available.');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Selected repositories are no longer available.',
+      });
     }
 
     selectedRepositories.push({
@@ -316,11 +318,24 @@ async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
     });
   }
 
+  try {
+    assertUniqueRepositoryFullNames(
+      selectedRepositories.map((repository) => repository.fullName),
+    );
+  } catch (error) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'The selected repositories are invalid.',
+      cause: error,
+    });
+  }
+
   return {
     normalizedRepositoryIds: normalizeRepositorySelection(selectedRepositories),
-    selectedRepositories: selectedRepositories.sort((left, right) =>
-      left.fullName.localeCompare(right.fullName),
-    ),
+    selectedRepositories,
   };
 }
 
@@ -568,7 +583,7 @@ async function resolveSetupChatFallbackHandoffTarget(
   return null;
 }
 
-function didSuggestionSourceChange({
+export function didSuggestionSourceChange({
   currentState,
   nextRepositoryIds,
   nextSetupGuidance,
@@ -577,11 +592,14 @@ function didSuggestionSourceChange({
   nextRepositoryIds: string[];
   nextSetupGuidance: string | null;
 }): boolean {
+  const currentRepositoryIdSet = new Set(currentState.selectedRepositoryIds);
+  const nextRepositoryIdSet = new Set(nextRepositoryIds);
+
   return (
     currentState.setupGuidance !== nextSetupGuidance ||
-    currentState.selectedRepositoryIds.length !== nextRepositoryIds.length ||
-    currentState.selectedRepositoryIds.some(
-      (repositoryId, index) => repositoryId !== nextRepositoryIds[index],
+    currentRepositoryIdSet.size !== nextRepositoryIdSet.size ||
+    [...currentRepositoryIdSet].some(
+      (repositoryId) => !nextRepositoryIdSet.has(repositoryId),
     )
   );
 }
@@ -2569,16 +2587,25 @@ export async function startSetupNewOnboardingTaskCommand(
     const onboardingTaskTitle = buildSetupEnvironmentTaskTitle(
       selectedRepositoryFullNames,
     );
-    const workspacePayload = buildSetupNewWorkspacePayload(
-      selectedRepositoryFullNames,
-    );
+    let workspacePayload: ReturnType<typeof buildSetupNewWorkspacePayload>;
+    try {
+      workspacePayload = buildSetupNewWorkspacePayload(
+        selectedRepositoryFullNames,
+      );
+    } catch (error) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'The selected repositories are invalid.',
+        cause: error,
+      });
+    }
     // Stamp the provider explicitly: dequeue defaults to GitHub when the
     // payload omits it, which breaks non-GitHub deployments.
-    const setupSourceControlProvider = resolveSingleSourceControlProvider(
-      selectedRepositories.map(
-        (repository) => repository.sourceControlProvider,
-      ),
-    );
+    const setupSourceControlProvider =
+      selectedRepositories[0]?.sourceControlProvider;
     const emptyRepositoryFullNames = selectedRepositories
       .filter((repository) => repositoryEmptyStates.get(repository.id) === true)
       .map((repository) => repository.fullName);

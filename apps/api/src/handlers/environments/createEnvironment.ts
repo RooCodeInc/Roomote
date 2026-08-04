@@ -14,6 +14,8 @@ import {
 import {
   type TaskPayload,
   environmentConfigSchema,
+  getAmbiguousEnvironmentRepositoryError,
+  getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
   getEnvironmentRepositoryInstallationError,
 } from '@roomote/types';
@@ -69,7 +71,10 @@ export function getEnvironmentRepositoryConfigError(
     installationId: string | number | null | undefined;
   }>,
 ): string | null {
-  return getEnvironmentRepositoryInstallationError(repositoryRows);
+  return (
+    getAmbiguousEnvironmentRepositoryError(repositoryRows) ??
+    getEnvironmentRepositoryInstallationError(repositoryRows)
+  );
 }
 
 function extractRunId(auth: McpAuth): number | null {
@@ -252,6 +257,19 @@ export async function createEnvironment(
   }
 
   const config = parsedConfig.data;
+  const duplicateRepositoryError = getDuplicateEnvironmentRepositoryConfigError(
+    config.repositories,
+  );
+
+  if (duplicateRepositoryError) {
+    return c.json(
+      {
+        error: `Invalid environment configuration: ${duplicateRepositoryError}`,
+      },
+      400,
+    );
+  }
+
   try {
     const existing = await db.query.environments.findFirst({
       where: eq(environments.name, config.name),

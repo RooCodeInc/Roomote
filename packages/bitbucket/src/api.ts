@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  filterRepositoryNamesForSourceControlProvider,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -754,6 +755,14 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
 async function resolveBitbucketRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
+  const filterForBitbucket = (repositoryNames: string[]) => {
+    return filterRepositoryNamesForSourceControlProvider(
+      taskRun.payload,
+      repositoryNames,
+      BITBUCKET_PROVIDER,
+    );
+  };
+
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, taskRun.payload.environmentId),
@@ -765,9 +774,11 @@ async function resolveBitbucketRepositoryNamesForTaskRun(
       );
     }
 
-    return normalizeRepositorySelection(
-      environment.config.repositories.map(
-        (repository) => repository.repository,
+    return filterForBitbucket(
+      normalizeRepositorySelection(
+        environment.config.repositories.map(
+          (repository) => repository.repository,
+        ),
       ),
     );
   }
@@ -778,7 +789,7 @@ async function resolveBitbucketRepositoryNamesForTaskRun(
     );
 
     if (selectedRepositories.length > 0) {
-      return selectedRepositories;
+      return filterForBitbucket(selectedRepositories);
     }
   }
 

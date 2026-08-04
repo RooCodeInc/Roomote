@@ -6,6 +6,7 @@ import {
   commandSchema,
   environmentConfigSchema,
   environmentRepositoryConfigSchema,
+  getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '../environment-config';
 
@@ -431,6 +432,33 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
+  it('keeps legacy duplicate repository entries parseable on read', () => {
+    const result = environmentConfigSchema.safeParse({
+      name: 'Env',
+      repositories: [
+        { repository: 'owner/repo' },
+        { repository: 'owner/repo' },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('reports duplicate repository entries for write validation', () => {
+    expect(
+      getDuplicateEnvironmentRepositoryConfigError([
+        { repository: 'owner/repo' },
+        { repository: 'owner/repo' },
+      ]),
+    ).toBe('Duplicate repository: owner/repo');
+    expect(
+      getDuplicateEnvironmentRepositoryConfigError([
+        { repository: 'owner/repo' },
+        { repository: 'owner/other' },
+      ]),
+    ).toBeNull();
+  });
+
   describe('tool_versions', () => {
     it('should accept root-level tool_versions for environment workspaces', () => {
       const result = environmentConfigSchema.safeParse({

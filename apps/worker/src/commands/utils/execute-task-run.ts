@@ -50,6 +50,7 @@ import {
 
 import { BackgroundEnvironmentSetupController } from './background-environment-setup-controller';
 import { injectEnvVars, writeBashrc } from './env-vars';
+import { resolveRepositoryProvidersFromPayload } from './repository-providers';
 import { buildServiceContextForPreviewProxy } from './service-context';
 import { finalizeJob, handleTaskRunError } from './task-run-lifecycle';
 
@@ -537,6 +538,9 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
             preserveGitState,
             serviceContext,
             sourceControlProvider: resolveSourceControlProviderFromPayload(
+              currentTaskRun.payload,
+            ),
+            repositoryProviders: resolveRepositoryProvidersFromPayload(
               currentTaskRun.payload,
             ),
             gitAuthorName: jobContext.gitAuthor?.name,

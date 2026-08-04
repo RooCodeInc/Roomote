@@ -217,9 +217,7 @@ function getSuggestedTaskRepositoryFullNames(
   payload: SuggestedTasksPayload,
 ): string[] {
   if (payload.repo === ALL_REPOSITORIES) {
-    return [...new Set(payload.selectedRepositories ?? [])].sort(
-      (left, right) => left.localeCompare(right),
-    );
+    return [...new Set(payload.selectedRepositories ?? [])];
   }
 
   if (payload.repo?.trim()) {

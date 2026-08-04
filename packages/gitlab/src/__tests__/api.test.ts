@@ -530,6 +530,96 @@ describe('createTaskRunScopedGitLabTokens', () => {
     );
   });
 
+  it('ignores selected repositories mapped to another provider', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 999,
+          token: 'glptt_repo_scoped',
+          username: 'oauth2',
+        }),
+        { status: 201 },
+      ),
+    );
+
+    const result = await createTaskRunScopedGitLabTokens(
+      makeTaskRun({
+        repo: 'group/project',
+        selectedRepositories: ['group/project', 'ExampleOrg/example-backend'],
+        repositoryProviders: {
+          'group/project': 'gitlab',
+          'ExampleOrg/example-backend': 'github',
+        },
+        description: 'Work across providers',
+      } as TaskRun['payload']),
+      { fetchImpl: fetchMock },
+    );
+
+    expect(result.credentials).toHaveLength(1);
+    expect(result.credentials[0]?.repositoryFullName).toBe('group/project');
+  });
+
+  it('uses mapped GitLab repositories as the scope for all-repositories tasks', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 999,
+          token: 'glptt_repo_scoped',
+          username: 'oauth2',
+        }),
+        { status: 201 },
+      ),
+    );
+
+    const result = await createTaskRunScopedGitLabTokens(
+      makeTaskRun({
+        repo: '__all_repositories__',
+        sourceControlProvider: 'github',
+        repositoryProviders: {
+          'group/project': 'gitlab',
+          'ExampleOrg/example-backend': 'github',
+        },
+        description: 'Work across all mapped repositories',
+      } as TaskRun['payload']),
+      { fetchImpl: fetchMock },
+    );
+
+    expect(result.credentials).toHaveLength(1);
+    expect(result.credentials[0]?.repositoryFullName).toBe('group/project');
+  });
+
+  it('ignores selected repository names omitted from a provider map', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 999,
+          token: 'glptt_repo_scoped',
+          username: 'oauth2',
+        }),
+        { status: 201 },
+      ),
+    );
+    const result = await createTaskRunScopedGitLabTokens(
+      makeTaskRun({
+        repo: 'group/project',
+        selectedRepositories: [
+          'group/project',
+          'ExampleOrg/example-backend',
+          'unknown/repository',
+        ],
+        repositoryProviders: {
+          'group/project': 'gitlab',
+          'ExampleOrg/example-backend': 'github',
+        },
+        description: 'Work across providers',
+      } as TaskRun['payload']),
+      { fetchImpl: fetchMock },
+    );
+
+    expect(result.credentials).toHaveLength(1);
+    expect(result.credentials[0]?.repositoryFullName).toBe('group/project');
+  });
+
   it('mints scoped tokens against a self-managed GITLAB_BASE_URL with the self-managed credential host', async () => {
     process.env.GITLAB_BASE_URL = 'https://gitlab.example.com';
 

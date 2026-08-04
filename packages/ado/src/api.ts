@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  filterRepositoryNamesForSourceControlProvider,
   stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -1482,6 +1483,14 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
 async function resolveAdoRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
+  const filterForAdo = (repositoryNames: string[]) => {
+    return filterRepositoryNamesForSourceControlProvider(
+      taskRun.payload,
+      repositoryNames,
+      ADO_PROVIDER,
+    );
+  };
+
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, taskRun.payload.environmentId),
@@ -1493,9 +1502,11 @@ async function resolveAdoRepositoryNamesForTaskRun(
       );
     }
 
-    return normalizeRepositorySelection(
-      environment.config.repositories.map(
-        (repository) => repository.repository,
+    return filterForAdo(
+      normalizeRepositorySelection(
+        environment.config.repositories.map(
+          (repository) => repository.repository,
+        ),
       ),
     );
   }
@@ -1506,7 +1517,7 @@ async function resolveAdoRepositoryNamesForTaskRun(
     );
 
     if (selectedRepositories.length > 0) {
-      return selectedRepositories;
+      return filterForAdo(selectedRepositories);
     }
   }
 

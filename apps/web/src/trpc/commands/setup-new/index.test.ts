@@ -243,6 +243,7 @@ vi.mock('../setup/shared', () => ({
 }));
 
 import {
+  didSuggestionSourceChange,
   getSetupBootstrapStatusCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
@@ -257,6 +258,8 @@ import {
   trackSetupWelcomeSeenCommand,
 } from './index';
 import {
+  ALL_REPOSITORIES,
+  createEmptySetupNewState,
   TaskPayloadKind,
   WORKER_RUNTIME_SCHEMA_VERSION,
   type SetupNewState,
@@ -326,6 +329,21 @@ function createFromOnlySelectChain(result: unknown) {
     from: vi.fn(async () => result),
   };
 }
+
+describe('didSuggestionSourceChange', () => {
+  it('treats reordered repository ids as the same suggestion source', () => {
+    expect(
+      didSuggestionSourceChange({
+        currentState: {
+          ...createEmptySetupNewState(),
+          selectedRepositoryIds: ['repo-a', 'repo-b'],
+        },
+        nextRepositoryIds: ['repo-b', 'repo-a'],
+        nextSetupGuidance: null,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe('setup-new auth config commands', () => {
   beforeEach(() => {
@@ -1284,6 +1302,75 @@ describe('setup-new onboarding task start command', () => {
         }),
       }),
     );
+  });
+
+  it('uses the first workspace provider when setup repositories are mixed', async () => {
+    vi.mocked(getRepositories).mockResolvedValue([
+      {
+        id: 'repo-1',
+        fullName: 'octo/api',
+        sourceControlProvider: 'github',
+      },
+      {
+        id: 'repo-2',
+        fullName: 'group/web',
+        sourceControlProvider: 'gitlab',
+      },
+    ] as Awaited<ReturnType<typeof getRepositories>>);
+    vi.mocked(normalizeRepositorySelection).mockReturnValue([
+      'repo-1',
+      'repo-2',
+    ]);
+    vi.mocked(buildSetupNewWorkspacePayload).mockReturnValue({
+      repo: ALL_REPOSITORIES,
+      selectedRepositories: ['octo/api', 'group/web'],
+    });
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: { selectedRepositoryIds: ['repo-1', 'repo-2'] },
+    });
+
+    await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'github',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects selected repositories with duplicate full names', async () => {
+    vi.mocked(getRepositories).mockResolvedValue([
+      {
+        id: 'repo-github',
+        fullName: 'group/project',
+        sourceControlProvider: 'github',
+      },
+      {
+        id: 'repo-gitlab',
+        fullName: 'group/project',
+        sourceControlProvider: 'gitlab',
+      },
+    ] as Awaited<ReturnType<typeof getRepositories>>);
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: {
+        selectedRepositoryIds: ['repo-github', 'repo-gitlab'],
+      },
+    });
+
+    await expect(
+      startSetupNewOnboardingTaskCommand(buildMockAuth()),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message:
+        'The selected repositories include multiple entries named "group/project". Select only one because task workspaces identify repositories by full name.',
+    });
+    expect(enqueueTask).not.toHaveBeenCalled();
   });
 
   it('launches with bootstrap instructions instead of blocking when every selected repo is empty', async () => {

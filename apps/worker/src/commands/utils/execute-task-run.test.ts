@@ -178,6 +178,9 @@ describe('executeTaskRun', () => {
         harness: 'opencode-server',
         payload: {
           repo: 'owner/repo',
+          repositoryProviders: {
+            'owner/repo': 'gitlab',
+          },
         },
       },
       envVars: {
@@ -233,6 +236,9 @@ describe('executeTaskRun', () => {
     });
     expect(setupArgs.workspace.envVars).toMatchObject({
       FOO: 'bar',
+    });
+    expect(setupArgs.workspace.repositoryProviders).toEqual({
+      'owner/repo': 'gitlab',
     });
     expect(typeof setupArgs.recordPhase).toBe('function');
     expect(sdkTaskRunsStampMilestoneMock).toHaveBeenCalledWith({

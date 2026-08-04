@@ -10,6 +10,10 @@ import {
   ALL_REPOSITORIES,
   environmentConfigSchema,
   getSourceControlProviderLabel,
+  normalizeSourceControlProvider,
+  resolveRepositoryProvidersFromPayload,
+  resolveSourceControlHostFromPayload,
+  resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
 import { isGitLabOAuthAccessToken } from '@roomote/gitlab';
@@ -34,6 +38,49 @@ export type RepositoryRow = {
   fullName: string;
   htmlUrl: string;
 };
+
+export function resolveSourceControlProviderForRepositoryFromPayload(
+  payload: Record<string, unknown>,
+  repositoryFullName: string,
+): SourceControlProvider {
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+  if (repositoryProviders) {
+    const repositoryProvider = repositoryProviders[repositoryFullName];
+
+    if (repositoryProvider === undefined) {
+      throw new Error(
+        `Repository ${repositoryFullName} is not mapped to a source control provider.`,
+      );
+    }
+
+    return normalizeSourceControlProvider(repositoryProvider);
+  }
+
+  return resolveSourceControlProviderFromPayload(payload);
+}
+
+export function resolveSourceControlHostForRepositoryFromPayload(
+  payload: Record<string, unknown>,
+  repositoryFullName: string,
+): string | undefined {
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+  if (repositoryProviders?.[repositoryFullName] !== undefined) {
+    return undefined;
+  }
+
+  const repositoryProvider =
+    resolveSourceControlProviderForRepositoryFromPayload(
+      payload,
+      repositoryFullName,
+    );
+  const primaryProvider = resolveSourceControlProviderFromPayload(payload);
+
+  return repositoryProvider === primaryProvider
+    ? resolveSourceControlHostFromPayload(payload)
+    : undefined;
+}
 
 /**
  * Shared provider-resolution and name/url plumbing for the provider-neutral

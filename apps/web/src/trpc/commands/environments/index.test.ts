@@ -5,6 +5,7 @@ const {
   mockGetBranches,
   mockGetRepositoryEmptyStates,
   mockGetRepositories,
+  mockUpdateEnvironmentDefinition,
   mockBeginEnvironmentVerification,
   mockActiveVerificationRuns,
 } = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ const {
       installationId: 'installation-1',
     },
   ]),
+  mockUpdateEnvironmentDefinition: vi.fn(),
   mockBeginEnvironmentVerification: vi.fn(),
   // Active verification run seen inside the retry critical section. Each entry
   // is returned by the locked transaction's active-run lookup.
@@ -51,6 +53,8 @@ vi.mock('@roomote/db/server', () => ({
   createEnvironmentConfigVersionSnapshot: vi.fn(),
   db: {
     select: mockDbSelect,
+    transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({}),
   },
   desc: vi.fn(),
   environmentConfigVersions: {},
@@ -66,7 +70,7 @@ vi.mock('@roomote/db/server', () => ({
   sql: vi.fn(),
   taskRuns: {},
   tasks: {},
-  updateEnvironmentDefinition: vi.fn(),
+  updateEnvironmentDefinition: mockUpdateEnvironmentDefinition,
   users: {},
   withEnvironmentVerificationRetryLock: async (
     _environmentId: string,
@@ -100,11 +104,23 @@ import { TaskPayloadKind } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import {
   createEnvironmentCommand,
+  getEnvironmentRepositoryConfigError,
   retryEnvironmentVerificationCommand,
   startEnvironmentDefinitionTaskCommand,
   updateEnvironmentCommand,
   validateConfigCommand,
 } from './index';
+
+describe('getEnvironmentRepositoryConfigError', () => {
+  it('rejects ambiguous active repository names', () => {
+    expect(
+      getEnvironmentRepositoryConfigError([
+        { id: 'repo-github', fullName: 'acme/app', installationId: '1' },
+        { id: 'repo-gitlab', fullName: 'acme/app', installationId: null },
+      ]),
+    ).toContain('Multiple repositories are named "acme/app"');
+  });
+});
 
 function buildMockAuth(): UserAuthSuccess {
   return {
@@ -155,11 +171,11 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
     expect(result.taskId).toBe('task-env-definition-1');
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'Set up the api + web environment',
+        title: 'Set up the web + api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
-            selectedRepositories: ['acme/api', 'acme/web'],
+            selectedRepositories: ['acme/web', 'acme/api'],
           }),
         }),
         initiator: { kind: 'user', userId: 'user-1' },
@@ -168,6 +184,24 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
         trigger: 'manual',
       }),
     );
+  });
+
+  it('surfaces duplicate repository names as a validation error', async () => {
+    mockGetRepositories.mockResolvedValueOnce([
+      { id: 'repo-github', fullName: 'acme/app', installationId: '1' },
+      { id: 'repo-gitlab', fullName: 'acme/app', installationId: null },
+    ]);
+
+    await expect(
+      startEnvironmentDefinitionTaskCommand(buildMockAuth(), {
+        repositoryIds: ['repo-github', 'repo-gitlab'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message:
+        'Multiple repositories are named "acme/app". Environment repository names must be unique across source-control connections.',
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('applies the selected model to settings-created setup tasks', async () => {
@@ -203,7 +237,7 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
     });
 
     expect(mockGetRepositoryEmptyStates).toHaveBeenCalledWith({
-      repositoryIds: ['repo-1', 'repo-2'],
+      repositoryIds: ['repo-2', 'repo-1'],
     });
 
     const enqueueInput = mockEnqueueTask.mock.calls[0]?.[0] as {
@@ -398,6 +432,102 @@ describe('environment repository validation', () => {
     });
   });
 
+  it('rejects duplicate configured repositories before creating mappings', async () => {
+    const result = await createEnvironmentCommand(buildMockAuth(), {
+      name: 'Duplicate repository',
+      config: {
+        name: 'Duplicate repository',
+        repositories: [{ repository: 'acme/api' }, { repository: 'acme/api' }],
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Invalid configuration: Duplicate repository: acme/api',
+    });
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate configured repositories before updating mappings', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            {
+              id: 'env-1',
+              name: 'Existing environment',
+              description: null,
+              config: {
+                name: 'Existing environment',
+                repositories: [{ repository: 'acme/api' }],
+              },
+            },
+          ],
+        }),
+      }),
+    });
+
+    const result = await updateEnvironmentCommand(buildMockAuth(), {
+      id: 'env-1',
+      config: {
+        name: 'Duplicate repository',
+        repositories: [{ repository: 'acme/api' }, { repository: 'acme/api' }],
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Invalid configuration: Duplicate repository: acme/api',
+    });
+    expect(mockDbSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps legacy duplicate repositories editable for metadata-only updates', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            {
+              id: 'env-1',
+              name: 'Legacy environment',
+              description: null,
+              config: {
+                name: 'Legacy environment',
+                repositories: [
+                  { repository: 'acme/api' },
+                  { repository: 'acme/api' },
+                ],
+              },
+            },
+          ],
+        }),
+      }),
+    });
+
+    const result = await updateEnvironmentCommand(buildMockAuth(), {
+      id: 'env-1',
+      description: 'Updated description',
+    });
+
+    expect(result).toEqual({ success: true, data: undefined });
+    expect(mockUpdateEnvironmentDefinition).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        environmentId: 'env-1',
+        fields: expect.objectContaining({
+          description: 'Updated description',
+          config: expect.objectContaining({
+            repositories: [
+              { repository: 'acme/api' },
+              { repository: 'acme/api' },
+            ],
+          }),
+        }),
+        repositoryIds: undefined,
+      }),
+    );
+  });
+
   it('rejects update when a configured repository is not linked', async () => {
     mockDbSelect
       .mockReturnValueOnce({
@@ -464,6 +594,24 @@ describe('environment repository validation', () => {
 
     expect(result).toEqual({ errors: [], warnings: [] });
     expect(mockGetBranches).not.toHaveBeenCalled();
+  });
+
+  it('uses provider-neutral guidance when repository access fails', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({ where: async () => [] }),
+    });
+    mockCheckRepoAccess.mockResolvedValue(false);
+
+    const result = await validateConfigCommand(buildMockAuth(), {
+      config: {
+        name: 'GitLab Test',
+        repositories: [{ repository: 'acme/backend' }],
+      },
+    });
+
+    expect(result.errors).toEqual([
+      "Repository 'acme/backend' is not accessible. Ensure it is connected through its source-control provider.",
+    ]);
   });
 
   it('continues warning when a GitHub branch is missing', async () => {

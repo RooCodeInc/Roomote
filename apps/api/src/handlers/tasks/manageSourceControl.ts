@@ -6,13 +6,14 @@ import {
   completeClaimedLatestUserMessageForReplyQuote,
   restoreClaimedLatestUserMessageForReplyQuote,
 } from '@roomote/communication/messages';
-import { resolveSourceControlProviderFromPayload } from '@roomote/types';
-
+import { resolveRepositoryProvidersFromPayload } from '@roomote/types';
 import {
   createOrUpdateSourceControlPullRequestForTaskRun,
   findTaskRunForSourceControlMutation,
+  getPayloadRecord,
   manageSourceControlIssueForTaskRun,
   readSourceControlPullRequestForTaskRun,
+  resolveSourceControlProviderForRepositoryFromPayload,
   sourceControlIssueInputSchema,
   sourceControlPullRequestMutationInputSchema,
   sourceControlPullRequestReadInputSchema,
@@ -93,11 +94,22 @@ export async function manageSourceControl(
       runId: auth.authContext.runId,
       taskId,
     });
-    const isGitHubTask =
-      resolveSourceControlProviderFromPayload(taskRun.payload) === 'github';
+    const payload = getPayloadRecord(taskRun.payload);
+    let targetProvider = input.sourceControlProvider;
+    const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+    if (
+      !targetProvider &&
+      (!repositoryProviders || input.repositoryFullName in repositoryProviders)
+    ) {
+      targetProvider = resolveSourceControlProviderForRepositoryFromPayload(
+        payload,
+        input.repositoryFullName,
+      );
+    }
     const bodyInput = 'body' in input ? input : null;
     const shouldQuote =
-      isGitHubTask &&
+      targetProvider === 'github' &&
       (input.action === 'reply_to_pull_request_comment' ||
         input.action === 'create_pull_request_comment' ||
         input.action === 'create_issue_comment') &&

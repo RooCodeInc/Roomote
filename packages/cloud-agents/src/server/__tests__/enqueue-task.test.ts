@@ -15,6 +15,7 @@ vi.mock('../llm-task-title', async (importOriginal) => ({
 }));
 
 import {
+  ALL_REPOSITORIES,
   type TaskSpec,
   type SnapshotResumeTask,
   RunStatus,
@@ -805,6 +806,10 @@ describe('enqueueTask snapshot resume', () => {
           description: 'Do the thing',
           sourceControlProvider: 'ado',
           sourceControlHost: 'dev.azure.com',
+          repositoryProviders: {
+            'roomote/Test ADO/Test ADO': 'ado',
+            'group/web': 'gitlab',
+          },
         },
       }),
       initiator: { kind: 'user', userId },
@@ -833,10 +838,15 @@ describe('enqueueTask snapshot resume', () => {
     const resumePayload = resumeRun.payload as {
       sourceControlProvider?: string;
       sourceControlHost?: string;
+      repositoryProviders?: Record<string, string>;
     };
 
     expect(resumePayload.sourceControlProvider).toBe('ado');
     expect(resumePayload.sourceControlHost).toBe('dev.azure.com');
+    expect(resumePayload.repositoryProviders).toEqual({
+      'roomote/Test ADO/Test ADO': 'ado',
+      'group/web': 'gitlab',
+    });
   });
 
   it('walks the resume chain for stamps when the source run predates inheritance', async () => {
@@ -909,6 +919,10 @@ describe('enqueueTask snapshot resume', () => {
           description: 'Do the thing',
           sourceControlProvider: 'ado',
           sourceControlHost: 'dev.azure.com',
+          repositoryProviders: {
+            'acme/widgets': 'ado',
+            'group/web': 'gitlab',
+          },
         },
       }),
       initiator: { kind: 'user', userId },
@@ -942,6 +956,13 @@ describe('enqueueTask snapshot resume', () => {
     ).toBe('gitea');
     expect(
       (resumeRun.payload as { sourceControlHost?: string }).sourceControlHost,
+    ).toBeUndefined();
+    expect(
+      (
+        resumeRun.payload as {
+          repositoryProviders?: Record<string, string>;
+        }
+      ).repositoryProviders,
     ).toBeUndefined();
   });
 
@@ -1299,6 +1320,10 @@ describe('enqueueTask source-control provider stamping', () => {
 
     const environment = await environmentFactory.create({
       createdByUserId: userId,
+      config: {
+        name: 'GitLab environment',
+        repositories: [{ repository: 'group/project' }],
+      },
     });
     createdEnvironmentIds.push(environment.id);
 
@@ -1332,6 +1357,278 @@ describe('enqueueTask source-control provider stamping', () => {
       (persistedRun!.payload as { sourceControlProvider?: string })
         .sourceControlProvider,
     ).toBe('gitlab');
+    expect(
+      (persistedRun!.payload as { repositoryProviders?: unknown })
+        .repositoryProviders,
+    ).toBeUndefined();
+  });
+
+  it('stamps a provider map and the first repository provider for a mixed environment', async () => {
+    const userId = await createUser();
+    const primaryRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: userId,
+      fullName: 'group/mixed-api',
+      isActive: true,
+    });
+    const secondaryRepository = await repositoryFactory.create({
+      sourceControlProvider: 'ado',
+      linkedByUserId: userId,
+      fullName: 'acme/Platform/mixed-web',
+      isActive: true,
+    });
+    createdRepositoryIds.push(primaryRepository.id, secondaryRepository.id);
+
+    const environment = await environmentFactory.create({
+      createdByUserId: userId,
+      config: {
+        name: 'Mixed environment',
+        repositories: [
+          { repository: 'group/mixed-api' },
+          { repository: 'acme/Platform/mixed-web' },
+        ],
+      },
+    });
+    createdEnvironmentIds.push(environment.id);
+
+    await db.insert(environmentRepositoryMappings).values([
+      {
+        environmentId: environment.id,
+        repositoryId: primaryRepository.id,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+      {
+        environmentId: environment.id,
+        repositoryId: secondaryRepository.id,
+        createdAt: new Date('2026-01-01T00:00:01.000Z'),
+      },
+    ]);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'group/mixed-api',
+          environmentId: environment.id,
+          description: 'Work in the mixed environment',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload).toMatchObject({
+      sourceControlProvider: 'gitlab',
+      repositoryProviders: {
+        'group/mixed-api': 'gitlab',
+        'acme/Platform/mixed-web': 'ado',
+      },
+    });
+    expect(run.payload.sourceControlHost).toBeUndefined();
+  });
+
+  it('stamps mixed selected repositories in selection order', async () => {
+    const userId = await createUser();
+    const gitLabRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: userId,
+      fullName: 'group/selected-web',
+      isActive: true,
+    });
+    const adoRepository = await repositoryFactory.create({
+      sourceControlProvider: 'ado',
+      linkedByUserId: userId,
+      fullName: 'acme/Platform/selected-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(gitLabRepository.id, adoRepository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: [
+            'group/selected-web',
+            'acme/Platform/selected-api',
+          ],
+          description: 'Work across selected providers',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload).toMatchObject({
+      sourceControlProvider: 'gitlab',
+      repositoryProviders: {
+        'group/selected-web': 'gitlab',
+        'acme/Platform/selected-api': 'ado',
+      },
+    });
+  });
+
+  it('re-stamps a PR launch after auto-resolving a mixed environment', async () => {
+    const userId = await createUser();
+    const primaryRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: userId,
+      fullName: 'group/pr-context',
+      isActive: true,
+    });
+    const pullRequestRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      linkedByUserId: userId,
+      fullName: 'octo/pr-target',
+      isActive: true,
+    });
+    createdRepositoryIds.push(primaryRepository.id, pullRequestRepository.id);
+
+    const environment = await environmentFactory.create({
+      createdByUserId: userId,
+      config: {
+        name: 'PR mixed environment',
+        repositories: [
+          { repository: 'group/pr-context' },
+          { repository: 'octo/pr-target' },
+        ],
+      },
+    });
+    createdEnvironmentIds.push(environment.id);
+    await db.insert(environmentRepositoryMappings).values([
+      {
+        environmentId: environment.id,
+        repositoryId: primaryRepository.id,
+      },
+      {
+        environmentId: environment.id,
+        repositoryId: pullRequestRepository.id,
+      },
+    ]);
+
+    const run = await launchFresh({
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'octo/pr-target',
+          prNumber: 1082,
+          prTitle: 'Support mixed environments',
+          prUrl: 'https://github.com/octo/pr-target/pull/1082',
+          headSha: 'a'.repeat(40),
+          sourceControlProvider: 'gitea',
+          sourceControlHost: 'gitea.example.com',
+        },
+      } as Extract<TaskSpec, { type: 'github_pr_review' }>,
+      initiator: { kind: 'automation', key: 'review_code' },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'webhook',
+      prLinkage: {
+        provider: 'gitea',
+        repository: 'octo/pr-target',
+        prNumber: 1082,
+        prUrl: 'https://github.com/octo/pr-target/pull/1082',
+        prTitle: 'Support mixed environments',
+        prSha: 'a'.repeat(40),
+      },
+    });
+
+    expect(run.payload).toMatchObject({
+      environmentId: environment.id,
+      sourceControlProvider: 'gitlab',
+      repositoryProviders: {
+        'group/pr-context': 'gitlab',
+        'octo/pr-target': 'gitea',
+      },
+    });
+    expect(run.payload.sourceControlHost).toBeUndefined();
+  });
+
+  it('recomputes mixed-provider stamps for a failed-start relaunch', async () => {
+    const userId = await createUser();
+    const primaryRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: userId,
+      fullName: 'group/relaunch-api',
+      isActive: true,
+    });
+    const secondaryRepository = await repositoryFactory.create({
+      sourceControlProvider: 'ado',
+      linkedByUserId: userId,
+      fullName: 'acme/Platform/relaunch-web',
+      isActive: true,
+    });
+    createdRepositoryIds.push(primaryRepository.id, secondaryRepository.id);
+
+    const environment = await environmentFactory.create({
+      createdByUserId: userId,
+      config: {
+        name: 'Relaunch environment',
+        repositories: [
+          { repository: 'group/relaunch-api' },
+          { repository: 'acme/Platform/relaunch-web' },
+        ],
+      },
+    });
+    createdEnvironmentIds.push(environment.id);
+    await db.insert(environmentRepositoryMappings).values([
+      {
+        environmentId: environment.id,
+        repositoryId: primaryRepository.id,
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      },
+      {
+        environmentId: environment.id,
+        repositoryId: secondaryRepository.id,
+        createdAt: new Date('2026-01-02T00:00:01.000Z'),
+      },
+    ]);
+
+    const failedRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'group/relaunch-api',
+          environmentId: environment.id,
+          description: 'Work in the mixed environment',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const legacyPayload = { ...failedRun.payload };
+    delete legacyPayload.sourceControlProvider;
+    delete legacyPayload.repositoryProviders;
+    await db
+      .update(taskRuns)
+      .set({
+        payload: legacyPayload,
+        status: RunStatus.Failed,
+        error: 'Failed to create source control token',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+    await db
+      .update(tasks)
+      .set({ state: 'failed' })
+      .where(eq(tasks.id, failedRun.taskId));
+
+    const relaunchRun = await enqueueTaskRelaunch(
+      { sourceRunId: failedRun.id, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    expect(relaunchRun.payload).toMatchObject({
+      sourceControlProvider: 'gitlab',
+      repositoryProviders: {
+        'group/relaunch-api': 'gitlab',
+        'acme/Platform/relaunch-web': 'ado',
+      },
+    });
   });
 });
 
