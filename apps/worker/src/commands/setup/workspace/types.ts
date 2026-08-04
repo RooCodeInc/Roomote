@@ -66,6 +66,7 @@ export interface PrepareWorkspaceOptions {
   preserveGitState?: boolean;
   cleanupLegacyPaths?: boolean;
   sourceControlProvider?: SourceControlProvider;
+  repositoryProviders?: Record<string, SourceControlProvider>;
   serviceContext?: ServiceContext;
   gitAuthorName?: string;
   gitAuthorEmail?: string;

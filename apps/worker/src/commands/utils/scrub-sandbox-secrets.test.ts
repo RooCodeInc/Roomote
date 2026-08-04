@@ -30,6 +30,12 @@ vi.mock('os', async (importOriginal) => {
 });
 
 const COMMON_ENV_PATH = '/home/testuser/.roomote/env.sh';
+const TOKEN_ENV_PATHS = [
+  '/home/testuser/.roomote/gh-token-env.sh',
+  '/home/testuser/.roomote/gitlab-token-env.sh',
+  '/home/testuser/.roomote/gitea-token-env.sh',
+  '/home/testuser/.roomote/ado-token-env.sh',
+];
 
 const EXPECTED_REMOVED_PATHS = [
   '/home/testuser/.roomote/gh-token',
@@ -86,6 +92,14 @@ describe('scrubSandboxSecretsBeforeSnapshot', () => {
 
     for (const path of EXPECTED_REMOVED_PATHS) {
       expect(fs.rmSync).toHaveBeenCalledWith(path, { force: true });
+    }
+  });
+
+  it('recreates every provider token env script before snapshotting', async () => {
+    await scrubSandboxSecretsBeforeSnapshot();
+
+    for (const path of TOKEN_ENV_PATHS) {
+      expect(findWrite(path)).toBeDefined();
     }
   });
 

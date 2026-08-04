@@ -3,6 +3,7 @@ import { RunStatus } from '@roomote/types';
 const {
   mockTaskRunsUpdate,
   mockFetchSnapshotEnv,
+  mockFindTaskRun,
   mockFindEnvironment,
   mockDone,
   mockUpdateSnapshotStatus,
@@ -16,6 +17,7 @@ const {
 } = vi.hoisted(() => ({
   mockTaskRunsUpdate: vi.fn(),
   mockFetchSnapshotEnv: vi.fn(),
+  mockFindTaskRun: vi.fn(),
   mockFindEnvironment: vi.fn(),
   mockDone: vi.fn(),
   mockUpdateSnapshotStatus: vi.fn(),
@@ -33,6 +35,7 @@ vi.mock('@roomote/sdk/client', () => ({
     taskRuns: {
       update: mockTaskRunsUpdate,
       fetchSnapshotEnv: mockFetchSnapshotEnv,
+      findFirstById: mockFindTaskRun,
       done: mockDone,
     },
     environments: {
@@ -91,6 +94,13 @@ describe('snapshot', () => {
         repositories: [{ repository: 'Roomote/example-app' }],
       },
     });
+    mockFindTaskRun.mockResolvedValue({
+      payload: {
+        repositoryProviders: {
+          'Roomote/example-app': 'gitlab',
+        },
+      },
+    });
     mockWorkerEnvFromProcessEnv.mockReturnValue({});
     mockCreateStartupLogger.mockReturnValue({ userLog: { log: vi.fn() } });
     mockDone.mockResolvedValue(undefined);
@@ -120,6 +130,15 @@ describe('snapshot', () => {
       environmentId: 'env-1',
       snapshotStatus: 'failed',
     });
+    expect(mockSetup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: expect.objectContaining({
+          repositoryProviders: {
+            'Roomote/example-app': 'gitlab',
+          },
+        }),
+      }),
+    );
     const injectCallOrder = mockInjectEnvVars.mock.invocationCallOrder[0];
     const findEnvironmentCallOrder =
       mockFindEnvironment.mock.invocationCallOrder[0];
