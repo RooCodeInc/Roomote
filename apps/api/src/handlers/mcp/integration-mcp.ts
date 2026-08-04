@@ -98,6 +98,9 @@ export function createIntegrationMcpProxy(
     upstream: upstreamUrl,
     allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: options?.allowedToolNames,
+    // Resend's z.email() tool schemas include regex lookarounds that Azure
+    // OpenAI rejects. The upstream Resend server still validates tool calls.
+    stripToolSchemaPatterns: integration.id === 'resend',
     // Integration OAuth MCPs resolve acting-user credentials directly.
     validateTaskRunToken: async () => null,
     resolveCredentials: async (auth) => {
