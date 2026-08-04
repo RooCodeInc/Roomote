@@ -1,0 +1,97 @@
+---
+title: Ease your team into cloud agents
+description: Build trust in Roomote through small, visible, low-risk team habits.
+contributor: Bruno Bergher
+contributor_url: https://github.com/brunobergher
+contributor_company: Roomote
+contributor_company_url: https://roomote.dev
+---
+
+## Overview
+
+Cloud agents can feel uncomfortable at first, especially when using one means
+asking a question in public or letting it comment on a teammate's work. Do not
+start by automating everything. Give the team a few low-risk ways to watch
+Roomote work, understand what it can do, and see leaders review its output.
+
+The goal is familiarity, not maximum usage. Begin with questions and code
+reviews, keep the work visible, and add more autonomy only after the team trusts
+the results.
+
+- **Trigger**: Channel activity and pull request updates
+- **Setup time**: About 20 minutes
+- **Requires**: Admin access, Slack, a source-control connection, a healthy environment
+- **Serves**: Engineers, Leads
+- **Cooked By**: [Bruno Bergher](https://github.com/brunobergher) from [Roomote](https://roomote.dev)
+
+## Ingredients
+
+- A healthy [environment](/environments) for the team's main repositories
+- Two Slack channels, such as `#factory` and `#ask-roomote`, with Roomote invited
+- The **Review Code** automation
+- One or two leaders willing to use Roomote where the team can watch
+
+## Steps
+
+1. Create a `#factory` channel for visible examples. Have leaders bring real,
+   small tasks there, include the context Roomote needs, and review the result
+   in the thread. Leave corrections visible too; showing how to steer an agent
+   is more useful than showing only perfect outcomes.
+2. Create an `#ask-roomote` channel for codebase questions. Start with explicit
+   mentions, or configure [auto-response](/automations#channel-automations) once
+   the channel's purpose is clear. Encourage questions such as where a behavior
+   lives, how a flow works, or which tests cover a change.
+3. Have a leader ask Roomote to add an unmistakable custom emoji reaction to a
+   specific Slack message. This small, visible action shows that Roomote can help
+   with more than code without asking the team to configure another automation.
+4. Enable **Review Code**, then turn on **Review PRs not created by Roomote** so
+   it includes pull requests opened by engineers. Keep automatic draft reviews
+   off at first. Roomote adds a second opinion without taking control of the pull
+   request, which lets engineers compare its comments with their own review and
+   build trust gradually.
+5. Keep the first tasks read-only. Ask for explanations, investigation, and
+   review before asking Roomote to change code. When the team is comfortable,
+   let a leader demonstrate one small implementation and walk through the diff,
+   checks, and pull request.
+6. Close the loop in public. When Roomote helps, say what was useful. When it
+   misses, reply with the missing context and show the corrected result. This
+   teaches the team that agent output is reviewable work, not a verdict.
+7. Offer direct messages as a rehearsal space for anyone who is not ready to
+   ask publicly. Invite people to share useful answers back in `#ask-roomote` so
+   the team's shared confidence still grows.
+
+## Starter prompts
+
+Use questions that are easy for an engineer to verify:
+
+```text
+Where is authentication handled in this codebase? Link the important files and
+explain the request flow. Do not change code.
+```
+
+```text
+Which tests cover this pull request's behavior, and what important case might
+still be missing? Do not change code.
+```
+
+```text
+Explain why this service exists and which other parts of the system call it.
+Keep the answer short and link to the relevant code.
+```
+
+```text
+Add the :eyes: reaction to the message linked below. Do not post a reply.
+```
+
+## Variations
+
+- Start `#ask-roomote` with office hours led by one champion, then leave it open all week once the questions become routine.
+- Ask leaders to post one useful Roomote thread in an existing engineering channel each week instead of creating `#factory` permanently.
+- Begin **Review Code** with a small set of repositories before enabling it across the organization.
+
+Avoid adoption targets such as a required number of agent tasks per engineer.
+Watch for better signals: more people asking verifiable questions, teammates
+replying naturally in Roomote threads, and engineers acting on review comments
+they checked themselves.
+
+**Pairs well with:** [scheduled housekeeping](/cookbook/scheduled-housekeeping)

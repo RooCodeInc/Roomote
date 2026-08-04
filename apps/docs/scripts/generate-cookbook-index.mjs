@@ -60,7 +60,9 @@ async function readRecipe(fileName) {
 
 function renderTable(recipes) {
   const rows = recipes
-    .sort((left, right) => left.title.localeCompare(right.title))
+    .sort((left, right) =>
+      left.title.localeCompare(right.title, 'en', { sensitivity: 'base' }),
+    )
     .map((recipe) => {
       return `| [${escapeTableCell(recipe.title)}](${recipe.slug}) | ${escapeTableCell(recipe.description)} |`;
     });
