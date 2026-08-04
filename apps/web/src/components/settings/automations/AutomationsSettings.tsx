@@ -1355,7 +1355,12 @@ function AutomationCard({
       className={cn('scroll-mt-24', iconEnabled ? 'order-[-20]' : 'order-0')}
       aria-disabled={disabled || undefined}
     >
-      <Card className={cn('h-full gap-3', disabled && 'opacity-50')}>
+      <Card
+        className={cn(
+          'h-full gap-3 px-5 py-4 md:px-6 md:py-6',
+          disabled && 'opacity-50',
+        )}
+      >
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-3">
@@ -2441,7 +2446,7 @@ export function AutomationsSettings() {
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {!settingsQuery.isPending &&
       capabilities?.requiresSlackReconnect &&
       capabilities.missingScopes.length > 0 ? (

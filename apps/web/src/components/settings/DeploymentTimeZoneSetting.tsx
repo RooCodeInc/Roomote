@@ -22,6 +22,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   Skeleton,
+  Sun,
 } from '@/components/system';
 
 const FALLBACK_TIME_ZONES = [
@@ -90,21 +91,24 @@ export function DeploymentTimeZoneSetting() {
 
   if (!isEditing) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Scheduling timezone:{' '}
-        <span className="font-medium text-foreground">
-          {formatTimeZone(effectiveTimeZone)}
-        </span>{' '}
-        <Button
-          type="button"
-          variant="link"
-          size="sm"
-          className="h-auto p-0"
-          onClick={() => setIsEditing(true)}
-        >
-          Edit
-        </Button>
-      </p>
+      <div className="flex gap-1 items-center text-sm text-muted-foreground">
+        <Sun className="size-4" />
+        <p>
+          Scheduling timezone:{' '}
+          <span className="font-medium text-foreground">
+            {formatTimeZone(effectiveTimeZone)}
+          </span>{' '}
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            onClick={() => setIsEditing(true)}
+          >
+            Edit
+          </Button>
+        </p>
+      </div>
     );
   }
 

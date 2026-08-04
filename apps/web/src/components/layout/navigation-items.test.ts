@@ -1,13 +1,13 @@
 import { getVisiblePrimaryNavItems } from './navigation-items';
 
 describe('getVisiblePrimaryNavItems', () => {
-  it('places automations before task history for admins', () => {
+  it('places task history before automations for admins', () => {
     const items = getVisiblePrimaryNavItems({ isAdmin: true });
 
     expect(items.map((item) => item.href)).toEqual([
       '/',
-      '/automations',
       '/tasks',
+      '/automations',
       '/analytics',
     ]);
   });

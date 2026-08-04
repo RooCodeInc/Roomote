@@ -199,7 +199,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
-    await db.delete(users);
+    await db.delete(users).where(eq(users.id, adminAuth.userId));
   });
 
   it('preserves a disabled emoji trigger during an unrelated save', async () => {
@@ -776,7 +776,7 @@ describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () =
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
-    await db.delete(users);
+    await db.delete(users).where(eq(users.id, adminAuth.userId));
   });
 
   it('writes discord auto-respond targets alongside Slack ones with merged order', async () => {

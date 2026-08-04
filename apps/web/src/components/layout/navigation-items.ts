@@ -23,6 +23,14 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchPaths: ['/'],
   },
   {
+    icon: Rows4,
+    href: '/tasks',
+    label: 'Tasks',
+    description: 'View current and past tasks',
+    matchExact: false,
+    matchPaths: ['/tasks', '/cloud-agents'],
+  },
+  {
     icon: Zap,
     href: '/automations',
     label: 'Automations',
@@ -30,14 +38,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: false,
     matchPaths: ['/automations'],
     adminOnly: true,
-  },
-  {
-    icon: Rows4,
-    href: '/tasks',
-    label: 'Tasks',
-    description: 'View current and past tasks',
-    matchExact: false,
-    matchPaths: ['/tasks', '/cloud-agents'],
   },
   {
     icon: ChartColumnIncreasing,
