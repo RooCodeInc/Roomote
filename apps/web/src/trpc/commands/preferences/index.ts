@@ -1,4 +1,4 @@
-import { and, db, eq, isNull, users } from '@roomote/db/server';
+import { and, db, eq, isNull, sql, users } from '@roomote/db/server';
 import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
@@ -129,30 +129,19 @@ export async function updatePersonalPreferencesCommand(
     return getPersonalPreferencesCommand(auth);
   }
 
-  const currentUser = await db.query.users.findFirst({
-    where: eq(users.id, auth.userId),
-    columns: {
-      metadata: true,
-    },
-  });
-  const normalizedMetadata = {
-    ...normalizeMetadata(currentUser?.metadata),
-    ...nextMetadataRecord,
-  };
-
-  const updatedRows = await db
+  const [updatedUser] = await db
     .update(users)
     .set({
-      metadata: normalizedMetadata,
+      metadata: sql`${users.metadata} || ${JSON.stringify(nextMetadataRecord)}::jsonb`,
       lastSyncAt: new Date(),
       updatedAt: new Date(),
     })
     .where(eq(users.id, auth.userId))
-    .returning({ id: users.id });
+    .returning({ metadata: users.metadata });
 
-  if (updatedRows.length === 0) {
+  if (!updatedUser) {
     throw new Error('Unable to update preferences for the active user.');
   }
 
-  return normalizePersonalPreferences(normalizedMetadata);
+  return normalizePersonalPreferences(normalizeMetadata(updatedUser.metadata));
 }

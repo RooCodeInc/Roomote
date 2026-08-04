@@ -43,4 +43,21 @@ describe('personal preferences', () => {
       }),
     );
   });
+
+  it('preserves concurrent updates to different preferences', async () => {
+    const user = await userFactory.create();
+    const auth = buildAuth(user.id);
+
+    await Promise.all([
+      updatePersonalPreferencesCommand(auth, { mindReaderMode: true }),
+      updatePersonalPreferencesCommand(auth, { narrationMode: true }),
+    ]);
+
+    await expect(getPersonalPreferencesCommand(auth)).resolves.toEqual(
+      expect.objectContaining({
+        mindReaderMode: true,
+        narrationMode: true,
+      }),
+    );
+  });
 });
