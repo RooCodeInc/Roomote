@@ -894,10 +894,6 @@ export function CustomAutomationsSection() {
           >
             Custom
           </h2>
-          <p className="text-sm text-muted-foreground">
-            Create your own scheduled agent runs with a prompt, frequency,
-            environment, and optional report channel.
-          </p>
         </div>
         {!isCreating && !editingId ? (
           <Button
@@ -968,7 +964,7 @@ export function CustomAutomationsSection() {
           </CardContent>
         </Card>
       ) : rows.length === 0 && !isCreating ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground -mt-4">
           No custom automations created yet.
         </p>
       ) : (
