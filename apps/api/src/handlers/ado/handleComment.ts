@@ -313,7 +313,7 @@ export async function handleAdoComment(
     const body =
       targetsResult.status === 'error' &&
       targetsResult.code === 'account_link_required'
-        ? buildSourceControlAccountLinkRequiredMessage('ado')
+        ? await buildSourceControlAccountLinkRequiredMessage('ado')
         : buildReviewerGateMissComment();
 
     await postMentionResponseComment({

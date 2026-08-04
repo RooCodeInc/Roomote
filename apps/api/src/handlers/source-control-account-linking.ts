@@ -1,6 +1,8 @@
 import { Env } from '@roomote/env';
 import { PRODUCT_NAME } from '@roomote/types';
 
+import { appendAccountLinkHelpText } from './account-link-help.js';
+
 type SourceControlCommentProvider =
   | 'github'
   | 'gitlab'
@@ -78,9 +80,9 @@ export function buildSourceControlEnvironmentRequiredMessage(
   return `I saw the mention, but no Roomote environment is mapped to this ${copy.accountLabel} repository. Set up an environment and map this repository from ${settingsText}, then mention me again.`;
 }
 
-export function buildSourceControlAccountLinkRequiredMessage(
+export async function buildSourceControlAccountLinkRequiredMessage(
   provider: SourceControlCommentProvider,
-): string {
+): Promise<string> {
   const copy = sourceControlCommentProviderCopy[provider];
 
   const settingsUrl = getLinkedAccountsSettingsUrl(provider);
@@ -95,8 +97,12 @@ export function buildSourceControlAccountLinkRequiredMessage(
     provider === 'bitbucket' ||
     provider === 'ado'
   ) {
-    return `I saw the mention, but I need your ${copy.accountLabel} account linked to ${PRODUCT_NAME} before ${copy.commentSurface} can start work here. ${linkInstruction} If ${copy.accountLabel} is missing from Linked Accounts, ask an admin to add the ${copy.accountLabel} OAuth client credentials in Settings -> Environments -> Source Control first.`;
+    return appendAccountLinkHelpText(
+      `I saw the mention, but I need your ${copy.accountLabel} account linked to ${PRODUCT_NAME} before ${copy.commentSurface} can start work here. ${linkInstruction} If ${copy.accountLabel} is missing from Linked Accounts, ask an admin to add the ${copy.accountLabel} OAuth client credentials in Settings -> Environments -> Source Control first.`,
+    );
   }
 
-  return `I saw the mention, but I need your ${copy.accountLabel} account linked to ${PRODUCT_NAME} before ${copy.commentSurface} can start work here. ${linkInstruction}`;
+  return appendAccountLinkHelpText(
+    `I saw the mention, but I need your ${copy.accountLabel} account linked to ${PRODUCT_NAME} before ${copy.commentSurface} can start work here. ${linkInstruction}`,
+  );
 }

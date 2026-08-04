@@ -81,6 +81,7 @@ import {
   rememberTelegramImplicitTopic,
   verifyTelegramWebhookSecret,
 } from './webhook-gate.js';
+import { appendAccountLinkHelpText } from '../account-link-help.js';
 
 // Deep-link payload used by the group "link account" button: tapping
 // https://t.me/<bot>?start=link opens the bot's DM with "/start link".
@@ -248,7 +249,9 @@ telegram.post('/', async (c) => {
       chatId: String(message.chat.id),
       text: senderUserId
         ? '✅ This Telegram account is already linked to your Roomote account — head back to the group and send your request again.'
-        : 'Let’s link your Telegram account: generate a code under *Settings → Personal → Linked Accounts* in Roomote, then send it here.',
+        : await appendAccountLinkHelpText(
+            'Let’s link your Telegram account: generate a code under *Settings → Personal → Linked Accounts* in Roomote, then send it here.',
+          ),
       textFormat: 'markdown',
     });
 
@@ -270,7 +273,7 @@ telegram.post('/', async (c) => {
       chatId: String(message.chat.id),
       text: senderUserId
         ? TELEGRAM_WELCOME_MESSAGE
-        : `${TELEGRAM_WELCOME_MESSAGE}\n\n${TELEGRAM_WELCOME_LINK_NUDGE}`,
+        : `${TELEGRAM_WELCOME_MESSAGE}\n\n${await appendAccountLinkHelpText(TELEGRAM_WELCOME_LINK_NUDGE)}`,
       textFormat: 'markdown',
     });
 
@@ -287,7 +290,7 @@ telegram.post('/', async (c) => {
     if (isTelegramPrivateChat(message)) {
       await postTelegramMessageBestEffort({
         chatId: String(message.chat.id),
-        text: TELEGRAM_LINK_REQUIRED_MESSAGE,
+        text: await appendAccountLinkHelpText(TELEGRAM_LINK_REQUIRED_MESSAGE),
         textFormat: 'markdown',
       });
     } else {
@@ -314,7 +317,10 @@ telegram.post('/', async (c) => {
           replyToMessageId: nudgeMetadata.communicationMessageId,
           ...(botUsername
             ? {
-                text: 'Link your Telegram account to Roomote first, then send your request again.',
+                text: await appendAccountLinkHelpText(
+                  'Link your Telegram account to Roomote first, then send your request again.',
+                ),
+                textFormat: 'markdown' as const,
                 buttons: [
                   [
                     {
@@ -325,7 +331,9 @@ telegram.post('/', async (c) => {
                 ],
               }
             : {
-                text: TELEGRAM_LINK_REQUIRED_MESSAGE,
+                text: await appendAccountLinkHelpText(
+                  TELEGRAM_LINK_REQUIRED_MESSAGE,
+                ),
                 textFormat: 'markdown' as const,
               }),
         });

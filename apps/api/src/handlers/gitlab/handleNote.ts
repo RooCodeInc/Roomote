@@ -293,7 +293,7 @@ async function handleGitLabIssueNote({
       body:
         targetsResult.status === 'error' &&
         targetsResult.code === 'account_link_required'
-          ? buildSourceControlAccountLinkRequiredMessage('gitlab')
+          ? await buildSourceControlAccountLinkRequiredMessage('gitlab')
           : buildIssueGateMissNote(),
     });
 
@@ -383,7 +383,7 @@ async function handleGitLabMergeRequestNote({
       body:
         targetsResult.status === 'error' &&
         targetsResult.code === 'account_link_required'
-          ? buildSourceControlAccountLinkRequiredMessage('gitlab')
+          ? await buildSourceControlAccountLinkRequiredMessage('gitlab')
           : buildReviewerGateMissNote(),
     });
 

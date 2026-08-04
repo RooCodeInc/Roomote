@@ -54,6 +54,11 @@ const mocks = vi.hoisted(() => ({
   shouldRouteUnmentioned: vi.fn(),
   enqueueGatewayEvent: vi.fn(),
   callViaEmojiConfig: vi.fn(),
+  appendAccountLinkHelpText: vi.fn(async (message: string) => message),
+}));
+
+vi.mock('../../account-link-help.js', () => ({
+  appendAccountLinkHelpText: mocks.appendAccountLinkHelpText,
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -225,6 +230,9 @@ async function postIngressEvent(body: unknown, secret = 'gateway-secret') {
 describe('Discord Gateway event handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendAccountLinkHelpText.mockImplementation(
+      async (message: string) => message,
+    );
     process.env.R_DISCORD_GATEWAY_SECRET = 'gateway-secret';
     mocks.claimEvent.mockResolvedValue({
       status: 'claimed',
@@ -1263,6 +1271,9 @@ describe('Discord Gateway event handler', () => {
   });
 
   it('sends the link DM even when the dedupe check is unavailable', async () => {
+    mocks.appendAccountLinkHelpText.mockImplementation(
+      async (message: string) => `${message} Ask an admin for an invite.`,
+    );
     mocks.findMappedUserId.mockResolvedValue(null);
     // Redis down: the mention flow fails open so the user is not left silent.
     mocks.redisSet.mockRejectedValue(new Error('redis unavailable'));
@@ -1286,6 +1297,11 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.createDirectMessage).toHaveBeenCalledWith('discord-user-1');
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Ask an admin for an invite.'),
+      }),
+    );
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         text: 'I sent you a DM to link your Discord account.',
@@ -1294,6 +1310,9 @@ describe('Discord Gateway event handler', () => {
   });
 
   it('falls back to public link instructions when the account-link DM is blocked', async () => {
+    mocks.appendAccountLinkHelpText.mockImplementation(
+      async (message: string) => `${message} Ask an admin for an invite.`,
+    );
     mocks.findMappedUserId.mockResolvedValue(null);
     mocks.createDirectMessage.mockRejectedValue(
       new DiscordApiError({
@@ -1337,6 +1356,9 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.reply.mock.calls[0]?.[0]?.text).toMatch(
       /\[Settings → Personal → Linked Accounts\]\([^)]+\/settings\/personal\)/,
+    );
+    expect(mocks.reply.mock.calls[0]?.[0]?.text).toContain(
+      'Ask an admin for an invite.',
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });

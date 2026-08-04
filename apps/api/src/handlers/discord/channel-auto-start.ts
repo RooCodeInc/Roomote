@@ -81,7 +81,7 @@ async function sendLinkNudgeBestEffort(input: {
     );
     await input.provider.postMessage({
       channelId: dmChannel.id,
-      text: buildDiscordChannelAutoStartLinkMessage(input.channelName),
+      text: await buildDiscordChannelAutoStartLinkMessage(input.channelName),
     });
     await markAccountLinkDmSent(input.discordUserId);
   } catch (error) {

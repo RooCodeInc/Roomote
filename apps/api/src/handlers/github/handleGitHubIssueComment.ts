@@ -180,7 +180,7 @@ export async function handleGitHubIssueComment(
       ...replyTarget,
       body:
         commenterGate.code === 'account_link_required'
-          ? buildSourceControlAccountLinkRequiredMessage('github')
+          ? await buildSourceControlAccountLinkRequiredMessage('github')
           : buildGateMissComment(),
     });
 
@@ -198,7 +198,7 @@ export async function handleGitHubIssueComment(
   if (!target?.properties.userId) {
     await postIssueComment({
       ...replyTarget,
-      body: buildSourceControlAccountLinkRequiredMessage('github'),
+      body: await buildSourceControlAccountLinkRequiredMessage('github'),
     });
 
     return { status: 'ok', message: 'account_link_required' };

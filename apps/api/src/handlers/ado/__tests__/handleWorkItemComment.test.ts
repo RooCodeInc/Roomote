@@ -55,7 +55,7 @@ vi.mock('../../utils', () => ({
 }));
 
 vi.mock('../../source-control-account-linking', () => ({
-  buildSourceControlAccountLinkRequiredMessage: () =>
+  buildSourceControlAccountLinkRequiredMessage: async () =>
     'link your Azure DevOps account',
 }));
 

@@ -261,7 +261,7 @@ export async function handleBitbucketComment(
     await postMentionResponseComment({
       ...mentionResponseTarget,
       body: requiresAccountLink
-        ? buildSourceControlAccountLinkRequiredMessage('bitbucket')
+        ? await buildSourceControlAccountLinkRequiredMessage('bitbucket')
         : requiresEnvironment
           ? buildSourceControlEnvironmentRequiredMessage('bitbucket')
           : buildReviewerGateMissComment(),
