@@ -25,6 +25,7 @@ import {
   claimJobById,
   fetchEnvVars,
   fetchResolvedRuntimeEnvVars,
+  resolveTaskRunSourceControlProviders,
   cancelAndReleaseTaskRun,
   createSourceControlTokenForTaskRun,
   type SourceControlRuntimeToken,
@@ -135,6 +136,9 @@ export const dequeueResumeTaskRun = async (
           sourceRepo?: string;
           sourceEnvironmentId?: string;
           sourceSelectedRepositories?: string[];
+          sourceControlProviders: Awaited<
+            ReturnType<typeof resolveTaskRunSourceControlProviders>
+          >;
         };
 
     const result: TransactionResult = await db.transaction(async (tx) => {
@@ -283,10 +287,12 @@ export const dequeueResumeTaskRun = async (
       );
 
       // Fetch environment variables
+      const sourceControlProviders = await resolveTaskRunSourceControlProviders(
+        taskRun,
+        tx,
+      );
       const envVars = await fetchEnvVars(tx, {
-        sourceControlProvider: resolveSourceControlProviderFromPayload(
-          taskRun.payload,
-        ),
+        sourceControlProvider: sourceControlProviders,
       });
       const settings = await tx.query.deploymentSettings.findFirst({
         columns: {
@@ -342,6 +348,7 @@ export const dequeueResumeTaskRun = async (
         sourceRepo,
         sourceEnvironmentId,
         sourceSelectedRepositories,
+        sourceControlProviders,
       };
     });
 
@@ -410,14 +417,13 @@ export const dequeueResumeTaskRun = async (
       return undefined;
     }
 
-    const gitHubToken =
-      sourceControlToken.provider === 'github' ? sourceControlToken.token : '';
+    const gitHubToken = sourceControlToken.envVars.GH_TOKEN ?? '';
 
     let resolvedEnvVars: Record<string, string>;
 
     try {
       resolvedEnvVars = await fetchResolvedRuntimeEnvVars(result.envVars, {
-        sourceControlProvider: sourceControlToken.provider,
+        sourceControlProvider: result.sourceControlProviders,
       });
     } catch (error) {
       const message =

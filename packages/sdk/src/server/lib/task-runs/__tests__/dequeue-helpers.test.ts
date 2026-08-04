@@ -8,6 +8,7 @@ const {
   mockCreateTaskRunScopedGitLabTokens,
   mockCreateTaskRunGiteaCredentials,
   mockCreateTaskRunAdoCredentials,
+  mockCreateTaskRunBitbucketCredentials,
   mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
@@ -19,6 +20,7 @@ const {
   mockCreateTaskRunScopedGitLabTokens: vi.fn(),
   mockCreateTaskRunGiteaCredentials: vi.fn(),
   mockCreateTaskRunAdoCredentials: vi.fn(),
+  mockCreateTaskRunBitbucketCredentials: vi.fn(),
   mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
@@ -84,6 +86,11 @@ vi.mock('@roomote/gitea', () => ({
 vi.mock('@roomote/ado', () => ({
   createTaskRunAdoCredentials: (...args: unknown[]) =>
     mockCreateTaskRunAdoCredentials(...args),
+}));
+
+vi.mock('@roomote/bitbucket', () => ({
+  createTaskRunBitbucketCredentials: (...args: unknown[]) =>
+    mockCreateTaskRunBitbucketCredentials(...args),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -174,6 +181,9 @@ describe('createSourceControlTokenForTaskRun', () => {
           originBaseUrl: 'https://dev.azure.com',
         },
       ],
+    });
+    mockCreateTaskRunBitbucketCredentials.mockResolvedValue({
+      credentials: [],
     });
   });
 
@@ -392,6 +402,88 @@ describe('createSourceControlTokenForTaskRun', () => {
     expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalled();
   });
 
+  it('mints mapped providers primary-first and merges aggregate metadata', async () => {
+    const taskRun = makeTaskRun({
+      repo: 'owner/repo',
+      selectedRepositories: ['owner/repo', 'group/project'],
+      repositoryProviders: {
+        'group/project': 'gitlab',
+        'owner/repo': 'github',
+      },
+      description: 'Work across providers',
+    } as TaskRun['payload']);
+
+    const result = await createSourceControlTokenForTaskRun(taskRun, '[test]', {
+      maxRetries: 1,
+    });
+
+    expect(result).toEqual({
+      provider: 'github',
+      token: 'ghs_app_token',
+      envVar: 'GH_TOKEN',
+      envVars: { GH_TOKEN: 'ghs_app_token' },
+      gitCredentials: [
+        {
+          host: 'gitlab.com',
+          repositoryFullName: 'group/project',
+          username: 'oauth2',
+          token: 'glptt_scoped_token',
+        },
+      ],
+      gitProxyCredentials: [],
+      source: 'app',
+      expiresAt: null,
+      artifactsPatch: {
+        gitlabScopedProjectTokens: [
+          {
+            repositoryFullName: 'group/project',
+            projectId: '101',
+            tokenId: 202,
+          },
+        ],
+      },
+    });
+    expect(
+      mockCreateTaskRunWorkerGitHubToken.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mockCreateTaskRunScopedGitLabTokens.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('retries the whole mapped-provider operation and returns no partial token', async () => {
+    mockCreateTaskRunScopedGitLabTokens.mockRejectedValue(
+      new Error('GitLab unavailable'),
+    );
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const result = await createSourceControlTokenForTaskRun(
+        makeTaskRun({
+          repo: 'owner/repo',
+          repositoryProviders: {
+            'owner/repo': 'github',
+            'group/project': 'gitlab',
+          },
+          description: 'Work across providers',
+        } as TaskRun['payload']),
+        '[test]',
+        { maxRetries: 2, baseDelayMs: 0 },
+      );
+
+      expect(result).toBeNull();
+      expect(mockCreateTaskRunWorkerGitHubToken).toHaveBeenCalledTimes(2);
+      expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalledTimes(2);
+    } finally {
+      consoleWarnSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it('returns null when GitLab token is missing', async () => {
     mockCreateTaskRunScopedGitLabTokens.mockRejectedValueOnce(
       new Error('GITLAB_TOKEN is required for GitLab source control jobs.'),
@@ -518,6 +610,23 @@ describe('redactSourceControlProviderEnvVars', () => {
     };
 
     expect(redactSourceControlProviderEnvVars(envVars, 'github')).toBe(envVars);
+  });
+
+  it('redacts every non-GitHub deployment token for mixed-provider jobs', () => {
+    expect(
+      redactSourceControlProviderEnvVars(
+        {
+          GH_TOKEN: 'operator-github-token',
+          GITLAB_TOKEN: 'glpat_deployment_token',
+          BITBUCKET_OAUTH: 'bitbucket_deployment_token',
+          OPENAI_API_KEY: 'sk-test',
+        },
+        ['github', 'gitlab', 'bitbucket'],
+      ),
+    ).toEqual({
+      GH_TOKEN: 'operator-github-token',
+      OPENAI_API_KEY: 'sk-test',
+    });
   });
 });
 

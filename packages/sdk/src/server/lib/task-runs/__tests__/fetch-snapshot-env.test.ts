@@ -6,10 +6,12 @@ const {
   mockFindFirst,
   mockFetchResolvedRuntimeEnvVars,
   mockCreateSourceControlTokenForTaskRun,
+  mockResolveTaskRunSourceControlProviders,
 } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
   mockFetchResolvedRuntimeEnvVars: vi.fn(),
   mockCreateSourceControlTokenForTaskRun: vi.fn(),
+  mockResolveTaskRunSourceControlProviders: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -31,6 +33,8 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../dequeue-helpers', () => ({
   fetchResolvedRuntimeEnvVars: mockFetchResolvedRuntimeEnvVars,
   createSourceControlTokenForTaskRun: mockCreateSourceControlTokenForTaskRun,
+  resolveTaskRunSourceControlProviders:
+    mockResolveTaskRunSourceControlProviders,
 }));
 
 import { fetchSnapshotEnv } from '../fetch-snapshot-env';
@@ -62,6 +66,7 @@ function makeGitHubToken(token: string) {
 describe('fetchSnapshotEnv', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockResolveTaskRunSourceControlProviders.mockResolvedValue(['github']);
   });
 
   // ── Happy path: deployment-scoped env vars ───────────────────────────
@@ -84,7 +89,7 @@ describe('fetchSnapshotEnv', () => {
     const result = await fetchSnapshotEnv(auth, { runId: 42 });
 
     expect(result).toEqual({
-      envVars: { MY_SECRET: 'value123' },
+      envVars: { MY_SECRET: 'value123', GH_TOKEN: 'ghs_token_abc' },
       gitHubToken: 'ghs_token_abc',
       sourceControlToken: token,
       taskId: 'task_123',
@@ -96,7 +101,7 @@ describe('fetchSnapshotEnv', () => {
     // Verify the gateway-aware resolution was used (so snapshot env withholds
     // gateway-served provider keys, like the task dequeue path).
     expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(undefined, {
-      sourceControlProvider: 'github',
+      sourceControlProvider: ['github'],
     });
 
     // Verify createSourceControlTokenForTaskRun was called with the task run.
@@ -126,14 +131,14 @@ describe('fetchSnapshotEnv', () => {
     const result = await fetchSnapshotEnv(auth, { runId: 42 });
 
     expect(result).toEqual({
-      envVars: {},
+      envVars: { GH_TOKEN: 'ghs_job_token' },
       gitHubToken: 'ghs_job_token',
       sourceControlToken: token,
       taskId: 'task_123',
     });
 
     expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(undefined, {
-      sourceControlProvider: 'github',
+      sourceControlProvider: ['github'],
     });
   });
 
@@ -174,9 +179,39 @@ describe('fetchSnapshotEnv', () => {
 
     const result = await fetchSnapshotEnv(auth, { runId: 42 });
 
-    expect(result.envVars).toEqual({});
+    expect(result.envVars).toEqual({ GH_TOKEN: 'ghs_token_xyz' });
     expect(result.gitHubToken).toBe('ghs_token_xyz');
     expect(result.taskId).toBe('task_123');
+  });
+
+  it('derives gitHubToken from merged source-control env vars', async () => {
+    const auth: AuthTokenContext = {
+      userId: 'user_456',
+      tokenType: 'auth',
+      version: 1,
+    };
+    mockFindFirst.mockResolvedValue(makeTaskRun());
+    mockResolveTaskRunSourceControlProviders.mockResolvedValue([
+      'gitlab',
+      'github',
+    ]);
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({ MY_SECRET: 'value' });
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'gitlab',
+      token: 'glptt_primary',
+      envVar: 'GITLAB_TOKEN',
+      envVars: { GH_TOKEN: 'ghs_merged' },
+      source: 'app',
+      expiresAt: null,
+    });
+
+    const result = await fetchSnapshotEnv(auth, { runId: 42 });
+
+    expect(result.gitHubToken).toBe('ghs_merged');
+    expect(result.envVars).toEqual({
+      MY_SECRET: 'value',
+      GH_TOKEN: 'ghs_merged',
+    });
   });
 
   // ── Source-control token creation fails ─────────────────────────────

@@ -42,6 +42,7 @@ vi.mock('@roomote/db/server', () => ({
   repositories: {
     fullName: 'repositories.fullName',
     isActive: 'repositories.isActive',
+    sourceControlProvider: 'repositories.sourceControlProvider',
   },
 }));
 
@@ -121,6 +122,64 @@ describe('createTaskRunGitHubToken', () => {
       installationId: 'install-exampleorg',
       repositoryIds: [101, 102],
     });
+  });
+
+  it('ignores selected repositories mapped to another provider', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'ExampleOrg/example-backend',
+        installationId: 'install-exampleorg',
+        githubRepoId: 101,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'ExampleOrg/example-backend',
+          selectedRepositories: ['ExampleOrg/example-backend', 'group/project'],
+          repositoryProviders: {
+            'ExampleOrg/example-backend': 'github',
+            'group/project': 'gitlab',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).resolves.toBe('ghs_test_token');
+
+    expect(mockCreateGitHubToken).toHaveBeenCalledWith({
+      type: 'installationId',
+      installationId: 'install-exampleorg',
+      repositoryIds: [101],
+    });
+  });
+
+  it('still rejects unknown selected repository names', async () => {
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'ExampleOrg/example-backend',
+        installationId: 'install-exampleorg',
+        githubRepoId: 101,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: '__all_repositories__',
+          selectedRepositories: [
+            'ExampleOrg/example-backend',
+            'group/project',
+            'unknown/repository',
+          ],
+          repositoryProviders: {
+            'ExampleOrg/example-backend': 'github',
+            'group/project': 'gitlab',
+          },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow(
+      'Selected repositories not found for task run 123: unknown/repository',
+    );
   });
 
   it('uses the environment repositories installation for environment tasks', async () => {

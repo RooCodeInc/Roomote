@@ -1,5 +1,4 @@
 import {
-  resolveSourceControlProviderFromPayload,
   type AuthTokenContext,
   type RunTokenContext,
   type SourceControlTokenMetadata,
@@ -9,6 +8,7 @@ import { db, taskRuns, eq } from '@roomote/db/server';
 import {
   fetchResolvedRuntimeEnvVars,
   createSourceControlTokenForTaskRun,
+  resolveTaskRunSourceControlProviders,
 } from './dequeue-helpers';
 
 /**
@@ -40,10 +40,10 @@ export async function fetchSnapshotEnv(
   // dequeue so gateway-covered provider keys are withheld here too; otherwise
   // a snapshot taken with the flag on would bake raw provider keys into the
   // snapshot's shell env and the persisted image.
-  const envVars = await fetchResolvedRuntimeEnvVars(undefined, {
-    sourceControlProvider: resolveSourceControlProviderFromPayload(
-      taskRun.payload,
-    ),
+  const sourceControlProviders =
+    await resolveTaskRunSourceControlProviders(taskRun);
+  const deploymentEnvVars = await fetchResolvedRuntimeEnvVars(undefined, {
+    sourceControlProvider: sourceControlProviders,
   });
 
   const sourceControlToken = await createSourceControlTokenForTaskRun(
@@ -76,8 +76,8 @@ export async function fetchSnapshotEnv(
       .where(eq(taskRuns.id, taskRun.id));
   }
 
-  const gitHubToken =
-    sourceControlToken.provider === 'github' ? sourceControlToken.token : '';
+  const envVars = { ...deploymentEnvVars, ...sourceControlToken.envVars };
+  const gitHubToken = envVars.GH_TOKEN ?? '';
 
   return { envVars, gitHubToken, sourceControlToken, taskId: taskRun.taskId };
 }

@@ -1482,6 +1482,18 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
 async function resolveAdoRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
+  const filterForAdo = (repositoryNames: string[]) => {
+    const repositoryProviders = (
+      taskRun.payload as { repositoryProviders?: Record<string, string> }
+    ).repositoryProviders;
+
+    return repositoryNames.filter(
+      (repositoryName) =>
+        repositoryProviders?.[repositoryName] === undefined ||
+        repositoryProviders[repositoryName] === ADO_PROVIDER,
+    );
+  };
+
   if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, taskRun.payload.environmentId),
@@ -1493,9 +1505,11 @@ async function resolveAdoRepositoryNamesForTaskRun(
       );
     }
 
-    return normalizeRepositorySelection(
-      environment.config.repositories.map(
-        (repository) => repository.repository,
+    return filterForAdo(
+      normalizeRepositorySelection(
+        environment.config.repositories.map(
+          (repository) => repository.repository,
+        ),
       ),
     );
   }
@@ -1506,7 +1520,7 @@ async function resolveAdoRepositoryNamesForTaskRun(
     );
 
     if (selectedRepositories.length > 0) {
-      return selectedRepositories;
+      return filterForAdo(selectedRepositories);
     }
   }
 
