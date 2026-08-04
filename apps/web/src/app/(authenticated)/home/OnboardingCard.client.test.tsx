@@ -8,6 +8,7 @@ let enabledMcpIds: string[] = [];
 let linkedMcpIds: string[] = [];
 let orgHasLinear = false;
 let userHasLinkedLinear = false;
+let hasEnabledAutomations = true;
 
 const {
   mockPush,
@@ -103,7 +104,7 @@ vi.mock('@tanstack/react-query', () => ({
           },
           isPending: false,
         }
-      : { data: { hasEnabledAutomations: true }, isPending: false },
+      : { data: { hasEnabledAutomations }, isPending: false },
 }));
 
 vi.mock('motion/react', async () => {
@@ -163,8 +164,30 @@ beforeEach(() => {
   linkedMcpIds = [];
   orgHasLinear = false;
   userHasLinkedLinear = false;
+  hasEnabledAutomations = true;
   localStorage.clear();
   vi.clearAllMocks();
+});
+
+it('prioritizes automations and opens the automations page', () => {
+  hasEnabledAutomations = false;
+  linkableProviders = [
+    {
+      id: 'slack',
+      category: 'communication',
+      label: 'Slack',
+      configured: true,
+      linked: false,
+    },
+  ];
+
+  render(<OnboardingCard />);
+  expect(
+    screen.getByText("Put your team's work on autopilot with automations"),
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+  expect(mockPush).toHaveBeenCalledWith('/automations');
 });
 
 it('prioritizes communication accounts before source-control accounts', () => {

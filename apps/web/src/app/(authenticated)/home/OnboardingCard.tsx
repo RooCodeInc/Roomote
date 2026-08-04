@@ -430,6 +430,22 @@ export function OnboardingCard() {
 
   const cards: CardConfig[] = [
     {
+      id: 'automations',
+      icon: (
+        <Zap
+          className="size-4 shrink-0 text-muted-foreground"
+          strokeWidth={1}
+        />
+      ),
+      label: "Put your team's work on autopilot with automations",
+      buttonLabel: 'Go',
+      onClick: () => router.push('/automations'),
+      visible:
+        !automationsPending &&
+        Boolean(automationOnboardingStatus) &&
+        !automationOnboardingStatus?.hasEnabledAutomations,
+    },
+    {
       id: 'link-suggested-tasks',
       icon: <Spinner />,
       label: 'Your selected tasks have started.',
@@ -447,22 +463,6 @@ export function OnboardingCard() {
     ...adminIntegrationCards,
     ...personalMcpCards,
     linearPersonalCard,
-    {
-      id: 'automations',
-      icon: (
-        <Zap
-          className="size-4 shrink-0 text-muted-foreground"
-          strokeWidth={1}
-        />
-      ),
-      label: 'Automations keep your repos moving in the background',
-      buttonLabel: 'Set them up',
-      onClick: () => router.push(SETTINGS_PATHS.automations),
-      visible:
-        !automationsPending &&
-        Boolean(automationOnboardingStatus) &&
-        !automationOnboardingStatus?.hasEnabledAutomations,
-    },
   ];
 
   const activeCard = cards.find((card) => card.visible && !dismissed[card.id]);
