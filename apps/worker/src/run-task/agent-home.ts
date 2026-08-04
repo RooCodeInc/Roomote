@@ -50,6 +50,7 @@ import { SLACK_POSTING_TOOL_EXCLUSIONS } from './slack-posting-tools';
 import { SLACK_STOP_HOOK_SCRIPT } from './slack-stop-hook-script';
 import { OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT } from './opencode-slack-hooks-plugin-script';
 import { OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT } from './opencode-chatgpt-gateway-plugin-script';
+import { OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT } from './opencode-tool-safety-plugin-script';
 import { resolveOpenCodeModelSelection } from './opencode-model';
 import {
   createProofRunnerAgentPrompt,
@@ -191,6 +192,8 @@ const ROOMOTE_OPENCODE_SLACK_HOOKS_PLUGIN_FILE_NAME = 'roomote-slack-hooks.js';
 
 const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
   'roomote-chatgpt-gateway.js';
+
+const ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME = 'roomote-tool-safety.js';
 
 const OPENCODE_ALLOW_ALL_PERMISSION = {
   read: 'allow',
@@ -620,6 +623,10 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
     pluginsDir,
     ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME,
   );
+  const toolSafetyPluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_TOOL_SAFETY_PLUGIN_FILE_NAME,
+  );
   const silenceHookPath = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME,
@@ -634,6 +641,11 @@ function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
   fs.writeFileSync(
     chatGptGatewayPluginPath,
     OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT,
+    'utf8',
+  );
+  fs.writeFileSync(
+    toolSafetyPluginPath,
+    OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT,
     'utf8',
   );
   fs.writeFileSync(silenceHookPath, SLACK_SILENCE_HOOK_SCRIPT, 'utf8');
