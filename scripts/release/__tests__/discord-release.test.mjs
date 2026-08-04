@@ -24,6 +24,7 @@ describe('Discord release announcement', () => {
     });
 
     assert.equal(payload.username, 'Roomote Releases');
+    assert.equal(payload.flags, 4);
     assert.deepEqual(payload.allowed_mentions, { parse: [] });
     assert.equal(
       payload.content,
