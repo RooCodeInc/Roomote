@@ -20,8 +20,10 @@ import type { McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
 import {
   DUPLICATE_ENVIRONMENT_NAME_ERROR,
+  ENVIRONMENT_ADMIN_REQUIRED_ERROR,
   EVAL_ENVIRONMENT_WRITE_ERROR,
   attachEnvironmentIdToTaskRun,
+  canAdministerEnvironments,
   getEnvironmentRepositoryConfigError,
   isEnvironmentNameUniqueViolation,
   resolveCallingVerificationTaskId,
@@ -44,8 +46,8 @@ export async function updateEnvironment(
   const auth = c.get('mcpAuth');
   const userId = await resolveEnvironmentWriteUserId(auth);
 
-  if (!userId) {
-    return c.json({ error: 'User context required' }, 403);
+  if (!userId || !(await canAdministerEnvironments(userId))) {
+    return c.json({ error: ENVIRONMENT_ADMIN_REQUIRED_ERROR }, 403);
   }
 
   const id = c.req.param('id');
