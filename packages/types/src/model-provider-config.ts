@@ -1392,6 +1392,10 @@ export function getDisplayModelProviderId(
 
   const runtimeProviderId = getTaskModelProviderId(normalizedModelId);
 
+  if (runtimeProviderId === 'bedrock-mantle') {
+    return 'amazon-bedrock';
+  }
+
   if (
     runtimeProviderId === 'openai' &&
     options?.chatgptConnected &&
