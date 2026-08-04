@@ -11,6 +11,7 @@ const {
   getTaskChannelBindingsMock,
   maybeSendCommunicationThreadReplyMock,
   postMessageMock,
+  postTopLevelMessageMock,
   slackInstallationFindFirstMock,
   taskRunFindFirstMock,
 } = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ const {
   getTaskChannelBindingsMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
   postMessageMock: vi.fn(),
+  postTopLevelMessageMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
 }));
@@ -74,6 +76,7 @@ vi.mock('@roomote/slack', () => ({
   SlackNotifier: vi.fn(
     class {
       postMessage = postMessageMock;
+      postTopLevelMessage = postTopLevelMessageMock;
     },
   ),
   trackLatestUserMessageForSlackQuote: vi.fn(),
@@ -178,6 +181,7 @@ describe('Slack thread reply quotes', () => {
       },
     ]);
     postMessageMock.mockResolvedValue('333.444');
+    postTopLevelMessageMock.mockResolvedValue({ messageTs: '333.444' });
     clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
   });
 
@@ -211,6 +215,32 @@ describe('Slack thread reply quotes', () => {
       42,
       'quote-image',
     );
+  });
+
+  it('preserves Slack API errors when a late-bound automation root cannot be posted', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    getTaskChannelBindingsMock.mockResolvedValue({
+      slackChannelId: 'C123',
+      slackThreadTs: null,
+    });
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    postTopLevelMessageMock.mockResolvedValue({ error: 'not_in_channel' });
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'done' }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Slack chat.postMessage failed: not_in_channel',
+    });
   });
 
   it('consumes the exact pending quote after an image-only reply without rendering it', async () => {

@@ -26,6 +26,7 @@ import {
   listConnectedCommunicationProviders,
   type ResolvedAutomationDestination,
 } from './destination';
+import { getCommunicationProviderAdapter } from '../lib/communication-providers';
 import {
   isCronRunDue,
   resolveDeploymentTimeZone,
@@ -245,6 +246,28 @@ async function launchCustomAutomationRow(
         error: message,
       });
       return result;
+    }
+
+    if (destination.provider === 'slack') {
+      const slack = await getCommunicationProviderAdapter('slack');
+      const isMember =
+        slack?.provider === 'slack'
+          ? await slack.isAppInChannel(destination.channelId)
+          : null;
+      if (isMember !== true) {
+        const message =
+          isMember === false
+            ? `Slack app cannot access report channel ${destination.channelId}. Invite the app to the channel or choose another destination.`
+            : `Slack report channel ${destination.channelId} could not be verified. Try again before running this automation.`;
+        result.skippedReason = message;
+        result.errors.push(message);
+        await recordCustomAutomationRunOutcome(db, {
+          id: automation.id,
+          status: 'failed',
+          error: message,
+        });
+        return result;
+      }
     }
   }
 

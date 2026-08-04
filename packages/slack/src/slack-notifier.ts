@@ -886,6 +886,26 @@ export class SlackNotifier {
     return response?.ts;
   }
 
+  /**
+   * Posts a top-level message while preserving Slack's API error code for
+   * callers that need to report why a new conversation could not be created.
+   */
+  public async postTopLevelMessage(message: SlackMessage): Promise<{
+    messageTs?: string;
+    error?: string;
+  }> {
+    const response = await this.sendMessage(
+      'chat.postMessage',
+      message,
+      'regular',
+    );
+
+    return {
+      ...(response?.ts ? { messageTs: response.ts } : {}),
+      ...(response?.error ? { error: response.error } : {}),
+    };
+  }
+
   public async postEphemeralMessage(message: SlackMessage & { user: string }) {
     const response = await this.sendMessage(
       'chat.postEphemeral',
