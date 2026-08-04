@@ -402,10 +402,11 @@ describe('createSourceControlTokenForTaskRun', () => {
     expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalled();
   });
 
-  it('mints mapped providers primary-first and merges aggregate metadata', async () => {
+  it('mints the stamped primary provider first and merges aggregate metadata', async () => {
     const taskRun = makeTaskRun({
-      repo: 'owner/repo',
+      repo: 'group/project',
       selectedRepositories: ['owner/repo', 'group/project'],
+      sourceControlProvider: 'github',
       repositoryProviders: {
         'group/project': 'gitlab',
         'owner/repo': 'github',

@@ -2,7 +2,11 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { TaskWorkspace, SourceControlProvider } from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
-import { environmentRepositoryMappings, repositories } from '../schema';
+import {
+  environmentRepositoryMappings,
+  environments,
+  repositories,
+} from '../schema';
 
 /**
  * Collapse a set of repository providers to the single provider they all
@@ -91,6 +95,15 @@ async function resolveEnvironmentProviders(
   dbOrTx: DatabaseOrTransaction,
   environmentId: string,
 ): Promise<Record<string, SourceControlProvider>> {
+  const environment = await dbOrTx.query.environments.findFirst({
+    where: eq(environments.id, environmentId),
+    columns: { config: true },
+  });
+
+  if (!environment) {
+    return {};
+  }
+
   const rows = await dbOrTx
     .select({
       fullName: repositories.fullName,
@@ -115,7 +128,7 @@ async function resolveEnvironmentProviders(
 
   return toRepositoryProviderMap(
     rows,
-    rows.map((row) => row.fullName),
+    environment.config.repositories.map((repository) => repository.repository),
   );
 }
 

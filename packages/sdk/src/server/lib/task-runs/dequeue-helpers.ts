@@ -431,16 +431,19 @@ export async function resolveTaskRunSourceControlProviders(
     payload.repositoryProviders &&
     Object.keys(payload.repositoryProviders).length > 0
   ) {
-    const orderedEntries = Object.entries(payload.repositoryProviders);
-    const primaryProvider = payload.repo
-      ? orderedEntries.find(([repository]) => repository === payload.repo)?.[1]
-      : undefined;
+    const mappedProviders = Object.values(payload.repositoryProviders).map(
+      normalizeSourceControlProvider,
+    );
+    const primaryProvider =
+      payload.sourceControlProvider === undefined ||
+      payload.sourceControlProvider === null ||
+      payload.sourceControlProvider === ''
+        ? mappedProviders[0]
+        : resolveSourceControlProviderFromPayload(payload);
     const providers = [
       ...(primaryProvider === undefined ? [] : [primaryProvider]),
-      ...orderedEntries
-        .filter(([repository]) => repository !== payload.repo)
-        .map(([, provider]) => provider),
-    ].map(normalizeSourceControlProvider);
+      ...mappedProviders,
+    ];
 
     return [...new Set(providers)];
   }

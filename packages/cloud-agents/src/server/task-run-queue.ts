@@ -1354,6 +1354,10 @@ async function enqueueFreshLaunch(
 
     if (envId) {
       task.payload.environmentId = envId;
+      await stampWorkspaceSourceControlProviders(task.payload, {
+        type: 'environment',
+        environmentId: envId,
+      });
 
       console.log(
         `[enqueueTask] Auto-resolved environment ${envId} for ${workspace.repo}`,
@@ -1787,16 +1791,17 @@ async function stampWorkspaceSourceControlProviders(
     workspace,
   );
   const providers = Object.values(repositoryProviders);
+  const spansProviders = new Set(providers).size > 1;
 
-  if (
-    new Set(providers).size > 1 &&
-    payload.repositoryProviders === undefined
-  ) {
+  if (spansProviders) {
     payload.repositoryProviders = repositoryProviders;
   }
 
   const primaryProvider = providers[0];
-  if (payload.sourceControlProvider === undefined && primaryProvider) {
+  if (
+    primaryProvider &&
+    (spansProviders || payload.sourceControlProvider === undefined)
+  ) {
     payload.sourceControlProvider = primaryProvider;
   }
 }
@@ -2010,9 +2015,7 @@ function inheritSnapshotResumeSourceControlStamps(
     sourceControlHost?: unknown;
   };
 
-  const inheritsProvider = payload.sourceControlProvider === undefined;
-
-  if (inheritsProvider) {
+  if (payload.sourceControlProvider === undefined) {
     const provider = sourceControlProviderSchema.safeParse(
       source.sourceControlProvider,
     );
@@ -2020,19 +2023,19 @@ function inheritSnapshotResumeSourceControlStamps(
     if (provider.success) {
       payload.sourceControlProvider = provider.data;
     }
+  }
 
-    if (payload.repositoryProviders === undefined) {
-      const repositoryProviders = z
-        .record(sourceControlProviderSchema)
-        .safeParse(source.repositoryProviders);
+  if (payload.repositoryProviders === undefined) {
+    const repositoryProviders = z
+      .record(sourceControlProviderSchema)
+      .safeParse(source.repositoryProviders);
 
-      if (repositoryProviders.success) {
-        payload.repositoryProviders = repositoryProviders.data;
-      }
+    if (repositoryProviders.success) {
+      payload.repositoryProviders = repositoryProviders.data;
     }
   }
 
-  if (inheritsProvider && payload.sourceControlHost === undefined) {
+  if (payload.sourceControlHost === undefined) {
     const host =
       typeof source.sourceControlHost === 'string'
         ? source.sourceControlHost.trim()

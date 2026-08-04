@@ -900,6 +900,10 @@ describe('enqueueTask snapshot resume', () => {
           description: 'Do the thing',
           sourceControlProvider: 'ado',
           sourceControlHost: 'dev.azure.com',
+          repositoryProviders: {
+            'acme/widgets': 'ado',
+            'group/web': 'gitlab',
+          },
         },
       }),
       initiator: { kind: 'user', userId },
@@ -933,7 +937,17 @@ describe('enqueueTask snapshot resume', () => {
     ).toBe('gitea');
     expect(
       (resumeRun.payload as { sourceControlHost?: string }).sourceControlHost,
-    ).toBeUndefined();
+    ).toBe('dev.azure.com');
+    expect(
+      (
+        resumeRun.payload as {
+          repositoryProviders?: Record<string, string>;
+        }
+      ).repositoryProviders,
+    ).toEqual({
+      'acme/widgets': 'ado',
+      'group/web': 'gitlab',
+    });
   });
 
   it('rejects a resume without a source run id', async () => {
@@ -1290,6 +1304,10 @@ describe('enqueueTask source-control provider stamping', () => {
 
     const environment = await environmentFactory.create({
       createdByUserId: userId,
+      config: {
+        name: 'GitLab environment',
+        repositories: [{ repository: 'group/project' }],
+      },
     });
     createdEnvironmentIds.push(environment.id);
 
@@ -1347,6 +1365,13 @@ describe('enqueueTask source-control provider stamping', () => {
 
     const environment = await environmentFactory.create({
       createdByUserId: userId,
+      config: {
+        name: 'Mixed environment',
+        repositories: [
+          { repository: 'group/mixed-api' },
+          { repository: 'acme/Platform/mixed-web' },
+        ],
+      },
     });
     createdEnvironmentIds.push(environment.id);
 
@@ -1386,6 +1411,80 @@ describe('enqueueTask source-control provider stamping', () => {
     });
   });
 
+  it('re-stamps a PR launch after auto-resolving a mixed environment', async () => {
+    const userId = await createUser();
+    const primaryRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: userId,
+      fullName: 'group/pr-context',
+      isActive: true,
+    });
+    const pullRequestRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      linkedByUserId: userId,
+      fullName: 'octo/pr-target',
+      isActive: true,
+    });
+    createdRepositoryIds.push(primaryRepository.id, pullRequestRepository.id);
+
+    const environment = await environmentFactory.create({
+      createdByUserId: userId,
+      config: {
+        name: 'PR mixed environment',
+        repositories: [
+          { repository: 'group/pr-context' },
+          { repository: 'octo/pr-target' },
+        ],
+      },
+    });
+    createdEnvironmentIds.push(environment.id);
+    await db.insert(environmentRepositoryMappings).values([
+      {
+        environmentId: environment.id,
+        repositoryId: primaryRepository.id,
+      },
+      {
+        environmentId: environment.id,
+        repositoryId: pullRequestRepository.id,
+      },
+    ]);
+
+    const run = await launchFresh({
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'octo/pr-target',
+          prNumber: 1082,
+          prTitle: 'Support mixed environments',
+          prUrl: 'https://github.com/octo/pr-target/pull/1082',
+          headSha: 'a'.repeat(40),
+        },
+      } as Extract<TaskSpec, { type: 'github_pr_review' }>,
+      initiator: { kind: 'automation', key: 'review_code' },
+      workflow: 'pr_review',
+      surface: 'github',
+      trigger: 'webhook',
+      prLinkage: {
+        provider: 'gitea',
+        repository: 'octo/pr-target',
+        prNumber: 1082,
+        prUrl: 'https://github.com/octo/pr-target/pull/1082',
+        prTitle: 'Support mixed environments',
+        prSha: 'a'.repeat(40),
+      },
+    });
+
+    expect(run.payload).toMatchObject({
+      environmentId: environment.id,
+      sourceControlProvider: 'gitlab',
+      repositoryProviders: {
+        'group/pr-context': 'gitlab',
+        'octo/pr-target': 'gitea',
+      },
+    });
+  });
+
   it('recomputes mixed-provider stamps for a failed-start relaunch', async () => {
     const userId = await createUser();
     const primaryRepository = await repositoryFactory.create({
@@ -1404,6 +1503,13 @@ describe('enqueueTask source-control provider stamping', () => {
 
     const environment = await environmentFactory.create({
       createdByUserId: userId,
+      config: {
+        name: 'Relaunch environment',
+        repositories: [
+          { repository: 'group/relaunch-api' },
+          { repository: 'acme/Platform/relaunch-web' },
+        ],
+      },
     });
     createdEnvironmentIds.push(environment.id);
     await db.insert(environmentRepositoryMappings).values([

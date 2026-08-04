@@ -12,6 +12,7 @@ let mockRows: Array<{
   host: string | null;
   sourceControlProvider: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
 }> = [];
+let mockEnvironmentRepositories: string[] = [];
 
 const query = {
   innerJoin: vi.fn(() => query),
@@ -33,16 +34,30 @@ const dbOrTx = {
   select: vi.fn(() => ({
     from: vi.fn(() => query),
   })),
+  query: {
+    environments: {
+      findFirst: vi.fn(async () => ({
+        config: {
+          name: 'Test environment',
+          repositories: mockEnvironmentRepositories.map((repository) => ({
+            repository,
+          })),
+        },
+      })),
+    },
+  },
 } as unknown as DatabaseOrTransaction;
 
 describe('resolveWorkspaceSourceControlProvider', () => {
   beforeEach(() => {
     mockRows = [];
+    mockEnvironmentRepositories = [];
     mockWhere.mockReset();
     mockOrderBy.mockReset();
   });
 
   it('resolves the provider from an environment with a single-provider mapping', async () => {
+    mockEnvironmentRepositories = ['acme/Platform/backend'];
     mockRows = [
       {
         fullName: 'acme/Platform/backend',
@@ -57,6 +72,32 @@ describe('resolveWorkspaceSourceControlProvider', () => {
         environmentId: 'env-1',
       }),
     ).resolves.toBe('ado');
+  });
+
+  it('orders environment providers by the declared repository config', async () => {
+    mockEnvironmentRepositories = ['group/web', 'octo/api'];
+    mockRows = [
+      {
+        fullName: 'octo/api',
+        host: 'github.com',
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'group/web',
+        host: 'gitlab.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'environment',
+        environmentId: 'env-1',
+      }),
+    ).resolves.toEqual({
+      'group/web': 'gitlab',
+      'octo/api': 'github',
+    });
   });
 
   it('resolves the provider from a single repository workspace', async () => {
