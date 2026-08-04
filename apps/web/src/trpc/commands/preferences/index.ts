@@ -28,6 +28,10 @@ function normalizePersonalPreferences(
     colorTheme: isPersonalColorTheme(metadata.color_theme)
       ? metadata.color_theme
       : DEFAULT_PERSONAL_PREFERENCES.colorTheme,
+    mindReaderMode:
+      typeof metadata.mind_reader_mode === 'boolean'
+        ? metadata.mind_reader_mode
+        : DEFAULT_PERSONAL_PREFERENCES.mindReaderMode,
     narrationMode:
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
@@ -111,6 +115,10 @@ export async function updatePersonalPreferencesCommand(
 
   if (input.colorTheme !== undefined) {
     nextMetadataRecord.color_theme = input.colorTheme;
+  }
+
+  if (input.mindReaderMode !== undefined) {
+    nextMetadataRecord.mind_reader_mode = input.mindReaderMode;
   }
 
   if (input.narrationMode !== undefined) {

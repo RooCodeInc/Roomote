@@ -43,6 +43,10 @@ function mergeResultForUpdatedFields(
       updates.colorTheme === undefined
         ? mergedPreferences.colorTheme
         : result.colorTheme,
+    mindReaderMode:
+      updates.mindReaderMode === undefined
+        ? mergedPreferences.mindReaderMode
+        : result.mindReaderMode,
     narrationMode:
       updates.narrationMode === undefined
         ? mergedPreferences.narrationMode
@@ -67,6 +71,11 @@ function rollbackUpdatedFields(
       mergedPreferences.colorTheme === optimisticPreferences.colorTheme
         ? previousPreferences.colorTheme
         : mergedPreferences.colorTheme,
+    mindReaderMode:
+      updates.mindReaderMode !== undefined &&
+      mergedPreferences.mindReaderMode === optimisticPreferences.mindReaderMode
+        ? previousPreferences.mindReaderMode
+        : mergedPreferences.mindReaderMode,
     narrationMode:
       updates.narrationMode !== undefined &&
       mergedPreferences.narrationMode === optimisticPreferences.narrationMode
