@@ -33,36 +33,23 @@ export function getEnvironmentDefinitionIdFromPayload(
 export function normalizeRepositorySelection(
   repositories: RepositoryReference[],
 ): string[] {
-  const uniqueRepositories = Array.from(
-    new Map(
-      repositories.map((repository) => [repository.id, repository]),
-    ).values(),
-  );
-
-  return uniqueRepositories
-    .sort(
-      (left, right) =>
-        left.fullName.localeCompare(right.fullName) ||
-        left.id.localeCompare(right.id),
-    )
-    .map((repository) => repository.id);
+  return [...new Set(repositories.map((repository) => repository.id))];
 }
 
 export function buildCreateEnvironmentDefinitionPrompt(
   repositoryFullNames: string[],
   options?: { emptyRepositoryFullNames?: string[] },
 ): string {
-  const sortedRepositories = [...repositoryFullNames].sort((left, right) =>
-    left.localeCompare(right),
-  );
+  const orderedRepositories = [...new Set(repositoryFullNames)];
 
-  const repositoryLines = sortedRepositories
+  const repositoryLines = orderedRepositories
     .map((repositoryFullName) => `- ${repositoryFullName}`)
     .join('\n');
 
-  const emptyRepositories = [...(options?.emptyRepositoryFullNames ?? [])]
-    .filter((fullName) => repositoryFullNames.includes(fullName))
-    .sort((left, right) => left.localeCompare(right));
+  const emptyRepositoryNames = new Set(options?.emptyRepositoryFullNames ?? []);
+  const emptyRepositories = orderedRepositories.filter((fullName) =>
+    emptyRepositoryNames.has(fullName),
+  );
 
   // Restate the skill's empty-repository bootstrap rules inline so a worker
   // whose packaged environment-setup skill predates the bootstrap section
@@ -134,9 +121,7 @@ export function buildEnvironmentDefinitionWorkspacePayload(
   repo: string;
   selectedRepositories?: string[];
 } {
-  const normalizedRepositories = [...new Set(repositoryFullNames)].sort(
-    (left, right) => left.localeCompare(right),
-  );
+  const normalizedRepositories = [...new Set(repositoryFullNames)];
   const primaryRepository = normalizedRepositories[0];
 
   if (!primaryRepository) {

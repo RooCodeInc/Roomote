@@ -97,11 +97,9 @@ export function buildUpdateEnvironmentDefinitionPrompt(input: {
   repositoryFullNames: string[];
   config: EnvironmentConfig;
 }): string {
-  const sortedRepositories = [...input.repositoryFullNames].sort(
-    (left, right) => left.localeCompare(right),
-  );
+  const orderedRepositories = [...new Set(input.repositoryFullNames)];
 
-  const repositoryLines = sortedRepositories
+  const repositoryLines = orderedRepositories
     .map((repositoryFullName) => `- ${repositoryFullName}`)
     .join('\n');
 

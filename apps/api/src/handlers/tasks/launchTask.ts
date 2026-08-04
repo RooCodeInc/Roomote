@@ -43,7 +43,7 @@ function normalizeRepositoryFullNames(body: TaskLaunchRequest): string[] {
         body.repo && body.repo !== ALL_REPOSITORIES ? body.repo : null,
       ].filter((value): value is string => Boolean(value)),
     ),
-  ].sort((left, right) => left.localeCompare(right));
+  ];
 }
 
 async function validateSelectedRepositories(
@@ -88,20 +88,6 @@ async function validateSelectedRepositories(
   return null;
 }
 
-function resolveSingleSourceControlProvider(
-  providers: SourceControlProvider[],
-): SourceControlProvider | undefined {
-  const uniqueProviders = [...new Set(providers)];
-
-  if (uniqueProviders.length > 1) {
-    throw new Error(
-      'Selected repositories must belong to a single source control provider.',
-    );
-  }
-
-  return uniqueProviders[0];
-}
-
 async function resolveLaunchSourceControlProvider({
   repositoryFullNames,
   environmentId,
@@ -110,22 +96,22 @@ async function resolveLaunchSourceControlProvider({
   environmentId: string | undefined;
 }): Promise<SourceControlProvider | undefined> {
   if (repositoryFullNames.length > 0) {
-    const rows = await db
-      .select({ sourceControlProvider: repositories.sourceControlProvider })
-      .from(repositories)
-      .where(
-        and(
-          eq(repositories.isActive, true),
-          inArray(repositories.fullName, repositoryFullNames),
-        ),
-      );
-    const provider = resolveSingleSourceControlProvider(
-      rows.map((row) => row.sourceControlProvider),
+    const repositoryProviders = await resolveWorkspaceRepositoryProviders(db, {
+      type: 'repository_set',
+      repositories: repositoryFullNames,
+    });
+    const unresolvedRepositories = repositoryFullNames.filter(
+      (repositoryFullName) =>
+        repositoryProviders[repositoryFullName] === undefined,
     );
 
-    if (provider) {
-      return provider;
+    if (unresolvedRepositories.length > 0) {
+      throw new Error(
+        `Could not unambiguously resolve source control for: ${unresolvedRepositories.join(', ')}`,
+      );
     }
+
+    return Object.values(repositoryProviders)[0];
   }
 
   if (environmentId) {

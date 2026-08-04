@@ -356,15 +356,16 @@ describe('launchTask', () => {
     expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
   });
 
-  it('rejects launches whose selected repositories span multiple providers', async () => {
+  it('allows selected repositories that span multiple providers', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 105, taskId: 'task-mixed-set' });
     mockRepositoriesFindMany.mockResolvedValue([
       { fullName: 'octo/github-repo', installationId: 1 },
       { fullName: 'group/gitlab-repo', installationId: null },
     ]);
-    mockSelectRows.mockReturnValue([
-      { sourceControlProvider: 'github' },
-      { sourceControlProvider: 'gitlab' },
-    ]);
+    mockResolveWorkspaceRepositoryProviders.mockResolvedValue({
+      'octo/github-repo': 'github',
+      'group/gitlab-repo': 'gitlab',
+    });
 
     const app = createApp(authContext);
     const response = await app.request(
@@ -378,11 +379,43 @@ describe('launchTask', () => {
       }),
     );
 
-    expect(response.status).toBe(400);
-    const json = (await response.json()) as { error: string };
-    expect(json.error).toBe(
-      'Selected repositories must belong to a single source control provider.',
+    expect(response.status).toBe(200);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            selectedRepositories: ['octo/github-repo', 'group/gitlab-repo'],
+            sourceControlProvider: 'github',
+          }),
+        }),
+      }),
+      expect.anything(),
     );
+  });
+
+  it('rejects selected repositories whose source control is ambiguous', async () => {
+    mockRepositoriesFindMany.mockResolvedValue([
+      { fullName: 'group/project', installationId: null },
+    ]);
+    mockResolveWorkspaceRepositoryProviders.mockResolvedValue({});
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Ship a change',
+          selectedRepositories: ['group/project'],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'Could not unambiguously resolve source control for: group/project',
+    });
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 

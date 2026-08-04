@@ -25,7 +25,7 @@ import {
 } from '@roomote/types';
 
 import { getLatestTaskRunsByTaskId } from '@/lib/server';
-import { resolveSingleSourceControlProvider } from '@/lib/server/source-control-provider';
+import { resolvePrimarySourceControlProvider } from '@/lib/server/source-control-provider';
 import type { UserAuthSuccess } from '@/types';
 import { assertAdmin } from '../setup/shared';
 import { decorateSuggestionsWithEnvironmentIds } from './launch-resolution';
@@ -141,7 +141,7 @@ async function launchSuggestedTasksTask(input: {
     .select({ sourceControlProvider: repositories.sourceControlProvider })
     .from(repositories)
     .where(inArray(repositories.fullName, input.repositoryFullNames));
-  const scanSourceControlProvider = resolveSingleSourceControlProvider(
+  const scanSourceControlProvider = resolvePrimarySourceControlProvider(
     scanRepositoryRows.map((row) => row.sourceControlProvider),
   );
   const launchResult = await enqueueTask(

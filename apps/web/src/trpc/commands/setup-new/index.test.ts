@@ -1219,7 +1219,7 @@ describe('setup-new onboarding task start command', () => {
     ]);
     vi.mocked(buildSetupNewWorkspacePayload).mockReturnValue({
       repo: ALL_REPOSITORIES,
-      selectedRepositories: ['group/web', 'octo/api'],
+      selectedRepositories: ['octo/api', 'group/web'],
     });
     mockOnboardingTransaction({
       slackInstallation: null,
@@ -1232,7 +1232,7 @@ describe('setup-new onboarding task start command', () => {
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
-            sourceControlProvider: 'gitlab',
+            sourceControlProvider: 'github',
           }),
         }),
       }),

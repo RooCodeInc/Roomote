@@ -2,28 +2,40 @@ import type { SourceControlProvider } from '@roomote/types';
 import { db, resolveWorkspaceRepositoryProviders } from '@roomote/db/server';
 
 /**
- * Resolve the single provider a launch's explicitly selected repositories
- * belong to, so the task payload can carry an explicit `sourceControlProvider`.
- * Without it, dequeue falls back to the GitHub default and non-GitHub
- * deployments fail source control token creation.
- *
- * This is the web launch-validation path: it THROWS when the selection spans
- * multiple providers, surfacing a clear error before enqueue. This differs from
- * the shared {@link resolveWorkspaceSourceControlProvider}, which returns
- * `undefined` on ambiguity and defers to the downstream GitHub fallback.
+ * Resolve the primary provider for an explicitly selected repository set.
+ * Mixed-provider sets are supported; the queue stamps the complete provider
+ * map before persistence.
  */
-export function resolveSingleSourceControlProvider(
-  providers: SourceControlProvider[],
+export function resolveSelectedRepositorySourceControlProvider(
+  repositories: Array<{
+    fullName: string;
+    sourceControlProvider: SourceControlProvider;
+  }>,
+  repositoryOrder: string[],
 ): SourceControlProvider | undefined {
-  const uniqueProviders = [...new Set(providers)];
-
-  if (uniqueProviders.length > 1) {
-    throw new Error(
-      'Selected repositories must belong to a single source control provider.',
+  for (const repositoryFullName of repositoryOrder) {
+    const matches = repositories.filter(
+      (repository) => repository.fullName === repositoryFullName,
     );
+
+    if (matches.length > 1) {
+      throw new Error(
+        `Could not unambiguously resolve source control for: ${repositoryFullName}`,
+      );
+    }
+
+    if (matches[0]) {
+      return matches[0].sourceControlProvider;
+    }
   }
 
-  return uniqueProviders[0];
+  return undefined;
+}
+
+export function resolvePrimarySourceControlProvider(
+  providers: SourceControlProvider[],
+): SourceControlProvider | undefined {
+  return providers[0];
 }
 
 /**

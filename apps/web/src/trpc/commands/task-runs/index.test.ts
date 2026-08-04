@@ -324,4 +324,39 @@ describe('createStandardTaskRunCommand', () => {
       }),
     );
   });
+
+  it('allows mixed selected repositories and keeps selection order for the primary provider', async () => {
+    mockGetRepositories.mockResolvedValue([
+      {
+        id: 'repo-github',
+        fullName: 'octo/api',
+        sourceControlProvider: 'github',
+      },
+      {
+        id: 'repo-gitlab',
+        fullName: 'group/web',
+        sourceControlProvider: 'gitlab',
+      },
+    ]);
+
+    const result = await createStandardTaskRunCommand(auth, {
+      payload: {
+        repo: ALL_REPOSITORIES,
+        selectedRepositories: ['octo/api', 'group/web'],
+        description: 'Update selected repositories',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            selectedRepositories: ['octo/api', 'group/web'],
+            sourceControlProvider: 'github',
+          }),
+        }),
+      }),
+    );
+  });
 });

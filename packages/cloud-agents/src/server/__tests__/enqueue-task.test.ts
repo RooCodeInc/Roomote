@@ -15,6 +15,7 @@ vi.mock('../llm-task-title', async (importOriginal) => ({
 }));
 
 import {
+  ALL_REPOSITORIES,
   type TaskSpec,
   type SnapshotResumeTask,
   RunStatus,
@@ -1407,6 +1408,48 @@ describe('enqueueTask source-control provider stamping', () => {
       repositoryProviders: {
         'group/mixed-api': 'gitlab',
         'acme/Platform/mixed-web': 'ado',
+      },
+    });
+  });
+
+  it('stamps mixed selected repositories in selection order', async () => {
+    const userId = await createUser();
+    const gitLabRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: userId,
+      fullName: 'group/selected-web',
+      isActive: true,
+    });
+    const adoRepository = await repositoryFactory.create({
+      sourceControlProvider: 'ado',
+      linkedByUserId: userId,
+      fullName: 'acme/Platform/selected-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(gitLabRepository.id, adoRepository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: [
+            'group/selected-web',
+            'acme/Platform/selected-api',
+          ],
+          description: 'Work across selected providers',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload).toMatchObject({
+      sourceControlProvider: 'gitlab',
+      repositoryProviders: {
+        'group/selected-web': 'gitlab',
+        'acme/Platform/selected-api': 'ado',
       },
     });
   });

@@ -305,9 +305,7 @@ async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
 
   return {
     normalizedRepositoryIds: normalizeRepositorySelection(selectedRepositories),
-    selectedRepositories: selectedRepositories.sort((left, right) =>
-      left.fullName.localeCompare(right.fullName),
-    ),
+    selectedRepositories,
   };
 }
 

@@ -155,11 +155,11 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
     expect(result.taskId).toBe('task-env-definition-1');
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'Set up the api + web environment',
+        title: 'Set up the web + api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
-            selectedRepositories: ['acme/api', 'acme/web'],
+            selectedRepositories: ['acme/web', 'acme/api'],
           }),
         }),
         initiator: { kind: 'user', userId: 'user-1' },
@@ -203,7 +203,7 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
     });
 
     expect(mockGetRepositoryEmptyStates).toHaveBeenCalledWith({
-      repositoryIds: ['repo-1', 'repo-2'],
+      repositoryIds: ['repo-2', 'repo-1'],
     });
 
     const enqueueInput = mockEnqueueTask.mock.calls[0]?.[0] as {

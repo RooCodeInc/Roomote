@@ -36,7 +36,7 @@ import type { UserAuthSuccess } from '@/types';
 import { Env, getArtifactById, getRepositories } from '@/lib/server';
 import {
   resolveEnvironmentSourceControlProvider,
-  resolveSingleSourceControlProvider,
+  resolveSelectedRepositorySourceControlProvider,
 } from '@/lib/server/source-control-provider';
 import { humanizeFilename } from '@/lib/task-utils';
 
@@ -59,9 +59,7 @@ function getManualTaskRepositoryFullNames(
   payload: TaskPayload<typeof TaskPayloadKind.StandardTask>,
 ) {
   if (payload.selectedRepositories?.length) {
-    return [...new Set(payload.selectedRepositories.filter(Boolean))].sort(
-      (left, right) => left.localeCompare(right),
-    );
+    return [...new Set(payload.selectedRepositories.filter(Boolean))];
   }
 
   if (payload.repo && payload.repo !== ALL_REPOSITORIES) {
@@ -362,10 +360,9 @@ export async function createStandardTaskRunCommand(
     );
     const sourceControlProvider =
       input.payload.sourceControlProvider ??
-      resolveSingleSourceControlProvider(
-        selectedRepositories.map(
-          (repository) => repository.sourceControlProvider,
-        ),
+      resolveSelectedRepositorySourceControlProvider(
+        selectedRepositories,
+        selectedRepositoryFullNames,
       ) ??
       (await resolveEnvironmentSourceControlProvider(
         input.payload.environmentId,

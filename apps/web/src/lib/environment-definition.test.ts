@@ -4,6 +4,7 @@ import {
   buildCreateEnvironmentDefinitionPrompt,
   RunStatus,
   getEnvironmentDefinitionIdFromPayload,
+  normalizeRepositorySelection,
   type EnvironmentConfig,
 } from '@roomote/types';
 
@@ -36,14 +37,14 @@ describe('environment definition helpers', () => {
     );
   });
 
-  it('builds the create prompt with the environment-setup skill and sorted repositories', () => {
+  it('builds the create prompt with repositories in selection order', () => {
     const prompt = buildCreateEnvironmentDefinitionPrompt([
       'acme/web',
       'acme/api',
     ]);
 
     expect(prompt).toContain('$environment-setup');
-    expect(prompt).toContain('- acme/api\n- acme/web');
+    expect(prompt).toContain('- acme/web\n- acme/api');
     expect(prompt).toContain(
       'Do not mock or stub required services just to make the environment appear to work.',
     );
@@ -107,8 +108,18 @@ describe('environment definition helpers', () => {
       buildEnvironmentDefinitionWorkspacePayload(['acme/web', 'acme/api']),
     ).toEqual({
       repo: '__all_repositories__',
-      selectedRepositories: ['acme/api', 'acme/web'],
+      selectedRepositories: ['acme/web', 'acme/api'],
     });
+  });
+
+  it('deduplicates repository selections without changing their order', () => {
+    expect(
+      normalizeRepositorySelection([
+        { id: 'repo-web', fullName: 'acme/web' },
+        { id: 'repo-api', fullName: 'acme/api' },
+        { id: 'repo-web', fullName: 'acme/web' },
+      ]),
+    ).toEqual(['repo-web', 'repo-api']);
   });
 
   it('builds the update prompt with the existing environment context', () => {
@@ -123,6 +134,9 @@ describe('environment definition helpers', () => {
       'Update the existing Roomote environment definition instead of creating a new one.',
     );
     expect(prompt).toContain('- ID: env-123');
+    expect(prompt).toContain(
+      'Repositories to inspect:\n- acme/web\n- acme/api',
+    );
     expect(prompt).toContain(
       'Keep the existing environment name unless the user explicitly asked to rename it.',
     );
