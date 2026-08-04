@@ -44,6 +44,7 @@ import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 export type DequeuedTaskContext = {
   id: string;
   title: string;
+  workflow: Task['workflow'];
   /** The initial task prompt (tasks.prompt); per-attempt prompt is top-level. */
   prompt: string | null;
   harnessInstructions: string | null;
@@ -59,6 +60,7 @@ export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
   return {
     id: task.id,
     title: task.title,
+    workflow: task.workflow,
     prompt: task.prompt ?? null,
     harnessInstructions: task.harnessInstructions ?? null,
     requestedWorkKind: task.requestedWorkKind,

@@ -665,6 +665,7 @@ export async function startPreviewSetupTaskCommand(
           repo: ALL_REPOSITORIES,
           environmentId: environment.id,
           environmentDefinitionId: environment.id,
+          environmentManagementMode: 'update',
           description: prompt,
         },
       },

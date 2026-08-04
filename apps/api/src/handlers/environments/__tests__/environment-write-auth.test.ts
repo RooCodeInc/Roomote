@@ -106,6 +106,13 @@ describe.each([
   beforeEach(() => {
     vi.clearAllMocks();
     mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
+    mockTaskRunFindFirst.mockResolvedValue({
+      payloadKind: 'standard',
+      payload: {
+        environmentManagementMode: method === 'POST' ? 'create' : 'update',
+      },
+      task: { workflow: 'setup_onboarding' },
+    });
   });
 
   it('rejects a deployment-principal run token with no live acting user', async () => {
@@ -213,6 +220,34 @@ describe.each([
     expect(response.status).toBe(403);
     expect(mockUsersFindFirst).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ['ordinary task', 'standard', {}],
+    [
+      'snapshot resume',
+      'snapshot_resume',
+      { environmentManagementMode: method === 'POST' ? 'create' : 'update' },
+    ],
+  ])(
+    'rejects an admin run token from an %s',
+    async (_label, payloadKind, payload) => {
+      mockTaskRunFindFirst
+        .mockResolvedValueOnce({ actingUserId: 'user-live-admin' })
+        .mockResolvedValueOnce({
+          payloadKind,
+          payload,
+          task: { workflow: 'standard' },
+        });
+
+      const app = createApp(deploymentRunToken());
+      const response = await app.request(invalidBodyRequest(method, path));
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: 'This task is not allowed to perform that environment action.',
+      });
+    },
+  );
 });
 
 describe.each([
@@ -273,6 +308,12 @@ describe('createEnvironment attribution', () => {
     // attachEnvironmentIdToTaskRun payload sync, which can no-op.
     mockTaskRunFindFirst
       .mockResolvedValueOnce({ actingUserId: 'user-live' })
+      .mockResolvedValueOnce({
+        payloadKind: 'standard',
+        payload: { environmentManagementMode: 'create' },
+        task: { workflow: 'setup_onboarding' },
+      })
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
 
     const app = createApp({

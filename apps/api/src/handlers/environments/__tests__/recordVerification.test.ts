@@ -79,7 +79,9 @@ describe('recordVerification', () => {
   it('records a successful verification for a task marked to verify the environment', async () => {
     mockTaskRunFindFirst.mockResolvedValueOnce({
       taskId: 'task-abc',
+      payloadKind: 'standard',
       payload: { verifiesEnvironmentId: 'env-1' },
+      task: { workflow: 'standard' },
     });
 
     const app = createApp(runToken());
@@ -106,7 +108,9 @@ describe('recordVerification', () => {
   it('authorizes the environment-setup task via the environmentDefinitionId marker', async () => {
     mockTaskRunFindFirst.mockResolvedValueOnce({
       taskId: 'task-setup',
+      payloadKind: 'standard',
       payload: { environmentDefinitionId: 'env-1' },
+      task: { workflow: 'setup_onboarding' },
     });
 
     const app = createApp(runToken());
@@ -125,10 +129,45 @@ describe('recordVerification', () => {
     );
   });
 
+  it.each([
+    [
+      'ordinary task',
+      'standard',
+      { environmentDefinitionId: 'env-1' },
+      'standard',
+    ],
+    [
+      'snapshot resume',
+      'snapshot_resume',
+      { environmentManagementMode: 'verify', verifiesEnvironmentId: 'env-1' },
+      'standard',
+    ],
+  ])(
+    'rejects verification from an %s',
+    async (_label, payloadKind, payload, workflow) => {
+      mockTaskRunFindFirst.mockResolvedValueOnce({
+        taskId: 'task-denied',
+        payloadKind,
+        payload,
+        task: { workflow },
+      });
+
+      const app = createApp(runToken());
+      const response = await app.request(
+        verificationRequest('env-1', { success: true }),
+      );
+
+      expect(response.status).toBe(403);
+      expect(mockRecordEnvironmentVerification).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects a task that is not authorized for the target environment', async () => {
     mockTaskRunFindFirst.mockResolvedValueOnce({
       taskId: 'task-other',
+      payloadKind: 'standard',
       payload: { verifiesEnvironmentId: 'env-other' },
+      task: { workflow: 'standard' },
     });
 
     const app = createApp(runToken());
@@ -159,7 +198,9 @@ describe('recordVerification', () => {
   it('returns 409 when the verification attempt is superseded', async () => {
     mockTaskRunFindFirst.mockResolvedValueOnce({
       taskId: 'task-stale',
+      payloadKind: 'standard',
       payload: { verifiesEnvironmentId: 'env-1' },
+      task: { workflow: 'standard' },
     });
     mockRecordEnvironmentVerification.mockResolvedValueOnce({
       recorded: false,

@@ -2764,6 +2764,7 @@ export async function startSetupNewOnboardingTaskCommand(
                 type: TaskPayloadKind.StandardTask,
                 payload: {
                   ...workspacePayload,
+                  environmentManagementMode: 'create',
                   ...(setupSourceControlProvider
                     ? { sourceControlProvider: setupSourceControlProvider }
                     : {}),
@@ -2852,6 +2853,7 @@ export async function startSetupNewOnboardingTaskCommand(
             type: TaskPayloadKind.StandardTask,
             payload: {
               ...workspacePayload,
+              environmentManagementMode: 'create',
               ...(setupSourceControlProvider
                 ? { sourceControlProvider: setupSourceControlProvider }
                 : {}),
@@ -2933,6 +2935,7 @@ export async function startSetupNewOnboardingTaskCommand(
             type: TaskPayloadKind.SlackAppMention,
             payload: {
               ...workspacePayload,
+              environmentManagementMode: 'create',
               ...(setupSourceControlProvider
                 ? { sourceControlProvider: setupSourceControlProvider }
                 : {}),

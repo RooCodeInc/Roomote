@@ -21,9 +21,11 @@ import { logHandlerError } from '../utils';
 import {
   DUPLICATE_ENVIRONMENT_NAME_ERROR,
   ENVIRONMENT_ADMIN_REQUIRED_ERROR,
+  ENVIRONMENT_TASK_CAPABILITY_ERROR,
   EVAL_ENVIRONMENT_WRITE_ERROR,
   attachEnvironmentIdToTaskRun,
   canAdministerEnvironments,
+  canTaskRunManageEnvironments,
   getEnvironmentRepositoryConfigError,
   isEnvironmentNameUniqueViolation,
   resolveCallingVerificationTaskId,
@@ -48,6 +50,10 @@ export async function updateEnvironment(
 
   if (!userId || !(await canAdministerEnvironments(userId))) {
     return c.json({ error: ENVIRONMENT_ADMIN_REQUIRED_ERROR }, 403);
+  }
+
+  if (!(await canTaskRunManageEnvironments(auth, 'update'))) {
+    return c.json({ error: ENVIRONMENT_TASK_CAPABILITY_ERROR }, 403);
   }
 
   const id = c.req.param('id');

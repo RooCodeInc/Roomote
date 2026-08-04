@@ -13,12 +13,15 @@ import {
   users,
 } from '@roomote/db/server';
 import {
+  type EnvironmentManagementAction,
   type TaskPayload,
+  canPerformEnvironmentManagementAction,
   environmentConfigSchema,
   getAmbiguousEnvironmentRepositoryError,
   getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
   getEnvironmentRepositoryInstallationError,
+  resolveEnvironmentManagementMode,
 } from '@roomote/types';
 import { captureActivationEnvironmentSaved } from '@roomote/telemetry/server';
 
@@ -35,6 +38,8 @@ export const EVAL_ENVIRONMENT_WRITE_ERROR =
   'isEval is reserved for internal eval environments.';
 export const ENVIRONMENT_ADMIN_REQUIRED_ERROR =
   'Admin access is required to create or update environments.';
+export const ENVIRONMENT_TASK_CAPABILITY_ERROR =
+  'This task is not allowed to perform that environment action.';
 
 type PostgresErrorLike = {
   code?: string;
@@ -140,6 +145,39 @@ export async function canAdministerEnvironments(
   return user?.role === 'admin' && user.deletedAt == null;
 }
 
+export async function canTaskRunManageEnvironments(
+  auth: McpAuth,
+  action: EnvironmentManagementAction,
+): Promise<boolean> {
+  if (auth.authContext.tokenType !== 'run') {
+    return true;
+  }
+
+  const runId = extractRunId(auth);
+  if (!runId) {
+    return false;
+  }
+
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
+    columns: { payload: true, payloadKind: true },
+    with: { task: { columns: { workflow: true } } },
+  });
+
+  if (!taskRun) {
+    return false;
+  }
+
+  return canPerformEnvironmentManagementAction(
+    resolveEnvironmentManagementMode({
+      payloadKind: taskRun.payloadKind,
+      payload: taskRun.payload,
+      workflow: taskRun.task.workflow,
+    }),
+    action,
+  );
+}
+
 /**
  * When environment creation/update is triggered by a running task run, persist
  * the resulting environment id on that job payload so the UI can resolve
@@ -232,6 +270,10 @@ export async function createEnvironment(
 
   if (!userId || !(await canAdministerEnvironments(userId))) {
     return c.json({ error: ENVIRONMENT_ADMIN_REQUIRED_ERROR }, 403);
+  }
+
+  if (!(await canTaskRunManageEnvironments(auth, 'create'))) {
+    return c.json({ error: ENVIRONMENT_TASK_CAPABILITY_ERROR }, 403);
   }
 
   let body: unknown;

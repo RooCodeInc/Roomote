@@ -176,6 +176,7 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
             selectedRepositories: ['acme/web', 'acme/api'],
+            environmentManagementMode: 'create',
           }),
         }),
         initiator: { kind: 'user', userId: 'user-1' },
@@ -313,6 +314,7 @@ describe('retryEnvironmentVerificationCommand', () => {
           payload: expect.objectContaining({
             environmentId: 'env-1',
             verifiesEnvironmentId: 'env-1',
+            environmentManagementMode: 'verify',
           }),
         }),
         workflow: 'standard',
