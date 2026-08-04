@@ -47,6 +47,8 @@ type DispatchDependencies = {
   /** The bot's managed role id for a guild, when known. */
   getBotRoleId?: (guildId: string) => string | null | undefined;
   getBotUsername?: () => string | undefined;
+  /** Stable across resumes, distinct after Discord creates a new session. */
+  getSessionDedupeScope?: () => string | undefined;
   /**
    * Forward an unmentioned guild message when Gateway channel metadata could
    * not be resolved. The durable API consumer performs its own authoritative
@@ -286,6 +288,7 @@ export async function handleGatewayDispatch(
     typeof packet.s === 'number' && Number.isSafeInteger(packet.s)
       ? packet.s
       : null;
+  const sessionDedupeScope = dependencies.getSessionDedupeScope?.();
   const reactionEventId =
     eventType === 'MESSAGE_REACTION_ADD' &&
     dispatchSequence !== null &&
@@ -298,6 +301,7 @@ export async function handleGatewayDispatch(
           payload.message_id,
           payload.user_id,
           payload.emoji.id ?? payload.emoji.name,
+          ...(sessionDedupeScope ? [sessionDedupeScope] : []),
           dispatchSequence,
         ].join(':')
       : null;

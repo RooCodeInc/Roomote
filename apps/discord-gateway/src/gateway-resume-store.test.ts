@@ -52,6 +52,35 @@ describe('DiscordGatewayResumeStore', () => {
     });
   });
 
+  it('keeps the session dedupe scope stable across process restarts', async () => {
+    const firstStore = new DiscordGatewayResumeStore(
+      'fingerprint',
+      createRepository(),
+      60_000,
+    );
+    const secondStore = new DiscordGatewayResumeStore(
+      'fingerprint',
+      createRepository(),
+      60_000,
+    );
+
+    await firstStore.retrieve(0);
+    await secondStore.retrieve(0);
+
+    expect(firstStore.getSessionDedupeScope(0)).toBe(
+      secondStore.getSessionDedupeScope(0),
+    );
+    expect(firstStore.getSessionDedupeScope(0)).not.toContain('session-1');
+
+    await secondStore.update(0, {
+      ...persistedSession,
+      sessionId: 'session-2',
+    });
+    expect(secondStore.getSessionDedupeScope(0)).not.toBe(
+      firstStore.getSessionDedupeScope(0),
+    );
+  });
+
   it('persists a new session immediately and checkpoints only acknowledged dispatches', async () => {
     const repository = createRepository();
     repository.find.mockResolvedValueOnce(null);

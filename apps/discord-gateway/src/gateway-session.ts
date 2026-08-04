@@ -184,6 +184,8 @@ export class DiscordGatewaySession {
         await handleGatewayDispatch(data, {
           getBotRoleId: (guildId) => this.botRoleIds.get(guildId),
           getBotUsername: () => this.botUsername,
+          getSessionDedupeScope: () =>
+            resumeStore.getSessionDedupeScope(shardId),
           rest,
           getBotUserId: () => this.botUserId,
           getCachedChannel: (channelId) => this.channelCache.get(channelId),

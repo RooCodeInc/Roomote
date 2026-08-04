@@ -179,6 +179,56 @@ describe('DiscordGatewaySession durable resume wiring', () => {
       sequence: 43,
     });
 
+    const reactionPayload = {
+      user_id: 'user-1',
+      channel_id: 'dm-1',
+      message_id: 'message-1',
+      emoji: { id: null, name: 'white_check_mark' },
+    };
+    await activeManagerOptions.updateSessionInfo(0, {
+      ...persisted,
+      sequence: 44,
+    });
+    const firstSessionScope = resumeStore.getSessionDedupeScope(0);
+    await listeners.get(WebSocketShardEvents.Dispatch)?.({
+      shardId: 0,
+      data: {
+        op: 0,
+        s: 44,
+        t: 'MESSAGE_REACTION_ADD',
+        d: reactionPayload,
+      },
+    });
+    expect(queue.enqueue).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        eventId: `dm-1:message-1:user-1:white_check_mark:${firstSessionScope}:44`,
+      }),
+    );
+
+    await activeManagerOptions.updateSessionInfo(0, {
+      ...persisted,
+      sessionId: 'session-2',
+      sequence: 44,
+    });
+    const secondSessionScope = resumeStore.getSessionDedupeScope(0);
+    expect(secondSessionScope).not.toBe(firstSessionScope);
+    await listeners.get(WebSocketShardEvents.Dispatch)?.({
+      shardId: 0,
+      data: {
+        op: 0,
+        s: 44,
+        t: 'MESSAGE_REACTION_ADD',
+        d: reactionPayload,
+      },
+    });
+    expect(queue.enqueue).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        eventId: `dm-1:message-1:user-1:white_check_mark:${secondSessionScope}:44`,
+      }),
+    );
+
     await session.disconnect();
 
     expect(destroy).toHaveBeenCalledOnce();
@@ -215,6 +265,7 @@ describe('DiscordGatewaySession durable resume wiring', () => {
     const resumeStore = {
       retrieve: vi.fn(async () => null),
       update: vi.fn(async () => undefined),
+      getSessionDedupeScope: vi.fn(() => 'session-scope'),
       acknowledgeDispatch: vi.fn(() => true),
       recordHeartbeat: vi.fn(async () => undefined),
       flush: vi.fn(async () => undefined),

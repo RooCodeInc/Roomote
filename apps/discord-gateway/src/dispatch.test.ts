@@ -67,12 +67,17 @@ describe('handleGatewayDispatch', () => {
     await expect(
       handleGatewayDispatch(
         { t: 'MESSAGE_REACTION_ADD', s: 42, d: payload },
-        { enqueue, rest, now },
+        {
+          enqueue,
+          rest,
+          now,
+          getSessionDedupeScope: () => 'session-a',
+        },
       ),
     ).resolves.toBe('enqueued');
 
     expect(enqueue).toHaveBeenCalledWith({
-      eventId: 'channel-1:message-1:user-1:white_check_mark:42',
+      eventId: 'channel-1:message-1:user-1:white_check_mark:session-a:42',
       eventType: 'MESSAGE_REACTION_ADD',
       payload,
       receivedAt: '2026-07-12T12:00:00.000Z',
@@ -87,6 +92,12 @@ describe('handleGatewayDispatch', () => {
       return true;
     });
     const rest = { post: vi.fn() };
+    const dependencies = {
+      enqueue,
+      rest,
+      now,
+      getSessionDedupeScope: () => 'session-a',
+    };
     const payload = {
       user_id: 'user-1',
       channel_id: 'channel-1',
@@ -97,19 +108,28 @@ describe('handleGatewayDispatch', () => {
     await expect(
       handleGatewayDispatch(
         { t: 'MESSAGE_REACTION_ADD', s: 42, d: payload },
-        { enqueue, rest, now },
+        dependencies,
       ),
     ).resolves.toBe('enqueued');
     await expect(
       handleGatewayDispatch(
         { t: 'MESSAGE_REACTION_ADD', s: 42, d: payload },
-        { enqueue, rest, now },
+        dependencies,
       ),
     ).resolves.toBe('duplicate');
     await expect(
       handleGatewayDispatch(
         { t: 'MESSAGE_REACTION_ADD', s: 43, d: payload },
-        { enqueue, rest, now },
+        dependencies,
+      ),
+    ).resolves.toBe('enqueued');
+    await expect(
+      handleGatewayDispatch(
+        { t: 'MESSAGE_REACTION_ADD', s: 42, d: payload },
+        {
+          ...dependencies,
+          getSessionDedupeScope: () => 'session-b',
+        },
       ),
     ).resolves.toBe('enqueued');
   });
