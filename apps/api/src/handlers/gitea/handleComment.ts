@@ -369,7 +369,7 @@ async function handleGiteaIssueComment({
       body:
         targetsResult.status === 'error' &&
         targetsResult.code === 'account_link_required'
-          ? buildSourceControlAccountLinkRequiredMessage('gitea')
+          ? await buildSourceControlAccountLinkRequiredMessage('gitea')
           : buildIssueGateMissComment(),
     });
 
@@ -465,7 +465,7 @@ async function handleGiteaPullRequestComment({
       body:
         targetsResult.status === 'error' &&
         targetsResult.code === 'account_link_required'
-          ? buildSourceControlAccountLinkRequiredMessage('gitea')
+          ? await buildSourceControlAccountLinkRequiredMessage('gitea')
           : targetsResult.status === 'error' &&
               targetsResult.message.includes('no environment mapping')
             ? buildSourceControlEnvironmentRequiredMessage('gitea')

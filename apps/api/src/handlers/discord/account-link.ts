@@ -8,6 +8,7 @@ import { Env } from '@roomote/env';
 import { getRedis } from '@roomote/redis';
 
 import { apiLogger } from '../../logging.js';
+import { appendAccountLinkHelpText } from '../account-link-help.js';
 import { replyToDiscordEvent } from './replies.js';
 import type { DiscordChannelContext } from './task-launch.js';
 
@@ -34,17 +35,21 @@ export function buildDiscordAccountLinkFallbackInstruction(): string {
   return `Generate a code under ${formatDiscordLinkedAccountsPath()}, then ${DISCORD_LINK_CODE_INSTRUCTION}.`;
 }
 
-export function buildDiscordLinkRequiredMessage(): string {
-  return `Link your Discord account to Roomote before starting tasks. ${buildDiscordAccountLinkFallbackInstruction()}`;
+export async function buildDiscordLinkRequiredMessage(): Promise<string> {
+  return appendAccountLinkHelpText(
+    `Link your Discord account to Roomote before starting tasks. ${buildDiscordAccountLinkFallbackInstruction()}`,
+  );
 }
 
-export function buildDiscordChannelAutoStartLinkMessage(
+export async function buildDiscordChannelAutoStartLinkMessage(
   channelName: string,
-): string {
-  return [
-    `Roomote watches **#${channelName}** and starts a task for each new message, but your Discord account is not linked to a Roomote account yet, so your message did not start one.`,
-    `Generate a code under ${formatDiscordLinkedAccountsPath()} in Roomote, then reply here with \`/link code:<code>\`.`,
-  ].join('\n\n');
+): Promise<string> {
+  return appendAccountLinkHelpText(
+    [
+      `Roomote watches **#${channelName}** and starts a task for each new message, but your Discord account is not linked to a Roomote account yet, so your message did not start one.`,
+      `Generate a code under ${formatDiscordLinkedAccountsPath()} in Roomote, then reply here with \`/link code:<code>\`.`,
+    ].join('\n\n'),
+  );
 }
 
 // One link DM per user per day across every entry path (mentions, slash
@@ -243,7 +248,7 @@ export async function promptDiscordAccountLink(input: {
       applicationId: input.applicationId,
       channel: input.channel,
       ...(input.interaction ? { interaction: input.interaction } : {}),
-      text: buildDiscordLinkRequiredMessage(),
+      text: await buildDiscordLinkRequiredMessage(),
       ...(input.replyToMessageId
         ? { replyToMessageId: input.replyToMessageId }
         : {}),
@@ -296,7 +301,7 @@ export async function promptDiscordAccountLink(input: {
       );
       await input.provider.postMessage({
         channelId: dmChannel.id,
-        text: buildDiscordLinkRequiredMessage(),
+        text: await buildDiscordLinkRequiredMessage(),
       });
       dmPromptSent = true;
       if (slot === 'claimed') {
@@ -332,7 +337,9 @@ export async function promptDiscordAccountLink(input: {
     text: buildAccountLinkThreadReplyText({
       dmPromptSent,
       accountLabel: DISCORD_ACCOUNT_LABEL,
-      fallbackInstruction: buildDiscordAccountLinkFallbackInstruction(),
+      fallbackInstruction: await appendAccountLinkHelpText(
+        buildDiscordAccountLinkFallbackInstruction(),
+      ),
     }),
     ...(input.replyToMessageId
       ? { replyToMessageId: input.replyToMessageId }

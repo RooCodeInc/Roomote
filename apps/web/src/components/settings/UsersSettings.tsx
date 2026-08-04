@@ -39,6 +39,7 @@ import {
   Users,
 } from '@/components/system';
 import { Section } from '@/components/settings';
+import { AccountLinkHelpSection } from './AccountLinkHelpSection';
 import { formatDistanceToNow } from 'date-fns';
 
 const LICENSE_PURCHASE_URL =
@@ -620,6 +621,8 @@ export function UsersSettings() {
           clean.
         </p>
       </Section>
+
+      <AccountLinkHelpSection />
 
       <Dialog
         open={pendingInviteRemoval != null}

@@ -39,6 +39,7 @@ const {
   updateReturningMock,
   usersFindFirstMock,
   telegramMappingsFindFirstMock,
+  appendAccountLinkHelpTextMock,
 } = vi.hoisted(() => ({
   addReactionMock: vi.fn(),
   answerCallbackQueryMock: vi.fn(),
@@ -82,10 +83,15 @@ const {
   updateReturningMock: vi.fn(),
   usersFindFirstMock: vi.fn(),
   telegramMappingsFindFirstMock: vi.fn(),
+  appendAccountLinkHelpTextMock: vi.fn(async (message: string) => message),
 }));
 
 vi.mock('@roomote/env', () => ({
   Env: envMock,
+}));
+
+vi.mock('../../account-link-help.js', () => ({
+  appendAccountLinkHelpText: appendAccountLinkHelpTextMock,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -359,6 +365,9 @@ function mockTelegramLinkedSender(userId = 'launch-owner-1') {
 describe('Telegram webhook handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    appendAccountLinkHelpTextMock.mockImplementation(
+      async (message: string) => message,
+    );
 
     // Some tests queue one-shot lookup results on these mocks. Reset them so
     // later tests do not inherit stale values when the whole suite runs.
@@ -484,6 +493,9 @@ describe('Telegram webhook handler', () => {
   });
 
   it('nudges an unlinked sender to link and drops the message', async () => {
+    appendAccountLinkHelpTextMock.mockImplementation(
+      async (message: string) => `${message} Ask an admin for an invite.`,
+    );
     const response = await postTelegramUpdate(createTelegramUpdate());
 
     await expect(response.json()).resolves.toEqual({
@@ -509,9 +521,15 @@ describe('Telegram webhook handler', () => {
         textFormat: 'markdown',
       }),
     );
+    expect(postMessageMock.mock.calls[0]?.[0].text).toContain(
+      'Ask an admin for an invite.',
+    );
   });
 
   it('nudges an unlinked group sender who addressed the bot with a deep-link button', async () => {
+    appendAccountLinkHelpTextMock.mockImplementation(
+      async (message: string) => `${message} Ask an admin for an invite.`,
+    );
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
@@ -520,6 +538,9 @@ describe('Telegram webhook handler', () => {
           entities: [{ type: 'mention', offset: 0, length: 12 }],
         },
       }),
+    );
+    expect(postMessageMock.mock.calls[0]?.[0].text).toContain(
+      'Ask an admin for an invite.',
     );
 
     await expect(response.json()).resolves.toEqual({
@@ -636,6 +657,9 @@ describe('Telegram webhook handler', () => {
   });
 
   it('replies with linking instructions to the /start link deep link', async () => {
+    appendAccountLinkHelpTextMock.mockImplementation(
+      async (message: string) => `${message} Ask an admin for an invite.`,
+    );
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
@@ -643,6 +667,9 @@ describe('Telegram webhook handler', () => {
           entities: [{ type: 'bot_command', offset: 0, length: 6 }],
         },
       }),
+    );
+    expect(postMessageMock.mock.calls[0]?.[0].text).toContain(
+      'Ask an admin for an invite.',
     );
 
     await expect(response.json()).resolves.toEqual({
@@ -1386,6 +1413,9 @@ describe('Telegram webhook handler', () => {
   });
 
   it('welcomes bare /start commands from an unlinked sender', async () => {
+    appendAccountLinkHelpTextMock.mockImplementation(
+      async (message: string) => `${message} Ask an admin for an invite.`,
+    );
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
@@ -1413,6 +1443,9 @@ describe('Telegram webhook handler', () => {
         text: expect.stringContaining('Linked Accounts'),
         textFormat: 'markdown',
       }),
+    );
+    expect(postMessageMock.mock.calls[0]?.[0].text).toContain(
+      'Ask an admin for an invite.',
     );
   });
 

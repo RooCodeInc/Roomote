@@ -311,10 +311,12 @@ import {
 import {
   createPasswordResetLinkCommand,
   createInviteCommand,
+  getAccountLinkHelpCommand,
   getAccessPolicySettingsCommand,
   removeUserCommand,
   revokeInviteCommand,
   setLicenseKeyCommand,
+  setAccountLinkHelpCommand,
   updateUserRoleCommand,
 } from '../commands/access-policy';
 import {
@@ -2563,6 +2565,20 @@ export const appRouter = createRouter({
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getAccessPolicySettingsCommand(auth),
     ),
+
+    accountLinkHelp: protectedProcedure.query(({ ctx: { auth } }) =>
+      getAccountLinkHelpCommand(auth),
+    ),
+
+    setAccountLinkHelp: protectedProcedure
+      .input(
+        z.object({
+          helpText: z.string().trim().max(1000).nullable(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setAccountLinkHelpCommand(auth, input),
+      ),
 
     createInvite: protectedProcedure
       .input(

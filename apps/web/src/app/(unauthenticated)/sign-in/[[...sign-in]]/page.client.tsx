@@ -11,12 +11,14 @@ export function SignInPageClient({
   inviteRole = null,
   inviteInvalid = false,
   seatLimitBlocked = false,
+  accountLinkHelpText = null,
 }: {
   enabledProviders: AuthProvider[];
   canSignUp: boolean;
   inviteRole?: UserRole | null;
   inviteInvalid?: boolean;
   seatLimitBlocked?: boolean;
+  accountLinkHelpText?: string | null;
 }) {
   useSetAuthState();
 
@@ -25,6 +27,7 @@ export function SignInPageClient({
       enabledProviders={enabledProviders}
       canSignUp={canSignUp}
       inviteRole={inviteRole}
+      accountLinkHelpText={accountLinkHelpText}
       noticeMessage={
         seatLimitBlocked
           ? 'This deployment has reached its licensed user limit. Ask an admin to free a seat or add a license key, then sign in again.'

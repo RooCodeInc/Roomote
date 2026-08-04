@@ -77,6 +77,7 @@ export * from './lib/discord-runtime-credentials';
 export * from './lib/router-debug-settings';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
+export * from './lib/account-link-help-settings';
 export * from './lib/setup-qualification';
 export * from './lib/repositories';
 export * from './lib/telemetry-ids';
