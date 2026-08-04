@@ -288,6 +288,13 @@ export async function launchTask(
 
     const basePayload = {
       ...workspacePayload,
+      ...(requestedType === 'environment-definition'
+        ? {
+            environmentManagementMode: body.environmentId
+              ? ('update' as const)
+              : ('create' as const),
+          }
+        : {}),
       ...(sourceControlProvider ? { sourceControlProvider } : {}),
       branch: body.branch,
       sha: body.sha,

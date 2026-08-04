@@ -70,6 +70,7 @@ async function importRoomoteMcpServer(
   // the runner (e.g. when this suite itself runs inside a Roomote task) so
   // tests only see what they opt into.
   delete process.env.ROOMOTE_TASK_ID;
+  delete process.env.ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE;
 
   Object.assign(process.env, envOverrides);
 
@@ -949,7 +950,9 @@ describe('roomote MCP tool descriptions', () => {
   });
 
   it('serializes manage_environments definition as a plain string schema, not a union', async () => {
-    const { registeredTools } = await importRoomoteMcpServer();
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE: 'create',
+    });
     const envTool = getRegisteredTool(registeredTools, 'manage_environments');
     const definitionField = envTool.config.inputSchema
       .definition as unknown as z.ZodType;
@@ -966,6 +969,38 @@ describe('roomote MCP tool descriptions', () => {
     expect(definitionField.description).toContain('YAML or JSON string');
   });
 
+  it.each([
+    ['create', ['create', 'update', 'record_verification']],
+    ['update', ['update', 'record_verification']],
+    ['verify', ['record_verification']],
+  ])('restricts environment management for %s tasks', async (mode, actions) => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE: mode,
+    });
+    const envTool = getRegisteredTool(registeredTools, 'manage_environments');
+
+    expect(getInputSchemaField(envTool, 'action').options).toEqual(actions);
+  });
+
+  it('omits environment management from ordinary tasks', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+
+    expect(
+      registeredTools.some((tool) => tool.name === 'manage_environments'),
+    ).toBe(false);
+  });
+
+  it('documents hidden investigation context on task suggestions', () => {
+    const source = readFileSync(
+      path.resolve(thisDirPath, '../index.ts'),
+      'utf8',
+    );
+
+    expect(source).toContain('investigationContext: z');
+    expect(source).toContain(
+      'Optional hidden implementation context for the implementing agent. This is not shown to Slack users.',
+    );
+  });
   it('forwards issueNumber from manage_source_control tool params', async () => {
     vi.stubGlobal(
       'fetch',

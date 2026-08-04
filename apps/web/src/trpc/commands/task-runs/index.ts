@@ -410,6 +410,13 @@ export async function createStandardTaskRunCommand(
       };
     }
 
+    const {
+      environmentDefinitionId: _environmentDefinitionId,
+      environmentManagementMode: _environmentManagementMode,
+      verifiesEnvironmentId: _verifiesEnvironmentId,
+      ...payload
+    } = input.payload;
+
     const evalSelection = resolveEvalHarnessSelection({
       harness: input.harness,
       model: input.model,
@@ -419,9 +426,8 @@ export async function createStandardTaskRunCommand(
       throw new Error(evalSelection.error);
     }
 
-    const selectedRepositoryFullNames = getManualTaskRepositoryFullNames(
-      input.payload,
-    );
+    const selectedRepositoryFullNames =
+      getManualTaskRepositoryFullNames(payload);
     const availableRepositories =
       selectedRepositoryFullNames.length === 0
         ? []
@@ -430,26 +436,24 @@ export async function createStandardTaskRunCommand(
       selectedRepositoryFullNames.includes(repository.fullName),
     );
     const sourceControlProvider =
-      input.payload.sourceControlProvider ??
+      payload.sourceControlProvider ??
       resolveSelectedRepositorySourceControlProvider(
         selectedRepositories,
         selectedRepositoryFullNames,
       ) ??
-      (await resolveEnvironmentSourceControlProvider(
-        input.payload.environmentId,
-      ));
+      (await resolveEnvironmentSourceControlProvider(payload.environmentId));
 
     const task: StandardTask = {
       harness: evalSelection.harness ?? input.harness,
       computeProvider: input.computeProvider,
       type: TaskPayloadKind.StandardTask,
       payload: {
-        ...input.payload,
+        ...payload,
         ...(sourceControlProvider ? { sourceControlProvider } : {}),
         ...(evalSelection.harnessModelOverrides
           ? {
               harnessModelOverrides: {
-                ...(input.payload.harnessModelOverrides ?? {}),
+                ...(payload.harnessModelOverrides ?? {}),
                 ...evalSelection.harnessModelOverrides,
               },
             }

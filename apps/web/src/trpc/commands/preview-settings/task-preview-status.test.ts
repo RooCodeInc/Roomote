@@ -417,10 +417,17 @@ describe('startPreviewSetupTaskCommand', () => {
 
     const enqueueInput = vi.mocked(enqueueTask).mock.calls.at(-1)?.[0] as {
       title: string;
-      task: { payload: { description: string; environmentId?: string } };
+      task: {
+        payload: {
+          description: string;
+          environmentId?: string;
+          environmentManagementMode?: string;
+        };
+      };
     };
     expect(enqueueInput.title).toMatch(/^Fix live previews: /);
     expect(enqueueInput.task.payload.environmentId).toBe(environment.id);
+    expect(enqueueInput.task.payload.environmentManagementMode).toBe('update');
     // Repair prompts are standalone coding-task briefs, not $environment-setup
     // skill invocations: the skill prohibits application source changes.
     expect(

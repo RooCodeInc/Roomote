@@ -339,6 +339,23 @@ describe('createStandardTaskRunCommand', () => {
     );
   });
 
+  it('strips privileged environment-management markers from manual tasks', async () => {
+    await createStandardTaskRunCommand(auth, {
+      payload: {
+        repo: 'acme/app',
+        description: 'Ordinary task',
+        environmentDefinitionId: '7bb91386-6282-4c98-9b31-0eb181116822',
+        environmentManagementMode: 'create',
+        verifiesEnvironmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
+      },
+    });
+
+    const payload = mockEnqueueTask.mock.calls[0]?.[0].task.payload;
+    expect(payload).not.toHaveProperty('environmentDefinitionId');
+    expect(payload).not.toHaveProperty('environmentManagementMode');
+    expect(payload).not.toHaveProperty('verifiesEnvironmentId');
+  });
+
   it('allows an all-repositories launch without an environment', async () => {
     const result = await createStandardTaskRunCommand(auth, {
       payload: {

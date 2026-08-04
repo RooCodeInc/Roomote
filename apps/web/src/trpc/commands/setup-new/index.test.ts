@@ -1687,6 +1687,7 @@ describe('setup-new onboarding task start command', () => {
             communicationProvider: 'discord',
             communicationChannelId: 'dm-channel-1',
             communicationMessageId: 'dm-message-1',
+            environmentManagementMode: 'create',
           }),
         }),
       }),

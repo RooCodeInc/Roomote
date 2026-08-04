@@ -66,6 +66,7 @@ type TaskChannelBindings = Pick<
   'slackChannelId' | 'slackThreadTs' | 'linearSessionId'
 > & {
   goal?: DequeuedTaskRun['task']['goal'];
+  workflow?: DequeuedTaskRun['task']['workflow'];
 };
 
 type Todo = {

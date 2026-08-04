@@ -15,6 +15,7 @@ import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
+import { environmentManagementModes } from './environment-management';
 import { resolveTaskModelIdAlias } from './task-models';
 
 /**
@@ -975,6 +976,12 @@ const sharedTaskPayloadSchema = z.object({
    * the `record_verification` MCP action.
    */
   verifiesEnvironmentId: z.string().uuid().optional(),
+
+  /**
+   * Narrows the environment-management actions exposed to this task. This is
+   * stamped by trusted launch paths and converted to worker runtime policy.
+   */
+  environmentManagementMode: z.enum(environmentManagementModes).optional(),
 
   /**
    * Optional validated repository subset to prepare when `repo` is the

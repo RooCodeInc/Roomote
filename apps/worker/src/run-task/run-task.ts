@@ -45,6 +45,7 @@ import {
 import { recordChatTurnStart } from '../mcp/roomote-mcp-server/chat-reply-satisfaction';
 import { recordSandboxPromptSlackTurnStart } from '../sandbox-server/procedures/slackReplyTurnTracking';
 import { type IntegrationMcpOptions } from '../commands/setup/setup-mcps';
+import { applyEnvironmentManagementRuntimeEnv } from '../environment-management';
 
 import type {
   EnvironmentSetupSettledOutcome,
@@ -731,36 +732,43 @@ export const runTask = async ({
       ),
     );
 
-    const runtimeEnv: Record<string, string> = {
-      ...deploymentEnvVars,
-      ...sanitizedEnv,
-      ...openCodeHarnessEnv,
-      R_APP_URL: workerEnv.roomoteAppUrl,
-      ROOMOTE_PLATFORM_API_URL: workerEnv.trpcUrl,
-      ROOMOTE_WORKSPACE_PATH: workspacePath,
-      ROOMOTE_CLOUD_TOKEN: workerEnv.authToken,
-      ROOMOTE_TASK_ID: taskRun.taskId,
-      ROOMOTE_TASK_RUN_ID: String(taskRun.id),
-      AGENT_BROWSER_SESSION: taskRun.taskId,
-      ROOMOTE_TASK_TYPE: taskRun.payloadKind,
-      ROOMOTE_AUTOMATION_TASK:
-        taskRun.payloadKind === TaskPayloadKind.Scan ||
-        isSilentChannelAutomationLaunch(taskRun)
-          ? 'true'
-          : 'false',
-      ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE && {
-        ROOMOTE_AUTH_BYPASS_VALUE: unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE,
-      }),
-      ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME && {
-        ROOMOTE_AUTH_BYPASS_HEADER_NAME:
-          unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
-      }),
-      // Consumed (and removed) by generateOpenCodeConfig, which registers the
-      // hidden proof-runner subagent only when a browser surface exists.
-      ...(environmentConfig?.initialUrl && {
-        ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
-      }),
-    };
+    const runtimeEnv = applyEnvironmentManagementRuntimeEnv(
+      {
+        ...deploymentEnvVars,
+        ...sanitizedEnv,
+        ...openCodeHarnessEnv,
+        R_APP_URL: workerEnv.roomoteAppUrl,
+        ROOMOTE_PLATFORM_API_URL: workerEnv.trpcUrl,
+        ROOMOTE_WORKSPACE_PATH: workspacePath,
+        ROOMOTE_CLOUD_TOKEN: workerEnv.authToken,
+        ROOMOTE_TASK_ID: taskRun.taskId,
+        ROOMOTE_TASK_RUN_ID: String(taskRun.id),
+        AGENT_BROWSER_SESSION: taskRun.taskId,
+        ROOMOTE_TASK_TYPE: taskRun.payloadKind,
+        ROOMOTE_AUTOMATION_TASK:
+          taskRun.payloadKind === TaskPayloadKind.Scan ||
+          isSilentChannelAutomationLaunch(taskRun)
+            ? 'true'
+            : 'false',
+        ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE && {
+          ROOMOTE_AUTH_BYPASS_VALUE: unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE,
+        }),
+        ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME && {
+          ROOMOTE_AUTH_BYPASS_HEADER_NAME:
+            unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
+        }),
+        // Consumed (and removed) by generateOpenCodeConfig, which registers the
+        // hidden proof-runner subagent only when a browser surface exists.
+        ...(environmentConfig?.initialUrl && {
+          ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
+        }),
+      },
+      {
+        payloadKind: taskRun.payloadKind,
+        payload: taskRun.payload,
+        workflow: task?.workflow,
+      },
+    );
     // Strip credentials for disabled providers as defense in depth, even if a
     // stale worker/dequeue payload still contains them.
     for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {

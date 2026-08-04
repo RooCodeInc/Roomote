@@ -24,6 +24,7 @@ import {
   initWorkerSentry,
   installWorkerFatalProcessHandlers,
 } from '../../monitoring/sentry.js';
+import { getEnvironmentManagementActions } from '../../environment-management.js';
 
 import { handleCreatePlan } from './create-plan.js';
 import { handleUpload } from './upload.js';
@@ -1049,96 +1050,110 @@ roomoteMcpServer.registerTool(
   },
 );
 
-roomoteMcpServer.registerTool(
-  'manage_environments',
-  {
-    title: 'Manage Environments',
-    description: `Create or update ${PRODUCT_NAME} environments, or record an environment verification result.`,
-    inputSchema: {
-      action: z
-        .enum(['create', 'update', 'record_verification'])
-        .describe('The environment action to perform'),
-      definition: z
-        .string()
-        .optional()
-        .describe(
-          'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories). Required for "create" and "update".',
-        ),
-      environmentId: z
-        .string()
-        .optional()
-        .describe(
-          'Existing environment ID. Required for "update" and "record_verification".',
-        ),
-      format: z
-        .enum(['auto', 'json', 'yaml'])
-        .optional()
-        .describe(
-          'How to parse definition when it is a string. Defaults to auto (JSON first, then YAML).',
-        ),
-      name: z
-        .string()
-        .optional()
-        .describe('Optional name override applied after parsing definition.'),
-      description: z
-        .string()
-        .optional()
-        .describe(
-          'Optional description override applied after parsing definition.',
-        ),
-      success: z
-        .boolean()
-        .optional()
-        .describe(
-          'For "record_verification": whether the environment verification succeeded.',
-        ),
-      error: z
-        .string()
-        .optional()
-        .describe(
-          'For "record_verification" with success=false: a short, user-safe failure message. Never include secrets or full environment YAML.',
-        ),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => {
-    const config = getRoomoteConfig();
-    if (!config) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
+const allowedEnvironmentManagementActions = getEnvironmentManagementActions();
 
-    if (params.action === 'record_verification') {
-      if (typeof params.success !== 'boolean') {
-        return errorResult(
-          'success (boolean) is required for record_verification',
+if (allowedEnvironmentManagementActions) {
+  roomoteMcpServer.registerTool(
+    'manage_environments',
+    {
+      title: 'Manage Environments',
+      description: `Create or update ${PRODUCT_NAME} environments, or record an environment verification result.`,
+      inputSchema: {
+        action: z
+          .enum(allowedEnvironmentManagementActions)
+          .describe('The environment action to perform'),
+        definition: z
+          .string()
+          .optional()
+          .describe(
+            'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories). Required for "create" and "update".',
+          ),
+        environmentId: z
+          .string()
+          .optional()
+          .describe(
+            'Existing environment ID. Required for "update" and "record_verification".',
+          ),
+        format: z
+          .enum(['auto', 'json', 'yaml'])
+          .optional()
+          .describe(
+            'How to parse definition when it is a string. Defaults to auto (JSON first, then YAML).',
+          ),
+        name: z
+          .string()
+          .optional()
+          .describe('Optional name override applied after parsing definition.'),
+        description: z
+          .string()
+          .optional()
+          .describe(
+            'Optional description override applied after parsing definition.',
+          ),
+        success: z
+          .boolean()
+          .optional()
+          .describe(
+            'For "record_verification": whether the environment verification succeeded.',
+          ),
+        error: z
+          .string()
+          .optional()
+          .describe(
+            'For "record_verification" with success=false: a short, user-safe failure message. Never include secrets or full environment YAML.',
+          ),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const config = getRoomoteConfig();
+      if (!config) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
+
+      if (params.action === 'record_verification') {
+        if (typeof params.success !== 'boolean') {
+          return errorResult(
+            'success (boolean) is required for record_verification',
+          );
+        }
+
+        return handleRecordVerification(
+          {
+            environmentId: params.environmentId ?? '',
+            success: params.success,
+            error: params.error,
+          },
+          config,
         );
       }
 
-      return handleRecordVerification(
-        {
-          environmentId: params.environmentId ?? '',
-          success: params.success,
-          error: params.error,
-        },
-        config,
-      );
-    }
+      if (params.definition === undefined) {
+        return errorResult(
+          `definition is required for action "${params.action}"`,
+        );
+      }
 
-    if (params.definition === undefined) {
-      return errorResult(
-        `definition is required for action "${params.action}"`,
-      );
-    }
+      if (params.action === 'update') {
+        return handleUpdateEnvironment(
+          {
+            environmentId: params.environmentId ?? '',
+            definition: params.definition,
+            format: params.format,
+            name: params.name,
+            description: params.description,
+          },
+          config,
+        );
+      }
 
-    if (params.action === 'update') {
-      return handleUpdateEnvironment(
+      return handleCreateEnvironment(
         {
-          environmentId: params.environmentId ?? '',
           definition: params.definition,
           format: params.format,
           name: params.name,
@@ -1146,19 +1161,9 @@ roomoteMcpServer.registerTool(
         },
         config,
       );
-    }
-
-    return handleCreateEnvironment(
-      {
-        definition: params.definition,
-        format: params.format,
-        name: params.name,
-        description: params.description,
-      },
-      config,
-    );
-  },
-);
+    },
+  );
+}
 
 if (shouldRegisterEnvVarRequestTool()) {
   roomoteMcpServer.registerTool(

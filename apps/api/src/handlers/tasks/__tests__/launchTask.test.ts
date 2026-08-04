@@ -513,6 +513,40 @@ describe('launchTask', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['create', undefined],
+    ['update', '6f1f3f0a-9f5e-4d2a-8f4e-1a2b3c4d5e6f'],
+  ] as const)(
+    'stamps %s capability on environment-definition tasks',
+    async (mode, environmentId) => {
+      mockEnqueueTask.mockResolvedValue({ id: 106, taskId: 'task-env' });
+      mockRepositoriesFindMany.mockResolvedValue([
+        { fullName: 'octo/github-repo', installationId: 1 },
+      ]);
+      mockResolveWorkspaceRepositoryProviders.mockResolvedValue({
+        'octo/github-repo': 'github',
+      });
+
+      const app = createApp(authContext);
+      const response = await app.request(
+        new Request('http://localhost/tasks', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            type: 'environment-definition',
+            selectedRepositories: ['octo/github-repo'],
+            ...(environmentId ? { environmentId } : {}),
+          }),
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockEnqueueTask.mock.calls[0]?.[0].task.payload).toEqual(
+        expect.objectContaining({ environmentManagementMode: mode }),
+      );
+    },
+  );
+
   it('allows non-admin members to launch standard tasks', async () => {
     mockGetMembershipRole.mockResolvedValue('org:member');
     mockEnqueueTask.mockResolvedValue({ id: 102, taskId: 'task-member' });
@@ -528,5 +562,8 @@ describe('launchTask', () => {
 
     expect(response.status).toBe(200);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask.mock.calls[0]?.[0].task.payload).not.toHaveProperty(
+      'environmentManagementMode',
+    );
   });
 });
