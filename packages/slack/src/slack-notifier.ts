@@ -3,6 +3,7 @@ import type {
   SlackConversationMessage,
   SlackMessage,
   SlackMessageMetadata,
+  SlackPostMessageResult,
   SlackResponse,
   SlackFile,
   SlackThreadMessage,
@@ -862,6 +863,18 @@ export class SlackNotifier {
   }
 
   public async postMessage(message: SlackMessage) {
+    return (await this.postMessageDetailed(message)).ts;
+  }
+
+  /**
+   * Like postMessage, but preserves why a post produced no timestamp: the
+   * Slack API error code, a transport failure, or a skipped reply into a
+   * deleted thread. Callers that report failures to an agent or decide
+   * retryability must use this instead of inferring from a missing ts.
+   */
+  public async postMessageDetailed(
+    message: SlackMessage,
+  ): Promise<SlackPostMessageResult> {
     if (message.channel && message.thread_ts) {
       const threadRootExists = await this.hasMessageInThread({
         channel: message.channel,
@@ -873,7 +886,7 @@ export class SlackNotifier {
         console.warn(
           `[postMessage] Skipping threaded Slack reply because thread root ${message.thread_ts} is no longer available in channel ${message.channel}`,
         );
-        return undefined;
+        return { skippedMissingThreadRoot: true };
       }
     }
 
@@ -883,7 +896,15 @@ export class SlackNotifier {
       'regular',
     );
 
-    return response?.ts;
+    if (!response) {
+      return { transportError: true };
+    }
+
+    if (!response.ok || !response.ts) {
+      return { slackErrorCode: response.error ?? 'unknown_error' };
+    }
+
+    return { ts: response.ts };
   }
 
   public async postEphemeralMessage(message: SlackMessage & { user: string }) {

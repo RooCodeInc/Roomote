@@ -1,8 +1,5 @@
-import {
-  buildApiHeaders,
-  fetchWithTimeout,
-  parseApiError,
-} from './api-client.js';
+import { buildApiHeaders, fetchWithTimeout } from './api-client.js';
+import { ChatDeliveryError } from './chat-delivery-error.js';
 import type {
   CommunicationChannelMessagesResponse,
   CommunicationMessageContextResponse,
@@ -52,8 +49,39 @@ async function postToMcpEndpoint<
       continue;
     }
 
-    const error = await parseApiError(response);
-    throw new Error(`${errorPrefix}: ${response.status} ${error}`);
+    const bodyText = await response.text();
+    let parsedBody: {
+      error?: unknown;
+      retryable?: unknown;
+      slackErrorCode?: unknown;
+    } | null = null;
+    try {
+      parsedBody = JSON.parse(bodyText) as {
+        error?: unknown;
+        retryable?: unknown;
+        slackErrorCode?: unknown;
+      };
+    } catch {
+      parsedBody = null;
+    }
+
+    const errorDetail =
+      typeof parsedBody?.error === 'string' ? parsedBody.error : bodyText;
+    const message = `${errorPrefix}: ${response.status} ${errorDetail}`;
+
+    if (parsedBody?.retryable === false) {
+      throw new ChatDeliveryError({
+        message,
+        status: response.status,
+        retryable: false,
+        providerErrorCode:
+          typeof parsedBody.slackErrorCode === 'string'
+            ? parsedBody.slackErrorCode
+            : undefined,
+      });
+    }
+
+    throw new Error(message);
   }
 }
 

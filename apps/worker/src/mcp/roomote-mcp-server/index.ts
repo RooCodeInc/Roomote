@@ -47,6 +47,7 @@ import { handleShowWidget } from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
 import {
   type ChatReplyPurpose,
+  recordChatReplyDeliveryFailure,
   recordChatReplySatisfaction,
 } from './chat-reply-satisfaction.js';
 import { handlePostToChannel } from './post-to-channel.js';
@@ -1358,7 +1359,9 @@ if (shouldRegisterSlackThreadReplyTool()) {
         replyPurpose: params.purpose,
         sessionId: extra.sessionId,
       });
-      return result;
+      return recordFailedChatDeliveryResult(result, {
+        sessionId: extra.sessionId,
+      });
     },
   );
 }
@@ -1399,6 +1402,78 @@ function recordSuccessfulSlackTurnSatisfactionResult(
   } catch {
     return;
   }
+}
+
+/**
+ * Records a failed delivery attempt flagged by the tool handler. When the
+ * failure becomes terminal (non-retryable, or the bounded attempt budget is
+ * spent), rewrites the tool result so the agent stops retrying an
+ * undeliverable post; the stop and silence hooks now allow completion.
+ */
+function recordFailedChatDeliveryResult(
+  result: ToolResult,
+  options: { sessionId?: string } = {},
+): ToolResult {
+  const text = result.content
+    .map((entry) => (entry.type === 'text' ? entry.text : ''))
+    .join('\n');
+
+  if (!text.trim()) {
+    return result;
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return result;
+  }
+
+  const deliveryFailure = parsed.deliveryFailure;
+  if (
+    parsed.success !== false ||
+    typeof deliveryFailure !== 'object' ||
+    deliveryFailure === null
+  ) {
+    return result;
+  }
+
+  const { retryable, providerErrorCode } = deliveryFailure as {
+    retryable?: unknown;
+    providerErrorCode?: unknown;
+  };
+  const failureRecord = recordChatReplyDeliveryFailure({
+    retryable: retryable !== false,
+    providerErrorCode:
+      typeof providerErrorCode === 'string' ? providerErrorCode : undefined,
+    sessionId: options.sessionId,
+  });
+
+  if (!failureRecord.terminalDeliveryFailure) {
+    return result;
+  }
+
+  const codeSuffix =
+    typeof providerErrorCode === 'string' && providerErrorCode
+      ? ` (${providerErrorCode})`
+      : '';
+
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          ...parsed,
+          deliveryPermanentlyFailed: true,
+          error:
+            `${typeof parsed.error === 'string' ? parsed.error : 'Chat delivery failed'}. ` +
+            `Delivery to the configured chat channel is failing permanently${codeSuffix}. ` +
+            'This has been recorded as the terminal delivery outcome: do not retry this or any other posting tool. ' +
+            'Finish the task now; the task transcript carries the result.',
+        }),
+      },
+    ],
+  };
 }
 
 if (shouldRegisterChannelPostTool()) {

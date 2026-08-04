@@ -33,6 +33,7 @@ export function uniqueNonEmpty(values?: string[]): string[] {
 export function errorResultWithArtifacts(
   message: string,
   uploadedArtifactIds: string[],
+  fields?: Record<string, unknown>,
 ): ToolResult {
   return {
     content: [
@@ -42,6 +43,7 @@ export function errorResultWithArtifacts(
           success: false,
           error: message,
           ...(uploadedArtifactIds.length > 0 && { uploadedArtifactIds }),
+          ...fields,
         }),
       },
     ],

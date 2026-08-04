@@ -28,6 +28,20 @@ export interface SlackResponse {
   message?: Record<string, unknown>;
 }
 
+/**
+ * Structured outcome of a chat.postMessage attempt. Exactly one of the
+ * fields is set: `ts` on success, otherwise the failure discriminator.
+ */
+export interface SlackPostMessageResult {
+  ts?: string;
+  /** Slack API error code (e.g. `not_in_channel`) when Slack rejected the post. */
+  slackErrorCode?: string;
+  /** The HTTP call itself failed (non-2xx status or network error); retryable. */
+  transportError?: boolean;
+  /** Threaded reply skipped because the thread root message no longer exists. */
+  skippedMissingThreadRoot?: boolean;
+}
+
 export interface SlackMessageMetadata {
   event_type: string;
   event_payload: Record<string, unknown>;

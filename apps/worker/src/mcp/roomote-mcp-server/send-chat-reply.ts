@@ -1,4 +1,5 @@
 import { replyToChatThread } from './chat-api-client.js';
+import { describeChatDeliveryFailure } from './chat-delivery-error.js';
 import {
   errorResultWithArtifacts,
   normalizeOptionalSlackText,
@@ -29,6 +30,7 @@ export async function handleSendChatReply(
 
   const uploadedArtifactIds: string[] = [];
   const allArtifactIds = [...imageArtifactIds];
+  let reachedDeliveryCall = false;
 
   try {
     const uploads = await uploadSlackImagePaths({
@@ -50,6 +52,7 @@ export async function handleSendChatReply(
       return contentValidation;
     }
 
+    reachedDeliveryCall = true;
     const reply = await replyToChatThread(roomoteConfig, {
       ...(summary && { text: summary }),
       ...(allArtifactIds.length > 0 && {
@@ -64,11 +67,23 @@ export async function handleSendChatReply(
       ...(imageArtifactIds.length > 0 && { imageArtifactIds }),
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Only the thread_reply call itself counts as a delivery attempt; image
+    // upload or validation failures say nothing about channel deliverability.
+    const deliveryFailureFields = reachedDeliveryCall
+      ? { deliveryFailure: describeChatDeliveryFailure(error) }
+      : undefined;
+
     if (uploadedArtifactIds.length > 0) {
       return errorResultWithArtifacts(
-        error instanceof Error ? error.message : String(error),
+        message,
         uploadedArtifactIds,
+        deliveryFailureFields,
       );
+    }
+
+    if (deliveryFailureFields) {
+      return errorResult(message, deliveryFailureFields);
     }
 
     return catchError(error);

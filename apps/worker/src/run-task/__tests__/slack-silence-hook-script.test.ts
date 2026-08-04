@@ -485,6 +485,28 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stderr).toContain('reason="slack_update_overdue"');
   });
 
+  it('stands down entirely when delivery to the bound channel has permanently failed', () => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now() - 7 * 60_000 - 1_000,
+      deliveryFailureCount: 5,
+      lastDeliveryFailureCode: 'not_in_channel',
+      terminalDeliveryFailureAtMs: Date.now() - 5_000,
+    });
+
+    const result = runHook({
+      input: { hook_event_name: 'PostToolUse', tool_name: 'shell' },
+      env: {
+        ROOMOTE_SLACK_HOOK_DEBUG: '1',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('decision="allow"');
+    expect(result.stderr).toContain('reason="terminal_delivery_failure"');
+  });
+
   it('names the communication surface in the silence reminder for non-Slack providers', () => {
     const stateFilePath = writeState({
       startedAtMs: Date.now() - 7 * 60_000 - 1_000,

@@ -43,6 +43,19 @@ interface ChatReplySatisfactionState {
   terminalSatisfactionTool?: 'send_chat_reply';
   lastNonSlackWorkAfterTerminalAtMs?: number;
   lastSilenceReminderAtMs?: number;
+  /** Failed chat delivery attempts since the last successful post this turn. */
+  deliveryFailureCount?: number;
+  lastDeliveryFailureAtMs?: number;
+  /** Structured provider error code (e.g. Slack `not_in_channel`) from the latest failed delivery. */
+  lastDeliveryFailureCode?: string;
+  /**
+   * Stamped when delivery to the bound chat channel has permanently failed:
+   * a non-retryable provider error, or the bounded attempt budget is spent.
+   * The stop and silence hooks treat this as the terminal outcome so the
+   * task can complete instead of being reminded into a closeout it has no
+   * way to deliver. Cleared by any later successful post or a new turn.
+   */
+  terminalDeliveryFailureAtMs?: number;
 }
 
 function trimString(value: unknown): string {
@@ -146,11 +159,82 @@ export function recordChatTurnStart(input: {
           terminalSatisfiedAtMs: undefined,
           terminalSatisfactionTool: undefined,
           lastNonSlackWorkAfterTerminalAtMs: undefined,
+          deliveryFailureCount: undefined,
+          lastDeliveryFailureAtMs: undefined,
+          lastDeliveryFailureCode: undefined,
+          terminalDeliveryFailureAtMs: undefined,
         }
       : {}),
   };
 
   writeState(stateFilePath, state);
+}
+
+/**
+ * Bounded budget of failed delivery attempts before the failure is treated
+ * as terminal even without a structured non-retryable verdict. Keeps a task
+ * whose channel fails with an unclassified error from retrying forever.
+ */
+const MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL = 5;
+
+/**
+ * Records a failed chat delivery attempt. When the failure is non-retryable,
+ * or the bounded attempt budget is spent, stamps `terminalDeliveryFailureAtMs`
+ * so the stop and silence hooks stop demanding an undeliverable closeout.
+ */
+export function recordChatReplyDeliveryFailure(input: {
+  retryable: boolean;
+  providerErrorCode?: string;
+  sessionId?: string;
+  stateFilePath?: string;
+  nowMs?: number;
+}): { terminalDeliveryFailure: boolean } {
+  const stateFilePath = getStateFilePath(input.stateFilePath);
+
+  if (!stateFilePath) {
+    return { terminalDeliveryFailure: false };
+  }
+
+  const existingState = readState(stateFilePath);
+  const sessionId = trimString(input.sessionId);
+  const parentThreadId = trimString(existingState.parentThreadId);
+
+  if (parentThreadId && sessionId && sessionId !== parentThreadId) {
+    return { terminalDeliveryFailure: false };
+  }
+
+  const nowMs = input.nowMs ?? Date.now();
+  const previousCount =
+    typeof existingState.deliveryFailureCount === 'number' &&
+    Number.isFinite(existingState.deliveryFailureCount)
+      ? existingState.deliveryFailureCount
+      : 0;
+  const deliveryFailureCount = previousCount + 1;
+  const providerErrorCode = trimString(input.providerErrorCode);
+  const previousTerminalAtMs =
+    typeof existingState.terminalDeliveryFailureAtMs === 'number' &&
+    Number.isFinite(existingState.terminalDeliveryFailureAtMs)
+      ? existingState.terminalDeliveryFailureAtMs
+      : undefined;
+  const terminalDeliveryFailure =
+    previousTerminalAtMs !== undefined ||
+    !input.retryable ||
+    deliveryFailureCount >= MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL;
+  const state: ChatReplySatisfactionState = {
+    ...existingState,
+    deliveryFailureCount,
+    lastDeliveryFailureAtMs: nowMs,
+    ...(providerErrorCode
+      ? { lastDeliveryFailureCode: providerErrorCode }
+      : {}),
+    ...(terminalDeliveryFailure
+      ? { terminalDeliveryFailureAtMs: previousTerminalAtMs ?? nowMs }
+      : {}),
+  };
+
+  writeState(stateFilePath, state);
+
+  return { terminalDeliveryFailure };
 }
 
 export function recordChatReplySatisfaction(input: {
@@ -197,6 +281,18 @@ export function recordChatReplySatisfaction(input: {
     replyPurpose:
       input.tool === 'send_chat_reply' ? input.replyPurpose : undefined,
     recordedAtMs: nowMs,
+    // A successful post proves the channel is deliverable again. Reactions
+    // do not: they go through reactions.add, not chat.postMessage, so a
+    // reaction succeeding must not re-arm closeout enforcement against a
+    // posting path that is still broken.
+    ...(input.tool === 'send_chat_reply'
+      ? {
+          deliveryFailureCount: undefined,
+          lastDeliveryFailureAtMs: undefined,
+          lastDeliveryFailureCode: undefined,
+          terminalDeliveryFailureAtMs: undefined,
+        }
+      : {}),
     ...(satisfiesCurrentTurn
       ? {
           satisfiedTurnMessageTs: currentTurnMessageTs,
