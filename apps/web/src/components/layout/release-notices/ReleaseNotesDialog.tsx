@@ -179,7 +179,7 @@ export function ReleaseNotesDialog({
 
         <DialogFooter className="flex-col gap-2 md:flex-row md:justify-end">
           <a
-            href="https://discord.gg/KNw7Sz75UK"
+            href="https://discord.gg/roomote"
             target="_blank"
             className="order-2 text-sm underline md:order-1 md:mr-auto"
             rel="noreferrer"
