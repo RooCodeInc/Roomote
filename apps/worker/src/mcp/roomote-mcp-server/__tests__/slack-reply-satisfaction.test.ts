@@ -825,6 +825,28 @@ describe('Slack reply satisfaction state', () => {
       });
     });
 
+    it('is not cleared by a successful reaction', () => {
+      const stateFilePath = writeStateFile({
+        startedAtMs: 1000,
+        currentTurnMessageTs: '111.222',
+        deliveryFailureCount: 3,
+        lastDeliveryFailureCode: 'not_in_channel',
+        terminalDeliveryFailureAtMs: 2000,
+      });
+
+      recordSlackReplySatisfaction({
+        stateFilePath,
+        messageTs: '111.222',
+        tool: 'send_chat_reaction_emoji',
+        nowMs: 3000,
+      });
+
+      const state = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
+      expect(state.deliveryFailureCount).toBe(3);
+      expect(state.lastDeliveryFailureCode).toBe('not_in_channel');
+      expect(state.terminalDeliveryFailureAtMs).toBe(2000);
+    });
+
     it('is cleared by a later successful post', () => {
       const stateFilePath = writeStateFile({
         startedAtMs: 1000,

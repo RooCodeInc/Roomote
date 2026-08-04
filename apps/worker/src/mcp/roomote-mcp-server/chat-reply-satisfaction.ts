@@ -281,11 +281,18 @@ export function recordChatReplySatisfaction(input: {
     replyPurpose:
       input.tool === 'send_chat_reply' ? input.replyPurpose : undefined,
     recordedAtMs: nowMs,
-    // A successful post proves the channel is deliverable again.
-    deliveryFailureCount: undefined,
-    lastDeliveryFailureAtMs: undefined,
-    lastDeliveryFailureCode: undefined,
-    terminalDeliveryFailureAtMs: undefined,
+    // A successful post proves the channel is deliverable again. Reactions
+    // do not: they go through reactions.add, not chat.postMessage, so a
+    // reaction succeeding must not re-arm closeout enforcement against a
+    // posting path that is still broken.
+    ...(input.tool === 'send_chat_reply'
+      ? {
+          deliveryFailureCount: undefined,
+          lastDeliveryFailureAtMs: undefined,
+          lastDeliveryFailureCode: undefined,
+          terminalDeliveryFailureAtMs: undefined,
+        }
+      : {}),
     ...(satisfiesCurrentTurn
       ? {
           satisfiedTurnMessageTs: currentTurnMessageTs,
