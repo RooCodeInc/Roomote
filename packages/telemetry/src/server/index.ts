@@ -30,8 +30,11 @@ import {
   type PingVersionCheckResponse,
   type TelemetryEventProperties,
   type ActivationEnvironmentSource,
+  type ActivationSetupMilestone,
+  type ActivationSetupMilestoneProperties,
   type ActivationTaskProperties,
   buildActivationPrMergedProperties,
+  buildActivationSetupMilestoneProperties,
   buildActivationTaskProperties,
 } from '../index';
 
@@ -317,6 +320,16 @@ export async function captureActivationEnvironmentSaved(
   source: ActivationEnvironmentSource,
 ): Promise<void> {
   return captureInstanceEvent('activation_environment_saved', { source });
+}
+
+export async function captureActivationSetupMilestone(
+  milestone: ActivationSetupMilestone,
+  properties: ActivationSetupMilestoneProperties = {},
+): Promise<void> {
+  return captureInstanceEvent(
+    `activation_setup_${milestone}`,
+    buildActivationSetupMilestoneProperties(properties),
+  );
 }
 
 export async function captureActivationTaskCreated(

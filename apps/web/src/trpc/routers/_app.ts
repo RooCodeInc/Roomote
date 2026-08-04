@@ -252,6 +252,9 @@ import {
   cancelSetupNewOnboardingTaskCommand,
   resetSetupNewSelectionCommand,
   ensureSetupNewDefaultAgentsCommand,
+  trackSetupBootstrapWelcomeSeenCommand,
+  trackSetupCommsStateCommand,
+  trackSetupWelcomeSeenCommand,
 } from '../commands/setup-new';
 import {
   getOnboardingStatusCommand,
@@ -2251,6 +2254,20 @@ export const appRouter = createRouter({
       getSetupNewStatusCommand(auth),
     ),
 
+    trackWelcomeSeen: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      trackSetupWelcomeSeenCommand(auth),
+    ),
+
+    trackCommsState: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(['microsoft', 'telegram', 'discord']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        trackSetupCommsStateCommand(auth, input),
+      ),
+
     saveAuthProviderChoice: protectedProcedure
       .input(
         z.object({
@@ -2388,6 +2405,16 @@ export const appRouter = createRouter({
           .optional(),
       )
       .query(({ input }) => getSetupBootstrapStatusCommand(input)),
+
+    trackWelcomeSeen: publicProcedure
+      .input(
+        z
+          .object({
+            setupToken: z.string().optional(),
+          })
+          .optional(),
+      )
+      .mutation(({ input }) => trackSetupBootstrapWelcomeSeenCommand(input)),
 
     saveAuthProviderChoice: publicProcedure
       .input(

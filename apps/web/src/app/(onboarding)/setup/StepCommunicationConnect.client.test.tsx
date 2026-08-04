@@ -8,25 +8,39 @@ import type {
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { SetupAuthProviderId, SetupAuthStatus } from '@roomote/types';
 
-const { connectSlackMutateMock, teamsStatusState } = vi.hoisted(() => ({
-  connectSlackMutateMock: vi.fn(),
-  teamsStatusState: {
-    data: {
-      botConfigured: true,
-      botUsesTenantSpecificTokenFlow: false,
-      microsoftAuthConfigured: true,
-      webhookUrl: 'https://roomote.example.com/api/webhooks/teams',
-      openInTeamsUrl:
-        'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id' as
-          | string
-          | null,
-      botName: 'Roomote',
-      primaryConversationReady: true,
-      primaryConversationType: 'channel' as string | null,
+const { connectSlackMutateMock, trackMilestoneMock, teamsStatusState } =
+  vi.hoisted(() => ({
+    connectSlackMutateMock: vi.fn(),
+    trackMilestoneMock: vi.fn(),
+    teamsStatusState: {
+      data: {
+        botConfigured: true,
+        botUsesTenantSpecificTokenFlow: false,
+        microsoftAuthConfigured: true,
+        webhookUrl: 'https://roomote.example.com/api/webhooks/teams',
+        openInTeamsUrl:
+          'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id' as
+            | string
+            | null,
+        botName: 'Roomote',
+        primaryConversationReady: true,
+        primaryConversationType: 'channel' as string | null,
+      },
+      isPending: false,
+      isError: false,
     },
-    isPending: false,
-    isError: false,
-  },
+  }));
+
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: () => ({ mutate: trackMilestoneMock }),
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    setupNew: {
+      trackCommsState: { mutationOptions: () => ({}) },
+    },
+  }),
 }));
 
 vi.mock('@/hooks/slack', () => ({

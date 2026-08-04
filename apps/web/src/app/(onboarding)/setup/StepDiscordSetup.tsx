@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -37,6 +37,11 @@ export function StepDiscordSetup({
   const [clearedSavedValues, setClearedSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const configuredTrackedRef = useRef(false);
+  const authedTrackedRef = useRef(false);
+  const trackCommsState = useMutation(
+    trpc.setupNew.trackCommsState.mutationOptions(),
+  );
   const provider = useMemo(
     () => status.data?.providers.find((item) => item.id === 'discord') ?? null,
     [status.data?.providers],
@@ -45,6 +50,11 @@ export function StepDiscordSetup({
   const save = useMutation(
     trpc.comms.saveAuthConfig.mutationOptions({
       onSuccess: async (result) => {
+        setCredentialsSaved(true);
+        configuredTrackedRef.current = true;
+        trackCommsState.mutate({
+          provider: 'discord',
+        });
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.comms.status.queryKey(),
@@ -58,12 +68,31 @@ export function StepDiscordSetup({
             `Discord was saved, but Roomote could not finish connecting: ${result.discord.error ?? 'unknown error'}`,
           );
         }
-        setCredentialsSaved(true);
       },
       onError: (error) => toast.error(error.message),
     }),
   );
   const isConfigured = credentialsSaved || provider?.setupSatisfied === true;
+  useEffect(() => {
+    if (
+      provider?.setupSatisfied === true &&
+      !credentialsSaved &&
+      !configuredTrackedRef.current
+    ) {
+      configuredTrackedRef.current = true;
+      trackCommsState.mutate({
+        provider: 'discord',
+      });
+    }
+  }, [credentialsSaved, provider?.setupSatisfied, trackCommsState]);
+  useEffect(() => {
+    if (discordAccount.data?.mapping && !authedTrackedRef.current) {
+      authedTrackedRef.current = true;
+      trackCommsState.mutate({
+        provider: 'discord',
+      });
+    }
+  }, [discordAccount.data?.mapping, trackCommsState]);
   const isActionDisabled =
     save.isPending ||
     status.isLoading ||

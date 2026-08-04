@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -37,6 +37,11 @@ export function StepTelegramSetup({
   const [clearedSavedValues, setClearedSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const configuredTrackedRef = useRef(false);
+  const authedTrackedRef = useRef(false);
+  const trackCommsState = useMutation(
+    trpc.setupNew.trackCommsState.mutationOptions(),
+  );
   const provider = useMemo(
     () => status.data?.providers.find((item) => item.id === 'telegram') ?? null,
     [status.data?.providers],
@@ -45,6 +50,11 @@ export function StepTelegramSetup({
   const save = useMutation(
     trpc.comms.saveAuthConfig.mutationOptions({
       onSuccess: async (result) => {
+        setCredentialsSaved(true);
+        configuredTrackedRef.current = true;
+        trackCommsState.mutate({
+          provider: 'telegram',
+        });
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.comms.status.queryKey(),
@@ -58,12 +68,31 @@ export function StepTelegramSetup({
             `Telegram was saved, but Roomote could not connect the bot: ${result.telegramWebhook.error ?? 'unknown error'}`,
           );
         }
-        setCredentialsSaved(true);
       },
       onError: (error) => toast.error(error.message),
     }),
   );
   const isConfigured = credentialsSaved || provider?.setupSatisfied === true;
+  useEffect(() => {
+    if (
+      provider?.setupSatisfied === true &&
+      !credentialsSaved &&
+      !configuredTrackedRef.current
+    ) {
+      configuredTrackedRef.current = true;
+      trackCommsState.mutate({
+        provider: 'telegram',
+      });
+    }
+  }, [credentialsSaved, provider?.setupSatisfied, trackCommsState]);
+  useEffect(() => {
+    if (telegramAccount.data?.mapping && !authedTrackedRef.current) {
+      authedTrackedRef.current = true;
+      trackCommsState.mutate({
+        provider: 'telegram',
+      });
+    }
+  }, [telegramAccount.data?.mapping, trackCommsState]);
   const isActionDisabled =
     save.isPending ||
     status.isLoading ||
