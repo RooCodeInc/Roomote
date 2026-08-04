@@ -350,4 +350,15 @@ describe('collectConnectedTaskModelProviderIds', () => {
     // SuperGrok serves xai/ model ids, same alias pattern as ChatGPT→openai.
     expect(connected.has('xai')).toBe(true);
   });
+
+  it('includes the Mantle model prefix when Amazon Bedrock is connected', () => {
+    const connected = collectConnectedTaskModelProviderIds({
+      runtimeEnv: {},
+      persistedEnvVarNames: ['AWS_BEARER_TOKEN_BEDROCK'],
+      chatgptConnected: false,
+    });
+
+    expect(connected.has('amazon-bedrock')).toBe(true);
+    expect(connected.has('bedrock-mantle')).toBe(true);
+  });
 });
