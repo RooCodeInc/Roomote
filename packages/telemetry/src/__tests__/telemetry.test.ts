@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildActivationPrMergedProperties,
+  buildActivationSetupMilestoneProperties,
   buildActivationTaskProperties,
   PAGEVIEW_EVENT,
   TELEMETRY_EVENT_NAME_PATTERN,
@@ -186,6 +187,16 @@ describe('TELEMETRY_EVENT_NAME_PATTERN', () => {
 });
 
 describe('activation event properties', () => {
+  it('allows only provider classifications on setup milestones', () => {
+    expect(
+      buildActivationSetupMilestoneProperties({
+        provider: 'slack',
+        preexisting: true,
+      }),
+    ).toEqual({ provider: 'slack', preexisting: true });
+    expect(buildActivationSetupMilestoneProperties({})).toBeUndefined();
+  });
+
   it('allows only safe task routing classifications', () => {
     expect(
       buildActivationTaskProperties({

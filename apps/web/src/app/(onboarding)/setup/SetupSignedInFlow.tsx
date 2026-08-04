@@ -80,6 +80,9 @@ export function SetupSignedInFlow() {
     useState<ComputeProvider | null>(null);
   const [pendingModelProvider, setPendingModelProvider] =
     useState<SetupModelProviderId | null>(null);
+  const trackWelcomeSeen = useMutation(
+    trpc.setupNew.trackWelcomeSeen.mutationOptions(),
+  );
   const {
     data: setupStatus,
     isLoading: isSetupStatusLoading,
@@ -291,7 +294,14 @@ export function SetupSignedInFlow() {
           animate="center"
           exit="exit"
         >
-          {step === 'welcome' && <StepWelcome onContinue={goToNextStep} />}
+          {step === 'welcome' && (
+            <StepWelcome
+              onContinue={() => {
+                trackWelcomeSeen.mutate();
+                goToNextStep();
+              }}
+            />
+          )}
           {step === 'auth-provider' && (
             <StepAuthProvider
               additionalProviders={['telegram', 'discord']}

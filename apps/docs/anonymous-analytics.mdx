@@ -15,8 +15,13 @@ When anonymous telemetry is enabled, your deployment sends:
 
 - **Usage events** — page views (as route patterns like `/task/[taskId]`,
   never actual URLs or IDs) and product events such as tasks being created
-  or settling as completed, failed, or canceled, with non-identifying facts
-  like the harness, model, source surface, and sandbox provider used.
+  or settling as completed, failed, or canceled, plus setup progress such as
+  reaching authenticated setup and configuring or connecting communications,
+  source-control, inference, and sandbox providers. Setup events include only
+  the provider type and, where Roomote can determine it from deployment state,
+  whether it was configured before the wizard. Other events include
+  non-identifying facts like the harness, model, source surface, and sandbox
+  provider used.
 - **A daily instance report** — aggregate deployment metadata and usage:
   setup timestamps; counts of users, environments, and connected repositories;
   task, model, token, and cost totals for the past day; pull-request statistics

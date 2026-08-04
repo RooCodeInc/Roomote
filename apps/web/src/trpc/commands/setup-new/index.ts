@@ -110,6 +110,10 @@ import {
 
 import type { UserAuthSuccess } from '@/types';
 import {
+  evaluateSetupFunnelMilestones,
+  recordSetupFunnelMilestones,
+} from '@/lib/server/setup-funnel-telemetry';
+import {
   assertSetupTokenValid,
   getLatestTaskRunsByTaskId,
   getRepositories,
@@ -130,6 +134,11 @@ import {
   normalizeRepositorySelection,
 } from '@/lib/setup-new';
 import type { QueuedOnboardingTask } from './types';
+import {
+  getLinkedDiscordAccountCommand,
+  getLinkedTelegramAccountCommand,
+} from '../linked-accounts';
+import { getTeamsIntegrationStatusCommand } from '../teams';
 
 import {
   assertAdmin,
@@ -1448,7 +1457,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     gitlabBaseUrl,
   });
 
-  return {
+  const status = {
     hasGitHub: baseStatus.hasGitHub,
     hasSlack: slackAccessStatus.hasSlackUserMapping,
     hasSlackInstallation: slackAccessStatus.hasSlackInstallation,
@@ -1468,6 +1477,12 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     computeSetup,
     sourceControlSetup,
   };
+
+  if (baseStatus.setupCompletedAt === null) {
+    await recordSetupFunnelMilestones(evaluateSetupFunnelMilestones(status));
+  }
+
+  return status;
 }
 
 export async function saveSetupNewModelConfigCommand(
@@ -2338,6 +2353,63 @@ export async function getSetupBootstrapStatusCommand(input?: {
       selectedProvider: setupNewState.authProvider,
     }),
   };
+}
+
+export async function trackSetupWelcomeSeenCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  await recordSetupFunnelMilestones([{ milestone: 'welcome' }]);
+}
+
+export async function trackSetupCommsStateCommand(
+  auth: UserAuthSuccess,
+  input: {
+    provider: 'microsoft' | 'telegram' | 'discord';
+  },
+) {
+  assertAdmin(auth);
+  const candidates = [];
+
+  if (input.provider === 'microsoft') {
+    const status = await getTeamsIntegrationStatusCommand(auth);
+    if (status.botConfigured && status.microsoftAuthConfigured) {
+      candidates.push({
+        milestone: 'comms_configured' as const,
+        provider: input.provider,
+      });
+    }
+    if (status.primaryConversationReady) {
+      candidates.push({
+        milestone: 'comms_authed' as const,
+        provider: input.provider,
+      });
+    }
+  } else {
+    const status =
+      input.provider === 'telegram'
+        ? await getLinkedTelegramAccountCommand(auth)
+        : await getLinkedDiscordAccountCommand(auth);
+    if (status.configured) {
+      candidates.push({
+        milestone: 'comms_configured' as const,
+        provider: input.provider,
+      });
+    }
+    if (status.mapping) {
+      candidates.push({
+        milestone: 'comms_authed' as const,
+        provider: input.provider,
+      });
+    }
+  }
+
+  await recordSetupFunnelMilestones(candidates);
+}
+
+export async function trackSetupBootstrapWelcomeSeenCommand(input?: {
+  setupToken?: string;
+}) {
+  assertSetupTokenValid(await resolveSetupTokenInput(input?.setupToken));
+  await recordSetupFunnelMilestones([{ milestone: 'welcome' }]);
 }
 
 export async function saveSetupBootstrapAuthProviderChoiceCommand(input: {
