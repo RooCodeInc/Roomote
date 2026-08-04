@@ -61,8 +61,8 @@ describe('normalizeTaskModelId', () => {
     expect(normalizeTaskModelId('vercel/openai/gpt-5.4')).toBe(
       'vercel/openai/gpt-5.4',
     );
-    expect(normalizeTaskModelId('requesty/openai/gpt-5.4')).toBe(
-      'requesty/openai/gpt-5.4',
+    expect(normalizeTaskModelId('requesty/gpt-5.6-terra@eu')).toBe(
+      'requesty/gpt-5.6-terra@eu',
     );
     expect(normalizeTaskModelId('baseten/moonshotai/Kimi-K2.7-Code')).toBe(
       'baseten/moonshotai/Kimi-K2.7-Code',
