@@ -637,6 +637,20 @@ describe('redactSourceControlProviderEnvVars', () => {
     });
   });
 
+  it('removes the deployment Bitbucket token after credentials are derived', () => {
+    expect(
+      redactSourceControlProviderEnvVars(
+        {
+          BITBUCKET_OAUTH: 'bitbucket_deployment_token',
+          OPENAI_API_KEY: 'sk-test',
+        },
+        'bitbucket',
+      ),
+    ).toEqual({
+      OPENAI_API_KEY: 'sk-test',
+    });
+  });
+
   it('leaves unrelated env vars intact for GitHub jobs', () => {
     const envVars = {
       GITLAB_TOKEN: 'glpat_deployment_token',

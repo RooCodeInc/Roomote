@@ -217,6 +217,7 @@ vi.mock('../setup/shared', () => ({
 }));
 
 import {
+  didSuggestionSourceChange,
   getSetupBootstrapStatusCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
@@ -229,6 +230,7 @@ import {
 } from './index';
 import {
   ALL_REPOSITORIES,
+  createEmptySetupNewState,
   TaskPayloadKind,
   WORKER_RUNTIME_SCHEMA_VERSION,
   type SetupNewState,
@@ -298,6 +300,21 @@ function createFromOnlySelectChain(result: unknown) {
     from: vi.fn(async () => result),
   };
 }
+
+describe('didSuggestionSourceChange', () => {
+  it('treats reordered repository ids as the same suggestion source', () => {
+    expect(
+      didSuggestionSourceChange({
+        currentState: {
+          ...createEmptySetupNewState(),
+          selectedRepositoryIds: ['repo-a', 'repo-b'],
+        },
+        nextRepositoryIds: ['repo-b', 'repo-a'],
+        nextSetupGuidance: null,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe('setup-new auth config commands', () => {
   beforeEach(() => {
@@ -1261,9 +1278,11 @@ describe('setup-new onboarding task start command', () => {
 
     await expect(
       startSetupNewOnboardingTaskCommand(buildMockAuth()),
-    ).rejects.toThrow(
-      'The selected repositories include multiple entries named "group/project".',
-    );
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message:
+        'The selected repositories include multiple entries named "group/project". Select only one because task workspaces identify repositories by full name.',
+    });
     expect(enqueueTask).not.toHaveBeenCalled();
   });
 

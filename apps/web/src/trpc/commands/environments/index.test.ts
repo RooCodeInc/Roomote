@@ -100,11 +100,23 @@ import { TaskPayloadKind } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import {
   createEnvironmentCommand,
+  getEnvironmentRepositoryConfigError,
   retryEnvironmentVerificationCommand,
   startEnvironmentDefinitionTaskCommand,
   updateEnvironmentCommand,
   validateConfigCommand,
 } from './index';
+
+describe('getEnvironmentRepositoryConfigError', () => {
+  it('rejects ambiguous active repository names', () => {
+    expect(
+      getEnvironmentRepositoryConfigError([
+        { id: 'repo-github', fullName: 'acme/app', installationId: '1' },
+        { id: 'repo-gitlab', fullName: 'acme/app', installationId: null },
+      ]),
+    ).toContain('Multiple active repositories are named "acme/app"');
+  });
+});
 
 function buildMockAuth(): UserAuthSuccess {
   return {
@@ -168,6 +180,24 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
         trigger: 'manual',
       }),
     );
+  });
+
+  it('surfaces duplicate repository names as a validation error', async () => {
+    mockGetRepositories.mockResolvedValueOnce([
+      { id: 'repo-github', fullName: 'acme/app', installationId: '1' },
+      { id: 'repo-gitlab', fullName: 'acme/app', installationId: null },
+    ]);
+
+    await expect(
+      startEnvironmentDefinitionTaskCommand(buildMockAuth(), {
+        repositoryIds: ['repo-github', 'repo-gitlab'],
+      }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message:
+        'Multiple active repositories are named "acme/app". Environment repository names must be unique across source-control connections.',
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('applies the selected model to settings-created setup tasks', async () => {

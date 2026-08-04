@@ -14,6 +14,7 @@ import {
 import {
   type TaskPayload,
   environmentConfigSchema,
+  getAmbiguousEnvironmentRepositoryError,
   getMissingEnvironmentRepositoryError,
   getEnvironmentRepositoryInstallationError,
 } from '@roomote/types';
@@ -69,7 +70,10 @@ export function getEnvironmentRepositoryConfigError(
     installationId: string | number | null | undefined;
   }>,
 ): string | null {
-  return getEnvironmentRepositoryInstallationError(repositoryRows);
+  return (
+    getAmbiguousEnvironmentRepositoryError(repositoryRows) ??
+    getEnvironmentRepositoryInstallationError(repositoryRows)
+  );
 }
 
 function extractRunId(auth: McpAuth): number | null {

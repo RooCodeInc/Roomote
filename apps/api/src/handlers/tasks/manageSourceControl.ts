@@ -6,9 +6,11 @@ import {
   completeClaimedLatestUserMessageForReplyQuote,
   restoreClaimedLatestUserMessageForReplyQuote,
 } from '@roomote/communication/messages';
+import { resolveRepositoryProvidersFromPayload } from '@roomote/types';
 import {
   createOrUpdateSourceControlPullRequestForTaskRun,
   findTaskRunForSourceControlMutation,
+  getPayloadRecord,
   manageSourceControlIssueForTaskRun,
   readSourceControlPullRequestForTaskRun,
   resolveSourceControlProviderForRepositoryFromPayload,
@@ -92,18 +94,19 @@ export async function manageSourceControl(
       runId: auth.authContext.runId,
       taskId,
     });
-    const payload =
-      taskRun.payload &&
-      typeof taskRun.payload === 'object' &&
-      !Array.isArray(taskRun.payload)
-        ? (taskRun.payload as Record<string, unknown>)
-        : {};
-    const targetProvider =
-      input.sourceControlProvider ??
-      resolveSourceControlProviderForRepositoryFromPayload(
+    const payload = getPayloadRecord(taskRun.payload);
+    let targetProvider = input.sourceControlProvider;
+    const repositoryProviders = resolveRepositoryProvidersFromPayload(payload);
+
+    if (
+      !targetProvider &&
+      (!repositoryProviders || input.repositoryFullName in repositoryProviders)
+    ) {
+      targetProvider = resolveSourceControlProviderForRepositoryFromPayload(
         payload,
         input.repositoryFullName,
       );
+    }
     const bodyInput = 'body' in input ? input : null;
     const shouldQuote =
       targetProvider === 'github' &&

@@ -24,6 +24,7 @@ function toSingleProvider(
 type RepositoryProviderRow = {
   fullName: string;
   host: string | null;
+  isActive?: boolean;
   sourceControlProvider: SourceControlProvider;
 };
 
@@ -44,14 +45,16 @@ function toRepositoryProviderMap(
 
   for (const fullName of [...new Set(repositoryOrder)]) {
     const matches = rowsByFullName.get(fullName) ?? [];
+    const activeMatches = matches.filter((row) => row.isActive === true);
+    const candidates = activeMatches.length > 0 ? activeMatches : matches;
     const hostMatches =
-      matches.length > 1 && sourceControlHost
-        ? matches.filter((row) => row.host === sourceControlHost)
-        : matches;
+      candidates.length > 1 && sourceControlHost
+        ? candidates.filter((row) => row.host === sourceControlHost)
+        : candidates;
 
-    if (matches.length > 1 && hostMatches.length !== 1) {
+    if (candidates.length > 1 && hostMatches.length !== 1) {
       console.warn(
-        `[resolveWorkspaceRepositoryProviders] Omitting ambiguous repository ${fullName}; matched ${matches.length} rows.`,
+        `[resolveWorkspaceRepositoryProviders] Omitting ambiguous repository ${fullName}; matched ${candidates.length} candidate rows.`,
       );
       continue;
     }
@@ -78,6 +81,7 @@ async function resolveProvidersByFullNames(
     .select({
       fullName: repositories.fullName,
       host: repositories.host,
+      isActive: repositories.isActive,
       sourceControlProvider: repositories.sourceControlProvider,
     })
     .from(repositories)
@@ -103,6 +107,7 @@ async function resolveEnvironmentProviders(
     .select({
       fullName: repositories.fullName,
       host: repositories.host,
+      isActive: repositories.isActive,
       sourceControlProvider: repositories.sourceControlProvider,
     })
     .from(environmentRepositoryMappings)
@@ -134,6 +139,7 @@ async function resolveAllRepositoriesProviders(
     .select({
       fullName: repositories.fullName,
       host: repositories.host,
+      isActive: repositories.isActive,
       sourceControlProvider: repositories.sourceControlProvider,
     })
     .from(repositories)
@@ -177,10 +183,9 @@ export async function resolveWorkspaceRepositoryProviders(
  * every workspace shape (single repo, repo set, environment, all repositories).
  *
  * Returns `undefined` when the provider is ambiguous (spans multiple providers)
- * or unknown (no matching repositories). This never throws — an unresolved
- * provider means the caller should leave the payload unstamped and let the
- * downstream GitHub default apply. The web launch-validation path wraps this
- * resolver to add its own throw-on-multi-provider behavior.
+ * or unknown (no matching repositories). This never throws — callers that
+ * require a resolved provider validate the returned repository map before
+ * enqueue, while legacy callers may leave the scalar provider unstamped.
  */
 export async function resolveWorkspaceSourceControlProvider(
   dbOrTx: DatabaseOrTransaction,

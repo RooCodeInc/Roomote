@@ -89,7 +89,6 @@ vi.mock('@roomote/sdk/server', () => ({
 // to null so the enqueue payload is deterministic.
 vi.mock('@/lib/server/source-control-provider', () => ({
   resolveEnvironmentSourceControlProvider: vi.fn(async () => null),
-  resolvePrimarySourceControlProvider: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/server', () => ({

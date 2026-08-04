@@ -152,6 +152,9 @@ export async function initializeRepositories(
 
     case 'repository_set':
     case 'all_repositories': {
+      // A stamped map is the launch-time workspace snapshot. Prefer it over
+      // a live provider-filtered list so mixed-provider tasks keep every
+      // repository selected when the task was queued.
       const repositoriesToPrepare =
         workspace.type === 'repository_set'
           ? workspace.repositories.map((fullName) => ({ fullName }))

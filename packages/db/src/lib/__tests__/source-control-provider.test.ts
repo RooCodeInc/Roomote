@@ -10,6 +10,7 @@ const mockOrderBy = vi.fn();
 let mockRows: Array<{
   fullName: string;
   host: string | null;
+  isActive?: boolean;
   sourceControlProvider: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
 }> = [];
 let mockEnvironmentRepositories: string[] = [];
@@ -225,6 +226,48 @@ describe('resolveWorkspaceSourceControlProvider', () => {
         sourceControlHost: 'git.example.com',
       }),
     ).resolves.toEqual({ 'group/project': 'gitea' });
+  });
+
+  it('prefers active rows over stale inactive rows with the same name', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        isActive: false,
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        fullName: 'group/project',
+        host: 'github.com',
+        isActive: true,
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+      }),
+    ).resolves.toEqual({ 'group/project': 'github' });
+  });
+
+  it('falls back to inactive rows when no active row matches', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        isActive: false,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+      }),
+    ).resolves.toEqual({ 'group/project': 'gitlab' });
   });
 
   it('omits and logs ambiguous same-name repository rows', async () => {

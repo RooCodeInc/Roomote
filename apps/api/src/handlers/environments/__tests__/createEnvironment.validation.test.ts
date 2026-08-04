@@ -20,4 +20,15 @@ describe('getEnvironmentRepositoryConfigError', () => {
       ]),
     ).toBe(MULTI_INSTALLATION_ENVIRONMENT_REPOSITORIES_ERROR);
   });
+
+  it('rejects ambiguous repository names across source-control connections', () => {
+    expect(
+      getEnvironmentRepositoryConfigError([
+        { fullName: 'acme/app', installationId: 'github-installation' },
+        { fullName: 'acme/app', installationId: null },
+      ]),
+    ).toBe(
+      'Multiple active repositories are named "acme/app". Environment repository names must be unique across source-control connections.',
+    );
+  });
 });

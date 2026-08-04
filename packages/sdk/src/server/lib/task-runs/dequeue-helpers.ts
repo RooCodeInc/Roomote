@@ -83,6 +83,9 @@ export function redactSourceControlProviderEnvVars(
   envVars: Record<string, string>,
   sourceControlProvider?: SourceControlProvider | SourceControlProvider[],
 ): Record<string, string> {
+  // Provider credential builders have already converted deployment secrets
+  // into scoped or proxy-backed worker credentials. Never expose the broad
+  // deployment token itself inside the task sandbox, including Bitbucket.
   const providers = Array.isArray(sourceControlProvider)
     ? sourceControlProvider
     : sourceControlProvider

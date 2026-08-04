@@ -4,6 +4,7 @@ import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
   filterRepositoryNamesForSourceControlProvider,
+  resolveRepositoryProvidersFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -963,9 +964,9 @@ async function resolveGitLabRepositoryNamesForTaskRun(
     return [taskRun.payload.repo];
   }
 
-  const repositoryProviders = (
-    taskRun.payload as { repositoryProviders?: Record<string, string> }
-  ).repositoryProviders;
+  const repositoryProviders = resolveRepositoryProvidersFromPayload(
+    taskRun.payload,
+  );
   if (repositoryProviders) {
     const mappedRepositories = Object.entries(repositoryProviders)
       .filter(([, provider]) => provider === GITLAB_PROVIDER)

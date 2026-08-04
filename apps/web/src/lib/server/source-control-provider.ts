@@ -32,12 +32,6 @@ export function resolveSelectedRepositorySourceControlProvider(
   return undefined;
 }
 
-export function resolvePrimarySourceControlProvider(
-  providers: SourceControlProvider[],
-): SourceControlProvider | undefined {
-  return providers[0];
-}
-
 /**
  * Resolve the provider for an environment-backed launch by delegating to the
  * shared resolver (single source of truth for the environment-repository join).

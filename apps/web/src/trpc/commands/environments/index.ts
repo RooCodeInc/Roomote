@@ -1,4 +1,5 @@
 import { enqueueTask } from '@roomote/cloud-agents/server';
+import { TRPCError } from '@trpc/server';
 import {
   createEnvironmentConfigVersionSnapshot,
   db,
@@ -37,6 +38,7 @@ import {
   type ComputeProvider,
   type EnvironmentConfig,
   environmentConfigSchema,
+  getAmbiguousEnvironmentRepositoryError,
   getEnvironmentRepositoryInstallationError,
   getMissingEnvironmentRepositoryError,
   isExitedRunStatus,
@@ -140,14 +142,17 @@ type EnvironmentRepositoryRow = {
   installationId: string | null;
 };
 
-function getEnvironmentRepositoryConfigError(
+export function getEnvironmentRepositoryConfigError(
   repositoriesToValidate: EnvironmentRepositoryRow[],
 ): string | null {
-  return getEnvironmentRepositoryInstallationError(
-    repositoriesToValidate.map((repository) => ({
-      fullName: repository.fullName,
-      installationId: repository.installationId,
-    })),
+  return (
+    getAmbiguousEnvironmentRepositoryError(repositoriesToValidate) ??
+    getEnvironmentRepositoryInstallationError(
+      repositoriesToValidate.map((repository) => ({
+        fullName: repository.fullName,
+        installationId: repository.installationId,
+      })),
+    )
   );
 }
 
@@ -197,7 +202,10 @@ async function resolveSelectedRepositories(
     const repository = repositoriesById.get(repositoryId);
 
     if (!repository) {
-      throw new Error('Selected repositories are no longer available.');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Selected repositories are no longer available.',
+      });
     }
 
     return {
@@ -211,7 +219,10 @@ async function resolveSelectedRepositories(
     getEnvironmentRepositoryConfigError(selectedRepositories);
 
   if (repositoryConfigError) {
-    throw new Error(repositoryConfigError);
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: repositoryConfigError,
+    });
   }
 
   return {
@@ -815,9 +826,23 @@ export async function startEnvironmentDefinitionTaskCommand(
     (repository) => repository.fullName,
   );
   const title = buildSetupEnvironmentTaskTitle(selectedRepositoryFullNames);
-  const workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
-    selectedRepositoryFullNames,
-  );
+  let workspacePayload: ReturnType<
+    typeof buildEnvironmentDefinitionWorkspacePayload
+  >;
+  try {
+    workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
+      selectedRepositoryFullNames,
+    );
+  } catch (error) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'The selected repositories are invalid.',
+      cause: error,
+    });
+  }
   const modelSelection = resolveEvalHarnessSelection({
     model: input.selectedModelId,
   });

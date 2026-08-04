@@ -10,9 +10,8 @@ import {
   deploymentSettings,
   eq,
   getBackgroundAgentSettingsForDeployment,
-  inArray,
-  repositories,
   resolveRepositorySelectionByIds,
+  resolveWorkspaceRepositoryProviders,
   workItems,
 } from '@roomote/db/server';
 import {
@@ -22,10 +21,10 @@ import {
   createEmptySetupNewState,
   isExitedRunStatus,
   normalizeSetupNewState,
+  resolveTaskWorkspace,
 } from '@roomote/types';
 
 import { getLatestTaskRunsByTaskId } from '@/lib/server';
-import { resolvePrimarySourceControlProvider } from '@/lib/server/source-control-provider';
 import type { UserAuthSuccess } from '@/types';
 import { assertAdmin } from '../setup/shared';
 import { decorateSuggestionsWithEnvironmentIds } from './launch-resolution';
@@ -137,13 +136,13 @@ async function launchSuggestedTasksTask(input: {
   );
   // Stamp the provider explicitly: dequeue defaults to GitHub when the
   // payload omits it, which breaks non-GitHub deployments.
-  const scanRepositoryRows = await db
-    .select({ sourceControlProvider: repositories.sourceControlProvider })
-    .from(repositories)
-    .where(inArray(repositories.fullName, input.repositoryFullNames));
-  const scanSourceControlProvider = resolvePrimarySourceControlProvider(
-    scanRepositoryRows.map((row) => row.sourceControlProvider),
+  const scanRepositoryProviders = await resolveWorkspaceRepositoryProviders(
+    db,
+    resolveTaskWorkspace(workspacePayload),
   );
+  const scanSourceControlProvider = input.repositoryFullNames
+    .map((repositoryFullName) => scanRepositoryProviders[repositoryFullName])
+    .find((provider) => provider !== undefined);
   const launchResult = await enqueueTask(
     {
       task: {

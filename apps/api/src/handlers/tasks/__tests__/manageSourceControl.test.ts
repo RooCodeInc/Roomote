@@ -103,4 +103,29 @@ describe('manageSourceControl', () => {
       }),
     });
   });
+
+  it('defers unmapped provider errors until after repository scope validation', async () => {
+    mockManageSourceControlIssueForTaskRun.mockRejectedValueOnce(
+      new Error(
+        "Repository other/repo is outside this task's source-control scope.",
+      ),
+    );
+
+    const response = await createApp().request('/task-1/source_control', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'get_issue',
+        repositoryFullName: 'other/repo',
+        issueNumber: 42,
+      }),
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Repository other/repo is outside this task's source-control scope.",
+    });
+    expect(mockManageSourceControlIssueForTaskRun).toHaveBeenCalled();
+  });
 });
