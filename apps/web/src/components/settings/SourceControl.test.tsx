@@ -330,8 +330,17 @@ vi.mock('@/components/settings', () => ({
 }));
 
 vi.mock('./SourceControlConfigForm', () => ({
-  SourceControlConfigForm: ({ provider }: { provider: string }) => (
-    <div data-testid={`source-control-config-${provider}`} />
+  SourceControlConfigForm: ({
+    provider,
+    showSetupInstructions,
+  }: {
+    provider: string;
+    showSetupInstructions?: boolean;
+  }) => (
+    <div
+      data-testid={`source-control-config-${provider}`}
+      data-show-setup-instructions={showSetupInstructions}
+    />
   ),
 }));
 
@@ -631,15 +640,10 @@ describe('SourceControl settings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
 
-    expect(
-      screen.getByRole('link', { name: /GitLab OAuth application/ }),
-    ).toHaveAttribute(
-      'href',
-      'https://gitlab.com/-/user_settings/applications',
+    expect(screen.getByTestId('source-control-config-gitlab')).toHaveAttribute(
+      'data-show-setup-instructions',
+      'true',
     );
-    expect(
-      screen.getByTestId('source-control-config-gitlab'),
-    ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Hide config' }),
     ).not.toBeInTheDocument();
@@ -666,10 +670,10 @@ describe('SourceControl settings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
 
-    expect(
-      screen.getByRole('link', { name: /Azure DevOps connection/ }),
-    ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
-    expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
+    expect(screen.getByTestId('source-control-config-ado')).toHaveAttribute(
+      'data-show-setup-instructions',
+      'true',
+    );
   });
 
   it('keeps every expanded provider form visible when setting up multiple providers', () => {

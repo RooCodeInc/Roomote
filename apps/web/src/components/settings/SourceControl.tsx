@@ -24,8 +24,6 @@ import {
   useSyncRepositories,
 } from '@/hooks/source-control';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { getSourceControlSetupCopy } from '@/app/(onboarding)/setup/sourceControlSetupCopy';
-
 import {
   useCreateGitHubAppManifest,
   useEnableGitHubApp,
@@ -40,7 +38,6 @@ import {
   Button,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
   GitMerge,
   Input,
   Label,
@@ -399,6 +396,7 @@ export function SourceControl() {
           <SourceControlConfigForm
             provider={provider}
             configStatus={sourceControlConfigStatus.data}
+            showSetupInstructions={!tokenProviderState[provider].isConfigured}
             saveSuccessMessage={`${sourceControlProviderDescriptors[provider].label} credentials saved.`}
             onSaved={() =>
               completeProviderConfigSave({
@@ -737,9 +735,7 @@ function SourceControlProviderBlock({
           {!isConfigured ? (
             isGitHubUnconfigured ? (
               <GitHubAppSettingsSetupPanel setup={githubSetup} />
-            ) : (
-              <ProviderSetupInstructions provider={provider} title={title} />
-            )
+            ) : null
           ) : null}
           {shouldShowGitHubConfigForm ? configForm : null}
           {isPending ? null : repositoryCount > 0 && repositories ? (
@@ -918,54 +914,6 @@ function GitHubAppSettingsSetupPanel({ setup }: { setup: ReactNode }) {
         <p className="text-sm text-muted-foreground">
           After credentials are saved, Connect GitHub installs the app for the
           repositories Roomote should work with.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function ProviderSetupInstructions({
-  provider,
-  title,
-}: {
-  provider: SourceControlProvider;
-  title: string;
-}) {
-  const setupCopy = getSourceControlSetupCopy(provider);
-
-  return (
-    <div className="max-w-2xl space-y-4">
-      <div className="space-y-2">
-        <p className="text-sm font-semibold">
-          Create {setupCopy.setupLabelArticle ?? 'a'}{' '}
-          {setupCopy.creationHref ? (
-            <a
-              href={setupCopy.creationHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline underline-offset-4 hover:text-foreground"
-            >
-              {setupCopy.setupLabel}
-              <ExternalLink className="ml-1 inline size-4 -translate-y-0.5" />
-            </a>
-          ) : (
-            setupCopy.setupLabel
-          )}{' '}
-          for {title}.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          {setupCopy.creationHint ??
-            'Roomote will guide you through app creation and installation.'}
-        </p>
-      </div>
-      <div className="space-y-1">
-        <p className="text-sm font-semibold">
-          Copy credentials and finish setup.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Copy the generated credential, then paste it below. Roomote stores
-          deployment credentials securely and uses them to sync repositories and
-          configure pull request webhooks.
         </p>
       </div>
     </div>
