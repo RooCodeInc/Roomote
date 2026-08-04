@@ -42,12 +42,12 @@ describe('resolveModelsDevSlug', () => {
   });
 
   it('strips the requesty/ prefix for Requesty routed models', () => {
-    expect(resolveModelsDevSlug('requesty/openai/gpt-5.4')).toBe(
-      'openai/gpt-5.4',
+    expect(resolveModelsDevSlug('requesty/gpt-5.6-terra@eu')).toBe(
+      'gpt-5.6-terra@eu',
     );
-    expect(
-      resolveModelsDevSlug('requesty/~anthropic/claude-sonnet-latest'),
-    ).toBe('anthropic/claude-sonnet-latest');
+    expect(resolveModelsDevSlug('requesty/~claude-sonnet-5')).toBe(
+      'claude-sonnet-5',
+    );
   });
 
   it('strips the baseten/ prefix for Baseten routed models', () => {
@@ -317,12 +317,12 @@ describe('lookupModelMetadataFromCatalog', () => {
     const catalog = buildCatalog({
       gatewayModelsByLowerSlug: {
         requesty: {
-          'anthropic/claude-sonnet-4': {
-            id: 'anthropic/claude-sonnet-4',
-            name: 'Claude Sonnet 4',
+          'claude-sonnet-5': {
+            id: 'claude-sonnet-5',
+            name: 'Claude Sonnet 5',
             modalities: { input: ['text', 'image', 'pdf'] },
-            limit: { context: 200000 },
-            cost: { input: 3, output: 15 },
+            limit: { context: 1000000 },
+            cost: { input: 2, output: 10 },
           },
         },
       },
@@ -330,16 +330,16 @@ describe('lookupModelMetadataFromCatalog', () => {
 
     const result = lookupModelMetadataFromCatalog(
       catalog,
-      'requesty/anthropic/claude-sonnet-4',
+      'requesty/claude-sonnet-5',
     );
 
     expect(result.metadata).toEqual({
-      contextWindow: 200000,
+      contextWindow: 1000000,
       inputTypes: ['text', 'image', 'pdf'],
-      inputPricePerToken: 3 / 1_000_000,
-      outputPricePerToken: 15 / 1_000_000,
+      inputPricePerToken: 2 / 1_000_000,
+      outputPricePerToken: 10 / 1_000_000,
     });
-    expect(result.displayName).toBe('Claude Sonnet 4');
+    expect(result.displayName).toBe('Claude Sonnet 5');
   });
 
   it('falls back to the provider-agnostic models map for requesty-routed models missing from the gateway entry', () => {

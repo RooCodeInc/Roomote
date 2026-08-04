@@ -347,6 +347,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(kimiK3ByProvider).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/moonshotai/kimi-k3' },
       { providerId: 'vercel', modelId: 'vercel/moonshotai/kimi-k3' },
+      { providerId: 'requesty', modelId: 'requesty/kimi-k3' },
       { providerId: 'baseten', modelId: 'baseten/moonshotai/Kimi-K3' },
       { providerId: 'togetherai', modelId: 'togetherai/moonshotai/Kimi-K3' },
       { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
@@ -418,6 +419,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       expect(providersByModel).toEqual([
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
         { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
+        { providerId: 'requesty', modelId: `requesty/${modelId}@eu` },
         { providerId: 'openai', modelId: `openai/${modelId}` },
         { providerId: 'azure', modelId: `azure/${modelId}` },
         {
@@ -460,6 +462,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         modelId: 'openrouter/google/gemini-3.6-flash',
       },
       { providerId: 'vercel', modelId: 'vercel/google/gemini-3.6-flash' },
+      { providerId: 'requesty', modelId: 'requesty/gemini-3.6-flash' },
       { providerId: 'opencode', modelId: 'opencode/gemini-3.6-flash' },
       { providerId: 'google', modelId: 'google/gemini-3.6-flash' },
     ]);
@@ -484,6 +487,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       {
         providerId: 'vercel',
         modelId: 'vercel/deepseek/deepseek-v4-flash-0731',
+      },
+      {
+        providerId: 'requesty',
+        modelId: 'requesty/deepseek-v4-flash-0731',
       },
       {
         providerId: 'baseten',
@@ -742,7 +749,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
   });
 
-  it('maps Requesty to the REQUESTY_API_KEY env var and hides it from new connections', () => {
+  it('maps Requesty to its current models.dev catalog and recommended roles', () => {
     const requestyProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'requesty',
     );
@@ -750,26 +757,38 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(requestyProvider).toMatchObject({
       label: 'Requesty',
       envVarName: 'REQUESTY_API_KEY',
-      defaultRoomoteModel: 'requesty/anthropic/claude-haiku-4-5',
-      hidden: true,
+      defaultRoomoteModel: 'requesty/claude-sonnet-5',
+      recommendedRoleModels: {
+        helper: 'requesty/gemini-3.6-flash',
+        codeReview: 'requesty/claude-sonnet-5',
+        explore: 'requesty/gemini-3.6-flash',
+        planning: 'requesty/claude-opus-5',
+      },
     });
+    expect(
+      requestyProvider?.suggestedTaskModels.map((model) => model.id),
+    ).toEqual([
+      'requesty/claude-fable-5',
+      'requesty/claude-haiku-4-5',
+      'requesty/claude-opus-5',
+      'requesty/claude-sonnet-5',
+      'requesty/gpt-5.6-sol@eu',
+      'requesty/gpt-5.6-terra@eu',
+      'requesty/gpt-5.6-luna@eu',
+      'requesty/gemini-3.6-flash',
+      'requesty/deepseek-v4-flash-0731',
+      'requesty/glm-5.2',
+      'requesty/kimi-k3',
+      'requesty/grok-4.5',
+    ]);
   });
 
-  it('excludes hidden providers from the setup status unless they are connected', () => {
+  it('offers Requesty for new connections', () => {
     const unconnected = buildSetupModelStatus({});
 
     expect(
       unconnected.providers.some((provider) => provider.id === 'requesty'),
-    ).toBe(false);
-
-    const connected = buildSetupModelStatus({
-      persistedEnvVarNames: ['REQUESTY_API_KEY'],
-    });
-    const requestyStatus = connected.providers.find(
-      (provider) => provider.id === 'requesty',
-    );
-
-    expect(requestyStatus?.savedApiKeySatisfied).toBe(true);
+    ).toBe(true);
   });
 
   it('maps Baseten to the BASETEN_API_KEY env var', () => {
@@ -1423,7 +1442,7 @@ describe('buildSetupModelStatus', () => {
   it('resolves the requesty provider from a runtime Requesty model id', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
-        R_MODEL: 'requesty/anthropic/claude-sonnet-4',
+        R_MODEL: 'requesty/claude-sonnet-5',
         REQUESTY_API_KEY: 'rty-runtime',
       },
     });

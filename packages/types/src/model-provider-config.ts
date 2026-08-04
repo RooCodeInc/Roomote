@@ -368,17 +368,30 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'requesty',
     label: 'Requesty',
     envVarName: 'REQUESTY_API_KEY',
-    defaultRoomoteModel: 'requesty/anthropic/claude-haiku-4-5',
+    defaultRoomoteModel: 'requesty/claude-sonnet-5',
     authKind: 'api-key',
-    // Requesty's models.dev catalog does not yet list GPT 5.6 Sol/Terra/Luna,
-    // so only recommended models that resolve there are suggested.
+    // Requesty's models.dev slugs are provider-local rather than lab/model.
     suggestedTaskModels: mapRecommendedTaskModels({
-      'claude-haiku-4-5': 'requesty/anthropic/claude-haiku-4-5',
+      'claude-fable-5': 'requesty/claude-fable-5',
+      'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
+      'claude-opus-5': 'requesty/claude-opus-5',
+      'claude-sonnet-5': 'requesty/claude-sonnet-5',
+      'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
+      'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
+      'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
+      'gemini-3-6-flash': 'requesty/gemini-3.6-flash',
+      'deepseek-v4-flash-0731': 'requesty/deepseek-v4-flash-0731',
+      'glm-5-2': 'requesty/glm-5.2',
+      'kimi-k3': 'requesty/kimi-k3',
+      'grok-4-5': 'requesty/grok-4.5',
     }),
-    // Hidden from new connections for now: the catalog above resolves too
-    // few recommended models to seed a useful default list. Existing
-    // connections keep working.
-    hidden: true,
+    recommendedRoleModels: {
+      helper: 'requesty/gemini-3.6-flash',
+      codeReview: 'requesty/claude-sonnet-5',
+      explore: 'requesty/gemini-3.6-flash',
+      planning: 'requesty/claude-opus-5',
+    },
+    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
   },
   {
     id: 'baseten',
