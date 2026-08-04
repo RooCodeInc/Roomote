@@ -33,6 +33,17 @@
 		}
 	}
 
+	@local_sandbox path_regexp local_sandbox ^/_roomote-sandbox/([a-z0-9]+)(/.*)$
+
+	handle @local_sandbox {
+		rewrite * {re.local_sandbox.2}
+		reverse_proxy preview-proxy:8081 {
+			header_up Host {re.local_sandbox.1}-sandbox-server.{$ROOMOTE_PREVIEW_DOMAIN}
+			lb_try_duration 10s
+			lb_try_interval 250ms
+		}
+	}
+
 	@api {
 		path /_roomote-api /_roomote-api/*
 	}

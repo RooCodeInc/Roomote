@@ -207,6 +207,17 @@ describe('buildDockerSandboxServerUrl', () => {
     ).toBe('https://roomote-example.ngrok.app/_roomote-sandbox/task123456789');
   });
 
+  it('routes networked Docker sandbox transport through the app origin for local preview domains', () => {
+    expect(
+      buildDockerSandboxServerUrl({
+        network: 'roomote_default',
+        taskId: 'task123456789',
+        publicAppUrl: 'http://192.168.50.78:28080/',
+        previewProxyBaseUrl: 'http://preview.localhost:28080',
+      }),
+    ).toBe('http://192.168.50.78:28080/_roomote-sandbox/task123456789');
+  });
+
   it('keeps the direct published URL fallback without a public app origin', () => {
     expect(
       buildDockerSandboxServerUrl({
