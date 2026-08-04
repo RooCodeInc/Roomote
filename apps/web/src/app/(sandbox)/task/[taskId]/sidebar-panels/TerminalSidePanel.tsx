@@ -10,6 +10,7 @@ import {
 } from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 
+import { generateClientUuid } from '@/lib/client-uuid';
 import { cn } from '@/lib/utils';
 import {
   BasicTooltip,
@@ -110,7 +111,7 @@ export function TerminalSidePanel({ active, onClose }: TerminalSidePanelProps) {
 
   const openTerminalTab = useCallback(
     (options?: { initialCommand?: string }) => {
-      const id = crypto.randomUUID();
+      const id = generateClientUuid();
       const sessionId = id;
 
       setExtraTerminalTabs((prev) => [

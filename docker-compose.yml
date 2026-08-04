@@ -73,6 +73,8 @@ services:
     image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     environment:
       S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
+      ROOMOTE_PREVIEW_PROXY_PORT: ${ROOMOTE_PREVIEW_PROXY_PORT:-18081}
+      ROOMOTE_PREVIEW_DOMAIN: ${ROOMOTE_PREVIEW_DOMAIN:-roomotepreview.localhost}
     ports:
       - '127.0.0.1:18080:18080'
     volumes:

@@ -5,6 +5,7 @@ import {
   TaskPayloadKind,
   NonRetryableSpawnError,
   getPrimaryPortFromConfig,
+  isLocalPreviewDomain,
   portNameToSlug,
   SANDBOX_SERVER_NAMED_PORT,
   TaskRunErrorCode,
@@ -804,6 +805,22 @@ export function buildDockerSandboxServerUrl(params: {
     return undefined;
   }
 
+  const localPreviewDomain = (() => {
+    try {
+      return isLocalPreviewDomain(
+        params.previewProxyBaseUrl
+          ? new URL(params.previewProxyBaseUrl).hostname
+          : null,
+      );
+    } catch {
+      return false;
+    }
+  })();
+
+  if (params.publicAppUrl && (!params.network || localPreviewDomain)) {
+    return `${params.publicAppUrl.replace(/\/+$/, '')}/_roomote-sandbox/${params.taskId}`;
+  }
+
   if (params.network && params.previewProxyBaseUrl) {
     return buildPreviewProxyUrl(
       params.taskId,
@@ -811,10 +828,6 @@ export function buildDockerSandboxServerUrl(params: {
       params.previewProxyBaseUrl,
       params.previewProxySubdomainSuffix,
     );
-  }
-
-  if (!params.network && params.publicAppUrl) {
-    return `${params.publicAppUrl.replace(/\/+$/, '')}/_roomote-sandbox/${params.taskId}`;
   }
 
   return undefined;

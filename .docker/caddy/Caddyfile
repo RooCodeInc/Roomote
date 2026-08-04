@@ -50,8 +50,8 @@
 
 	handle @local_sandbox {
 		rewrite * {re.local_sandbox.2}
-		reverse_proxy host.docker.internal:18081 {
-			header_up Host {re.local_sandbox.1}-sandbox-server.roomotepreview.localhost:18081
+		reverse_proxy host.docker.internal:{$ROOMOTE_PREVIEW_PROXY_PORT:18081} {
+			header_up Host {re.local_sandbox.1}-sandbox-server.{$ROOMOTE_PREVIEW_DOMAIN:roomotepreview.localhost}:{$ROOMOTE_PREVIEW_PROXY_PORT:18081}
 			lb_try_duration 10s
 			lb_try_interval 250ms
 		}

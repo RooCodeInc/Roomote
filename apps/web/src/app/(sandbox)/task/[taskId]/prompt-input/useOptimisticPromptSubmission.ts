@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import type { TaskMessageEnvelope } from '@/types';
+import { generateClientUuid } from '@/lib/client-uuid';
 import { useTRPC } from '@/trpc/client';
 
 import {
@@ -68,7 +69,7 @@ export function useOptimisticPromptSubmission() {
       images,
       location,
     }: StartOptimisticPromptSubmissionInput) => {
-      const clientMessageId = globalThis.crypto.randomUUID();
+      const clientMessageId = generateClientUuid();
       const optimisticPrompt = createOptimisticPromptArtifacts({
         taskId,
         prompt,
