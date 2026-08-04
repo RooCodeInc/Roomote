@@ -15,8 +15,9 @@ describe('generateClientUuid', () => {
   });
 
   it('falls back to a v4 UUID when randomUUID is missing (insecure origins)', () => {
-    const getRandomValues =
-      globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+    const getRandomValues = globalThis.crypto.getRandomValues.bind(
+      globalThis.crypto,
+    );
 
     vi.stubGlobal('crypto', { getRandomValues });
 
@@ -24,8 +25,9 @@ describe('generateClientUuid', () => {
   });
 
   it('generates unique values without randomUUID', () => {
-    const getRandomValues =
-      globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+    const getRandomValues = globalThis.crypto.getRandomValues.bind(
+      globalThis.crypto,
+    );
 
     vi.stubGlobal('crypto', { getRandomValues });
 
