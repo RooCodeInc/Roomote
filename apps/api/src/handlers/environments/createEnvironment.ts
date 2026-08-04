@@ -10,6 +10,7 @@ import {
   inArray,
   repositories,
   taskRuns,
+  users,
 } from '@roomote/db/server';
 import {
   type TaskPayload,
@@ -30,6 +31,8 @@ export const DUPLICATE_ENVIRONMENT_NAME_ERROR =
   'An environment with this name already exists. This endpoint only creates new environments.';
 export const EVAL_ENVIRONMENT_WRITE_ERROR =
   'isEval is reserved for internal eval environments.';
+export const ENVIRONMENT_ADMIN_REQUIRED_ERROR =
+  'Admin access is required to create or update environments.';
 
 type PostgresErrorLike = {
   code?: string;
@@ -109,16 +112,27 @@ export async function resolveEnvironmentWriteUserId(
       runId: extractRunId(auth) ?? undefined,
     });
   } catch (error) {
-    // A malformed run token or a missing task run means there is no
-    // resolvable live actor; fall back to mint-time attribution. Unexpected
-    // lookup failures degrade the same way (matching pre-live-actor
-    // behavior) instead of escaping the handler's structured error path.
+    // Environment writes must fail closed when a run token is malformed, its
+    // task run no longer exists, or the live-actor lookup otherwise fails.
     if (!(error instanceof McpProxyError)) {
       logHandlerError('resolveEnvironmentWriteUserId', error);
     }
+
+    return null;
   }
 
   return liveActingUserId ?? auth.userId ?? null;
+}
+
+export async function canAdministerEnvironments(
+  userId: string,
+): Promise<boolean> {
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { role: true, deletedAt: true },
+  });
+
+  return user?.role === 'admin' && user.deletedAt == null;
 }
 
 /**
@@ -211,8 +225,8 @@ export async function createEnvironment(
   const auth = c.get('mcpAuth');
   const userId = await resolveEnvironmentWriteUserId(auth);
 
-  if (!userId) {
-    return c.json({ error: 'User context required' }, 403);
+  if (!userId || !(await canAdministerEnvironments(userId))) {
+    return c.json({ error: ENVIRONMENT_ADMIN_REQUIRED_ERROR }, 403);
   }
 
   let body: unknown;

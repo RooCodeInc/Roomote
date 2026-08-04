@@ -11,12 +11,14 @@ const {
   mockTaskRunFindFirst,
   mockRepositoriesFindMany,
   mockEnvironmentsFindFirst,
+  mockUsersFindFirst,
   mockCreateSnapshot,
   mockEnvironmentInsertValues,
 } = vi.hoisted(() => ({
   mockTaskRunFindFirst: vi.fn(),
   mockRepositoriesFindMany: vi.fn().mockResolvedValue([]),
   mockEnvironmentsFindFirst: vi.fn().mockResolvedValue(null),
+  mockUsersFindFirst: vi.fn(),
   mockCreateSnapshot: vi.fn(),
   mockEnvironmentInsertValues: vi.fn(),
 }));
@@ -45,6 +47,9 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
         },
         environments: {
           findFirst: mockEnvironmentsFindFirst,
+        },
+        users: {
+          findFirst: mockUsersFindFirst,
         },
         repositories: {
           findMany: mockRepositoriesFindMany,
@@ -100,6 +105,7 @@ describe.each([
 ] as const)('%s user-context gate', (_name, method, path) => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
   });
 
   it('rejects a deployment-principal run token with no live acting user', async () => {
@@ -110,8 +116,9 @@ describe.each([
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({
-      error: 'User context required',
+      error: 'Admin access is required to create or update environments.',
     });
+    expect(mockUsersFindFirst).not.toHaveBeenCalled();
   });
 
   it('accepts a deployment-principal run token once a live acting user is attached', async () => {
@@ -125,13 +132,20 @@ describe.each([
     expect(response.status).toBe(400);
   });
 
-  it('rejects a run token whose task run no longer exists and has no mint-time user', async () => {
+  it('rejects a run token whose task run no longer exists despite an admin mint-time user', async () => {
     mockTaskRunFindFirst.mockResolvedValueOnce(null);
 
-    const app = createApp(deploymentRunToken());
+    const app = createApp({
+      runId: 42,
+      userId: 'user-mint-admin',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
     const response = await app.request(invalidBodyRequest(method, path));
 
     expect(response.status).toBe(403);
+    expect(mockUsersFindFirst).not.toHaveBeenCalled();
   });
 
   it('prefers the live acting user but falls back to the mint-time claim', async () => {
@@ -160,11 +174,51 @@ describe.each([
     expect(response.status).toBe(400);
     expect(mockTaskRunFindFirst).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['member', { role: 'member', deletedAt: null }],
+    ['deleted admin', { role: 'admin', deletedAt: new Date() }],
+  ])('rejects a %s before processing the write', async (_label, user) => {
+    mockUsersFindFirst.mockResolvedValueOnce({
+      ...user,
+    });
+
+    const app = createApp({
+      userId: 'user-member',
+      tokenType: 'auth',
+      version: 1,
+    });
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Admin access is required to create or update environments.',
+    });
+    expect(mockUsersFindFirst).toHaveBeenCalledOnce();
+    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('checks the live acting user role for deployment-principal runs', async () => {
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      actingUserId: 'user-live-member',
+    });
+    mockUsersFindFirst.mockResolvedValueOnce({
+      role: 'member',
+      deletedAt: null,
+    });
+
+    const app = createApp(deploymentRunToken());
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(403);
+    expect(mockUsersFindFirst).toHaveBeenCalledOnce();
+  });
 });
 
 describe('createEnvironment attribution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
       {
@@ -246,6 +300,7 @@ describe('createEnvironment attribution', () => {
 describe('updateEnvironment repository validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
     mockEnvironmentsFindFirst.mockResolvedValue({
       id: 'env-1',
       name: 'ADO Test',
@@ -288,15 +343,15 @@ describe('updateEnvironment repository validation', () => {
 describe('environment MCP config reserved env var rejection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUsersFindFirst.mockResolvedValue({ role: 'admin', deletedAt: null });
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
       { id: 'repo-1', fullName: 'acme/app', installationId: null },
     ]);
   });
 
-  // Environment writes are not admin-gated on this path, so a non-admin can
-  // reach it through the in-sandbox `environment` MCP tool. Reject configs
-  // that interpolate runtime credentials before they are ever persisted.
+  // Admin-gated environment writes must still reject configs that interpolate
+  // runtime credentials before they are ever persisted.
   it.each([
     [
       'a header value in shell syntax',
