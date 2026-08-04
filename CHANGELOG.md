@@ -2,6 +2,31 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.34.0 (2026-08-04)
+
+This release adds Granola and Requesty connections, introduces Mind reader mode for expanded model thoughts, and improves task reliability across mixed-provider workspaces and chat delivery failures.
+
+### Highlights
+
+- Connect Granola once for deployment-wide access to approved meeting notes, folders, and transcripts.
+- Connect Requesty from setup or model settings with a curated catalog of current supported models.
+- Expand model thought blocks by default with the optional Mind reader mode.
+- Launch tasks reliably from workspaces that combine repositories across supported source-control providers.
+
+### Minor changes
+
+- Let deployment administrators connect Granola once so Roomote can securely browse the notes, folders, and transcripts allowed by the configured API key.
+- Add an optional Mind reader mode that expands LLM thought blocks by default while preserving manual conversation-level choices.
+- Let users connect Requesty from setup or model settings and start with a curated catalog of current supported models.
+
+### Patch changes
+
+- Use Roomote's stable branded Discord invite from the repository and in-app release notes.
+- Keep tasks running when agents attempt to read unsupported ICO or CUR files by returning a recoverable tool error before provider submission.
+- Launch tasks reliably from workspaces that combine repositories across GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket with provider-scoped credentials. Thanks to @jantekb for reporting [#1082](https://github.com/RooCodeInc/Roomote/issues/1082).
+- Require an active deployment administrator to create or update shared environments through Roomote's MCP tools.
+- Stop completed chat tasks from entering repeated closeout attempts when message delivery has failed permanently. Thanks to @daniel-lxs for contributing this improvement.
+
 ## 0.33.0 (2026-08-04)
 
 This release adds new ways to connect and invoke Roomote, gives deployments clearer account-linking guidance, and improves automation and Amazon Bedrock model discovery.
