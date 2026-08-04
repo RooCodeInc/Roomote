@@ -78,6 +78,36 @@ describe('OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT', () => {
     ).rejects.toThrow('cannot safely attach ICO or CUR image files');
   });
 
+  it('rejects a safe-looking symlink whose target is an unsupported icon', async () => {
+    const hooks = await loadHooks();
+    const targetPath = path.join(tempDir, 'target.ico');
+    const symlinkPath = path.join(tempDir, 'preview.png');
+    fs.writeFileSync(targetPath, 'not inspected by the plugin', 'utf8');
+    fs.symlinkSync(targetPath, symlinkPath);
+
+    await expect(
+      hooks['tool.execute.before'](
+        { tool: 'read' },
+        { args: { filePath: symlinkPath } },
+      ),
+    ).rejects.toThrow('cannot safely attach ICO or CUR image files');
+  });
+
+  it('allows a symlink to a supported image path', async () => {
+    const hooks = await loadHooks();
+    const targetPath = path.join(tempDir, 'target.png');
+    const symlinkPath = path.join(tempDir, 'preview.png');
+    fs.writeFileSync(targetPath, 'not inspected by the plugin', 'utf8');
+    fs.symlinkSync(targetPath, symlinkPath);
+
+    await expect(
+      hooks['tool.execute.before'](
+        { tool: 'read' },
+        { args: { filePath: symlinkPath } },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it.each(['/tmp/screenshot.png', '/tmp/component.ts'])(
     'allows safe reads for %s',
     async (filePath) => {

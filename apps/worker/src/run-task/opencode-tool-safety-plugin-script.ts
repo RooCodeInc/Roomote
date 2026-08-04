@@ -1,4 +1,6 @@
-export const OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT = `const UNSUPPORTED_READ_IMAGE_EXTENSIONS = new Set(['.cur', '.ico']);
+export const OPENCODE_TOOL_SAFETY_PLUGIN_SCRIPT = `import { realpath } from 'node:fs/promises';
+
+const UNSUPPORTED_READ_IMAGE_EXTENSIONS = new Set(['.cur', '.ico']);
 
 function getReadPath(input, context) {
   const args = context?.args ?? input?.args;
@@ -24,6 +26,20 @@ function getExtension(filePath) {
   return extensionIndex >= 0 ? basename.slice(extensionIndex) : '';
 }
 
+async function resolvesToUnsupportedImage(filePath) {
+  if (UNSUPPORTED_READ_IMAGE_EXTENSIONS.has(getExtension(filePath))) {
+    return true;
+  }
+
+  try {
+    const resolvedPath = await realpath(filePath.split(/[?#]/u, 1)[0]);
+    return UNSUPPORTED_READ_IMAGE_EXTENSIONS.has(getExtension(resolvedPath));
+  } catch {
+    // Let the read tool report missing or inaccessible paths itself.
+    return false;
+  }
+}
+
 export const RoomoteOpenCodeToolSafety = async () => ({
   'tool.execute.before': async (input, context) => {
     if (input?.tool !== 'read') {
@@ -32,7 +48,7 @@ export const RoomoteOpenCodeToolSafety = async () => ({
 
     const filePath = getReadPath(input, context);
 
-    if (!filePath || !UNSUPPORTED_READ_IMAGE_EXTENSIONS.has(getExtension(filePath))) {
+    if (!filePath || !(await resolvesToUnsupportedImage(filePath))) {
       return;
     }
 
