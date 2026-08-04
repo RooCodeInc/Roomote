@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -56,6 +56,11 @@ type CustomAutomationFormState = {
   targetServiceUrl: string;
 };
 
+type AutomationDestinationProvider = Exclude<
+  CustomAutomationFormState['targetProvider'],
+  'none'
+>;
+
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
@@ -79,6 +84,21 @@ const SCHEDULE_OPTIONS: Array<{
   { value: 'daily', label: 'Daily' },
   { value: 'weekly', label: 'Weekly' },
   { value: 'cron', label: 'Custom schedule' },
+];
+
+const DESTINATION_OPTIONS: Array<{
+  value: AutomationDestinationProvider;
+  label: string;
+  capability:
+    | 'slackConnected'
+    | 'discordConnected'
+    | 'teamsConnected'
+    | 'telegramConnected';
+}> = [
+  { value: 'slack', label: 'Slack', capability: 'slackConnected' },
+  { value: 'discord', label: 'Discord', capability: 'discordConnected' },
+  { value: 'teams', label: 'Teams', capability: 'teamsConnected' },
+  { value: 'telegram', label: 'Telegram', capability: 'telegramConnected' },
 ];
 
 function scheduleLabel(mode: CustomAutomationScheduleMode): string {
@@ -113,8 +133,15 @@ function targetFromRow(row: CustomAutomationListItem): {
   };
 }
 
-function formFromRow(row: CustomAutomationListItem): CustomAutomationFormState {
+function formFromRow(
+  row: CustomAutomationListItem,
+  connectedProviders: readonly AutomationDestinationProvider[] | null,
+): CustomAutomationFormState {
   const target = targetFromRow(row);
+  const targetIsConnected =
+    connectedProviders === null ||
+    target.provider === 'none' ||
+    connectedProviders.includes(target.provider);
   return {
     name: row.name,
     prompt: row.prompt,
@@ -123,9 +150,9 @@ function formFromRow(row: CustomAutomationListItem): CustomAutomationFormState {
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
     model: row.model ?? '',
-    targetProvider: target.provider,
-    targetChannelId: target.channelId,
-    targetServiceUrl: target.serviceUrl,
+    targetProvider: targetIsConnected ? target.provider : 'none',
+    targetChannelId: targetIsConnected ? target.channelId : '',
+    targetServiceUrl: targetIsConnected ? target.serviceUrl : '',
   };
 }
 
@@ -189,6 +216,32 @@ export function CustomAutomationsSection() {
     settingsQuery.data?.settings.managerSlackChannelId ?? '';
   const managerDiscordChannelId =
     settingsQuery.data?.settings.managerDiscordChannelId ?? '';
+  const capabilities = settingsQuery.data?.capabilities;
+  const capabilitiesLoaded = !settingsQuery.isPending && Boolean(capabilities);
+  const connectedDestinationOptions = useMemo(
+    () =>
+      capabilitiesLoaded
+        ? DESTINATION_OPTIONS.filter(
+            (option) => capabilities?.[option.capability] === true,
+          )
+        : [],
+    [capabilities, capabilitiesLoaded],
+  );
+  const connectedDestinationProviders = useMemo(
+    () => connectedDestinationOptions.map((option) => option.value),
+    [connectedDestinationOptions],
+  );
+  const capabilitiesLoadedRef = useRef(capabilitiesLoaded);
+  const connectedDestinationProvidersRef = useRef(
+    connectedDestinationProviders,
+  );
+  capabilitiesLoadedRef.current = capabilitiesLoaded;
+  connectedDestinationProvidersRef.current = connectedDestinationProviders;
+  const visibleDestinationOptions = capabilitiesLoaded
+    ? connectedDestinationOptions
+    : DESTINATION_OPTIONS.filter(
+        (option) => option.value === form.targetProvider,
+      );
 
   const environmentOptions = useMemo(
     () =>
@@ -387,7 +440,12 @@ export function CustomAutomationsSection() {
   const editAutomation = (row: CustomAutomationListItem) => {
     setEditingId(row.id);
     setIsCreating(false);
-    setForm(formFromRow(row));
+    setForm(
+      formFromRow(
+        row,
+        capabilitiesLoaded ? connectedDestinationProviders : null,
+      ),
+    );
     setResolvedCron(row.cronExpression ?? null);
     setScheduleSummary(null);
     window.history.replaceState(
@@ -411,7 +469,14 @@ export function CustomAutomationsSection() {
       if (row) {
         setEditingId(row.id);
         setIsCreating(false);
-        setForm(formFromRow(row));
+        setForm(
+          formFromRow(
+            row,
+            capabilitiesLoadedRef.current
+              ? connectedDestinationProvidersRef.current
+              : null,
+          ),
+        );
         setResolvedCron(row.cronExpression ?? null);
         setScheduleSummary(null);
       }
@@ -421,6 +486,22 @@ export function CustomAutomationsSection() {
     window.addEventListener('hashchange', openLinkedAutomation);
     return () => window.removeEventListener('hashchange', openLinkedAutomation);
   }, [rows]);
+
+  useEffect(() => {
+    if (!capabilitiesLoaded) return;
+
+    setForm((current) =>
+      current.targetProvider === 'none' ||
+      connectedDestinationProviders.includes(current.targetProvider)
+        ? current
+        : {
+            ...current,
+            targetProvider: 'none',
+            targetChannelId: '',
+            targetServiceUrl: '',
+          },
+    );
+  }, [capabilitiesLoaded, connectedDestinationProviders]);
 
   const saveForm = () => {
     if (!form.environmentId) {
@@ -660,10 +741,11 @@ export function CustomAutomationsSection() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">None</SelectItem>
-                <SelectItem value="slack">Slack</SelectItem>
-                <SelectItem value="discord">Discord</SelectItem>
-                <SelectItem value="teams">Teams</SelectItem>
-                <SelectItem value="telegram">Telegram</SelectItem>
+                {visibleDestinationOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -789,7 +871,11 @@ export function CustomAutomationsSection() {
             >
               Cancel
             </Button>
-            <Button type="button" disabled={busy} onClick={saveForm}>
+            <Button
+              type="button"
+              disabled={busy || !capabilitiesLoaded}
+              onClick={saveForm}
+            >
               {editingId ? 'Save' : 'Create'}
             </Button>
           </div>
@@ -817,18 +903,31 @@ export function CustomAutomationsSection() {
           <Button
             type="button"
             size="sm"
-            disabled={busy || atCap}
+            disabled={busy || atCap || !capabilitiesLoaded}
             onClick={() => {
+              const managerProvider =
+                managerSlackChannelId &&
+                settingsQuery.data?.capabilities.slackConnected
+                  ? 'slack'
+                  : managerDiscordChannelId &&
+                      settingsQuery.data?.capabilities.discordConnected
+                    ? 'discord'
+                    : null;
+              const targetProvider =
+                managerProvider ??
+                connectedDestinationOptions[0]?.value ??
+                'none';
               setIsCreating(true);
               setEditingId(null);
               setForm({
                 ...EMPTY_FORM,
-                targetProvider:
-                  managerDiscordChannelId && !managerSlackChannelId
-                    ? 'discord'
-                    : 'slack',
+                targetProvider,
                 targetChannelId:
-                  managerSlackChannelId || managerDiscordChannelId,
+                  targetProvider === 'slack'
+                    ? managerSlackChannelId
+                    : targetProvider === 'discord'
+                      ? managerDiscordChannelId
+                      : '',
               });
               setResolvedCron(null);
               setScheduleSummary(null);

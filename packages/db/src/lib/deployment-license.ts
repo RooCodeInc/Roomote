@@ -1,6 +1,6 @@
 import { createPublicKey, verify as verifySignature } from 'node:crypto';
 
-import { Env } from '@roomote/env';
+import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 
 import { db, type DatabaseOrTransaction } from '../db';
 import {
@@ -17,8 +17,15 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
 export const FREE_SEAT_LIMIT = 10;
 
 const LICENSE_KEY_PREFIX = 'RMLK1';
-const LICENSE_PUBLIC_KEY_SPKI_B64 =
-  'MCowBQYDK2VwAyEAs8vzncSsZYeJCxOYCeSbzH5VEDFJNhh/c6HTBu4N+Sk=';
+/**
+ * Ed25519 public half of the Roomote license signing key (SPKI DER, base64).
+ *
+ * This must stay in lockstep with the private key Roomote Cloud signs licenses
+ * with. Exported so a test can pin the value: the unit tests all inject their
+ * own generated keypair, so they cannot catch this constant drifting.
+ */
+export const LICENSE_PUBLIC_KEY_SPKI_B64 =
+  'MCowBQYDK2VwAyEALp8Px1N98T1Gh4a8zbj6EnpyWbxF3VJNqTKmXvxK8xc=';
 
 export type LicensePayload = {
   licenseId: string;
@@ -165,12 +172,34 @@ export function hasCurrentLicenseActivation(
   );
 }
 
+/**
+ * Whether Roomote Cloud hosts this deployment. `R_CLOUD_ENABLED` is set by
+ * Cloud provisioning and documented as "do not set this for self-hosted
+ * deployments", so it is the discriminator between the two seat gates below.
+ */
+function isCloudHostedDeployment(): boolean {
+  return isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
+}
+
 export function getEffectiveSeatLimit(
   licenseState: DeploymentLicenseState,
   cloudState: LicenseCloudLease | null | undefined,
   deploymentId: string,
   now: Date = new Date(),
 ): number {
+  if (licenseState.status !== 'valid') {
+    return FREE_SEAT_LIMIT;
+  }
+
+  // Cloud provisions a `lic_cloud_<deploymentId>` key onto deployments it hosts,
+  // on infrastructure it controls, so the one-installation binding an activation
+  // lease provides buys nothing here. Self-hosted keeps the lease requirement:
+  // that binding is what stops a single purchased key raising seats across many
+  // installations.
+  if (isCloudHostedDeployment()) {
+    return licenseState.seatLimit;
+  }
+
   return hasCurrentLicenseActivation(
     licenseState,
     cloudState,

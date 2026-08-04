@@ -32,7 +32,7 @@ export const TodoListItem = ({
   <li
     data-completed={completed}
     className={cn(
-      'group flex flex-col gap-2 rounded-md px-3 py-1 text-sm transition-colors text-muted-foregound cursor-default',
+      'group flex flex-col gap-2 rounded-md px-3 py-1 text-sm transition-colors text-muted-foreground cursor-default',
       !inProgress && 'text-muted-foreground/70',
       className,
     )}

@@ -2,7 +2,9 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 
 import {
   FREE_SEAT_LIMIT,
+  getEffectiveSeatLimit,
   getEnvLicenseKey,
+  LICENSE_PUBLIC_KEY_SPKI_B64,
   resolveConfiguredLicenseKey,
   resolveLicenseState,
   verifyLicenseKey,
@@ -169,6 +171,89 @@ describe('resolveLicenseState', () => {
         publicKeySpkiB64,
       ),
     ).toMatchObject({ status: 'expired', seatLimit: FREE_SEAT_LIMIT });
+  });
+});
+
+describe('LICENSE_PUBLIC_KEY_SPKI_B64', () => {
+  // Every other test in this file injects its own generated keypair, so none of
+  // them notice if this constant drifts away from the key Roomote Cloud signs
+  // with. It drifted once (PR #937) and silently capped every deployment at the
+  // free tier, so pin the value here.
+  it('matches the public half of the Cloud license signing key', () => {
+    expect(LICENSE_PUBLIC_KEY_SPKI_B64).toBe(
+      'MCowBQYDK2VwAyEALp8Px1N98T1Gh4a8zbj6EnpyWbxF3VJNqTKmXvxK8xc=',
+    );
+  });
+});
+
+describe('getEffectiveSeatLimit', () => {
+  const DEPLOYMENT_ID = 'deployment-1';
+  const now = new Date('2026-06-01T00:00:00.000Z');
+  const licensed = () =>
+    resolveLicenseState(issueKey(validPayload), now, publicKeySpkiB64);
+  const currentLease = {
+    licenseId: 'lic_test123',
+    deploymentId: DEPLOYMENT_ID,
+    activationExpiresAt: '2026-06-02T00:00:00.000Z',
+    entitlementsVersion: 'v1',
+    entitlements: {},
+    entitlementsExpiresAt: '2026-06-02T00:00:00.000Z',
+    lastSyncedAt: '2026-06-01T00:00:00.000Z',
+  };
+
+  function setCloudHosted(enabled: boolean) {
+    vi.stubEnv('R_CLOUD_ENABLED', enabled ? 'true' : 'false');
+    initializeWebRuntimeEnv();
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    initializeWebRuntimeEnv();
+  });
+
+  it('honors a valid key without a lease on a Cloud-hosted deployment', () => {
+    setCloudHosted(true);
+
+    expect(getEffectiveSeatLimit(licensed(), null, DEPLOYMENT_ID, now)).toBe(
+      50,
+    );
+  });
+
+  it('still requires a lease when self-hosted', () => {
+    setCloudHosted(false);
+
+    expect(getEffectiveSeatLimit(licensed(), null, DEPLOYMENT_ID, now)).toBe(
+      FREE_SEAT_LIMIT,
+    );
+    expect(
+      getEffectiveSeatLimit(licensed(), currentLease, DEPLOYMENT_ID, now),
+    ).toBe(50);
+  });
+
+  it('does not let a Cloud deployment ride an unverifiable key', () => {
+    setCloudHosted(true);
+
+    expect(
+      getEffectiveSeatLimit(
+        resolveLicenseState(issueKey(validPayload), now),
+        null,
+        DEPLOYMENT_ID,
+        now,
+      ),
+    ).toBe(FREE_SEAT_LIMIT);
+  });
+
+  it('does not let a Cloud deployment ride an expired key', () => {
+    setCloudHosted(true);
+    const expired = resolveLicenseState(
+      issueKey({ ...validPayload, expiresAt: '2026-05-01T00:00:00.000Z' }),
+      now,
+      publicKeySpkiB64,
+    );
+
+    expect(getEffectiveSeatLimit(expired, null, DEPLOYMENT_ID, now)).toBe(
+      FREE_SEAT_LIMIT,
+    );
   });
 });
 

@@ -2,6 +2,20 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.32.1 (2026-08-04)
+
+This patch restores licensed Cloud seat limits and keeps custom automation destinations limited to connected communication providers.
+
+### Highlights
+
+- Restore licensed seat limits for Roomote Cloud deployments so valid provisioned licenses no longer fall back to the free-tier limit when no activation lease is present.
+- Choose custom automation destinations from connected communication providers only.
+
+### Patch changes
+
+- Restore licensed seat limits for Roomote Cloud deployments so valid provisioned licenses no longer fall back to the free-tier limit when no activation lease is present.
+- Show only connected communication providers when choosing a custom automation destination, while preserving task-view-only delivery and existing form edits as integration availability loads.
+
 ## 0.32.0 (2026-08-03)
 
 This release adds OpenCode Go subscriptions, restores convenient automation test runs, refreshes recommended models, and makes license syncing more resilient.
