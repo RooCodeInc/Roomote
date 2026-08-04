@@ -11,6 +11,7 @@ import {
   environmentConfigSchema,
   getSourceControlProviderLabel,
   normalizeSourceControlProvider,
+  resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -58,6 +59,22 @@ export function resolveSourceControlProviderForRepositoryFromPayload(
   }
 
   return resolveSourceControlProviderFromPayload(payload);
+}
+
+export function resolveSourceControlHostForRepositoryFromPayload(
+  payload: Record<string, unknown>,
+  repositoryFullName: string,
+): string | undefined {
+  const repositoryProvider =
+    resolveSourceControlProviderForRepositoryFromPayload(
+      payload,
+      repositoryFullName,
+    );
+  const primaryProvider = resolveSourceControlProviderFromPayload(payload);
+
+  return repositoryProvider === primaryProvider
+    ? resolveSourceControlHostFromPayload(payload)
+    : undefined;
 }
 
 /**

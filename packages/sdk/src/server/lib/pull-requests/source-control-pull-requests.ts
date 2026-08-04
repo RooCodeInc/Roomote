@@ -22,7 +22,6 @@ import {
   getSourceControlProviderLabel,
   normalizePrBodyAttributionAppMention,
   prActions,
-  resolveSourceControlHostFromPayload,
   sourceControlProviderSchema,
   type PrAction,
   type SourceControlProvider,
@@ -56,6 +55,7 @@ import {
   isDraftTitle,
   isGitLabDraft,
   resolveRepositoryRow,
+  resolveSourceControlHostForRepositoryFromPayload,
   resolveSourceControlProviderForRepositoryFromPayload,
   splitRepositoryFullName,
   type FetchImpl,
@@ -186,7 +186,10 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     payloadRecord,
     input.repositoryFullName,
   );
-  const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
+  const payloadHost = resolveSourceControlHostForRepositoryFromPayload(
+    payloadRecord,
+    input.repositoryFullName,
+  );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {

@@ -3,7 +3,6 @@ import { getOctokit } from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
-  resolveSourceControlHostFromPayload,
   sourceControlProviderSchema,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -27,6 +26,7 @@ import {
   formatResponseBody,
   getPayloadRecord,
   resolveRepositoryRow,
+  resolveSourceControlHostForRepositoryFromPayload,
   resolveSourceControlProviderForRepositoryFromPayload,
   splitRepositoryFullName,
   type FetchImpl,
@@ -237,7 +237,10 @@ export async function writeSourceControlPullRequestForTaskRun({
     payloadRecord,
     input.repositoryFullName,
   );
-  const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
+  const payloadHost = resolveSourceControlHostForRepositoryFromPayload(
+    payloadRecord,
+    input.repositoryFullName,
+  );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {

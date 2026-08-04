@@ -1,13 +1,11 @@
 import { type TaskRun } from '@roomote/db/server';
-import {
-  getSourceControlProviderLabel,
-  resolveSourceControlHostFromPayload,
-} from '@roomote/types';
+import { getSourceControlProviderLabel } from '@roomote/types';
 
 import {
   assertRepositoryInTaskRunScope,
   getPayloadRecord,
   resolveRepositoryRow,
+  resolveSourceControlHostForRepositoryFromPayload,
   resolveSourceControlProviderForRepositoryFromPayload,
   type FetchImpl,
 } from '../pull-requests/source-control-pull-request-shared';
@@ -66,7 +64,10 @@ export async function manageSourceControlIssueForTaskRun({
   const repository = await resolveRepositoryRow({
     provider,
     repositoryFullName: input.repositoryFullName,
-    host: resolveSourceControlHostFromPayload(payload),
+    host: resolveSourceControlHostForRepositoryFromPayload(
+      payload,
+      input.repositoryFullName,
+    ),
   });
 
   const ops = getIssueProviderOperations(provider);

@@ -308,10 +308,6 @@ describe('initializeRepositories', () => {
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,
     );
-    mockListRepositories.mockResolvedValue([
-      { fullName: 'acme/github-app' },
-      { fullName: 'acme/gitlab-app' },
-    ]);
     const prepareRepositorySpy = vi
       .spyOn(WorkspaceManager.prototype, 'prepareRepository')
       .mockImplementation(async (repo) => `/tmp/${repo}`);
@@ -320,10 +316,13 @@ describe('initializeRepositories', () => {
       workspace: { type: 'all_repositories' },
       envVars: {},
       taskRunType: TaskPayloadKind.StandardTask,
-      repositoryProviders: { 'acme/gitlab-app': 'gitlab' },
+      repositoryProviders: {
+        'acme/github-app': 'github',
+        'acme/gitlab-app': 'gitlab',
+      },
     });
 
-    expect(mockListRepositories).toHaveBeenCalledTimes(1);
+    expect(mockListRepositories).not.toHaveBeenCalled();
     expect(prepareRepositorySpy).toHaveBeenCalledWith(
       'acme/github-app',
       undefined,

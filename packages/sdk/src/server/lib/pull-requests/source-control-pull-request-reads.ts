@@ -4,7 +4,6 @@ import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
-  resolveSourceControlHostFromPayload,
   sourceControlProviderSchema,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -25,6 +24,7 @@ import {
   isDraftTitle,
   isGitLabDraft,
   resolveRepositoryRow,
+  resolveSourceControlHostForRepositoryFromPayload,
   resolveSourceControlProviderForRepositoryFromPayload,
   splitRepositoryFullName,
   type FetchImpl,
@@ -613,7 +613,10 @@ export async function readSourceControlPullRequestForTaskRun({
     payloadRecord,
     input.repositoryFullName,
   );
-  const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
+  const payloadHost = resolveSourceControlHostForRepositoryFromPayload(
+    payloadRecord,
+    input.repositoryFullName,
+  );
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {

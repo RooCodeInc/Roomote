@@ -180,6 +180,7 @@ describe('manageSourceControlIssueForTaskRun', () => {
       repo: 'acme/frontend',
       selectedRepositories: ['acme/frontend', 'acme/backend'],
       sourceControlProvider: 'github',
+      sourceControlHost: 'github.com',
       repositoryProviders: { 'acme/backend': 'gitlab' },
     } as unknown as TaskRun['payload'];
 

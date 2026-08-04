@@ -966,6 +966,19 @@ async function resolveGitLabRepositoryNamesForTaskRun(
     return [taskRun.payload.repo];
   }
 
+  const repositoryProviders = (
+    taskRun.payload as { repositoryProviders?: Record<string, string> }
+  ).repositoryProviders;
+  if (repositoryProviders) {
+    const mappedRepositories = Object.entries(repositoryProviders)
+      .filter(([, provider]) => provider === GITLAB_PROVIDER)
+      .map(([repositoryName]) => repositoryName);
+
+    if (mappedRepositories.length > 0) {
+      return mappedRepositories;
+    }
+  }
+
   throw new Error(
     `GitLab source control jobs require an explicit repository scope for task run ${taskRun.id}.`,
   );

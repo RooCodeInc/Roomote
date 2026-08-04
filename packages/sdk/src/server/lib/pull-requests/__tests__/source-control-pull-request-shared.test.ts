@@ -6,6 +6,7 @@ vi.mock('@roomote/gitlab', () => ({
 
 import {
   buildGitLabTokenHeader,
+  resolveSourceControlHostForRepositoryFromPayload,
   resolveSourceControlProviderForRepositoryFromPayload,
 } from '../source-control-pull-request-shared';
 
@@ -32,6 +33,34 @@ describe('resolveSourceControlProviderForRepositoryFromPayload', () => {
         'acme/frontend',
       ),
     ).toBe('github');
+  });
+});
+
+describe('resolveSourceControlHostForRepositoryFromPayload', () => {
+  it('does not apply the primary provider host to a mapped secondary repository', () => {
+    expect(
+      resolveSourceControlHostForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          sourceControlHost: 'github.com',
+          repositoryProviders: { 'acme/backend': 'gitlab' },
+        },
+        'acme/backend',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('keeps the scalar host for repositories on the primary provider', () => {
+    expect(
+      resolveSourceControlHostForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          sourceControlHost: 'github.com',
+          repositoryProviders: { 'acme/backend': 'gitlab' },
+        },
+        'acme/frontend',
+      ),
+    ).toBe('github.com');
   });
 });
 

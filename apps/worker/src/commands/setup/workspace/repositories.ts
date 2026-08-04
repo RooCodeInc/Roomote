@@ -90,6 +90,7 @@ export async function initializeRepositories(
       : { sourceControlProvider: resolvedSourceControlProvider }),
     ...(repositoryProviders ? { repositoryProviders } : {}),
   };
+  const mappedRepositoryNames = Object.keys(repositoryProviders ?? {});
   const { workspaceRoot, workspaceManager } = createWorkspaceManager(
     envVars,
     logger,
@@ -154,14 +155,16 @@ export async function initializeRepositories(
       const repositoriesToPrepare =
         workspace.type === 'repository_set'
           ? workspace.repositories.map((fullName) => ({ fullName }))
-          : await timedStep(
-              logger,
-              'initializeRepositories: list repositories',
-              () =>
-                sdk.repositories.listRepositories({
-                  sourceControlProvider: resolvedSourceControlProvider,
-                }),
-            );
+          : mappedRepositoryNames.length > 0
+            ? mappedRepositoryNames.map((fullName) => ({ fullName }))
+            : await timedStep(
+                logger,
+                'initializeRepositories: list repositories',
+                () =>
+                  sdk.repositories.listRepositories({
+                    sourceControlProvider: resolvedSourceControlProvider,
+                  }),
+              );
 
       const limit = pLimit(REPO_PREPARATION_CONCURRENCY);
 
