@@ -28,7 +28,7 @@ describe('getEnvironmentRepositoryConfigError', () => {
         { fullName: 'acme/app', installationId: null },
       ]),
     ).toBe(
-      'Multiple active repositories are named "acme/app". Environment repository names must be unique across source-control connections.',
+      'Multiple repositories are named "acme/app". Environment repository names must be unique across source-control connections.',
     );
   });
 });

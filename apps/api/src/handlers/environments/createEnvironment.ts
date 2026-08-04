@@ -15,6 +15,7 @@ import {
   type TaskPayload,
   environmentConfigSchema,
   getAmbiguousEnvironmentRepositoryError,
+  getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
   getEnvironmentRepositoryInstallationError,
 } from '@roomote/types';
@@ -256,6 +257,19 @@ export async function createEnvironment(
   }
 
   const config = parsedConfig.data;
+  const duplicateRepositoryError = getDuplicateEnvironmentRepositoryConfigError(
+    config.repositories,
+  );
+
+  if (duplicateRepositoryError) {
+    return c.json(
+      {
+        error: `Invalid environment configuration: ${duplicateRepositoryError}`,
+      },
+      400,
+    );
+  }
+
   try {
     const existing = await db.query.environments.findFirst({
       where: eq(environments.name, config.name),

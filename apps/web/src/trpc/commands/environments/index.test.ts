@@ -5,6 +5,7 @@ const {
   mockGetBranches,
   mockGetRepositoryEmptyStates,
   mockGetRepositories,
+  mockUpdateEnvironmentDefinition,
   mockBeginEnvironmentVerification,
   mockActiveVerificationRuns,
 } = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ const {
       installationId: 'installation-1',
     },
   ]),
+  mockUpdateEnvironmentDefinition: vi.fn(),
   mockBeginEnvironmentVerification: vi.fn(),
   // Active verification run seen inside the retry critical section. Each entry
   // is returned by the locked transaction's active-run lookup.
@@ -51,6 +53,8 @@ vi.mock('@roomote/db/server', () => ({
   createEnvironmentConfigVersionSnapshot: vi.fn(),
   db: {
     select: mockDbSelect,
+    transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({}),
   },
   desc: vi.fn(),
   environmentConfigVersions: {},
@@ -66,7 +70,7 @@ vi.mock('@roomote/db/server', () => ({
   sql: vi.fn(),
   taskRuns: {},
   tasks: {},
-  updateEnvironmentDefinition: vi.fn(),
+  updateEnvironmentDefinition: mockUpdateEnvironmentDefinition,
   users: {},
   withEnvironmentVerificationRetryLock: async (
     _environmentId: string,
@@ -114,7 +118,7 @@ describe('getEnvironmentRepositoryConfigError', () => {
         { id: 'repo-github', fullName: 'acme/app', installationId: '1' },
         { id: 'repo-gitlab', fullName: 'acme/app', installationId: null },
       ]),
-    ).toContain('Multiple active repositories are named "acme/app"');
+    ).toContain('Multiple repositories are named "acme/app"');
   });
 });
 
@@ -195,7 +199,7 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
     ).rejects.toMatchObject({
       code: 'BAD_REQUEST',
       message:
-        'Multiple active repositories are named "acme/app". Environment repository names must be unique across source-control connections.',
+        'Multiple repositories are named "acme/app". Environment repository names must be unique across source-control connections.',
     });
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
@@ -445,6 +449,24 @@ describe('environment repository validation', () => {
   });
 
   it('rejects duplicate configured repositories before updating mappings', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            {
+              id: 'env-1',
+              name: 'Existing environment',
+              description: null,
+              config: {
+                name: 'Existing environment',
+                repositories: [{ repository: 'acme/api' }],
+              },
+            },
+          ],
+        }),
+      }),
+    });
+
     const result = await updateEnvironmentCommand(buildMockAuth(), {
       id: 'env-1',
       config: {
@@ -457,7 +479,53 @@ describe('environment repository validation', () => {
       success: false,
       error: 'Invalid configuration: Duplicate repository: acme/api',
     });
-    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps legacy duplicate repositories editable for metadata-only updates', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            {
+              id: 'env-1',
+              name: 'Legacy environment',
+              description: null,
+              config: {
+                name: 'Legacy environment',
+                repositories: [
+                  { repository: 'acme/api' },
+                  { repository: 'acme/api' },
+                ],
+              },
+            },
+          ],
+        }),
+      }),
+    });
+
+    const result = await updateEnvironmentCommand(buildMockAuth(), {
+      id: 'env-1',
+      description: 'Updated description',
+    });
+
+    expect(result).toEqual({ success: true, data: undefined });
+    expect(mockUpdateEnvironmentDefinition).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        environmentId: 'env-1',
+        fields: expect.objectContaining({
+          description: 'Updated description',
+          config: expect.objectContaining({
+            repositories: [
+              { repository: 'acme/api' },
+              { repository: 'acme/api' },
+            ],
+          }),
+        }),
+        repositoryIds: undefined,
+      }),
+    );
   });
 
   it('rejects update when a configured repository is not linked', async () => {

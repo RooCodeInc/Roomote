@@ -6,6 +6,7 @@ import {
   commandSchema,
   environmentConfigSchema,
   environmentRepositoryConfigSchema,
+  getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '../environment-config';
 
@@ -431,7 +432,7 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
-  it('rejects duplicate repository entries', () => {
+  it('keeps legacy duplicate repository entries parseable on read', () => {
     const result = environmentConfigSchema.safeParse({
       name: 'Env',
       repositories: [
@@ -440,19 +441,22 @@ describe('environmentConfigSchema', () => {
       ],
     });
 
-    expect(result.success).toBe(false);
-    if (result.success) {
-      throw new Error('Expected duplicate repositories to fail validation');
-    }
+    expect(result.success).toBe(true);
+  });
 
-    expect(result.error.issues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          message: 'Duplicate repository: owner/repo',
-          path: ['repositories', 1, 'repository'],
-        }),
+  it('reports duplicate repository entries for write validation', () => {
+    expect(
+      getDuplicateEnvironmentRepositoryConfigError([
+        { repository: 'owner/repo' },
+        { repository: 'owner/repo' },
       ]),
-    );
+    ).toBe('Duplicate repository: owner/repo');
+    expect(
+      getDuplicateEnvironmentRepositoryConfigError([
+        { repository: 'owner/repo' },
+        { repository: 'owner/other' },
+      ]),
+    ).toBeNull();
   });
 
   describe('tool_versions', () => {

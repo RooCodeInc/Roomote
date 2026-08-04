@@ -11,6 +11,7 @@ import {
 } from '@roomote/db/server';
 import {
   environmentConfigSchema,
+  getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '@roomote/types';
 
@@ -90,6 +91,17 @@ export async function updateEnvironment(
     }
 
     const config = parsedConfig.data;
+    const duplicateRepositoryError =
+      getDuplicateEnvironmentRepositoryConfigError(config.repositories);
+
+    if (duplicateRepositoryError) {
+      return c.json(
+        {
+          error: `Invalid environment configuration: ${duplicateRepositoryError}`,
+        },
+        400,
+      );
+    }
 
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, id),

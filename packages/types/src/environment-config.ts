@@ -830,20 +830,6 @@ export const environmentConfigSchema = z
       .optional(),
   })
   .superRefine((data, ctx) => {
-    const seenRepositories = new Set<string>();
-
-    data.repositories.forEach((repository, index) => {
-      if (seenRepositories.has(repository.repository)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `Duplicate repository: ${repository.repository}`,
-          path: ['repositories', index, 'repository'],
-        });
-      }
-
-      seenRepositories.add(repository.repository);
-    });
-
     for (const conflict of getReservedEnvironmentPortConflicts(data)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -1042,6 +1028,22 @@ export function hasEnvironmentOidcTargets(
 export const MULTI_INSTALLATION_ENVIRONMENT_REPOSITORIES_ERROR =
   'Environment repositories must all belong to the same GitHub App installation.';
 
+export function getDuplicateEnvironmentRepositoryConfigError(
+  repositories: Array<{ repository: string }>,
+): string | null {
+  const seen = new Set<string>();
+  const duplicate = repositories.find((repository) => {
+    if (seen.has(repository.repository)) {
+      return true;
+    }
+
+    seen.add(repository.repository);
+    return false;
+  });
+
+  return duplicate ? `Duplicate repository: ${duplicate.repository}` : null;
+}
+
 export function getAmbiguousEnvironmentRepositoryError(
   repositories: Array<{ fullName: string }>,
 ): string | null {
@@ -1056,7 +1058,7 @@ export function getAmbiguousEnvironmentRepositoryError(
   });
 
   return duplicate
-    ? `Multiple active repositories are named "${duplicate.fullName}". Environment repository names must be unique across source-control connections.`
+    ? `Multiple repositories are named "${duplicate.fullName}". Environment repository names must be unique across source-control connections.`
     : null;
 }
 
