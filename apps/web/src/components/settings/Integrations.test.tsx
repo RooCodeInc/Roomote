@@ -845,7 +845,7 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Inspect and manage shared email infrastructure through Resend from Roomote tasks. Sending, credential creation, automation triggers, and contact mutations start disabled.',
+        'Inspect and manage shared email infrastructure through Resend from Roomote tasks.',
       ),
     ).toBeInTheDocument();
     expect(
