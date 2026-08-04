@@ -830,6 +830,20 @@ export const environmentConfigSchema = z
       .optional(),
   })
   .superRefine((data, ctx) => {
+    const seenRepositories = new Set<string>();
+
+    data.repositories.forEach((repository, index) => {
+      if (seenRepositories.has(repository.repository)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate repository: ${repository.repository}`,
+          path: ['repositories', index, 'repository'],
+        });
+      }
+
+      seenRepositories.add(repository.repository);
+    });
+
     for (const conflict of getReservedEnvironmentPortConflicts(data)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

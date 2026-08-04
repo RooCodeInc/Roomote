@@ -563,16 +563,6 @@ export async function updateEnvironmentCommand(
 ): Promise<EnvironmentResult> {
   assertAdmin(auth);
 
-  const [env] = await db
-    .select()
-    .from(environments)
-    .where(and(eq(environments.id, input.id), buildOwnershipFilter()))
-    .limit(1);
-
-  if (!env) {
-    return { success: false, error: 'Environment not found' };
-  }
-
   let nextConfig: EnvironmentConfig | undefined;
 
   if (input.config) {
@@ -586,10 +576,23 @@ export async function updateEnvironmentCommand(
     }
 
     nextConfig = parseResult.data;
-  } else if (
-    input.name !== undefined ||
-    input.description !== undefined ||
-    input.agentInstructions !== undefined
+  }
+
+  const [env] = await db
+    .select()
+    .from(environments)
+    .where(and(eq(environments.id, input.id), buildOwnershipFilter()))
+    .limit(1);
+
+  if (!env) {
+    return { success: false, error: 'Environment not found' };
+  }
+
+  if (
+    !input.config &&
+    (input.name !== undefined ||
+      input.description !== undefined ||
+      input.agentInstructions !== undefined)
   ) {
     const parseResult = environmentConfigSchema.safeParse({
       ...(env.config as EnvironmentConfig),

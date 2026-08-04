@@ -431,6 +431,30 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
+  it('rejects duplicate repository entries', () => {
+    const result = environmentConfigSchema.safeParse({
+      name: 'Env',
+      repositories: [
+        { repository: 'owner/repo' },
+        { repository: 'owner/repo' },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error('Expected duplicate repositories to fail validation');
+    }
+
+    expect(result.error.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: 'Duplicate repository: owner/repo',
+          path: ['repositories', 1, 'repository'],
+        }),
+      ]),
+    );
+  });
+
   describe('tool_versions', () => {
     it('should accept root-level tool_versions for environment workspaces', () => {
       const result = environmentConfigSchema.safeParse({

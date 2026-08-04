@@ -428,6 +428,38 @@ describe('environment repository validation', () => {
     });
   });
 
+  it('rejects duplicate configured repositories before creating mappings', async () => {
+    const result = await createEnvironmentCommand(buildMockAuth(), {
+      name: 'Duplicate repository',
+      config: {
+        name: 'Duplicate repository',
+        repositories: [{ repository: 'acme/api' }, { repository: 'acme/api' }],
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Invalid configuration: Duplicate repository: acme/api',
+    });
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate configured repositories before updating mappings', async () => {
+    const result = await updateEnvironmentCommand(buildMockAuth(), {
+      id: 'env-1',
+      config: {
+        name: 'Duplicate repository',
+        repositories: [{ repository: 'acme/api' }, { repository: 'acme/api' }],
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Invalid configuration: Duplicate repository: acme/api',
+    });
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
   it('rejects update when a configured repository is not linked', async () => {
     mockDbSelect
       .mockReturnValueOnce({
