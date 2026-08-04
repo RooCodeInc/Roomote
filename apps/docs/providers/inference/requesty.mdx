@@ -1,0 +1,51 @@
+---
+title: Requesty
+icon: '/logo/integrations/requesty.png'
+description: Route Roomote model calls through Requesty's multi-provider AI gateway.
+---
+
+Requesty is a multi-provider inference gateway with centralized routing,
+fallbacks, usage analytics, and cost controls. Use it when you want one
+connection for models from several vendors.
+
+## Get an API key
+
+Sign up for Requesty and create a key on the [API Keys page](https://app.requesty.ai/api-keys).
+Add credits or configure billing and any key-level spending limits before
+connecting the key to Roomote.
+
+## Configuration
+
+Add **Requesty** in **Settings > Models** and paste the key, or configure:
+
+```sh
+REQUESTY_API_KEY=...
+```
+
+Roomote exposes its recommended Requesty models under the `requesty/<model>`
+prefix. Some model IDs include a region suffix such as `@eu`. Apply the
+recommended mapping or select models individually for each role.
+
+## Cost behavior
+
+Requesty bills routed model usage according to the account's plan, provider
+pricing, and any bring-your-own-key configuration. Roomote records token usage
+and estimates model cost from metadata, but Requesty's usage dashboard and bill
+are authoritative. See [Requesty pricing](https://www.requesty.ai/pricing) for
+current terms.
+
+## Verify setup
+
+1. save `REQUESTY_API_KEY`
+2. confirm Requesty models appear in **Settings > Models**
+3. apply the recommended mapping or assign a model to the coding role
+4. run a small task and confirm it appears in [Requesty analytics](https://app.requesty.ai/analytics)
+
+## Common issues
+
+- **The key is rejected.** Confirm it is active and belongs to the intended
+  Requesty organization.
+- **A model cannot be routed.** Check model availability, approved-model rules,
+  routing policies, regional support, and account balance in Requesty.
+- **A spending limit blocks tasks.** Raise the applicable Requesty key or
+  organization limit, or choose a model with available budget.

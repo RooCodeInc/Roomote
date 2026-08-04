@@ -11,6 +11,7 @@ import {
 } from '@roomote/db/server';
 import {
   environmentConfigSchema,
+  getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '@roomote/types';
 
@@ -19,8 +20,10 @@ import type { McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
 import {
   DUPLICATE_ENVIRONMENT_NAME_ERROR,
+  ENVIRONMENT_ADMIN_REQUIRED_ERROR,
   EVAL_ENVIRONMENT_WRITE_ERROR,
   attachEnvironmentIdToTaskRun,
+  canAdministerEnvironments,
   getEnvironmentRepositoryConfigError,
   isEnvironmentNameUniqueViolation,
   resolveCallingVerificationTaskId,
@@ -43,8 +46,8 @@ export async function updateEnvironment(
   const auth = c.get('mcpAuth');
   const userId = await resolveEnvironmentWriteUserId(auth);
 
-  if (!userId) {
-    return c.json({ error: 'User context required' }, 403);
+  if (!userId || !(await canAdministerEnvironments(userId))) {
+    return c.json({ error: ENVIRONMENT_ADMIN_REQUIRED_ERROR }, 403);
   }
 
   const id = c.req.param('id');
@@ -90,6 +93,17 @@ export async function updateEnvironment(
     }
 
     const config = parsedConfig.data;
+    const duplicateRepositoryError =
+      getDuplicateEnvironmentRepositoryConfigError(config.repositories);
+
+    if (duplicateRepositoryError) {
+      return c.json(
+        {
+          error: `Invalid environment configuration: ${duplicateRepositoryError}`,
+        },
+        400,
+      );
+    }
 
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, id),

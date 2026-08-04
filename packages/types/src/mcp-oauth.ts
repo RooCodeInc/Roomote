@@ -124,6 +124,16 @@ export interface McpConnectionAsanaConfig {
 }
 
 /**
+ * Deployment-scoped Granola connection config stored in mcpConnections.authConfig.
+ *
+ * The API key is expected to be encrypted before persistence.
+ */
+export interface McpConnectionGranolaConfig {
+  type: 'granola';
+  encryptedApiKey: string;
+}
+
+/**
  * Organization-scoped Vercel connection config stored in mcpConnections.authConfig.
  *
  * The bearer token is expected to be encrypted before persistence.
@@ -157,6 +167,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionOAuthConfig
   | McpConnectionSnowflakeConfig
   | McpConnectionAsanaConfig
+  | McpConnectionGranolaConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
   | Record<string, never>;
@@ -480,6 +491,17 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     icon: 'braintrust',
   },
   {
+    id: 'granola',
+    name: 'Granola',
+    description: `Connect Granola so your agents can browse meeting notes, transcripts, decisions, and action items from ${PRODUCT_NAME} tasks`,
+    icon: 'granola',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'native',
+    instructions:
+      'Use Granola to browse and read meeting notes, transcripts, folders, decisions, and action items through the deployment API key. The built-in tools are read-only.',
+  },
+  {
     id: 'supermemory',
     name: 'Supermemory',
     url: 'https://mcp.supermemory.ai/mcp',
@@ -784,6 +806,19 @@ export function isMcpConnectionAsanaConfig(
     typeof authConfig === 'object' &&
     'type' in authConfig &&
     authConfig.type === 'asana',
+  );
+}
+
+export function isMcpConnectionGranolaConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionGranolaConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'granola' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string',
   );
 }
 

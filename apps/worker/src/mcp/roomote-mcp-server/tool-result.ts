@@ -1,11 +1,14 @@
 import type { ToolResult } from './types.js';
 
-export function errorResult(message: string): ToolResult {
+export function errorResult(
+  message: string,
+  fields?: Record<string, unknown>,
+): ToolResult {
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify({ success: false, error: message }),
+        text: JSON.stringify({ success: false, error: message, ...fields }),
       },
     ],
   };

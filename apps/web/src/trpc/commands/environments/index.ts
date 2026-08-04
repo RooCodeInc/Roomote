@@ -1,4 +1,5 @@
 import { enqueueTask } from '@roomote/cloud-agents/server';
+import { TRPCError } from '@trpc/server';
 import {
   createEnvironmentConfigVersionSnapshot,
   db,
@@ -37,6 +38,8 @@ import {
   type ComputeProvider,
   type EnvironmentConfig,
   environmentConfigSchema,
+  getAmbiguousEnvironmentRepositoryError,
+  getDuplicateEnvironmentRepositoryConfigError,
   getEnvironmentRepositoryInstallationError,
   getMissingEnvironmentRepositoryError,
   isExitedRunStatus,
@@ -140,14 +143,17 @@ type EnvironmentRepositoryRow = {
   installationId: string | null;
 };
 
-function getEnvironmentRepositoryConfigError(
+export function getEnvironmentRepositoryConfigError(
   repositoriesToValidate: EnvironmentRepositoryRow[],
 ): string | null {
-  return getEnvironmentRepositoryInstallationError(
-    repositoriesToValidate.map((repository) => ({
-      fullName: repository.fullName,
-      installationId: repository.installationId,
-    })),
+  return (
+    getAmbiguousEnvironmentRepositoryError(repositoriesToValidate) ??
+    getEnvironmentRepositoryInstallationError(
+      repositoriesToValidate.map((repository) => ({
+        fullName: repository.fullName,
+        installationId: repository.installationId,
+      })),
+    )
   );
 }
 
@@ -197,7 +203,10 @@ async function resolveSelectedRepositories(
     const repository = repositoriesById.get(repositoryId);
 
     if (!repository) {
-      throw new Error('Selected repositories are no longer available.');
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Selected repositories are no longer available.',
+      });
     }
 
     return {
@@ -211,14 +220,15 @@ async function resolveSelectedRepositories(
     getEnvironmentRepositoryConfigError(selectedRepositories);
 
   if (repositoryConfigError) {
-    throw new Error(repositoryConfigError);
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: repositoryConfigError,
+    });
   }
 
   return {
     normalizedRepositoryIds: normalizeRepositorySelection(selectedRepositories),
-    selectedRepositories: selectedRepositories.sort((left, right) =>
-      left.fullName.localeCompare(right.fullName),
-    ),
+    selectedRepositories,
   };
 }
 
@@ -454,6 +464,17 @@ export async function createEnvironmentCommand(
     };
   }
 
+  const duplicateRepositoryError = getDuplicateEnvironmentRepositoryConfigError(
+    parseResult.data.repositories ?? [],
+  );
+
+  if (duplicateRepositoryError) {
+    return {
+      success: false,
+      error: `Invalid configuration: ${duplicateRepositoryError}`,
+    };
+  }
+
   const [existing] = await db
     .select()
     .from(environments)
@@ -573,6 +594,18 @@ export async function updateEnvironmentCommand(
       return {
         success: false,
         error: `Invalid configuration: ${parseResult.error.issues.map((i) => i.message).join(', ')}`,
+      };
+    }
+
+    const duplicateRepositoryError =
+      getDuplicateEnvironmentRepositoryConfigError(
+        parseResult.data.repositories ?? [],
+      );
+
+    if (duplicateRepositoryError) {
+      return {
+        success: false,
+        error: `Invalid configuration: ${duplicateRepositoryError}`,
       };
     }
 
@@ -817,9 +850,23 @@ export async function startEnvironmentDefinitionTaskCommand(
     (repository) => repository.fullName,
   );
   const title = buildSetupEnvironmentTaskTitle(selectedRepositoryFullNames);
-  const workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
-    selectedRepositoryFullNames,
-  );
+  let workspacePayload: ReturnType<
+    typeof buildEnvironmentDefinitionWorkspacePayload
+  >;
+  try {
+    workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
+      selectedRepositoryFullNames,
+    );
+  } catch (error) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message:
+        error instanceof Error
+          ? error.message
+          : 'The selected repositories are invalid.',
+      cause: error,
+    });
+  }
   const modelSelection = resolveEvalHarnessSelection({
     model: input.selectedModelId,
   });
@@ -1249,7 +1296,7 @@ export async function validateConfigCommand(
 
       if (!hasAccess) {
         errors.push(
-          `Repository '${repo.repository}' is not accessible. Ensure it is installed via the GitHub App.`,
+          `Repository '${repo.repository}' is not accessible. Ensure it is connected through its source-control provider.`,
         );
         return; // skip branch check if repo itself is inaccessible
       }

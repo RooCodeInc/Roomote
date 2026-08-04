@@ -3,20 +3,28 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 
 type PersonalColorTheme = 'light' | 'dark' | 'system';
 
-const { colorThemeState, narrationModeState } = vi.hoisted(() => ({
-  colorThemeState: {
-    colorTheme: 'system' as PersonalColorTheme,
-    isLoading: false,
-    isUpdating: false,
-    setColorTheme: vi.fn(),
-  },
-  narrationModeState: {
-    enabled: false,
-    isLoading: false,
-    isUpdating: false,
-    setEnabled: vi.fn(),
-  },
-}));
+const { colorThemeState, mindReaderModeState, narrationModeState } = vi.hoisted(
+  () => ({
+    colorThemeState: {
+      colorTheme: 'system' as PersonalColorTheme,
+      isLoading: false,
+      isUpdating: false,
+      setColorTheme: vi.fn(),
+    },
+    mindReaderModeState: {
+      enabled: false,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    },
+    narrationModeState: {
+      enabled: false,
+      isLoading: false,
+      isUpdating: false,
+      setEnabled: vi.fn(),
+    },
+  }),
+);
 
 vi.mock('@/hooks/useColorTheme', () => ({
   useColorTheme: () => colorThemeState,
@@ -24,6 +32,10 @@ vi.mock('@/hooks/useColorTheme', () => ({
 
 vi.mock('@/hooks/useNarrationMode', () => ({
   useNarrationMode: () => narrationModeState,
+}));
+
+vi.mock('@/hooks/useMindReaderMode', () => ({
+  useMindReaderMode: () => mindReaderModeState,
 }));
 
 vi.mock('@/components/system', () => ({
@@ -105,6 +117,9 @@ describe('UserPreferencesSection', () => {
     colorThemeState.colorTheme = 'system' as PersonalColorTheme;
     colorThemeState.isLoading = false;
     colorThemeState.isUpdating = false;
+    mindReaderModeState.enabled = false;
+    mindReaderModeState.isLoading = false;
+    mindReaderModeState.isUpdating = false;
     narrationModeState.enabled = false;
     narrationModeState.isLoading = false;
     narrationModeState.isUpdating = false;
@@ -112,6 +127,7 @@ describe('UserPreferencesSection', () => {
 
   it('renders user preference controls with the current state', () => {
     colorThemeState.colorTheme = 'dark' as PersonalColorTheme;
+    mindReaderModeState.enabled = true;
     narrationModeState.enabled = true;
 
     render(<UserPreferencesSection />);
@@ -119,6 +135,13 @@ describe('UserPreferencesSection', () => {
     expect(screen.getByText('Preferences')).toBeInTheDocument();
     expect(screen.getByText('Color theme')).toBeInTheDocument();
     expect(screen.getByLabelText('Color theme')).toHaveValue('dark');
+    expect(screen.getByText('Mind reader mode')).toHaveClass('font-semibold');
+    expect(
+      screen.getByText(
+        'Automatically expand LLM thoughts by default in conversations.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Toggle mind reader mode')).toBeChecked();
     expect(screen.getByText('Narration mode')).toHaveClass('font-semibold');
     expect(
       screen.getByText(
@@ -130,11 +153,13 @@ describe('UserPreferencesSection', () => {
 
   it('disables controls while the corresponding preference is loading or updating', () => {
     colorThemeState.isLoading = true;
+    mindReaderModeState.isLoading = true;
     narrationModeState.isUpdating = true;
 
     render(<UserPreferencesSection />);
 
     expect(screen.getByLabelText('Color theme')).toBeDisabled();
+    expect(screen.getByLabelText('Toggle mind reader mode')).toBeDisabled();
     expect(screen.getByLabelText('Toggle narration mode')).toBeDisabled();
   });
 
@@ -154,6 +179,14 @@ describe('UserPreferencesSection', () => {
     fireEvent.click(screen.getByLabelText('Toggle narration mode'));
 
     expect(narrationModeState.setEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('updates mind reader mode immediately when the switch changes', () => {
+    render(<UserPreferencesSection />);
+
+    fireEvent.click(screen.getByLabelText('Toggle mind reader mode'));
+
+    expect(mindReaderModeState.setEnabled).toHaveBeenCalledWith(true);
   });
 
   it('renders theme choices in a dropdown', () => {

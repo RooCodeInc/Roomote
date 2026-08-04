@@ -69,7 +69,7 @@ const DISABLED_TASK_MODEL_PROVIDER_ID_SET = new Set<string>(
 /**
  * Gateway providers route models from many labs under a single provider
  * prefix (e.g. `openrouter/z-ai/glm-5.2`, `vercel/openai/gpt-5.6-terra`,
- * `requesty/anthropic/claude-sonnet-5`). This is the canonical set:
+ * `requesty/claude-sonnet-5`). This is the canonical set:
  * models.dev slug resolution and gateway pricing lookups derive from it.
  * `vercel` and `requesty` also appear in `DIRECT_TASK_MODEL_PROVIDER_IDS`
  * because their slugs are addressed by their own prefix; `openrouter` is the

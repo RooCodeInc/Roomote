@@ -876,6 +876,54 @@ describe('WorkspaceManager tool versions', () => {
         },
       );
     });
+
+    it('chooses the source control provider separately for each repository', async () => {
+      const prepareRepositorySpy = vi
+        .spyOn(manager, 'prepareRepository')
+        .mockImplementation(async (repository) => `/workspace/${repository}`);
+
+      await manager.prepareEnvironmentRepositories(
+        {
+          name: 'Mixed Providers',
+          repositories: [
+            { repository: 'acme/github-app' },
+            { repository: 'acme/gitlab-app' },
+          ],
+        },
+        false,
+        false,
+        undefined,
+        {
+          sourceControlProvider: 'github',
+          repositoryProviders: { 'acme/gitlab-app': 'gitlab' },
+        },
+      );
+
+      expect(prepareRepositorySpy).toHaveBeenCalledWith(
+        'acme/github-app',
+        undefined,
+        undefined,
+        false,
+        false,
+        {
+          sourceControlProvider: 'github',
+          setDefaultRemote: false,
+          toolVersionsConfig: undefined,
+        },
+      );
+      expect(prepareRepositorySpy).toHaveBeenCalledWith(
+        'acme/gitlab-app',
+        undefined,
+        undefined,
+        false,
+        false,
+        {
+          sourceControlProvider: 'gitlab',
+          setDefaultRemote: false,
+          toolVersionsConfig: undefined,
+        },
+      );
+    });
   });
 
   describe('installWorkspaceToolVersions', () => {

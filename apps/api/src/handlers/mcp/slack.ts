@@ -33,6 +33,7 @@ import {
   setLatestSlackBotReply,
   setSlackThreadReplyFooterMessageTs,
   SlackNotifier,
+  SlackPostDeliveryError,
   trackSlackBotReply,
   withSlackThreadReplyFooterLock,
   THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE as SLACK_THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE,
@@ -971,16 +972,17 @@ slackMcp.post('/thread_reply', async (c) => {
     blocks.push(...imageBlocks);
     blocks.push(...rootFooterBlocks);
 
-    const rootMessageTs = await slack.postMessage({
+    const rootPostResult = await slack.postMessageDetailed({
       channel: slackReplyTarget.channel,
       text: getSlackFallbackText(fallbackText, imageBlocks.length),
       unfurl_links: false,
       unfurl_media: false,
       blocks,
     });
+    const rootMessageTs = rootPostResult.ts;
 
     if (!rootMessageTs) {
-      throw new Error('Slack chat.postMessage returned no message timestamp');
+      throw new SlackPostDeliveryError(rootPostResult);
     }
 
     // The root message is already visible in Slack; failing the reply here
@@ -1141,7 +1143,7 @@ slackMcp.post('/thread_reply', async (c) => {
           );
         }
 
-        const nextMessageTs = await slack.postMessage({
+        const replyPostResult = await slack.postMessageDetailed({
           channel: slackReplyTarget.channel,
           thread_ts: existingThreadTs,
           text: getSlackFallbackText(fallbackText, imageBlocks.length),
@@ -1149,9 +1151,13 @@ slackMcp.post('/thread_reply', async (c) => {
           unfurl_media: false,
           blocks,
         });
+        const nextMessageTs = replyPostResult.ts;
 
         if (!nextMessageTs) {
-          throw new Error('Slack thread source message no longer exists');
+          if (replyPostResult.skippedMissingThreadRoot) {
+            throw new Error('Slack thread source message no longer exists');
+          }
+          throw new SlackPostDeliveryError(replyPostResult);
         }
 
         if (pendingQuote) {
@@ -1340,6 +1346,17 @@ slackMcp.post('/thread_reply', async (c) => {
       return c.json(
         { error: 'Slack thread reply is busy; please retry shortly' },
         503,
+      );
+    }
+
+    if (error instanceof SlackPostDeliveryError) {
+      return c.json(
+        {
+          error: error.message,
+          slackErrorCode: error.slackErrorCode ?? null,
+          retryable: error.retryable,
+        },
+        error.retryable ? 502 : 422,
       );
     }
 

@@ -1028,6 +1028,40 @@ export function hasEnvironmentOidcTargets(
 export const MULTI_INSTALLATION_ENVIRONMENT_REPOSITORIES_ERROR =
   'Environment repositories must all belong to the same GitHub App installation.';
 
+export function getDuplicateEnvironmentRepositoryConfigError(
+  repositories: Array<{ repository: string }>,
+): string | null {
+  const seen = new Set<string>();
+  const duplicate = repositories.find((repository) => {
+    if (seen.has(repository.repository)) {
+      return true;
+    }
+
+    seen.add(repository.repository);
+    return false;
+  });
+
+  return duplicate ? `Duplicate repository: ${duplicate.repository}` : null;
+}
+
+export function getAmbiguousEnvironmentRepositoryError(
+  repositories: Array<{ fullName: string }>,
+): string | null {
+  const seen = new Set<string>();
+  const duplicate = repositories.find((repository) => {
+    if (seen.has(repository.fullName)) {
+      return true;
+    }
+
+    seen.add(repository.fullName);
+    return false;
+  });
+
+  return duplicate
+    ? `Multiple repositories are named "${duplicate.fullName}". Environment repository names must be unique across source-control connections.`
+    : null;
+}
+
 type EnvironmentRepositoryInstallationReference = {
   fullName: string;
   installationId: string | number | null | undefined;

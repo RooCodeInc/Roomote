@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
   buildRepositoryCloneUrl,
+  filterRepositoryNamesForSourceControlProvider,
   type SourceControlProvider,
 } from '@roomote/types';
 import {
@@ -481,6 +482,17 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
   return [...new Set(repositoryNames.filter(Boolean))];
 }
 
+function filterRepositorySelectionForGitea(
+  taskRun: TaskRun,
+  repositoryNames: string[],
+): string[] {
+  return filterRepositoryNamesForSourceControlProvider(
+    taskRun.payload,
+    repositoryNames,
+    GITEA_PROVIDER,
+  );
+}
+
 async function resolveGiteaRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
@@ -495,9 +507,12 @@ async function resolveGiteaRepositoryNamesForTaskRun(
       );
     }
 
-    return normalizeRepositorySelection(
-      environment.config.repositories.map(
-        (repository) => repository.repository,
+    return filterRepositorySelectionForGitea(
+      taskRun,
+      normalizeRepositorySelection(
+        environment.config.repositories.map(
+          (repository) => repository.repository,
+        ),
       ),
     );
   }
@@ -508,7 +523,7 @@ async function resolveGiteaRepositoryNamesForTaskRun(
     );
 
     if (selectedRepositories.length > 0) {
-      return selectedRepositories;
+      return filterRepositorySelectionForGitea(taskRun, selectedRepositories);
     }
   }
 

@@ -403,12 +403,12 @@ export function useSandboxReadOnly(): boolean {
 }
 
 /**
- * Captures the reasoning-expanded preference at mount time so each
+ * Captures the conversation's reasoning-expanded override at mount time so each
  * ReasoningMessage block initialises its local open/close state once.
- * Later changes to the global preference only affect *newly mounted* blocks,
- * not existing ones (which are independently controllable).
+ * A null value lets the personal default apply until the user manually changes
+ * a reasoning block; later overrides only affect newly mounted blocks.
  */
-export function useInitialSandboxReasoningExpanded(): boolean {
+export function useInitialSandboxReasoningExpanded(): boolean | null {
   const store = useSandboxStore();
   const initialValueRef = useRef(store.getState().reasoningExpanded);
   return initialValueRef.current;

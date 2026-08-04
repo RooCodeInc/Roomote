@@ -14,6 +14,7 @@ export function isPersonalColorTheme(
 
 export interface PersonalPreferences {
   colorTheme: PersonalColorTheme;
+  mindReaderMode: boolean;
   narrationMode: boolean;
 }
 
@@ -21,5 +22,6 @@ export type PersonalPreferencesUpdate = Partial<PersonalPreferences>;
 
 export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   colorTheme: 'system',
+  mindReaderMode: false,
   narrationMode: false,
 };

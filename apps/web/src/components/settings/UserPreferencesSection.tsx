@@ -1,6 +1,7 @@
 'use client';
 
 import { useColorTheme } from '@/hooks/useColorTheme';
+import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import type { PersonalColorTheme } from '@/types/preferences';
 
@@ -33,7 +34,18 @@ export function UserPreferencesSection() {
     isUpdating: isThemeUpdating,
     setColorTheme,
   } = useColorTheme();
-  const { enabled, isLoading, isUpdating, setEnabled } = useNarrationMode();
+  const {
+    enabled: mindReaderModeEnabled,
+    isLoading: isMindReaderModeLoading,
+    isUpdating: isMindReaderModeUpdating,
+    setEnabled: setMindReaderModeEnabled,
+  } = useMindReaderMode();
+  const {
+    enabled: narrationModeEnabled,
+    isLoading: isNarrationModeLoading,
+    isUpdating: isNarrationModeUpdating,
+    setEnabled: setNarrationModeEnabled,
+  } = useNarrationMode();
   const isThemeDisabled = isThemeLoading || isThemeUpdating;
 
   return (
@@ -69,10 +81,27 @@ export function UserPreferencesSection() {
 
         <div className="flex gap-3">
           <Switch
+            aria-label="Toggle mind reader mode"
+            checked={mindReaderModeEnabled}
+            disabled={isMindReaderModeLoading || isMindReaderModeUpdating}
+            onCheckedChange={setMindReaderModeEnabled}
+          />
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-foreground">
+              Mind reader mode
+            </p>
+            <p className="text-sm text-foreground">
+              Automatically expand LLM thoughts by default in conversations.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <Switch
             aria-label="Toggle narration mode"
-            checked={enabled}
-            disabled={isLoading || isUpdating}
-            onCheckedChange={setEnabled}
+            checked={narrationModeEnabled}
+            disabled={isNarrationModeLoading || isNarrationModeUpdating}
+            onCheckedChange={setNarrationModeEnabled}
           />
           <div className="space-y-1">
             <p className="text-sm font-semibold text-foreground">

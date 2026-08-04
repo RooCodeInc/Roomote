@@ -20,6 +20,7 @@ export * from './slack-api-base-url';
 export * from './slack-api-fetch';
 export * from './slack-channel-info-cache';
 export * from './slack-messages';
+export * from './post-message-delivery';
 export * from './slack-notifier';
 export * from './slack-system-messages';
 export * from './slack-thread-message-utils';
@@ -49,6 +50,7 @@ export type {
   SlackFile,
   SlackMessage,
   SlackMessageMetadata,
+  SlackPostMessageResult,
   SlackResponse,
   SlackEvent,
   SlackThreadMessage,

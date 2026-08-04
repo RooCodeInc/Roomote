@@ -70,14 +70,27 @@ export async function initializeRepositories(
     gitAuthorName,
     gitAuthorEmail,
     sourceControlProvider,
+    repositoryProviders,
   }: PrepareWorkspaceOptions,
 ): Promise<PrepareWorkspaceResult> {
   const resolvedSourceControlProvider =
     sourceControlProvider ?? DEFAULT_SOURCE_CONTROL_PROVIDER;
-  const sourceControlPrepareOptions =
-    resolvedSourceControlProvider === DEFAULT_SOURCE_CONTROL_PROVIDER
+  const resolveRepositoryProvider = (repository: string) =>
+    repositoryProviders?.[repository] ?? resolvedSourceControlProvider;
+  const sourceControlPrepareOptions = (repository: string) => {
+    const repositoryProvider = resolveRepositoryProvider(repository);
+
+    return repositoryProvider === DEFAULT_SOURCE_CONTROL_PROVIDER
       ? {}
-      : { sourceControlProvider: resolvedSourceControlProvider };
+      : { sourceControlProvider: repositoryProvider };
+  };
+  const environmentSourceControlPrepareOptions = {
+    ...(resolvedSourceControlProvider === DEFAULT_SOURCE_CONTROL_PROVIDER
+      ? {}
+      : { sourceControlProvider: resolvedSourceControlProvider }),
+    ...(repositoryProviders ? { repositoryProviders } : {}),
+  };
+  const mappedRepositoryNames = Object.keys(repositoryProviders ?? {});
   const { workspaceRoot, workspaceManager } = createWorkspaceManager(
     envVars,
     logger,
@@ -104,7 +117,7 @@ export async function initializeRepositories(
               sourceBranch: workspace.sourceBranch,
               sourceSha: workspace.sourceSha,
             },
-            sourceControlPrepareOptions,
+            environmentSourceControlPrepareOptions,
           ),
       );
 
@@ -139,17 +152,22 @@ export async function initializeRepositories(
 
     case 'repository_set':
     case 'all_repositories': {
+      // A stamped map is the launch-time workspace snapshot. Prefer it over
+      // a live provider-filtered list so mixed-provider tasks keep every
+      // repository selected when the task was queued.
       const repositoriesToPrepare =
         workspace.type === 'repository_set'
           ? workspace.repositories.map((fullName) => ({ fullName }))
-          : await timedStep(
-              logger,
-              'initializeRepositories: list repositories',
-              () =>
-                sdk.repositories.listRepositories({
-                  sourceControlProvider: resolvedSourceControlProvider,
-                }),
-            );
+          : mappedRepositoryNames.length > 0
+            ? mappedRepositoryNames.map((fullName) => ({ fullName }))
+            : await timedStep(
+                logger,
+                'initializeRepositories: list repositories',
+                () =>
+                  sdk.repositories.listRepositories({
+                    sourceControlProvider: resolvedSourceControlProvider,
+                  }),
+              );
 
       const limit = pLimit(REPO_PREPARATION_CONCURRENCY);
 
@@ -167,7 +185,7 @@ export async function initializeRepositories(
                   preserveGitState,
                   cleanupLegacyPaths,
                   {
-                    ...sourceControlPrepareOptions,
+                    ...sourceControlPrepareOptions(repo.fullName),
                   },
                 ),
             );
@@ -317,7 +335,7 @@ export async function initializeRepositories(
               workspace.sha,
               preserveGitState,
               cleanupLegacyPaths,
-              sourceControlPrepareOptions,
+              sourceControlPrepareOptions(workspace.repository),
             ),
         );
       } catch (error) {

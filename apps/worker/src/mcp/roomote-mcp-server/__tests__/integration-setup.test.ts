@@ -50,6 +50,19 @@ describe('integration setup guide', () => {
     );
   });
 
+  it('documents the deployment-scoped read-only Granola setup flow', () => {
+    expect(INTEGRATION_SETUP_CONTENT).toContain('# Granola');
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'That operator connects Granola once for the deployment with a Granola API key.',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'If using a personal API key instead, create it with only Public notes selected.',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'The built-in connection is read-only.',
+    );
+  });
+
   it('documents the admin-managed Vercel setup flow', () => {
     expect(INTEGRATION_SETUP_CONTENT).toContain('# Vercel');
     expect(INTEGRATION_SETUP_CONTENT).toContain(

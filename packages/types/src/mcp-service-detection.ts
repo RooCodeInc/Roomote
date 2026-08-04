@@ -260,6 +260,14 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     userSettingsPath: '/settings/personal',
   },
   {
+    id: 'granola',
+    name: 'Granola',
+    availabilityKind: 'admin_configured',
+    hostSuffixes: ['notes.granola.ai'],
+    deploymentSettingsPath: '/settings/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
     id: 'supermemory',
     name: 'Supermemory',
     availabilityKind: 'curated_oauth',

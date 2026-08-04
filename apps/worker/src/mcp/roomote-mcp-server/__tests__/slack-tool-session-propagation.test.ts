@@ -13,6 +13,7 @@ const mockState = vi.hoisted(() => ({
   handleSendChatReactionEmoji: vi.fn(),
   handleAddReactionToSlackMessage: vi.fn(),
   recordChatReplySatisfaction: vi.fn(),
+  recordChatReplyDeliveryFailure: vi.fn(),
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
@@ -54,6 +55,7 @@ vi.mock('../add-reaction-to-slack-message.js', () => ({
 
 vi.mock('../chat-reply-satisfaction.js', () => ({
   recordChatReplySatisfaction: mockState.recordChatReplySatisfaction,
+  recordChatReplyDeliveryFailure: mockState.recordChatReplyDeliveryFailure,
 }));
 
 function getRegisteredTool(toolName: string): RegisteredTool {
@@ -75,6 +77,10 @@ describe('roomote MCP Slack tool session propagation', () => {
     mockState.handleSendChatReactionEmoji.mockReset();
     mockState.handleAddReactionToSlackMessage.mockReset();
     mockState.recordChatReplySatisfaction.mockReset();
+    mockState.recordChatReplyDeliveryFailure.mockReset();
+    mockState.recordChatReplyDeliveryFailure.mockReturnValue({
+      terminalDeliveryFailure: false,
+    });
 
     process.env = {
       ...originalEnv,
@@ -113,6 +119,98 @@ describe('roomote MCP Slack tool session propagation', () => {
       replyPurpose: 'closeout',
       sessionId: 'thread-child',
     });
+  });
+
+  it('records failed deliveries with the MCP session id and keeps the result unchanged while retryable', async () => {
+    const failedResult = {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: 'Failed to reply to chat thread: 502 transport hiccup',
+            deliveryFailure: { retryable: true },
+          }),
+        },
+      ],
+    };
+    mockState.handleSendChatReply.mockResolvedValue(failedResult);
+
+    const result = await getRegisteredTool('send_chat_reply').handler!(
+      { message: 'done', purpose: 'closeout' },
+      { sessionId: 'thread-child' },
+    );
+
+    expect(mockState.recordChatReplyDeliveryFailure).toHaveBeenCalledWith({
+      retryable: true,
+      providerErrorCode: undefined,
+      sessionId: 'thread-child',
+    });
+    expect(mockState.recordChatReplySatisfaction).not.toHaveBeenCalled();
+    expect(result).toBe(failedResult);
+  });
+
+  it('rewrites the result with do-not-retry guidance once delivery is terminal', async () => {
+    mockState.recordChatReplyDeliveryFailure.mockReturnValue({
+      terminalDeliveryFailure: true,
+    });
+    mockState.handleSendChatReply.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: 'Failed to reply to chat thread: 422 not_in_channel',
+            deliveryFailure: {
+              retryable: false,
+              providerErrorCode: 'not_in_channel',
+            },
+          }),
+        },
+      ],
+    });
+
+    const result = (await getRegisteredTool('send_chat_reply').handler!(
+      { message: 'done', purpose: 'closeout' },
+      { sessionId: 'thread-child' },
+    )) as { content: Array<{ type: string; text: string }> };
+
+    expect(mockState.recordChatReplyDeliveryFailure).toHaveBeenCalledWith({
+      retryable: false,
+      providerErrorCode: 'not_in_channel',
+      sessionId: 'thread-child',
+    });
+
+    const parsed = JSON.parse(result.content[0]!.text) as Record<
+      string,
+      unknown
+    >;
+    expect(parsed.success).toBe(false);
+    expect(parsed.deliveryPermanentlyFailed).toBe(true);
+    expect(parsed.error).toContain('not_in_channel');
+    expect(parsed.error).toContain('failing permanently');
+    expect(parsed.error).toContain('do not retry');
+  });
+
+  it('does not record a delivery failure for non-delivery errors', async () => {
+    mockState.handleSendChatReply.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: 'ROOMOTE_WORKSPACE_PATH not set',
+          }),
+        },
+      ],
+    });
+
+    await getRegisteredTool('send_chat_reply').handler!(
+      { message: 'done', purpose: 'closeout' },
+      { sessionId: 'thread-child' },
+    );
+
+    expect(mockState.recordChatReplyDeliveryFailure).not.toHaveBeenCalled();
   });
 
   it('passes the MCP session id into send_chat_reaction_emoji satisfaction writes', async () => {

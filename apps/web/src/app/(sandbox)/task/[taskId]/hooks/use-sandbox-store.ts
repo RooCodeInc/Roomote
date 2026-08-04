@@ -114,7 +114,7 @@ interface SandboxState {
   logfiles: LogfileInfo[];
 
   // Reasoning expansion preference (user intent based on last expand/collapse).
-  reasoningExpanded: boolean;
+  reasoningExpanded: boolean | null;
 
   // Current user info for local prompt UX and userId-based message resolution.
   currentUserInfo: AcpUserInfo | null;
@@ -457,7 +457,7 @@ export function createSandboxStore(
   pendingUserInputRequests: PendingTaskUserInputRequest[];
   pendingEnvVarRequest: PendingTaskEnvVarRequest | null;
   logfiles: LogfileInfo[];
-  reasoningExpanded: boolean;
+  reasoningExpanded: boolean | null;
   currentUserInfo: AcpUserInfo | null;
   setLogfiles: (files: LogfileInfo[]) => void;
   setReasoningExpanded: (expanded: boolean) => void;
@@ -580,7 +580,7 @@ export function createSandboxStore(
       pendingUserInputRequests: [],
       pendingEnvVarRequest: null,
       logfiles: [],
-      reasoningExpanded: false,
+      reasoningExpanded: null,
       currentUserInfo: initialCurrentUser,
 
       setLogfiles: (files) => set({ logfiles: files }),

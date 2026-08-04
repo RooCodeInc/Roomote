@@ -9,6 +9,10 @@ const narrationModeState = vi.hoisted(() => ({
   enabled: false,
 }));
 
+const mindReaderModeState = vi.hoisted(() => ({
+  enabled: false,
+}));
+
 const taskPhaseState = vi.hoisted(() => ({
   phase: null as string | null,
 }));
@@ -36,6 +40,23 @@ vi.mock('@/components/ai-elements', () => ({
   Shimmer: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
 
+vi.mock('@/components/ai-elements/message-ui-options', () => ({
+  MessageUiOptionsProvider: ({
+    children,
+    value,
+  }: {
+    children: ReactNode;
+    value?: { expandReasoningByDefault?: boolean };
+  }) => (
+    <div
+      data-testid="message-ui-options"
+      data-expand-reasoning={String(value?.expandReasoningByDefault)}
+    >
+      {children}
+    </div>
+  ),
+}));
+
 vi.mock('./hooks', () => ({
   useSandboxMessages: () => ({
     messages: sandboxMessagesState.messages,
@@ -47,6 +68,15 @@ vi.mock('./hooks', () => ({
 vi.mock('@/hooks/useNarrationMode', () => ({
   useNarrationMode: () => ({
     enabled: narrationModeState.enabled,
+    isLoading: false,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  }),
+}));
+
+vi.mock('@/hooks/useMindReaderMode', () => ({
+  useMindReaderMode: () => ({
+    enabled: mindReaderModeState.enabled,
     isLoading: false,
     isUpdating: false,
     setEnabled: vi.fn(),
@@ -109,6 +139,7 @@ describe('Messages', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    mindReaderModeState.enabled = false;
     narrationModeState.enabled = false;
     taskPhaseState.phase = null;
     sandboxMessagesState.messages = [];
@@ -171,6 +202,27 @@ describe('Messages', () => {
       }),
     );
     expect(screen.getByText('Sleep rows')).toBeInTheDocument();
+  });
+
+  it('passes mind reader mode into the reasoning expansion default', () => {
+    mindReaderModeState.enabled = true;
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: null,
+            taskRun: null,
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByTestId('message-ui-options')).toHaveAttribute(
+      'data-expand-reasoning',
+      'true',
+    );
   });
 
   it('keeps internal transcript rows hidden when debug UI is disabled', () => {

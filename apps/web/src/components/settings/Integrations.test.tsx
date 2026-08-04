@@ -35,6 +35,9 @@ const state = vi.hoisted(() => ({
   asanaConnection: null as null | {
     authStatus?: string | null;
   },
+  granolaConnection: null as null | {
+    authStatus?: string | null;
+  },
   grafanaConnection: null as null | {
     authStatus?: string | null;
     baseUrl: string;
@@ -91,6 +94,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     disconnectMcp: vi.fn(),
     setDisabledTools: vi.fn(),
     saveAsanaConnection: vi.fn(),
+    saveGranolaConnection: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
@@ -240,6 +244,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useAsanaConnection: () => ({
     data: state.asanaConnection,
+    isPending: false,
+  }),
+  useSaveGranolaConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveGranolaConnection,
+  }),
+  useGranolaConnection: () => ({
+    data: state.granolaConnection,
     isPending: false,
   }),
   useSaveGrafanaConnection: () => ({
@@ -443,6 +455,7 @@ describe('Integrations settings', () => {
     };
     state.linearRedirectPath = '';
     state.asanaConnection = null;
+    state.granolaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
     state.isAdmin = true;
@@ -801,6 +814,7 @@ describe('Integrations settings', () => {
       'Better Stack',
       'Braintrust',
       'Grafana',
+      'Granola',
       'Jira',
       'monday.com',
       'Neon',
@@ -860,6 +874,9 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Configure Grafana' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Configure Granola' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Configure Snowflake' }),
@@ -1064,6 +1081,21 @@ describe('Integrations settings', () => {
     expect(
       screen.getByText(
         'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the Granola confirmation dialog copy for highlighted integrations', () => {
+    state.searchParams = 'highlight=granola';
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByRole('heading', { name: 'Enable Granola?' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Roomote will use one deployment-wide Granola connection to browse meeting notes, transcripts, decisions, and action items.',
       ),
     ).toBeInTheDocument();
   });
@@ -1371,6 +1403,32 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
+  it('opens the Granola API-key dialog with deployment access guidance', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Granola' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect Granola' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Granola API Key')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /We strongly recommend a Granola workspace API key\. Workspace keys can read public notes and spaces where "Allow Granola API access" is enabled\./,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'You can also use a personal API key with Public notes selected and Personal notes left unchecked.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Store a Granola API key for this deployment. The secret stays encrypted server-side.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('submits an Asana token from the dialog', () => {
     render(<Integrations />);
 
@@ -1407,6 +1465,26 @@ describe('Integrations settings', () => {
       {
         baseUrl: 'https://grafana.example.com',
         serviceAccountToken: 'glsa_secret',
+      },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it('submits a trimmed Granola API key from the dialog', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Granola' }));
+    fireEvent.change(screen.getByLabelText('Granola API Key'), {
+      target: { value: '  granola-secret-key  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Granola' }));
+
+    expect(mutations.saveGranolaConnection).toHaveBeenCalledWith(
+      {
+        apiKey: 'granola-secret-key',
       },
       expect.objectContaining({
         onSuccess: expect.any(Function),
@@ -1528,6 +1606,64 @@ describe('Integrations settings', () => {
     expect(
       screen.getByText('Leave blank to keep the existing token.'),
     ).toBeInTheDocument();
+  });
+
+  it('shows native Granola connected controls and supports editing', () => {
+    state.deploymentEnablements = [{ mcpId: 'granola', enabled: true }];
+    state.userConnections = [
+      {
+        mcpId: 'granola',
+        authStatus: 'authenticated',
+      },
+    ];
+    state.granolaConnection = {
+      authStatus: 'authenticated',
+    };
+
+    render(<Integrations />);
+
+    const granolaCard = screen
+      .getByRole('heading', { name: 'Granola' })
+      .closest('#integration-granola');
+    expect(granolaCard).not.toBeNull();
+    expect(
+      within(granolaCard as HTMLElement)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual(['Disconnect Granola', 'Edit Granola connection']);
+    expect(
+      screen.queryByRole('button', { name: 'Manage Granola tools' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect Granola' }));
+    expect(mutations.disconnectMcp).toHaveBeenCalledWith(
+      { mcpId: 'granola' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Edit Granola connection' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Edit Granola' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Granola API Key')).toHaveValue('');
+    expect(
+      screen.getByText('Leave blank to keep the existing API key.'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(mutations.saveGranolaConnection).toHaveBeenCalledWith(
+      { apiKey: '' },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
   });
 
   it('opens the Vercel credential dialog from the integrations page', () => {

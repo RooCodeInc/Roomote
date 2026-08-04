@@ -12,6 +12,7 @@ import {
   uploadPreparedArtifact,
 } from '../local-file-upload.js';
 import { replyToChatThread } from '../chat-api-client.js';
+import { ChatDeliveryError } from '../chat-delivery-error.js';
 import { handleSendChatReply } from '../send-chat-reply.js';
 import type { ArtifactConfig, RoomoteConfig } from '../types.js';
 
@@ -293,6 +294,71 @@ describe('handleReplyToSlackThread', () => {
       success: false,
       error: 'Slack API unavailable',
       uploadedArtifactIds: ['art-1'],
+      deliveryFailure: { retryable: true },
     });
+  });
+
+  it('flags unclassified delivery errors as retryable delivery failures', async () => {
+    vi.mocked(replyToChatThread).mockRejectedValue(
+      new Error('Failed to reply to chat thread: 502 transport hiccup'),
+    );
+
+    const result = await handleSendChatReply(
+      { taskId: 'task-1', summary: 'closeout text' },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      success: false,
+      error: 'Failed to reply to chat thread: 502 transport hiccup',
+      deliveryFailure: { retryable: true },
+    });
+  });
+
+  it('carries the structured verdict for non-retryable delivery errors', async () => {
+    vi.mocked(replyToChatThread).mockRejectedValue(
+      new ChatDeliveryError({
+        message: 'Failed to reply to chat thread: 422 not_in_channel',
+        status: 422,
+        retryable: false,
+        providerErrorCode: 'not_in_channel',
+      }),
+    );
+
+    const result = await handleSendChatReply(
+      { taskId: 'task-1', summary: 'closeout text' },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      success: false,
+      error: 'Failed to reply to chat thread: 422 not_in_channel',
+      deliveryFailure: {
+        retryable: false,
+        providerErrorCode: 'not_in_channel',
+      },
+    });
+  });
+
+  it('does not flag pre-delivery failures as delivery failures', async () => {
+    const result = await handleSendChatReply(
+      {
+        taskId: 'task-1',
+        summary: 'has image',
+        imagePaths: ['screenshots/after.png'],
+      },
+      { ...artifactConfig, workspacePath: undefined },
+      roomoteConfig,
+    );
+
+    const parsed = JSON.parse(result.content[0]!.text) as Record<
+      string,
+      unknown
+    >;
+    expect(parsed.success).toBe(false);
+    expect(parsed.deliveryFailure).toBeUndefined();
+    expect(replyToChatThread).not.toHaveBeenCalled();
   });
 });

@@ -68,6 +68,7 @@ const MODEL_PROVIDER_DOC_PATHS: Partial<
   opencode: 'providers/inference/opencode',
   'opencode-go': 'providers/inference/opencode-go',
   openrouter: 'providers/inference/openrouter',
+  requesty: 'providers/inference/requesty',
   togetherai: 'providers/inference/together-ai',
   vercel: 'providers/inference/vercel-ai-gateway',
   vllm: 'providers/inference/vllm',

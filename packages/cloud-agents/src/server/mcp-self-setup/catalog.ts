@@ -158,6 +158,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Tie AI regressions back to code and prompt changes',
     ],
   },
+  granola: {
+    capabilities: [
+      'Browse workspace meeting notes for relevant discussions and decisions',
+      'Read meeting details and transcripts through a deployment API key',
+      'Keep access read-only and limited by the Granola key configuration',
+    ],
+  },
   supermemory: {
     capabilities: [
       'Save important decisions and context as shared memories during tasks',

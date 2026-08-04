@@ -1,4 +1,4 @@
-import { and, db, eq, isNull, users } from '@roomote/db/server';
+import { and, db, eq, isNull, sql, users } from '@roomote/db/server';
 import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
@@ -28,6 +28,10 @@ function normalizePersonalPreferences(
     colorTheme: isPersonalColorTheme(metadata.color_theme)
       ? metadata.color_theme
       : DEFAULT_PERSONAL_PREFERENCES.colorTheme,
+    mindReaderMode:
+      typeof metadata.mind_reader_mode === 'boolean'
+        ? metadata.mind_reader_mode
+        : DEFAULT_PERSONAL_PREFERENCES.mindReaderMode,
     narrationMode:
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
@@ -113,6 +117,10 @@ export async function updatePersonalPreferencesCommand(
     nextMetadataRecord.color_theme = input.colorTheme;
   }
 
+  if (input.mindReaderMode !== undefined) {
+    nextMetadataRecord.mind_reader_mode = input.mindReaderMode;
+  }
+
   if (input.narrationMode !== undefined) {
     nextMetadataRecord.narration_mode = input.narrationMode;
   }
@@ -121,30 +129,19 @@ export async function updatePersonalPreferencesCommand(
     return getPersonalPreferencesCommand(auth);
   }
 
-  const currentUser = await db.query.users.findFirst({
-    where: eq(users.id, auth.userId),
-    columns: {
-      metadata: true,
-    },
-  });
-  const normalizedMetadata = {
-    ...normalizeMetadata(currentUser?.metadata),
-    ...nextMetadataRecord,
-  };
-
-  const updatedRows = await db
+  const [updatedUser] = await db
     .update(users)
     .set({
-      metadata: normalizedMetadata,
+      metadata: sql`${users.metadata} || ${JSON.stringify(nextMetadataRecord)}::jsonb`,
       lastSyncAt: new Date(),
       updatedAt: new Date(),
     })
     .where(eq(users.id, auth.userId))
-    .returning({ id: users.id });
+    .returning({ metadata: users.metadata });
 
-  if (updatedRows.length === 0) {
+  if (!updatedUser) {
     throw new Error('Unable to update preferences for the active user.');
   }
 
-  return normalizePersonalPreferences(normalizedMetadata);
+  return normalizePersonalPreferences(normalizeMetadata(updatedUser.metadata));
 }

@@ -7,6 +7,7 @@ import pMap from 'p-map';
 import { createGitHubToken, resolveGitHubAppCredentials } from '@roomote/auth';
 import {
   DEFAULT_SOURCE_CONTROL_PROVIDER,
+  filterRepositoryNamesForSourceControlProvider,
   normalizePemEnvValue,
 } from '@roomote/types';
 import {
@@ -43,7 +44,15 @@ async function createTokenForRepositoryNames({
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
 }): Promise<string> {
-  const uniqueRepositoryNames = [...new Set(repositoryNames.filter(Boolean))];
+  const uniqueRepositoryNames = [
+    ...new Set(
+      filterRepositoryNamesForSourceControlProvider(
+        taskRun.payload,
+        repositoryNames.filter(Boolean),
+        DEFAULT_SOURCE_CONTROL_PROVIDER,
+      ),
+    ),
+  ];
 
   const selectedRepoRows = await db.query.repositories.findMany({
     where: and(

@@ -581,6 +581,21 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
     process.exit(0);
   }
 
+  // Delivery to the bound channel has permanently failed; ack and silence
+  // reminders would demand posts that cannot succeed, so stand down entirely.
+  const terminalDeliveryFailureAtMs = readFiniteMs(
+    state && state.terminalDeliveryFailureAtMs,
+  );
+  if (terminalDeliveryFailureAtMs !== null) {
+    logAllow({
+      trigger: hookEventName,
+      reason: 'terminal_delivery_failure',
+      tool: getToolName(hookInput),
+      terminalDeliveryFailureAtMs,
+    });
+    process.exit(0);
+  }
+
   if (
     hookEventName === 'PreToolUse' &&
     isPrematureAutomationReply(hookInput, state)

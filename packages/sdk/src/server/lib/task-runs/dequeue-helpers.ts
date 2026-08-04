@@ -9,6 +9,7 @@ import {
   RunStatus,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
+  normalizeSourceControlProvider,
   resolveTaskWorkspace,
   resolveSourceControlProviderFromPayload,
   type SourceControlProvider,
@@ -80,22 +81,31 @@ export function redactControlPlaneEnvVars(
 
 export function redactSourceControlProviderEnvVars(
   envVars: Record<string, string>,
-  sourceControlProvider?: SourceControlProvider,
+  sourceControlProvider?: SourceControlProvider | SourceControlProvider[],
 ): Record<string, string> {
-  if (sourceControlProvider === 'github') {
+  // Provider credential builders have already converted deployment secrets
+  // into scoped or proxy-backed worker credentials. Never expose the broad
+  // deployment token itself inside the task sandbox, including Bitbucket.
+  const providers = Array.isArray(sourceControlProvider)
+    ? sourceControlProvider
+    : sourceControlProvider
+      ? [sourceControlProvider]
+      : [];
+  const providerTokenEnvVars = providers.flatMap((provider) =>
+    provider === 'gitlab'
+      ? ['GITLAB_TOKEN']
+      : provider === 'gitea'
+        ? ['GITEA_TOKEN']
+        : provider === 'bitbucket'
+          ? ['BITBUCKET_OAUTH']
+          : provider === 'ado'
+            ? ['ADO_TOKEN']
+            : [],
+  );
+
+  if (providerTokenEnvVars.length === 0) {
     return envVars;
   }
-
-  const providerTokenEnvVars =
-    sourceControlProvider === 'gitlab'
-      ? ['GITLAB_TOKEN']
-      : sourceControlProvider === 'gitea'
-        ? ['GITEA_TOKEN']
-        : sourceControlProvider === 'bitbucket'
-          ? []
-          : sourceControlProvider === 'ado'
-            ? ['ADO_TOKEN']
-            : [];
   const shouldRedact = providerTokenEnvVars.some(
     (envVar) => envVars[envVar] !== undefined,
   );
@@ -133,7 +143,7 @@ export function claimJobById(runId: number) {
 export async function fetchEnvVars(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   options?: {
-    sourceControlProvider?: SourceControlProvider;
+    sourceControlProvider?: SourceControlProvider | SourceControlProvider[];
   },
 ): Promise<Record<string, string>> {
   const encryptedEnvVars = await tx.query.environmentVariables.findMany();
@@ -243,7 +253,7 @@ function redactModelRuntimeManagedEnvVars(
 export async function fetchResolvedRuntimeEnvVars(
   deploymentEnvVars?: Record<string, string>,
   options?: {
-    sourceControlProvider?: SourceControlProvider;
+    sourceControlProvider?: SourceControlProvider | SourceControlProvider[];
   },
 ): Promise<Record<string, string>> {
   const envVars =
@@ -406,23 +416,47 @@ export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
 };
 
 /**
- * Resolve the provider for a run's source-control token. Prefers the explicit
- * payload stamp; when absent, resolves from the synced repositories the
- * workspace references, so non-GitHub deployments work even when a launch
- * site forgot to stamp the payload. Falls back to the GitHub default only
- * when the workspace repositories are unknown or span providers.
+ * Resolve the ordered providers for a run's source-control tokens. A repository
+ * map is authoritative and keeps the primary repository's provider first.
+ * Legacy payloads retain the existing scalar, workspace, and default fallback.
  */
-async function resolveTaskRunSourceControlProvider(
+export async function resolveTaskRunSourceControlProviders(
   taskRun: Pick<TaskRun, 'id' | 'payload'>,
-): Promise<SourceControlProvider> {
-  const payload = taskRun.payload as { sourceControlProvider?: unknown };
+  dbOrTx: Parameters<typeof resolveWorkspaceSourceControlProvider>[0] = db,
+): Promise<SourceControlProvider[]> {
+  const payload = taskRun.payload as {
+    repo?: string;
+    repositoryProviders?: Record<string, unknown>;
+    sourceControlProvider?: unknown;
+  };
+
+  if (
+    payload.repositoryProviders &&
+    Object.keys(payload.repositoryProviders).length > 0
+  ) {
+    const mappedProviders = Object.values(payload.repositoryProviders).map(
+      normalizeSourceControlProvider,
+    );
+    const primaryProvider =
+      payload.sourceControlProvider === undefined ||
+      payload.sourceControlProvider === null ||
+      payload.sourceControlProvider === ''
+        ? mappedProviders[0]
+        : resolveSourceControlProviderFromPayload(payload);
+    const providers = [
+      ...(primaryProvider === undefined ? [] : [primaryProvider]),
+      ...mappedProviders,
+    ];
+
+    return [...new Set(providers)];
+  }
 
   if (
     payload.sourceControlProvider !== undefined &&
     payload.sourceControlProvider !== null &&
     payload.sourceControlProvider !== ''
   ) {
-    return resolveSourceControlProviderFromPayload(payload);
+    return [resolveSourceControlProviderFromPayload(payload)];
   }
 
   // No explicit stamp: resolve from the workspace's synced repositories via the
@@ -431,12 +465,12 @@ async function resolveTaskRunSourceControlProvider(
   // GitHub default that resolveSourceControlProviderFromPayload applies.
   const workspace = resolveTaskWorkspace(taskRun.payload);
   const resolvedProvider = await resolveWorkspaceSourceControlProvider(
-    db,
+    dbOrTx,
     workspace,
   );
 
   if (resolvedProvider) {
-    return resolvedProvider;
+    return [resolvedProvider];
   }
 
   // The GitHub default is wrong whenever the workspace actually spans
@@ -445,17 +479,16 @@ async function resolveTaskRunSourceControlProvider(
   // scopes into per-provider runs; log loudly so the surface that forgot is
   // diagnosable from the run's cancellation.
   console.warn(
-    `[resolveTaskRunSourceControlProvider] Task run ${taskRun.id} has no sourceControlProvider stamp and its ${workspace.type} workspace resolves to no single provider; falling back to the GitHub default. The launch site should stamp the payload or split multi-provider scopes into per-provider runs.`,
+    `[resolveTaskRunSourceControlProviders] Task run ${taskRun.id} has no sourceControlProvider stamp and its ${workspace.type} workspace resolves to no single provider; falling back to the GitHub default. The launch site should stamp the payload or split multi-provider scopes into per-provider runs.`,
   );
 
-  return resolveSourceControlProviderFromPayload(taskRun.payload);
+  return [resolveSourceControlProviderFromPayload(taskRun.payload)];
 }
 
 async function createProviderToken(
   taskRun: TaskRun,
+  provider: SourceControlProvider,
 ): Promise<SourceControlRuntimeToken> {
-  const provider = await resolveTaskRunSourceControlProvider(taskRun);
-
   switch (provider) {
     case 'github': {
       const token = await createTaskRunWorkerGitHubToken(taskRun);
@@ -536,26 +569,48 @@ async function createProviderToken(
   }
 }
 
-/**
- * Creates a source-control token for the task run with retry logic.
- * Retries up to {@link SOURCE_CONTROL_TOKEN_MAX_RETRIES} times with
- * exponential backoff (1s, 2s, 4s) to handle transient provider API failures.
- * Returns null if all attempts fail (caller should handle the error).
- */
-export async function createSourceControlTokenForTaskRun(
+function mergeProviderTokens(
+  tokens: SourceControlRuntimeToken[],
+): SourceControlRuntimeToken {
+  const [primaryToken, ...secondaryTokens] = tokens;
+
+  if (!primaryToken) {
+    throw new Error('No source control providers resolved for task run.');
+  }
+
+  return secondaryTokens.reduce<SourceControlRuntimeToken>(
+    (merged, token) => ({
+      ...merged,
+      envVars: { ...merged.envVars, ...token.envVars },
+      gitCredentials: [
+        ...(merged.gitCredentials ?? []),
+        ...(token.gitCredentials ?? []),
+      ],
+      gitProxyCredentials: [
+        ...(merged.gitProxyCredentials ?? []),
+        ...(token.gitProxyCredentials ?? []),
+      ],
+      artifactsPatch: {
+        ...(merged.artifactsPatch ?? {}),
+        ...(token.artifactsPatch ?? {}),
+      },
+    }),
+    primaryToken,
+  );
+}
+
+async function createProviderTokenWithRetry(
   taskRun: TaskRun,
+  provider: SourceControlProvider,
   logPrefix: string,
-  {
-    maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
-    baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
-  } = {},
+  maxRetries: number,
+  baseDelayMs: number,
 ): Promise<SourceControlRuntimeToken | null> {
-  const provider = await resolveTaskRunSourceControlProvider(taskRun);
   const label = getSourceControlProviderLabel(provider);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await createProviderToken(taskRun);
+      return await createProviderToken(taskRun, provider);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
@@ -574,6 +629,54 @@ export async function createSourceControlTokenForTaskRun(
   }
 
   return null;
+}
+
+/**
+ * Creates a source-control token for the task run with retry logic.
+ * Retries up to {@link SOURCE_CONTROL_TOKEN_MAX_RETRIES} times with
+ * exponential backoff (1s, 2s, 4s) to handle transient provider API failures.
+ * Returns null if all attempts fail (caller should handle the error).
+ */
+export async function createSourceControlTokenForTaskRun(
+  taskRun: TaskRun,
+  logPrefix: string,
+  {
+    maxRetries = SOURCE_CONTROL_TOKEN_MAX_RETRIES,
+    baseDelayMs = SOURCE_CONTROL_TOKEN_BASE_DELAY_MS,
+  } = {},
+): Promise<SourceControlRuntimeToken | null> {
+  const providers = await resolveTaskRunSourceControlProviders(taskRun);
+
+  // GitLab scoped tokens create revocable remote resources. Mint them last so
+  // a later provider failure cannot orphan a successful GitLab token set.
+  const mintOrder = [
+    ...providers.filter((provider) => provider !== 'gitlab'),
+    ...providers.filter((provider) => provider === 'gitlab'),
+  ];
+  const tokensByProvider = new Map<
+    SourceControlProvider,
+    SourceControlRuntimeToken
+  >();
+
+  for (const provider of mintOrder) {
+    const token = await createProviderTokenWithRetry(
+      taskRun,
+      provider,
+      logPrefix,
+      maxRetries,
+      baseDelayMs,
+    );
+
+    if (!token) {
+      return null;
+    }
+
+    tokensByProvider.set(provider, token);
+  }
+
+  return mergeProviderTokens(
+    providers.map((provider) => tokensByProvider.get(provider)!),
+  );
 }
 
 /**

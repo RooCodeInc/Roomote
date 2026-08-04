@@ -5,6 +5,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 export interface MessageUiOptions {
   compact?: boolean;
   displayMode?: 'default' | 'narration';
+  expandReasoningByDefault?: boolean;
   hideNewTaskAction?: boolean;
 }
 

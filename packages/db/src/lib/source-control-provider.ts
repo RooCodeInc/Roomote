@@ -1,8 +1,12 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { TaskWorkspace, SourceControlProvider } from '@roomote/types';
 
 import type { DatabaseOrTransaction } from '../db';
-import { environmentRepositoryMappings, repositories } from '../schema';
+import {
+  environmentRepositoryMappings,
+  environments,
+  repositories,
+} from '../schema';
 
 /**
  * Collapse a set of repository providers to the single provider they all
@@ -17,28 +21,95 @@ function toSingleProvider(
   return unique.length === 1 ? unique[0] : undefined;
 }
 
-async function resolveProviderByFullNames(
+type RepositoryProviderRow = {
+  fullName: string;
+  host: string | null;
+  isActive?: boolean;
+  sourceControlProvider: SourceControlProvider;
+};
+
+function toRepositoryProviderMap(
+  rows: RepositoryProviderRow[],
+  repositoryOrder: string[],
+  sourceControlHost?: string,
+): Record<string, SourceControlProvider> {
+  const rowsByFullName = new Map<string, RepositoryProviderRow[]>();
+
+  for (const row of rows) {
+    const matches = rowsByFullName.get(row.fullName) ?? [];
+    matches.push(row);
+    rowsByFullName.set(row.fullName, matches);
+  }
+
+  const result: Record<string, SourceControlProvider> = {};
+
+  for (const fullName of [...new Set(repositoryOrder)]) {
+    const matches = rowsByFullName.get(fullName) ?? [];
+    const activeMatches = matches.filter((row) => row.isActive === true);
+    const candidates = activeMatches.length > 0 ? activeMatches : matches;
+    const hostMatches =
+      candidates.length > 1 && sourceControlHost
+        ? candidates.filter((row) => row.host === sourceControlHost)
+        : candidates;
+
+    if (candidates.length > 1 && hostMatches.length !== 1) {
+      console.warn(
+        `[resolveWorkspaceRepositoryProviders] Omitting ambiguous repository ${fullName}; matched ${candidates.length} candidate rows.`,
+      );
+      continue;
+    }
+
+    const match = hostMatches[0];
+    if (match) {
+      result[fullName] = match.sourceControlProvider;
+    }
+  }
+
+  return result;
+}
+
+async function resolveProvidersByFullNames(
   dbOrTx: DatabaseOrTransaction,
   fullNames: string[],
-): Promise<SourceControlProvider | undefined> {
+  sourceControlHost?: string,
+): Promise<Record<string, SourceControlProvider>> {
   if (fullNames.length === 0) {
-    return undefined;
+    return {};
   }
 
   const rows = await dbOrTx
-    .select({ sourceControlProvider: repositories.sourceControlProvider })
+    .select({
+      fullName: repositories.fullName,
+      host: repositories.host,
+      isActive: repositories.isActive,
+      sourceControlProvider: repositories.sourceControlProvider,
+    })
     .from(repositories)
     .where(inArray(repositories.fullName, fullNames));
 
-  return toSingleProvider(rows.map((row) => row.sourceControlProvider));
+  return toRepositoryProviderMap(rows, fullNames, sourceControlHost);
 }
 
-async function resolveEnvironmentProvider(
+async function resolveEnvironmentProviders(
   dbOrTx: DatabaseOrTransaction,
   environmentId: string,
-): Promise<SourceControlProvider | undefined> {
+): Promise<Record<string, SourceControlProvider>> {
+  const environment = await dbOrTx.query.environments.findFirst({
+    where: eq(environments.id, environmentId),
+    columns: { config: true },
+  });
+
+  if (!environment) {
+    return {};
+  }
+
   const rows = await dbOrTx
-    .select({ sourceControlProvider: repositories.sourceControlProvider })
+    .select({
+      fullName: repositories.fullName,
+      host: repositories.host,
+      isActive: repositories.isActive,
+      sourceControlProvider: repositories.sourceControlProvider,
+    })
     .from(environmentRepositoryMappings)
     .innerJoin(
       repositories,
@@ -49,20 +120,61 @@ async function resolveEnvironmentProvider(
         eq(environmentRepositoryMappings.environmentId, environmentId),
         eq(repositories.isActive, true),
       ),
+    )
+    .orderBy(
+      asc(environmentRepositoryMappings.createdAt),
+      asc(environmentRepositoryMappings.id),
     );
 
-  return toSingleProvider(rows.map((row) => row.sourceControlProvider));
+  return toRepositoryProviderMap(
+    rows,
+    environment.config.repositories.map((repository) => repository.repository),
+  );
 }
 
-async function resolveAllRepositoriesProvider(
+async function resolveAllRepositoriesProviders(
   dbOrTx: DatabaseOrTransaction,
-): Promise<SourceControlProvider | undefined> {
+): Promise<Record<string, SourceControlProvider>> {
   const rows = await dbOrTx
-    .select({ sourceControlProvider: repositories.sourceControlProvider })
+    .select({
+      fullName: repositories.fullName,
+      host: repositories.host,
+      isActive: repositories.isActive,
+      sourceControlProvider: repositories.sourceControlProvider,
+    })
     .from(repositories)
-    .where(eq(repositories.isActive, true));
+    .where(eq(repositories.isActive, true))
+    .orderBy(asc(repositories.createdAt), asc(repositories.id));
 
-  return toSingleProvider(rows.map((row) => row.sourceControlProvider));
+  return toRepositoryProviderMap(
+    rows,
+    rows.map((row) => row.fullName),
+  );
+}
+
+/** Resolve repository full names to providers in workspace order. */
+export async function resolveWorkspaceRepositoryProviders(
+  dbOrTx: DatabaseOrTransaction,
+  workspace: TaskWorkspace,
+): Promise<Record<string, SourceControlProvider>> {
+  switch (workspace.type) {
+    case 'repository':
+      return resolveProvidersByFullNames(
+        dbOrTx,
+        [workspace.repo],
+        workspace.sourceControlHost,
+      );
+    case 'repository_set':
+      return resolveProvidersByFullNames(
+        dbOrTx,
+        workspace.repositories,
+        workspace.sourceControlHost,
+      );
+    case 'environment':
+      return resolveEnvironmentProviders(dbOrTx, workspace.environmentId);
+    case 'all_repositories':
+      return resolveAllRepositoriesProviders(dbOrTx);
+  }
 }
 
 /**
@@ -71,23 +183,17 @@ async function resolveAllRepositoriesProvider(
  * every workspace shape (single repo, repo set, environment, all repositories).
  *
  * Returns `undefined` when the provider is ambiguous (spans multiple providers)
- * or unknown (no matching repositories). This never throws — an unresolved
- * provider means the caller should leave the payload unstamped and let the
- * downstream GitHub default apply. The web launch-validation path wraps this
- * resolver to add its own throw-on-multi-provider behavior.
+ * or unknown (no matching repositories). This never throws — callers that
+ * require a resolved provider validate the returned repository map before
+ * enqueue, while legacy callers may leave the scalar provider unstamped.
  */
 export async function resolveWorkspaceSourceControlProvider(
   dbOrTx: DatabaseOrTransaction,
   workspace: TaskWorkspace,
 ): Promise<SourceControlProvider | undefined> {
-  switch (workspace.type) {
-    case 'repository':
-      return resolveProviderByFullNames(dbOrTx, [workspace.repo]);
-    case 'repository_set':
-      return resolveProviderByFullNames(dbOrTx, workspace.repositories);
-    case 'environment':
-      return resolveEnvironmentProvider(dbOrTx, workspace.environmentId);
-    case 'all_repositories':
-      return resolveAllRepositoriesProvider(dbOrTx);
-  }
+  const repositoryProviders = await resolveWorkspaceRepositoryProviders(
+    dbOrTx,
+    workspace,
+  );
+  return toSingleProvider(Object.values(repositoryProviders));
 }

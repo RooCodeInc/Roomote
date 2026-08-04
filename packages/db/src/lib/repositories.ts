@@ -30,18 +30,19 @@ export async function resolveRepositorySelectionByIds(params: {
   }
 
   const executor = params.executor ?? db;
+  const repositoryIds = [...new Set(params.repositoryIds)];
   const rows = await executor
     .select({
       id: repositories.id,
       fullName: repositories.fullName,
     })
     .from(repositories)
-    .where(inArray(repositories.id, params.repositoryIds));
+    .where(inArray(repositories.id, repositoryIds));
 
   const rowsById = new Map(
     rows.map((repository) => [repository.id, repository]),
   );
-  const selectedRepositories = params.repositoryIds
+  const selectedRepositories = repositoryIds
     .map((repositoryId) => rowsById.get(repositoryId))
     .filter(
       (

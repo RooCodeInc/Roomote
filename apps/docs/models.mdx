@@ -53,6 +53,7 @@ These connections use metered API billing or a provider-managed gateway:
 | [OpenAI](/providers/inference/openai) | OpenAI API key | OpenAI API project |
 | [OpenCode Zen](/providers/inference/opencode) | OpenCode API key | OpenCode account |
 | [OpenRouter](/providers/inference/openrouter) | OpenRouter API key | OpenRouter balance and key limit |
+| [Requesty](/providers/inference/requesty) | Requesty API key | Requesty organization |
 | [Together AI](/providers/inference/together-ai) | Together AI API key | Together AI account |
 | [Vercel AI Gateway](/providers/inference/vercel-ai-gateway) | AI Gateway API key | Vercel team |
 | [xAI](/providers/inference/xai) | xAI API key | xAI API team |
@@ -154,12 +155,13 @@ R_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
 Roomote automatically makes common provider configuration available to the
-model runtime, including OpenRouter, Vercel AI Gateway, OpenAI, Azure OpenAI,
-Azure AI Foundry, Anthropic, Google Gemini, Moonshot, Kimi for Coding, MiniMax,
-Z.AI, OpenCode, Amazon Bedrock, xAI, and GitHub Copilot. For gateway-supported
-providers, credentials stay on the control plane and model requests are proxied
-instead of forwarding the credentials into task workers. Use `R_MODEL_ENV_KEYS`
-when a provider key uses a custom env var name and must be forwarded:
+model runtime, including OpenRouter, Requesty, Vercel AI Gateway, OpenAI, Azure
+OpenAI, Azure AI Foundry, Anthropic, Google Gemini, Moonshot, Kimi for Coding,
+MiniMax, Z.AI, OpenCode, Amazon Bedrock, xAI, and GitHub Copilot. For
+gateway-supported providers, credentials stay on the control plane and model
+requests are proxied instead of forwarding the credentials into task workers.
+Use `R_MODEL_ENV_KEYS` when a provider key uses a custom env var name and must be
+forwarded:
 
 ```sh
 R_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY

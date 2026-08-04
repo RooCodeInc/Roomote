@@ -28,14 +28,18 @@ const AcpReasoningMessageBase = ({
   onSuppress: _onSuppress,
 }: AcpReasoningMessageProps) => {
   const anchorId = messageAnchorId(msg.ts);
-  const { displayMode = 'default' } = useMessageUiOptions();
+  const { displayMode = 'default', expandReasoningByDefault = false } =
+    useMessageUiOptions();
   const initialExpanded = useInitialSandboxReasoningExpanded();
   const setReasoningExpanded = useSandboxSetReasoningExpanded();
 
-  const [isOpen, setIsOpen] = useState(initialExpanded);
+  const [openOverride, setOpenOverride] = useState<boolean | null>(
+    initialExpanded,
+  );
+  const isOpen = openOverride ?? expandReasoningByDefault;
 
   const handleOpenChange = (open: boolean) => {
-    setIsOpen(open);
+    setOpenOverride(open);
     setReasoningExpanded(open);
   };
 

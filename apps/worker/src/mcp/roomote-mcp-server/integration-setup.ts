@@ -111,6 +111,14 @@ Braintrust uses OAuth:
 
 Once connected, I can access AI evaluation and logging data during tasks.
 
+# Granola
+
+Granola uses an admin-managed API key:
+1. A deployment operator enables Granola from Settings > Integrations.
+2. That operator connects Granola once for the deployment with a Granola API key.
+
+Prefer a workspace API key, which cannot read ordinary private notes. Workspace keys can read public notes and notes in spaces where Allow Granola API access is enabled. If using a personal API key instead, create it with only Public notes selected. Once connected, I can browse and read accessible meeting notes, folders, transcripts, decisions, and action items. The built-in connection is read-only.
+
 # Asana
 
 Asana uses an admin-managed access token:

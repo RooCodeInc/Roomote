@@ -4,7 +4,82 @@ vi.mock('@roomote/gitlab', () => ({
   isGitLabOAuthAccessToken: (token: string) => token === 'oauth-token',
 }));
 
-import { buildGitLabTokenHeader } from '../source-control-pull-request-shared';
+import {
+  buildGitLabTokenHeader,
+  resolveSourceControlHostForRepositoryFromPayload,
+  resolveSourceControlProviderForRepositoryFromPayload,
+} from '../source-control-pull-request-shared';
+
+describe('resolveSourceControlProviderForRepositoryFromPayload', () => {
+  it('prefers the target repository provider over the task primary provider', () => {
+    expect(
+      resolveSourceControlProviderForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          repositoryProviders: { 'acme/backend': 'gitlab' },
+        },
+        'acme/backend',
+      ),
+    ).toBe('gitlab');
+  });
+
+  it('rejects repositories omitted from a provider map', () => {
+    expect(() =>
+      resolveSourceControlProviderForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          repositoryProviders: { 'acme/backend': 'gitlab' },
+        },
+        'acme/frontend',
+      ),
+    ).toThrow(
+      'Repository acme/frontend is not mapped to a source control provider.',
+    );
+  });
+});
+
+describe('resolveSourceControlHostForRepositoryFromPayload', () => {
+  it('does not apply the primary provider host to a mapped secondary repository', () => {
+    expect(
+      resolveSourceControlHostForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          sourceControlHost: 'github.com',
+          repositoryProviders: { 'acme/backend': 'gitlab' },
+        },
+        'acme/backend',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('keeps the scalar host for legacy payloads without a provider map', () => {
+    expect(
+      resolveSourceControlHostForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          sourceControlHost: 'github.com',
+        },
+        'acme/frontend',
+      ),
+    ).toBe('github.com');
+  });
+
+  it('does not apply a scalar host to a mapped primary repository', () => {
+    expect(
+      resolveSourceControlHostForRepositoryFromPayload(
+        {
+          sourceControlProvider: 'github',
+          sourceControlHost: 'github.enterprise.example',
+          repositoryProviders: {
+            'acme/frontend': 'github',
+            'acme/backend': 'gitlab',
+          },
+        },
+        'acme/frontend',
+      ),
+    ).toBeUndefined();
+  });
+});
 
 describe('buildGitLabTokenHeader', () => {
   it('uses the Bearer authorization header for OAuth tokens', () => {
