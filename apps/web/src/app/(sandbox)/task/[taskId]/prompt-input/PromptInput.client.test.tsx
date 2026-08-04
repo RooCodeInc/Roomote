@@ -444,6 +444,52 @@ describe('PromptInput', () => {
     });
   });
 
+  it('falls back to the web API when sandbox cancellation hangs', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const sandboxCancelMutateMock = vi
+        .fn()
+        .mockImplementation(() => new Promise(() => {}));
+
+      useSandboxConnectedMock.mockReturnValue(true);
+      useSandboxConnectionStatusMock.mockReturnValue({
+        connected: true,
+        connectionError: false,
+        reconnect: vi.fn(),
+      });
+      useSandboxTaskPhaseMock.mockReturnValue('running');
+      useSandboxClientMock.mockReturnValue({
+        commands: {
+          cancelTask: { mutate: sandboxCancelMutateMock },
+          touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+        },
+      });
+
+      render(
+        <PromptInput
+          taskRun={createTaskRun(45, { taskId: 'task-hung' })}
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect(sandboxCancelMutateMock).toHaveBeenCalledTimes(1);
+      expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
+        taskId: 'task-hung',
+        runId: 45,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not call the web API when sandbox cancellation succeeds', async () => {
     const sandboxCancelMutateMock = vi.fn().mockResolvedValue(undefined);
 
