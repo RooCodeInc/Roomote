@@ -206,6 +206,18 @@ function removePatchChangesSection(markdown) {
   return kept.join('\n').trim();
 }
 
+function removeReleaseHeading(markdown, version) {
+  const headingRe = new RegExp(
+    `^##\\s+v?${escapeRegExp(version)}(?:\\s+\\([^\n]+\\))?\\s*\\n+`,
+    'i',
+  );
+  return markdown.replace(headingRe, '').trim();
+}
+
+function extractReleaseIntro(markdown) {
+  return markdown.split(/\n\s*\n/, 1)[0].trim();
+}
+
 /**
  * Build the Discord webhook payload for a published GitHub Release.
  *
@@ -231,12 +243,24 @@ export function buildDiscordReleasePayload(release) {
 
   const version = tagName.replace(/^v/i, '');
   const versionTag = `v${version}`;
-  const prefix = `# Roomote ${version} is out!`;
-  const suffix = `See the full release notes [${versionTag}](${url}). Let us know what you think!`;
-  const body =
+  const semver = /^(\d+)\.(\d+)\.(\d+)(?:-|$)/.exec(version);
+  const isMajorRelease = semver?.[2] === '0' && semver[3] === '0';
+  const prefix = isMajorRelease
+    ? `# Roomote ${version} is out!`
+    : `### Roomote ${version} is published`;
+  const suffix = isMajorRelease
+    ? `See the full release notes → [${versionTag}](${url}). Let us know what you think!`
+    : `See the full release notes → [${versionTag}](${url}).`;
+  const releaseBody =
     typeof release.body === 'string'
-      ? removePatchChangesSection(release.body)
+      ? removeReleaseHeading(release.body, version)
       : '';
+  const body = isMajorRelease
+    ? removePatchChangesSection(releaseBody).replace(
+        /([^\n])\n\n(###\s+Highlights\s*$)/im,
+        '$1\n$2',
+      )
+    : extractReleaseIntro(releaseBody);
   const bodyLimit = DISCORD_MESSAGE_LIMIT - prefix.length - suffix.length - 4;
   const announcementBody = truncateDiscordText(body, bodyLimit);
   const content = announcementBody
