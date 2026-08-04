@@ -129,6 +129,10 @@ empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
   in a single transaction while the previous release keeps serving. If a
   migration fails, the schema rolls back, the previous configuration is
   restored, and the previous release stays up.
+- **Failed upgrades restore the previous configuration.** Failures before the
+  new release starts, including image-pull failures, restore the prior
+  environment, Compose, and Caddy configuration and restart the previous
+  controller when needed.
 - **Rollback is one command.** Every release's schema keeps the previous
   release working, so `roomote rollback` re-deploys the prior release without
   touching the database. `roomote upgrade <tag>` does the same for any

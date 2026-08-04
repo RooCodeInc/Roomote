@@ -60,8 +60,10 @@ linked, Roomote can attribute a task to the right user, respect access rules,
 and continue the right thread when someone replies later.
 
 If someone asks Roomote to do work from chat before their account is linked,
-Roomote prompts them to link the account. After linking, they may need to send
-the request again.
+Roomote prompts them to link the account. On Discord, Roomote keeps the latest
+request for 10 minutes and starts it automatically when linking succeeds during
+that window. Other communications providers may require the request to be sent
+again.
 
 Telegram and Discord use one-time link codes instead of acting as sign-in
 providers. Generate a code under **Settings > Personal > Linked Accounts** and

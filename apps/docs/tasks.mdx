@@ -81,9 +81,16 @@ look for:
 | Preview           | Whether the visible result matches the claim for UI or workflow changes                    |
 | Artifacts         | Plans, reports, screenshots, or other outputs you may want to reuse or review              |
 
+Command tool calls show their output in a collapsed, copyable section in the
+transcript, so you can inspect the details without leaving the task.
+
 When an environment setup command fails, open the task **Logs** panel and
 select its `Setup: <command>` entry. The command's output is available there
 without needing to enter the sandbox workspace.
+
+If an environment fails to start before the agent produces any output, the
+task may show **Retry**. Roomote hides that action after agent output exists to
+avoid running the same work twice.
 
 ## Continuing work
 

@@ -80,6 +80,10 @@ Create arbitrary scheduled agent runs with:
 - an optional **report destination** channel (Slack, Discord, Teams, or
   Telegram)
 
+The destination selector lists only communications providers that are
+currently connected. If a saved provider is disconnected, reconnect it before
+editing the automation or choose another destination.
+
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
 9am.” Roomote previews the interpreted schedule before saving and asks for
@@ -110,7 +114,9 @@ an explicit IANA timezone.
 
 Admins can also manage custom automations from a Roomote task through the
 `manage_custom_automations` tool: list, resolve a schedule, create, update,
-delete, or run an enabled automation immediately.
+delete, or run an enabled automation immediately. After creating an automation
+conversationally, Roomote asks whether you want to run it immediately as a
+test.
 
 ## Channel automations
 
@@ -134,9 +140,9 @@ the Roomote bot can already see in your server.
 
 A few provider-specific behaviors to know:
 
-- On Discord, messages from people who have not linked their Discord account
-  to Roomote do not start tasks; Roomote sends them a direct message
-  explaining how to link instead.
+- On Discord, Roomote keeps the latest request from an unlinked person for 10
+  minutes and sends them a direct message explaining how to link. Completing
+  the link during that window starts the saved request automatically.
 - Messages posted by other bots or webhooks (for example a deploy or alert
   feed) can start tasks too. Use launch criteria to keep noisy feeds in
   check — for example, only launching on new or worsening alerts.
