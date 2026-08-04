@@ -679,6 +679,36 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ).toBe('xai');
   });
 
+  it('groups native Bedrock and Mantle models under Amazon Bedrock', () => {
+    expect(
+      groupModelsByDisplayProvider([
+        {
+          id: 'amazon-bedrock/anthropic.claude-opus-4-8',
+          displayName: 'Claude Opus 4.8',
+        },
+        {
+          id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+        },
+      ]),
+    ).toEqual([
+      {
+        providerId: 'amazon-bedrock',
+        label: 'Amazon Bedrock',
+        items: [
+          {
+            id: 'amazon-bedrock/anthropic.claude-opus-4-8',
+            displayName: 'Claude Opus 4.8',
+          },
+          {
+            id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+            displayName: 'Claude Sonnet 5',
+          },
+        ],
+      },
+    ]);
+  });
+
   it('groups model chooser options by display provider and catalog order', () => {
     const groups = groupModelsByDisplayProvider(
       [
