@@ -25,7 +25,7 @@ This release adds Granola and Requesty connections, introduces Mind reader mode 
 - Keep tasks running when agents attempt to read unsupported ICO or CUR files by returning a recoverable tool error before provider submission.
 - Launch tasks reliably from workspaces that combine repositories across GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket with provider-scoped credentials. Thanks to @jantekb for reporting [#1082](https://github.com/RooCodeInc/Roomote/issues/1082).
 - Require an active deployment administrator to create or update shared environments through Roomote's MCP tools.
-- Stop completed chat tasks from entering repeated closeout attempts when message delivery has failed permanently. Thanks to @daniel-lxs for contributing this improvement.
+- Stop completed chat tasks from entering repeated closeout attempts when message delivery has failed permanently.
 
 ## 0.33.0 (2026-08-04)
 
