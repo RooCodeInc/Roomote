@@ -228,6 +228,7 @@ import {
   startSetupNewOnboardingTaskCommand,
 } from './index';
 import {
+  ALL_REPOSITORIES,
   TaskPayloadKind,
   WORKER_RUNTIME_SCHEMA_VERSION,
   type SetupNewState,
@@ -1194,6 +1195,45 @@ describe('setup-new onboarding task start command', () => {
           slackTeamId: null,
           slackChannel: null,
           slackThreadTs: null,
+        }),
+      }),
+    );
+  });
+
+  it('uses the first workspace provider when setup repositories are mixed', async () => {
+    vi.mocked(getRepositories).mockResolvedValue([
+      {
+        id: 'repo-1',
+        fullName: 'octo/api',
+        sourceControlProvider: 'github',
+      },
+      {
+        id: 'repo-2',
+        fullName: 'group/web',
+        sourceControlProvider: 'gitlab',
+      },
+    ] as Awaited<ReturnType<typeof getRepositories>>);
+    vi.mocked(normalizeRepositorySelection).mockReturnValue([
+      'repo-1',
+      'repo-2',
+    ]);
+    vi.mocked(buildSetupNewWorkspacePayload).mockReturnValue({
+      repo: ALL_REPOSITORIES,
+      selectedRepositories: ['group/web', 'octo/api'],
+    });
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: { selectedRepositoryIds: ['repo-1', 'repo-2'] },
+    });
+
+    await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'gitlab',
+          }),
         }),
       }),
     );

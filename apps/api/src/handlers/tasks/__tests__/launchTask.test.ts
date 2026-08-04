@@ -11,12 +11,14 @@ const {
   mockEnvironmentsFindFirst,
   mockRepositoriesFindMany,
   mockSelectRows,
+  mockResolveWorkspaceRepositoryProviders,
   mockGetMembershipRole,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
   mockSelectRows: vi.fn(),
+  mockResolveWorkspaceRepositoryProviders: vi.fn(),
   mockGetMembershipRole: vi.fn(),
 }));
 
@@ -35,6 +37,8 @@ vi.mock('@roomote/db/server', () => ({
   environments: {},
   environmentRepositoryMappings: {},
   repositories: {},
+  resolveWorkspaceRepositoryProviders: (...args: unknown[]) =>
+    mockResolveWorkspaceRepositoryProviders(...args),
   db: {
     query: {
       environments: {
@@ -88,6 +92,8 @@ describe('launchTask', () => {
     mockRepositoriesFindMany.mockReset();
     mockSelectRows.mockReset();
     mockSelectRows.mockReturnValue([]);
+    mockResolveWorkspaceRepositoryProviders.mockReset();
+    mockResolveWorkspaceRepositoryProviders.mockResolvedValue({});
     mockGetMembershipRole.mockReset();
     mockGetMembershipRole.mockResolvedValue('org:admin');
   });
@@ -137,7 +143,9 @@ describe('launchTask', () => {
 
   it('stamps the source-control provider resolved from environment repositories into the payload', async () => {
     mockEnqueueTask.mockResolvedValue({ id: 100, taskId: 'task-gl' });
-    mockSelectRows.mockReturnValue([{ sourceControlProvider: 'gitlab' }]);
+    mockResolveWorkspaceRepositoryProviders.mockResolvedValue({
+      'group/project': 'gitlab',
+    });
 
     const app = createApp(authContext);
     const response = await app.request(
@@ -156,6 +164,32 @@ describe('launchTask', () => {
       task: { payload: { sourceControlProvider?: string } };
     };
     expect(enqueuedTask.task.payload.sourceControlProvider).toBe('gitlab');
+  });
+
+  it('uses the first environment repository provider for mixed environments', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 100, taskId: 'task-mixed' });
+    mockResolveWorkspaceRepositoryProviders.mockResolvedValue({
+      'octo/api': 'github',
+      'group/web': 'gitlab',
+    });
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Ship a mixed-provider change',
+          environmentId: '6f1f3f0a-9f5e-4d2a-8f4e-1a2b3c4d5e6f',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { payload: { sourceControlProvider?: string } };
+    };
+    expect(enqueuedTask.task.payload.sourceControlProvider).toBe('github');
   });
 
   it('leaves the provider unset for prompt-only launches with no repository context', async () => {

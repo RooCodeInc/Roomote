@@ -39,6 +39,7 @@ import {
   WORK_ITEM_ACTIVE_STATUSES,
   shouldUseAppTokenOnly,
 } from '../task-runs';
+import { ALL_REPOSITORIES } from '../constants';
 
 describe('isSourceControlTaskSurface', () => {
   it.each(['github', 'gitlab', 'gitea', 'bitbucket', 'ado'] as const)(
@@ -285,6 +286,32 @@ describe('taskSpecSchema', () => {
     }
 
     expect(parsed.payload.sourceControlProvider).toBe('gitlab');
+  });
+
+  it('preserves repositoryProviders on mixed-provider task payloads', () => {
+    const parsed = taskSpecSchema.parse({
+      userId: 'user-1',
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        selectedRepositories: ['octo/api', 'group/web'],
+        sourceControlProvider: 'github',
+        repositoryProviders: {
+          'octo/api': 'github',
+          'group/web': 'gitlab',
+        },
+        description: 'Update a mixed-provider workspace',
+      },
+    });
+
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+
+    expect(parsed.payload.repositoryProviders).toEqual({
+      'octo/api': 'github',
+      'group/web': 'gitlab',
+    });
   });
 
   it('preserves customAutomationId and Slack channel context on StandardTask payloads', () => {

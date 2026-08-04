@@ -1,5 +1,5 @@
 import type { SourceControlProvider } from '@roomote/types';
-import { db, resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
+import { db, resolveWorkspaceRepositoryProviders } from '@roomote/db/server';
 
 /**
  * Resolve the single provider a launch's explicitly selected repositories
@@ -30,11 +30,8 @@ export function resolveSingleSourceControlProvider(
  * Resolve the provider for an environment-backed launch by delegating to the
  * shared resolver (single source of truth for the environment-repository join).
  *
- * Unlike {@link resolveSingleSourceControlProvider}, this returns `undefined`
- * (rather than throwing) when the environment's repositories span multiple
- * providers, deferring to the dequeue-time GitHub fallback. Environment
- * launches are a secondary fallback behind the explicit repository selection,
- * so an ambiguous environment should not hard-fail the launch.
+ * Mixed environments use their first repository's provider as the scalar
+ * compatibility value. Queue stamping adds the complete repository map.
  */
 export async function resolveEnvironmentSourceControlProvider(
   environmentId: string | undefined,
@@ -43,8 +40,9 @@ export async function resolveEnvironmentSourceControlProvider(
     return undefined;
   }
 
-  return resolveWorkspaceSourceControlProvider(db, {
+  const repositoryProviders = await resolveWorkspaceRepositoryProviders(db, {
     type: 'environment',
     environmentId,
   });
+  return Object.values(repositoryProviders)[0];
 }

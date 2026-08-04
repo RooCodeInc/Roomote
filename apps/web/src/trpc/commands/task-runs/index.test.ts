@@ -52,7 +52,7 @@ vi.mock('@roomote/db/server', () => ({
     right,
   })),
   markTaskStartParallelCountEndedAt: vi.fn(),
-  resolveWorkspaceSourceControlProvider: (...args: unknown[]) =>
+  resolveWorkspaceRepositoryProviders: (...args: unknown[]) =>
     mockResolveWorkspaceProvider(...args),
   repositories: {
     id: 'repositories.id',
@@ -138,7 +138,7 @@ describe('createStandardTaskRunCommand', () => {
     });
     mockDbWhere.mockResolvedValue([]);
     // Shared resolver defaults to unresolved; the environment test overrides it.
-    mockResolveWorkspaceProvider.mockResolvedValue(undefined);
+    mockResolveWorkspaceProvider.mockResolvedValue({});
     mockSuccessfulEnqueue();
   });
 
@@ -265,7 +265,9 @@ describe('createStandardTaskRunCommand', () => {
 
   it('stamps an environment source-control provider from its repository mappings', async () => {
     // The environment resolver delegates to the shared @roomote/db resolver.
-    mockResolveWorkspaceProvider.mockResolvedValue('ado');
+    mockResolveWorkspaceProvider.mockResolvedValue({
+      'acme/Platform/backend': 'ado',
+    });
 
     const result = await createStandardTaskRunCommand(auth, {
       payload: {
@@ -293,6 +295,32 @@ describe('createStandardTaskRunCommand', () => {
         workflow: 'standard',
         surface: 'web',
         trigger: 'manual',
+      }),
+    );
+  });
+
+  it('uses the first repository provider for a mixed environment', async () => {
+    mockResolveWorkspaceProvider.mockResolvedValue({
+      'octo/api': 'github',
+      'group/web': 'gitlab',
+    });
+
+    const result = await createStandardTaskRunCommand(auth, {
+      payload: {
+        repo: ALL_REPOSITORIES,
+        environmentId: '7bb91386-6282-4c98-9b31-0eb181116822',
+        description: 'Update the environment',
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'github',
+          }),
+        }),
       }),
     );
   });

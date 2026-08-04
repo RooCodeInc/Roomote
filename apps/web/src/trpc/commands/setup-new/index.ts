@@ -1,9 +1,6 @@
 import * as GitHub from '@roomote/github';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import {
-  resolveEnvironmentSourceControlProvider,
-  resolveSingleSourceControlProvider,
-} from '@/lib/server/source-control-provider';
+import { resolveEnvironmentSourceControlProvider } from '@/lib/server/source-control-provider';
 import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
@@ -2498,11 +2495,8 @@ export async function startSetupNewOnboardingTaskCommand(
     );
     // Stamp the provider explicitly: dequeue defaults to GitHub when the
     // payload omits it, which breaks non-GitHub deployments.
-    const setupSourceControlProvider = resolveSingleSourceControlProvider(
-      selectedRepositories.map(
-        (repository) => repository.sourceControlProvider,
-      ),
-    );
+    const setupSourceControlProvider =
+      selectedRepositories[0]?.sourceControlProvider;
     const emptyRepositoryFullNames = selectedRepositories
       .filter((repository) => repositoryEmptyStates.get(repository.id) === true)
       .map((repository) => repository.fullName);

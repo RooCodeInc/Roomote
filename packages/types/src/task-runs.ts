@@ -823,6 +823,12 @@ const sharedTaskPayloadSchema = z.object({
   sourceControlProvider: sourceControlProviderSchema.optional(),
 
   /**
+   * Source-control provider keyed by repository full name for workspaces that
+   * span multiple providers. Single-provider payloads omit this field.
+   */
+  repositoryProviders: z.record(sourceControlProviderSchema).optional(),
+
+  /**
    * Source-control instance host for repository resolution (for example
    * `gitlab.example.com`), matching `repositories.host`. Stamped by launch
    * sites that know the concrete host so same-name repositories on multiple
@@ -1924,6 +1930,7 @@ type TaskWorkspacePayload = {
   repo?: string;
   branch?: string;
   sha?: string;
+  sourceControlHost?: string;
   environmentId?: string;
   selectedRepositories?: string[];
 };
@@ -1934,10 +1941,12 @@ export type TaskWorkspace =
       repo: string;
       branch?: string;
       sha?: string;
+      sourceControlHost?: string;
     }
   | {
       type: 'repository_set';
       repositories: string[];
+      sourceControlHost?: string;
     }
   | {
       type: 'all_repositories';
@@ -1983,6 +1992,7 @@ export function resolveTaskWorkspace(
       ? {
           type: 'repository_set',
           repositories,
+          sourceControlHost: payload.sourceControlHost,
         }
       : {
           type: 'all_repositories',
@@ -2000,6 +2010,7 @@ export function resolveTaskWorkspace(
     repo: payload.repo,
     branch: payload.branch,
     sha: payload.sha,
+    sourceControlHost: payload.sourceControlHost,
   };
 }
 

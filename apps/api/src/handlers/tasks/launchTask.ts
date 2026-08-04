@@ -8,11 +8,11 @@ import {
 import {
   and,
   db,
-  environmentRepositoryMappings,
   environments,
   eq,
   inArray,
   repositories,
+  resolveWorkspaceRepositoryProviders,
 } from '@roomote/db/server';
 import {
   ADMIN_REQUIRED_LAUNCH_TYPES,
@@ -129,23 +129,11 @@ async function resolveLaunchSourceControlProvider({
   }
 
   if (environmentId) {
-    const rows = await db
-      .select({ sourceControlProvider: repositories.sourceControlProvider })
-      .from(environmentRepositoryMappings)
-      .innerJoin(
-        repositories,
-        eq(environmentRepositoryMappings.repositoryId, repositories.id),
-      )
-      .where(
-        and(
-          eq(environmentRepositoryMappings.environmentId, environmentId),
-          eq(repositories.isActive, true),
-        ),
-      );
-
-    return resolveSingleSourceControlProvider(
-      rows.map((row) => row.sourceControlProvider),
-    );
+    const repositoryProviders = await resolveWorkspaceRepositoryProviders(db, {
+      type: 'environment',
+      environmentId,
+    });
+    return Object.values(repositoryProviders)[0];
   }
 
   return undefined;

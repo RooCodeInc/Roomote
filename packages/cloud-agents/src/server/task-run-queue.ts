@@ -64,7 +64,7 @@ import {
   lt,
   recordSnapshotResumeEvent,
   resolveDefaultComputeProvider,
-  resolveWorkspaceSourceControlProvider,
+  resolveWorkspaceRepositoryProviders,
   sql,
 } from '@roomote/db/server';
 import { type Redis, getRedis } from '@roomote/redis';
@@ -1340,26 +1340,7 @@ async function enqueueFreshLaunch(
   ]);
   const workspace = resolveTaskWorkspace(task.payload);
 
-  // Stamp the source-control provider once at launch when the caller omitted
-  // it. Downstream consumers (token minting, worker repository resolution)
-  // otherwise fall back to the GitHub default, which breaks GitLab/Gitea/ADO
-  // deployments for any launch surface that forgot the stamp. The shared
-  // resolver covers every workspace shape (repository, repository_set,
-  // environment, all_repositories) so environment- and all-repositories-based
-  // launches (e.g. Linear) get stamped too.
-  if (
-    !('sourceControlProvider' in task.payload) ||
-    !task.payload.sourceControlProvider
-  ) {
-    const resolvedProvider = await resolveWorkspaceSourceControlProvider(
-      db,
-      workspace,
-    );
-
-    if (resolvedProvider) {
-      task.payload.sourceControlProvider = resolvedProvider;
-    }
-  }
+  await stampWorkspaceSourceControlProviders(task.payload, workspace);
 
   if (
     PR_TASK_TYPES.has(task.type) &&
@@ -1797,6 +1778,29 @@ function reconstructFreshTaskFromFailedRun(sourceRun: TaskRun): FreshTask {
   } as FreshTask;
 }
 
+async function stampWorkspaceSourceControlProviders(
+  payload: FreshTask['payload'],
+  workspace: ReturnType<typeof resolveTaskWorkspace>,
+): Promise<void> {
+  const repositoryProviders = await resolveWorkspaceRepositoryProviders(
+    db,
+    workspace,
+  );
+  const providers = Object.values(repositoryProviders);
+
+  if (
+    new Set(providers).size > 1 &&
+    payload.repositoryProviders === undefined
+  ) {
+    payload.repositoryProviders = repositoryProviders;
+  }
+
+  const primaryProvider = providers[0];
+  if (payload.sourceControlProvider === undefined && primaryProvider) {
+    payload.sourceControlProvider = primaryProvider;
+  }
+}
+
 /**
  * Re-enqueues a failed first-start run on the same task (new run row, same task
  * id). Used when environment creation fails before the session can start and the
@@ -1864,19 +1868,7 @@ export async function enqueueTaskRelaunch(
 
   const workspace = resolveTaskWorkspace(task.payload);
 
-  if (
-    !('sourceControlProvider' in task.payload) ||
-    !task.payload.sourceControlProvider
-  ) {
-    const resolvedProvider = await resolveWorkspaceSourceControlProvider(
-      db,
-      workspace,
-    );
-
-    if (resolvedProvider) {
-      task.payload.sourceControlProvider = resolvedProvider;
-    }
-  }
+  await stampWorkspaceSourceControlProviders(task.payload, workspace);
 
   const { initialPaths } = await resolveEnvironmentContext(task);
   const resolvedHarness = await resolveRequestedHarness(task);
@@ -2013,6 +2005,7 @@ function inheritSnapshotResumeSourceControlStamps(
   sourcePayload: unknown,
 ): void {
   const source = (sourcePayload ?? {}) as {
+    repositoryProviders?: unknown;
     sourceControlProvider?: unknown;
     sourceControlHost?: unknown;
   };
@@ -2026,6 +2019,16 @@ function inheritSnapshotResumeSourceControlStamps(
 
     if (provider.success) {
       payload.sourceControlProvider = provider.data;
+    }
+
+    if (payload.repositoryProviders === undefined) {
+      const repositoryProviders = z
+        .record(sourceControlProviderSchema)
+        .safeParse(source.repositoryProviders);
+
+      if (repositoryProviders.success) {
+        payload.repositoryProviders = repositoryProviders.data;
+      }
     }
   }
 
