@@ -18,7 +18,7 @@ import {
   ADMIN_REQUIRED_LAUNCH_TYPES,
   ALL_REPOSITORIES,
   buildTaskTypePromptAndWorkspacePayload,
-  getEnvironmentRepositoryInstallationError,
+  getEnvironmentRepositoryConnectionError,
   type StandardTask,
   type SuggestedTasksTask,
   TaskPayloadKind,
@@ -48,7 +48,7 @@ function normalizeRepositoryFullNames(body: TaskLaunchRequest): string[] {
 
 async function validateSelectedRepositories(
   repositoryFullNames: string[],
-  options: { requireSingleInstallation?: boolean } = {},
+  options: { requireSingleConnection?: boolean } = {},
 ): Promise<{ error: string; status: 400 | 404 } | null> {
   if (repositoryFullNames.length === 0) {
     return null;
@@ -59,7 +59,12 @@ async function validateSelectedRepositories(
       eq(repositories.isActive, true),
       inArray(repositories.fullName, repositoryFullNames),
     ),
-    columns: { fullName: true, installationId: true },
+    columns: {
+      fullName: true,
+      sourceControlProvider: true,
+      host: true,
+      installationId: true,
+    },
   });
 
   const foundRepositories = new Set(
@@ -76,12 +81,12 @@ async function validateSelectedRepositories(
     };
   }
 
-  if (options.requireSingleInstallation) {
-    const installationError =
-      getEnvironmentRepositoryInstallationError(orgRepositories);
+  if (options.requireSingleConnection) {
+    const connectionError =
+      getEnvironmentRepositoryConnectionError(orgRepositories);
 
-    if (installationError) {
-      return { error: installationError, status: 400 };
+    if (connectionError) {
+      return { error: connectionError, status: 400 };
     }
   }
 
@@ -221,7 +226,7 @@ export async function launchTask(
 
     const repositoryValidationError = shouldValidateRepositorySelection
       ? await validateSelectedRepositories(repositoryFullNames, {
-          requireSingleInstallation: requestedType === 'environment-definition',
+          requireSingleConnection: requestedType === 'environment-definition',
         })
       : null;
 

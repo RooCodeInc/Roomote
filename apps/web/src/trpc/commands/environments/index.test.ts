@@ -20,11 +20,15 @@ const {
     {
       id: 'repo-1',
       fullName: 'acme/api',
+      sourceControlProvider: 'github',
+      host: 'github.com',
       installationId: 'installation-1',
     },
     {
       id: 'repo-2',
       fullName: 'acme/web',
+      sourceControlProvider: 'github',
+      host: 'github.com',
       installationId: 'installation-1',
     },
   ]),
@@ -96,7 +100,11 @@ vi.mock('@/lib/server', () => ({
   getRepositories: mockGetRepositories,
 }));
 
-import { TaskPayloadKind } from '@roomote/types';
+import {
+  MULTI_HOST_ENVIRONMENT_REPOSITORIES_ERROR,
+  MULTI_PROVIDER_ENVIRONMENT_REPOSITORIES_ERROR,
+  TaskPayloadKind,
+} from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import {
   createEnvironmentCommand,
@@ -433,6 +441,85 @@ describe('environment repository validation', () => {
       success: false,
       error: 'Repositories are not linked to this deployment: roomote/Test ADO',
     });
+  });
+
+  it('rejects create when repositories span multiple instances of a provider', async () => {
+    mockDbSelect
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ limit: async () => [] }) }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: async () => [
+            {
+              id: 'repo-1',
+              fullName: 'acme/api',
+              sourceControlProvider: 'gitea',
+              host: 'gitea-one.example.com',
+              installationId: null,
+            },
+            {
+              id: 'repo-2',
+              fullName: 'acme/web',
+              sourceControlProvider: 'gitea',
+              host: 'gitea-two.example.com',
+              installationId: null,
+            },
+          ],
+        }),
+      });
+
+    const result = await createEnvironmentCommand(buildMockAuth(), {
+      name: 'Gitea Test',
+      config: {
+        name: 'Gitea Test',
+        repositories: [{ repository: 'acme/api' }, { repository: 'acme/web' }],
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: MULTI_HOST_ENVIRONMENT_REPOSITORIES_ERROR,
+    });
+  });
+
+  it('reports mixed providers from validateConfigCommand', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: async () => [
+          {
+            id: 'repo-1',
+            fullName: 'acme/api',
+            sourceControlProvider: 'github',
+            host: 'github.com',
+            installationId: 'installation-1',
+          },
+          {
+            id: 'repo-2',
+            fullName: 'acme/web',
+            sourceControlProvider: 'gitea',
+            host: 'gitea.example.com',
+            installationId: null,
+          },
+        ],
+      }),
+    });
+    mockCheckRepoAccess.mockResolvedValue(true);
+    mockGetBranches.mockResolvedValue(['main']);
+
+    const result = await validateConfigCommand(buildMockAuth(), {
+      config: {
+        name: 'Mixed Test',
+        repositories: [
+          { repository: 'acme/api', branch: 'main' },
+          { repository: 'acme/web', branch: 'main' },
+        ],
+      },
+    });
+
+    expect(result.errors).toContain(
+      MULTI_PROVIDER_ENVIRONMENT_REPOSITORIES_ERROR,
+    );
   });
 
   it('does not validate Azure DevOps branches through GitHub', async () => {

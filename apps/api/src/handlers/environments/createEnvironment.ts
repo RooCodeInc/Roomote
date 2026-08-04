@@ -15,7 +15,7 @@ import {
   type TaskPayload,
   environmentConfigSchema,
   getMissingEnvironmentRepositoryError,
-  getEnvironmentRepositoryInstallationError,
+  getEnvironmentRepositoryConnectionError,
 } from '@roomote/types';
 import { captureActivationEnvironmentSaved } from '@roomote/telemetry/server';
 
@@ -66,10 +66,12 @@ export function isEnvironmentNameUniqueViolation(error: unknown): boolean {
 export function getEnvironmentRepositoryConfigError(
   repositoryRows: Array<{
     fullName: string;
+    sourceControlProvider: string | null | undefined;
+    host: string | null | undefined;
     installationId: string | number | null | undefined;
   }>,
 ): string | null {
-  return getEnvironmentRepositoryInstallationError(repositoryRows);
+  return getEnvironmentRepositoryConnectionError(repositoryRows);
 }
 
 function extractRunId(auth: McpAuth): number | null {
@@ -273,7 +275,13 @@ export async function createEnvironment(
               eq(repositories.isActive, true),
               inArray(repositories.fullName, repositoryNames),
             ),
-            columns: { id: true, fullName: true, installationId: true },
+            columns: {
+              id: true,
+              fullName: true,
+              sourceControlProvider: true,
+              host: true,
+              installationId: true,
+            },
           })
         : [];
 

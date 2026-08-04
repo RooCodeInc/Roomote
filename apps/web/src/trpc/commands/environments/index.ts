@@ -37,7 +37,7 @@ import {
   type ComputeProvider,
   type EnvironmentConfig,
   environmentConfigSchema,
-  getEnvironmentRepositoryInstallationError,
+  getEnvironmentRepositoryConnectionError,
   getMissingEnvironmentRepositoryError,
   isExitedRunStatus,
   normalizeRepositorySelection,
@@ -131,21 +131,27 @@ function assertAdmin(auth: UserAuthSuccess) {
 type SelectedRepositorySummary = {
   id: string;
   fullName: string;
+  sourceControlProvider: string;
+  host: string | null;
   installationId: string | null;
 };
 
 type EnvironmentRepositoryRow = {
   id: string;
   fullName: string;
+  sourceControlProvider: string;
+  host: string | null;
   installationId: string | null;
 };
 
 function getEnvironmentRepositoryConfigError(
   repositoriesToValidate: EnvironmentRepositoryRow[],
 ): string | null {
-  return getEnvironmentRepositoryInstallationError(
+  return getEnvironmentRepositoryConnectionError(
     repositoriesToValidate.map((repository) => ({
       fullName: repository.fullName,
+      sourceControlProvider: repository.sourceControlProvider,
+      host: repository.host,
       installationId: repository.installationId,
     })),
   );
@@ -168,6 +174,8 @@ async function getEnvironmentRepositoryRows(
     .select({
       id: repositories.id,
       fullName: repositories.fullName,
+      sourceControlProvider: repositories.sourceControlProvider,
+      host: repositories.host,
       installationId: repositories.installationId,
     })
     .from(repositories)
@@ -203,6 +211,8 @@ async function resolveSelectedRepositories(
     return {
       id: repository.id,
       fullName: repository.fullName,
+      sourceControlProvider: repository.sourceControlProvider,
+      host: repository.host,
       installationId: repository.installationId,
     };
   });
@@ -1220,6 +1230,7 @@ export async function validateConfigCommand(
         fullName: repositories.fullName,
         installationId: repositories.installationId,
         sourceControlProvider: repositories.sourceControlProvider,
+        host: repositories.host,
       })
       .from(repositories)
       .where(
