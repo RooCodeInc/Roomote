@@ -50,6 +50,8 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect monitoring, incidents, and telemetry.',
   railway:
     'Roomote will be able to inspect Railway account, project, and service inventory.',
+  resend:
+    'Roomote will be able to inspect and manage shared email infrastructure.',
   braintrust:
     'Roomote will be able to inspect prompts, evaluations, and AI run history.',
   linear:

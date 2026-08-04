@@ -63,6 +63,8 @@ describe('matchSlackMcpSetupService', () => {
       ['https://acme.atlassian.net/browse/OPS-1', 'jira'],
       ['https://my-app.vercel.app/anything', 'vercel'],
       ['https://vercel.com/acme-team/my-app', 'vercel'],
+      ['https://resend.com/emails/123', 'resend'],
+      ['https://resend.com/domains/example.com', 'resend'],
     ])('matches %s to %s', (url, serviceId) => {
       expect(matchServiceIdForUrl(url)).toBe(serviceId);
     });
@@ -74,6 +76,8 @@ describe('matchSlackMcpSetupService', () => {
       'https://developer.monday.com/apps/docs/intro',
       'https://developer.monday.com/boards/1234567890',
       'https://mcp.monday.com/boards/1234567890',
+      'https://resend.com/docs/mcp-server',
+      'https://resend.com/pricing',
     ])('does not match %s', (url) => {
       expect(matchServiceIdForUrl(url)).toBeNull();
     });

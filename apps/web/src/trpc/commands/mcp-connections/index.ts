@@ -14,6 +14,7 @@ import {
   getAllowedIntegrationMcpToolNames,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
+  getMcpIntegrationDefaultDisabledTools,
   type McpConnectionRole,
   isMcpConnectionAsanaConfig,
   isMcpConnectionGrafanaConfig,
@@ -605,12 +606,18 @@ export async function setDeploymentMcpEnabledCommand(
     await assertStaticOauthReady(integration);
   }
 
+  const defaultDisabledTools =
+    getMcpIntegrationDefaultDisabledTools(integration);
+
   const [result] = await db
     .insert(deploymentMcpEnablements)
     .values({
       mcpId: input.mcpId,
       enabled: input.enabled,
       enabledByUserId: auth.userId,
+      ...(defaultDisabledTools.length > 0
+        ? { disabledTools: [...defaultDisabledTools] }
+        : {}),
     })
     .onConflictDoUpdate({
       target: [deploymentMcpEnablements.mcpId],
