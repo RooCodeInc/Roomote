@@ -246,6 +246,7 @@ export function buildDiscordReleasePayload(release) {
   return {
     username: 'Roomote Releases',
     content,
+    flags: 1 << 2,
     allowed_mentions: { parse: [] },
   };
 }
