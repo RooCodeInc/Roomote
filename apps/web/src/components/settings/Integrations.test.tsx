@@ -801,6 +801,7 @@ describe('Integrations settings', () => {
       'Better Stack',
       'Braintrust',
       'Grafana',
+      'Granola',
       'Jira',
       'monday.com',
       'Neon',
@@ -1064,6 +1065,21 @@ describe('Integrations settings', () => {
     expect(
       screen.getByText(
         'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the Granola confirmation dialog copy for highlighted integrations', () => {
+    state.searchParams = 'highlight=granola';
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByRole('heading', { name: 'Enable Granola?' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Roomote will be able to search meeting notes, transcripts, decisions, and action items.',
       ),
     ).toBeInTheDocument();
   });

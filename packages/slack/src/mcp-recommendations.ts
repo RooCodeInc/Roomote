@@ -33,6 +33,8 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect workspaces, projects, tasks, teams, and task comments.',
   grafana:
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
+  granola:
+    'Roomote will be able to search meeting notes, transcripts, decisions, and action items.',
   sentry:
     'Roomote will be able to inspect Sentry issue context and run scheduled Sentry triage through MCP.',
   posthog:

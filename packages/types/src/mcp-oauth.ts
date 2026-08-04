@@ -480,6 +480,17 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     icon: 'braintrust',
   },
   {
+    id: 'granola',
+    name: 'Granola',
+    url: 'https://mcp.granola.ai/mcp',
+    description: `Search meeting notes, transcripts, decisions, and action items from ${PRODUCT_NAME} tasks`,
+    icon: 'granola',
+    serverMode: 'upstream_proxy',
+    oauthScopeMode: 'read-only',
+    instructions:
+      "Use Granola to search and read the connected user's meeting notes, transcripts, folders, decisions, and action items. Granola follows the user's active workspace and exposes read-only tools.",
+  },
+  {
     id: 'supermemory',
     name: 'Supermemory',
     url: 'https://mcp.supermemory.ai/mcp',

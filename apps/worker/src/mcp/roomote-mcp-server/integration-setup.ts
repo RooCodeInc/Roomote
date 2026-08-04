@@ -111,6 +111,14 @@ Braintrust uses OAuth:
 
 Once connected, I can access AI evaluation and logging data during tasks.
 
+# Granola
+
+Granola uses OAuth:
+1. A deployment operator enables Granola from Settings > Integrations.
+2. Each user connects their own Granola account via OAuth.
+
+Once connected, I can search and read the user's meeting notes, folders, transcripts, decisions, and action items from their active Granola workspace. The built-in connection is read-only.
+
 # Asana
 
 Asana uses an admin-managed access token:

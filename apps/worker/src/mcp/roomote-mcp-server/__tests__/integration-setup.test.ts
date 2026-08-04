@@ -50,6 +50,16 @@ describe('integration setup guide', () => {
     );
   });
 
+  it('documents the user-scoped read-only Granola setup flow', () => {
+    expect(INTEGRATION_SETUP_CONTENT).toContain('# Granola');
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'Each user connects their own Granola account via OAuth.',
+    );
+    expect(INTEGRATION_SETUP_CONTENT).toContain(
+      'The built-in connection is read-only.',
+    );
+  });
+
   it('documents the admin-managed Vercel setup flow', () => {
     expect(INTEGRATION_SETUP_CONTENT).toContain('# Vercel');
     expect(INTEGRATION_SETUP_CONTENT).toContain(

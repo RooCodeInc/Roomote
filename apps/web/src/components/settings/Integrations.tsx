@@ -88,6 +88,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect prompts, evaluations, and AI run history.',
   grafana:
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
+  granola:
+    'Roomote will be able to search meeting notes, transcripts, decisions, and action items.',
   github:
     'Roomote will be able to inspect PRs, issues, and repository context.',
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',

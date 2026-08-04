@@ -158,6 +158,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Tie AI regressions back to code and prompt changes',
     ],
   },
+  granola: {
+    capabilities: [
+      'Search meeting notes for relevant discussions and decisions',
+      'Read meeting details and transcripts for implementation context',
+      'Review folders, attendees, and action items during follow-up work',
+    ],
+  },
   supermemory: {
     capabilities: [
       'Save important decisions and context as shared memories during tasks',
