@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { isAppInChannelMock } = vi.hoisted(() => ({
+  isAppInChannelMock: vi.fn(async () => true),
+}));
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
 }));
@@ -31,6 +35,12 @@ vi.mock('../destination', () => ({
   buildDestinationTaskPayloadFields: vi.fn(() => ({})),
   findTeamsConversationServiceUrl: vi.fn(),
   listConnectedCommunicationProviders: vi.fn(async () => ['slack', 'teams']),
+}));
+
+vi.mock('../../lib/communication-providers', () => ({
+  getCommunicationProviderAdapter: vi.fn(async () => ({
+    isAppInChannel: isAppInChannelMock,
+  })),
 }));
 
 vi.mock('../scheduling-utils', () => ({
@@ -112,6 +122,7 @@ describe('customAutomationsJob', () => {
     vi.mocked(enqueueTask).mockResolvedValue({
       taskId: 'task_abc',
     } as never);
+    isAppInChannelMock.mockResolvedValue(true);
   });
 
   it('launches a StandardTask for due automations', async () => {
@@ -218,6 +229,25 @@ describe('customAutomationsJob', () => {
     );
     expect(enqueued.task.payload.description).toContain(
       'do not mention this automation',
+    );
+  });
+
+  it('fails before launch when the Slack app cannot access the report channel', async () => {
+    isAppInChannelMock.mockResolvedValue(false);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBeNull();
+    expect(enqueueTask).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        id: automation.id,
+        status: 'failed',
+        error: expect.stringContaining(
+          'Slack app cannot access report channel C123',
+        ),
+      }),
     );
   });
 
@@ -339,6 +369,7 @@ describe('customAutomationsJob', () => {
 describe('runCustomAutomationNow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    isAppInChannelMock.mockResolvedValue(true);
     vi.mocked(getCustomAutomationById).mockResolvedValue(automation as never);
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('daily');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(new Date());

@@ -131,6 +131,20 @@ describe('SlackNotifier', () => {
       expect(ts).toBeUndefined();
     });
 
+    it('preserves Slack API errors for top-level message callers', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: false, error: 'not_in_channel' }),
+      });
+
+      const result = await notifier.postTopLevelMessage({
+        channel: 'C123',
+        text: 'failure case',
+      });
+
+      expect(result).toEqual({ error: 'not_in_channel' });
+    });
+
     it('does not change unfurl behavior for plain text messages', async () => {
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: true,

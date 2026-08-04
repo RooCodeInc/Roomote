@@ -971,16 +971,19 @@ slackMcp.post('/thread_reply', async (c) => {
     blocks.push(...imageBlocks);
     blocks.push(...rootFooterBlocks);
 
-    const rootMessageTs = await slack.postMessage({
+    const rootPost = await slack.postTopLevelMessage({
       channel: slackReplyTarget.channel,
       text: getSlackFallbackText(fallbackText, imageBlocks.length),
       unfurl_links: false,
       unfurl_media: false,
       blocks,
     });
+    const rootMessageTs = rootPost.messageTs;
 
     if (!rootMessageTs) {
-      throw new Error('Slack chat.postMessage returned no message timestamp');
+      throw new Error(
+        `Slack chat.postMessage failed${rootPost.error ? `: ${rootPost.error}` : ' without a message timestamp'}`,
+      );
     }
 
     // The root message is already visible in Slack; failing the reply here
@@ -1343,11 +1346,8 @@ slackMcp.post('/thread_reply', async (c) => {
       );
     }
 
-    if (message === 'Slack chat.postMessage returned no message timestamp') {
-      return c.json(
-        { error: 'Slack chat.postMessage returned no message timestamp' },
-        502,
-      );
+    if (message.startsWith('Slack chat.postMessage failed')) {
+      return c.json({ error: message }, 502);
     }
 
     if (message === 'Slack thread source message no longer exists') {
