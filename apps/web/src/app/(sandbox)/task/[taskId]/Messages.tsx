@@ -26,6 +26,7 @@ import {
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
+import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { Lightbulb, Skeleton } from '@/components/system';
 import { cn } from '@/lib/utils';
 
@@ -199,6 +200,7 @@ const MessagesBase = ({
   const { messages } = useSandboxMessages();
   const historyReady = useSandboxHistoryReady();
   const taskPhase = useSandboxTaskPhase();
+  const { enabled: mindReaderModeEnabled } = useMindReaderMode();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const [suppressedMessageIds, setSuppressedMessageIds] = useState<Set<string>>(
     () => new Set(),
@@ -211,8 +213,10 @@ const MessagesBase = ({
       displayMode:
         messageUiOptions?.displayMode ??
         (narrationModeEnabled ? 'narration' : 'default'),
+      expandReasoningByDefault:
+        messageUiOptions?.expandReasoningByDefault ?? mindReaderModeEnabled,
     }),
-    [messageUiOptions, narrationModeEnabled],
+    [messageUiOptions, mindReaderModeEnabled, narrationModeEnabled],
   );
 
   useEffect(() => {

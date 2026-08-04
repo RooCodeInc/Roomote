@@ -2,6 +2,7 @@ import { renderHook } from '@testing-library/react';
 
 type PersonalPreferences = {
   colorTheme: 'light' | 'dark' | 'system';
+  mindReaderMode: boolean;
   narrationMode: boolean;
 };
 
@@ -52,6 +53,7 @@ const {
   queryState: {
     data: {
       colorTheme: 'system',
+      mindReaderMode: false,
       narrationMode: false,
     } as PersonalPreferences | undefined,
     isPending: false,
@@ -110,12 +112,14 @@ describe('usePersonalPreferences', () => {
     vi.clearAllMocks();
     queryState.data = {
       colorTheme: 'system',
+      mindReaderMode: false,
       narrationMode: false,
     };
     queryState.isPending = false;
     queryClientMock.cancelQueries.mockResolvedValue(undefined);
     queryClientMock.getQueryData.mockReturnValue({
       colorTheme: 'system',
+      mindReaderMode: false,
       narrationMode: false,
     });
   });
@@ -123,6 +127,7 @@ describe('usePersonalPreferences', () => {
   it('exposes the current personal preferences from the query', () => {
     queryState.data = {
       colorTheme: 'dark',
+      mindReaderMode: true,
       narrationMode: true,
     };
 
@@ -130,6 +135,7 @@ describe('usePersonalPreferences', () => {
 
     expect(result.current.preferences).toEqual({
       colorTheme: 'dark',
+      mindReaderMode: true,
       narrationMode: true,
     });
     expect(result.current.isLoading).toBe(false);
@@ -142,6 +148,7 @@ describe('usePersonalPreferences', () => {
 
     expect(result.current.preferences).toEqual({
       colorTheme: 'system',
+      mindReaderMode: false,
       narrationMode: false,
     });
   });
@@ -170,6 +177,7 @@ describe('usePersonalPreferences', () => {
       preferencesQueryKey,
       {
         colorTheme: 'dark',
+        mindReaderMode: false,
         narrationMode: false,
       },
     );
@@ -177,6 +185,7 @@ describe('usePersonalPreferences', () => {
     options.onSuccess?.(
       {
         colorTheme: 'dark',
+        mindReaderMode: false,
         narrationMode: false,
       },
       variables,
@@ -185,6 +194,7 @@ describe('usePersonalPreferences', () => {
     options.onSettled?.(
       {
         colorTheme: 'dark',
+        mindReaderMode: false,
         narrationMode: false,
       },
       null,
@@ -199,10 +209,12 @@ describe('usePersonalPreferences', () => {
     expect(
       updateCall?.[1]({
         colorTheme: 'dark',
+        mindReaderMode: true,
         narrationMode: true,
       }),
     ).toEqual({
       colorTheme: 'dark',
+      mindReaderMode: true,
       narrationMode: true,
     });
     expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({
@@ -213,6 +225,7 @@ describe('usePersonalPreferences', () => {
   it('rolls back the optimistic cache update and shows an error when the mutation fails', async () => {
     queryClientMock.getQueryData.mockReturnValue({
       colorTheme: 'light',
+      mindReaderMode: true,
       narrationMode: true,
     });
 
@@ -239,10 +252,12 @@ describe('usePersonalPreferences', () => {
     expect(
       rollbackCall?.[1]({
         colorTheme: 'system',
+        mindReaderMode: false,
         narrationMode: false,
       }),
     ).toEqual({
       colorTheme: 'light',
+      mindReaderMode: false,
       narrationMode: false,
     });
     expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({
@@ -269,6 +284,7 @@ describe('usePersonalPreferences', () => {
     options.onSuccess?.(
       {
         colorTheme: 'dark',
+        mindReaderMode: false,
         narrationMode: false,
       },
       firstUpdate,
@@ -281,10 +297,12 @@ describe('usePersonalPreferences', () => {
     expect(
       successCall?.[1]({
         colorTheme: 'dark',
+        mindReaderMode: true,
         narrationMode: true,
       }),
     ).toEqual({
       colorTheme: 'dark',
+      mindReaderMode: true,
       narrationMode: true,
     });
   });
@@ -311,10 +329,12 @@ describe('usePersonalPreferences', () => {
     expect(
       rollbackCall?.[1]({
         colorTheme: 'dark',
+        mindReaderMode: true,
         narrationMode: true,
       }),
     ).toEqual({
       colorTheme: 'system',
+      mindReaderMode: true,
       narrationMode: true,
     });
   });

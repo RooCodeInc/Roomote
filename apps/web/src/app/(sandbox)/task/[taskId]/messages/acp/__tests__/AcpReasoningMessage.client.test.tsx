@@ -8,21 +8,25 @@ vi.mock('@/components/ai-elements', () => ({
   MessageContent: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
-  Reasoning: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  Reasoning: ({ children, open }: { children: ReactNode; open?: boolean }) => (
+    <div data-reasoning-open={String(open)}>{children}</div>
+  ),
   ReasoningTrigger: () => <div data-testid="reasoning-trigger">Thought</div>,
   ReasoningContent: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
 }));
 
-const { messageUiOptionsState } = vi.hoisted(() => ({
+const { initialExpandedState, messageUiOptionsState } = vi.hoisted(() => ({
+  initialExpandedState: { value: null as boolean | null },
   messageUiOptionsState: {
     displayMode: 'default' as 'default' | 'narration',
+    expandReasoningByDefault: false,
   },
 }));
 
 vi.mock('../../../hooks/SandboxProvider', () => ({
-  useInitialSandboxReasoningExpanded: vi.fn().mockReturnValue(false),
+  useInitialSandboxReasoningExpanded: () => initialExpandedState.value,
   useSandboxSetReasoningExpanded: vi.fn().mockReturnValue(vi.fn()),
 }));
 
@@ -54,7 +58,36 @@ function reasoningMessage(text: string, partial: boolean): AcpUiMessage {
 
 describe('AcpReasoningMessage', () => {
   beforeEach(() => {
+    initialExpandedState.value = null;
     messageUiOptionsState.displayMode = 'default';
+    messageUiOptionsState.expandReasoningByDefault = false;
+  });
+
+  it('opens reasoning when mind reader mode supplies the default', () => {
+    messageUiOptionsState.expandReasoningByDefault = true;
+
+    const { container } = render(
+      <AcpReasoningMessage msg={reasoningMessage('Expanded thought', false)} />,
+    );
+
+    expect(
+      container.querySelector('[data-reasoning-open="true"]'),
+    ).not.toBeNull();
+  });
+
+  it('prefers the conversation expansion state after a manual choice', () => {
+    initialExpandedState.value = false;
+    messageUiOptionsState.expandReasoningByDefault = true;
+
+    const { container } = render(
+      <AcpReasoningMessage
+        msg={reasoningMessage('Collapsed thought', false)}
+      />,
+    );
+
+    expect(
+      container.querySelector('[data-reasoning-open="false"]'),
+    ).not.toBeNull();
   });
 
   it('renders streaming reasoning immediately in default mode', () => {
