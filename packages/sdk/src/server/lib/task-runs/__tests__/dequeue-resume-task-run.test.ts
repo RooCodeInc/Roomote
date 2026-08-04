@@ -24,6 +24,7 @@ const {
   mockRecordTaskRunLifecycleEvent,
   mockRecordSnapshotResumeEvent,
   mockResolveSlackTaskRunRouting,
+  mockResolveTaskRunSourceControlProviders,
   onBootstrapFailureMock,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
@@ -48,6 +49,7 @@ const {
   mockRecordTaskRunLifecycleEvent: vi.fn(),
   mockRecordSnapshotResumeEvent: vi.fn(),
   mockResolveSlackTaskRunRouting: vi.fn(),
+  mockResolveTaskRunSourceControlProviders: vi.fn(),
   onBootstrapFailureMock: vi.fn(),
 }));
 
@@ -88,6 +90,8 @@ vi.mock('../dequeue-helpers', () => ({
   reportBootstrapFailure: (...args: unknown[]) =>
     mockReportBootstrapFailure(...args),
   resolveGitAuthor: (...args: unknown[]) => mockResolveGitAuthor(...args),
+  resolveTaskRunSourceControlProviders: (...args: unknown[]) =>
+    mockResolveTaskRunSourceControlProviders(...args),
 }));
 
 vi.mock('../slack-task-run-routing', () => ({
@@ -149,6 +153,7 @@ describe('dequeueResumeTaskRun', () => {
     mockEq.mockReturnValue('eq-clause');
     mockClaimJobById.mockReturnValue('claim-query');
     mockFetchEnvVars.mockResolvedValue({ ORG_ENV: '1' });
+    mockResolveTaskRunSourceControlProviders.mockResolvedValue(['github']);
     mockResolveGitAuthor.mockResolvedValue({
       name: 'Roomote',
       email: 'roomote@example.com',
@@ -217,6 +222,18 @@ describe('dequeueResumeTaskRun', () => {
   it("returns the task's harnessSessionId for snapshot resume", async () => {
     const resumeRun = makeSnapshotResumeRun();
 
+    mockResolveTaskRunSourceControlProviders.mockResolvedValue([
+      'gitlab',
+      'github',
+    ]);
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'gitlab',
+      token: 'gl-token',
+      envVar: 'GITLAB_TOKEN',
+      envVars: { GH_TOKEN: 'gh-token' },
+      source: 'app',
+      expiresAt: null,
+    });
     mockTxExecute.mockResolvedValue([{ id: resumeRun.id }]);
     mockTxFindFirstTaskRuns.mockResolvedValueOnce(resumeRun);
 
@@ -225,6 +242,14 @@ describe('dequeueResumeTaskRun', () => {
     });
 
     expect(result?.harnessSessionId).toBe('session-canonical');
+    expect(result?.gitHubToken).toBe('gh-token');
+    expect(mockFetchEnvVars).toHaveBeenCalledWith(expect.anything(), {
+      sourceControlProvider: ['gitlab', 'github'],
+    });
+    expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(
+      { ORG_ENV: '1' },
+      { sourceControlProvider: ['gitlab', 'github'] },
+    );
     expect(result?.harnessInstructions).toBe('preserved instructions');
     expect(result?.sourceSelectedRepositories).toEqual([
       'acme/api',

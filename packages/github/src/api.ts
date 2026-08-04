@@ -43,7 +43,22 @@ async function createTokenForRepositoryNames({
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
 }): Promise<string> {
-  const uniqueRepositoryNames = [...new Set(repositoryNames.filter(Boolean))];
+  const repositoryProviders = (
+    taskRun.payload as {
+      repositoryProviders?: Record<string, string>;
+    }
+  ).repositoryProviders;
+  const uniqueRepositoryNames = [
+    ...new Set(
+      repositoryNames.filter(
+        (repositoryName) =>
+          repositoryName &&
+          (repositoryProviders?.[repositoryName] === undefined ||
+            repositoryProviders[repositoryName] ===
+              DEFAULT_SOURCE_CONTROL_PROVIDER),
+      ),
+    ),
+  ];
 
   const selectedRepoRows = await db.query.repositories.findMany({
     where: and(

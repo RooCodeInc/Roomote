@@ -481,6 +481,21 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
   return [...new Set(repositoryNames.filter(Boolean))];
 }
 
+function filterRepositorySelectionForGitea(
+  taskRun: TaskRun,
+  repositoryNames: string[],
+): string[] {
+  const repositoryProviders = (
+    taskRun.payload as { repositoryProviders?: Record<string, string> }
+  ).repositoryProviders;
+
+  return repositoryNames.filter(
+    (repositoryName) =>
+      repositoryProviders?.[repositoryName] === undefined ||
+      repositoryProviders[repositoryName] === GITEA_PROVIDER,
+  );
+}
+
 async function resolveGiteaRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
@@ -495,9 +510,12 @@ async function resolveGiteaRepositoryNamesForTaskRun(
       );
     }
 
-    return normalizeRepositorySelection(
-      environment.config.repositories.map(
-        (repository) => repository.repository,
+    return filterRepositorySelectionForGitea(
+      taskRun,
+      normalizeRepositorySelection(
+        environment.config.repositories.map(
+          (repository) => repository.repository,
+        ),
       ),
     );
   }
@@ -508,7 +526,7 @@ async function resolveGiteaRepositoryNamesForTaskRun(
     );
 
     if (selectedRepositories.length > 0) {
-      return selectedRepositories;
+      return filterRepositorySelectionForGitea(taskRun, selectedRepositories);
     }
   }
 

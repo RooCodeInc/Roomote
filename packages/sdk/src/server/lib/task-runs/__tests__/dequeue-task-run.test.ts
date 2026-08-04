@@ -25,6 +25,7 @@ const {
   mockRecordTaskRunLifecycleEvent,
   mockGetRedis,
   mockResolveSlackTaskRunRouting,
+  mockResolveTaskRunSourceControlProviders,
   onBootstrapFailureMock,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
@@ -50,6 +51,7 @@ const {
   mockRecordTaskRunLifecycleEvent: vi.fn(),
   mockGetRedis: vi.fn(() => 'redis-client'),
   mockResolveSlackTaskRunRouting: vi.fn(),
+  mockResolveTaskRunSourceControlProviders: vi.fn(),
   onBootstrapFailureMock: vi.fn(),
 }));
 
@@ -99,6 +101,8 @@ vi.mock('../dequeue-helpers', () => ({
   reportBootstrapFailure: (...args: unknown[]) =>
     mockReportBootstrapFailure(...args),
   resolveGitAuthor: (...args: unknown[]) => mockResolveGitAuthor(...args),
+  resolveTaskRunSourceControlProviders: (...args: unknown[]) =>
+    mockResolveTaskRunSourceControlProviders(...args),
 }));
 
 import { dequeueTaskRun } from '../dequeue-task-run';
@@ -217,6 +221,7 @@ describe('dequeueTaskRun', () => {
     mockSql.mockReturnValue('claim-query');
     mockClaimJobById.mockReturnValue('claim-query');
     mockFetchEnvVars.mockResolvedValue({ ORG_ENV: '1' });
+    mockResolveTaskRunSourceControlProviders.mockResolvedValue(['github']);
     mockResolveGitAuthor.mockResolvedValue({
       name: 'Roomote',
       email: 'roomote@example.com',
@@ -301,6 +306,18 @@ describe('dequeueTaskRun', () => {
   it('treats StandardTask jobs without identity metadata as runnable', async () => {
     const taskRun = makeStandardTaskRun();
 
+    mockResolveTaskRunSourceControlProviders.mockResolvedValue([
+      'gitlab',
+      'github',
+    ]);
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'gitlab',
+      token: 'gl-token',
+      envVar: 'GITLAB_TOKEN',
+      envVars: { GH_TOKEN: 'gh-token' },
+      source: 'app',
+      expiresAt: null,
+    });
     mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
     mockTxFindFirstTaskRuns.mockResolvedValue(taskRun);
 
@@ -319,6 +336,13 @@ describe('dequeueTaskRun', () => {
     expect(result?.prompt).toBe('prompt');
     expect(result?.harnessInstructions).toBe('instructions');
     expect(result?.requestedWorkKind).toBe('unknown');
+    expect(mockFetchEnvVars).toHaveBeenCalledWith(expect.anything(), {
+      sourceControlProvider: ['gitlab', 'github'],
+    });
+    expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(
+      { ORG_ENV: '1' },
+      { sourceControlProvider: ['gitlab', 'github'] },
+    );
     expect(result?.task).toMatchObject({
       id: 'task-101',
       title: 'Task 101',

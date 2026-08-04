@@ -913,6 +913,21 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
   return [...new Set(repositoryNames.filter(Boolean))];
 }
 
+function filterRepositorySelectionForGitLab(
+  taskRun: TaskRun,
+  repositoryNames: string[],
+): string[] {
+  const repositoryProviders = (
+    taskRun.payload as { repositoryProviders?: Record<string, string> }
+  ).repositoryProviders;
+
+  return repositoryNames.filter(
+    (repositoryName) =>
+      repositoryProviders?.[repositoryName] === undefined ||
+      repositoryProviders[repositoryName] === GITLAB_PROVIDER,
+  );
+}
+
 async function resolveGitLabRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[]> {
@@ -927,9 +942,12 @@ async function resolveGitLabRepositoryNamesForTaskRun(
       );
     }
 
-    return normalizeRepositorySelection(
-      environment.config.repositories.map(
-        (repository) => repository.repository,
+    return filterRepositorySelectionForGitLab(
+      taskRun,
+      normalizeRepositorySelection(
+        environment.config.repositories.map(
+          (repository) => repository.repository,
+        ),
       ),
     );
   }
@@ -940,7 +958,7 @@ async function resolveGitLabRepositoryNamesForTaskRun(
     );
 
     if (selectedRepositories.length > 0) {
-      return selectedRepositories;
+      return filterRepositorySelectionForGitLab(taskRun, selectedRepositories);
     }
   }
 

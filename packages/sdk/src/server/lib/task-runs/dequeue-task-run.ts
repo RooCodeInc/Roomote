@@ -24,6 +24,7 @@ import {
   type GitAuthor,
   fetchEnvVars,
   fetchResolvedRuntimeEnvVars,
+  resolveTaskRunSourceControlProviders,
   cancelAndReleaseTaskRun,
   createSourceControlTokenForTaskRun,
   type SourceControlRuntimeToken,
@@ -281,6 +282,9 @@ export const dequeueTaskRun = async (
           envVars: Record<string, string>;
           orgAgentInstructions?: string;
           gitAuthor: GitAuthor;
+          sourceControlProviders: Awaited<
+            ReturnType<typeof resolveTaskRunSourceControlProviders>
+          >;
         };
 
     // Phase 1: Transaction — claim the run and fetch all data needed for
@@ -309,10 +313,12 @@ export const dequeueTaskRun = async (
 
       const task = taskRun.task;
 
+      const sourceControlProviders = await resolveTaskRunSourceControlProviders(
+        taskRun,
+        tx,
+      );
       const envVars = await fetchEnvVars(tx, {
-        sourceControlProvider: resolveSourceControlProviderFromPayload(
-          taskRun.payload,
-        ),
+        sourceControlProvider: sourceControlProviders,
       });
       const settings = await tx.query.deploymentSettings.findFirst({
         columns: {
@@ -386,6 +392,7 @@ export const dequeueTaskRun = async (
         envVars,
         orgAgentInstructions: settings?.globalAgentInstructions ?? undefined,
         gitAuthor,
+        sourceControlProviders,
       };
     });
 
@@ -455,8 +462,7 @@ export const dequeueTaskRun = async (
       return undefined;
     }
 
-    const gitHubToken =
-      sourceControlToken.provider === 'github' ? sourceControlToken.token : '';
+    const gitHubToken = sourceControlToken.envVars.GH_TOKEN ?? '';
     const sourceControlArtifacts = sourceControlToken.artifactsPatch ?? {};
 
     let prompt: string;
@@ -531,7 +537,7 @@ export const dequeueTaskRun = async (
         },
         fn: async () =>
           await fetchResolvedRuntimeEnvVars(txResult.envVars, {
-            sourceControlProvider: sourceControlToken.provider,
+            sourceControlProvider: txResult.sourceControlProviders,
           }),
       });
     } catch (error) {
