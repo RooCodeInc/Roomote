@@ -23,7 +23,8 @@ function deriveDisplayNameFromModelId(modelId: string): string {
  * Model-id prefixes of the providers currently connected (saved or runtime
  * env). A connected ChatGPT subscription serves `openai/` model ids, so it
  * contributes `openai` alongside its own `chatgpt` catalog id. SuperGrok
- * similarly contributes `xai` alongside `xai-subscription`.
+ * similarly contributes `xai` alongside `xai-subscription`, and Amazon
+ * Bedrock contributes the `bedrock-mantle` runtime provider prefix.
  */
 export function collectConnectedTaskModelProviderIds(options: {
   runtimeEnv: Partial<Record<string, string | undefined>>;
@@ -40,7 +41,7 @@ export function collectConnectedTaskModelProviderIds(options: {
     xaiSubscriptionConnected: options.xaiSubscriptionConnected,
   });
 
-  return new Set([
+  const connectedProviderIds = new Set<string>([
     ...status.providers
       .filter(
         (provider) =>
@@ -50,6 +51,12 @@ export function collectConnectedTaskModelProviderIds(options: {
     ...(options.chatgptConnected ? ['openai'] : []),
     ...(options.xaiSubscriptionConnected ? ['xai'] : []),
   ]);
+
+  if (connectedProviderIds.has('amazon-bedrock')) {
+    connectedProviderIds.add('bedrock-mantle');
+  }
+
+  return connectedProviderIds;
 }
 
 /**
