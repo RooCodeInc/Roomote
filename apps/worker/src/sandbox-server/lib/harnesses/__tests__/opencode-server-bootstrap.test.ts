@@ -78,6 +78,19 @@ describe('opencode-server bootstrap', () => {
     );
   }
 
+  function readOpenCodeToolSafetyPlugin(homeDir: string): string {
+    return fs.readFileSync(
+      path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'plugins',
+        'roomote-tool-safety.js',
+      ),
+      'utf8',
+    );
+  }
+
   // The plugin seed gate probes `opencode --version` through OPENCODE_COMMAND.
   // Pin the probe to a stub so the resolved version always matches the seed
   // fixtures regardless of whatever opencode CLI the host machine has on PATH
@@ -1740,6 +1753,24 @@ describe('opencode-server bootstrap', () => {
 
     expect(pluginContent).toContain('RoomoteChatGptGatewayModels');
     expect(pluginContent).toContain('R_INFERENCE_GATEWAY_CHATGPT');
+  });
+
+  it('installs the OpenCode tool safety plugin', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    const pluginContent = readOpenCodeToolSafetyPlugin(homeDir);
+
+    expect(pluginContent).toContain('RoomoteOpenCodeToolSafety');
+    expect(pluginContent).toContain("'.ico'");
   });
 
   it('enables Slack hook debug logs only when Slack reply satisfaction is configured', async () => {
