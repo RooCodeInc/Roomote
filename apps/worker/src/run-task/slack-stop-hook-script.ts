@@ -404,6 +404,19 @@ function getTerminalCurrentTurnFailureReason(state) {
     process.exit(0);
   }
 
+  // Delivery to the bound channel has permanently failed; every reminder this
+  // hook could issue demands a post that cannot succeed, so let the turn end.
+  const terminalDeliveryFailureAtMs = readFiniteMs(
+    state && state.terminalDeliveryFailureAtMs,
+  );
+  if (terminalDeliveryFailureAtMs !== null) {
+    logAllow({
+      reason: 'terminal_delivery_failure',
+      terminalDeliveryFailureAtMs,
+    });
+    process.exit(0);
+  }
+
   if (hasConfiguredSlackReplyStateWithoutTurn(state)) {
     if (state && state.requiresTerminalCloseoutWithoutTurn === true) {
       logBlock({

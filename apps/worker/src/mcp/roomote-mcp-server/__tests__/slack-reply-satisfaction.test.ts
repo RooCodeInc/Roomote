@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import {
   CHAT_REPLY_SATISFACTION_STATE_FILE_ENV as SLACK_REPLY_SATISFACTION_STATE_FILE_ENV,
+  recordChatReplyDeliveryFailure,
   recordChatReplySatisfaction as recordSlackReplySatisfaction,
   recordChatTurnStart as recordSlackTurnStart,
 } from '../chat-reply-satisfaction';
@@ -713,6 +714,160 @@ describe('Slack reply satisfaction state', () => {
       tool: 'add_reaction_to_slack_message',
       recordedAtMs: 1234,
       satisfiedTurnMessageTs: '111.222',
+    });
+  });
+
+  describe('recordChatReplyDeliveryFailure', () => {
+    function writeStateFile(state: Record<string, unknown>): string {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
+      tempDirs.push(tempDir);
+      const stateFilePath = path.join(tempDir, 'reply-state.json');
+      fs.writeFileSync(stateFilePath, JSON.stringify(state), 'utf8');
+      return stateFilePath;
+    }
+
+    it('counts a retryable failure without stamping a terminal outcome', () => {
+      const stateFilePath = writeStateFile({ startedAtMs: 1000 });
+
+      const result = recordChatReplyDeliveryFailure({
+        stateFilePath,
+        retryable: true,
+        nowMs: 2000,
+      });
+
+      expect(result).toEqual({ terminalDeliveryFailure: false });
+      expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
+        startedAtMs: 1000,
+        deliveryFailureCount: 1,
+        lastDeliveryFailureAtMs: 2000,
+      });
+    });
+
+    it('stamps a terminal outcome on a non-retryable failure', () => {
+      const stateFilePath = writeStateFile({ startedAtMs: 1000 });
+
+      const result = recordChatReplyDeliveryFailure({
+        stateFilePath,
+        retryable: false,
+        providerErrorCode: 'not_in_channel',
+        nowMs: 2000,
+      });
+
+      expect(result).toEqual({ terminalDeliveryFailure: true });
+      expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
+        startedAtMs: 1000,
+        deliveryFailureCount: 1,
+        lastDeliveryFailureAtMs: 2000,
+        lastDeliveryFailureCode: 'not_in_channel',
+        terminalDeliveryFailureAtMs: 2000,
+      });
+    });
+
+    it('stamps a terminal outcome when the bounded retry budget is spent', () => {
+      const stateFilePath = writeStateFile({
+        startedAtMs: 1000,
+        deliveryFailureCount: 4,
+        lastDeliveryFailureAtMs: 1900,
+      });
+
+      const result = recordChatReplyDeliveryFailure({
+        stateFilePath,
+        retryable: true,
+        nowMs: 2000,
+      });
+
+      expect(result).toEqual({ terminalDeliveryFailure: true });
+      expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
+        startedAtMs: 1000,
+        deliveryFailureCount: 5,
+        lastDeliveryFailureAtMs: 2000,
+        terminalDeliveryFailureAtMs: 2000,
+      });
+    });
+
+    it('keeps the earliest terminal stamp across later failures', () => {
+      const stateFilePath = writeStateFile({
+        startedAtMs: 1000,
+        deliveryFailureCount: 5,
+        lastDeliveryFailureAtMs: 2000,
+        terminalDeliveryFailureAtMs: 2000,
+      });
+
+      const result = recordChatReplyDeliveryFailure({
+        stateFilePath,
+        retryable: true,
+        nowMs: 3000,
+      });
+
+      expect(result).toEqual({ terminalDeliveryFailure: true });
+      const state = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
+      expect(state.terminalDeliveryFailureAtMs).toBe(2000);
+      expect(state.deliveryFailureCount).toBe(6);
+    });
+
+    it('ignores failures reported from non-parent sessions', () => {
+      const stateFilePath = writeStateFile({
+        startedAtMs: 1000,
+        parentThreadId: 'thread-parent',
+      });
+
+      const result = recordChatReplyDeliveryFailure({
+        stateFilePath,
+        retryable: false,
+        sessionId: 'thread-subagent',
+        nowMs: 2000,
+      });
+
+      expect(result).toEqual({ terminalDeliveryFailure: false });
+      expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
+        startedAtMs: 1000,
+        parentThreadId: 'thread-parent',
+      });
+    });
+
+    it('is cleared by a later successful post', () => {
+      const stateFilePath = writeStateFile({
+        startedAtMs: 1000,
+        deliveryFailureCount: 3,
+        lastDeliveryFailureAtMs: 2000,
+        lastDeliveryFailureCode: 'not_in_channel',
+        terminalDeliveryFailureAtMs: 2000,
+      });
+
+      recordSlackReplySatisfaction({
+        stateFilePath,
+        messageTs: '111.222',
+        tool: 'send_chat_reply',
+        replyPurpose: 'closeout',
+        nowMs: 3000,
+      });
+
+      const state = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
+      expect(state.deliveryFailureCount).toBeUndefined();
+      expect(state.lastDeliveryFailureAtMs).toBeUndefined();
+      expect(state.lastDeliveryFailureCode).toBeUndefined();
+      expect(state.terminalDeliveryFailureAtMs).toBeUndefined();
+      expect(state.messageTs).toBe('111.222');
+    });
+
+    it('is reset by a new inbound turn', () => {
+      const stateFilePath = writeStateFile({
+        currentTurnMessageTs: '111.222',
+        deliveryFailureCount: 3,
+        lastDeliveryFailureAtMs: 2000,
+        terminalDeliveryFailureAtMs: 2000,
+      });
+
+      recordSlackTurnStart({
+        stateFilePath,
+        turnMessageTs: '333.444',
+        nowMs: 3000,
+      });
+
+      const state = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
+      expect(state.deliveryFailureCount).toBeUndefined();
+      expect(state.terminalDeliveryFailureAtMs).toBeUndefined();
+      expect(state.currentTurnMessageTs).toBe('333.444');
     });
   });
 });

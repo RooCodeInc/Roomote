@@ -131,6 +131,20 @@ describe('SlackNotifier', () => {
       expect(ts).toBeUndefined();
     });
 
+    it('returns undefined when Slack rejects the message', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: false, error: 'not_in_channel' }),
+      });
+
+      const ts = await notifier.postMessage({
+        channel: 'C123',
+        text: 'rejected case',
+      });
+
+      expect(ts).toBeUndefined();
+    });
+
     it('does not change unfurl behavior for plain text messages', async () => {
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -184,6 +198,66 @@ describe('SlackNotifier', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('postMessageDetailed', () => {
+    it('returns the message ts on success', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true, ts: '123.456' }),
+      });
+
+      const result = await notifier.postMessageDetailed({
+        channel: 'C123',
+        text: 'hello world',
+      });
+
+      expect(result).toEqual({ ts: '123.456' });
+    });
+
+    it('returns the Slack error code when Slack rejects the message', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: false, error: 'not_in_channel' }),
+      });
+
+      const result = await notifier.postMessageDetailed({
+        channel: 'C123',
+        text: 'rejected case',
+      });
+
+      expect(result).toEqual({ slackErrorCode: 'not_in_channel' });
+    });
+
+    it('flags a transport error for non-2xx responses', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      });
+
+      const result = await notifier.postMessageDetailed({
+        channel: 'C123',
+        text: 'failure case',
+      });
+
+      expect(result).toEqual({ transportError: true });
+    });
+
+    it('flags a skipped threaded reply when the thread root is gone', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: false, error: 'thread_not_found' }),
+      });
+
+      const result = await notifier.postMessageDetailed({
+        channel: 'C123',
+        thread_ts: '123.000',
+        text: 'hello thread',
+      });
+
+      expect(result).toEqual({ skippedMissingThreadRoot: true });
     });
   });
 

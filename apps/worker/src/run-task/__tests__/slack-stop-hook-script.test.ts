@@ -214,6 +214,67 @@ describe('SLACK_STOP_HOOK_SCRIPT', () => {
     );
   });
 
+  it('allows Stop when delivery to the bound channel has permanently failed', () => {
+    const stateFilePath = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),
+      'state.json',
+    );
+    tempDirs.push(path.dirname(stateFilePath));
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        startedAtMs: Date.now() - 60_000,
+        requiresTerminalCloseoutWithoutTurn: true,
+        deliveryFailureCount: 1,
+        lastDeliveryFailureCode: 'not_in_channel',
+        terminalDeliveryFailureAtMs: Date.now() - 5_000,
+      }),
+      'utf8',
+    );
+
+    const result = runHook({
+      env: {
+        ROOMOTE_SLACK_HOOK_DEBUG: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('decision="allow"');
+    expect(result.stderr).toContain('reason="terminal_delivery_failure"');
+  });
+
+  it('allows Stop on an unsatisfied turn when delivery has permanently failed', () => {
+    const stateFilePath = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),
+      'state.json',
+    );
+    tempDirs.push(path.dirname(stateFilePath));
+    fs.writeFileSync(
+      stateFilePath,
+      JSON.stringify({
+        currentTurnMessageTs: '111.222',
+        currentTurnStartedAtMs: Date.now() - 60_000,
+        deliveryFailureCount: 5,
+        terminalDeliveryFailureAtMs: Date.now() - 5_000,
+      }),
+      'utf8',
+    );
+
+    const result = runHook({
+      env: {
+        ROOMOTE_SLACK_HOOK_DEBUG: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('decision="allow"');
+    expect(result.stderr).toContain('reason="terminal_delivery_failure"');
+  });
+
   it('allows Stop when an automation-started task posted its closeout without an inbound turn', () => {
     const stateFilePath = path.join(
       fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-stop-state-')),

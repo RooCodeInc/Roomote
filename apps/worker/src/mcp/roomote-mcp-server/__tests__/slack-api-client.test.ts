@@ -7,6 +7,7 @@ import {
   replyToSlackThread,
   trackSlackReplyQuote,
 } from '../slack-api-client.js';
+import { ChatDeliveryError } from '../chat-delivery-error.js';
 import type { RoomoteConfig } from '../types.js';
 
 const config: RoomoteConfig = {
@@ -172,6 +173,31 @@ describe('replyToSlackThread', () => {
       replyToSlackThread(config, { text: 'blocked' }),
     ).rejects.toThrow('Failed to reply to Slack thread: 403 forbidden');
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws a typed delivery error when the platform marks the failure non-retryable', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      text: async () =>
+        JSON.stringify({
+          error: 'Slack chat.postMessage failed: not_in_channel',
+          slackErrorCode: 'not_in_channel',
+          retryable: false,
+        }),
+    });
+
+    const error = (await replyToSlackThread(config, { text: 'blocked' }).catch(
+      (thrown: unknown) => thrown,
+    )) as ChatDeliveryError;
+
+    expect(error).toBeInstanceOf(ChatDeliveryError);
+    expect(error.message).toBe(
+      'Failed to reply to Slack thread: 422 Slack chat.postMessage failed: not_in_channel',
+    );
+    expect(error.status).toBe(422);
+    expect(error.retryable).toBe(false);
+    expect(error.providerErrorCode).toBe('not_in_channel');
   });
 });
 

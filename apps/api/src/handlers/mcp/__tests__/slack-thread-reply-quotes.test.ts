@@ -10,7 +10,7 @@ const {
   getLatestUserMessageMock,
   getTaskChannelBindingsMock,
   maybeSendCommunicationThreadReplyMock,
-  postMessageMock,
+  postMessageDetailedMock,
   slackInstallationFindFirstMock,
   taskRunFindFirstMock,
 } = vi.hoisted(() => ({
@@ -20,7 +20,7 @@ const {
   getLatestUserMessageMock: vi.fn(),
   getTaskChannelBindingsMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
-  postMessageMock: vi.fn(),
+  postMessageDetailedMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
 }));
@@ -50,7 +50,10 @@ vi.mock('@roomote/db/server', () => ({
   workItems: { id: 'id' },
 }));
 
-vi.mock('@roomote/slack', () => ({
+vi.mock('@roomote/slack', async (importOriginal) => ({
+  SlackPostDeliveryError: (
+    await importOriginal<typeof import('@roomote/slack')>()
+  ).SlackPostDeliveryError,
   buildSlackThreadFooterText: vi.fn().mockReturnValue('Task footer'),
   buildSlackThreadReplyFooterBlock: vi.fn(({ footerText }) => ({
     type: 'context',
@@ -73,7 +76,7 @@ vi.mock('@roomote/slack', () => ({
   setSlackThreadReplyFooterMessageTs: vi.fn(),
   SlackNotifier: vi.fn(
     class {
-      postMessage = postMessageMock;
+      postMessageDetailed = postMessageDetailedMock;
     },
   ),
   trackLatestUserMessageForSlackQuote: vi.fn(),
@@ -177,7 +180,7 @@ describe('Slack thread reply quotes', () => {
         alt_text: 'Screenshot',
       },
     ]);
-    postMessageMock.mockResolvedValue('333.444');
+    postMessageDetailedMock.mockResolvedValue({ ts: '333.444' });
     clearLatestUserMessageForReplyQuoteIfIdMock.mockResolvedValue(true);
   });
 
@@ -191,7 +194,7 @@ describe('Slack thread reply quotes', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(postMessageMock).toHaveBeenCalledWith(
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
         thread_ts: '111.222',
@@ -221,7 +224,7 @@ describe('Slack thread reply quotes', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(postMessageMock).toHaveBeenCalledWith(
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
         thread_ts: '111.222',
@@ -230,7 +233,7 @@ describe('Slack thread reply quotes', () => {
         ]),
       }),
     );
-    expect(postMessageMock.mock.calls[0]?.[0]?.blocks).not.toEqual(
+    expect(postMessageDetailedMock.mock.calls[0]?.[0]?.blocks).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           block_id: 'roomote_thread_reply_quote',
@@ -264,7 +267,7 @@ describe('Slack thread reply quotes', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(postMessageMock).toHaveBeenCalledWith(
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
       expect.objectContaining({
         blocks: expect.arrayContaining([
           expect.objectContaining({
@@ -273,7 +276,7 @@ describe('Slack thread reply quotes', () => {
         ]),
       }),
     );
-    expect(postMessageMock.mock.calls[0]?.[0]?.blocks).not.toEqual(
+    expect(postMessageDetailedMock.mock.calls[0]?.[0]?.blocks).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ block_id: 'footer' })]),
     );
     expect(clearLatestUserMessageForReplyQuoteIfIdMock).toHaveBeenCalledWith(
@@ -285,7 +288,9 @@ describe('Slack thread reply quotes', () => {
 
   it('keeps the pending quote when Slack delivery fails', async () => {
     buildThreadReplyImageBlocksMock.mockResolvedValue([]);
-    postMessageMock.mockRejectedValueOnce(new Error('Slack unavailable'));
+    postMessageDetailedMock.mockRejectedValueOnce(
+      new Error('Slack unavailable'),
+    );
 
     const response = await createApp().request('/mcp/thread_reply', {
       method: 'POST',
@@ -295,6 +300,62 @@ describe('Slack thread reply quotes', () => {
 
     expect(response.status).toBe(500);
     expect(clearLatestUserMessageForReplyQuoteIfIdMock).not.toHaveBeenCalled();
+  });
+
+  it('maps a permanent Slack posting error to a non-retryable structured response', async () => {
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    postMessageDetailedMock.mockResolvedValue({
+      slackErrorCode: 'not_in_channel',
+    });
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'On it' }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: 'Slack chat.postMessage failed: not_in_channel',
+      slackErrorCode: 'not_in_channel',
+      retryable: false,
+    });
+  });
+
+  it('maps a transport-level Slack posting failure to a retryable 502', async () => {
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    postMessageDetailedMock.mockResolvedValue({ transportError: true });
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'On it' }),
+    });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: 'Slack chat.postMessage failed: transport error',
+      slackErrorCode: null,
+      retryable: true,
+    });
+  });
+
+  it('keeps reporting a deleted thread root as a 409', async () => {
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    postMessageDetailedMock.mockResolvedValue({
+      skippedMissingThreadRoot: true,
+    });
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'On it' }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'Slack thread source message no longer exists',
+    });
   });
 
   it('clears exactly by id when the clear request carries a quoteId', async () => {
