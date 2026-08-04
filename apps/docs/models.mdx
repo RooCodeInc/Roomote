@@ -155,12 +155,13 @@ R_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
 Roomote automatically makes common provider configuration available to the
-model runtime, including OpenRouter, Vercel AI Gateway, OpenAI, Azure OpenAI,
-Azure AI Foundry, Anthropic, Google Gemini, Moonshot, Kimi for Coding, MiniMax,
-Z.AI, OpenCode, Amazon Bedrock, xAI, and GitHub Copilot. For gateway-supported
-providers, credentials stay on the control plane and model requests are proxied
-instead of forwarding the credentials into task workers. Use `R_MODEL_ENV_KEYS`
-when a provider key uses a custom env var name and must be forwarded:
+model runtime, including OpenRouter, Requesty, Vercel AI Gateway, OpenAI, Azure
+OpenAI, Azure AI Foundry, Anthropic, Google Gemini, Moonshot, Kimi for Coding,
+MiniMax, Z.AI, OpenCode, Amazon Bedrock, xAI, and GitHub Copilot. For
+gateway-supported providers, credentials stay on the control plane and model
+requests are proxied instead of forwarding the credentials into task workers.
+Use `R_MODEL_ENV_KEYS` when a provider key uses a custom env var name and must be
+forwarded:
 
 ```sh
 R_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
