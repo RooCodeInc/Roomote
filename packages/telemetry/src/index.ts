@@ -44,6 +44,45 @@ export const ACTIVATION_ENVIRONMENT_SOURCES = [
 export type ActivationEnvironmentSource =
   (typeof ACTIVATION_ENVIRONMENT_SOURCES)[number];
 
+export const ACTIVATION_SETUP_MILESTONES = [
+  'welcome',
+  'authed',
+  'comms_configured',
+  'comms_authed',
+  'source_control_configured',
+  'source_control_authed',
+  'inference_configured',
+  'sandbox_configured',
+] as const;
+
+export type ActivationSetupMilestone =
+  (typeof ACTIVATION_SETUP_MILESTONES)[number];
+
+export type ActivationSetupMilestoneProperties = {
+  provider?: string;
+  preexisting?: boolean;
+};
+
+export function buildActivationSetupMilestoneProperties(
+  properties: ActivationSetupMilestoneProperties,
+): TelemetryEventProperties | undefined {
+  if (
+    properties.provider === undefined &&
+    properties.preexisting === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(properties.provider === undefined
+      ? {}
+      : { provider: properties.provider }),
+    ...(properties.preexisting === undefined
+      ? {}
+      : { preexisting: properties.preexisting }),
+  };
+}
+
 export type ActivationTaskProperties = {
   workflow: string;
   surface: string;

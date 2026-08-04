@@ -24,6 +24,8 @@ export type BackgroundAgentFieldErrorKey =
   | 'conflictResolverLabel'
   | 'conflictResolverMaxPrAgeDays'
   | 'conflictResolverInstructions'
+  | 'callRoomoteViaEmojiName'
+  | 'callRoomoteViaEmojiInstructions'
   | 'channelAutoStartSlackChannels'
   | 'channelAutoStartDiscordChannels'
   | 'channelAutoStartInstructions'
@@ -220,6 +222,7 @@ export interface ResolvedChannelAutoStartDiscordRow {
 
 export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomationInputFields {
   savingAutomation:
+    | 'callRoomoteViaEmoji'
     | 'channelAutoStart'
     | 'managerChannel'
     | 'managerStats'
@@ -248,6 +251,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   conflictResolverMaxPrAgeDays?: ConflictResolverMaxPrAgeDays;
   conflictResolverLabel: string;
   conflictResolverInstructions: string | null;
+  callRoomoteViaEmojiEnabled?: boolean;
+  callRoomoteViaEmojiName?: string | null;
+  callRoomoteViaEmojiInstructions?: string | null;
   issueFixerInstructions?: string | null;
   channelAutoStartSlackChannels?: ChannelAutoStartInputRow[];
   /**

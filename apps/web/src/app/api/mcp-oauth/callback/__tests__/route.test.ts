@@ -8,6 +8,7 @@ const {
   exchangeCodeForTokensMock,
   getClientInformationMock,
   getMcpIntegrationMock,
+  getMcpIntegrationDefaultDisabledToolsMock,
   getMcpIntegrationOauthEndpointsMock,
   hydrateLinearMcpConnectionAfterOauthMock,
   isDeploymentScopedMcpIntegrationMock,
@@ -15,6 +16,8 @@ const {
   loggerErrorMock,
   loggerWarnMock,
   mcpConnectionsFindFirstMock,
+  deploymentEnablementOnConflictMock,
+  deploymentEnablementValuesMock,
   storeTokensMock,
   updateAuthStatusMock,
 } = vi.hoisted(() => ({
@@ -25,6 +28,7 @@ const {
   exchangeCodeForTokensMock: vi.fn(),
   getClientInformationMock: vi.fn(),
   getMcpIntegrationMock: vi.fn(),
+  getMcpIntegrationDefaultDisabledToolsMock: vi.fn(),
   getMcpIntegrationOauthEndpointsMock: vi.fn(),
   hydrateLinearMcpConnectionAfterOauthMock: vi.fn(),
   isDeploymentScopedMcpIntegrationMock: vi.fn(),
@@ -32,6 +36,8 @@ const {
   loggerErrorMock: vi.fn(),
   loggerWarnMock: vi.fn(),
   mcpConnectionsFindFirstMock: vi.fn(),
+  deploymentEnablementOnConflictMock: vi.fn().mockResolvedValue(undefined),
+  deploymentEnablementValuesMock: vi.fn(),
   storeTokensMock: vi.fn(),
   updateAuthStatusMock: vi.fn(),
 }));
@@ -65,9 +71,7 @@ vi.mock('@roomote/db/server', () => ({
       },
     },
     insert: vi.fn(() => ({
-      values: vi.fn(() => ({
-        onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
-      })),
+      values: deploymentEnablementValuesMock,
     })),
   },
   mcpConnections: { id: 'mcp_connections.id' },
@@ -86,6 +90,8 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/types', () => ({
   getMcpIntegration: getMcpIntegrationMock,
+  getMcpIntegrationDefaultDisabledTools:
+    getMcpIntegrationDefaultDisabledToolsMock,
   getMcpIntegrationOauthEndpoints: getMcpIntegrationOauthEndpointsMock,
   isDeploymentScopedMcpIntegration: isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegration: isSelfServeMcpIntegrationMock,
@@ -108,6 +114,9 @@ function buildRequest(query: string) {
 describe('GET /api/mcp-oauth/callback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    deploymentEnablementValuesMock.mockReturnValue({
+      onConflictDoUpdate: deploymentEnablementOnConflictMock,
+    });
     authorizeMock.mockResolvedValue({
       success: true,
       userId: 'user-1',
@@ -133,6 +142,7 @@ describe('GET /api/mcp-oauth/callback', () => {
       name: 'Linear',
       url: 'https://mcp.linear.app/mcp',
     });
+    getMcpIntegrationDefaultDisabledToolsMock.mockReturnValue([]);
     getMcpIntegrationOauthEndpointsMock.mockReturnValue({
       authorizationEndpoint: 'https://linear.app/oauth/authorize',
       tokenEndpoint: 'https://api.linear.app/oauth/token',
@@ -288,6 +298,45 @@ describe('GET /api/mcp-oauth/callback', () => {
         hasErrorDescription: true,
       }),
       'MCP OAuth provider returned an error',
+    );
+  });
+
+  it('seeds Resend tool defaults without overwriting saved choices on reconnect', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'resend',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'resend',
+      name: 'Resend',
+      url: 'https://mcp.resend.com/mcp',
+    });
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://api.resend.com/oauth/authorize',
+      tokenEndpoint: 'https://api.resend.com/oauth/token',
+      registrationEndpoint: 'https://api.resend.com/oauth/register',
+      tokenEndpointAuthMethod: 'none',
+    });
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    getMcpIntegrationDefaultDisabledToolsMock.mockReturnValue([
+      'send-email',
+      'create-contact',
+    ]);
+
+    await GET(buildRequest('?code=auth-code&state=state-1'));
+
+    expect(deploymentEnablementValuesMock).toHaveBeenCalledWith({
+      mcpId: 'resend',
+      enabled: true,
+      enabledByUserId: 'user-1',
+      disabledTools: ['send-email', 'create-contact'],
+    });
+    expect(deploymentEnablementOnConflictMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.not.objectContaining({ disabledTools: expect.anything() }),
+      }),
     );
   });
 

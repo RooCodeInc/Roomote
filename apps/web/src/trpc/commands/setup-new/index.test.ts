@@ -14,6 +14,11 @@ const {
   mockResolveSavedWorkerImage,
   mockResolveGiteaBaseUrl,
   mockResolveDeploymentEnvVar,
+  mockRecordSetupFunnelMilestones,
+  mockGetLinkedTelegramAccount,
+  mockGetLinkedDiscordAccount,
+  mockGetTeamsIntegrationStatus,
+  mockInvalidateTelegramRuntimeCredentialsCache,
 } = vi.hoisted(() => ({
   mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockTxSelect: vi.fn(),
@@ -33,6 +38,25 @@ const {
     .fn()
     .mockResolvedValue('https://gitea.example.com'),
   mockResolveDeploymentEnvVar: vi.fn().mockResolvedValue(null),
+  mockRecordSetupFunnelMilestones: vi.fn().mockResolvedValue(undefined),
+  mockGetLinkedTelegramAccount: vi.fn(),
+  mockGetLinkedDiscordAccount: vi.fn(),
+  mockGetTeamsIntegrationStatus: vi.fn(),
+  mockInvalidateTelegramRuntimeCredentialsCache: vi.fn(),
+}));
+
+vi.mock('@/lib/server/setup-funnel-telemetry', () => ({
+  evaluateSetupFunnelMilestones: vi.fn(() => []),
+  recordSetupFunnelMilestones: mockRecordSetupFunnelMilestones,
+}));
+
+vi.mock('../linked-accounts', () => ({
+  getLinkedTelegramAccountCommand: mockGetLinkedTelegramAccount,
+  getLinkedDiscordAccountCommand: mockGetLinkedDiscordAccount,
+}));
+
+vi.mock('../teams', () => ({
+  getTeamsIntegrationStatusCommand: mockGetTeamsIntegrationStatus,
 }));
 
 vi.mock('../compute/compute-provisioning', async (importOriginal) => {
@@ -123,6 +147,8 @@ vi.mock('@roomote/db/server', () => ({
     identityErrorCode: null,
   })),
   invalidateTeamsBotRuntimeCredentialsCache: vi.fn(),
+  invalidateTelegramRuntimeCredentialsCache:
+    mockInvalidateTelegramRuntimeCredentialsCache,
   slackInstallations: {},
   slackUserMappings: {},
   sql: vi.fn(),
@@ -226,6 +252,9 @@ import {
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
   startSetupNewOnboardingTaskCommand,
+  trackSetupBootstrapWelcomeSeenCommand,
+  trackSetupCommsStateCommand,
+  trackSetupWelcomeSeenCommand,
 } from './index';
 import {
   TaskPayloadKind,
@@ -437,6 +466,64 @@ describe('setup-new auth config commands', () => {
 
     expect(mockGetSetupBootstrapState).toHaveBeenCalledTimes(1);
     expect(mockDbTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('setup funnel milestone commands', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSetupTokenState.requiredToken = undefined;
+    mockSetupTokenState.inviteCookieToken = null;
+    mockGetLinkedTelegramAccount.mockResolvedValue({
+      configured: false,
+      mapping: null,
+    });
+    mockGetLinkedDiscordAccount.mockResolvedValue({
+      configured: false,
+      mapping: null,
+    });
+  });
+
+  it('records welcome after an admin reaches signed-in setup', async () => {
+    await trackSetupWelcomeSeenCommand(buildMockAuth());
+
+    expect(mockRecordSetupFunnelMilestones).toHaveBeenCalledWith([
+      { milestone: 'welcome' },
+    ]);
+  });
+
+  it('requires a valid bootstrap token before recording welcome', async () => {
+    mockSetupTokenState.requiredToken = 'expected-token';
+
+    await expect(
+      trackSetupBootstrapWelcomeSeenCommand({ setupToken: 'wrong-token' }),
+    ).rejects.toThrow('A valid setup token is required.');
+    expect(mockRecordSetupFunnelMilestones).not.toHaveBeenCalled();
+  });
+
+  it('derives communications milestones from authoritative account state', async () => {
+    mockGetLinkedTelegramAccount.mockResolvedValue({
+      configured: true,
+      mapping: { telegramUserId: '42' },
+    });
+
+    await trackSetupCommsStateCommand(buildMockAuth(), {
+      provider: 'telegram',
+    });
+
+    expect(mockRecordSetupFunnelMilestones).toHaveBeenCalledWith([
+      {
+        milestone: 'comms_configured',
+        provider: 'telegram',
+      },
+      {
+        milestone: 'comms_authed',
+        provider: 'telegram',
+      },
+    ]);
+    expect(
+      mockInvalidateTelegramRuntimeCredentialsCache,
+    ).toHaveBeenCalledOnce();
   });
 });
 

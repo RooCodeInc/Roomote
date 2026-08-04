@@ -35,6 +35,7 @@ const {
   withContentionMock,
   claimPendingOutOfBandMock,
   releaseClaimedOutOfBandMock,
+  callViaEmojiConfigMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
@@ -89,6 +90,7 @@ const {
   withContentionMock: vi.fn(),
   claimPendingOutOfBandMock: vi.fn(),
   releaseClaimedOutOfBandMock: vi.fn(),
+  callViaEmojiConfigMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -266,6 +268,10 @@ vi.mock('../unmentioned-thread-reply.js', () => ({
     shouldRouteUnmentionedReplyMock,
 }));
 
+vi.mock('../../call-roomote-via-emoji.js', () => ({
+  getCallRoomoteViaEmojiConfiguration: callViaEmojiConfigMock,
+}));
+
 import { teams } from '../index';
 
 function createApp() {
@@ -372,6 +378,7 @@ describe('Teams webhook handler', () => {
     usersFindFirstMock.mockResolvedValue(null);
     verifyBotFrameworkJwtMock.mockResolvedValue({ payload: {} });
     shouldRouteUnmentionedReplyMock.mockResolvedValue(false);
+    callViaEmojiConfigMock.mockResolvedValue(null);
     withContentionMock.mockImplementation(
       async (
         _key: string,
@@ -399,6 +406,70 @@ describe('Teams webhook handler', () => {
     });
     expect(response.status).toBe(401);
     expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('turns a configured reaction into a thread message', async () => {
+    callViaEmojiConfigMock.mockResolvedValue({
+      emoji: 'thumbsup',
+      prompt: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
+    });
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'reaction-1',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'activity-root',
+          reactionsAdded: [{ type: 'like' }],
+        }),
+      ),
+    });
+
+    expect(response.status).toBe(200);
+    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      expect.objectContaining({
+        provider: 'teams',
+        text: 'Act on this Additional instructions: Prioritize safety.',
+        ts: 'reaction-1',
+        threadTs: 'activity-root',
+      }),
+    );
+  });
+
+  it('ignores reaction types outside the Teams native set', async () => {
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'reaction-unsupported',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'activity-root',
+          reactionsAdded: [{ type: 'white_check_mark' }],
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'reaction_not_configured',
+    });
+    expect(callViaEmojiConfigMock).not.toHaveBeenCalled();
+    expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
   });
 
   it('queues Teams message activities for matching active task runs', async () => {

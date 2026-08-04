@@ -81,6 +81,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'conflict_resolver',
   'suggester',
   'announcer',
+  'call_roomote_via_emoji',
   // Channel auto-start for ALL chat providers (Slack + Discord targets live in
   // this one row, distinguished by target provider/targetKind). The key keeps
   // its historical Slack-only name because renaming an automations primary key

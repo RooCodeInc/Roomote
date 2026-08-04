@@ -187,23 +187,76 @@ function truncateDiscordText(value, limit) {
   return `${value.slice(0, limit - 1).trimEnd()}…`;
 }
 
-function removePatchChangesSection(markdown) {
+function parseDiscordReleaseNotes(markdown, version) {
   const lines = markdown.split('\n');
-  const kept = [];
-  let skipping = false;
-
-  for (const line of lines) {
-    if (/^###\s+Patch changes\s*$/i.test(line)) {
-      skipping = true;
-      continue;
-    }
-    if (skipping && /^#{1,3}\s+/.test(line)) {
-      skipping = false;
-    }
-    if (!skipping) kept.push(line);
+  const firstLine = lines[0]?.trim().toLowerCase();
+  const normalizedVersion = version.toLowerCase();
+  const headings = [`## ${normalizedVersion}`, `## v${normalizedVersion}`];
+  if (
+    headings.some(
+      (heading) =>
+        firstLine === heading || firstLine?.startsWith(`${heading} (`),
+    )
+  ) {
+    lines.shift();
   }
 
-  return kept.join('\n').trim();
+  const intro = [];
+  const sections = [];
+  let currentSection = null;
+
+  for (const line of lines) {
+    if (line.startsWith('### ')) {
+      currentSection = { heading: line.slice(4).trim(), lines: [] };
+      sections.push(currentSection);
+    } else if (currentSection) {
+      currentSection.lines.push(line);
+    } else {
+      intro.push(line);
+    }
+  }
+
+  return {
+    intro: intro.join('\n').trim(),
+    sections: sections.map((section) => ({
+      heading: section.heading,
+      body: section.lines.join('\n').trim(),
+    })),
+  };
+}
+
+function assembleDiscordContent(prefix, body, suffix) {
+  const bodyLimit = DISCORD_MESSAGE_LIMIT - prefix.length - suffix.length - 4;
+  const announcementBody = truncateDiscordText(body, bodyLimit);
+  return announcementBody
+    ? `${prefix}\n\n${announcementBody}\n\n${suffix}`
+    : `${prefix}\n\n${suffix}`;
+}
+
+function buildCompactDiscordReleaseContent({ version, url, notes }) {
+  return assembleDiscordContent(
+    `### Roomote ${version} is published`,
+    notes.intro,
+    `See the full release notes → [v${version}](${url}).`,
+  );
+}
+
+function buildDetailedDiscordReleaseContent({ version, url, notes }) {
+  const sections = notes.sections
+    .filter((section) => section.heading.toLowerCase() !== 'patch changes')
+    .map((section) =>
+      section.body
+        ? `### ${section.heading}\n\n${section.body}`
+        : `### ${section.heading}`,
+    );
+  const [firstSection, ...remainingSections] = sections;
+  const body = [notes.intro, firstSection].filter(Boolean).join('\n');
+
+  return assembleDiscordContent(
+    `# Roomote ${version} is out!`,
+    [body, ...remainingSections].filter(Boolean).join('\n\n'),
+    `See the full release notes → [v${version}](${url}). Let us know what you think!`,
+  );
 }
 
 /**
@@ -230,22 +283,20 @@ export function buildDiscordReleasePayload(release) {
   }
 
   const version = tagName.replace(/^v/i, '');
-  const versionTag = `v${version}`;
-  const prefix = `# Roomote ${version} is out!`;
-  const suffix = `See the full release notes [${versionTag}](${url}). Let us know what you think!`;
-  const body =
-    typeof release.body === 'string'
-      ? removePatchChangesSection(release.body)
-      : '';
-  const bodyLimit = DISCORD_MESSAGE_LIMIT - prefix.length - suffix.length - 4;
-  const announcementBody = truncateDiscordText(body, bodyLimit);
-  const content = announcementBody
-    ? `${prefix}\n\n${announcementBody}\n\n${suffix}`
-    : `${prefix}\n\n${suffix}`;
+  const [, minor, patch] = version.split('-', 1)[0].split('.');
+  const isMajorRelease = minor === '0' && patch === '0';
+  const notes = parseDiscordReleaseNotes(
+    typeof release.body === 'string' ? release.body : '',
+    version,
+  );
+  const content = isMajorRelease
+    ? buildDetailedDiscordReleaseContent({ version, url, notes })
+    : buildCompactDiscordReleaseContent({ version, url, notes });
 
   return {
     username: 'Roomote Releases',
     content,
+    flags: 1 << 2,
     allowed_mentions: { parse: [] },
   };
 }

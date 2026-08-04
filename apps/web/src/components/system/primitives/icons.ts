@@ -169,6 +169,7 @@ export {
   Shapes,
   Slack,
   Slash,
+  Smile,
   Sparkles,
   Square,
   SquareArrowOutUpRight,

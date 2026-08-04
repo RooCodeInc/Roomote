@@ -112,6 +112,31 @@ Admins can also manage custom automations from a Roomote task through the
 `manage_custom_automations` tool: list, resolve a schedule, create, update,
 delete, or run an enabled automation immediately.
 
+## Call Roomote via emoji
+
+Use **Call Roomote via emoji** to let teammates summon Roomote by reacting to a
+message in Slack, Discord, or Microsoft Teams. An admin chooses the emoji name,
+such as `:white_check_mark:`, and can add optional instructions that apply to
+every request started this way.
+
+When the configured reaction is added, Roomote handles it like a teammate
+replied in that thread with `@Roomote Act on this`. Existing Roomote task
+threads continue the active task; other threads start a task with the thread's
+conversation as context. Optional automation instructions are added after the
+default `Act on this` prompt.
+
+The teammate adding the reaction must have a linked Roomote account, just as
+they would when mentioning Roomote directly from that communications provider.
+
+Provider support differs slightly:
+
+- Slack supports standard and workspace custom emoji reactions.
+- Discord supports standard and server custom emoji reactions.
+- Microsoft Teams sends reaction activities only for messages posted by
+  Roomote. Teams supports its native `like`, `heart`, `laugh`, `surprised`,
+  `sad`, and `angry` reactions; choose an equivalent configured emoji such as
+  `:thumbsup:` for Like or `:heart:` for Heart.
+
 ## Channel automations
 
 The channel section starts with **Auto-respond to channels**.

@@ -137,13 +137,15 @@ function getOAuthServerMetadataOverride(
     issuer: new URL(endpoints.authorizationEndpoint).origin,
     authorization_endpoint: endpoints.authorizationEndpoint,
     token_endpoint: endpoints.tokenEndpoint,
+    ...(endpoints.registrationEndpoint
+      ? { registration_endpoint: endpoints.registrationEndpoint }
+      : {}),
     scopes_supported: getMcpIntegrationOauthScopes(integration),
     response_types_supported: ['code'],
     grant_types_supported: ['authorization_code', 'refresh_token'],
-    token_endpoint_auth_methods_supported: [
-      'client_secret_post',
-      'client_secret_basic',
-    ],
+    token_endpoint_auth_methods_supported: endpoints.tokenEndpointAuthMethod
+      ? [endpoints.tokenEndpointAuthMethod]
+      : ['client_secret_post', 'client_secret_basic'],
   };
 }
 

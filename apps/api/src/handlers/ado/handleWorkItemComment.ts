@@ -454,7 +454,7 @@ export async function handleAdoWorkItemComment(
     await postWorkItemMentionResponseComment({
       project: projectName,
       workItemId,
-      body: buildSourceControlAccountLinkRequiredMessage('ado'),
+      body: await buildSourceControlAccountLinkRequiredMessage('ado'),
     });
 
     return { status: 'ok', message: 'account_link_required' };

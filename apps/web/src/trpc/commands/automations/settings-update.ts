@@ -238,6 +238,17 @@ export async function updateBackgroundAgentSettingsCommand(
   assertAdmin(auth);
   const fieldErrors: BackgroundAgentFieldErrors = {};
   const existingSettings = await getBackgroundAgentSettingsForDeployment();
+  const shouldUpdateCallRoomoteViaEmoji =
+    input.savingAutomation === 'callRoomoteViaEmoji';
+  const callRoomoteViaEmojiEnabled = shouldUpdateCallRoomoteViaEmoji
+    ? input.callRoomoteViaEmojiEnabled === true
+    : existingSettings.callRoomoteViaEmojiEnabled;
+  const callRoomoteViaEmojiName = shouldUpdateCallRoomoteViaEmoji
+    ? normalizeOptionalText(input.callRoomoteViaEmojiName)
+    : existingSettings.callRoomoteViaEmojiName;
+  const callRoomoteViaEmojiInstructions = shouldUpdateCallRoomoteViaEmoji
+    ? normalizeOptionalText(input.callRoomoteViaEmojiInstructions)
+    : existingSettings.callRoomoteViaEmojiInstructions;
   const shouldUpdateChannelAutoStart =
     input.savingAutomation === 'channelAutoStart';
   const destinationDescriptors = listAutomationDestinationDescriptors();
@@ -278,6 +289,21 @@ export async function updateBackgroundAgentSettingsCommand(
 
   if ((input.reviewerInstructions?.length ?? 0) > 8_000) {
     fieldErrors.reviewerInstructions = 'Review Code instructions are too long.';
+  }
+
+  if (
+    shouldUpdateCallRoomoteViaEmoji &&
+    callRoomoteViaEmojiEnabled &&
+    !callRoomoteViaEmojiName
+  ) {
+    fieldErrors.callRoomoteViaEmojiName = 'Choose an emoji name.';
+  } else if ((callRoomoteViaEmojiName?.length ?? 0) > 100) {
+    fieldErrors.callRoomoteViaEmojiName = 'Emoji name is too long.';
+  }
+
+  if ((callRoomoteViaEmojiInstructions?.length ?? 0) > 8_000) {
+    fieldErrors.callRoomoteViaEmojiInstructions =
+      'Additional instructions are too long.';
   }
 
   const channelAutoStartRows = shouldUpdateChannelAutoStart
@@ -1041,6 +1067,16 @@ export async function updateBackgroundAgentSettingsCommand(
           updatedAt: now,
         },
       });
+
+    await upsertAutomation(tx, {
+      key: 'call_roomote_via_emoji',
+      enabled: callRoomoteViaEmojiEnabled && Boolean(callRoomoteViaEmojiName),
+      instructions: callRoomoteViaEmojiInstructions,
+      settings: {
+        ...(callRoomoteViaEmojiName ? { emoji: callRoomoteViaEmojiName } : {}),
+      },
+      updatedAt: now,
+    });
 
     await upsertAutomation(tx, {
       key: 'review_code',

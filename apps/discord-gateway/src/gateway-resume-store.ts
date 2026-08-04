@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { SessionInfo } from '@discordjs/ws';
 import {
   clearDiscordGatewayResumeState,
@@ -76,6 +78,16 @@ export class DiscordGatewayResumeStore {
       this.durableSequences.set(shardId, session.sequence);
     }
     return this.committedSession(shardId);
+  }
+
+  getSessionDedupeScope(shardId: number): string | undefined {
+    const sessionId = this.sessions.get(shardId)?.sessionId;
+    if (!sessionId) return undefined;
+
+    return createHash('sha256')
+      .update(`${this.tokenFingerprint}:${sessionId}`)
+      .digest('hex')
+      .slice(0, 16);
   }
 
   async update(shardId: number, session: SessionInfo | null): Promise<void> {

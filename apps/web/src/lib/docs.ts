@@ -5,6 +5,11 @@
 export const DOCS_BASE_URL = 'https://docs.roomote.dev';
 
 /**
+ * Cookbook recipes for common Roomote workflows.
+ */
+export const DOCS_COOKBOOK_URL = `${DOCS_BASE_URL}/cookbook`;
+
+/**
  * Public docs page describing the environment definition YAML format.
  */
 export const DOCS_ENVIRONMENT_DEFINITION_URL = `${DOCS_BASE_URL}/environments/definition`;

@@ -252,6 +252,9 @@ import {
   cancelSetupNewOnboardingTaskCommand,
   resetSetupNewSelectionCommand,
   ensureSetupNewDefaultAgentsCommand,
+  trackSetupBootstrapWelcomeSeenCommand,
+  trackSetupCommsStateCommand,
+  trackSetupWelcomeSeenCommand,
 } from '../commands/setup-new';
 import {
   getOnboardingStatusCommand,
@@ -308,10 +311,12 @@ import {
 import {
   createPasswordResetLinkCommand,
   createInviteCommand,
+  getAccountLinkHelpCommand,
   getAccessPolicySettingsCommand,
   removeUserCommand,
   revokeInviteCommand,
   setLicenseKeyCommand,
+  setAccountLinkHelpCommand,
   updateUserRoleCommand,
 } from '../commands/access-policy';
 import {
@@ -398,6 +403,7 @@ const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCY_SCHEMA = z.enum(
 );
 
 const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
+  'callRoomoteViaEmoji',
   'channelAutoStart',
   'managerChannel',
   'managerStats',
@@ -482,6 +488,19 @@ const automationsRouter = createRouter({
           conflictResolverMaxPrAgeDaysSchema.optional(),
         conflictResolverLabel: z.string().trim().min(1).max(255),
         conflictResolverInstructions: z.string().max(8_000).nullable(),
+        callRoomoteViaEmojiEnabled: z.boolean().optional(),
+        callRoomoteViaEmojiName: z
+          .string()
+          .trim()
+          .min(1)
+          .max(100)
+          .nullable()
+          .optional(),
+        callRoomoteViaEmojiInstructions: z
+          .string()
+          .max(8_000)
+          .nullable()
+          .optional(),
         channelAutoStartSlackChannels: z
           .array(
             z.object({
@@ -2237,6 +2256,20 @@ export const appRouter = createRouter({
       getSetupNewStatusCommand(auth),
     ),
 
+    trackWelcomeSeen: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      trackSetupWelcomeSeenCommand(auth),
+    ),
+
+    trackCommsState: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(['microsoft', 'telegram', 'discord']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        trackSetupCommsStateCommand(auth, input),
+      ),
+
     saveAuthProviderChoice: protectedProcedure
       .input(
         z.object({
@@ -2374,6 +2407,16 @@ export const appRouter = createRouter({
           .optional(),
       )
       .query(({ input }) => getSetupBootstrapStatusCommand(input)),
+
+    trackWelcomeSeen: publicProcedure
+      .input(
+        z
+          .object({
+            setupToken: z.string().optional(),
+          })
+          .optional(),
+      )
+      .mutation(({ input }) => trackSetupBootstrapWelcomeSeenCommand(input)),
 
     saveAuthProviderChoice: publicProcedure
       .input(
@@ -2522,6 +2565,20 @@ export const appRouter = createRouter({
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getAccessPolicySettingsCommand(auth),
     ),
+
+    accountLinkHelp: protectedProcedure.query(({ ctx: { auth } }) =>
+      getAccountLinkHelpCommand(auth),
+    ),
+
+    setAccountLinkHelp: protectedProcedure
+      .input(
+        z.object({
+          helpText: z.string().trim().max(1000).nullable(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setAccountLinkHelpCommand(auth, input),
+      ),
 
     createInvite: protectedProcedure
       .input(

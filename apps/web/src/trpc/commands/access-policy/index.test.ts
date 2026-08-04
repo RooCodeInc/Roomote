@@ -7,13 +7,22 @@ type TestUser = {
   createdAt: Date;
 };
 
-const { state, getEnvLicenseKeyMock } = vi.hoisted(() => ({
+const {
+  state,
+  getEnvLicenseKeyMock,
+  getAccountLinkHelpMock,
+  setAccountLinkHelpMock,
+} = vi.hoisted(() => ({
   state: {
     users: [] as TestUser[],
     credentialUserIds: [] as string[],
     createdResetLinkForUserId: null as string | null,
   },
   getEnvLicenseKeyMock: vi.fn(() => null as string | null),
+  getAccountLinkHelpMock: vi.fn(async () => null as string | null),
+  setAccountLinkHelpMock: vi.fn(async (value: string | null) =>
+    value?.trim() ? value.trim() : null,
+  ),
 }));
 
 vi.mock('@roomote/db/server', () => {
@@ -45,8 +54,10 @@ vi.mock('@roomote/db/server', () => {
       },
     },
     eq: vi.fn(),
+    getDeploymentAccountLinkHelpText: getAccountLinkHelpMock,
     inArray: vi.fn(),
     isNull: vi.fn(),
+    setDeploymentAccountLinkHelpText: setAccountLinkHelpMock,
     users,
   };
 });
@@ -99,8 +110,10 @@ vi.mock('@/lib/server/auth-provider-config', () => ({
 
 import {
   createPasswordResetLinkCommand,
+  getAccountLinkHelpCommand,
   getAccessPolicySettingsCommand,
   setLicenseKeyCommand,
+  setAccountLinkHelpCommand,
 } from './index';
 
 describe('access policy commands', () => {
@@ -109,6 +122,12 @@ describe('access policy commands', () => {
     state.credentialUserIds = [];
     state.createdResetLinkForUserId = null;
     getEnvLicenseKeyMock.mockReturnValue(null);
+    getAccountLinkHelpMock.mockClear();
+    getAccountLinkHelpMock.mockResolvedValue(null);
+    setAccountLinkHelpMock.mockClear();
+    setAccountLinkHelpMock.mockImplementation(async (value: string | null) =>
+      value?.trim() ? value.trim() : null,
+    );
   });
 
   it('marks active users that have credential accounts', async () => {
@@ -176,6 +195,28 @@ describe('access policy commands', () => {
       }),
     ).rejects.toThrow('Unauthorized');
     expect(state.createdResetLinkForUserId).toBeNull();
+  });
+
+  it('gets and updates account linking help for admins', async () => {
+    getAccountLinkHelpMock.mockResolvedValue('Ask an admin for an invite.');
+
+    await expect(
+      getAccountLinkHelpCommand({ isAdmin: true } as never),
+    ).resolves.toEqual({ helpText: 'Ask an admin for an invite.' });
+    await expect(
+      setAccountLinkHelpCommand({ isAdmin: true } as never, {
+        helpText: '  Join our community.  ',
+      }),
+    ).resolves.toEqual({ helpText: 'Join our community.' });
+  });
+
+  it('rejects account linking help changes from non-admins', async () => {
+    await expect(
+      setAccountLinkHelpCommand({ isAdmin: false } as never, {
+        helpText: 'Join our community.',
+      }),
+    ).rejects.toThrow('Unauthorized');
+    expect(setAccountLinkHelpMock).not.toHaveBeenCalled();
   });
 
   it('returns generated password reset links for admins', async () => {

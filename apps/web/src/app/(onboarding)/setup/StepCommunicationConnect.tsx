@@ -1,10 +1,13 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import type { SetupAuthStatus } from '@roomote/types';
 import { toast } from 'sonner';
 
 import { useConnectSlack } from '@/hooks/slack';
 import { useTeamsIntegrationStatus } from '@/hooks/teams';
+import { useTRPC } from '@/trpc/client';
 import { TaskStatusIndicator } from '@/components/sandbox';
 import {
   ArrowRight,
@@ -41,6 +44,7 @@ export function StepCommunicationConnect({
   onBack?: () => void;
   returnPath?: string;
 }) {
+  const trpc = useTRPC();
   const provider = getCommunicationProvider(authSetup);
   const connectSlack = useConnectSlack(returnPath, {
     onSuccess: (url) => {
@@ -49,6 +53,41 @@ export function StepCommunicationConnect({
     onError: () => toast.error('Failed to connect Slack. Please try again.'),
   });
   const teamsIntegrationStatus = useTeamsIntegrationStatus();
+  const configuredTrackedRef = useRef(false);
+  const authedTrackedRef = useRef(false);
+  const trackCommsState = useMutation(
+    trpc.setupNew.trackCommsState.mutationOptions(),
+  );
+  const teamsStatus = teamsIntegrationStatus.data;
+  const teamsConfigured =
+    teamsStatus?.botConfigured === true && teamsStatus.microsoftAuthConfigured;
+  const primaryConversationReady = Boolean(
+    teamsStatus?.primaryConversationReady,
+  );
+  useEffect(() => {
+    if (
+      provider === 'microsoft' &&
+      teamsConfigured &&
+      !configuredTrackedRef.current
+    ) {
+      configuredTrackedRef.current = true;
+      trackCommsState.mutate({
+        provider: 'microsoft',
+      });
+    }
+  }, [provider, teamsConfigured, trackCommsState]);
+  useEffect(() => {
+    if (
+      provider === 'microsoft' &&
+      primaryConversationReady &&
+      !authedTrackedRef.current
+    ) {
+      authedTrackedRef.current = true;
+      trackCommsState.mutate({
+        provider: 'microsoft',
+      });
+    }
+  }, [primaryConversationReady, provider, trackCommsState]);
   const skipLink = (
     <button
       type="button"
@@ -59,16 +98,9 @@ export function StepCommunicationConnect({
     </button>
   );
   if (provider === 'microsoft') {
-    const teamsStatus = teamsIntegrationStatus.data;
     const openInTeamsUrl = teamsStatus?.openInTeamsUrl ?? null;
     const teamsBotName = teamsStatus?.botName?.trim() || 'Roomote';
-    const teamsReady =
-      teamsStatus?.botConfigured === true &&
-      teamsStatus.microsoftAuthConfigured &&
-      openInTeamsUrl !== null;
-    const primaryConversationReady = Boolean(
-      teamsStatus?.primaryConversationReady,
-    );
+    const teamsReady = teamsConfigured && openInTeamsUrl !== null;
 
     return (
       <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">

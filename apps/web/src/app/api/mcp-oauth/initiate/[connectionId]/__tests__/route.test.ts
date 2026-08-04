@@ -274,6 +274,45 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     expect(authUrl.searchParams.get('scope')).not.toContain('boards:write');
   });
 
+  it('requests full access for the deployment-scoped Resend connection', async () => {
+    mcpConnectionsFindFirstMock.mockResolvedValue({
+      id: CONNECTION_ID,
+      mcpId: 'resend',
+      userId: null,
+      connectionRole: 'default',
+    });
+    getMcpIntegrationMock.mockReturnValue({
+      id: 'resend',
+      name: 'Resend',
+      url: 'https://mcp.resend.com/mcp',
+    });
+    isDeploymentScopedMcpIntegrationMock.mockReturnValue(true);
+    getMcpIntegrationOauthEndpointsMock.mockReturnValue({
+      authorizationEndpoint: 'https://api.resend.com/oauth/authorize',
+      tokenEndpoint: 'https://api.resend.com/oauth/token',
+      registrationEndpoint: 'https://api.resend.com/oauth/register',
+      tokenEndpointAuthMethod: 'none',
+    });
+    getClientInformationMock.mockResolvedValue(undefined);
+    getMcpIntegrationOauthScopesMock.mockReturnValue(['full_access']);
+
+    const response = await GET(buildRequest(), {
+      params: Promise.resolve({ connectionId: CONNECTION_ID }),
+    });
+
+    expect(registerOAuthClientMock).toHaveBeenCalledWith(
+      'https://api.resend.com/oauth/register',
+      expect.objectContaining({
+        scope: 'full_access',
+        token_endpoint_auth_method: 'none',
+      }),
+    );
+    const authUrl = new URL(response.headers.get('location')!);
+    expect(authUrl.searchParams.get('scope')).toBe('full_access');
+    expect(discoverOAuthEndpointsMock).not.toHaveBeenCalled();
+    expect(discoverOAuthProtectedResourceMetadataMock).not.toHaveBeenCalled();
+  });
+
   it('stores the configured Linear OAuth client for the callback', async () => {
     getMcpIntegrationOauthEndpointsMock.mockReturnValue({
       authorizationEndpoint: 'https://linear.app/oauth/authorize',

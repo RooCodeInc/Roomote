@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { getDeploymentAccountLinkHelpText } from '@roomote/db/server';
 
 import {
   canVisitorSignUp,
@@ -41,14 +42,18 @@ export default async function Page(props: {
   // Whether the visitor arrived with a usable invite (the /invite/<token>
   // route stores it in the invite cookie) or bootstrap rights; without one,
   // the form offers sign-in only and account creation stays hidden.
-  const canSignUp = await canVisitorSignUp();
-  const invite = await getRequestInviteSummary();
-  const searchParams = await props.searchParams;
+  const [canSignUp, invite, searchParams, authContext, accountLinkHelpText] =
+    await Promise.all([
+      canVisitorSignUp(),
+      getRequestInviteSummary(),
+      props.searchParams,
+      getSignedInAuthContext(),
+      getDeploymentAccountLinkHelpText(),
+    ]);
   // A visitor bounced here by the seat gate still holds their Better Auth
   // session cookie, so re-running the auth evaluation identifies them and
   // lets the form explain the rejection instead of silently offering
   // sign-in again.
-  const authContext = await getSignedInAuthContext();
   const seatLimitBlocked =
     !authContext.success && authContext.reason === 'seat_limit';
 
@@ -59,6 +64,7 @@ export default async function Page(props: {
       inviteRole={invite?.role ?? null}
       inviteInvalid={hasInvitedParam(searchParams.invited) && invite === null}
       seatLimitBlocked={seatLimitBlocked}
+      accountLinkHelpText={accountLinkHelpText}
     />
   );
 }

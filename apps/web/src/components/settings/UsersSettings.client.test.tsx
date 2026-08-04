@@ -77,6 +77,8 @@ const {
   mockRemoveUser,
   mockCreatePasswordResetLink,
   mockSetLicenseKey,
+  mockAccountLinkHelpState,
+  mockSetAccountLinkHelp,
   mockClipboardWriteText,
   mockCapture,
 } = vi.hoisted(() => ({
@@ -159,6 +161,13 @@ const {
   mockSetLicenseKey: vi.fn(async (_input: { licenseKey: string | null }) => ({
     saved: true,
   })),
+  mockAccountLinkHelpState: {
+    current: { helpText: null as string | null },
+  },
+  mockSetAccountLinkHelp: vi.fn(async (input: { helpText: string | null }) => {
+    mockAccountLinkHelpState.current = { helpText: input.helpText };
+    return mockAccountLinkHelpState.current;
+  }),
   mockClipboardWriteText: vi.fn(async (_value: string) => undefined),
   mockCapture: vi.fn(),
 }));
@@ -187,6 +196,19 @@ vi.mock('@/trpc/client', () => ({
         queryOptions: () => ({
           queryKey: ['access-policy'],
           queryFn: async () => mockSettingsState.current,
+        }),
+      },
+      accountLinkHelp: {
+        queryKey: () => ['account-link-help'],
+        queryOptions: () => ({
+          queryKey: ['account-link-help'],
+          queryFn: async () => mockAccountLinkHelpState.current,
+        }),
+      },
+      setAccountLinkHelp: {
+        mutationOptions: (options: Record<string, unknown> = {}) => ({
+          mutationFn: mockSetAccountLinkHelp,
+          ...options,
         }),
       },
       createInvite: {
@@ -256,6 +278,7 @@ describe('UsersSettings', () => {
     vi.clearAllMocks();
     mockClipboardWriteText.mockResolvedValue(undefined);
     mockAuthorizedUser.current = { userId: 'user-1', cloudEnabled: false };
+    mockAccountLinkHelpState.current = { helpText: null };
     mockSettingsState.current = {
       slackTeamId: null,
       hasSlackSignIn: false,
@@ -264,6 +287,23 @@ describe('UsersSettings', () => {
       users: [],
       license: unlicensedLicense,
     };
+  });
+
+  it('saves deployment-specific account linking help', async () => {
+    renderUsersSettings();
+
+    const textarea = await screen.findByLabelText('Account linking help text');
+    fireEvent.change(textarea, {
+      target: { value: 'Ask an admin: https://discord.gg/example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockSetAccountLinkHelp.mock.calls[0]?.[0]).toEqual({
+        helpText: 'Ask an admin: https://discord.gg/example',
+      });
+      expect(toast.success).toHaveBeenCalledWith('Account linking help saved.');
+    });
   });
 
   it('shows org membership rows only for configured org providers', async () => {

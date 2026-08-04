@@ -380,7 +380,9 @@ describe('getMergedPullRequests', () => {
       provider: 'bitbucket',
     });
 
-    const mergedAt = new Date('2026-07-10T00:00:00Z');
+    // Keep this legacy-cursor fixture outside the historical windows used by
+    // the other real-database suites, which run concurrently in Vitest.
+    const mergedAt = new Date('2099-07-10T00:00:00Z');
     await insertMergedFacts([
       {
         repositoryId: repoA.id,
@@ -406,7 +408,7 @@ describe('getMergedPullRequests', () => {
         cursor: { mergedAt: mergedAt.toISOString(), externalPullRequestId: 5 },
         cursorDate: mergedAt,
       },
-      new Date('2026-07-11T00:00:00Z'),
+      new Date('2099-07-11T00:00:00Z'),
     );
 
     expect(manifestKeys(batch.pullRequests).sort()).toEqual([

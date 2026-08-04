@@ -1195,7 +1195,7 @@ export async function handlePrComment(
       target: mentionResponseTarget,
       body:
         reviewerGate.code === 'account_link_required'
-          ? buildSourceControlAccountLinkRequiredMessage('github')
+          ? await buildSourceControlAccountLinkRequiredMessage('github')
           : buildReviewerGateMissComment(),
     });
 

@@ -71,11 +71,33 @@ export const teamsActivitySchema = z
     channelData: teamsActivityChannelDataSchema.optional(),
     entities: z.array(teamsActivityMentionEntitySchema).optional(),
     replyToId: z.string().optional(),
+    reactionsAdded: z
+      .array(
+        z
+          .object({
+            type: z.string(),
+          })
+          .passthrough(),
+      )
+      .optional(),
     attachments: z.array(z.unknown()).optional(),
   })
   .passthrough();
 
 export type TeamsActivity = z.infer<typeof teamsActivitySchema>;
+
+const TEAMS_NATIVE_REACTION_TYPES = new Set([
+  'like',
+  'heart',
+  'laugh',
+  'surprised',
+  'sad',
+  'angry',
+]);
+
+export function isTeamsNativeReactionType(value: string): boolean {
+  return TEAMS_NATIVE_REACTION_TYPES.has(value.trim().toLowerCase());
+}
 
 export type TeamsActivityCommunicationMetadata = {
   communicationProvider: 'teams';

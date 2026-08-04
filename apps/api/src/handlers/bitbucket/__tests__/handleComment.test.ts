@@ -39,6 +39,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...actual,
+    getDeploymentAccountLinkHelpText: vi.fn().mockResolvedValue(null),
     findActiveGitHubPrReviewTask: mockFindActiveGitHubPrReviewTask,
     findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
   };

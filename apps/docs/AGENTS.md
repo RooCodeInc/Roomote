@@ -80,10 +80,23 @@ Provider ids and documentation slugs can differ (for example, `google` maps to
 `google-gemini`), so make that mapping explicit and cover it with the setup
 docs tests.
 
+### Cookbook recipes
+
+Add each Cookbook recipe as a standalone `cookbook/<slug>.mdx` file using
+`cookbook/template.mdx` as the structural guide. After adding or changing a
+recipe, run `pnpm --filter @roomote/docs generate-cookbook-index` so the table in
+`cookbook/index.mdx` stays alphabetized by frontmatter title. Do not edit the
+generated table between its `cookbook-recipes` markers by hand.
+
+Never add individual Cookbook recipe pages to `docs.json`. Only
+`cookbook/index` and `cookbook/template` belong in the Cookbook sidebar group;
+readers discover recipes through the generated index.
+
 ## Working notes
 
 - `docs.json` is the navigation and branding source of truth. When you add,
-  rename, or remove a page, update its `navigation` entry in the same change.
+  rename, or remove a page, update its `navigation` entry in the same change,
+  except for individual Cookbook recipes as described above.
 - Pages are MDX files referenced by file name (without extension).
 - Internal links use root-relative paths (`/environments`, not `/docs/...`).
 - Brand assets (`roomote.css`, `logo/`, `favicon.svg`, `fonts/`) live in this

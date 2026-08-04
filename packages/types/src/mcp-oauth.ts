@@ -244,6 +244,8 @@ export type McpIntegrationOAuthClientEnv = {
 export type McpIntegrationOAuthEndpoints = {
   authorizationEndpoint: string;
   tokenEndpoint: string;
+  registrationEndpoint?: string;
+  tokenEndpointAuthMethod?: OAuthTokenEndpointAuthMethod;
 };
 
 export type McpIntegrationAuthorizationParameter = {
@@ -274,7 +276,34 @@ export type McpIntegration = {
   oauthScopeMode?: McpIntegrationOauthScopeMode;
   connectionMode?: McpIntegrationConnectionMode;
   serverMode?: McpIntegrationServerMode;
+  defaultDisabledTools?: string[];
 };
+
+export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
+  'send-email',
+  'send-batch-emails',
+  'send-broadcast',
+  'update-email',
+  'create-contact',
+  'update-contact',
+  'remove-contact',
+  'add-contact-to-segment',
+  'remove-contact-from-segment',
+  'update-contact-topics',
+  'create-contact-import',
+  'create-automation',
+  'update-automation',
+  'send-event',
+  'create-api-key',
+  'remove-api-key',
+  'create-contact-property',
+  'update-contact-property',
+  'remove-contact-property',
+  'update-domain',
+  'remove-domain',
+  'create-webhook',
+  'update-webhook',
+] as const;
 
 export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
@@ -422,6 +451,26 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     icon: 'railway',
     connectionScope: 'deployment',
     serverMode: 'upstream_proxy',
+  },
+  {
+    id: 'resend',
+    name: 'Resend',
+    url: 'https://mcp.resend.com/mcp',
+    description: `Inspect and manage shared email infrastructure through Resend from ${PRODUCT_NAME} tasks.`,
+    icon: 'resend',
+    connectionScope: 'deployment',
+    connectionMode: 'oauth',
+    serverMode: 'upstream_proxy',
+    oauthEndpoints: {
+      authorizationEndpoint: 'https://api.resend.com/oauth/authorize',
+      tokenEndpoint: 'https://api.resend.com/oauth/token',
+      registrationEndpoint: 'https://api.resend.com/oauth/register',
+      tokenEndpointAuthMethod: 'none',
+    },
+    oauthScopes: ['full_access'],
+    defaultDisabledTools: [...RESEND_DEFAULT_DISABLED_TOOL_NAMES],
+    instructions:
+      'Use Resend to inspect email delivery, received messages, domains, contacts, templates, broadcasts, and related infrastructure. Email sending, credential creation and removal, scheduled-send changes, domain and webhook mutations, automation mutations and triggers, and contact mutations are disabled until a deployment admin explicitly enables those tools.',
   },
   {
     id: 'braintrust',
@@ -642,6 +691,21 @@ export function getMcpIntegrationOauthScopes(
   }
 
   return integration.oauthScopes;
+}
+
+export function getMcpIntegrationDefaultDisabledTools(
+  integrationOrId: McpIntegration | string | undefined,
+): readonly string[] {
+  if (!integrationOrId) {
+    return [];
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.defaultDisabledTools ?? [];
 }
 
 export function getMcpIntegrationOauthEndpoints(

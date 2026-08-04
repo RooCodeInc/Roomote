@@ -312,6 +312,81 @@ describe('startNewDiscordTask', () => {
     expect(agentPrompt).not.toContain('@Roomote investigate the flaky build');
   });
 
+  it('excludes attachments posted after a reacted-to message', async () => {
+    const file = (id: string) => ({
+      id,
+      name: `${id}.txt`,
+      mimeType: 'text/plain',
+      size: 12,
+      url: `https://cdn.discordapp.com/attachments/${id}.txt`,
+    });
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          {
+            id: '100',
+            user: 'u-alice',
+            username: 'Alice',
+            text: 'Earlier context',
+            files: [file('before')],
+          },
+          {
+            id: '200',
+            user: 'u-alice',
+            username: 'Alice',
+            text: 'React to this',
+            files: [file('target')],
+          },
+          {
+            id: '300',
+            user: 'u-bob',
+            username: 'Bob',
+            text: 'Later context',
+            files: [file('after')],
+          },
+        ],
+      }),
+    };
+
+    await startNewDiscordTask({
+      provider: provider as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      contextThroughMessageId: '200',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Act on this',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'channel-1:200:discord-user-1:white_check_mark:42',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'thread-1',
+        communicationMessageId: '200',
+      },
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Task thread',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+    });
+
+    expect(mocks.processAttachments).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'before' }),
+      expect.objectContaining({ id: 'target' }),
+    ]);
+    expect(mocks.processAttachments).not.toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'after' })]),
+    );
+  });
+
   it('does not inherit prior thread context for /new (forceNewThread)', async () => {
     const provider = {
       fetchChannelMessages: vi.fn().mockResolvedValue({

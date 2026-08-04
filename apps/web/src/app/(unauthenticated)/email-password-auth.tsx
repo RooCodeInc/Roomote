@@ -2,6 +2,7 @@
 
 import { type ReactNode, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Streamdown } from 'streamdown';
 
 import { authClient } from '@/lib/auth-client';
 import { cn } from '@/lib/utils';
@@ -35,6 +36,7 @@ export function EmailPasswordAuth({
   submitRowClassName,
   submitButtonClassName,
   submitLeadingAction,
+  accountLinkHelpText = null,
 }: {
   redirectUrl: string;
   defaultMode?: 'sign-in' | 'sign-up';
@@ -46,6 +48,7 @@ export function EmailPasswordAuth({
   submitRowClassName?: string;
   submitButtonClassName?: string;
   submitLeadingAction?: ReactNode;
+  accountLinkHelpText?: string | null;
 }) {
   const router = useRouter();
   const [modeState, setModeState] = useState<'sign-in' | 'sign-up'>(
@@ -194,11 +197,18 @@ export function EmailPasswordAuth({
         </Button>
       )}
       {hideModeSwitchMessage ? null : (
-        <p className="w-full text-sm text-muted-foreground mt-8">
-          Need an account? Forgot your password?
-          <br />
-          Ask your admin.
-        </p>
+        <div className="mt-8 w-full text-sm text-muted-foreground">
+          <p>
+            Need an account? Forgot your password?
+            <br />
+            Ask your admin.
+          </p>
+          {accountLinkHelpText ? (
+            <Streamdown className="mt-2 [&_a]:font-medium [&_a]:underline [&_a]:underline-offset-2 [&_h1]:text-sm! [&_h2]:text-sm! [&_h3]:text-sm! [&_img]:hidden [&_p]:m-0">
+              {accountLinkHelpText}
+            </Streamdown>
+          ) : null}
+        </div>
       )}
     </form>
   );

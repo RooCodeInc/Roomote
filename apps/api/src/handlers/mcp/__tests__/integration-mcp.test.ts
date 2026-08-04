@@ -65,6 +65,15 @@ function createInitializeRequest(id: number) {
   };
 }
 
+function createToolsListRequest(id: number) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    method: 'tools/list',
+    params: {},
+  };
+}
+
 function createApp(
   integrationId: string,
   authContext: Variables['authContext'],
@@ -187,5 +196,71 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
 
     expect(response.status).toBe(200);
     expect(mockFindConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it('strips Resend tool schema patterns for Azure-compatible tool calls', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            tools: [
+              {
+                name: 'create-contact',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    email: {
+                      type: 'string',
+                      description: 'Contact email address',
+                      pattern: '^(?!\\.)lookaround-pattern$',
+                    },
+                    nested: {
+                      type: 'array',
+                      items: { type: 'string', pattern: '^nested$' },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('resend', createRunToken()),
+      createToolsListRequest(1),
+    );
+    const body = (await response.json()) as {
+      result: {
+        tools: Array<{
+          inputSchema: {
+            properties: {
+              email: Record<string, unknown>;
+              nested: { items: Record<string, unknown> };
+            };
+          };
+        }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.result.tools[0]?.inputSchema.properties.email).toEqual({
+      type: 'string',
+      description: 'Contact email address',
+    });
+    expect(body.result.tools[0]?.inputSchema.properties.nested.items).toEqual({
+      type: 'string',
+    });
   });
 });

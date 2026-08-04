@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion, type Variants } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
@@ -93,6 +93,9 @@ export function SetupBootstrapFlow() {
         staleTime: 5_000,
       },
     ),
+  );
+  const trackWelcomeSeen = useMutation(
+    trpc.setupBootstrap.trackWelcomeSeen.mutationOptions(),
   );
   const bootstrapAuthProvider = getBootstrapAuthProvider(
     bootstrapStatus?.authSetup,
@@ -225,11 +228,14 @@ export function SetupBootstrapFlow() {
         >
           {bootstrapStep === 'welcome' && (
             <StepWelcome
-              onContinue={() =>
+              onContinue={() => {
+                trackWelcomeSeen.mutate(
+                  setupToken ? { setupToken } : undefined,
+                );
                 setBootstrapStepWithTransition(
                   getBootstrapStepAfterWelcome(bootstrapStatus.authSetup),
-                )
-              }
+                );
+              }}
             />
           )}
           {bootstrapStep === 'email-account' && (

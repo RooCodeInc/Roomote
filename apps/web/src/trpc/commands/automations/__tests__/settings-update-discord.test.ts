@@ -199,7 +199,31 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
-    await db.delete(users);
+    await db.delete(users).where(eq(users.id, adminAuth.userId));
+  });
+
+  it('preserves a disabled emoji trigger during an unrelated save', async () => {
+    await upsertAutomation(db, {
+      key: 'call_roomote_via_emoji',
+      enabled: false,
+      instructions: 'Prioritize safety.',
+      settings: { emoji: ':white_check_mark:' },
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({ savingAutomation: 'managerStats' }),
+    );
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'call_roomote_via_emoji'),
+    });
+
+    expect(result.success).toBe(true);
+    expect(automation).toMatchObject({
+      enabled: false,
+      instructions: 'Prioritize safety.',
+      settings: { emoji: ':white_check_mark:' },
+    });
   });
 
   it('saves a Discord manager channel without Slack and returns the persisted id', async () => {
@@ -752,7 +776,7 @@ describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () =
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
-    await db.delete(users);
+    await db.delete(users).where(eq(users.id, adminAuth.userId));
   });
 
   it('writes discord auto-respond targets alongside Slack ones with merged order', async () => {

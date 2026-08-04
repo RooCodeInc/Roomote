@@ -50,6 +50,90 @@ describe('handleGatewayDispatch', () => {
     });
   });
 
+  it('enqueues message reactions with a deterministic event id', async () => {
+    const enqueue = vi.fn().mockResolvedValue(true);
+    const rest = { post: vi.fn() };
+    const payload = {
+      user_id: 'user-1',
+      channel_id: 'channel-1',
+      message_id: 'message-1',
+      guild_id: 'guild-1',
+      emoji: { id: null, name: 'white_check_mark' },
+      member: {
+        user: { id: 'user-1', username: 'matt' },
+      },
+    };
+
+    await expect(
+      handleGatewayDispatch(
+        { t: 'MESSAGE_REACTION_ADD', s: 42, d: payload },
+        {
+          enqueue,
+          rest,
+          now,
+          getSessionDedupeScope: () => 'session-a',
+        },
+      ),
+    ).resolves.toBe('enqueued');
+
+    expect(enqueue).toHaveBeenCalledWith({
+      eventId: 'channel-1:message-1:user-1:white_check_mark:session-a:42',
+      eventType: 'MESSAGE_REACTION_ADD',
+      payload,
+      receivedAt: '2026-07-12T12:00:00.000Z',
+    });
+  });
+
+  it('keeps separate reaction adds distinct while deduping Gateway replays', async () => {
+    const eventIds = new Set<string>();
+    const enqueue = vi.fn(async (envelope: DiscordInboundEnvelope) => {
+      if (eventIds.has(envelope.eventId)) return false;
+      eventIds.add(envelope.eventId);
+      return true;
+    });
+    const rest = { post: vi.fn() };
+    const dependencies = {
+      enqueue,
+      rest,
+      now,
+      getSessionDedupeScope: () => 'session-a',
+    };
+    const payload = {
+      user_id: 'user-1',
+      channel_id: 'channel-1',
+      message_id: 'message-1',
+      emoji: { id: null, name: 'white_check_mark' },
+    };
+
+    await expect(
+      handleGatewayDispatch(
+        { t: 'MESSAGE_REACTION_ADD', s: 42, d: payload },
+        dependencies,
+      ),
+    ).resolves.toBe('enqueued');
+    await expect(
+      handleGatewayDispatch(
+        { t: 'MESSAGE_REACTION_ADD', s: 42, d: payload },
+        dependencies,
+      ),
+    ).resolves.toBe('duplicate');
+    await expect(
+      handleGatewayDispatch(
+        { t: 'MESSAGE_REACTION_ADD', s: 43, d: payload },
+        dependencies,
+      ),
+    ).resolves.toBe('enqueued');
+    await expect(
+      handleGatewayDispatch(
+        { t: 'MESSAGE_REACTION_ADD', s: 42, d: payload },
+        {
+          ...dependencies,
+          getSessionDedupeScope: () => 'session-b',
+        },
+      ),
+    ).resolves.toBe('enqueued');
+  });
+
   it('normalizes a managed-role mention into a canonical bot mention', async () => {
     const enqueue = vi.fn().mockResolvedValue(true);
     const rest = { post: vi.fn() };

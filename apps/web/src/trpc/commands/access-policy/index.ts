@@ -5,8 +5,10 @@ import {
   db,
   deploymentSettings,
   eq,
+  getDeploymentAccountLinkHelpText,
   inArray,
   isNull,
+  setDeploymentAccountLinkHelpText,
   users,
 } from '@roomote/db/server';
 import { randomUUID } from 'node:crypto';
@@ -34,6 +36,25 @@ import { Env } from '@/lib/server/env';
 import { resolveAuthProviderConfig } from '@/lib/server/auth-provider-config';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
+
+export async function getAccountLinkHelpCommand(
+  auth: UserAuthSuccess,
+): Promise<{ helpText: string | null }> {
+  assertAdmin(auth);
+
+  return { helpText: await getDeploymentAccountLinkHelpText() };
+}
+
+export async function setAccountLinkHelpCommand(
+  auth: UserAuthSuccess,
+  input: { helpText: string | null },
+): Promise<{ helpText: string | null }> {
+  assertAdmin(auth);
+
+  return {
+    helpText: await setDeploymentAccountLinkHelpText(input.helpText),
+  };
+}
 
 function assertAdmin(auth: UserAuthSuccess): asserts auth is UserAuthSuccess {
   if (!auth.isAdmin) {

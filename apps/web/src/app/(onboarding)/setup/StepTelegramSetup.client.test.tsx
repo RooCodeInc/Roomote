@@ -37,13 +37,16 @@ vi.mock('@tanstack/react-query', () => ({
     isError: false,
   }),
   useMutation: (options: {
-    onSuccess: (result: unknown) => Promise<void>;
+    onSuccess?: (result: unknown) => Promise<void>;
   }) => ({
     isPending: false,
-    mutate: () =>
-      void options.onSuccess({
-        telegramWebhook: { registered: false, error: 'network unavailable' },
-      }),
+    mutate: () => {
+      if (options.onSuccess) {
+        void options.onSuccess({
+          telegramWebhook: { registered: false, error: 'network unavailable' },
+        });
+      }
+    },
   }),
   useQueryClient: () => ({ invalidateQueries: invalidateQueriesMock }),
 }));
@@ -59,6 +62,9 @@ vi.mock('@/trpc/client', () => ({
     },
     linkedAccounts: {
       telegram: { queryKey: () => ['linkedAccounts.telegram'] },
+    },
+    setupNew: {
+      trackCommsState: { mutationOptions: () => ({}) },
     },
   }),
 }));

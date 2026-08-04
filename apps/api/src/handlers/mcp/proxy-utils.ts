@@ -307,6 +307,7 @@ interface McpProxyConfig {
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
   allowedToolNames?: readonly string[];
+  stripToolSchemaPatterns?: boolean;
   timeoutMs?: number;
 }
 
@@ -359,11 +360,36 @@ function isExpectedProxyDisconnect(error: unknown): error is DOMException {
   );
 }
 
+/**
+ * Resend's MCP uses Zod's email schema, which serializes to a JSON Schema
+ * `pattern` containing regex lookarounds. Azure OpenAI rejects `pattern` in
+ * tool schemas, while Resend still validates the actual tool call upstream.
+ * Strip only the model-facing keyword at this proxy boundary.
+ */
+function stripToolSchemaPatterns(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripToolSchemaPatterns);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== 'pattern')
+      .map(([key, nestedValue]) => [key, stripToolSchemaPatterns(nestedValue)]),
+  );
+}
+
 function filterToolsListPayload(
   payload: unknown,
   toolPolicy: {
     allowedToolNames?: readonly string[];
     disabledToolNames?: readonly string[] | null;
+  },
+  options?: {
+    stripToolSchemaPatterns?: boolean;
   },
 ): unknown {
   if (!payload || typeof payload !== 'object') {
@@ -393,11 +419,15 @@ function filterToolsListPayload(
       ),
   );
 
+  const filteredTools = filterMcpToolDefinitions(namedTools, toolPolicy);
+
   return {
     ...payload,
     result: {
       ...result,
-      tools: filterMcpToolDefinitions(namedTools, toolPolicy),
+      tools: options?.stripToolSchemaPatterns
+        ? stripToolSchemaPatterns(filteredTools)
+        : filteredTools,
     },
   };
 }
@@ -411,6 +441,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     allowAuthTokens = false,
     validateTaskRunToken = verifyTaskRunTokenTargetExists,
     allowedToolNames,
+    stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
   } = config;
 
   const app = new Hono<{ Variables: Variables }>();
@@ -652,7 +683,7 @@ export function createMcpProxy(config: McpProxyConfig) {
       }
 
       if (
-        hasToolRestrictions &&
+        (hasToolRestrictions || shouldStripToolSchemaPatterns) &&
         method === 'POST' &&
         getJsonRpcMethod(parsedBody) === 'tools/list' &&
         upstreamResponse.ok
@@ -665,10 +696,16 @@ export function createMcpProxy(config: McpProxyConfig) {
           if (!payload) {
             throw new Error('Unable to parse upstream tools/list payload');
           }
-          const filteredPayload = filterToolsListPayload(payload, {
-            allowedToolNames: effectiveAllowedToolNames,
-            disabledToolNames: credentials.disabledToolNames,
-          });
+          const filteredPayload = filterToolsListPayload(
+            payload,
+            {
+              allowedToolNames: effectiveAllowedToolNames,
+              disabledToolNames: credentials.disabledToolNames,
+            },
+            {
+              stripToolSchemaPatterns: shouldStripToolSchemaPatterns,
+            },
+          );
           const headers = buildProxyResponseHeaders(upstreamResponse.headers);
           headers.set('content-type', 'application/json');
 

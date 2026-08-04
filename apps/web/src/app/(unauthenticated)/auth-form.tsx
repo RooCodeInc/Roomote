@@ -70,6 +70,7 @@ export function AuthForm({
   inviteRole = null,
   hideModeSwitchMessage = false,
   noticeMessage = null,
+  accountLinkHelpText = null,
 }: {
   enabledProviders?: AuthProvider[];
   /**
@@ -88,6 +89,7 @@ export function AuthForm({
    * the per-attempt error state.
    */
   noticeMessage?: string | null;
+  accountLinkHelpText?: string | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -219,6 +221,7 @@ export function AuthForm({
             <div className="max-w-sm">
               <EmailPasswordAuth
                 redirectUrl={redirectUrl}
+                accountLinkHelpText={accountLinkHelpText}
                 allowSignUp={canSignUp}
                 labelsAsPlaceholders={true}
                 hideModeSwitchMessage={

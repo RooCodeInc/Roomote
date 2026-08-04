@@ -132,6 +132,24 @@ describe('shouldCaptureActivationTaskCreatedEvent', () => {
       workflow: 'standard' as const,
       initiator: { kind: 'automation', key: 'dependabot_triage' } as const,
     },
+    {
+      taskType: TaskPayloadKind.StandardTask,
+      workflow: 'standard' as const,
+      initiator: userInitiator,
+      sourceRunId: 42,
+    },
+    {
+      taskType: TaskPayloadKind.StandardTask,
+      workflow: 'standard' as const,
+      initiator: userInitiator,
+      environmentDefinitionId: 'environment-1',
+    },
+    {
+      taskType: TaskPayloadKind.StandardTask,
+      workflow: 'standard' as const,
+      initiator: userInitiator,
+      verifiesEnvironmentId: 'environment-1',
+    },
   ])('excludes non-activation task launches', (input) => {
     expect(shouldCaptureActivationTaskCreatedEvent(input)).toBe(false);
   });
