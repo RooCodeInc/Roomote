@@ -120,6 +120,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const steeringQueuedMessageRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const runId = taskRun?.id;
+    const taskId = taskRun?.taskId;
 
     const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
       null,
@@ -357,18 +358,38 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       cancellingRef.current = true;
 
       try {
-        await client?.commands.cancelTask.mutate({
-          cancelledBy: {
-            ...(cancelledByName ? { name: cancelledByName } : {}),
-            source: 'web',
-          },
+        if (client) {
+          try {
+            await client.commands.cancelTask.mutate({
+              cancelledBy: {
+                ...(cancelledByName ? { name: cancelledByName } : {}),
+                source: 'web',
+              },
+            });
+            return;
+          } catch (error) {
+            console.error('[sandbox] cancelTask error:', error);
+          }
+        }
+
+        if (!taskId) {
+          return;
+        }
+
+        const result = await trpcClient.taskRuns.cancel.mutate({
+          taskId,
+          runId,
         });
+
+        if (!result.success) {
+          throw new Error(result.error);
+        }
       } catch (err) {
-        console.error('[sandbox] cancelTask error:', err);
+        console.error('[sandbox] cancelTask fallback error:', err);
       } finally {
         cancellingRef.current = false;
       }
-    }, [client, cancelledByName]);
+    }, [client, cancelledByName, runId, taskId, trpcClient]);
 
     const handleSubmit = useCallback(
       async (message: PromptInputMessage) => {
