@@ -80,7 +80,12 @@ export async function GET(request: NextRequest) {
       redirectUri: buildGiteaOAuthRedirectUri(callbackOrigin),
     });
     if (!isSetupOAuthReturnTarget(returnTarget)) {
-      await syncRepositoriesCommand(authResult, { provider: 'gitea' });
+      const syncResult = await syncRepositoriesCommand(authResult, {
+        provider: 'gitea',
+      });
+      if (!syncResult.success) {
+        throw new Error(syncResult.error);
+      }
     }
     const resultTarget = addSourceControlOAuthResult(
       returnTarget,

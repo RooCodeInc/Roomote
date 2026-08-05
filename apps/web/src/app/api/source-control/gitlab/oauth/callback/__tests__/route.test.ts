@@ -180,4 +180,23 @@ describe('GET /api/source-control/gitlab/oauth/callback', () => {
       { provider: 'gitlab' },
     );
   });
+
+  it('reports a repository sync failure instead of a connected result', async () => {
+    getSetupBootstrapStateMock.mockResolvedValue({ setupOpen: false });
+    syncRepositoriesMock.mockResolvedValue({
+      success: false,
+      error: 'GitLab rejected the deployment credential.',
+    });
+
+    const response = await GET(
+      buildRequest(
+        '?code=auth-code&state=state-1',
+        'roomote-gitlab-oauth-state=state-1; roomote-gitlab-oauth-return-to=%2Fsettings%2Fsource-control',
+      ),
+    );
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.roomote.ai/settings/source-control?gitlab=error',
+    );
+  });
 });

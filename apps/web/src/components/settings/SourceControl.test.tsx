@@ -536,6 +536,16 @@ describe('SourceControl settings', () => {
     );
   });
 
+  it('shows retry guidance when an OAuth callback reports a failed connection or sync', () => {
+    state.searchParams = 'gitea=error';
+
+    render(<SourceControl />);
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Failed to connect or sync Gitea. Check the credentials and try again.',
+    );
+  });
+
   it('requests the regular callback background when updating GitHub from settings', () => {
     state.searchParams = 'tab=source-control';
 

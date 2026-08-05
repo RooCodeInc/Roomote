@@ -80,7 +80,12 @@ export async function GET(request: NextRequest) {
       redirectUri: buildBitbucketOAuthRedirectUri(publicAppUrl),
     });
     if (!isSetupOAuthReturnTarget(returnTarget)) {
-      await syncRepositoriesCommand(authResult, { provider: 'bitbucket' });
+      const syncResult = await syncRepositoriesCommand(authResult, {
+        provider: 'bitbucket',
+      });
+      if (!syncResult.success) {
+        throw new Error(syncResult.error);
+      }
     }
     const resultTarget = addSourceControlOAuthResult(
       returnTarget,

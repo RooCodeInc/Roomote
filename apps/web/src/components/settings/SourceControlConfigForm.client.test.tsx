@@ -524,6 +524,36 @@ describe('SourceControlConfigForm', () => {
     expect(screen.getByText(/Not in use yet/)).toBeInTheDocument();
   });
 
+  it('allows saving delegated Azure DevOps app settings before account linking', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildAdoDelegatedStatus({
+          savedSatisfied: false,
+          savedValue: null,
+        })}
+        showSetupInstructions
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('ADO_ORGANIZATION'), {
+      target: { value: 'acme' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_CLIENT_ID'), {
+      target: { value: 'client-id' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_CLIENT_SECRET'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_TENANT_ID'), {
+      target: { value: 'tenant-id' },
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'Save configuration' }),
+    ).toBeEnabled();
+  });
+
   it('says a reconnected Azure DevOps account is not in use while the saved id still belongs to the previous account', () => {
     adoLinkedAccountRef.current = {
       data: {

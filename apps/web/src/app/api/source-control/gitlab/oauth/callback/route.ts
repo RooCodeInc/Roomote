@@ -81,7 +81,12 @@ export async function GET(request: NextRequest) {
       redirectUri: buildGitLabOAuthRedirectUri(publicAppUrl),
     });
     if (!isSetupOAuthReturnTarget(returnTarget)) {
-      await syncRepositoriesCommand(authResult, { provider: 'gitlab' });
+      const syncResult = await syncRepositoriesCommand(authResult, {
+        provider: 'gitlab',
+      });
+      if (!syncResult.success) {
+        throw new Error(syncResult.error);
+      }
     }
     const resultTarget = addSourceControlOAuthResult(
       returnTarget,

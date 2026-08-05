@@ -257,6 +257,29 @@ export function SourceControl() {
   const adoIsConnected = (adoRepositories.data?.length ?? 0) > 0;
   const search = searchParams.toString();
   const redirectTarget = search ? `${pathname}?${search}` : pathname;
+  const failedProvider = sourceControlTokenBackedProviders.find(
+    (provider) => searchParams.get(provider) === 'error',
+  );
+
+  useEffect(() => {
+    if (!failedProvider) {
+      return;
+    }
+
+    const label = sourceControlProviderDescriptors[failedProvider].label;
+    toast.error(
+      `Failed to connect or sync ${label}. Check the credentials and try again.`,
+    );
+
+    const nextSearchParams = new URLSearchParams(search);
+    nextSearchParams.delete(failedProvider);
+    const nextSearch = nextSearchParams.toString();
+    window.history.replaceState(
+      window.history.state,
+      '',
+      nextSearch ? `${pathname}?${nextSearch}` : pathname,
+    );
+  }, [failedProvider, pathname, search]);
 
   const tokenProviderState = {
     gitlab: {

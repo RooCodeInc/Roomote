@@ -296,11 +296,7 @@ export function SourceControlConfigForm({
         nextValue.length === 0
       );
     }) ||
-    (isAdo &&
-      (adoAuthMode === 'pat'
-        ? !hasAdoPat
-        : !hasAdoAppCredentials ||
-          (adoAuthMode === 'delegated' && !adoLinkedAccount.data?.account)));
+    (isAdo && (adoAuthMode === 'pat' ? !hasAdoPat : !hasAdoAppCredentials));
 
   const hasNewValues = visibleFields.some((field) => {
     if (field.runtimeSatisfied) {
