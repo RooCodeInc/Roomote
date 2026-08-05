@@ -34,6 +34,7 @@ function messageEvent(input: {
   channel?: { id: string; type: number; parent_id?: string };
   attachments?: unknown[];
   mentions?: unknown[];
+  messageSnapshots?: unknown[];
 }) {
   return parse({
     op: 0,
@@ -51,6 +52,7 @@ function messageEvent(input: {
       },
       mentions: input.mentions ?? [],
       attachments: input.attachments ?? [],
+      message_snapshots: input.messageSnapshots ?? [],
       ...(input.channel ? { channel: input.channel } : {}),
     },
   });
@@ -84,6 +86,68 @@ describe('Discord Gateway event normalization', () => {
       channel: 'channel-1',
       turnPolicy: { reactionsAllowed: true },
     });
+  });
+
+  it('normalizes forwarded message snapshots as task content', () => {
+    const event = messageEvent({
+      messageSnapshots: [
+        {
+          message: {
+            content: 'Forwarded request',
+            mentions: [],
+            attachments: [
+              {
+                id: 'attachment-1',
+                filename: 'context.png',
+                content_type: 'image/png',
+                size: 1234,
+                url: 'https://cdn.discordapp.com/attachments/context.png',
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(isDiscordTaskEntryEvent(event, { botUserId })).toBe(true);
+    expect(
+      discordEventToQueuedCommunicationMessage(event, { botUserId }),
+    ).toMatchObject({
+      text: 'Forwarded request\n\nImage: context.png',
+    });
+  });
+
+  it('applies guild mention gating to forwarded snapshot content', () => {
+    const mentioned = messageEvent({
+      guildId: 'guild-1',
+      messageSnapshots: [
+        {
+          message: {
+            content: `<@${botUserId}> fix the forwarded bug`,
+            mentions: [{ id: botUserId, username: 'RoomoteBot', bot: true }],
+            attachments: [],
+          },
+        },
+      ],
+    });
+    const unmentioned = messageEvent({
+      guildId: 'guild-1',
+      messageSnapshots: [
+        {
+          message: {
+            content: 'Just forwarding context',
+            mentions: [],
+            attachments: [],
+          },
+        },
+      ],
+    });
+
+    expect(isDiscordTaskEntryEvent(mentioned, { botUserId })).toBe(true);
+    expect(
+      discordEventToQueuedCommunicationMessage(mentioned, { botUserId }),
+    ).toMatchObject({ text: 'fix the forwarded bug' });
+    expect(isDiscordTaskEntryEvent(unmentioned, { botUserId })).toBe(false);
   });
 
   it('requires a bot mention in guild channels outside task threads', () => {

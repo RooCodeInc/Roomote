@@ -5,6 +5,7 @@ import {
   getDiscordInteractionCommand,
   getDiscordInteractionCreate,
   getDiscordInteractionUser,
+  getDiscordMessageAttachments,
   getDiscordMessageCreate,
   getDiscordReactionAdd,
   isDiscordBotMentioned,
@@ -649,8 +650,11 @@ async function processDiscordGatewayEvent(
     userId: senderUserId,
   });
 
-  const processedAttachments = message?.attachments.length
-    ? await processDiscordAttachments(message.attachments)
+  const messageAttachments = message
+    ? getDiscordMessageAttachments(message)
+    : [];
+  const processedAttachments = messageAttachments.length
+    ? await processDiscordAttachments(messageAttachments)
     : { images: [], attachmentTexts: [], warnings: [] };
   for (const warning of processedAttachments.warnings) {
     apiLogger.warn(`[discord] Attachment warning: ${warning}`);

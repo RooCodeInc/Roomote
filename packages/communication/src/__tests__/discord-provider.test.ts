@@ -665,6 +665,40 @@ describe('DiscordCommunicationProvider', () => {
     ).rejects.toThrow();
   });
 
+  it('includes forwarded snapshot content when fetching messages', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000003';
+    const sent = await provider.postMessage({ channelId, text: 'placeholder' });
+    Object.assign(server.state.messages[channelId]![0]!, {
+      content: '',
+      attachments: [],
+      message_snapshots: [
+        {
+          message: {
+            content: 'Forwarded request',
+            attachments: [
+              {
+                id: 'attachment-1',
+                filename: 'context.png',
+                content_type: 'image/png',
+                size: 1234,
+                url: 'https://cdn.discordapp.com/attachments/context.png',
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    await expect(
+      provider.fetchMessage({ channelId, messageId: sent.messageId }),
+    ).resolves.toMatchObject({
+      text: 'Forwarded request',
+      fileCount: 1,
+      files: [{ id: 'attachment-1', name: 'context.png' }],
+    });
+  });
+
   it('maps Slack-style reaction names onto Discord unicode emoji', async () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000002';

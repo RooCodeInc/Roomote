@@ -1,5 +1,8 @@
 import {
   discordEventToQueuedCommunicationMessage,
+  getDiscordMessageAttachments,
+  getDiscordMessageContent,
+  isDiscordBotMentioned,
   type DiscordGatewayEvent,
   type DiscordMessage,
 } from '@roomote/communication/discord-event';
@@ -47,14 +50,6 @@ const CHANNEL_AUTO_START_MESSAGE_TYPES = new Set([0, 19]);
 
 const DISCORD_ROUTING_LOCK_PREFIX = 'discord:routing-lock:';
 const ROUTING_LOCK_TTL_SECONDS = 60;
-
-function isBotMentioned(message: DiscordMessage, botUserId: string): boolean {
-  return (
-    message.mentions.some((mention) => mention.id === botUserId) ||
-    message.content.includes(`<@${botUserId}>`) ||
-    message.content.includes(`<@!${botUserId}>`)
-  );
-}
 
 /**
  * Discord has no ephemeral channel messages, so the "connect your account"
@@ -141,7 +136,10 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
     return false;
   }
 
-  if (!message.content.trim() && message.attachments.length === 0) {
+  if (
+    !getDiscordMessageContent(message) &&
+    getDiscordMessageAttachments(message).length === 0
+  ) {
     return false;
   }
 
@@ -241,8 +239,9 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
     queuedMessageUserId = mappedUserId;
   }
 
-  const processedAttachments = message.attachments.length
-    ? await processDiscordAttachments(message.attachments)
+  const messageAttachments = getDiscordMessageAttachments(message);
+  const processedAttachments = messageAttachments.length
+    ? await processDiscordAttachments(messageAttachments)
     : { images: [], attachmentTexts: [], warnings: [] };
   for (const warning of processedAttachments.warnings) {
     apiLogger.warn(`[DiscordChannelAutoStart] Attachment warning: ${warning}`);
@@ -303,7 +302,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
           channelId: channel.channelId,
           channelName: channel.channelName,
           messageText: queuedMessage.text,
-          botMentioned: isBotMentioned(message, botUserId),
+          botMentioned: isDiscordBotMentioned(message, botUserId),
           launchCriteria,
           isBotAuthored,
           logContext,
