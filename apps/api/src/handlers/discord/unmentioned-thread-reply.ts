@@ -1,5 +1,10 @@
-import type { DiscordMessage } from '@roomote/communication/discord-event';
-import { isDiscordBotMentioned } from '@roomote/communication/discord-event';
+import {
+  getDiscordMessageContent,
+  getDiscordMessageMentions,
+  isDiscordBotMentioned,
+  type DiscordMessage,
+  type DiscordUser,
+} from '@roomote/communication/discord-event';
 
 import {
   compareBigIntMessageIds,
@@ -26,13 +31,14 @@ function mentionsDiscordBotInText(
 
 function mentionsDiscordUserOtherThanBotWithoutMentioningBot(
   text: string,
+  mentions: DiscordUser[],
   botUserId: string | undefined,
 ): boolean {
-  const mentionedUserIds = getMentionedDiscordUserIds(text);
-  return (
-    mentionedUserIds.length > 0 &&
-    !mentionedUserIds.some((userId) => userId === botUserId)
-  );
+  const mentionedUserIds = new Set([
+    ...getMentionedDiscordUserIds(text),
+    ...mentions.map((mention) => mention.id),
+  ]);
+  return mentionedUserIds.size > 0 && !mentionedUserIds.has(botUserId ?? '');
 }
 
 function mentionsDiscordUserOtherThanBotOrUser(
@@ -122,7 +128,8 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   // at that person, not Roomote.
   if (
     mentionsDiscordUserOtherThanBotWithoutMentioningBot(
-      message.content,
+      getDiscordMessageContent(message),
+      getDiscordMessageMentions(message),
       botUserId,
     )
   ) {

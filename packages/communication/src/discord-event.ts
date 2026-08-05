@@ -370,7 +370,9 @@ export function getDiscordMessageContent(message: DiscordMessage): string {
     .join('\n\n');
 }
 
-function getDiscordMessageMentions(message: DiscordMessage): DiscordUser[] {
+export function getDiscordMessageMentions(
+  message: DiscordMessage,
+): DiscordUser[] {
   return [
     ...message.mentions,
     ...(message.message_snapshots ?? []).flatMap(
