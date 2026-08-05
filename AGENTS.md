@@ -10,7 +10,8 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 - Do not put customer names, customer data, private deployment details, secrets, credentials, or internal maintainer discussion into commits, PR titles/bodies, PR/issue comments, review replies, or other public artifacts.
 - Prefer private channels (for example Slack or the task UI) for anything that is customer-specific, confidential, or only meaningful as internal discussion.
-- When writing public text, keep it general enough for an open-source audience and omit private context even when it was available in the private task thread.
+- Withhold information based on whether the information itself is sensitive, not merely because it appeared in a private task thread. Public artifacts should still include useful, non-sensitive technical details such as public URLs, error messages, stack traces, file paths, commands, and validation results.
+- Redact only the sensitive portions of otherwise useful technical details (for example credentials in a URL or customer data in an error) rather than omitting the entire detail.
 
 ## Setup
 
