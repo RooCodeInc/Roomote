@@ -118,6 +118,55 @@ export function buildActivationPrMergedProperties(properties: {
   };
 }
 
+export type ActivationAutomationAction = 'enabled' | 'disabled';
+
+export type ActivationAutomation =
+  | 'call_roomote_via_emoji'
+  | 'slack_channel_auto_start'
+  | 'review_code'
+  | 'conflict_resolver'
+  | 'manager_stats'
+  | 'sentry_triage'
+  | 'dependabot_triage'
+  | 'codeql_triage'
+  | 'issue_fixer'
+  | 'security_auditor'
+  | 'code_quality_auditor'
+  | 'ci_failure_triage'
+  | 'suggester'
+  | 'announcer'
+  | 'platform_issue_alerts';
+
+export function buildActivationAutomationProperties(
+  automation: ActivationAutomation,
+): TelemetryEventProperties {
+  return { automation };
+}
+
+export type ActivationCustomAutomationAction = 'created' | 'deleted';
+export type ActivationAutomationDestinationProvider =
+  | 'slack'
+  | 'discord'
+  | 'teams'
+  | 'telegram';
+
+export function toActivationAutomationDestinationProvider(
+  provider: string | null | undefined,
+): ActivationAutomationDestinationProvider | null {
+  return provider === 'slack' ||
+    provider === 'discord' ||
+    provider === 'teams' ||
+    provider === 'telegram'
+    ? provider
+    : null;
+}
+
+export function buildActivationCustomAutomationProperties(
+  destinationProvider: ActivationAutomationDestinationProvider | null,
+): TelemetryEventProperties {
+  return { destinationProvider };
+}
+
 /**
  * Wire types for the hosted Ping service (`/v1/*`). Versioned: breaking
  * changes require a new API version, additive fields do not.

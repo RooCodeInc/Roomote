@@ -16,6 +16,12 @@ import type { UserAuthSuccess } from '@/types';
 import { updateBackgroundAgentSettingsCommand } from '../settings-update';
 import type { UpdateBackgroundAgentSettingsInput } from '../types';
 
+const mockCaptureActivationAutomationChanged = vi.hoisted(() => vi.fn());
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureActivationAutomationChanged: mockCaptureActivationAutomationChanged,
+}));
+
 // Keep the test hermetic: the command constructs a SlackNotifier whenever a
 // Slack installation exists and probes channel membership/names after saving.
 vi.mock('@roomote/slack', async (importOriginal) => {
@@ -195,11 +201,64 @@ async function getAutomationTargets(key: BackgroundAutomationKey) {
 
 describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   beforeEach(async () => {
+    mockCaptureActivationAutomationChanged.mockClear();
     await db.delete(automations);
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
     await db.delete(users).where(eq(users.id, adminAuth.userId));
+  });
+
+  it('tracks a built-in automation when its enabled state changes', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'channel-1',
+      channelName: 'reports',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsDiscordChannel: 'channel-1',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
+      'enabled',
+      'manager_stats',
+    );
+  });
+
+  it('does not track a built-in automation when its enabled state is unchanged', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({ savingAutomation: 'managerStats' }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCaptureActivationAutomationChanged).not.toHaveBeenCalled();
+  });
+
+  it('tracks a built-in automation when it is disabled', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: true,
+      schedule: { mode: 'weekly' },
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({ savingAutomation: 'managerStats' }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
+      'disabled',
+      'manager_stats',
+    );
   });
 
   it('preserves a disabled emoji trigger during an unrelated save', async () => {

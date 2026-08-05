@@ -25,6 +25,8 @@ import {
 } from '@roomote/sdk/server';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { SlackNotifier } from '@roomote/slack';
+import { captureActivationAutomationChanged } from '@roomote/telemetry/server';
+import type { ActivationAutomation } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -76,6 +78,97 @@ import type {
   SlackChannelFieldErrorKey,
   UpdateBackgroundAgentSettingsInput,
 } from './types';
+
+type BackgroundAgentSettings = Awaited<
+  ReturnType<typeof getBackgroundAgentSettingsForDeployment>
+>;
+
+function getSavedAutomationActivation(
+  savingAutomation: UpdateBackgroundAgentSettingsInput['savingAutomation'],
+  settings: BackgroundAgentSettings,
+): { automation: ActivationAutomation; enabled: boolean } | null {
+  switch (savingAutomation) {
+    case 'callRoomoteViaEmoji':
+      return {
+        automation: 'call_roomote_via_emoji',
+        enabled: settings.callRoomoteViaEmojiEnabled,
+      };
+    case 'channelAutoStart':
+      return {
+        automation: 'slack_channel_auto_start',
+        enabled: settings.channelAutoStartEnabled,
+      };
+    case 'reviewer':
+      return {
+        automation: 'review_code',
+        enabled: settings.reviewCodeSettings.enabled === true,
+      };
+    case 'conflictResolver':
+      return {
+        automation: 'conflict_resolver',
+        enabled: settings.conflictResolverFrequency !== 'off',
+      };
+    case 'managerStats':
+      return {
+        automation: 'manager_stats',
+        enabled: settings.managerStatsFrequency !== 'off',
+      };
+    case 'sentryTriage':
+      return {
+        automation: 'sentry_triage',
+        enabled: settings.sentryTriageFrequency !== 'off',
+      };
+    case 'dependabotTriage':
+      return {
+        automation: 'dependabot_triage',
+        enabled: settings.dependabotTriageFrequency !== 'off',
+      };
+    case 'codeqlTriage':
+      return {
+        automation: 'codeql_triage',
+        enabled: settings.codeqlTriageFrequency !== 'off',
+      };
+    case 'issueFixer':
+      return {
+        automation: 'issue_fixer',
+        enabled: settings.issueFixerFrequency !== 'off',
+      };
+    case 'securityAuditor':
+      return {
+        automation: 'security_auditor',
+        enabled: settings.securityAuditorFrequency !== 'off',
+      };
+    case 'codeQualityAuditor':
+      return {
+        automation: 'code_quality_auditor',
+        enabled: settings.codeQualityAuditorFrequency !== 'off',
+      };
+    case 'ciFailureTriage':
+      return {
+        automation: 'ci_failure_triage',
+        enabled: settings.ciFailureTriageFrequency !== 'off',
+      };
+    case 'suggester':
+      return {
+        automation: 'suggester',
+        enabled: settings.suggesterFrequency !== 'off',
+      };
+    case 'announcer':
+      return {
+        automation: 'announcer',
+        enabled: settings.announcerFrequency !== 'off',
+      };
+    case 'platformIssueAlerts':
+      return {
+        automation: 'platform_issue_alerts',
+        enabled:
+          settings.platformIssueSlackChannelId !== null ||
+          settings.platformIssueDiscordChannelId !== null,
+      };
+    case 'managerChannel':
+      return null;
+  }
+}
 
 function parseSentryProjectSlugs(value: string | null | undefined): string[] {
   return [
@@ -1290,6 +1383,24 @@ export async function updateBackgroundAgentSettingsCommand(
   ]);
 
   const updatedSettings = await getBackgroundAgentSettingsForDeployment();
+  const previousActivation = getSavedAutomationActivation(
+    input.savingAutomation,
+    existingSettings,
+  );
+  const updatedActivation = getSavedAutomationActivation(
+    input.savingAutomation,
+    updatedSettings,
+  );
+  if (
+    previousActivation &&
+    updatedActivation &&
+    previousActivation.enabled !== updatedActivation.enabled
+  ) {
+    void captureActivationAutomationChanged(
+      updatedActivation.enabled ? 'enabled' : 'disabled',
+      updatedActivation.automation,
+    );
+  }
   const updatedChannelAutoStartSlackChannelIds =
     updatedSettings.channelAutoStartSlackChannels.map(
       ({ channelId }) => channelId,
