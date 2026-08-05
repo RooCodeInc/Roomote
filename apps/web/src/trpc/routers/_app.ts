@@ -681,8 +681,8 @@ const automationsRouter = createRouter({
   createCustomAutomation: protectedProcedure
     .input(
       z.object({
-        name: z.string().trim().min(1).max(100),
-        prompt: z.string().trim().min(1).max(8_000),
+        name: z.string(),
+        prompt: z.string(),
         enabled: z.boolean(),
         scheduleMode: z.enum([
           'off',
@@ -692,27 +692,14 @@ const automationsRouter = createRouter({
           'weekly',
           'cron',
         ]),
-        cronExpression: z.string().trim().max(200).nullable().optional(),
-        model: z
-          .string()
-          .trim()
-          .min(1)
-          .max(200)
-          .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
-          .nullable()
-          .optional(),
+        cronExpression: z.string().nullable().optional(),
+        model: z.string().nullable().optional(),
         environmentId: z.string().uuid(),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
           .optional(),
-        targetChannelId: z.string().trim().min(1).max(160).optional(),
-        targetServiceUrl: z
-          .string()
-          .trim()
-          .min(1)
-          .max(500)
-          .nullable()
-          .optional(),
+        targetChannelId: z.string().optional(),
+        targetServiceUrl: z.string().nullable().optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -723,8 +710,8 @@ const automationsRouter = createRouter({
     .input(
       z.object({
         id: z.string().uuid(),
-        name: z.string().trim().min(1).max(100),
-        prompt: z.string().trim().min(1).max(8_000),
+        name: z.string(),
+        prompt: z.string(),
         enabled: z.boolean(),
         scheduleMode: z.enum([
           'off',
@@ -734,27 +721,14 @@ const automationsRouter = createRouter({
           'weekly',
           'cron',
         ]),
-        cronExpression: z.string().trim().max(200).nullable().optional(),
-        model: z
-          .string()
-          .trim()
-          .min(1)
-          .max(200)
-          .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
-          .nullable()
-          .optional(),
+        cronExpression: z.string().nullable().optional(),
+        model: z.string().nullable().optional(),
         environmentId: z.string().uuid(),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
           .optional(),
-        targetChannelId: z.string().trim().min(1).max(160).optional(),
-        targetServiceUrl: z
-          .string()
-          .trim()
-          .min(1)
-          .max(500)
-          .nullable()
-          .optional(),
+        targetChannelId: z.string().optional(),
+        targetServiceUrl: z.string().nullable().optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>

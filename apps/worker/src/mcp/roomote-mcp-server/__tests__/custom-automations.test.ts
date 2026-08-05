@@ -75,17 +75,7 @@ describe('handleManageCustomAutomations', () => {
     });
   });
 
-  it('still requires all create fields and defaults enabled to true', async () => {
-    const missing = await handleManageCustomAutomations(
-      { action: 'create', name: 'Incomplete' },
-      config,
-    );
-    expect(JSON.parse(missing.content[0]?.text ?? '{}')).toMatchObject({
-      success: false,
-      error: 'prompt is required',
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-
+  it('leaves create validation to the API and defaults enabled to true', async () => {
     await handleManageCustomAutomations(
       {
         action: 'create',
@@ -98,5 +88,33 @@ describe('handleManageCustomAutomations', () => {
     );
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(request.body as string)).toMatchObject({ enabled: true });
+  });
+
+  it('returns the API stable validation error to the MCP caller', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: 'Model must use provider/model format.',
+          code: 'invalid_input',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleManageCustomAutomations(
+      {
+        action: 'create',
+        name: 'Daily scan',
+        prompt: 'Scan the repository.',
+        schedule: 'daily',
+        model: 'no-provider-prefix',
+        environmentId: 'environment-1',
+      },
+      config,
+    );
+
+    expect(result.content[0]?.text).toContain(
+      'Model must use provider/model format.',
+    );
   });
 });

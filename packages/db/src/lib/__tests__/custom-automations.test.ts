@@ -65,9 +65,9 @@ describe('custom automations helpers', () => {
       },
     });
 
-    expect(updated.enabled).toBe(false);
-    expect(updated.scheduleMode).toBe('weekly');
-    expect(updated.prompt).toContain('updated');
+    expect(updated?.enabled).toBe(false);
+    expect(updated?.scheduleMode).toBe('weekly');
+    expect(updated?.prompt).toContain('updated');
 
     await deleteCustomAutomation(created.id);
     expect(await getCustomAutomationById(created.id)).toBeNull();
@@ -99,7 +99,7 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
-  it('persists canonical cron schedules and rejects invalid mode combinations', async () => {
+  it('persists canonical cron schedules', async () => {
     const [environment] = await db
       .insert(environments)
       .values({
@@ -120,22 +120,10 @@ describe('custom automations helpers', () => {
     expect(created.scheduleMode).toBe('cron');
     expect(created.cronExpression).toBe('0 9 * * 1-5');
 
-    await expect(
-      updateCustomAutomation(created.id, {
-        name: created.name,
-        prompt: created.prompt,
-        enabled: true,
-        scheduleMode: 'daily',
-        cronExpression: '0 9 * * *',
-        environmentId: environment!.id,
-        target: {},
-      }),
-    ).rejects.toThrow('only valid for a cron schedule');
-
     await deleteCustomAutomation(created.id);
   });
 
-  it('persists a model override and rejects malformed model ids', async () => {
+  it('persists and clears a model override', async () => {
     const [environment] = await db
       .insert(environments)
       .values({
@@ -164,19 +152,7 @@ describe('custom automations helpers', () => {
       environmentId: environment!.id,
       target: {},
     });
-    expect(cleared.model).toBeNull();
-
-    await expect(
-      updateCustomAutomation(created.id, {
-        name: created.name,
-        prompt: created.prompt,
-        enabled: true,
-        scheduleMode: 'daily',
-        model: 'no-provider-prefix',
-        environmentId: environment!.id,
-        target: {},
-      }),
-    ).rejects.toThrow('provider/model format');
+    expect(cleared?.model).toBeNull();
 
     await deleteCustomAutomation(created.id);
   });
@@ -241,18 +217,5 @@ describe('custom automations helpers', () => {
 
     await releaseCustomAutomationLaunchClaim(created.id, nextClaim!);
     await deleteCustomAutomation(created.id);
-  });
-
-  it('rejects a partially specified report destination', async () => {
-    await expect(
-      createCustomAutomation({
-        name: `Partial target ${Date.now()}`,
-        prompt: 'Scan for flaky tests.',
-        enabled: true,
-        scheduleMode: 'daily',
-        environmentId: 'ignored-by-early-validation',
-        target: { provider: 'slack' } as never,
-      }),
-    ).rejects.toThrow('Report destination');
   });
 });
