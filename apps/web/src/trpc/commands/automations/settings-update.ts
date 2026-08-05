@@ -25,6 +25,8 @@ import {
 } from '@roomote/sdk/server';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { SlackNotifier } from '@roomote/slack';
+import { captureActivationAutomationChanged } from '@roomote/telemetry/server';
+import type { ActivationAutomation } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -76,6 +78,79 @@ import type {
   SlackChannelFieldErrorKey,
   UpdateBackgroundAgentSettingsInput,
 } from './types';
+
+type BackgroundAgentSettings = Awaited<
+  ReturnType<typeof getBackgroundAgentSettingsForDeployment>
+>;
+
+function getAutomationActivations(
+  settings: BackgroundAgentSettings,
+): Array<{ automation: ActivationAutomation; enabled: boolean }> {
+  return [
+    {
+      automation: 'call_roomote_via_emoji',
+      enabled: settings.callRoomoteViaEmojiEnabled,
+    },
+    {
+      automation: 'slack_channel_auto_start',
+      enabled: settings.channelAutoStartEnabled,
+    },
+    {
+      automation: 'review_code',
+      enabled: settings.reviewCodeSettings.enabled === true,
+    },
+    {
+      automation: 'conflict_resolver',
+      enabled: settings.conflictResolverFrequency !== 'off',
+    },
+    {
+      automation: 'manager_stats',
+      enabled: settings.managerStatsFrequency !== 'off',
+    },
+    {
+      automation: 'sentry_triage',
+      enabled: settings.sentryTriageFrequency !== 'off',
+    },
+    {
+      automation: 'dependabot_triage',
+      enabled: settings.dependabotTriageFrequency !== 'off',
+    },
+    {
+      automation: 'codeql_triage',
+      enabled: settings.codeqlTriageFrequency !== 'off',
+    },
+    {
+      automation: 'issue_fixer',
+      enabled: settings.issueFixerFrequency !== 'off',
+    },
+    {
+      automation: 'security_auditor',
+      enabled: settings.securityAuditorFrequency !== 'off',
+    },
+    {
+      automation: 'code_quality_auditor',
+      enabled: settings.codeQualityAuditorFrequency !== 'off',
+    },
+    {
+      automation: 'ci_failure_triage',
+      enabled: settings.ciFailureTriageFrequency !== 'off',
+    },
+    {
+      automation: 'suggester',
+      enabled: settings.suggesterFrequency !== 'off',
+    },
+    {
+      automation: 'announcer',
+      enabled: settings.announcerFrequency !== 'off',
+    },
+    {
+      automation: 'platform_issue_alerts',
+      enabled:
+        settings.platformIssueSlackChannelId !== null ||
+        settings.platformIssueDiscordChannelId !== null,
+    },
+  ];
+}
 
 function parseSentryProjectSlugs(value: string | null | undefined): string[] {
   return [
@@ -1290,6 +1365,20 @@ export async function updateBackgroundAgentSettingsCommand(
   ]);
 
   const updatedSettings = await getBackgroundAgentSettingsForDeployment();
+  const previousActivations = new Map(
+    getAutomationActivations(existingSettings).map((activation) => [
+      activation.automation,
+      activation.enabled,
+    ]),
+  );
+  for (const activation of getAutomationActivations(updatedSettings)) {
+    if (previousActivations.get(activation.automation) !== activation.enabled) {
+      void captureActivationAutomationChanged(
+        activation.enabled ? 'enabled' : 'disabled',
+        activation.automation,
+      );
+    }
+  }
   const updatedChannelAutoStartSlackChannelIds =
     updatedSettings.channelAutoStartSlackChannels.map(
       ({ channelId }) => channelId,

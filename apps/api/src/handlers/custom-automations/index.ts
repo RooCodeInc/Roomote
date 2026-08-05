@@ -25,6 +25,8 @@ import type {
   CustomAutomationScheduleMode,
   OptionalAutomationTarget,
 } from '@roomote/types';
+import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
+import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -329,6 +331,10 @@ customAutomationsRouter.post('/', async (c) => {
       target: buildTarget(parsed.data),
       createdByUserId: adminId(c),
     });
+    void captureActivationCustomAutomationChanged(
+      'created',
+      parsed.data.targetProvider ?? null,
+    );
     return c.json({ automation, resolution: schedule.resolution }, 201);
   } catch (error) {
     const known = knownErrorResponse(c, error);
@@ -415,6 +421,10 @@ customAutomationsRouter.delete('/:id', async (c) => {
   if (!existing)
     return c.json({ error: 'Custom automation was not found.' }, 404);
   await deleteCustomAutomation(existing.id);
+  void captureActivationCustomAutomationChanged(
+    'deleted',
+    toActivationAutomationDestinationProvider(existing.target.provider),
+  );
   return c.json({ deleted: { id: existing.id, name: existing.name } });
 });
 

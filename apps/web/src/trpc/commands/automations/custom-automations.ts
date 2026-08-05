@@ -22,6 +22,8 @@ import {
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
 } from '@roomote/types';
+import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
+import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -191,6 +193,11 @@ export async function createCustomAutomationCommand(
     createdByUserId: auth.userId,
   });
 
+  void captureActivationCustomAutomationChanged(
+    'created',
+    input.targetProvider ?? null,
+  );
+
   return toListItem(created);
 }
 
@@ -237,6 +244,10 @@ export async function deleteCustomAutomationCommand(
   }
 
   await deleteCustomAutomation(input.id);
+  void captureActivationCustomAutomationChanged(
+    'deleted',
+    toActivationAutomationDestinationProvider(existing.target.provider),
+  );
   return { success: true };
 }
 

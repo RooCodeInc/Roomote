@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildActivationPrMergedProperties,
+  buildActivationAutomationProperties,
+  buildActivationCustomAutomationProperties,
   buildActivationSetupMilestoneProperties,
   buildActivationTaskProperties,
   PAGEVIEW_EVENT,
   TELEMETRY_EVENT_NAME_PATTERN,
+  toActivationAutomationDestinationProvider,
 } from '../index';
 import {
   getTelemetryConfigurationNotice,
@@ -225,5 +228,24 @@ describe('activation event properties', () => {
         surface: 'web',
       }),
     ).toEqual({ provider: 'github', workflow: 'standard', surface: 'web' });
+  });
+
+  it('allows only the built-in automation identifier', () => {
+    expect(buildActivationAutomationProperties('manager_stats')).toEqual({
+      automation: 'manager_stats',
+    });
+  });
+
+  it('allows only the custom automation destination provider', () => {
+    expect(buildActivationCustomAutomationProperties('slack')).toEqual({
+      destinationProvider: 'slack',
+    });
+    expect(buildActivationCustomAutomationProperties(null)).toEqual({
+      destinationProvider: null,
+    });
+    expect(toActivationAutomationDestinationProvider('discord')).toBe(
+      'discord',
+    );
+    expect(toActivationAutomationDestinationProvider('sentry')).toBeNull();
   });
 });
