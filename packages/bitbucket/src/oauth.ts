@@ -42,7 +42,9 @@ type BitbucketOAuthTokenResponse = {
   scopes?: string;
 };
 
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+let deletionPromise: Promise<void> | null = null;
+let connectionGeneration = 0;
 let cachedAccessToken: string | null = null;
 
 export function getBitbucketOAuthScopes(): readonly string[] {
@@ -101,11 +103,24 @@ export async function getBitbucketOAuthConnection() {
 }
 
 export async function deleteBitbucketOAuthConnection(): Promise<void> {
-  await db
-    .delete(deploymentSecrets)
-    .where(eq(deploymentSecrets.name, SECRET_NAME));
-  refreshPromise = null;
-  cachedAccessToken = null;
+  if (!deletionPromise) {
+    connectionGeneration += 1;
+    const inFlightRefresh = refreshPromise;
+    deletionPromise = (async () => {
+      await inFlightRefresh?.catch(() => undefined);
+      await db
+        .delete(deploymentSecrets)
+        .where(eq(deploymentSecrets.name, SECRET_NAME));
+      refreshPromise = null;
+      cachedAccessToken = null;
+    })();
+  }
+
+  try {
+    await deletionPromise;
+  } finally {
+    deletionPromise = null;
+  }
 }
 
 export function isBitbucketOAuthAccessToken(token: string): boolean {
@@ -186,7 +201,16 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
 }): Promise<string | null> {
+  if (deletionPromise) {
+    await deletionPromise;
+    return null;
+  }
+  const generation = connectionGeneration;
   const connection = await readConnection();
+  if (generation !== connectionGeneration || deletionPromise) {
+    await deletionPromise;
+    return null;
+  }
   if (!connection || connection.status !== 'active') return null;
   if (
     !options?.forceRefresh &&
@@ -234,12 +258,14 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
         ).toISOString(),
         status: 'active' as const,
       };
+      if (generation !== connectionGeneration) return null;
       await writeConnection(next);
       cachedAccessToken = next.accessToken;
       return next.accessToken;
     } catch (error) {
       if (requiresReauthorization) {
         try {
+          if (generation !== connectionGeneration) return null;
           await writeConnection({
             ...connection,
             status: 'reauthorization_required',
