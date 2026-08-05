@@ -178,18 +178,18 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
             <div className="ml-auto flex min-w-0 items-center">
               {isFeedbackPromptVisible ? (
                 <div
-                  className={`hidden min-w-0 items-center gap-2 px-3 text-sm text-muted-foreground md:flex relative transition-all duration-500 -right-10 ${isExpanded ? 'top-6 opacity-0' : 'top-0 opacity-100'}`}
+                  className={`hidden min-w-0 items-center gap-2 px-3 text-sm text-muted-foreground md:flex relative transition-all duration-500 delay-125 -right-10 ${isExpanded ? '-top-6 opacity-0' : 'top-0.5 opacity-100'}`}
                 >
-                  <MessageCirclePlus className="size-4 shrink-0" />
                   <span className="whitespace-nowrap">
                     <button
                       type="button"
                       onClick={() => setIsFeedbackDialogOpen(true)}
-                      className="cursor-pointer font-medium text-foreground underline underline-offset-2 hover:text-accent-foreground"
+                      className="cursor-pointer font-semibold text-muted-foreground underline underline-offset-2 hover:text-accent-foreground"
                     >
                       We need your feedback!
                     </button>
                   </span>
+                  <MessageCirclePlus className="size-4 shrink-0" />
                 </div>
               ) : null}
 
