@@ -25,6 +25,7 @@ import { dirname, join } from 'node:path';
 
 import { validateToken } from '@roomote/auth/client';
 import {
+  ROOMOTE_SYSTEM_PROMPT,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
 } from '@roomote/cloud-agents';
@@ -1010,10 +1011,10 @@ export const runTask = async ({
         sandboxInstruction,
       }),
     );
-    // Deliver workflow and runtime guidance through harness developer
-    // instructions so startup context stays out of the first user prompt.
+    // OpenCode consumes Roomote's identity, workflow, and runtime guidance
+    // through its developer-instructions layer.
     const harnessDeveloperInstructions =
-      [harnessInstructions, environmentInstructions]
+      [ROOMOTE_SYSTEM_PROMPT, harnessInstructions, environmentInstructions]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;
 

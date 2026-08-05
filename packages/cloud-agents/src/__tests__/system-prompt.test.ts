@@ -1,6 +1,16 @@
 import { ROOMOTE_SYSTEM_PROMPT } from '../system-prompt';
 
 describe('ROOMOTE_SYSTEM_PROMPT', () => {
+  it('keeps Roomote identity without obsolete edit-tool instructions', () => {
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'You are Roomote, a software engineering teammate.',
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('apply_patch');
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain(
+      'Do not use Python to read or write files',
+    );
+  });
+
   it('references shared workspace guidance for applicable repo-local AGENTS files instead of a developer-instruction inventory', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
       'follow the shared workspace guidance for the prepared repositories',
