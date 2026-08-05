@@ -49,6 +49,7 @@ Each submitted act item must:
 - target exactly one repository from repository_scope
 - copy the matching \`targetEnvironmentId\` from the "Repository environments" list
 - include \`executionPrompt\` that starts with \`$update-dependencies\`
+- explicitly state in \`executionPrompt\` that the remediation must not modify or bypass dependency minimum-age policy, including pnpm \`minimumReleaseAge\` and \`minimumReleaseAgeExclude\`; use only versions allowed by the existing policy
 - state that success means re-checking the targeted alert bundle and leaving no actionable alerts from that bundle open, unless an existing related PR already covers them
 - include investigationContext with the alert URL or number, alert summary, package, ecosystem, manifest path, severity, vulnerable range, first patched version, related open PRs and the alerts they cover, the exact GitHub CLI commands used during triage, and the validation the execution task must perform before opening a PR
 

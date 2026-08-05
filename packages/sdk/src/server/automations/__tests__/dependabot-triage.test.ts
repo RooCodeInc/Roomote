@@ -131,6 +131,10 @@ describe('dependabotTriageJob buildScanTask', () => {
       'every eligible environment with uncovered actionable alerts',
     );
     expect(payload.description).toContain(
+      'must not modify or bypass dependency minimum-age policy',
+    );
+    expect(payload.description).toContain('minimumReleaseAgeExclude');
+    expect(payload.description).toContain(
       'Do not post any Slack opening acknowledgement, scan announcement, progress update, or partial finding',
     );
     expect(payload.description).toContain(
