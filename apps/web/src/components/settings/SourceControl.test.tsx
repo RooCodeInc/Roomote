@@ -409,6 +409,11 @@ describe('SourceControl settings', () => {
     expect(getProviderConfigOAuthAuthorizePath('bitbucket')).toBe(
       '/api/source-control/bitbucket/oauth/authorize',
     );
+    expect(
+      getProviderConfigOAuthAuthorizePath('gitea', '/settings/source-control'),
+    ).toBe(
+      '/api/source-control/gitea/oauth/authorize?redirectTo=%2Fsettings%2Fsource-control',
+    );
     expect(getProviderConfigOAuthAuthorizePath('ado')).toBeNull();
   });
 

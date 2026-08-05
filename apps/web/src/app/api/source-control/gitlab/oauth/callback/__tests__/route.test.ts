@@ -4,14 +4,18 @@ const {
   authorizeMock,
   bootstrapWebRuntimeEnvMock,
   exchangeGitLabOAuthCodeMock,
+  getSetupBootstrapStateMock,
   resolveDeploymentEnvVarMock,
   resolveGitLabBaseUrlMock,
+  syncRepositoriesMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   bootstrapWebRuntimeEnvMock: vi.fn(),
   exchangeGitLabOAuthCodeMock: vi.fn(),
+  getSetupBootstrapStateMock: vi.fn(),
   resolveDeploymentEnvVarMock: vi.fn(),
   resolveGitLabBaseUrlMock: vi.fn(),
+  syncRepositoriesMock: vi.fn(),
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -20,6 +24,14 @@ vi.mock('@/lib/server', () => ({
 
 vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
   bootstrapWebRuntimeEnv: bootstrapWebRuntimeEnvMock,
+}));
+
+vi.mock('@/lib/server/setup-bootstrap-state', () => ({
+  getSetupBootstrapState: getSetupBootstrapStateMock,
+}));
+
+vi.mock('@/trpc/commands/source-control', () => ({
+  syncRepositoriesCommand: syncRepositoriesMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -77,6 +89,8 @@ describe('GET /api/source-control/gitlab/oauth/callback', () => {
       return null;
     });
     exchangeGitLabOAuthCodeMock.mockResolvedValue(undefined);
+    getSetupBootstrapStateMock.mockResolvedValue({ setupOpen: true });
+    syncRepositoriesMock.mockResolvedValue({ success: true, repositories: [] });
   });
 
   it('exchanges the code with redirect_uri built from R_PUBLIC_URL', async () => {
@@ -146,5 +160,24 @@ describe('GET /api/source-control/gitlab/oauth/callback', () => {
       'https://customer.roomote.ai/setup?step=source-control-connect&gitlab=error',
     );
     expect(exchangeGitLabOAuthCodeMock).not.toHaveBeenCalled();
+  });
+
+  it('returns to settings and syncs when setup is already complete', async () => {
+    getSetupBootstrapStateMock.mockResolvedValue({ setupOpen: false });
+
+    const response = await GET(
+      buildRequest(
+        '?code=auth-code&state=state-1',
+        'roomote-gitlab-oauth-state=state-1; roomote-gitlab-oauth-return-to=%2Fsetup%3Fstep%3Dsource-control-connect',
+      ),
+    );
+
+    expect(response.headers.get('location')).toBe(
+      'https://customer.roomote.ai/settings/source-control?gitlab=connected',
+    );
+    expect(syncRepositoriesMock).toHaveBeenCalledWith(
+      { success: true, isAdmin: true },
+      { provider: 'gitlab' },
+    );
   });
 });

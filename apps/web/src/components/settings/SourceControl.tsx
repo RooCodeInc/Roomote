@@ -142,24 +142,37 @@ type TokenProviderState = {
 
 export function getProviderConfigOAuthAuthorizePath(
   provider: SourceControlTokenBackedProvider,
+  redirectTo?: string,
 ): string | null {
-  return provider === 'gitlab' ||
-    provider === 'gitea' ||
-    provider === 'bitbucket'
-    ? `/api/source-control/${provider}/oauth/authorize`
-    : null;
+  if (
+    provider !== 'gitlab' &&
+    provider !== 'gitea' &&
+    provider !== 'bitbucket'
+  ) {
+    return null;
+  }
+
+  const path = `/api/source-control/${provider}/oauth/authorize`;
+  return redirectTo
+    ? `${path}?redirectTo=${encodeURIComponent(redirectTo)}`
+    : path;
 }
 
 export function completeProviderConfigSave({
   provider,
   navigate,
   sync,
+  redirectTo,
 }: {
   provider: SourceControlTokenBackedProvider;
   navigate: (path: string) => void;
   sync: () => void;
+  redirectTo?: string;
 }): void {
-  const authorizePath = getProviderConfigOAuthAuthorizePath(provider);
+  const authorizePath = getProviderConfigOAuthAuthorizePath(
+    provider,
+    redirectTo,
+  );
 
   if (authorizePath) {
     navigate(authorizePath);
@@ -403,6 +416,7 @@ export function SourceControl() {
                 provider,
                 navigate: (path) => window.location.assign(path),
                 sync: tokenProviderState[provider].sync.mutate,
+                redirectTo: redirectTarget,
               })
             }
           />
