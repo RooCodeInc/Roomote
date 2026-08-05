@@ -119,6 +119,7 @@ export {
   Maximize2,
   Menu,
   Megaphone,
+  MessageCirclePlus,
   MessageCircleQuestionMark,
   MessageSquareCode,
   MessageSquareIcon,
