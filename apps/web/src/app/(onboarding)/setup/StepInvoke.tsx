@@ -31,7 +31,6 @@ type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 export function StepInvoke({
   onTryItOut,
   onboardingTaskId,
-  linkSuggestedTasks = false,
   communicationProviders = [],
   sourceControlProviders = [],
   includeLinear = false,
@@ -40,7 +39,6 @@ export function StepInvoke({
 }: {
   onTryItOut?: () => void;
   onboardingTaskId?: string | null;
-  linkSuggestedTasks?: boolean;
   communicationProviders?: readonly CommunicationProviderId[];
   sourceControlProviders?: readonly SourceControlProvider[];
   includeLinear?: boolean;
@@ -150,10 +148,6 @@ export function StepInvoke({
 
         if (targetEnv) {
           params.set('environmentId', targetEnv.id);
-        }
-
-        if (linkSuggestedTasks) {
-          params.set('link_suggested', 'true');
         }
 
         const query = params.toString();

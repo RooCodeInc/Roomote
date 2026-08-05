@@ -9,6 +9,8 @@ let linkedMcpIds: string[] = [];
 let orgHasLinear = false;
 let userHasLinkedLinear = false;
 let hasEnabledAutomations = true;
+let onboardingPending = false;
+let automationsPending = false;
 
 const {
   mockPush,
@@ -38,7 +40,7 @@ vi.mock('@/hooks/useUser', () => ({
 vi.mock('@/hooks/mcp-connections', () => ({
   useDeploymentMcpEnablements: () => ({
     data: enabledMcpIds.map((mcpId) => ({ mcpId, enabled: true })),
-    isPending: false,
+    isPending: onboardingPending,
   }),
   useUserMcpConnections: () => ({
     data: linkedMcpIds.map((mcpId) => ({ mcpId, authStatus: 'authenticated' })),
@@ -102,9 +104,9 @@ vi.mock('@tanstack/react-query', () => ({
             orgHasLinear,
             userHasLinkedLinear,
           },
-          isPending: false,
+          isPending: onboardingPending,
         }
-      : { data: { hasEnabledAutomations }, isPending: false },
+      : { data: { hasEnabledAutomations }, isPending: automationsPending },
 }));
 
 vi.mock('motion/react', async () => {
@@ -151,7 +153,7 @@ vi.mock('@/components/settings/TelegramLinkAccountStep', () => ({
   TelegramLinkAccountStep: () => <div>Telegram link flow</div>,
 }));
 
-import { OnboardingCard } from './OnboardingCard';
+import { OnboardingPane } from './OnboardingPane';
 
 function dismissCard() {
   fireEvent.click(screen.getAllByRole('button', { name: 'Dismiss' })[0]!);
@@ -165,6 +167,8 @@ beforeEach(() => {
   orgHasLinear = false;
   userHasLinkedLinear = false;
   hasEnabledAutomations = true;
+  onboardingPending = false;
+  automationsPending = false;
   localStorage.clear();
   vi.clearAllMocks();
 });
@@ -181,7 +185,7 @@ it('prioritizes automations and opens the automations page', () => {
     },
   ];
 
-  render(<OnboardingCard />);
+  render(<OnboardingPane />);
   expect(
     screen.getByText("Put your team's work on autopilot with automations"),
   ).toBeInTheDocument();
@@ -215,7 +219,7 @@ it('prioritizes communication accounts before source-control accounts', () => {
     },
   ];
 
-  render(<OnboardingCard />);
+  render(<OnboardingPane />);
   expect(screen.getByText('Link your Slack account')).toBeInTheDocument();
   dismissCard();
   expect(screen.getByText('Link your Discord account')).toBeInTheDocument();
@@ -234,7 +238,7 @@ it('does not offer Slack installation, but links an installed Slack account', ()
     },
   ];
 
-  render(<OnboardingCard />);
+  render(<OnboardingPane />);
   expect(
     screen.queryByText(/Chat with Roomote on Slack/),
   ).not.toBeInTheDocument();
@@ -244,20 +248,9 @@ it('does not offer Slack installation, but links an installed Slack account', ()
 });
 
 it('uses the requested admin integration setup order', () => {
-  render(<OnboardingCard />);
+  render(<OnboardingPane />);
 
-  for (const name of [
-    'Notion',
-    'Sentry',
-    'Linear',
-    'Jira',
-    'monday.com',
-    'Vercel',
-    'Supabase',
-    'PostHog',
-    'Grafana',
-    'Asana',
-  ]) {
+  for (const name of ['Notion', 'Linear', 'Jira', 'Sentry', 'Grafana']) {
     expect(
       screen.getByText(`Enable ${name} for your workspace`),
     ).toBeInTheDocument();
@@ -266,7 +259,7 @@ it('uses the requested admin integration setup order', () => {
 });
 
 it('opens the highlighted integration settings for admin setup', () => {
-  render(<OnboardingCard />);
+  render(<OnboardingPane />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
   expect(mockPush).toHaveBeenCalledWith(
@@ -278,7 +271,7 @@ it('does not show workspace setup to non-admins and prompts enabled personal MCP
   isAdmin = false;
   enabledMcpIds = ['notion'];
 
-  render(<OnboardingCard />);
+  render(<OnboardingPane />);
   expect(screen.getByText('Link your Notion account')).toBeInTheDocument();
   expect(
     screen.queryByText('Enable Notion for your workspace'),
@@ -295,7 +288,7 @@ it('starts Slack linking directly', () => {
       linked: false,
     },
   ];
-  render(<OnboardingCard />);
+  render(<OnboardingPane />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Link' }));
   expect(mockAuthenticateSlack).toHaveBeenCalledWith('/', expect.any(Object));
@@ -311,8 +304,103 @@ it('opens the Discord account-link dialog directly', () => {
       linked: false,
     },
   ];
-  render(<OnboardingCard />);
+  render(<OnboardingPane />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Link' }));
   expect(screen.getByText('Discord link flow')).toBeInTheDocument();
+});
+
+it('shows an ambient card alongside the task card', () => {
+  render(<OnboardingPane />);
+
+  expect(
+    screen.getByText('Enable Notion for your workspace'),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText('Explore recipes for common workflows'),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Explore' })).toHaveAttribute(
+    'href',
+    'https://docs.roomote.dev/cookbook',
+  );
+  expect(screen.getByRole('link', { name: 'Explore' })).toHaveAttribute(
+    'target',
+    '_blank',
+  );
+});
+
+it('advances ambient cards independently from task cards', () => {
+  render(<OnboardingPane />);
+
+  const dismissButtons = screen.getAllByRole('button', { name: 'Dismiss' });
+  fireEvent.click(dismissButtons[2]!);
+
+  expect(
+    screen.getByText('Enable Notion for your workspace'),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText('Questions or ideas? We would love to hear from you'),
+  ).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Email us' })).toHaveAttribute(
+    'href',
+    'mailto:help@roomote.dev',
+  );
+});
+
+it('shows an all-set state when a lane is exhausted', () => {
+  render(<OnboardingPane />);
+
+  for (let index = 0; index < 5; index += 1) {
+    dismissCard();
+  }
+
+  expect(screen.getByText("You're all set")).toBeInTheDocument();
+  expect(
+    screen.getByText('Explore recipes for common workflows'),
+  ).toBeInTheDocument();
+});
+
+it('persists the collapsed pane state', () => {
+  const { unmount } = render(<OnboardingPane />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Collapse onboarding' }));
+  expect(
+    screen.queryByText('Enable Notion for your workspace'),
+  ).not.toBeInTheDocument();
+  expect(localStorage.getItem('home-onboarding-pane-collapsed')).toBe('true');
+
+  unmount();
+  render(<OnboardingPane />);
+
+  expect(
+    screen.getByRole('button', { name: 'Expand onboarding' }),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Expand onboarding' }));
+  expect(
+    screen.getByText('Enable Notion for your workspace'),
+  ).toBeInTheDocument();
+  expect(localStorage.getItem('home-onboarding-pane-collapsed')).toBe('false');
+});
+
+it('omits lower-priority integrations from onboarding', () => {
+  render(<OnboardingPane />);
+
+  for (const name of ['monday.com', 'Vercel', 'Supabase', 'PostHog', 'Asana']) {
+    expect(
+      screen.queryByText(`Enable ${name} for your workspace`),
+    ).not.toBeInTheDocument();
+  }
+});
+
+it('does not show an all-set task state while priorities are loading', () => {
+  isAdmin = false;
+  onboardingPending = true;
+  automationsPending = true;
+
+  render(<OnboardingPane />);
+
+  expect(screen.queryByText("You're all set")).not.toBeInTheDocument();
+  expect(
+    screen.getByText('Explore recipes for common workflows'),
+  ).toBeInTheDocument();
 });

@@ -467,16 +467,4 @@ describe('Setup StepInvoke', () => {
       screen.getByText('Try: @roomote Add support for a reset password flow.'),
     ).toBeInTheDocument();
   });
-
-  it('includes the link_suggested param when selected suggested tasks were started', async () => {
-    render(<StepInvoke linkSuggestedTasks={true} />);
-
-    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
-
-    await waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith(
-        '/?environmentId=env-1&link_suggested=true',
-      );
-    });
-  });
 });

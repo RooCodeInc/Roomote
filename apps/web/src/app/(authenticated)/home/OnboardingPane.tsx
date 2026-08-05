@@ -27,7 +27,11 @@ import { useTRPC } from '@/trpc/client';
 import { SETTINGS_PATHS } from '@/lib/settings';
 
 import {
+  BookMarked,
   BrandIcon,
+  Check,
+  ChevronDown,
+  ChevronUp,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -35,37 +39,31 @@ import {
   DialogTitle,
   Github,
   LinearLogo,
+  Mail,
+  Skeleton,
   Slack,
   X,
   Button,
-  Spinner,
   Zap,
 } from '@/components/system';
 import { McpIcon } from '@/components/settings/McpIcon';
 import { DiscordLinkAccountStep } from '@/components/settings/DiscordLinkAccountStep';
 import { TelegramLinkAccountStep } from '@/components/settings/TelegramLinkAccountStep';
+import { DOCS_COOKBOOK_URL } from '@/lib/docs';
 
 const DISMISSED_KEY = 'OnboardingCardsDismissedByOrg';
 const DISMISSED_DEPLOYMENT_KEY = 'deployment';
+const COLLAPSED_KEY = 'home-onboarding-pane-collapsed';
 
 const ADMIN_INTEGRATION_ORDER = [
   'notion',
-  'sentry',
   'linear',
   'jira',
-  'monday',
-  'vercel',
-  'supabase',
-  'posthog',
+  'sentry',
   'grafana',
-  'asana',
 ] as const;
 
-const PERSONAL_MCP_INTEGRATION_ORDER = [
-  'notion',
-  'monday',
-  'supabase',
-] as const;
+const PERSONAL_MCP_INTEGRATION_ORDER = ['notion'] as const;
 
 const CARD_EXIT_TRANSITION = {
   duration: 0.4,
@@ -104,7 +102,9 @@ type CardConfig = {
   icon: ReactNode;
   label: string;
   buttonLabel: string;
-  onClick: () => void;
+  onClick?: () => void;
+  href?: string;
+  external?: boolean;
   disabled?: boolean;
   dismissible?: boolean;
   visible: boolean;
@@ -147,20 +147,151 @@ function writeDismissedCardIds(ids: string[]): void {
   }
 }
 
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, String(collapsed));
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 function getMcpIntegration(id: string) {
   const integration = MCP_INTEGRATIONS.find((entry) => entry.id === id);
   if (!integration) throw new Error(`Unknown MCP integration: ${id}`);
   return integration;
 }
 
-/** Shows at most one onboarding guidance card at a time, in priority order. */
-export function OnboardingCard() {
+function OnboardingCardRow({
+  card,
+  onDismiss,
+}: {
+  card: CardConfig;
+  onDismiss: () => void;
+}) {
+  const action = card.href ? (
+    <Button asChild variant="default" size="xs">
+      <a
+        href={card.href}
+        target={card.external ? '_blank' : undefined}
+        rel={card.external ? 'noopener noreferrer' : undefined}
+      >
+        {card.buttonLabel}
+      </a>
+    </Button>
+  ) : (
+    <Button
+      variant="default"
+      size="xs"
+      type="button"
+      onClick={card.onClick}
+      disabled={card.disabled}
+    >
+      {card.buttonLabel}
+    </Button>
+  );
+
+  return (
+    <motion.div
+      key={card.id}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      variants={CARD_ANIMATION}
+      className="flex min-w-0 items-start gap-2 py-1 pl-1 text-sm md:items-center"
+    >
+      <span className="mt-0.5 shrink-0 md:mt-0">{card.icon}</span>
+      <div className="flex min-w-0 grow flex-col items-start gap-1 md:flex-row md:items-center md:gap-2">
+        <span className="flex w-full min-w-0 items-start gap-1">
+          <span className="grow cursor-default font-medium text-muted-foreground">
+            {card.label}
+          </span>
+          {card.dismissible !== false ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              className="ml-auto text-muted-foreground hover:text-foreground md:hidden"
+              onClick={onDismiss}
+              aria-label="Dismiss"
+            >
+              <X className="size-3.5" />
+            </Button>
+          ) : null}
+        </span>
+        {action}
+        {card.dismissible !== false ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            className="ml-auto hidden text-muted-foreground hover:text-foreground md:inline-flex"
+            onClick={onDismiss}
+            aria-label="Dismiss"
+          >
+            <X className="size-3.5" />
+          </Button>
+        ) : null}
+      </div>
+    </motion.div>
+  );
+}
+
+function OnboardingLane({
+  cards,
+  dismissed,
+  onDismiss,
+  pending = false,
+}: {
+  cards: CardConfig[];
+  dismissed: Record<string, boolean>;
+  onDismiss: (cardId: string) => void;
+  pending?: boolean;
+}) {
+  const activeCard = cards.find((card) => card.visible && !dismissed[card.id]);
+
+  return (
+    <div className="relative min-w-0 overflow-clip">
+      <AnimatePresence initial={false} mode="popLayout">
+        {pending ? (
+          <Skeleton key="pending" className="my-1 h-8 w-full" />
+        ) : activeCard ? (
+          <OnboardingCardRow
+            key={activeCard.id}
+            card={activeCard}
+            onDismiss={() => onDismiss(activeCard.id)}
+          />
+        ) : (
+          <motion.div
+            key="all-set"
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            variants={CARD_ANIMATION}
+            className="flex items-center gap-2 py-2 pl-1 text-sm font-medium text-muted-foreground"
+          >
+            <Check className="size-4" />
+            <span>You&apos;re all set</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** Shows the highest-priority task and ambient onboarding guidance together. */
+export function OnboardingPane() {
   const { isAdmin } = useAuthorizedUser();
   const searchParams = useSearchParams();
   const router = useRouter();
   const trpc = useTRPC();
-  const shouldShowSuggestedTasksCard =
-    searchParams.get('link_suggested') === 'true';
   const onboarding = useQuery(trpc.onboarding.status.queryOptions());
   const enablements = useDeploymentMcpEnablements();
   const userMcpConnections = useUserMcpConnections();
@@ -181,6 +312,7 @@ export function OnboardingCard() {
     null,
   );
   const [dismissed, setDismissed] = useState<Record<string, boolean>>({});
+  const [collapsed, setCollapsed] = useState(false);
   const connectionToastedRef = useRef(false);
 
   useEffect(() => {
@@ -207,14 +339,28 @@ export function OnboardingCard() {
     );
   }, []);
 
+  useEffect(() => {
+    setCollapsed(readCollapsed());
+  }, []);
+
   const dismiss = (cardId: string) => {
-    const nextDismissed = { ...dismissed, [cardId]: true };
-    setDismissed(nextDismissed);
-    writeDismissedCardIds(
-      Object.entries(nextDismissed)
-        .filter(([, isDismissed]) => isDismissed)
-        .map(([id]) => id),
-    );
+    setDismissed((currentDismissed) => {
+      const nextDismissed = { ...currentDismissed, [cardId]: true };
+      writeDismissedCardIds(
+        Object.entries(nextDismissed)
+          .filter(([, isDismissed]) => isDismissed)
+          .map(([id]) => id),
+      );
+      return nextDismissed;
+    });
+  };
+
+  const toggleCollapsed = () => {
+    setCollapsed((currentCollapsed) => {
+      const nextCollapsed = !currentCollapsed;
+      writeCollapsed(nextCollapsed);
+      return nextCollapsed;
+    });
   };
 
   const startOAuthLink = (
@@ -428,7 +574,7 @@ export function OnboardingCard() {
       !status?.userHasLinkedLinear,
   };
 
-  const cards: CardConfig[] = [
+  const taskCards: CardConfig[] = [
     {
       id: 'automations',
       icon: (
@@ -445,15 +591,6 @@ export function OnboardingCard() {
         Boolean(automationOnboardingStatus) &&
         !automationOnboardingStatus?.hasEnabledAutomations,
     },
-    {
-      id: 'link-suggested-tasks',
-      icon: <Spinner />,
-      label: 'Your selected tasks have started.',
-      buttonLabel: 'Check their progress',
-      onClick: () => router.push('/tasks'),
-      dismissible: false,
-      visible: shouldShowSuggestedTasksCard,
-    },
     ...COMMUNICATION_PROVIDER_ORDER.flatMap((providerId) =>
       providerCards.filter((card) => card.id === `link-${providerId}`),
     ),
@@ -465,64 +602,54 @@ export function OnboardingCard() {
     linearPersonalCard,
   ];
 
-  const activeCard = cards.find((card) => card.visible && !dismissed[card.id]);
-  if (!activeCard) return null;
+  const ambientCards: CardConfig[] = [
+    {
+      id: 'cookbook',
+      icon: <BookMarked className="size-4 shrink-0 text-muted-foreground" />,
+      label: 'Explore recipes for common workflows',
+      buttonLabel: 'Explore',
+      href: DOCS_COOKBOOK_URL,
+      external: true,
+      visible: true,
+    },
+    {
+      id: 'talk-to-us',
+      icon: <Mail className="size-4 shrink-0 text-muted-foreground" />,
+      label: 'Questions or ideas? We would love to hear from you',
+      buttonLabel: 'Email us',
+      href: 'mailto:help@roomote.dev',
+      visible: true,
+    },
+  ];
 
   return (
     <>
-      <div className="relative overflow-clip">
-        <AnimatePresence initial={false} mode="popLayout">
-          <motion.div
-            key={activeCard.id}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-            variants={CARD_ANIMATION}
-            className="flex md:w-fit md:items-center gap-2 py-1 pl-1 md:pr-5 text-sm"
-          >
-            <span className="mt-0.5 md:mt-0">{activeCard.icon}</span>
-            <div className="flex gap-1 flex-col items-start md:flex-row md:items-center md:gap-2 grow">
-              <span className="flex gap-1 items-start flex-nowrap w-full">
-                <span className="cursor-default font-medium text-muted-foreground grow">
-                  {activeCard.label}
-                </span>
-                {activeCard.dismissible !== false && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    type="button"
-                    className="md:hidden ml-auto text-muted-foreground hover:text-foreground"
-                    onClick={() => dismiss(activeCard.id)}
-                    aria-label="Dismiss"
-                  >
-                    <X className="size-3.5" />
-                  </Button>
-                )}
-              </span>
-              <Button
-                variant="default"
-                size="xs"
-                type="button"
-                onClick={activeCard.onClick}
-                disabled={activeCard.disabled}
-              >
-                {activeCard.buttonLabel}
-              </Button>
-              {activeCard.dismissible !== false && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  type="button"
-                  className="hidden md:inline-flex ml-auto text-muted-foreground hover:text-foreground"
-                  onClick={() => dismiss(activeCard.id)}
-                  aria-label="Dismiss"
-                >
-                  <X className="size-3.5" />
-                </Button>
-              )}
-            </div>
-          </motion.div>
-        </AnimatePresence>
+      <div className="flex w-full items-center gap-2 px-4">
+        {collapsed ? null : (
+          <div className="grid min-w-0 grow grid-cols-1 gap-x-8 gap-y-1 md:grid-cols-2">
+            <OnboardingLane
+              cards={taskCards}
+              dismissed={dismissed}
+              onDismiss={dismiss}
+              pending={isIntegrationsPending || automationsPending}
+            />
+            <OnboardingLane
+              cards={ambientCards}
+              dismissed={dismissed}
+              onDismiss={dismiss}
+            />
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          type="button"
+          className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={toggleCollapsed}
+          aria-label={collapsed ? 'Expand onboarding' : 'Collapse onboarding'}
+        >
+          {collapsed ? <ChevronUp /> : <ChevronDown />}
+        </Button>
       </div>
       <Dialog
         open={linkDialog === 'telegram'}

@@ -279,10 +279,6 @@ export function SetupSignedInFlow() {
           selectedComputeProvider,
         )
       : null;
-  const hasPersistedSelectedSuggestedTasks = status.queuedOnboardingTasks.some(
-    (task) => task.suggestionId !== null,
-  );
-
   return (
     <div className="relative w-full">
       <AnimatePresence mode="wait" initial={false} custom={transitionDirection}>
@@ -511,7 +507,6 @@ export function SetupSignedInFlow() {
                       : []
               }
               includeLinear={status.hasLinear}
-              linkSuggestedTasks={hasPersistedSelectedSuggestedTasks}
               computeProvisioning={computeProvisioning}
               onRetryComputeProvisioning={() =>
                 goToStep('compute-config', { revisit: true })

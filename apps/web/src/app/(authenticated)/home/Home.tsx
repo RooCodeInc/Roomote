@@ -52,7 +52,7 @@ import {
   AUTO_WORKSPACE_VALUE,
 } from '@/components/tasks';
 
-import { OnboardingCard } from './OnboardingCard';
+import { OnboardingPane } from './OnboardingPane';
 import { BottomSheetTabs } from './BottomSheetTabs';
 import {
   HOME_PROMPT_PLACEHOLDERS,
@@ -605,14 +605,14 @@ export function Home({
       <div className="flex flex-1 md:items-center justify-center h-[calc(var(--effective-viewport-height)-4rem)] md:h-[calc(var(--effective-viewport-height)-1rem)]">
         <div
           className={cn(
-            'flex w-full max-w-3xl flex-col px-4 justify-center h-full',
+            'flex h-full w-full flex-col justify-center',
             isExiting && 'animate-[exit-right_500ms_1_forwards]',
           )}
         >
           <div
             ref={contentColumnRef}
             className={cn(
-              'flex flex-col gap-4 md:gap-3 grow flex-1 min-h-0 overflow-y-auto md:overflow-visible md:h-full justify-start md:justify-center transition-all duration-500',
+              'mx-auto flex w-full max-w-3xl grow flex-1 flex-col justify-start gap-4 overflow-y-auto px-4 transition-all duration-500 md:h-full md:min-h-0 md:justify-center md:gap-3 md:overflow-visible',
               shouldDimMainForm && 'scale-90 blur-[3px] opacity-70',
             )}
           >
@@ -711,12 +711,9 @@ export function Home({
                 </Alert>
               )}
             </div>
-
-            <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
-              <OnboardingCard />
-            </div>
           </div>
-          <div className="shrink-0 pb-[env(safe-area-inset-bottom)]">
+          <div className="shrink-0 space-y-1 pb-[env(safe-area-inset-bottom)] animate-[fade-in_1s_1_750ms_backwards]">
+            <OnboardingPane />
             <BottomSheetTabs onExpandedChange={setIsBottomSheetExpanded} />
           </div>
         </div>

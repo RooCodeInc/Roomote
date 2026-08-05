@@ -113,8 +113,8 @@ vi.mock('@/lib/utils', () => ({
     classNames.filter(Boolean).join(' '),
 }));
 
-vi.mock('./OnboardingCard', () => ({
-  OnboardingCard: () => <div>Onboarding</div>,
+vi.mock('./OnboardingPane', () => ({
+  OnboardingPane: () => <div>Onboarding</div>,
 }));
 
 vi.mock('./BottomSheetTabs', () => ({
