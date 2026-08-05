@@ -98,6 +98,7 @@ vi.mock('node:fs', () => ({
 vi.mock('@roomote/cloud-agents', () => ({
   PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS: ['implement-changes'],
   ROOMOTE_COMPACT_PROMPT: 'Default compaction prompt.',
+  ROOMOTE_SYSTEM_PROMPT: 'You are Roomote, a software engineering teammate.',
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
