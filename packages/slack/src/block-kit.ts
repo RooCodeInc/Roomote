@@ -62,7 +62,10 @@ import type {
   SlackMessage,
   SlackThreadMessage,
 } from './types';
-import { postRouterDebugMessage } from './router-debug';
+import {
+  postRouterDebugMessage,
+  postRouterFallbackDebugMessage,
+} from './router-debug';
 import { postSlackInteractiveResponse } from './interactive-response';
 import { getPromptReadyThreadMessages } from './prompt-ready-thread-messages';
 import { SlackNotifier } from './slack-notifier';
@@ -784,6 +787,15 @@ function postSlackFinalRouterDebug({
   });
 }
 
+/**
+ * Warning shown above the manual workspace picker when automatic routing was
+ * skipped because the routing infrastructure failed (not because the request
+ * was ambiguous). Deliberately generic: raw provider errors can contain
+ * key identifiers and belong in the router debug channel, not user threads.
+ */
+export const SLACK_ROUTING_UNAVAILABLE_NOTICE =
+  '⚠️ Automatic routing is temporarily unavailable, so I could not pick a workspace for this request. Choose one below. If this keeps happening, ask an admin to check the deployment’s inference provider.';
+
 export async function showTaskConfiguration({
   event,
   slackInstallation,
@@ -793,6 +805,7 @@ export async function showTaskConfiguration({
   skipMcpSetupSuggestion,
   replaceMessageTs,
   processingReactionName,
+  routingFailureNoticeText,
 }: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
@@ -803,6 +816,11 @@ export async function showTaskConfiguration({
   /** When provided, update this message instead of posting a new one. */
   replaceMessageTs?: string;
   processingReactionName?: string;
+  /**
+   * Warning to show above the manual picker when the caller already attempted
+   * routing and it failed for infrastructure reasons (used with skipRouting).
+   */
+  routingFailureNoticeText?: string;
 }): Promise<{
   routingUsed: boolean;
   threadId: string;
@@ -888,6 +906,8 @@ export async function showTaskConfiguration({
 
     // Variable to hold routing result for pre-filling the selection UI
     let routingResult: RoutingResult | null = null;
+    let routingFallbackNoticeText: string | undefined =
+      routingFailureNoticeText;
     let suggestedRoutingDurationMs: number | undefined;
     let routingThreadMessages: SlackThreadMessage[] | undefined;
     let latestOwnBotReply:
@@ -1040,11 +1060,44 @@ export async function showTaskConfiguration({
           console.log(
             `[LLM Router] Slack routing returned fallback, using default selections: ${decision.reason}`,
           );
+
+          if (decision.cause === 'exception') {
+            routingFallbackNoticeText = SLACK_ROUTING_UNAVAILABLE_NOTICE;
+          }
+
+          void postRouterFallbackDebugMessage({
+            source: `Slack ${event.channel}`,
+            sourceLink:
+              buildSlackThreadPermalink({
+                slackWorkspaceDomain: slackInstallation.teamDomain ?? undefined,
+                slackChannelId: event.channel,
+                threadTs: threadId,
+              }) ?? undefined,
+            taskDescription: routingTaskDescription,
+            reason: decision.reason,
+            cause: decision.cause,
+            routingDurationMs: suggestedRoutingDurationMs,
+          });
         }
       } catch (error) {
         console.error(
           `[LLM Router] Error during Slack routing, using default selections: ${error instanceof Error ? error.message : String(error)}`,
         );
+
+        routingFallbackNoticeText = SLACK_ROUTING_UNAVAILABLE_NOTICE;
+
+        void postRouterFallbackDebugMessage({
+          source: `Slack ${event.channel}`,
+          sourceLink:
+            buildSlackThreadPermalink({
+              slackWorkspaceDomain: slackInstallation.teamDomain ?? undefined,
+              slackChannelId: event.channel,
+              threadTs: threadId,
+            }) ?? undefined,
+          taskDescription,
+          reason: error instanceof Error ? error.message : String(error),
+          cause: 'exception',
+        });
       }
     }
 
@@ -1202,14 +1255,15 @@ export async function showTaskConfiguration({
 
     // Routing failed or was skipped - show the manual selection UI as fallback
 
-    const blocks: SlackBlock[] = warningText?.trim()
-      ? [
-          {
-            type: 'section',
-            text: { type: 'mrkdwn', text: warningText.trim() },
-          },
-        ]
-      : [];
+    const blocks: SlackBlock[] = [
+      warningText?.trim(),
+      routingFallbackNoticeText?.trim(),
+    ]
+      .filter((text): text is string => Boolean(text))
+      .map((text) => ({
+        type: 'section',
+        text: { type: 'mrkdwn', text },
+      }));
 
     // Build workspace options with Environments first, then Repositories
     const workspaceOptions: Array<{

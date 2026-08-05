@@ -2,6 +2,7 @@ import { Env } from '@roomote/env';
 import type { SlackInstallation } from '@roomote/db/server';
 import {
   AGENT_DISPLAY_NAME,
+  buildSlackThreadPermalink,
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   getTaskInitiatorLinkedUserId,
@@ -24,6 +25,7 @@ import {
   extractPromptTextAttachments,
   getTaskUrl,
   routeTask,
+  type RoutingFallbackCause,
   type RoutingResult,
   type SlackMcpSetupRequirement,
 } from '@roomote/cloud-agents/server';
@@ -33,6 +35,7 @@ import {
   mapRoutingWorkspaceToSelectionValue,
   resolveWorkspace,
 } from './block-kit';
+import { postRouterFallbackDebugMessage } from './router-debug';
 import { postSlackMcpSetupSuggestion } from './mcp-setup-suggestion';
 import { finishRoutedStart } from './started-message';
 import { SlackNotifier } from './slack-notifier';
@@ -77,6 +80,12 @@ export type StartAutoRoutedSlackTaskResult =
       threadId: string;
       message: string;
       routingResult?: RoutingResult;
+      /**
+       * Present when the router returned a fallback. `cause: 'exception'`
+       * means routing infrastructure failed and the manual picker should
+       * carry a user-visible warning.
+       */
+      routingFallback?: { cause?: RoutingFallbackCause; reason: string };
     };
 
 function getNextSlackTimestamp(ts: string): string {
@@ -112,12 +121,14 @@ function getLatestSlackTimestamp(
 
 function buildRoutingFallbackRequiresPickerResult(
   threadId: string,
+  routingFallback?: { cause?: RoutingFallbackCause; reason: string },
 ): StartAutoRoutedSlackTaskResult {
   return {
     status: 'not_started',
     code: 'routing_fallback',
     threadId,
     message: 'Slack auto-routing needs manual environment selection.',
+    ...(routingFallback ? { routingFallback } : {}),
   };
 }
 
@@ -382,7 +393,24 @@ export async function startAutoRoutedSlackTask({
     }
 
     if (decision.status !== 'routed') {
-      return buildRoutingFallbackRequiresPickerResult(threadId);
+      void postRouterFallbackDebugMessage({
+        source: `Slack ${channel}`,
+        sourceLink: threadId
+          ? (buildSlackThreadPermalink({
+              slackWorkspaceDomain: slackInstallation.teamDomain ?? undefined,
+              slackChannelId: channel,
+              threadTs: threadId,
+            }) ?? undefined)
+          : undefined,
+        taskDescription: taskDescriptionWithAttachments,
+        reason: decision.reason,
+        cause: decision.cause,
+      });
+
+      return buildRoutingFallbackRequiresPickerResult(threadId, {
+        cause: decision.cause,
+        reason: decision.reason,
+      });
     }
 
     const workspaceValue = mapRoutingWorkspaceToSelectionValue(

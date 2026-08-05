@@ -11,7 +11,10 @@ import {
   slackInstallations,
   teamsInstallations,
 } from '@roomote/db/server';
-import type { RoutingDebugInfo } from '@roomote/cloud-agents/server';
+import type {
+  RoutingDebugInfo,
+  RoutingFallbackCause,
+} from '@roomote/cloud-agents/server';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { createTeamsCommunicationProviderFromEnv } from '@roomote/communication/teams-provider';
@@ -288,6 +291,141 @@ export async function postRouterDebugText(text: string): Promise<void> {
   } catch (error) {
     console.error(
       `[RouterDebug] Failed to post router debug message: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export interface RouterFallbackDebugParams {
+  source: string;
+  sourceLink?: string;
+  taskDescription: string;
+  /** Raw failure reason. Only posted to the internal debug destination. */
+  reason: string;
+  cause?: RoutingFallbackCause;
+  routingDurationMs?: number;
+}
+
+function formatFallbackCause(cause: RoutingFallbackCause | undefined): string {
+  return cause === 'exception'
+    ? 'routing call failed (infrastructure error)'
+    : 'router declined to pick a workspace';
+}
+
+/**
+ * Posts a routing-fallback diagnostic to the configured router debug
+ * destination. Unlike `postRouterDebugMessage`, this fires at fallback time so
+ * outages are visible even when no task ends up starting.
+ */
+export async function postRouterFallbackDebugMessage(
+  params: RouterFallbackDebugParams,
+): Promise<void> {
+  const destination = await getConfiguredRouterDebugDestination();
+
+  if (!destination) {
+    return;
+  }
+
+  const causeText = formatFallbackCause(params.cause);
+  const task = truncate(params.taskDescription, 500) || '(empty)';
+  const reason = truncate(params.reason, 2500) || '(none)';
+  const durationText =
+    params.routingDurationMs != null ? `${params.routingDurationMs}ms` : null;
+
+  if (destination.provider !== 'slack') {
+    const source = params.sourceLink
+      ? `[${params.source}](${params.sourceLink})`
+      : params.source;
+    const text = [
+      'Router diagnostics',
+      `Source: ${source}`,
+      `⚠️ Routing fallback: no route was chosen, so the manual workspace picker was shown.`,
+      `Cause: ${causeText}`,
+      `Message:\n${task}`,
+      `Failure reason:\n${reason}`,
+      durationText ? `Duration: ${durationText}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    try {
+      await postNonSlackRouterDebugMessage({
+        provider: destination.provider,
+        channelId: destination.channelId,
+        text,
+      });
+    } catch (error) {
+      console.error(
+        `[RouterDebug] Failed to post router fallback debug message: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return;
+  }
+
+  try {
+    const botAccessToken = await getActiveSlackBotToken();
+
+    if (!botAccessToken) {
+      console.warn('[RouterDebug] No active Slack installation found');
+      return;
+    }
+
+    const sourceText = params.sourceLink
+      ? `<${params.sourceLink}|${params.source}>`
+      : params.source;
+
+    const blocks: RouterDebugBlocks = [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `🔍 *Router* | ${sourceText}`,
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `⚠️ *Routing fallback* — no route was chosen, so the manual workspace picker was shown.\n• *Cause:* ${causeText}`,
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*Message*\n${quote(task)}`,
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*Failure reason*\n${quote(reason)}`,
+        },
+      },
+    ];
+
+    if (durationText) {
+      blocks.push({
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: `⏱️ ${durationText}`,
+          },
+        ],
+      });
+    }
+
+    await createSlackWebClient(botAccessToken).chat.postMessage({
+      channel: destination.channelId,
+      text: `Router fallback | ${params.source}`,
+      unfurl_links: false,
+      unfurl_media: false,
+      blocks,
+    });
+  } catch (error) {
+    console.error(
+      `[RouterDebug] Failed to post router fallback debug message: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

@@ -294,6 +294,7 @@ describe('routeTask', () => {
       status: 'fallback',
       reason:
         'OpenCode structured prompt failed: StructuredOutputError: failed to satisfy schema',
+      cause: 'exception',
       debug: {
         phase: 'fallback',
         toolsUsed: [],
