@@ -338,7 +338,7 @@ export async function postRouterFallbackDebugMessage(
     const text = [
       'Router diagnostics',
       `Source: ${source}`,
-      `⚠️ Routing fallback: no route was chosen, so the manual workspace picker was shown.`,
+      `Routing fallback: no route was chosen, so the manual workspace picker was shown.`,
       `Cause: ${causeText}`,
       `Message:\n${task}`,
       `Failure reason:\n${reason}`,
@@ -385,7 +385,7 @@ export async function postRouterFallbackDebugMessage(
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `⚠️ *Routing fallback* — no route was chosen, so the manual workspace picker was shown.\n• *Cause:* ${causeText}`,
+          text: `*Routing fallback* — no route was chosen, so the manual workspace picker was shown.\n• *Cause:* ${causeText}`,
         },
       },
       {

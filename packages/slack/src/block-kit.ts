@@ -794,7 +794,7 @@ function postSlackFinalRouterDebug({
  * key identifiers and belong in the router debug channel, not user threads.
  */
 export const SLACK_ROUTING_UNAVAILABLE_NOTICE =
-  '⚠️ Automatic routing is temporarily unavailable, so I could not pick a workspace for this request. Choose one below. If this keeps happening, ask an admin to check the deployment’s inference provider.';
+  'Automatic routing is temporarily unavailable, so I could not pick a workspace for this request. Choose one below. If this keeps happening, ask an admin to check the deployment’s inference provider.';
 
 export async function showTaskConfiguration({
   event,

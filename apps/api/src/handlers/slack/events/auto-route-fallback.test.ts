@@ -4,7 +4,7 @@ const { showTaskConfigurationMock } = vi.hoisted(() => ({
 
 vi.mock('@roomote/slack', () => ({
   showTaskConfiguration: showTaskConfigurationMock,
-  SLACK_ROUTING_UNAVAILABLE_NOTICE: '⚠️ routing unavailable notice',
+  SLACK_ROUTING_UNAVAILABLE_NOTICE: 'routing unavailable notice',
 }));
 
 describe('auto-route-fallback', () => {
@@ -91,7 +91,7 @@ describe('auto-route-fallback', () => {
     expect(showTaskConfigurationMock).toHaveBeenCalledWith(
       expect.objectContaining({
         skipRouting: true,
-        routingFailureNoticeText: '⚠️ routing unavailable notice',
+        routingFailureNoticeText: 'routing unavailable notice',
       }),
     );
   });
