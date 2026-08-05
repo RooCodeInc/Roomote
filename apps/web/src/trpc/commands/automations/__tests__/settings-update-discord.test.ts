@@ -335,7 +335,17 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     if (result.success) {
       expect(result.settings.managerSlackChannelId).toBe('C123456NEW');
       expect(result.settings.managerDiscordChannelId).toBeNull();
+      expect(result.settings.suggesterFrequency).toBe('daily');
+      expect(result.settings.announcerFrequency).toBe('weekly');
+      expect(result.settings.managerStatsFrequency).toBe('weekly');
     }
+    expect(mockCaptureActivationAutomationChanged.mock.calls).toEqual(
+      expect.arrayContaining([
+        ['enabled', 'suggester'],
+        ['enabled', 'announcer'],
+        ['enabled', 'manager_stats'],
+      ]),
+    );
   }, 15_000);
 
   it('preserves a Discord manager channel when a legacy manager save omits the Discord field', async () => {

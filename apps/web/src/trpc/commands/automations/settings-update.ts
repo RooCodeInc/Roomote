@@ -83,91 +83,73 @@ type BackgroundAgentSettings = Awaited<
   ReturnType<typeof getBackgroundAgentSettingsForDeployment>
 >;
 
-function getSavedAutomationActivation(
-  savingAutomation: UpdateBackgroundAgentSettingsInput['savingAutomation'],
+function getAutomationActivations(
   settings: BackgroundAgentSettings,
-): { automation: ActivationAutomation; enabled: boolean } | null {
-  switch (savingAutomation) {
-    case 'callRoomoteViaEmoji':
-      return {
-        automation: 'call_roomote_via_emoji',
-        enabled: settings.callRoomoteViaEmojiEnabled,
-      };
-    case 'channelAutoStart':
-      return {
-        automation: 'slack_channel_auto_start',
-        enabled: settings.channelAutoStartEnabled,
-      };
-    case 'reviewer':
-      return {
-        automation: 'review_code',
-        enabled: settings.reviewCodeSettings.enabled === true,
-      };
-    case 'conflictResolver':
-      return {
-        automation: 'conflict_resolver',
-        enabled: settings.conflictResolverFrequency !== 'off',
-      };
-    case 'managerStats':
-      return {
-        automation: 'manager_stats',
-        enabled: settings.managerStatsFrequency !== 'off',
-      };
-    case 'sentryTriage':
-      return {
-        automation: 'sentry_triage',
-        enabled: settings.sentryTriageFrequency !== 'off',
-      };
-    case 'dependabotTriage':
-      return {
-        automation: 'dependabot_triage',
-        enabled: settings.dependabotTriageFrequency !== 'off',
-      };
-    case 'codeqlTriage':
-      return {
-        automation: 'codeql_triage',
-        enabled: settings.codeqlTriageFrequency !== 'off',
-      };
-    case 'issueFixer':
-      return {
-        automation: 'issue_fixer',
-        enabled: settings.issueFixerFrequency !== 'off',
-      };
-    case 'securityAuditor':
-      return {
-        automation: 'security_auditor',
-        enabled: settings.securityAuditorFrequency !== 'off',
-      };
-    case 'codeQualityAuditor':
-      return {
-        automation: 'code_quality_auditor',
-        enabled: settings.codeQualityAuditorFrequency !== 'off',
-      };
-    case 'ciFailureTriage':
-      return {
-        automation: 'ci_failure_triage',
-        enabled: settings.ciFailureTriageFrequency !== 'off',
-      };
-    case 'suggester':
-      return {
-        automation: 'suggester',
-        enabled: settings.suggesterFrequency !== 'off',
-      };
-    case 'announcer':
-      return {
-        automation: 'announcer',
-        enabled: settings.announcerFrequency !== 'off',
-      };
-    case 'platformIssueAlerts':
-      return {
-        automation: 'platform_issue_alerts',
-        enabled:
-          settings.platformIssueSlackChannelId !== null ||
-          settings.platformIssueDiscordChannelId !== null,
-      };
-    case 'managerChannel':
-      return null;
-  }
+): Array<{ automation: ActivationAutomation; enabled: boolean }> {
+  return [
+    {
+      automation: 'call_roomote_via_emoji',
+      enabled: settings.callRoomoteViaEmojiEnabled,
+    },
+    {
+      automation: 'slack_channel_auto_start',
+      enabled: settings.channelAutoStartEnabled,
+    },
+    {
+      automation: 'review_code',
+      enabled: settings.reviewCodeSettings.enabled === true,
+    },
+    {
+      automation: 'conflict_resolver',
+      enabled: settings.conflictResolverFrequency !== 'off',
+    },
+    {
+      automation: 'manager_stats',
+      enabled: settings.managerStatsFrequency !== 'off',
+    },
+    {
+      automation: 'sentry_triage',
+      enabled: settings.sentryTriageFrequency !== 'off',
+    },
+    {
+      automation: 'dependabot_triage',
+      enabled: settings.dependabotTriageFrequency !== 'off',
+    },
+    {
+      automation: 'codeql_triage',
+      enabled: settings.codeqlTriageFrequency !== 'off',
+    },
+    {
+      automation: 'issue_fixer',
+      enabled: settings.issueFixerFrequency !== 'off',
+    },
+    {
+      automation: 'security_auditor',
+      enabled: settings.securityAuditorFrequency !== 'off',
+    },
+    {
+      automation: 'code_quality_auditor',
+      enabled: settings.codeQualityAuditorFrequency !== 'off',
+    },
+    {
+      automation: 'ci_failure_triage',
+      enabled: settings.ciFailureTriageFrequency !== 'off',
+    },
+    {
+      automation: 'suggester',
+      enabled: settings.suggesterFrequency !== 'off',
+    },
+    {
+      automation: 'announcer',
+      enabled: settings.announcerFrequency !== 'off',
+    },
+    {
+      automation: 'platform_issue_alerts',
+      enabled:
+        settings.platformIssueSlackChannelId !== null ||
+        settings.platformIssueDiscordChannelId !== null,
+    },
+  ];
 }
 
 function parseSentryProjectSlugs(value: string | null | undefined): string[] {
@@ -1383,23 +1365,19 @@ export async function updateBackgroundAgentSettingsCommand(
   ]);
 
   const updatedSettings = await getBackgroundAgentSettingsForDeployment();
-  const previousActivation = getSavedAutomationActivation(
-    input.savingAutomation,
-    existingSettings,
+  const previousActivations = new Map(
+    getAutomationActivations(existingSettings).map((activation) => [
+      activation.automation,
+      activation.enabled,
+    ]),
   );
-  const updatedActivation = getSavedAutomationActivation(
-    input.savingAutomation,
-    updatedSettings,
-  );
-  if (
-    previousActivation &&
-    updatedActivation &&
-    previousActivation.enabled !== updatedActivation.enabled
-  ) {
-    void captureActivationAutomationChanged(
-      updatedActivation.enabled ? 'enabled' : 'disabled',
-      updatedActivation.automation,
-    );
+  for (const activation of getAutomationActivations(updatedSettings)) {
+    if (previousActivations.get(activation.automation) !== activation.enabled) {
+      void captureActivationAutomationChanged(
+        activation.enabled ? 'enabled' : 'disabled',
+        activation.automation,
+      );
+    }
   }
   const updatedChannelAutoStartSlackChannelIds =
     updatedSettings.channelAutoStartSlackChannels.map(
