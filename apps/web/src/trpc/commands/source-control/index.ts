@@ -990,7 +990,7 @@ export async function saveSourceControlConfigCommand(
   });
 }
 
-export type ClearSourceControlConfigWarning = {
+type ClearSourceControlConfigWarning = {
   kind: 'webhook_cleanup' | 'oauth_cleanup';
   repositoryId?: string;
   repositoryFullName?: string;
