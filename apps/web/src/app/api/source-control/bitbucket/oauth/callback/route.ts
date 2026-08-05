@@ -7,7 +7,14 @@ import {
 } from '@roomote/bitbucket';
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { getSetupBootstrapState } from '@/lib/server/setup-bootstrap-state';
 import { syncRepositoriesCommand } from '@/trpc/commands/source-control';
+import {
+  addSourceControlOAuthResult,
+  getSourceControlOAuthReturnCookieName,
+  isSetupOAuthReturnTarget,
+  resolveSourceControlOAuthReturnTarget,
+} from '@/lib/server/source-control-oauth-redirect';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,9 +22,32 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
   const publicAppUrl = webEnv.R_PUBLIC_URL ?? webEnv.R_APP_URL;
-  const redirect = new URL('/setup', publicAppUrl);
-  redirect.searchParams.set('step', 'source-control-connect');
+  const { setupOpen } = await getSetupBootstrapState();
+  const returnTarget = resolveSourceControlOAuthReturnTarget({
+    requestedTarget: request.cookies.get(
+      getSourceControlOAuthReturnCookieName('bitbucket'),
+    )?.value,
+    setupOpen,
+  });
+  const redirect = new URL(returnTarget, publicAppUrl);
   const response = () => NextResponse.redirect(redirect);
+  const clearCookies = (result: NextResponse) => {
+    result.cookies.set('roomote-bitbucket-oauth-state', '', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: publicAppUrl.startsWith('https://'),
+      path: BITBUCKET_OAUTH_CALLBACK_PATH,
+      maxAge: 0,
+    });
+    result.cookies.set(getSourceControlOAuthReturnCookieName('bitbucket'), '', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: publicAppUrl.startsWith('https://'),
+      path: BITBUCKET_OAUTH_CALLBACK_PATH,
+      maxAge: 0,
+    });
+    return result;
+  };
   const authResult = await authorize();
   const state = request.nextUrl.searchParams.get('state');
   const expectedState = request.cookies.get(
@@ -32,7 +62,7 @@ export async function GET(request: NextRequest) {
     !code
   ) {
     redirect.searchParams.set('bitbucket', 'error');
-    return response();
+    return clearCookies(response());
   }
   try {
     const [clientId, clientSecret] = await Promise.all([
@@ -49,20 +79,28 @@ export async function GET(request: NextRequest) {
       code,
       redirectUri: buildBitbucketOAuthRedirectUri(publicAppUrl),
     });
-    await syncRepositoriesCommand(authResult, { provider: 'bitbucket' });
-    redirect.searchParams.set('bitbucket', 'connected');
-    redirect.searchParams.set('sync', '1');
+    if (!isSetupOAuthReturnTarget(returnTarget)) {
+      const syncResult = await syncRepositoriesCommand(authResult, {
+        provider: 'bitbucket',
+      });
+      if (!syncResult.success) {
+        throw new Error(syncResult.error);
+      }
+    }
+    const resultTarget = addSourceControlOAuthResult(
+      returnTarget,
+      'bitbucket',
+      'connected',
+    );
+    redirect.href = new URL(resultTarget, publicAppUrl).href;
   } catch (error) {
     console.error('[Bitbucket OAuth] callback failed', error);
-    redirect.searchParams.set('bitbucket', 'error');
+    const resultTarget = addSourceControlOAuthResult(
+      returnTarget,
+      'bitbucket',
+      'error',
+    );
+    redirect.href = new URL(resultTarget, publicAppUrl).href;
   }
-  const result = response();
-  result.cookies.set('roomote-bitbucket-oauth-state', '', {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: publicAppUrl.startsWith('https://'),
-    path: BITBUCKET_OAUTH_CALLBACK_PATH,
-    maxAge: 0,
-  });
-  return result;
+  return clearCookies(response());
 }

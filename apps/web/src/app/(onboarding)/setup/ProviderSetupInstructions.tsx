@@ -38,13 +38,13 @@ export function InstructionUrl({
   url: string;
 }) {
   return (
-    <div className="space-y-1 flex gap-2 items-center">
-      <p className="font-semibold text-foreground text-sm w-50 shrink-0">
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+      <p className="text-sm font-semibold text-foreground sm:w-50 sm:shrink-0">
         {heading}
       </p>
-      <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1.5 overflow-hidden justify-end">
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-black px-2 py-1.5">
         <BasicTooltip content={url}>
-          <span className="font-mono text-xs text-foreground truncate">
+          <span className="min-w-0 break-all font-mono text-xs text-foreground">
             {url}
           </span>
         </BasicTooltip>

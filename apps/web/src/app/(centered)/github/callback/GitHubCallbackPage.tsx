@@ -40,7 +40,7 @@ function decodeOAuthState(
   }
 }
 
-import { useUser } from '@/hooks/useUser';
+import { useSetupBootstrapOpen, useUser } from '@/hooks/useUser';
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
 import {
   useFinishAuthenticateGitHubAccount,
@@ -57,6 +57,7 @@ export default function Page() {
   const params = useSearchParams();
 
   const { authStatus, isSignedIn } = useUser();
+  const setupBootstrapOpen = useSetupBootstrapOpen();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -71,9 +72,11 @@ export default function Page() {
   // user back to where those can be fixed instead of dead-ending on the error.
   const cameFromSetup =
     decodedCallbackState?.redirect?.startsWith('/setup') === true;
-  const errorReturnTarget = cameFromSetup
-    ? '/setup?step=source-control-config'
-    : '/settings';
+  const completedSetupReturnTarget =
+    cameFromSetup && !setupBootstrapOpen ? '/settings/source-control' : null;
+  const errorReturnTarget =
+    completedSetupReturnTarget ??
+    (cameFromSetup ? '/setup?step=source-control-config' : '/settings');
 
   const navigateFromState = useCallback(() => {
     const encodedState = params.get('state');
@@ -87,8 +90,15 @@ export default function Page() {
       !redirect.startsWith('//') &&
       !redirect.includes('://');
 
-    router.push(isValidRedirect ? redirect : '/settings');
-  }, [params, router]);
+    const setupCompletedRedirect =
+      isValidRedirect && redirect.startsWith('/setup') && !setupBootstrapOpen
+        ? '/settings/source-control'
+        : null;
+
+    router.push(
+      setupCompletedRedirect ?? (isValidRedirect ? redirect : '/settings'),
+    );
+  }, [params, router, setupBootstrapOpen]);
 
   const finishAuthentication = useFinishAuthenticateGitHubAccount({
     onSuccess: (result) => {

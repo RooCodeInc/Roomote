@@ -972,7 +972,10 @@ export async function saveSourceControlConfigCommand(
 ) {
   assertAdmin(auth);
 
-  await assertValidSourceControlConfigInput(input);
+  await assertValidSourceControlConfigInput({
+    ...input,
+    allowIncompleteDelegated: true,
+  });
 
   return db.transaction(async (tx) => {
     const providerStatus = await saveSourceControlConfigValues({

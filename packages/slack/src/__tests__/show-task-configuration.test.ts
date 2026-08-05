@@ -27,6 +27,7 @@ const {
   addReactionMock,
   removeReactionMock,
   postRouterDebugMessageMock,
+  postRouterFallbackDebugMessageMock,
   setSlackStartedMessageTsMock,
   deliveryTrackerCommitMock,
 } = vi.hoisted(() => ({
@@ -58,6 +59,7 @@ const {
   addReactionMock: vi.fn(),
   removeReactionMock: vi.fn(),
   postRouterDebugMessageMock: vi.fn(),
+  postRouterFallbackDebugMessageMock: vi.fn(),
   setSlackStartedMessageTsMock: vi.fn(),
   deliveryTrackerCommitMock: vi.fn(),
 }));
@@ -160,6 +162,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('../router-debug', () => ({
   postRouterDebugMessage: postRouterDebugMessageMock,
+  postRouterFallbackDebugMessage: postRouterFallbackDebugMessageMock,
 }));
 
 vi.mock('../slack-messages', () => ({
@@ -199,6 +202,7 @@ import {
   handleRoutingRejectNo,
   handleSlackRoutingCorrection,
   showTaskConfiguration,
+  SLACK_ROUTING_UNAVAILABLE_NOTICE,
 } from '../block-kit';
 
 describe('Slack deleted-mention suppression', () => {
@@ -661,6 +665,168 @@ describe('Slack deleted-mention suppression', () => {
       'pending_workspace_selections',
       '111.222',
       expect.stringContaining('"text":"<@BOT> investigate this"'),
+    );
+  });
+
+  it('warns in the picker and posts fallback diagnostics when routing fails with an exception', async () => {
+    routeTaskMock.mockResolvedValueOnce({
+      status: 'fallback',
+      reason: 'OpenCode structured prompt failed: APIError: Key limit exceeded',
+      cause: 'exception',
+    });
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+    });
+
+    expect(postRouterFallbackDebugMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'Slack C123',
+        reason:
+          'OpenCode structured prompt failed: APIError: Key limit exceeded',
+        cause: 'exception',
+      }),
+    );
+    expect(JSON.stringify(postMessageMock.mock.calls)).toContain(
+      SLACK_ROUTING_UNAVAILABLE_NOTICE,
+    );
+  });
+
+  it('treats a thrown routeTask error as an exception fallback with a warning', async () => {
+    routeTaskMock.mockRejectedValueOnce(new Error('router transport failed'));
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+    });
+
+    expect(postRouterFallbackDebugMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'router transport failed',
+        cause: 'exception',
+      }),
+    );
+    expect(JSON.stringify(postMessageMock.mock.calls)).toContain(
+      SLACK_ROUTING_UNAVAILABLE_NOTICE,
+    );
+  });
+
+  it('does not blame the routing infrastructure when Slack context setup fails', async () => {
+    getChannelNameMock.mockRejectedValueOnce(
+      new Error('channels.info unavailable'),
+    );
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+    });
+
+    expect(routeTaskMock).not.toHaveBeenCalled();
+    expect(postRouterFallbackDebugMessageMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(postMessageMock.mock.calls)).not.toContain(
+      SLACK_ROUTING_UNAVAILABLE_NOTICE,
+    );
+  });
+
+  it('shows the plain picker without a warning when the router declined to pick', async () => {
+    routeTaskMock.mockResolvedValueOnce({
+      status: 'fallback',
+      reason:
+        'Could not map routed environment "Unknown" to an available environment.',
+      cause: 'model_decision',
+    });
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+    });
+
+    expect(postRouterFallbackDebugMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ cause: 'model_decision' }),
+    );
+    expect(JSON.stringify(postMessageMock.mock.calls)).not.toContain(
+      SLACK_ROUTING_UNAVAILABLE_NOTICE,
+    );
+  });
+
+  it('shows the routing-unavailable warning above the picker when the caller passes one', async () => {
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+      skipRouting: true,
+      routingFailureNoticeText: SLACK_ROUTING_UNAVAILABLE_NOTICE,
+    });
+
+    expect(routeTaskMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(postMessageMock.mock.calls)).toContain(
+      SLACK_ROUTING_UNAVAILABLE_NOTICE,
     );
   });
 

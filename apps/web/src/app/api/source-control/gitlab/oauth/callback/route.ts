@@ -8,6 +8,14 @@ import {
 } from '@roomote/gitlab';
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { getSetupBootstrapState } from '@/lib/server/setup-bootstrap-state';
+import { syncRepositoriesCommand } from '@/trpc/commands/source-control';
+import {
+  addSourceControlOAuthResult,
+  getSourceControlOAuthReturnCookieName,
+  isSetupOAuthReturnTarget,
+  resolveSourceControlOAuthReturnTarget,
+} from '@/lib/server/source-control-oauth-redirect';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,9 +23,32 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
   const publicAppUrl = webEnv.R_PUBLIC_URL ?? webEnv.R_APP_URL;
-  const redirect = new URL('/setup', publicAppUrl);
-  redirect.searchParams.set('step', 'source-control-connect');
+  const { setupOpen } = await getSetupBootstrapState();
+  const returnTarget = resolveSourceControlOAuthReturnTarget({
+    requestedTarget: request.cookies.get(
+      getSourceControlOAuthReturnCookieName('gitlab'),
+    )?.value,
+    setupOpen,
+  });
+  const redirect = new URL(returnTarget, publicAppUrl);
   const response = () => NextResponse.redirect(redirect);
+  const clearCookies = (result: NextResponse) => {
+    result.cookies.set('roomote-gitlab-oauth-state', '', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: publicAppUrl.startsWith('https://'),
+      path: '/api/source-control/gitlab/oauth',
+      maxAge: 0,
+    });
+    result.cookies.set(getSourceControlOAuthReturnCookieName('gitlab'), '', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: publicAppUrl.startsWith('https://'),
+      path: '/api/source-control/gitlab/oauth',
+      maxAge: 0,
+    });
+    return result;
+  };
   const authResult = await authorize();
   const state = request.nextUrl.searchParams.get('state');
   const expectedState = request.cookies.get(
@@ -32,7 +63,7 @@ export async function GET(request: NextRequest) {
     !code
   ) {
     redirect.searchParams.set('gitlab', 'error');
-    return response();
+    return clearCookies(response());
   }
   try {
     const [baseUrl, clientId, clientSecret] = await Promise.all([
@@ -49,19 +80,28 @@ export async function GET(request: NextRequest) {
       code,
       redirectUri: buildGitLabOAuthRedirectUri(publicAppUrl),
     });
-    redirect.searchParams.set('gitlab', 'connected');
-    redirect.searchParams.set('sync', '1');
+    if (!isSetupOAuthReturnTarget(returnTarget)) {
+      const syncResult = await syncRepositoriesCommand(authResult, {
+        provider: 'gitlab',
+      });
+      if (!syncResult.success) {
+        throw new Error(syncResult.error);
+      }
+    }
+    const resultTarget = addSourceControlOAuthResult(
+      returnTarget,
+      'gitlab',
+      'connected',
+    );
+    redirect.href = new URL(resultTarget, publicAppUrl).href;
   } catch (error) {
     console.error('[GitLab OAuth] callback failed', error);
-    redirect.searchParams.set('gitlab', 'error');
+    const resultTarget = addSourceControlOAuthResult(
+      returnTarget,
+      'gitlab',
+      'error',
+    );
+    redirect.href = new URL(resultTarget, publicAppUrl).href;
   }
-  const result = response();
-  result.cookies.set('roomote-gitlab-oauth-state', '', {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: publicAppUrl.startsWith('https://'),
-    path: '/api/source-control/gitlab/oauth',
-    maxAge: 0,
-  });
-  return result;
+  return clearCookies(response());
 }

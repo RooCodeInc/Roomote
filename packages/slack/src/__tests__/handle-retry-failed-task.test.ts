@@ -102,6 +102,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('../router-debug', () => ({
   postRouterDebugMessage: vi.fn(),
+  postRouterFallbackDebugMessage: vi.fn(),
 }));
 
 vi.mock('../slack-messages', () => ({

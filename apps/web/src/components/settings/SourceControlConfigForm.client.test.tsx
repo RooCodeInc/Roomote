@@ -160,6 +160,44 @@ function buildConfigStatus(
   };
 }
 
+function buildUnconfiguredProviderStatus(
+  provider: Exclude<SetupSourceControlStatus['preselectedProvider'], 'github'>,
+): SetupSourceControlStatus {
+  const catalogProvider = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+    (candidate) => candidate.provider === provider,
+  )!;
+
+  return {
+    selectedProvider: provider,
+    preselectedProvider: provider,
+    runtimeConfiguredProvider: null,
+    runtimeConfiguredProviders: [],
+    lockReason: null,
+    connectedProvider: null,
+    setupSatisfied: false,
+    setupSatisfiedByRuntimeEnv: false,
+    providers: [
+      {
+        ...catalogProvider,
+        runtimeConfigSatisfied: false,
+        savedConfigSatisfied: false,
+        configSatisfied: false,
+        configStepSatisfied: false,
+        configSatisfiedByRuntimeEnv: false,
+        connected: false,
+        repositoryCount: 0,
+        fields: catalogProvider.fields.map((field) => ({
+          ...field,
+          runtimeSatisfied: false,
+          savedSatisfied: false,
+          savedValue: null,
+          satisfiedByEnvVarName: null,
+        })),
+      },
+    ],
+  };
+}
+
 describe('SourceControlConfigForm', () => {
   beforeEach(() => {
     saveMutateMock.mockReset();
@@ -465,6 +503,31 @@ describe('SourceControlConfigForm', () => {
     expect(screen.getByText(/Azure DevOps Webhook Secret/)).toBeInTheDocument();
   });
 
+  it.each([
+    ['gitlab', '/api/source-control/gitlab/oauth/callback'],
+    ['gitea', '/api/source-control/gitea/oauth/callback'],
+    ['bitbucket', '/api/auth/oauth2/callback/bitbucket'],
+    ['ado', '/api/auth/oauth2/callback/ado'],
+  ] as const)(
+    'shows numbered setup instructions and the callback URL for %s',
+    (provider, callbackPath) => {
+      render(
+        <SourceControlConfigForm
+          provider={provider}
+          configStatus={buildUnconfiguredProviderStatus(provider)}
+          showSetupInstructions
+        />,
+      );
+
+      expect(screen.getByText('1')).toBeInTheDocument();
+      expect(screen.getByText('2')).toBeInTheDocument();
+      expect(screen.getByText('3')).toBeInTheDocument();
+      expect(
+        screen.getByText(`http://localhost:3000${callbackPath}`),
+      ).toBeInTheDocument();
+    },
+  );
+
   function buildAdoDelegatedStatus(linkedAccountField: {
     savedSatisfied: boolean;
     savedValue: string | null;
@@ -538,6 +601,36 @@ describe('SourceControlConfigForm', () => {
 
     expect(screen.getByText(/Connected as Ada Lovelace/)).toBeInTheDocument();
     expect(screen.getByText(/Not in use yet/)).toBeInTheDocument();
+  });
+
+  it('allows saving delegated Azure DevOps app settings before account linking', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildAdoDelegatedStatus({
+          savedSatisfied: false,
+          savedValue: null,
+        })}
+        showSetupInstructions
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('ADO_ORGANIZATION'), {
+      target: { value: 'acme' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_CLIENT_ID'), {
+      target: { value: 'client-id' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_CLIENT_SECRET'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_TENANT_ID'), {
+      target: { value: 'tenant-id' },
+    });
+
+    expect(
+      screen.getByRole('button', { name: 'Save configuration' }),
+    ).toBeEnabled();
   });
 
   it('says a reconnected Azure DevOps account is not in use while the saved id still belongs to the previous account', () => {

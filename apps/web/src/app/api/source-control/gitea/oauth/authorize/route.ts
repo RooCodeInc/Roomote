@@ -8,6 +8,11 @@ import {
 } from '@roomote/gitea';
 import { authorize, getCallbackHost } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import {
+  getSourceControlOAuthReturnCookieName,
+  normalizeSourceControlOAuthReturnTarget,
+  SOURCE_CONTROL_OAUTH_COOKIE_MAX_AGE,
+} from '@/lib/server/source-control-oauth-redirect';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,12 +41,26 @@ export async function GET(request: NextRequest) {
     redirectUri,
   });
   const response = NextResponse.redirect(url);
+  const returnTarget = normalizeSourceControlOAuthReturnTarget(
+    request.nextUrl.searchParams.get('redirectTo'),
+  );
   response.cookies.set('roomote-gitea-oauth-state', state, {
     httpOnly: true,
     sameSite: 'lax',
     secure: webEnv.R_APP_URL.startsWith('https://'),
     path: '/api/source-control/gitea/oauth',
-    maxAge: 600,
+    maxAge: SOURCE_CONTROL_OAUTH_COOKIE_MAX_AGE,
   });
+  response.cookies.set(
+    getSourceControlOAuthReturnCookieName('gitea'),
+    returnTarget ?? '',
+    {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: webEnv.R_APP_URL.startsWith('https://'),
+      path: '/api/source-control/gitea/oauth',
+      maxAge: SOURCE_CONTROL_OAUTH_COOKIE_MAX_AGE,
+    },
+  );
   return response;
 }
