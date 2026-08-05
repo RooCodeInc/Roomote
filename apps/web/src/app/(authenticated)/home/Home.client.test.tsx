@@ -379,6 +379,55 @@ describe('Home', () => {
     expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
+  it('renders the feedback prompt below the input and opens its dialog', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Feedback, please!' }),
+    );
+
+    expect(
+      screen.getByRole('dialog', {
+        name: 'What do you think of Roomote so far?',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Schedule time with the team' }),
+    ).toHaveAttribute(
+      'href',
+      'https://calendly.com/d/ctx9-f7q-6vr/roomote-feedback',
+    );
+    expect(screen.getByRole('link', { name: 'Email us' })).toHaveAttribute(
+      'href',
+      'mailto:help@roomote.dev?subject=My%20thoughts%20on%20Roomote%20so%20far',
+    );
+  });
+
+  it('persists dismissal of the feedback prompt', async () => {
+    const { unmount } = render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Feedback, please!' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Dismiss feedback prompt' }),
+    );
+
+    expect(window.localStorage.getItem('roomote-home-feedback-dismissed')).toBe(
+      '1',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Feedback, please!' }),
+    ).not.toBeInTheDocument();
+
+    unmount();
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Feedback, please!' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows a toast and does not launch a task for platform answers', async () => {
     mockRouteHomeTask.mockResolvedValue({
       status: 'platform_answer',
