@@ -997,9 +997,21 @@ export async function showTaskConfiguration({
           `[LLM Router] Attempting to route Slack task (channel: ${event.channel}, envs: ${routingContext.availableEnvironments.length})`,
         );
 
-        // Attempt LLM routing - result is used to pre-fill the selection UI
+        // Attempt LLM routing - result is used to pre-fill the selection UI.
+        // Only the router invocation itself maps to an exception fallback;
+        // surrounding Slack context setup failures are handled by the outer
+        // catch and must not claim the routing infrastructure is down.
         const routingStart = Date.now();
-        const decision = await routeTask(routingContext);
+        let decision: Awaited<ReturnType<typeof routeTask>>;
+        try {
+          decision = await routeTask(routingContext);
+        } catch (error) {
+          decision = {
+            status: 'fallback',
+            reason: error instanceof Error ? error.message : String(error),
+            cause: 'exception',
+          };
+        }
         suggestedRoutingDurationMs = Date.now() - routingStart;
 
         if (decision.status === 'platform_answer') {
@@ -1083,21 +1095,6 @@ export async function showTaskConfiguration({
         console.error(
           `[LLM Router] Error during Slack routing, using default selections: ${error instanceof Error ? error.message : String(error)}`,
         );
-
-        routingFallbackNoticeText = SLACK_ROUTING_UNAVAILABLE_NOTICE;
-
-        void postRouterFallbackDebugMessage({
-          source: `Slack ${event.channel}`,
-          sourceLink:
-            buildSlackThreadPermalink({
-              slackWorkspaceDomain: slackInstallation.teamDomain ?? undefined,
-              slackChannelId: event.channel,
-              threadTs: threadId,
-            }) ?? undefined,
-          taskDescription,
-          reason: error instanceof Error ? error.message : String(error),
-          cause: 'exception',
-        });
       }
     }
 

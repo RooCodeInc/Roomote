@@ -706,6 +706,68 @@ describe('Slack deleted-mention suppression', () => {
     );
   });
 
+  it('treats a thrown routeTask error as an exception fallback with a warning', async () => {
+    routeTaskMock.mockRejectedValueOnce(new Error('router transport failed'));
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+    });
+
+    expect(postRouterFallbackDebugMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'router transport failed',
+        cause: 'exception',
+      }),
+    );
+    expect(JSON.stringify(postMessageMock.mock.calls)).toContain(
+      SLACK_ROUTING_UNAVAILABLE_NOTICE,
+    );
+  });
+
+  it('does not blame the routing infrastructure when Slack context setup fails', async () => {
+    getChannelNameMock.mockRejectedValueOnce(
+      new Error('channels.info unavailable'),
+    );
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+    });
+
+    expect(routeTaskMock).not.toHaveBeenCalled();
+    expect(postRouterFallbackDebugMessageMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(postMessageMock.mock.calls)).not.toContain(
+      SLACK_ROUTING_UNAVAILABLE_NOTICE,
+    );
+  });
+
   it('shows the plain picker without a warning when the router declined to pick', async () => {
     routeTaskMock.mockResolvedValueOnce({
       status: 'fallback',
