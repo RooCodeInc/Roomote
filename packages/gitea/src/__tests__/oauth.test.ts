@@ -1,12 +1,59 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const {
+  deleteWhereMock,
+  deleteMock,
+  findFirstMock,
+  insertMock,
+  writeMock,
+  decryptMock,
+} = vi.hoisted(() => {
+  const deleteWhereMock = vi.fn(async () => undefined);
+  const writeMock = vi.fn(async () => undefined);
+  return {
+    deleteWhereMock,
+    deleteMock: vi.fn(() => ({ where: deleteWhereMock })),
+    findFirstMock: vi.fn(),
+    insertMock: vi.fn(() => ({
+      values: vi.fn(() => ({
+        onConflictDoUpdate: writeMock,
+      })),
+    })),
+    writeMock,
+    decryptMock: vi.fn(),
+  };
+});
+
+vi.mock('@roomote/db/server', () => ({
+  db: {
+    delete: deleteMock,
+    insert: insertMock,
+    query: { deploymentSecrets: { findFirst: findFirstMock } },
+  },
+  deploymentSecrets: { name: 'deployment_secrets.name' },
+  eq: (left: unknown, right: unknown) => ({ left, right }),
+}));
+
+vi.mock('@roomote/db/encryption', () => ({
+  decryptSecrets: decryptMock,
+  encryptJSON: vi.fn(() => 'encrypted-connection'),
+}));
 
 import {
   buildGiteaOAuthRedirectUri,
   createGiteaOAuthAuthorizationUrl,
+  deleteGiteaOAuthConnection,
+  exchangeGiteaOAuthCode,
   getGiteaOAuthScopes,
+  isGiteaOAuthAccessToken,
+  resolveGiteaOAuthAccessToken,
 } from '../oauth';
 
 describe('Gitea deployment OAuth', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('centralizes the granular deployment scopes', () => {
     expect(getGiteaOAuthScopes()).toEqual([
       'read:user',
@@ -48,5 +95,75 @@ describe('Gitea deployment OAuth', () => {
     expect(new URL(result.url).toString()).toContain(
       'https://git.example/gitea/login/oauth/authorize?',
     );
+  });
+
+  it('deletes the encrypted connection and clears cached tokens', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: 'gitea-access-token',
+          refresh_token: 'gitea-refresh-token',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 42, login: 'roomote' }),
+      });
+    await exchangeGiteaOAuthCode({
+      baseUrl: 'https://gitea.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      code: 'code',
+      redirectUri: 'https://roomote.example/callback',
+      fetchImpl,
+    });
+    expect(isGiteaOAuthAccessToken('gitea-access-token')).toBe(true);
+
+    await deleteGiteaOAuthConnection();
+
+    expect(deleteWhereMock).toHaveBeenCalledOnce();
+    expect(isGiteaOAuthAccessToken('gitea-access-token')).toBe(false);
+  });
+
+  it('waits for an in-flight refresh and prevents it from recreating the connection', async () => {
+    findFirstMock.mockResolvedValue({ value: 'encrypted-connection' });
+    decryptMock.mockResolvedValue({
+      baseUrl: 'https://gitea.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: new Date(0).toISOString(),
+      scopes: ['read:user'],
+      status: 'active',
+    });
+    let resolveResponse!: (response: Response) => void;
+    const fetchImpl = vi.fn(
+      () => new Promise<Response>((resolve) => (resolveResponse = resolve)),
+    );
+
+    const refresh = resolveGiteaOAuthAccessToken({
+      fetchImpl: fetchImpl as typeof fetch,
+      forceRefresh: true,
+    });
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    const deletion = deleteGiteaOAuthConnection();
+    expect(deleteWhereMock).not.toHaveBeenCalled();
+
+    resolveResponse(
+      Response.json({
+        access_token: 'refreshed-access-token',
+        refresh_token: 'refreshed-refresh-token',
+      }),
+    );
+
+    await expect(refresh).resolves.toBeNull();
+    await deletion;
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(deleteWhereMock).toHaveBeenCalledOnce();
   });
 });
