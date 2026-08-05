@@ -9,13 +9,14 @@ import {
 } from '@roomote/types';
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
-import { formatTimeZone } from '@/lib/formatters';
+import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
 import {
   Button,
   BasicTooltip,
+  BrandIcon,
   Card,
   CardContent,
   Dialog,
@@ -105,6 +106,17 @@ function scheduleLabel(mode: CustomAutomationScheduleMode): string {
   return (
     SCHEDULE_OPTIONS.find((option) => option.value === mode)?.label ?? mode
   );
+}
+
+function cadenceLabel(row: CustomAutomationListItem): string {
+  if (row.scheduleMode !== 'cron') {
+    return scheduleLabel(row.scheduleMode);
+  }
+
+  return row.cronExpression
+    ? (tryParseCronSchedule(row.cronExpression, 'UTC')?.summary ??
+        'Custom schedule')
+    : 'Custom schedule';
 }
 
 function targetFromRow(row: CustomAutomationListItem): {
@@ -977,9 +989,13 @@ export function CustomAutomationsSection() {
                     (environment) => environment.id === row.environmentId,
                   )?.name ?? 'Environment missing';
                 const target = targetFromRow(row);
+                const destinationName =
+                  DESTINATION_OPTIONS.find(
+                    (option) => option.value === target.provider,
+                  )?.label ?? 'No report channel';
                 const destinationLabel =
                   target.provider === 'none'
-                    ? 'no report channel'
+                    ? ''
                     : target.provider === 'slack'
                       ? (slackOptions.find(
                           (option) =>
@@ -1012,15 +1028,37 @@ export function CustomAutomationsSection() {
                     />
                     <div className="col-span-2 row-start-1 min-w-0 space-y-1 sm:col-span-1 sm:col-start-2">
                       <p className="text-sm font-semibold">{row.name}</p>
+                      <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
+                        <span>
+                          {cadenceLabel(row)}, in {environmentName} →
+                        </span>
+                        {target.provider !== 'none' ? (
+                          <BrandIcon
+                            icon={target.provider}
+                            name=""
+                            className="size-4 shrink-0"
+                          />
+                        ) : null}
+                        <span>
+                          {destinationName}
+                          {destinationLabel ? ` ${destinationLabel}` : ''}
+                        </span>
+                      </p>
                       <p className="text-xs text-muted-foreground">
-                        {row.scheduleMode === 'cron'
-                          ? row.cronExpression
-                          : scheduleLabel(row.scheduleMode)}{' '}
-                        · {environmentName} ·{' '}
-                        {target.provider === 'none'
-                          ? destinationLabel
-                          : `${target.provider}:${destinationLabel}`}{' '}
-                        · Created by {row.createdByName ?? 'Unknown'}
+                        Created by {row.createdByName ?? 'Unknown'}
+                        {row.lastRunAt ? (
+                          <>
+                            {' · Last run '}
+                            <span
+                              title={new Date(row.lastRunAt).toLocaleString()}
+                            >
+                              {formatDistanceToNowCompact(
+                                new Date(row.lastRunAt),
+                                { addSuffix: true },
+                              )}
+                            </span>
+                          </>
+                        ) : null}
                       </p>
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
