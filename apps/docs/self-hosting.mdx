@@ -135,6 +135,12 @@ empty PostgreSQL/MinIO/Redis volumes, and starts the recorded Roomote release.
   retained tag, and restoring the pre-upgrade bundle is the last-resort path
   that also rewinds data.
 
+Use `roomote upgrade` instead of updating application image references alone.
+The command refreshes the release's Compose and Caddy configuration together;
+mixing newer application images with an older Caddyfile can leave routes used
+by the new controller unavailable until the deployment configuration is also
+updated.
+
 The supported rollback target is the release immediately before the current
 one. Check the running application version and applied schema migration at any
 time under **Settings → Deployment → Diagnostics**; both are also recorded in
