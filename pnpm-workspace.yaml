@@ -8,9 +8,4 @@ minimumReleaseAgeExclude:
   - jose
   # Allow the patched releases while they finish maturing.
   - brace-expansion
-  - fast-uri
-  - hono
-  - ip-address
-  - postcss
-  - undici
 blockExoticSubdeps: true
