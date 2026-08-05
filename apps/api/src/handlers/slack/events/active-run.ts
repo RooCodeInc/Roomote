@@ -19,6 +19,7 @@ import {
   resolveCurrentSlackMessageFiles,
   type SlackThreadMessage,
   type SlackEvent,
+  type SlackTaskEntryMessage,
   type SlackNotifier,
   setPendingSlackRequestUserInputPromptMessageTs,
   SlackThreadDeliveryTracker,
@@ -381,7 +382,7 @@ async function handlePendingRequestUserInputReply(params: {
 }
 
 export async function processActiveRunMessage(
-  event: SlackEvent,
+  event: SlackTaskEntryMessage,
   slack: SlackNotifier,
   userId: string,
   activeRun: ActiveSlackTaskRun,
@@ -522,7 +523,7 @@ export async function processActiveRunMessage(
         text: messageTextWithVideoDescriptions,
         user: event.user,
         userId,
-        ts: event.ts,
+        ts: event.sourceEventId ?? event.ts,
         images: allImages.length > 0 ? allImages : undefined,
         formattedPrompt,
         turnPolicy,

@@ -60,6 +60,7 @@ import type {
   SlackEvent,
   SlackInteractivePayload,
   SlackMessage,
+  SlackTaskEntryMessage,
   SlackThreadMessage,
 } from './types';
 import { postRouterDebugMessage } from './router-debug';
@@ -794,7 +795,7 @@ export async function showTaskConfiguration({
   replaceMessageTs,
   processingReactionName,
 }: {
-  event: SlackEvent;
+  event: SlackTaskEntryMessage;
   slackInstallation: SlackInstallation;
   userMapping: SlackUserMapping;
   slack: SlackNotifier;

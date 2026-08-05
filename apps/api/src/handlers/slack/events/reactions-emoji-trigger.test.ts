@@ -6,11 +6,20 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../call-roomote-via-emoji.js', () => ({
-  getCallRoomoteViaEmojiConfiguration: mocks.getConfiguration,
+  resolveReactionTaskEntry: async (input: {
+    reaction: string;
+    requester: { id: string; name: string };
+    sourceEventId: string;
+    target: { channelId: string; messageId: string; threadId?: string };
+  }) => {
+    const { reaction, ...entry } = input;
+    const configuration = await mocks.getConfiguration(reaction);
+    return configuration ? { ...entry, prompt: configuration.prompt } : null;
+  },
 }));
 
 vi.mock('./message-entry.js', () => ({
-  handleMessageOrAppMentionEvent: mocks.handleMessage,
+  handleSlackReactionTaskEntry: mocks.handleMessage,
 }));
 
 import {
@@ -23,7 +32,7 @@ describe('Slack emoji trigger', () => {
     vi.clearAllMocks();
   });
 
-  it('turns a configured reaction into an app mention in the target thread', async () => {
+  it('turns a configured reaction into an explicit task entry', async () => {
     mocks.getConfiguration.mockResolvedValue({
       emoji: 'white_check_mark',
       prompt: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
@@ -59,13 +68,15 @@ describe('Slack emoji trigger', () => {
 
     expect(mocks.handleMessage).toHaveBeenCalledWith({
       context,
-      event: {
-        type: 'app_mention',
-        channel: 'C1',
-        user: 'U1',
-        text: '<@UROOMOTE> Act on this\n\nAdditional instructions:\nPrioritize safety.',
-        ts: '1710000000.000100',
-        thread_ts: '1710000000.000000',
+      entry: {
+        prompt: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
+        requester: { id: 'U1', name: 'U1' },
+        sourceEventId: '1710000001.000000',
+        target: {
+          channelId: 'C1',
+          messageId: '1710000000.000100',
+          threadId: '1710000000.000000',
+        },
       },
     });
   });
@@ -117,7 +128,7 @@ describe('Slack emoji trigger', () => {
     expect(mocks.handleMessage).toHaveBeenCalledTimes(1);
     expect(mocks.handleMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: expect.objectContaining({ text: '<@UROOMOTE> Act on this' }),
+        entry: expect.objectContaining({ prompt: 'Act on this' }),
       }),
     );
   });

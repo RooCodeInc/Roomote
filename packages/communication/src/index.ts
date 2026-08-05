@@ -5,6 +5,7 @@ export * from './discord-request-user-input';
 export * from './messages';
 export * from './provider';
 export * from './reaction-emoji';
+export * from './reaction-task-entry';
 export * from './request-user-input';
 export * from './task-thread-title';
 export * from './teams-activity';

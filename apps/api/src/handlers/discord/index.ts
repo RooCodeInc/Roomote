@@ -20,6 +20,10 @@ import {
   queueCommunicationMessageOnce,
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
+import {
+  reactionTaskEntryToQueuedMessage,
+  type ReactionTaskEntry,
+} from '@roomote/communication/reaction-task-entry';
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
@@ -39,7 +43,7 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
-import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
+import { resolveReactionTaskEntry } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
@@ -230,86 +234,8 @@ async function refreshDiscordUserMappingBestEffort(input: {
   }
 }
 
-type DiscordReactionTarget = { channelId: string; messageId: string };
-
-function getPersistedDiscordReactionTarget(
-  event: DiscordGatewayEvent,
-): DiscordReactionTarget | undefined {
-  const value = event.reactionTarget;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const target = value as Record<string, unknown>;
-  return typeof target.channelId === 'string' &&
-    typeof target.messageId === 'string'
-    ? { channelId: target.channelId, messageId: target.messageId }
-    : undefined;
-}
-
-async function processDiscordGatewayEvent(
-  event: DiscordGatewayEvent,
-  options: {
-    reactionTarget?: DiscordReactionTarget;
-  } = {},
-) {
-  const reactionTarget =
-    options.reactionTarget ?? getPersistedDiscordReactionTarget(event);
+async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   const reaction = getDiscordReactionAdd(event);
-  if (reaction) {
-    const resolved = await resolveDiscordProvider();
-    if (reaction.user_id === resolved.botUserId || !reaction.emoji.name) {
-      return { ok: true, ignored: 'bot_or_missing_reaction' };
-    }
-
-    const configuration = await getCallRoomoteViaEmojiConfiguration(
-      reaction.emoji.name,
-    );
-    if (!configuration) {
-      return { ok: true, ignored: 'reaction_not_configured' };
-    }
-
-    const author = reaction.member?.user ?? {
-      id: reaction.user_id,
-      username: `Discord user ${reaction.user_id}`,
-    };
-    return processDiscordGatewayEvent(
-      {
-        eventId: event.eventId,
-        eventType: 'MESSAGE_CREATE',
-        receivedAt: event.receivedAt,
-        reactionTarget: {
-          channelId: reaction.channel_id,
-          messageId: reaction.message_id,
-        },
-        payload: {
-          id: event.eventId,
-          channel_id: reaction.channel_id,
-          ...(reaction.guild_id ? { guild_id: reaction.guild_id } : {}),
-          content: `<@${resolved.botUserId}> ${configuration.prompt}`,
-          author,
-          mentions: [
-            {
-              id: resolved.botUserId,
-              username: 'Roomote',
-              bot: true,
-            },
-          ],
-          attachments: [],
-          message_reference: {
-            message_id: reaction.message_id,
-            channel_id: reaction.channel_id,
-          },
-        },
-      },
-      {
-        reactionTarget: {
-          channelId: reaction.channel_id,
-          messageId: reaction.message_id,
-        },
-      },
-    );
-  }
-
   const interaction = getDiscordInteractionCreate(event);
   const message = getDiscordMessageCreate(event);
   if (interaction?.type === 3) {
@@ -322,7 +248,42 @@ async function processDiscordGatewayEvent(
   }
 
   const resolved = await resolveDiscordProvider();
-  const channelId = interaction?.channel_id ?? message?.channel_id;
+  let reactionEntry: ReactionTaskEntry | null =
+    reaction && event.eventType === 'MESSAGE_REACTION_ADD'
+      ? (event.reactionTaskEntry ?? null)
+      : null;
+  if (reaction) {
+    if (reaction.user_id === resolved.botUserId || !reaction.emoji.name) {
+      return { ok: true, ignored: 'bot_or_missing_reaction' };
+    }
+
+    if (!reactionEntry) {
+      const author = reaction.member?.user;
+      reactionEntry = await resolveReactionTaskEntry({
+        reaction: reaction.emoji.name,
+        requester: {
+          id: reaction.user_id,
+          name:
+            author?.global_name?.trim() ||
+            author?.username ||
+            `Discord user ${reaction.user_id}`,
+        },
+        sourceEventId: event.eventId,
+        target: {
+          channelId: reaction.channel_id,
+          messageId: reaction.message_id,
+        },
+      });
+    }
+    if (!reactionEntry) {
+      return { ok: true, ignored: 'reaction_not_configured' };
+    }
+  }
+
+  const channelId =
+    interaction?.channel_id ??
+    message?.channel_id ??
+    reactionEntry?.target.channelId;
   if (!channelId) {
     return { ok: true, ignored: 'missing_channel' };
   }
@@ -337,11 +298,11 @@ async function processDiscordGatewayEvent(
   });
   const metadata = discordMetadataForChannel({
     channel,
-    messageId: reactionTarget?.messageId ?? event.eventId,
+    messageId: reactionEntry?.target.messageId ?? event.eventId,
     // Only a real channel message provides an anchor for the task thread;
     // interactions (slash commands, buttons) do not.
-    ...(reactionTarget?.messageId
-      ? { anchorMessageId: reactionTarget.messageId }
+    ...(reactionEntry?.target.messageId
+      ? { anchorMessageId: reactionEntry.target.messageId }
       : message?.id
         ? { anchorMessageId: message.id }
         : {}),
@@ -361,7 +322,7 @@ async function processDiscordGatewayEvent(
   // Auto-respond channels run first, mirroring Slack: a message in a
   // configured channel — mentioned or not, bot- or human-authored — is
   // consumed here and never reaches the mention/task-entry gating below.
-  if (message && !interaction && !reactionTarget) {
+  if (message && !interaction) {
     const handledAsChannelAutoStart = await maybeHandleDiscordChannelAutoStart({
       event,
       message,
@@ -378,7 +339,13 @@ async function processDiscordGatewayEvent(
   const command = getDiscordInteractionCommand(event);
   const sender = interaction
     ? getDiscordInteractionUser(interaction)
-    : message?.author;
+    : (message?.author ??
+      (reactionEntry
+        ? {
+            id: reactionEntry.requester.id,
+            username: reactionEntry.requester.name,
+          }
+        : undefined));
   if (!sender || sender.bot) {
     return { ok: true, ignored: 'bot_or_missing_sender' };
   }
@@ -540,11 +507,13 @@ async function processDiscordGatewayEvent(
     pendingRoutingReply ||
     repliedToAutomationReport,
   );
-  const isTaskEntry = isDiscordTaskEntryEvent(event, {
-    botUserId: resolved.botUserId,
-    isTaskThread: isRoomoteThread,
-    parentChannelId: channel.parentChannelId,
-  });
+  const isTaskEntry =
+    reactionEntry !== null ||
+    isDiscordTaskEntryEvent(event, {
+      botUserId: resolved.botUserId,
+      isTaskThread: isRoomoteThread,
+      parentChannelId: channel.parentChannelId,
+    });
   if (!isTaskEntry) {
     return { ok: true, ignored: 'not_task_entry' };
   }
@@ -554,6 +523,7 @@ async function processDiscordGatewayEvent(
     // @mentioning Roomote are ignored. Only explicit task entry (DM,
     // @mention, or slash command) should nudge them to link.
     const addressedBot =
+      reactionEntry !== null ||
       Boolean(command) ||
       channel.isDirectMessage ||
       (message != null && isDiscordBotMentioned(message, resolved.botUserId));
@@ -569,7 +539,10 @@ async function processDiscordGatewayEvent(
 
     await rememberPendingDiscordAccountLinkTask({
       discordUserId: sender.id,
-      event,
+      event:
+        reactionEntry && event.eventType === 'MESSAGE_REACTION_ADD'
+          ? { ...event, reactionTaskEntry: reactionEntry }
+          : event,
     }).catch((error) => {
       apiLogger.warn(
         `[discord] Failed to remember pending task for unlinked user ${sender.id}: ${error instanceof Error ? error.message : String(error)}`,
@@ -582,8 +555,8 @@ async function processDiscordGatewayEvent(
       channel,
       discordUserId: sender.id,
       ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-      ...(reactionTarget?.messageId
-        ? { replyToMessageId: reactionTarget.messageId }
+      ...(reactionEntry?.target.messageId
+        ? { replyToMessageId: reactionEntry.target.messageId }
         : message?.id
           ? { replyToMessageId: message.id }
           : {}),
@@ -655,14 +628,29 @@ async function processDiscordGatewayEvent(
   for (const warning of processedAttachments.warnings) {
     apiLogger.warn(`[discord] Attachment warning: ${warning}`);
   }
-  const queuedMessage = discordEventToQueuedCommunicationMessage(event, {
-    botUserId: resolved.botUserId,
-    userId: senderUserId,
-    isTaskThread: isRoomoteThread,
-    parentChannelId: channel.parentChannelId,
-    attachmentImages: processedAttachments.images,
-    attachmentText: processedAttachments.attachmentTexts,
-  });
+  const queuedMessage = reactionEntry
+    ? reactionTaskEntryToQueuedMessage(
+        'discord',
+        {
+          ...reactionEntry,
+          target: {
+            ...reactionEntry.target,
+            ...(metadata.communicationThreadId
+              ? { threadId: metadata.communicationThreadId }
+              : {}),
+            channelId: metadata.communicationChannelId,
+          },
+        },
+        senderUserId,
+      )
+    : discordEventToQueuedCommunicationMessage(event, {
+        botUserId: resolved.botUserId,
+        userId: senderUserId,
+        isTaskThread: isRoomoteThread,
+        parentChannelId: channel.parentChannelId,
+        attachmentImages: processedAttachments.images,
+        attachmentText: processedAttachments.attachmentTexts,
+      });
   if (!queuedMessage) {
     return { ok: true, ignored: 'empty_task_entry' };
   }
@@ -790,8 +778,8 @@ async function processDiscordGatewayEvent(
           : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
-        ...(reactionTarget?.messageId
-          ? { contextThroughMessageId: reactionTarget.messageId }
+        ...(reactionEntry?.target.messageId
+          ? { contextThroughMessageId: reactionEntry.target.messageId }
           : {}),
         ...(message?.message_reference?.message_id
           ? {
@@ -855,7 +843,7 @@ async function processDiscordGatewayEvent(
     await setLatestInboundMessageId(
       'discord',
       activeRun.id,
-      reactionTarget?.messageId ?? queuedMessage.ts,
+      reactionEntry?.target.messageId ?? queuedMessage.ts,
     );
     // Match Slack: eyes is an intake-only platform ack. Active follow-ups are
     // already durable once queued; agents may still react when turn policy allows.
@@ -873,11 +861,16 @@ async function processDiscordGatewayEvent(
     // Match Slack wake-up: temporary 👀 on the follow-up that resumes a
     // sleeping task. Worker onStart clears it via discordIntakeAckPending.
     let wakeAckPinned = false;
-    if (message?.id) {
+    const wakeReactionTarget = reactionEntry
+      ? reactionEntry.target
+      : message?.id
+        ? { channelId: channel.channelId, messageId: message.id }
+        : null;
+    if (wakeReactionTarget) {
       try {
         await resolved.provider.addReaction({
-          channelId: channel.channelId,
-          messageId: message.id,
+          channelId: wakeReactionTarget.channelId,
+          messageId: wakeReactionTarget.messageId,
           name: '👀',
         });
         wakeAckPinned = true;
@@ -894,8 +887,8 @@ async function processDiscordGatewayEvent(
           : {}),
         botUserId: resolved.botUserId,
         queuedMessage,
-        ...(reactionTarget?.messageId
-          ? { contextThroughMessageId: reactionTarget.messageId }
+        ...(reactionEntry?.target.messageId
+          ? { contextThroughMessageId: reactionEntry.target.messageId }
           : {}),
         ...(message?.message_reference?.message_id
           ? {
@@ -928,11 +921,11 @@ async function processDiscordGatewayEvent(
         messageId: metadata.communicationMessageId,
         guildId: metadata.communicationGuildId,
         preservePayloadFlags: ['discordTaskThread'],
-        ...(message?.id
+        ...(wakeReactionTarget
           ? {
               discordWakeAckReaction: {
-                channelId: channel.channelId,
-                messageId: message.id,
+                channelId: wakeReactionTarget.channelId,
+                messageId: wakeReactionTarget.messageId,
                 intakeAckPinned: wakeAckPinned,
               },
             }
@@ -950,11 +943,15 @@ async function processDiscordGatewayEvent(
       return { ok: true, resumed: true, runId: resumed.id };
     } catch (error) {
       await releaseDiscordContinuationClaim(continuationClaim);
-      if (wakeAckPinned && message?.id && resolved.provider.removeReaction) {
+      if (
+        wakeAckPinned &&
+        wakeReactionTarget &&
+        resolved.provider.removeReaction
+      ) {
         await resolved.provider
           .removeReaction({
-            channelId: channel.channelId,
-            messageId: message.id,
+            channelId: wakeReactionTarget.channelId,
+            messageId: wakeReactionTarget.messageId,
             name: 'eyes',
           })
           .catch(() => undefined);
@@ -980,11 +977,11 @@ async function processDiscordGatewayEvent(
   // Only real MESSAGE_CREATE messages can receive Discord reactions; slash-
   // command interaction ids are not message targets and would 404.
   let intakeAckPinned = false;
-  if (message?.id) {
+  if (message?.id || reactionEntry) {
     try {
       await resolved.provider.addReaction({
-        channelId: reactionTarget?.channelId ?? channel.channelId,
-        messageId: reactionTarget?.messageId ?? message.id,
+        channelId: reactionEntry?.target.channelId ?? channel.channelId,
+        messageId: reactionEntry?.target.messageId ?? message!.id,
         name: '👀',
       });
       intakeAckPinned = true;
@@ -1009,16 +1006,21 @@ async function processDiscordGatewayEvent(
       // task thread; known task threads were already handled above.
       forceNewThread: forceNewTask,
       ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
-      ...(message?.message_reference?.message_id
+      ...(reactionEntry
         ? {
-            replyToMessageId: message.message_reference.message_id,
-            ...(message.message_reference.channel_id
-              ? { replyToChannelId: message.message_reference.channel_id }
-              : {}),
+            replyToMessageId: reactionEntry.target.messageId,
+            replyToChannelId: reactionEntry.target.channelId,
           }
-        : {}),
-      ...(reactionTarget?.messageId
-        ? { contextThroughMessageId: reactionTarget.messageId }
+        : message?.message_reference?.message_id
+          ? {
+              replyToMessageId: message.message_reference.message_id,
+              ...(message.message_reference.channel_id
+                ? { replyToChannelId: message.message_reference.channel_id }
+                : {}),
+            }
+          : {}),
+      ...(reactionEntry?.target.messageId
+        ? { contextThroughMessageId: reactionEntry.target.messageId }
         : {}),
     });
   } catch (error) {

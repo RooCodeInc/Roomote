@@ -114,6 +114,11 @@ export interface SlackEvent {
   statuspageWarningText?: string;
 }
 
+export type SlackTaskEntryMessage = Omit<SlackEvent, 'type'> & {
+  type: SlackEvent['type'];
+  sourceEventId?: string;
+};
+
 export type SlackFunctionExecutionInput =
   | string
   | number

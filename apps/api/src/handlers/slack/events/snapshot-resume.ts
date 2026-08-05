@@ -15,7 +15,7 @@ import {
   queueSlackMessage,
   resolveCurrentSlackMessageFiles,
   SlackThreadDeliveryTracker,
-  type SlackEvent,
+  type SlackTaskEntryMessage,
   type SlackNotifier,
 } from '@roomote/slack';
 import { and, db, desc, eq, gt, taskRuns, tasks } from '@roomote/db/server';
@@ -42,7 +42,7 @@ type CompletedSlackTaskRun = {
 };
 
 export async function processSnapshotResume(
-  event: SlackEvent,
+  event: SlackTaskEntryMessage,
   slack: SlackNotifier,
   completedRun: CompletedSlackTaskRun,
   threadId: string,
@@ -149,7 +149,7 @@ export async function processSnapshotResume(
       text: messageTextWithVideoDescriptions,
       user: event.user,
       userId: userId ?? undefined,
-      ts: event.ts,
+      ts: event.sourceEventId ?? event.ts,
       images: allImages.length > 0 ? allImages : undefined,
       formattedPrompt,
       turnPolicy,

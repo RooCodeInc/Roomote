@@ -147,7 +147,16 @@ vi.mock('../unmentioned-thread-reply.js', () => ({
 }));
 
 vi.mock('../../call-roomote-via-emoji.js', () => ({
-  getCallRoomoteViaEmojiConfiguration: mocks.callViaEmojiConfig,
+  resolveReactionTaskEntry: async (input: {
+    reaction: string;
+    requester: { id: string; name: string };
+    sourceEventId: string;
+    target: { channelId: string; messageId: string };
+  }) => {
+    const { reaction, ...entry } = input;
+    const configuration = await mocks.callViaEmojiConfig(reaction);
+    return configuration ? { ...entry, prompt: configuration.prompt } : null;
+  },
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -2062,23 +2071,25 @@ describe('Discord Gateway event handler', () => {
       'channel-1:message-target:discord-user-1:white_check_mark:42';
     const originalEvent = {
       eventId,
-      eventType: 'MESSAGE_CREATE' as const,
+      eventType: 'MESSAGE_REACTION_ADD' as const,
       receivedAt: '2026-07-12T15:00:00.000Z',
-      reactionTarget: {
-        channelId: 'channel-1',
-        messageId: 'message-target',
+      reactionTaskEntry: {
+        prompt: 'Act on this',
+        requester: { id: 'discord-user-1', name: 'matt' },
+        sourceEventId: eventId,
+        target: {
+          channelId: 'channel-1',
+          messageId: 'message-target',
+        },
       },
       payload: {
-        id: eventId,
+        user_id: 'discord-user-1',
         channel_id: 'channel-1',
+        message_id: 'message-target',
         guild_id: 'guild-1',
-        content: '<@bot-1> Act on this',
-        author: { id: 'discord-user-1', username: 'matt' },
-        mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
-        attachments: [],
-        message_reference: {
-          message_id: 'message-target',
-          channel_id: 'channel-1',
+        emoji: { id: null, name: 'white_check_mark' },
+        member: {
+          user: { id: 'discord-user-1', username: 'matt' },
         },
       },
     };
