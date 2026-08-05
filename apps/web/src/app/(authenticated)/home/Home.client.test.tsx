@@ -428,6 +428,48 @@ describe('Home', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('keeps feedback dismissal usable when storage access fails', async () => {
+    const feedbackStorageKey = 'roomote-home-feedback-dismissed';
+    const originalGetItem = Storage.prototype.getItem;
+    const originalSetItem = Storage.prototype.setItem;
+    const getItemSpy = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation((key) => {
+        if (key === feedbackStorageKey) {
+          throw new Error('Storage access blocked');
+        }
+
+        return originalGetItem.call(window.localStorage, key);
+      });
+    const setItemSpy = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation((key, value) => {
+        if (key === feedbackStorageKey) {
+          throw new Error('Storage quota exceeded');
+        }
+
+        originalSetItem.call(window.localStorage, key, value);
+      });
+
+    try {
+      render(<Home initialPlaceholderIndex={0} />);
+
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Feedback, please!' }),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Dismiss feedback prompt' }),
+      );
+
+      expect(
+        screen.queryByRole('button', { name: 'Feedback, please!' }),
+      ).not.toBeInTheDocument();
+    } finally {
+      getItemSpy.mockRestore();
+      setItemSpy.mockRestore();
+    }
+  });
+
   it('shows a toast and does not launch a task for platform answers', async () => {
     mockRouteHomeTask.mockResolvedValue({
       status: 'platform_answer',

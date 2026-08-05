@@ -79,6 +79,22 @@ const FEEDBACK_EMAIL_URL =
   'mailto:help@roomote.dev?subject=My%20thoughts%20on%20Roomote%20so%20far';
 const FEEDBACK_DISCORD_URL = 'https://discord.gg/roomote';
 
+function isFeedbackPromptDismissed(): boolean {
+  try {
+    return window.localStorage.getItem(FEEDBACK_DISMISSED_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function persistFeedbackPromptDismissal(): void {
+  try {
+    window.localStorage.setItem(FEEDBACK_DISMISSED_STORAGE_KEY, '1');
+  } catch {
+    // Ignore storage failures; the prompt can still be dismissed for this session.
+  }
+}
+
 type RoutingFlowState = 'idle' | 'routing_pending' | 'launching';
 
 type SubmissionSnapshot = {
@@ -188,9 +204,7 @@ export function Home({
   useEffect(() => setPromptText(promptParam), [promptParam]);
 
   useEffect(() => {
-    setIsFeedbackPromptVisible(
-      window.localStorage.getItem(FEEDBACK_DISMISSED_STORAGE_KEY) !== '1',
-    );
+    setIsFeedbackPromptVisible(!isFeedbackPromptDismissed());
   }, []);
 
   useEffect(() => {
@@ -816,10 +830,7 @@ export function Home({
               variant="link"
               size="sm"
               onClick={() => {
-                window.localStorage.setItem(
-                  FEEDBACK_DISMISSED_STORAGE_KEY,
-                  '1',
-                );
+                persistFeedbackPromptDismissal();
                 setIsFeedbackPromptVisible(false);
               }}
               aria-label="Dismiss feedback prompt"
