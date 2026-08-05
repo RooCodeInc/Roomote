@@ -150,7 +150,7 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
                 type="button"
                 onClick={() => onTabClick('recent')}
                 className={cn(
-                  'pl-4 pr-5 py-3 cursor-pointer font-semibold text-left transition-colors',
+                  'pl-4 pr-5 py-3 cursor-pointer font-semibold text-left transition-colors text-nowrap',
                   activeTab === 'recent'
                     ? 'bg-foreground text-accent-foreground dark:bg-accent-foreground dark:text-card'
                     : 'text-muted-foreground/80 hover:text-accent-foreground',
@@ -165,7 +165,7 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
                 type="button"
                 onClick={() => onTabClick('pullRequests')}
                 className={cn(
-                  'px-5 py-3 cursor-pointer font-semibold text-left transition-colors',
+                  'px-5 py-3 cursor-pointer font-semibold text-left transition-colors text-nowrap',
                   activeTab === 'pullRequests'
                     ? 'bg-foreground text-accent-foreground dark:bg-accent-foreground dark:text-card'
                     : 'text-muted-foreground/80 hover:text-accent-foreground',
@@ -178,18 +178,17 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
             <div className="ml-auto flex min-w-0 items-center">
               {isFeedbackPromptVisible ? (
                 <div
-                  className={`hidden min-w-0 items-center gap-2 px-3 text-sm text-muted-foreground md:flex relative transition-all duration-500 delay-125 -right-10 ${isExpanded ? '-top-6 opacity-0' : 'top-0.5 opacity-100'}`}
+                  className={`flex min-w-0  items-center gap-2 px-3 text-sm text-muted-foreground md:flex relative transition-all duration-500 delay-125 -right-10 ${isExpanded ? '-top-6 opacity-0' : 'top-0.5 opacity-100'}`}
                 >
-                  <span className="whitespace-nowrap">
-                    <button
-                      type="button"
-                      onClick={() => setIsFeedbackDialogOpen(true)}
-                      className="cursor-pointer font-semibold text-muted-foreground underline underline-offset-2 hover:text-accent-foreground"
-                    >
-                      We need your feedback!
-                    </button>
-                  </span>
-                  <MessageCirclePlus className="size-4 shrink-0" />
+                  <button
+                    type="button"
+                    onClick={() => setIsFeedbackDialogOpen(true)}
+                    className="cursor-pointer font-semibold whitespace-nowrap text-muted-foreground/80 hover:text-accent-foreground"
+                  >
+                    <MessageCirclePlus className="inline -mt-0.5 mx-1.5 size-4 shrink-0" />
+                    <span className="hidden md:inline">Feedback, please!</span>
+                    <span className="inline md:hidden">Feedback</span>
+                  </button>
                 </div>
               ) : null}
 
