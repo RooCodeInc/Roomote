@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { db, deploymentSecrets, sql } from '@roomote/db/server';
+import { db, deploymentSecrets, eq, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
 
 const SECRET_NAME = 'gitlab_deployment_oauth_connection';
@@ -102,6 +102,14 @@ async function writeConnection(
 
 export async function getGitLabOAuthConnection(): Promise<GitLabOAuthConnection | null> {
   return readConnection();
+}
+
+export async function deleteGitLabOAuthConnection(): Promise<void> {
+  await db
+    .delete(deploymentSecrets)
+    .where(eq(deploymentSecrets.name, SECRET_NAME));
+  refreshPromise = null;
+  cachedAccessToken = null;
 }
 
 export async function exchangeGitLabOAuthCode(input: {

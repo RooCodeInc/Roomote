@@ -1,9 +1,36 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const { deleteWhereMock, deleteMock, insertMock } = vi.hoisted(() => {
+  const deleteWhereMock = vi.fn(async () => undefined);
+  return {
+    deleteWhereMock,
+    deleteMock: vi.fn(() => ({ where: deleteWhereMock })),
+    insertMock: vi.fn(() => ({
+      values: vi.fn(() => ({
+        onConflictDoUpdate: vi.fn(async () => undefined),
+      })),
+    })),
+  };
+});
+
+vi.mock('@roomote/db/server', () => ({
+  db: { delete: deleteMock, insert: insertMock },
+  deploymentSecrets: { name: 'deployment_secrets.name' },
+  eq: (left: unknown, right: unknown) => ({ left, right }),
+}));
+
+vi.mock('@roomote/db/encryption', () => ({
+  decryptSecrets: vi.fn(),
+  encryptJSON: vi.fn(() => 'encrypted-connection'),
+}));
 
 import {
   buildGiteaOAuthRedirectUri,
   createGiteaOAuthAuthorizationUrl,
+  deleteGiteaOAuthConnection,
+  exchangeGiteaOAuthCode,
   getGiteaOAuthScopes,
+  isGiteaOAuthAccessToken,
 } from '../oauth';
 
 describe('Gitea deployment OAuth', () => {
@@ -48,5 +75,35 @@ describe('Gitea deployment OAuth', () => {
     expect(new URL(result.url).toString()).toContain(
       'https://git.example/gitea/login/oauth/authorize?',
     );
+  });
+
+  it('deletes the encrypted connection and clears cached tokens', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: 'gitea-access-token',
+          refresh_token: 'gitea-refresh-token',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 42, login: 'roomote' }),
+      });
+    await exchangeGiteaOAuthCode({
+      baseUrl: 'https://gitea.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      code: 'code',
+      redirectUri: 'https://roomote.example/callback',
+      fetchImpl,
+    });
+    expect(isGiteaOAuthAccessToken('gitea-access-token')).toBe(true);
+
+    await deleteGiteaOAuthConnection();
+
+    expect(deleteWhereMock).toHaveBeenCalledOnce();
+    expect(isGiteaOAuthAccessToken('gitea-access-token')).toBe(false);
   });
 });

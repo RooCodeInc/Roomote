@@ -16,6 +16,7 @@ const {
   saveMutationOptionsRef,
   clearMutationOptionsRef,
   invalidateQueriesMock,
+  toastWarningMock,
 } = vi.hoisted(() => ({
   saveMutateMock: vi.fn(),
   clearMutateMock: vi.fn(),
@@ -27,11 +28,14 @@ const {
   },
   clearMutationOptionsRef: {
     current: null as {
-      onSuccess?: () => Promise<void> | void;
+      onSuccess?: (result: {
+        warnings: Array<{ message: string }>;
+      }) => Promise<void> | void;
       onError?: (error: Error) => void;
     } | null,
   },
   invalidateQueriesMock: vi.fn(async () => undefined),
+  toastWarningMock: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
@@ -60,7 +64,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: toastWarningMock },
 }));
 
 const { adoLinkedAccountRef } = vi.hoisted(() => ({
@@ -91,7 +95,7 @@ vi.mock('@/trpc/client', () => ({
           mutationKey: ['saveConfig'],
         }),
       },
-      clearGitHubConfig: {
+      clearConfig: {
         mutationOptions: (options: object) => ({
           ...options,
           mutationKey: ['clearConfig'],
@@ -124,21 +128,25 @@ const MASKED_VALUE = '•••••••••••••••••••�
 
 function buildConfigStatus(
   fields: SetupSourceControlStatus['providers'][number]['fields'],
+  provider: SetupSourceControlStatus['preselectedProvider'] = 'github',
 ): SetupSourceControlStatus {
+  const catalogProvider = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+    (candidate) => candidate.provider === provider,
+  )!;
   return {
-    selectedProvider: 'github',
-    preselectedProvider: 'github',
+    selectedProvider: provider,
+    preselectedProvider: provider,
     runtimeConfiguredProvider: null,
     runtimeConfiguredProviders: [],
     lockReason: null,
-    connectedProvider: 'github',
+    connectedProvider: provider,
     setupSatisfied: true,
     setupSatisfiedByRuntimeEnv: false,
     providers: [
       {
-        provider: 'github',
-        label: 'GitHub',
-        connectionMode: 'app',
+        provider,
+        label: catalogProvider.label,
+        connectionMode: catalogProvider.connectionMode,
         runtimeConfigSatisfied: false,
         savedConfigSatisfied: true,
         configSatisfied: true,
@@ -157,6 +165,7 @@ describe('SourceControlConfigForm', () => {
     saveMutateMock.mockReset();
     clearMutateMock.mockReset();
     invalidateQueriesMock.mockClear();
+    toastWarningMock.mockReset();
     saveMutationOptionsRef.current = null;
     clearMutationOptionsRef.current = null;
     adoLinkedAccountRef.current = { data: undefined, isPending: false };
@@ -311,21 +320,91 @@ describe('SourceControlConfigForm', () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/repositories will be disconnected/),
+      screen.getByText(/installations and repositories will be disconnected/),
     ).toBeInTheDocument();
 
     const removeButtons = screen.getAllByRole('button', { name: 'Remove' });
     fireEvent.click(removeButtons.at(-1)!);
 
-    expect(clearMutateMock).toHaveBeenCalledWith();
+    expect(clearMutateMock).toHaveBeenCalledWith({ provider: 'github' });
 
     await act(async () => {
-      await clearMutationOptionsRef.current?.onSuccess?.();
+      await clearMutationOptionsRef.current?.onSuccess?.({ warnings: [] });
     });
 
     expect(invalidateQueriesMock).toHaveBeenCalledWith({
       queryKey: ['github.installations'],
     });
+  });
+
+  it('offers removal for saved non-GitHub configuration and displays cleanup warnings', async () => {
+    render(
+      <SourceControlConfigForm
+        provider="gitlab"
+        configStatus={buildConfigStatus(
+          [
+            {
+              envVarName: 'GITLAB_CLIENT_ID',
+              acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
+              label: 'GitLab OAuth Client ID',
+              runtimeSatisfied: false,
+              savedSatisfied: true,
+              savedValue: 'saved-client-id',
+              satisfiedByEnvVarName: 'GITLAB_CLIENT_ID',
+            },
+          ],
+          'gitlab',
+        )}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(
+      screen.getByRole('heading', {
+        name: 'Remove GitLab configuration?',
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' }).at(-1)!);
+    expect(clearMutateMock).toHaveBeenCalledWith({ provider: 'gitlab' });
+
+    await act(async () => {
+      await clearMutationOptionsRef.current?.onSuccess?.({
+        warnings: [{ message: 'Remove the remaining hook manually.' }],
+      });
+    });
+    expect(toastWarningMock).toHaveBeenCalledWith(
+      'Remove the remaining hook manually.',
+    );
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+      queryKey: ['sourceControl.configStatus'],
+    });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+      queryKey: ['sourceControl.repositories'],
+    });
+  });
+
+  it('keeps removal hidden for runtime-only configuration', () => {
+    render(
+      <SourceControlConfigForm
+        provider="gitea"
+        configStatus={buildConfigStatus(
+          [
+            {
+              envVarName: 'GITEA_CLIENT_ID',
+              acceptedEnvVarNames: ['GITEA_CLIENT_ID'],
+              label: 'Gitea OAuth Client ID',
+              runtimeSatisfied: true,
+              savedSatisfied: false,
+              savedValue: null,
+              satisfiedByEnvVarName: 'GITEA_CLIENT_ID',
+            },
+          ],
+          'gitea',
+        )}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
   });
 
   it('renders the Azure DevOps auth modes and advanced fields', () => {
@@ -505,5 +584,73 @@ describe('SourceControlConfigForm', () => {
 
     expect(screen.getByText(/Connected as Ada Lovelace/)).toBeInTheDocument();
     expect(screen.queryByText(/Not in use yet/)).not.toBeInTheDocument();
+  });
+
+  it('confirms Azure DevOps account unlinking and invalidates the linked account', async () => {
+    adoLinkedAccountRef.current = {
+      data: {
+        configured: true,
+        account: { accountId: 'ada@contoso.com', displayName: 'Ada Lovelace' },
+      },
+      isPending: false,
+    };
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildAdoDelegatedStatus({
+          savedSatisfied: true,
+          savedValue: 'ada@contoso.com',
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(
+      screen.getByText(/delegated Azure DevOps account will be unlinked/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Remove' }).at(-1)!);
+    expect(clearMutateMock).toHaveBeenCalledWith({ provider: 'ado' });
+
+    await act(async () => {
+      await clearMutationOptionsRef.current?.onSuccess?.({ warnings: [] });
+    });
+    expect(invalidateQueriesMock).toHaveBeenCalledWith({
+      queryKey: ['linkedAccounts.ado'],
+    });
+  });
+
+  it('does not promise account unlinking for Azure DevOps PAT configuration', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildConfigStatus(
+          [
+            {
+              envVarName: 'ADO_TOKEN',
+              acceptedEnvVarNames: ['ADO_TOKEN'],
+              label: 'Azure DevOps Access Token',
+              secret: true,
+              runtimeSatisfied: false,
+              savedSatisfied: true,
+              savedValue: null,
+              satisfiedByEnvVarName: 'ADO_TOKEN',
+            },
+          ],
+          'ado',
+        )}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(
+      screen.getByText(
+        /Existing Azure DevOps repositories will be disconnected/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /configured delegated Azure DevOps account will be unlinked/,
+      ),
+    ).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { db, deploymentSecrets, sql } from '@roomote/db/server';
+import { db, deploymentSecrets, eq, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
 
 import { BITBUCKET_OAUTH_CALLBACK_PATH } from './constants';
@@ -43,6 +43,7 @@ type BitbucketOAuthTokenResponse = {
 };
 
 let refreshPromise: Promise<string> | null = null;
+let cachedAccessToken: string | null = null;
 
 export function getBitbucketOAuthScopes(): readonly string[] {
   return DEFAULT_SCOPES;
@@ -97,6 +98,18 @@ async function writeConnection(connection: BitbucketOAuthConnection) {
 
 export async function getBitbucketOAuthConnection() {
   return readConnection();
+}
+
+export async function deleteBitbucketOAuthConnection(): Promise<void> {
+  await db
+    .delete(deploymentSecrets)
+    .where(eq(deploymentSecrets.name, SECRET_NAME));
+  refreshPromise = null;
+  cachedAccessToken = null;
+}
+
+export function isBitbucketOAuthAccessToken(token: string): boolean {
+  return token === cachedAccessToken;
 }
 
 export async function exchangeBitbucketOAuthCode(input: {
@@ -165,6 +178,7 @@ export async function exchangeBitbucketOAuthCode(input: {
     // The token exchange remains valid if the identity lookup is temporarily unavailable.
   }
   await writeConnection(connection);
+  cachedAccessToken = connection.accessToken;
   return connection;
 }
 
@@ -178,6 +192,7 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
     !options?.forceRefresh &&
     Date.parse(connection.expiresAt) > Date.now() + 60_000
   ) {
+    cachedAccessToken = connection.accessToken;
     return connection.accessToken;
   }
   if (refreshPromise) return refreshPromise;
@@ -220,6 +235,7 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
         status: 'active' as const,
       };
       await writeConnection(next);
+      cachedAccessToken = next.accessToken;
       return next.accessToken;
     } catch (error) {
       if (requiresReauthorization) {

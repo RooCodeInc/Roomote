@@ -99,6 +99,14 @@ export async function getGiteaOAuthConnection(): Promise<GiteaOAuthConnection | 
   return readConnection();
 }
 
+export async function deleteGiteaOAuthConnection(): Promise<void> {
+  await db
+    .delete(deploymentSecrets)
+    .where(eq(deploymentSecrets.name, SECRET_NAME));
+  refreshPromise = null;
+  cachedAccessToken = null;
+}
+
 export async function exchangeGiteaOAuthCode(input: {
   baseUrl: string;
   clientId: string;

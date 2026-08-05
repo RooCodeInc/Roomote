@@ -90,7 +90,7 @@ import {
   getGitHubRoomoteMentionCommand,
   getRepositoriesCommand,
   getSourceControlConfigStatusCommand,
-  clearGitHubConfigCommand,
+  clearSourceControlConfigCommand,
   saveSourceControlConfigCommand,
   setPrActionCommand,
   setGitHubRoomoteMentionCommand,
@@ -1164,9 +1164,11 @@ export const appRouter = createRouter({
         saveSourceControlConfigCommand(auth, input),
       ),
 
-    clearGitHubConfig: protectedProcedure.mutation(({ ctx: { auth } }) =>
-      clearGitHubConfigCommand(auth),
-    ),
+    clearConfig: protectedProcedure
+      .input(z.object({ provider: sourceControlProviderSchema }))
+      .mutation(({ ctx: { auth }, input }) =>
+        clearSourceControlConfigCommand(auth, input),
+      ),
   }),
 
   slack: createRouter({

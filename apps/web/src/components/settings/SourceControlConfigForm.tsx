@@ -162,21 +162,33 @@ export function SourceControlConfigForm({
     }),
   );
   const clearConfig = useMutation(
-    trpc.sourceControl.clearGitHubConfig.mutationOptions({
-      onSuccess: async () => {
+    trpc.sourceControl.clearConfig.mutationOptions({
+      onSuccess: async (result) => {
         await queryClient.invalidateQueries({
           queryKey: trpc.sourceControl.configStatus.queryKey(),
         });
         await queryClient.invalidateQueries({
           queryKey: trpc.sourceControl.repositories.queryKey(),
         });
-        await queryClient.invalidateQueries({
-          queryKey: trpc.github.installations.queryKey(),
-        });
+        if (provider === 'github') {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.github.installations.queryKey(),
+          });
+        }
+        if (provider === 'ado') {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.linkedAccounts.ado.queryKey(),
+          });
+        }
         setValues({});
         setEditingSavedValues({});
         setRemoveDialogOpen(false);
-        toast.success('GitHub configuration removed.');
+        toast.success(
+          `${providerStatus?.label ?? 'Source-control'} configuration removed.`,
+        );
+        for (const warning of result.warnings) {
+          toast.warning(warning.message);
+        }
       },
       onError: (error) => {
         toast.error(error.message);
@@ -286,9 +298,23 @@ export function SourceControlConfigForm({
     }
     return nextValue.length > 0;
   });
-  const hasSavedValues =
-    provider === 'github' &&
-    providerStatus.fields.some((field) => field.savedSatisfied);
+  const hasSavedValues = providerStatus.fields.some(
+    (field) => field.savedSatisfied,
+  );
+  const hasPersistedAdoLinkedAccount = providerStatus.fields.some(
+    (field) =>
+      field.envVarName === 'ADO_LINKED_ACCOUNT_ID' &&
+      field.savedSatisfied &&
+      Boolean(field.savedValue?.trim()),
+  );
+  const providerRemovalDetail =
+    provider === 'github'
+      ? 'Existing GitHub App installations and repositories will be disconnected.'
+      : provider === 'ado'
+        ? hasPersistedAdoLinkedAccount
+          ? 'The configured delegated Azure DevOps account will be unlinked, and existing repositories will be disconnected.'
+          : 'Existing Azure DevOps repositories will be disconnected.'
+        : `The encrypted ${providerStatus.label} OAuth connection will be deleted, and existing repositories will be disconnected.`;
 
   return (
     <div className="space-y-4">
@@ -510,12 +536,14 @@ export function SourceControlConfigForm({
       <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Remove GitHub configuration?</DialogTitle>
+            <DialogTitle>
+              Remove {providerStatus.label} configuration?
+            </DialogTitle>
             <DialogDescription>
-              Saved GitHub credentials will be removed from the database.
-              Process environment variables are not affected. Existing GitHub
-              repositories will be disconnected so you can create or configure
-              another GitHub App.
+              Saved {providerStatus.label} configuration will be removed from
+              the database. Process environment variables are not affected.{' '}
+              {providerRemovalDetail} Roomote will attempt to remove external
+              hooks first. Cleanup failures will be reported after removal.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -530,7 +558,7 @@ export function SourceControlConfigForm({
             <Button
               type="button"
               variant="destructive"
-              onClick={() => clearConfig.mutate()}
+              onClick={() => clearConfig.mutate({ provider })}
               disabled={clearConfig.isPending}
             >
               <Trash2 />
