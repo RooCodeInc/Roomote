@@ -6,11 +6,13 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import { toast } from 'sonner';
 const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
   customAutomationsPending: false,
+  customAutomationRunPendingId: null as string | null,
   customAutomations: [] as Array<{
     id: string;
     name: string;
@@ -252,8 +254,12 @@ const mutations = vi.hoisted(() => ({
   } | null,
   latestTriggerOptions: null as {
     onSuccess?: (
-      result: NonNullable<typeof state.nextUpdateSettingsResult>,
+      result: { outcome: 'launched'; taskId: string },
+      variables: { automationKey: string },
     ) => void;
+  } | null,
+  latestCustomTriggerOptions: null as {
+    onSuccess?: (result: { outcome: 'launched'; taskId: string }) => void;
   } | null,
 }));
 
@@ -276,6 +282,8 @@ vi.mock('sonner', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    info: vi.fn(),
+    message: vi.fn(),
   },
 }));
 
@@ -364,9 +372,13 @@ vi.mock('@tanstack/react-query', () => ({
     ) => void;
     onError?: (...args: unknown[]) => void;
     mutationKind?: 'triggerCustomAutomation';
+    mutationKey?: unknown[];
   }) => {
     return {
-      isPending: false,
+      isPending:
+        _options?.mutationKind === 'triggerCustomAutomation' &&
+        (typeof _options.mutationKey?.[1] !== 'string' ||
+          _options.mutationKey[1] === state.customAutomationRunPendingId),
       mutate: vi.fn((variables: unknown) => {
         if (_options?.mutationKind === 'triggerCustomAutomation') {
           mutations.triggerCustomAutomation(variables);
@@ -421,10 +433,15 @@ vi.mock('@/trpc/client', () => ({
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
       },
       triggerCustomAutomation: {
-        mutationOptions: (options?: Record<string, unknown>) => ({
-          ...options,
-          mutationKind: 'triggerCustomAutomation',
-        }),
+        mutationOptions: (options?: Record<string, unknown>) => {
+          mutations.latestCustomTriggerOptions =
+            (options as typeof mutations.latestCustomTriggerOptions) ?? null;
+
+          return {
+            ...options,
+            mutationKind: 'triggerCustomAutomation',
+          };
+        },
       },
       resolveCustomAutomationSchedule: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
@@ -504,8 +521,10 @@ describe('AutomationsSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
+    state.customAutomationRunPendingId = null;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
+    mutations.latestCustomTriggerOptions = null;
     state.settingsQuery.data.capabilities.slackConnected = true;
     state.settingsQuery.data.capabilities.discordConnected = false;
     state.settingsQuery.data.capabilities.telegramConnected = false;
@@ -895,6 +914,24 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('names built-in automations in run-now task toasts', () => {
+    render(<AutomationsSettings />);
+
+    act(() => {
+      mutations.latestTriggerOptions?.onSuccess?.(
+        { outcome: 'launched', taskId: 'task-built-in-1' },
+        { automationKey: 'suggester' },
+      );
+    });
+
+    expect(toast.success).toHaveBeenCalledWith(
+      'Running Suggest Ideas now',
+      expect.objectContaining({
+        action: expect.objectContaining({ label: 'View task' }),
+      }),
+    );
+  });
+
   it('renders custom automations as a compact control list and honors their permalinks', async () => {
     state.environments = [{ id: 'env-1', name: 'Production' }];
     state.customAutomations = [
@@ -939,6 +976,35 @@ describe('AutomationsSettings', () => {
     expect(mutations.triggerCustomAutomation).toHaveBeenCalledWith({
       id: 'automation-1',
     });
+    act(() => {
+      mutations.latestCustomTriggerOptions?.onSuccess?.({
+        outcome: 'launched',
+        taskId: 'task-custom-1',
+      });
+    });
+    expect(toast.success).toHaveBeenCalledWith(
+      'Running Weekly flaky-test scan now',
+      expect.objectContaining({
+        action: expect.objectContaining({ label: 'View task' }),
+      }),
+    );
+
+    state.customAutomations.push({
+      ...state.customAutomations[0]!,
+      id: 'automation-2',
+      name: 'Daily dependency scan',
+    });
+    state.customAutomationRunPendingId = 'automation-1';
+    rerender(<AutomationsSettings />);
+    expect(
+      screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Run Daily dependency scan now' }),
+    ).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'New' })).toBeEnabled();
+
+    state.customAutomationRunPendingId = null;
     state.customAutomations[0]!.enabled = false;
     rerender(<AutomationsSettings />);
     expect(

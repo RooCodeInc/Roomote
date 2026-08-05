@@ -107,6 +107,62 @@ function scheduleLabel(mode: CustomAutomationScheduleMode): string {
   );
 }
 
+function CustomAutomationRunButton({
+  automation,
+  disabled,
+}: {
+  automation: CustomAutomationListItem;
+  disabled: boolean;
+}) {
+  const trpc = useTRPC();
+  const triggerMutation = useMutation({
+    ...trpc.automations.triggerCustomAutomation.mutationOptions({
+      onSuccess: (result) => {
+        switch (result.outcome) {
+          case 'launched':
+            toast.success(`Running ${automation.name} now`, {
+              action: {
+                label: 'View task',
+                onClick: () => window.open(`/task/${result.taskId}`, '_blank'),
+              },
+            });
+            break;
+          case 'completed':
+            toast.success(`${automation.name} ran successfully.`);
+            break;
+          case 'skipped':
+            toast.info(
+              `${automation.name} had nothing to do: ${result.reason}`,
+            );
+            break;
+          case 'failed':
+            toast.error(`${automation.name} failed: ${result.error}`);
+            break;
+        }
+      },
+      onError: (error) => {
+        toast.error(error.message || `Failed to run ${automation.name}`);
+      },
+    }),
+    mutationKey: ['customAutomationRun', automation.id],
+  });
+
+  return (
+    <BasicTooltip content="Run now">
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        disabled={disabled || triggerMutation.isPending || !automation.enabled}
+        aria-label={`Run ${automation.name} now`}
+        onClick={() => triggerMutation.mutate({ id: automation.id })}
+      >
+        <Play />
+      </Button>
+    </BasicTooltip>
+  );
+}
+
 function targetFromRow(row: CustomAutomationListItem): {
   provider: CustomAutomationFormState['targetProvider'];
   channelId: string;
@@ -338,35 +394,6 @@ export function CustomAutomationsSection() {
     }),
   );
 
-  const triggerMutation = useMutation(
-    trpc.automations.triggerCustomAutomation.mutationOptions({
-      onSuccess: (result) => {
-        switch (result.outcome) {
-          case 'launched':
-            toast.success('Custom automation started a task.', {
-              action: {
-                label: 'Open task',
-                onClick: () => window.open(`/task/${result.taskId}`, '_blank'),
-              },
-            });
-            break;
-          case 'completed':
-            toast.success('Custom automation ran successfully.');
-            break;
-          case 'skipped':
-            toast.info(`Custom automation had nothing to do: ${result.reason}`);
-            break;
-          case 'failed':
-            toast.error(`Custom automation failed: ${result.error}`);
-            break;
-        }
-      },
-      onError: (error) => {
-        toast.error(error.message || 'Failed to run custom automation');
-      },
-    }),
-  );
-
   const resolveScheduleMutation = useMutation(
     trpc.automations.resolveCustomAutomationSchedule.mutationOptions({
       onSuccess: (result, variables) => {
@@ -419,8 +446,7 @@ export function CustomAutomationsSection() {
     createMutation.isPending ||
     updateMutation.isPending ||
     deleteMutation.isPending ||
-    toggleMutation.isPending ||
-    triggerMutation.isPending;
+    toggleMutation.isPending;
 
   const closeEditor = () => {
     setIsCreating(false);
@@ -1024,18 +1050,10 @@ export function CustomAutomationsSection() {
                       </p>
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
-                      <BasicTooltip content="Run now">
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          disabled={busy || !row.enabled}
-                          aria-label={`Run ${row.name} now`}
-                          onClick={() => triggerMutation.mutate({ id: row.id })}
-                        >
-                          <Play />
-                        </Button>
-                      </BasicTooltip>
+                      <CustomAutomationRunButton
+                        automation={row}
+                        disabled={busy}
+                      />
                       <BasicTooltip content="Configure">
                         <Button
                           type="button"
