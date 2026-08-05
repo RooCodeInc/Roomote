@@ -1,6 +1,23 @@
+const { isRepoSkippedMock } = vi.hoisted(() => ({
+  isRepoSkippedMock: vi.fn<(repoFullName: string) => boolean>(() => false),
+}));
+
+vi.mock('@roomote/github', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/github')>();
+  return {
+    ...actual,
+    isRepoSkipped: isRepoSkippedMock,
+  };
+});
+
 import { standardTask } from '../standardTask';
 
 describe('Standard Task code-review self-review closeout', () => {
+  beforeEach(() => {
+    isRepoSkippedMock.mockReset();
+    isRepoSkippedMock.mockReturnValue(false);
+  });
+
   it('omits self-review closeout guidance when code reviews are disabled or omitted', () => {
     const baseInput = {
       description: 'Implement behavior change',
@@ -142,6 +159,49 @@ describe('Standard Task code-review self-review closeout', () => {
     );
     expect(harnessInstructions).not.toContain(
       'are doing a self-review on GitHub',
+    );
+  });
+
+  it('omits self-review guidance when the selected GitHub repository skips automated processing', () => {
+    isRepoSkippedMock.mockReturnValue(true);
+
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      codeReviewsEnabled: true,
+      sourceControlProvider: 'github',
+    });
+
+    expect(isRepoSkippedMock).toHaveBeenCalledWith('Roomote/example-app');
+    expect(harnessInstructions).not.toContain(
+      '<code_review_self_review_closeout>',
+    );
+    expect(harnessInstructions).not.toContain(
+      'are doing a self-review on GitHub',
+    );
+  });
+
+  it('keeps guidance for mixed workspaces but excludes skipped GitHub repositories', () => {
+    isRepoSkippedMock.mockImplementation(
+      (repoFullName) => repoFullName === 'Roomote/skipped-app',
+    );
+
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: 'Roomote/selected-workspace',
+      repoFullNames: ['Roomote/skipped-app', 'Roomote/reviewed-app'],
+      taskRunUrl: 'https://example.com/task/123',
+      codeReviewsEnabled: true,
+      sourceControlProvider: 'github',
+    });
+
+    expect(harnessInstructions).toContain('<code_review_self_review_closeout>');
+    expect(harnessInstructions).toContain(
+      'Automatic GitHub processing is disabled for `Roomote/skipped-app`',
+    );
+    expect(harnessInstructions).toContain(
+      'Never include the self-review expectation note for a pull request delivered from one of those repositories',
     );
   });
 
