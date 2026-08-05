@@ -1,6 +1,7 @@
 import type { SlackInstallation, SlackUserMapping } from '@roomote/db/server';
 import {
   showTaskConfiguration,
+  SLACK_ROUTING_UNAVAILABLE_NOTICE,
   type SlackEvent,
   type SlackNotifier,
   type StartAutoRoutedSlackTaskResult,
@@ -54,6 +55,10 @@ export async function showManualPickerForAutoRouteFallback(params: {
       : {}),
   };
 
+  const routingFailedFromException =
+    params.result.status === 'not_started' &&
+    params.result.routingFallback?.cause === 'exception';
+
   await showTaskConfiguration({
     event,
     slackInstallation: params.slackInstallation as SlackInstallation,
@@ -62,6 +67,9 @@ export async function showManualPickerForAutoRouteFallback(params: {
     skipRouting: true,
     skipMcpSetupSuggestion: true,
     processingReactionName: params.processingReactionName,
+    ...(routingFailedFromException
+      ? { routingFailureNoticeText: SLACK_ROUTING_UNAVAILABLE_NOTICE }
+      : {}),
   });
 
   return true;

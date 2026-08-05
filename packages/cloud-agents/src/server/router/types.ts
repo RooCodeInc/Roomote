@@ -220,10 +220,24 @@ export interface PlatformAnswerResult {
   debug?: RoutingDebugInfo;
 }
 
+/**
+ * Why a routing attempt ended in fallback. `model_decision` means the router
+ * ran but declined to pick (ambiguous request, unmapped workspace);
+ * `exception` means the routing infrastructure itself failed (provider error,
+ * timeout) and surfaces should tell the user routing is unavailable rather
+ * than silently showing the manual picker. Absent means `model_decision`.
+ */
+export type RoutingFallbackCause = 'exception' | 'model_decision';
+
 export type RoutingDecision =
   | { status: 'routed'; result: RoutingResult }
   | { status: 'platform_answer'; result: PlatformAnswerResult }
-  | { status: 'fallback'; reason: string; debug?: RoutingDebugInfo };
+  | {
+      status: 'fallback';
+      reason: string;
+      cause?: RoutingFallbackCause;
+      debug?: RoutingDebugInfo;
+    };
 
 export interface GitHubRoutingResult {
   reasoning: string;
@@ -233,7 +247,12 @@ export interface GitHubRoutingResult {
 
 export type GitHubRoutingDecision =
   | { status: 'routed'; result: GitHubRoutingResult }
-  | { status: 'fallback'; reason: string; debug?: RoutingDebugInfo };
+  | {
+      status: 'fallback';
+      reason: string;
+      cause?: RoutingFallbackCause;
+      debug?: RoutingDebugInfo;
+    };
 
 export interface WorkspaceResponse {
   workspaceValue: string;
