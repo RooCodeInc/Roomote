@@ -16,6 +16,7 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+export { getSetupBootstrapState } from '@/lib/server/setup-bootstrap-state';
 
 type SetupBaseStatus = {
   hasGitHub: boolean;
@@ -25,22 +26,6 @@ type SetupBaseStatus = {
   setupCompletedAt: Date | null;
   setupNewState: ReturnType<typeof createEmptySetupNewState>;
 };
-
-export async function getSetupBootstrapState(): Promise<{
-  setupOpen: boolean;
-}> {
-  const [deployment] = await db
-    .select({
-      setupCompletedAt: deploymentSettings.setupCompletedAt,
-    })
-    .from(deploymentSettings)
-    .where(eq(deploymentSettings.id, 'default'))
-    .limit(1);
-
-  return {
-    setupOpen: deployment?.setupCompletedAt == null,
-  };
-}
 
 export function assertAdmin(auth: UserAuthSuccess) {
   if (!auth.isAdmin) {

@@ -205,7 +205,7 @@ describe('GitHub callback page', () => {
     ).toBeInTheDocument();
   });
 
-  it('sends setup-originated errors back to the source-control configuration step', async () => {
+  it('sends setup-originated errors to settings after setup is complete', async () => {
     const originalLocation = window.location;
     const assignMock = vi.fn();
 
@@ -238,9 +238,7 @@ describe('GitHub callback page', () => {
 
     // Full document navigation so the setup wizard reads the ?step= deep
     // link on a fresh load instead of racing a client-side transition.
-    expect(assignMock).toHaveBeenCalledWith(
-      '/setup?step=source-control-config',
-    );
+    expect(assignMock).toHaveBeenCalledWith('/settings/source-control');
     expect(mockPush).not.toHaveBeenCalled();
 
     Object.defineProperty(window, 'location', {
