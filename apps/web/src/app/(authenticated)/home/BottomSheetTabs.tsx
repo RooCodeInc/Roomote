@@ -11,12 +11,14 @@ import {
 import {
   BasicTooltip,
   Button,
+  Calendar,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Mail,
   MessageCirclePlus,
   X,
 } from '@/components/system';
@@ -24,6 +26,8 @@ import { cn } from '@/lib/utils';
 
 import { PullRequestsList } from './PullRequestsList';
 import { RecentTasksList } from './RecentTasksList';
+import Image from 'next/image';
+import { DiscordLogoIcon } from '@radix-ui/react-icons';
 
 type HomeTab = 'recent' | 'pullRequests';
 
@@ -36,6 +40,7 @@ const FEEDBACK_CALENDLY_URL =
   'https://calendly.com/d/ctx9-f7q-6vr/roomote-feedback';
 const FEEDBACK_EMAIL_URL =
   'mailto:help@roomote.dev?subject=My%20thoughts%20on%20Roomote%20so%20far';
+const FEEDBACK_DISCORD_URL = 'https://discord.gg/roomote';
 
 export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
   const [activeTab, setActiveTab] = useState<HomeTab | null>(null);
@@ -171,27 +176,20 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
             </BasicTooltip>
 
             <div className="ml-auto flex min-w-0 items-center">
-              {isFeedbackPromptVisible && !isExpanded ? (
-                <div className="hidden min-w-0 items-center gap-2 px-3 text-xs text-muted-foreground md:flex">
+              {isFeedbackPromptVisible ? (
+                <div
+                  className={`hidden min-w-0 items-center gap-2 px-3 text-sm text-muted-foreground md:flex relative transition-all duration-500 -right-10 ${isExpanded ? 'top-6 opacity-0' : 'top-0 opacity-100'}`}
+                >
                   <MessageCirclePlus className="size-4 shrink-0" />
                   <span className="whitespace-nowrap">
-                    We&apos;d love{' '}
                     <button
                       type="button"
                       onClick={() => setIsFeedbackDialogOpen(true)}
                       className="cursor-pointer font-medium text-foreground underline underline-offset-2 hover:text-accent-foreground"
                     >
-                      your thoughts on Roomote
+                      We need your feedback!
                     </button>
                   </span>
-                  <button
-                    type="button"
-                    onClick={dismissFeedbackPrompt}
-                    aria-label="Dismiss feedback prompt"
-                    className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <X className="size-3.5" />
-                  </button>
                 </div>
               ) : null}
 
@@ -236,31 +234,63 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
         open={isFeedbackDialogOpen}
         onOpenChange={setIsFeedbackDialogOpen}
       >
-        <DialogContent size="md">
+        <DialogContent size="xl">
           <DialogHeader>
-            <DialogTitle>Roomote Feedback</DialogTitle>
+            <DialogTitle>What do you think of Roomote so far?</DialogTitle>
             <DialogDescription>
-              We&apos;d love to hear about your experience so far.
+              We&apos;d love to hear about your experience. Anything helps.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-2 md:grid-cols-2">
-            <Button asChild variant="outline">
+          <div className="flex flex-col gap-2 my-4 relative">
+            <Button
+              asChild
+              variant="default"
+              className="md:max-w-xs md:justify-start"
+            >
               <a href={FEEDBACK_CALENDLY_URL} target="_blank" rel="noreferrer">
-                Book time with the founders
+                <Calendar className="size-3.5" />
+                Schedule time with the team
               </a>
             </Button>
-            <Button asChild variant="outline">
-              <a href={FEEDBACK_EMAIL_URL}>Write us</a>
+            <Button
+              asChild
+              variant="default"
+              className="md:max-w-xs md:justify-start"
+            >
+              <a href={FEEDBACK_EMAIL_URL}>
+                <Mail className="size-3.5" />
+                Email us
+              </a>
             </Button>
+            <Button
+              asChild
+              variant="default"
+              className="md:max-w-xs md:justify-start"
+            >
+              <a href={FEEDBACK_DISCORD_URL} target="_blank" rel="noreferrer">
+                <DiscordLogoIcon className="size-3.5" />
+                Join the discord
+              </a>
+            </Button>
+            <Image
+              src="/elements/feedback.png"
+              alt=""
+              width={150}
+              height={150}
+              className="hidden md:block absolute -top-9 right-0 size-44"
+            />
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="md:justify-between">
             <Button
-              variant="outline"
-              onClick={() => setIsFeedbackDialogOpen(false)}
+              type="button"
+              variant="link"
+              size="sm"
+              onClick={dismissFeedbackPrompt}
+              aria-label="Dismiss feedback prompt"
             >
-              Close
+              Don't show this again
             </Button>
           </DialogFooter>
         </DialogContent>
