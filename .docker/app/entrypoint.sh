@@ -54,12 +54,23 @@ apply_node_heap_cap() {
 
   cap_mb="$1"
 
+  # Container runtimes usually mount the container's own cgroup at
+  # /sys/fs/cgroup, but some expose the host's whole hierarchy; there the
+  # mount-root files read unlimited and the real limit lives under the
+  # process's own path from /proc/self/cgroup, so try that path first.
+  # cgroup v1 reports "unlimited" as a page-rounded near-int64 number; the
+  # derived_mb < cap_mb comparison below already treats it as no limit.
+  self_v2="$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null | head -n 1)"
+  self_v1="$(grep -E '^[0-9]+:([^:]*,)?memory(,[^:]*)?:' /proc/self/cgroup 2>/dev/null | head -n 1 | cut -d: -f3)"
+
   limit_bytes=""
-  if [ -r /sys/fs/cgroup/memory.max ]; then
+  if [ -n "$self_v2" ] && [ -r "/sys/fs/cgroup${self_v2}/memory.max" ]; then
+    limit_bytes="$(cat "/sys/fs/cgroup${self_v2}/memory.max")"
+  elif [ -r /sys/fs/cgroup/memory.max ]; then
     limit_bytes="$(cat /sys/fs/cgroup/memory.max)"
+  elif [ -n "$self_v1" ] && [ -r "/sys/fs/cgroup/memory${self_v1}/memory.limit_in_bytes" ]; then
+    limit_bytes="$(cat "/sys/fs/cgroup/memory${self_v1}/memory.limit_in_bytes")"
   elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
-    # cgroup v1 reports "unlimited" as a page-rounded near-int64 number;
-    # the derived_mb < cap_mb comparison below already treats it as no limit.
     limit_bytes="$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)"
   fi
   case "$limit_bytes" in
