@@ -6,18 +6,20 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
+import { toast } from 'sonner';
 const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
   customAutomationsPending: false,
+  customAutomationRunPendingId: null as string | null,
   customAutomations: [] as Array<{
     id: string;
     name: string;
     prompt: string;
     enabled: boolean;
-    scheduleMode: 'weekly';
-    cronExpression: null;
+    scheduleMode: 'weekly' | 'cron';
+    cronExpression: string | null;
     model: null;
     environmentId: string;
     target: {
@@ -25,7 +27,7 @@ const state = vi.hoisted(() => ({
       externalRef: string;
       metadata?: Record<string, unknown>;
     };
-    lastRunAt: null;
+    lastRunAt: Date | null;
     lastSucceededAt: null;
     lastFailedAt: null;
     lastError: null;
@@ -252,8 +254,12 @@ const mutations = vi.hoisted(() => ({
   } | null,
   latestTriggerOptions: null as {
     onSuccess?: (
-      result: NonNullable<typeof state.nextUpdateSettingsResult>,
+      result: { outcome: 'launched'; taskId: string },
+      variables: { automationKey: string },
     ) => void;
+  } | null,
+  latestCustomTriggerOptions: null as {
+    onSuccess?: (result: { outcome: 'launched'; taskId: string }) => void;
   } | null,
 }));
 
@@ -276,6 +282,8 @@ vi.mock('sonner', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    info: vi.fn(),
+    message: vi.fn(),
   },
 }));
 
@@ -364,9 +372,13 @@ vi.mock('@tanstack/react-query', () => ({
     ) => void;
     onError?: (...args: unknown[]) => void;
     mutationKind?: 'triggerCustomAutomation';
+    mutationKey?: unknown[];
   }) => {
     return {
-      isPending: false,
+      isPending:
+        _options?.mutationKind === 'triggerCustomAutomation' &&
+        (typeof _options.mutationKey?.[1] !== 'string' ||
+          _options.mutationKey[1] === state.customAutomationRunPendingId),
       mutate: vi.fn((variables: unknown) => {
         if (_options?.mutationKind === 'triggerCustomAutomation') {
           mutations.triggerCustomAutomation(variables);
@@ -421,10 +433,15 @@ vi.mock('@/trpc/client', () => ({
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
       },
       triggerCustomAutomation: {
-        mutationOptions: (options?: Record<string, unknown>) => ({
-          ...options,
-          mutationKind: 'triggerCustomAutomation',
-        }),
+        mutationOptions: (options?: Record<string, unknown>) => {
+          mutations.latestCustomTriggerOptions =
+            (options as typeof mutations.latestCustomTriggerOptions) ?? null;
+
+          return {
+            ...options,
+            mutationKind: 'triggerCustomAutomation',
+          };
+        },
       },
       resolveCustomAutomationSchedule: {
         mutationOptions: (options?: Record<string, unknown>) => options ?? {},
@@ -504,8 +521,10 @@ describe('AutomationsSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
+    state.customAutomationRunPendingId = null;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
+    mutations.latestCustomTriggerOptions = null;
     state.settingsQuery.data.capabilities.slackConnected = true;
     state.settingsQuery.data.capabilities.discordConnected = false;
     state.settingsQuery.data.capabilities.telegramConnected = false;
@@ -895,6 +914,24 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('names built-in automations in run-now task toasts', () => {
+    render(<AutomationsSettings />);
+
+    act(() => {
+      mutations.latestTriggerOptions?.onSuccess?.(
+        { outcome: 'launched', taskId: 'task-built-in-1' },
+        { automationKey: 'suggester' },
+      );
+    });
+
+    expect(toast.success).toHaveBeenCalledWith(
+      'Running Suggest Ideas now',
+      expect.objectContaining({
+        action: expect.objectContaining({ label: 'View task' }),
+      }),
+    );
+  });
+
   it('renders custom automations as a compact control list and honors their permalinks', async () => {
     state.environments = [{ id: 'env-1', name: 'Production' }];
     state.customAutomations = [
@@ -925,11 +962,9 @@ describe('AutomationsSettings', () => {
         name: 'Toggle Weekly flaky-test scan',
       }),
     ).toBeChecked();
-    expect(
-      screen.getByText(
-        'Weekly · Production · slack:#roomote-managers · Created by Ada',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Weekly, in Production →')).toBeInTheDocument();
+    expect(screen.getByText('Slack #roomote-managers')).toBeInTheDocument();
+    expect(screen.getByText('Created by Ada')).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     ).toBeEnabled();
@@ -939,6 +974,35 @@ describe('AutomationsSettings', () => {
     expect(mutations.triggerCustomAutomation).toHaveBeenCalledWith({
       id: 'automation-1',
     });
+    act(() => {
+      mutations.latestCustomTriggerOptions?.onSuccess?.({
+        outcome: 'launched',
+        taskId: 'task-custom-1',
+      });
+    });
+    expect(toast.success).toHaveBeenCalledWith(
+      'Running Weekly flaky-test scan now',
+      expect.objectContaining({
+        action: expect.objectContaining({ label: 'View task' }),
+      }),
+    );
+
+    state.customAutomations.push({
+      ...state.customAutomations[0]!,
+      id: 'automation-2',
+      name: 'Daily dependency scan',
+    });
+    state.customAutomationRunPendingId = 'automation-1';
+    rerender(<AutomationsSettings />);
+    expect(
+      screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Run Daily dependency scan now' }),
+    ).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'New' })).toBeEnabled();
+
+    state.customAutomationRunPendingId = null;
     state.customAutomations[0]!.enabled = false;
     rerender(<AutomationsSettings />);
     expect(
@@ -971,6 +1035,43 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it('humanizes custom schedules and shows the last run when available', async () => {
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Weekday scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'cron',
+        cronExpression: '0 9 * * 1-5',
+        model: null,
+        environmentId: 'env-1',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: new Date(),
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText(
+        'At 09:00 AM, Monday through Friday, in Production →',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Created by Ada/)).toHaveTextContent(
+      /Created by Ada · Last run \d+s ago/,
+    );
+    expect(screen.queryByText('0 9 * * 1-5')).not.toBeInTheDocument();
   });
 
   it('only offers connected providers as custom automation destinations', async () => {

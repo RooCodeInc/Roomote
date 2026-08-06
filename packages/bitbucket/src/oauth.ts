@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { db, deploymentSecrets, sql } from '@roomote/db/server';
+import { db, deploymentSecrets, eq, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
 
 import { BITBUCKET_OAUTH_CALLBACK_PATH } from './constants';
@@ -42,7 +42,10 @@ type BitbucketOAuthTokenResponse = {
   scopes?: string;
 };
 
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+let deletionPromise: Promise<void> | null = null;
+let connectionGeneration = 0;
+let cachedAccessToken: string | null = null;
 
 export function getBitbucketOAuthScopes(): readonly string[] {
   return DEFAULT_SCOPES;
@@ -97,6 +100,31 @@ async function writeConnection(connection: BitbucketOAuthConnection) {
 
 export async function getBitbucketOAuthConnection() {
   return readConnection();
+}
+
+export async function deleteBitbucketOAuthConnection(): Promise<void> {
+  if (!deletionPromise) {
+    connectionGeneration += 1;
+    const inFlightRefresh = refreshPromise;
+    deletionPromise = (async () => {
+      await inFlightRefresh?.catch(() => undefined);
+      await db
+        .delete(deploymentSecrets)
+        .where(eq(deploymentSecrets.name, SECRET_NAME));
+      refreshPromise = null;
+      cachedAccessToken = null;
+    })();
+  }
+
+  try {
+    await deletionPromise;
+  } finally {
+    deletionPromise = null;
+  }
+}
+
+export function isBitbucketOAuthAccessToken(token: string): boolean {
+  return token === cachedAccessToken;
 }
 
 export async function exchangeBitbucketOAuthCode(input: {
@@ -165,6 +193,7 @@ export async function exchangeBitbucketOAuthCode(input: {
     // The token exchange remains valid if the identity lookup is temporarily unavailable.
   }
   await writeConnection(connection);
+  cachedAccessToken = connection.accessToken;
   return connection;
 }
 
@@ -172,12 +201,22 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
 }): Promise<string | null> {
+  if (deletionPromise) {
+    await deletionPromise;
+    return null;
+  }
+  const generation = connectionGeneration;
   const connection = await readConnection();
+  if (generation !== connectionGeneration || deletionPromise) {
+    await deletionPromise;
+    return null;
+  }
   if (!connection || connection.status !== 'active') return null;
   if (
     !options?.forceRefresh &&
     Date.parse(connection.expiresAt) > Date.now() + 60_000
   ) {
+    cachedAccessToken = connection.accessToken;
     return connection.accessToken;
   }
   if (refreshPromise) return refreshPromise;
@@ -219,11 +258,14 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
         ).toISOString(),
         status: 'active' as const,
       };
+      if (generation !== connectionGeneration) return null;
       await writeConnection(next);
+      cachedAccessToken = next.accessToken;
       return next.accessToken;
     } catch (error) {
       if (requiresReauthorization) {
         try {
+          if (generation !== connectionGeneration) return null;
           await writeConnection({
             ...connection,
             status: 'reauthorization_required',

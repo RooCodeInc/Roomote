@@ -21,11 +21,25 @@ import {
   Input,
   Spinner,
   Trash2,
+  ExternalLink,
 } from '@/components/system';
 import {
   useAdoLinkedAccount,
   useAuthenticateAdoAccount,
 } from '@/hooks/linked-accounts';
+import {
+  AdoSourceControlConfig,
+  AdoSourceControlInstructions,
+  DEFAULT_ADO_AUTH_MODE,
+} from '@/app/(onboarding)/setup/AdoSourceControlConfig';
+import {
+  BitbucketSourceControlCreation,
+  BitbucketSourceControlInstructions,
+} from '@/app/(onboarding)/setup/BitbucketSourceControlConfig';
+import { GiteaSourceControlInstructions } from '@/app/(onboarding)/setup/GiteaSourceControlConfig';
+import { GitLabSourceControlInstructions } from '@/app/(onboarding)/setup/GitLabSourceControlConfig';
+import { NumberedStep } from '@/app/(onboarding)/setup/NumberedStep';
+import { getSourceControlSetupCopy } from '@/app/(onboarding)/setup/sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
@@ -76,11 +90,13 @@ export function SourceControlConfigForm({
   configStatus,
   onSaved,
   saveSuccessMessage,
+  showSetupInstructions = false,
 }: {
   provider: SetupSourceControlStatus['preselectedProvider'];
   configStatus: SetupSourceControlStatus | undefined;
   onSaved?: () => void;
   saveSuccessMessage?: string;
+  showSetupInstructions?: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -116,7 +132,7 @@ export function SourceControlConfigForm({
   >({});
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
-    'pat',
+    showSetupInstructions ? DEFAULT_ADO_AUTH_MODE : 'pat',
   );
   const adoLinkedAccount = useAdoLinkedAccount();
   const authenticateAdoAccount = useAuthenticateAdoAccount();
@@ -162,21 +178,33 @@ export function SourceControlConfigForm({
     }),
   );
   const clearConfig = useMutation(
-    trpc.sourceControl.clearGitHubConfig.mutationOptions({
-      onSuccess: async () => {
+    trpc.sourceControl.clearConfig.mutationOptions({
+      onSuccess: async (result) => {
         await queryClient.invalidateQueries({
           queryKey: trpc.sourceControl.configStatus.queryKey(),
         });
         await queryClient.invalidateQueries({
           queryKey: trpc.sourceControl.repositories.queryKey(),
         });
-        await queryClient.invalidateQueries({
-          queryKey: trpc.github.installations.queryKey(),
-        });
+        if (provider === 'github') {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.github.installations.queryKey(),
+          });
+        }
+        if (provider === 'ado') {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.linkedAccounts.ado.queryKey(),
+          });
+        }
         setValues({});
         setEditingSavedValues({});
         setRemoveDialogOpen(false);
-        toast.success('GitHub configuration removed.');
+        toast.success(
+          `${providerStatus?.label ?? 'Source-control'} configuration removed.`,
+        );
+        for (const warning of result.warnings) {
+          toast.warning(warning.message);
+        }
       },
       onError: (error) => {
         toast.error(error.message);
@@ -208,13 +236,23 @@ export function SourceControlConfigForm({
           ? 'delegated'
           : hasEntra && !hasPat
             ? 'entra'
-            : 'pat',
+            : hasPat
+              ? 'pat'
+              : showSetupInstructions
+                ? DEFAULT_ADO_AUTH_MODE
+                : 'pat',
       );
     }
     // providerStatus.fields array identity is intentionally omitted; content
     // key and derived non-secret values drive resets instead of query refetches.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
-  }, [provider, nonSecretInitialValues, isAdo, nonSecretInitialValuesKey]);
+  }, [
+    provider,
+    nonSecretInitialValues,
+    isAdo,
+    nonSecretInitialValuesKey,
+    showSetupInstructions,
+  ]);
 
   if (!providerStatus) {
     return null;
@@ -270,11 +308,7 @@ export function SourceControlConfigForm({
         nextValue.length === 0
       );
     }) ||
-    (isAdo &&
-      (adoAuthMode === 'pat'
-        ? !hasAdoPat
-        : !hasAdoAppCredentials ||
-          (adoAuthMode === 'delegated' && !adoLinkedAccount.data?.account)));
+    (isAdo && (adoAuthMode === 'pat' ? !hasAdoPat : !hasAdoAppCredentials));
 
   const hasNewValues = visibleFields.some((field) => {
     if (field.runtimeSatisfied) {
@@ -286,54 +320,90 @@ export function SourceControlConfigForm({
     }
     return nextValue.length > 0;
   });
-  const hasSavedValues =
-    provider === 'github' &&
-    providerStatus.fields.some((field) => field.savedSatisfied);
+  const hasSavedValues = providerStatus.fields.some(
+    (field) => field.savedSatisfied,
+  );
+  const hasPersistedAdoLinkedAccount = providerStatus.fields.some(
+    (field) =>
+      field.envVarName === 'ADO_LINKED_ACCOUNT_ID' &&
+      field.savedSatisfied &&
+      Boolean(field.savedValue?.trim()),
+  );
+  const providerRemovalDetail =
+    provider === 'github'
+      ? 'Existing GitHub App installations and repositories will be disconnected.'
+      : provider === 'ado'
+        ? hasPersistedAdoLinkedAccount
+          ? 'The configured delegated Azure DevOps account will be unlinked, and existing repositories will be disconnected.'
+          : 'Existing Azure DevOps repositories will be disconnected.'
+        : `The encrypted ${providerStatus.label} OAuth connection will be deleted, and existing repositories will be disconnected.`;
+  const publicOrigin =
+    typeof window === 'undefined'
+      ? 'https://your-deployment-url'
+      : window.location.origin;
+  const setupCopy = getSourceControlSetupCopy(provider);
 
-  return (
-    <div className="space-y-4">
-      {isAdo ? (
-        <div className="grid max-w-xl gap-2 sm:grid-cols-3">
-          <button
-            type="button"
-            aria-pressed={adoAuthMode === 'pat'}
-            className={`rounded-md border p-3 text-left ${adoAuthMode === 'pat' ? 'border-foreground' : 'border-border'}`}
-            onClick={() => setAdoAuthMode('pat')}
-          >
-            <span className="block font-medium">Personal access token</span>
-            <span className="text-sm text-muted-foreground">
-              Use a PAT from a bot or service account.
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={adoAuthMode === 'entra'}
-            className={`rounded-md border p-3 text-left ${adoAuthMode === 'entra' ? 'border-foreground' : 'border-border'}`}
-            onClick={() => setAdoAuthMode('entra')}
-          >
-            <span className="block font-medium">
-              Microsoft Entra service principal
-            </span>
-            <span className="text-sm text-muted-foreground">
-              Use short-lived service-principal tokens.
-            </span>
-          </button>
-          <button
-            type="button"
-            aria-pressed={adoAuthMode === 'delegated'}
-            className={`rounded-md border p-3 text-left ${adoAuthMode === 'delegated' ? 'border-foreground' : 'border-border'}`}
-            onClick={() => setAdoAuthMode('delegated')}
-          >
-            <span className="block font-medium">
-              Connect with your Microsoft account
-            </span>
-            <span className="text-sm text-muted-foreground">
-              Use a delegated Azure DevOps account.
-            </span>
-          </button>
+  const adoModeSelector = showSetupInstructions ? (
+    <AdoSourceControlConfig
+      authMode={adoAuthMode}
+      onAuthModeChange={setAdoAuthMode}
+    />
+  ) : (
+    <div className="grid max-w-xl gap-2 sm:grid-cols-3">
+      <button
+        type="button"
+        aria-pressed={adoAuthMode === 'pat'}
+        className={`rounded-md border p-3 text-left ${adoAuthMode === 'pat' ? 'border-foreground' : 'border-border'}`}
+        onClick={() => setAdoAuthMode('pat')}
+      >
+        <span className="block font-medium">Personal access token</span>
+        <span className="text-sm text-muted-foreground">
+          Use a PAT from a bot or service account.
+        </span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={adoAuthMode === 'entra'}
+        className={`rounded-md border p-3 text-left ${adoAuthMode === 'entra' ? 'border-foreground' : 'border-border'}`}
+        onClick={() => setAdoAuthMode('entra')}
+      >
+        <span className="block font-medium">
+          Microsoft Entra service principal
+        </span>
+        <span className="text-sm text-muted-foreground">
+          Use short-lived service-principal tokens.
+        </span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={adoAuthMode === 'delegated'}
+        className={`rounded-md border p-3 text-left ${adoAuthMode === 'delegated' ? 'border-foreground' : 'border-border'}`}
+        onClick={() => setAdoAuthMode('delegated')}
+      >
+        <span className="block font-medium">
+          Connect with your Microsoft account
+        </span>
+        <span className="text-sm text-muted-foreground">
+          Use a delegated Azure DevOps account.
+        </span>
+      </button>
+    </div>
+  );
+
+  const credentials = (
+    <>
+      {showSetupInstructions ? (
+        <div className="space-y-1">
+          <p className="font-semibold">
+            Enter the values below for your {providerStatus.label} integration.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Roomote encrypts saved deployment credentials and uses them to sync
+            repositories and configure pull request webhooks.
+          </p>
         </div>
       ) : null}
-      {isAdo && adoAuthMode !== 'pat' ? (
+      {isAdo && adoAuthMode !== 'pat' && !showSetupInstructions ? (
         <p className="max-w-xl text-sm text-muted-foreground">
           The Microsoft Entra app registration needs the{' '}
           <span className="font-medium text-foreground">
@@ -507,15 +577,82 @@ export function SourceControlConfigForm({
           {hasNewValues ? 'Save configuration' : 'Save'}
         </Button>
       </div>
+    </>
+  );
+
+  return (
+    <div className="space-y-4">
+      {showSetupInstructions && !isAdo ? (
+        <NumberedStep number={1}>
+          {provider === 'bitbucket' ? (
+            <BitbucketSourceControlCreation />
+          ) : (
+            <>
+              <p className="font-semibold">
+                Create {setupCopy.setupLabelArticle ?? 'a'}{' '}
+                {setupCopy.creationHref ? (
+                  <a
+                    href={setupCopy.creationHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-4 hover:text-foreground"
+                  >
+                    {setupCopy.setupLabel}
+                    <ExternalLink className="ml-1 inline size-4 -translate-y-0.5" />
+                  </a>
+                ) : (
+                  setupCopy.setupLabel
+                )}
+                .
+              </p>
+              {setupCopy.creationHint ? (
+                <p className="text-sm text-muted-foreground">
+                  {setupCopy.creationHint}
+                </p>
+              ) : null}
+            </>
+          )}
+        </NumberedStep>
+      ) : null}
+      {isAdo ? (
+        showSetupInstructions ? (
+          <NumberedStep number={1}>{adoModeSelector}</NumberedStep>
+        ) : (
+          adoModeSelector
+        )
+      ) : null}
+      {showSetupInstructions ? (
+        <NumberedStep number={2}>
+          {provider === 'gitlab' ? (
+            <GitLabSourceControlInstructions publicOrigin={publicOrigin} />
+          ) : provider === 'gitea' ? (
+            <GiteaSourceControlInstructions publicOrigin={publicOrigin} />
+          ) : provider === 'bitbucket' ? (
+            <BitbucketSourceControlInstructions publicOrigin={publicOrigin} />
+          ) : isAdo ? (
+            <AdoSourceControlInstructions
+              authMode={adoAuthMode}
+              publicOrigin={publicOrigin}
+            />
+          ) : null}
+        </NumberedStep>
+      ) : null}
+      {showSetupInstructions ? (
+        <NumberedStep number={3}>{credentials}</NumberedStep>
+      ) : (
+        credentials
+      )}
       <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Remove GitHub configuration?</DialogTitle>
+            <DialogTitle>
+              Remove {providerStatus.label} configuration?
+            </DialogTitle>
             <DialogDescription>
-              Saved GitHub credentials will be removed from the database.
-              Process environment variables are not affected. Existing GitHub
-              repositories will be disconnected so you can create or configure
-              another GitHub App.
+              Saved {providerStatus.label} configuration will be removed from
+              the database. Process environment variables are not affected.{' '}
+              {providerRemovalDetail} Roomote will attempt to remove external
+              hooks first. Cleanup failures will be reported after removal.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -530,7 +667,7 @@ export function SourceControlConfigForm({
             <Button
               type="button"
               variant="destructive"
-              onClick={() => clearConfig.mutate()}
+              onClick={() => clearConfig.mutate({ provider })}
               disabled={clearConfig.isPending}
             >
               <Trash2 />

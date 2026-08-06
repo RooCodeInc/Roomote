@@ -336,6 +336,60 @@ describe('review-code GitHub workflow paths', () => {
     );
   });
 
+  it('publishes new findings as line-anchored inline comments with a retry-then-summary-carry recovery', () => {
+    for (const appendixName of [
+      'review-github-pr',
+      'review-github-pr-with-approval',
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+    ]) {
+      const appendix = readAppendix(skillContent, appendixName);
+      expect(appendix).toContain(
+        'post one new line-anchored inline comment per finding with `mcp__roomote__manage_source_control` `action: "create_pull_request_review_comment"`',
+      );
+      expect(appendix).toContain(
+        'If the provider rejects the anchor because the line is not part of the current diff, re-check the hunk, correct `path`, `line`, or `side`, and retry exactly once.',
+      );
+      expect(appendix).toContain(
+        'Match the suggestion syntax to `source_control_provider`: a fenced code block with info string `suggestion` on github and gitea, a fenced code block with info string `suggestion:-0+0` on gitlab, and a plain fenced code block with prose (no suggestion syntax) on bitbucket and ado.',
+      );
+      expect(appendix).toContain(
+        'Bitbucket and Azure DevOps do not validate anchors against the diff',
+      );
+    }
+    expect(skillContent).toContain(
+      '<scenario name="inline_comment_anchor_rejected">',
+    );
+    for (const appendixName of [
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+    ]) {
+      const appendix = readAppendix(skillContent, appendixName);
+      expect(appendix).toContain(
+        'A thread whose `outdated` flag is true reports its original anchor line and means the flagged lines were changed by later commits',
+      );
+      expect(appendix).toContain(
+        'Match threads by file and line including threads whose `outdated` flag is true',
+      );
+    }
+    for (const appendixName of [
+      'review-github-pr',
+      'review-github-pr-with-approval',
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+    ]) {
+      const appendix = readAppendix(skillContent, appendixName);
+      expect(appendix).toContain(
+        'Treat a thread whose `outdated` flag is true as a weaker match for new findings',
+      );
+    }
+    expect(skillContent).not.toContain('finding_without_thread_anchor');
+    expect(skillContent).not.toContain(
+      'no batch API for creating new line-anchored inline comments',
+    );
+    expect(skillContent).not.toContain('summary-carried on all providers');
+  });
+
   it('removes CI and check-state language from the shared skill contract', () => {
     expect(skillContent).not.toContain(
       'If unresolved findings remain after combining the published code findings with the latest fetched CI state',

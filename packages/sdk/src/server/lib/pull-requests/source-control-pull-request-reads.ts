@@ -138,6 +138,13 @@ type SourceControlPullRequestCommentThread = {
   resolved: boolean | null;
   path: string | null;
   line: number | null;
+  /**
+   * True when the provider reports the thread's anchored line was changed by
+   * commits after the comment was posted (GitHub); null where the provider
+   * has no such signal. An outdated anchor keeps its original line in `line`
+   * so the thread stays matchable to the finding it was raised for.
+   */
+  outdated: boolean | null;
   comments: SourceControlPullRequestComment[];
 };
 
@@ -255,6 +262,8 @@ const gitLabDiscussionNoteSchema = z
       .object({
         new_path: z.string().nullable().optional(),
         new_line: z.number().nullable().optional(),
+        old_path: z.string().nullable().optional(),
+        old_line: z.number().nullable().optional(),
       })
       .nullable()
       .optional(),
@@ -387,6 +396,7 @@ const bitbucketCommentSchema = z
       .object({
         path: z.string().optional(),
         to: z.number().nullable().optional(),
+        from: z.number().nullable().optional(),
       })
       .nullable()
       .optional(),
@@ -469,6 +479,10 @@ const adoThreadListSchema = z.object({
               .object({ line: z.number().optional() })
               .nullable()
               .optional(),
+            leftFileStart: z
+              .object({ line: z.number().optional() })
+              .nullable()
+              .optional(),
           })
           .nullable()
           .optional(),
@@ -488,8 +502,10 @@ const gitHubReviewThreadsQueryResponseSchema = z.object({
               z.object({
                 id: z.string(),
                 isResolved: z.boolean(),
+                isOutdated: z.boolean().nullable().optional(),
                 path: z.string().nullable().optional(),
                 line: z.number().nullable().optional(),
+                originalLine: z.number().nullable().optional(),
                 comments: z.object({
                   nodes: z.array(
                     z.object({
@@ -1052,8 +1068,10 @@ async function fetchGitHubReviewThreadsViaGraphql({
             nodes {
               id
               isResolved
+              isOutdated
               path
               line
+              originalLine
               comments(first: 50) {
                 nodes {
                   databaseId
@@ -1082,7 +1100,11 @@ async function fetchGitHubReviewThreadsViaGraphql({
     id: thread.id,
     resolved: thread.isResolved,
     path: thread.path ?? null,
-    line: thread.line ?? null,
+    // Outdated threads (the anchored line changed after the comment was
+    // posted) report line as null; fall back to the original anchor so the
+    // thread stays matchable to the finding it was raised for.
+    line: thread.line ?? thread.originalLine ?? null,
+    outdated: thread.isOutdated ?? null,
     comments: thread.comments.nodes.map((comment) => ({
       id: comment.databaseId != null ? String(comment.databaseId) : '',
       author: comment.author?.login ?? null,
@@ -1121,6 +1143,9 @@ function groupGitHubReviewCommentsIntoThreads(
         resolved: null,
         path: comment.path ?? null,
         line: comment.line ?? comment.original_line ?? null,
+        // REST review comments report line as null once the anchored line
+        // changed; original_line alone marks the thread outdated.
+        outdated: comment.line == null && comment.original_line != null,
         comments: [],
       };
       threadsByRootId.set(rootId, thread);
@@ -1271,8 +1296,15 @@ async function listGitLabMergeRequestComments({
         resolvableNotes.length > 0
           ? resolvableNotes.every((note) => Boolean(note.resolved))
           : null,
-      path: isDiffNote ? (firstNote.position?.new_path ?? null) : null,
-      line: isDiffNote ? (firstNote.position?.new_line ?? null) : null,
+      // Old-side comments (deleted lines) carry only old_path/old_line, so
+      // fall back to the old-side anchor to keep those threads matchable.
+      path: isDiffNote
+        ? (firstNote.position?.new_path ?? firstNote.position?.old_path ?? null)
+        : null,
+      line: isDiffNote
+        ? (firstNote.position?.new_line ?? firstNote.position?.old_line ?? null)
+        : null,
+      outdated: null,
       comments,
     });
   }
@@ -1419,6 +1451,7 @@ async function listGiteaPullRequestComments({
       resolved: null,
       path: reviewComments[0]?.path ?? null,
       line: reviewComments[0]?.line ?? null,
+      outdated: null,
       comments: reviewComments.map(mapGiteaComment),
     });
   }
@@ -1590,7 +1623,8 @@ async function listBitbucketPullRequestComments({
       id: threadId,
       resolved: null,
       path: comment.inline?.path ?? null,
-      line: comment.inline?.to ?? null,
+      line: comment.inline?.to ?? comment.inline?.from ?? null,
+      outdated: null,
       comments: [mapped],
     });
   }
@@ -1759,7 +1793,11 @@ async function listAdoPullRequestComments({
       id: String(thread.id),
       resolved: mapAdoThreadResolution(thread.status ?? null),
       path: thread.threadContext?.filePath ?? null,
-      line: thread.threadContext?.rightFileStart?.line ?? null,
+      line:
+        thread.threadContext?.rightFileStart?.line ??
+        thread.threadContext?.leftFileStart?.line ??
+        null,
+      outdated: null,
       comments,
     });
   }

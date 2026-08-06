@@ -2,6 +2,34 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.35.0 (2026-08-06)
+
+This release expands source-control setup and review workflows, adds a direct homepage feedback path, and improves reliability across automations, Slack routing, and self-hosted sandboxes.
+
+### Highlights
+
+- Review pull requests with line-anchored comments across GitHub, GitLab, Gitea, Bitbucket, and Azure DevOps.
+- Configure and safely disconnect every supported source-control provider from Settings.
+- Share feedback directly from the homepage without interrupting normal task workflows.
+- Scan and run custom automations more easily with clearer schedules, destinations, and independent controls.
+
+### Minor changes
+
+- Add a dismissible homepage feedback prompt that lets users book time with the founders or send feedback by email without interrupting their normal workflow.
+- Post line-anchored inline pull-request review comments across GitHub, GitLab, Gitea, Bitbucket, and Azure DevOps, with provider-aware suggestions and safe fallback when an anchor is rejected.
+- Let administrators configure non-GitHub source-control providers with complete callback guidance and safely remove persisted GitHub, GitLab, Gitea, Bitbucket, or Azure DevOps connections from Settings.
+
+### Patch changes
+
+- Make custom automations easier to scan with human-readable schedules and clearer destinations, and keep creation and other run controls available while an automation is being queued.
+- Keep sandbox HTTP and WebSocket traffic reachable on LAN-hosted deployments and fall back to the task API when a live sandbox connection cannot stop an active task.
+- Keep OpenCode task sessions consistently identified as Roomote while preserving the current workflow and implementation guidance.
+- Explain when automatic Slack routing is temporarily unavailable instead of silently showing the workspace picker, while keeping sensitive provider errors out of user-facing messages.
+- Stop task closeouts from promising a follow-up self-review when every selected GitHub repository is excluded from automated processing.
+- Let administrators disconnect GitLab, Gitea, and Bitbucket OAuth connections when provider client credentials come from runtime configuration.
+- Preserve deleted-line review thread anchors on Bitbucket and Azure DevOps so later reviews can match and reply to existing inline comments.
+- Let sync reviews resolve Roomote-authored inline threads after verifying the flagged code was fixed, including when GitHub marks the original anchor outdated.
+
 ## 0.34.0 (2026-08-04)
 
 This release adds Granola and Requesty connections, introduces Mind reader mode for expanded model thoughts, and improves task reliability across mixed-provider workspaces and chat delivery failures.

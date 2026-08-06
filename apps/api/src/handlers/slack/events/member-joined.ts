@@ -15,6 +15,7 @@ import type {
   SlackMemberJoinedChannelEvent,
   SlackNotifier,
 } from '@roomote/slack';
+import { captureActivationAutomationChanged } from '@roomote/telemetry/server';
 
 import { SLACK_WELCOME_MESSAGE_CHANNEL_LIMIT } from '../constants.js';
 
@@ -233,5 +234,17 @@ export async function maybePostSlackChannelWelcome(params: {
       });
 
     throw error;
+  }
+
+  if (shouldEnableStarterAutomations) {
+    for (const [automation, wasEnabled] of [
+      ['suggester', settings.suggesterFrequency !== 'off'],
+      ['announcer', settings.announcerFrequency !== 'off'],
+      ['manager_stats', settings.managerStatsFrequency !== 'off'],
+    ] as const) {
+      if (!wasEnabled) {
+        void captureActivationAutomationChanged('enabled', automation);
+      }
+    }
   }
 }

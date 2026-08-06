@@ -41,7 +41,8 @@ An environment can combine repositories from different source-control
 providers, such as GitHub and GitLab. Each provider must have working
 credentials in the deployment or the task cannot prepare the complete
 workspace. Repositories connected through GitHub must also belong to the same
-GitHub App installation.
+GitHub App installation. Repository full names must be unique within the
+environment, including across source-control connections.
 
 The setup task is meant to produce a working environment Roomote can reuse. If
 it cannot finish, adjust the input and try again from

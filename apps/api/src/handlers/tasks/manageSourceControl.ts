@@ -108,6 +108,9 @@ export async function manageSourceControl(
       );
     }
     const bodyInput = 'body' in input ? input : null;
+    // create_pull_request_review_comment is deliberately excluded: inline
+    // review findings are agent-authored, not replies to a pending user
+    // message, so quoting the latest user message above one would be wrong.
     const shouldQuote =
       targetProvider === 'github' &&
       (input.action === 'reply_to_pull_request_comment' ||
@@ -176,6 +179,7 @@ export async function manageSourceControl(
         );
       case 'reply_to_pull_request_comment':
       case 'create_pull_request_comment':
+      case 'create_pull_request_review_comment':
       case 'resolve_pull_request_thread':
       case 'submit_pull_request_review':
       case 'update_pull_request_comment': {

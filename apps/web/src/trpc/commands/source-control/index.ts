@@ -16,12 +16,16 @@ import {
   type SourceControlTokenBackedProvider,
 } from '@roomote/types';
 import {
+  and,
+  authAccounts,
   db,
+  eq,
   environmentRepositoryMappings,
   environmentVariables,
   getDeploymentGitHubRoomoteMentionEnabled,
   getDeploymentPrAction,
   resolveDeploymentEnvVar,
+  repositories,
   setDeploymentPrAction,
   setDeploymentGitHubRoomoteMentionEnabled,
   type DatabaseOrTransaction,
@@ -968,7 +972,10 @@ export async function saveSourceControlConfigCommand(
 ) {
   assertAdmin(auth);
 
-  await assertValidSourceControlConfigInput(input);
+  await assertValidSourceControlConfigInput({
+    ...input,
+    allowIncompleteDelegated: true,
+  });
 
   return db.transaction(async (tx) => {
     const providerStatus = await saveSourceControlConfigValues({
@@ -986,20 +993,253 @@ export async function saveSourceControlConfigCommand(
   });
 }
 
-export async function clearGitHubConfigCommand(auth: UserAuthSuccess) {
-  assertAdmin(auth);
+type ClearSourceControlConfigWarning = {
+  kind: 'webhook_cleanup' | 'oauth_cleanup';
+  repositoryId?: string;
+  repositoryFullName?: string;
+  message: string;
+};
 
-  const disableResult = await disableGitHubAppCommand(auth);
-  if (!disableResult.success) {
-    throw new Error(disableResult.error);
+type ClearConfigRepository = {
+  id: string;
+  externalRepoId: string | null;
+  fullName: string;
+  permissions: unknown;
+};
+
+function cleanupWarning(
+  kind: ClearSourceControlConfigWarning['kind'],
+  error: unknown,
+  repository?: Pick<ClearConfigRepository, 'id' | 'fullName'>,
+): ClearSourceControlConfigWarning {
+  return {
+    kind,
+    ...(repository
+      ? {
+          repositoryId: repository.id,
+          repositoryFullName: repository.fullName,
+        }
+      : {}),
+    message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+async function removeProviderHooks(
+  provider: Exclude<SourceControlProvider, 'github'>,
+  providerRepositories: ClearConfigRepository[],
+): Promise<ClearSourceControlConfigWarning[]> {
+  if (providerRepositories.length === 0) {
+    return [];
   }
 
-  const provider = getSetupSourceControlProvider('github');
+  const webhookUrl = getSourceControlWebhookUrl(provider);
+  if (!webhookUrl) {
+    return [
+      cleanupWarning(
+        'webhook_cleanup',
+        new Error(
+          'No publicly reachable Roomote URL is configured, so external hooks could not be removed automatically.',
+        ),
+      ),
+    ];
+  }
+
+  try {
+    const results = await (async () => {
+      switch (provider) {
+        case 'gitlab':
+          return GitLab.removeGitLabWebhooksForProjects({
+            projects: providerRepositories.flatMap((repository) =>
+              repository.externalRepoId?.trim()
+                ? [
+                    {
+                      projectId: repository.externalRepoId,
+                      repositoryFullName: repository.fullName,
+                    },
+                  ]
+                : [],
+            ),
+            webhookUrl,
+          });
+        case 'gitea':
+          return Gitea.removeGiteaWebhooksForRepositories({
+            repositories: providerRepositories.map((repository) => ({
+              repositoryFullName: repository.fullName,
+            })),
+            webhookUrl,
+          });
+        case 'bitbucket':
+          return Bitbucket.removeBitbucketWebhooksForRepositories({
+            repositories: providerRepositories.map((repository) => ({
+              repositoryFullName: repository.fullName,
+            })),
+            webhookUrl,
+          });
+        case 'ado':
+          return Ado.removeAdoServiceHooksForRepositories({
+            repositories: providerRepositories.flatMap((repository) => {
+              const repositoryId = repository.externalRepoId?.trim();
+              const projectId = getAdoProjectId(repository.permissions);
+              return repositoryId && projectId
+                ? [
+                    {
+                      repositoryFullName: repository.fullName,
+                      repositoryId,
+                      projectId,
+                    },
+                  ]
+                : [];
+            }),
+            webhookUrl,
+          });
+      }
+    })();
+
+    return results.flatMap((result) => {
+      if (result.status !== 'failed') {
+        return [];
+      }
+      const repository = providerRepositories.find(
+        (candidate) => candidate.fullName === result.repositoryFullName,
+      );
+      return [
+        cleanupWarning(
+          'webhook_cleanup',
+          new Error(result.error ?? 'External hook cleanup failed.'),
+          repository,
+        ),
+      ];
+    });
+  } catch (error) {
+    return [cleanupWarning('webhook_cleanup', error)];
+  }
+}
+
+async function deleteProviderOAuthConnection(
+  provider: SourceControlProvider,
+): Promise<ClearSourceControlConfigWarning[]> {
+  try {
+    switch (provider) {
+      case 'gitlab':
+        await GitLab.deleteGitLabOAuthConnection();
+        GitLab.clearGitLabDeploymentUserCache();
+        break;
+      case 'gitea':
+        await Gitea.deleteGiteaOAuthConnection();
+        Gitea.clearGiteaDeploymentUserCache();
+        break;
+      case 'bitbucket':
+        await Bitbucket.deleteBitbucketOAuthConnection();
+        Bitbucket.clearBitbucketDeploymentUserCache();
+        break;
+      case 'github':
+      case 'ado':
+        break;
+    }
+    return [];
+  } catch (error) {
+    return [cleanupWarning('oauth_cleanup', error)];
+  }
+}
+
+export async function clearSourceControlConfigCommand(
+  auth: UserAuthSuccess,
+  input: { provider: SourceControlProvider },
+) {
+  assertAdmin(auth);
+
+  const provider = getSetupSourceControlProvider(input.provider);
   const envVarNames = [
     ...new Set(provider.fields.flatMap((field) => field.acceptedEnvVarNames)),
   ];
+  if (input.provider === 'gitlab') {
+    envVarNames.push('GITLAB_TOKEN');
+  } else if (input.provider === 'gitea') {
+    envVarNames.push('GITEA_TOKEN');
+  } else if (input.provider === 'bitbucket') {
+    envVarNames.push(
+      'BITBUCKET_OAUTH',
+      'BITBUCKET_TOKEN',
+      'BITBUCKET_USERNAME',
+    );
+  }
 
-  await deleteDeploymentEnvironmentVariables(db, envVarNames);
+  const persistedEnvVarNames = new Set(
+    await getPersistedEnvironmentVariableNames(),
+  );
+  const hasPersistedEnvironmentVariables = envVarNames.some((name) =>
+    persistedEnvVarNames.has(name),
+  );
+  const hasPersistedOAuthConnection = hasPersistedEnvironmentVariables
+    ? false
+    : input.provider === 'gitlab'
+      ? Boolean(await GitLab.getGitLabOAuthConnection())
+      : input.provider === 'gitea'
+        ? Boolean(await Gitea.getGiteaOAuthConnection())
+        : input.provider === 'bitbucket'
+          ? Boolean(await Bitbucket.getBitbucketOAuthConnection())
+          : false;
+  if (!hasPersistedOAuthConnection && !hasPersistedEnvironmentVariables) {
+    return {
+      success: true as const,
+      provider: input.provider,
+      warnings: [],
+    };
+  }
 
-  return { success: true as const };
+  const [providerRepositories, persistedValues] = await Promise.all([
+    db.query.repositories.findMany({
+      where: eq(repositories.sourceControlProvider, input.provider),
+      columns: {
+        id: true,
+        externalRepoId: true,
+        fullName: true,
+        permissions: true,
+      },
+    }),
+    input.provider === 'ado'
+      ? getPersistedEnvironmentVariableValues(['ADO_LINKED_ACCOUNT_ID'])
+      : Promise.resolve({} as Record<string, string>),
+  ]);
+
+  if (input.provider === 'github') {
+    const disableResult = await disableGitHubAppCommand(auth);
+    if (!disableResult.success) {
+      throw new Error(disableResult.error);
+    }
+  }
+
+  const warnings =
+    input.provider === 'github'
+      ? []
+      : await removeProviderHooks(input.provider, providerRepositories);
+  warnings.push(...(await deleteProviderOAuthConnection(input.provider)));
+
+  const adoLinkedAccountId = persistedValues['ADO_LINKED_ACCOUNT_ID'];
+  const now = new Date();
+
+  await db.transaction(async (tx) => {
+    await deleteDeploymentEnvironmentVariables(tx, envVarNames);
+    await tx
+      .update(repositories)
+      .set({ isActive: false, updatedAt: now })
+      .where(eq(repositories.sourceControlProvider, input.provider));
+
+    if (input.provider === 'ado' && adoLinkedAccountId) {
+      await tx
+        .delete(authAccounts)
+        .where(
+          and(
+            eq(authAccounts.providerId, 'ado'),
+            eq(authAccounts.accountId, adoLinkedAccountId),
+          ),
+        );
+    }
+  });
+
+  return {
+    success: true as const,
+    provider: input.provider,
+    warnings,
+  };
 }

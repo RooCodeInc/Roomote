@@ -34,7 +34,9 @@ type GiteaOAuthTokenResponse = {
   scope?: string;
 };
 
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+let deletionPromise: Promise<void> | null = null;
+let connectionGeneration = 0;
 let cachedAccessToken: string | null = null;
 
 function tokenEndpoint(baseUrl: string): string {
@@ -97,6 +99,27 @@ async function writeConnection(
 
 export async function getGiteaOAuthConnection(): Promise<GiteaOAuthConnection | null> {
   return readConnection();
+}
+
+export async function deleteGiteaOAuthConnection(): Promise<void> {
+  if (!deletionPromise) {
+    connectionGeneration += 1;
+    const inFlightRefresh = refreshPromise;
+    deletionPromise = (async () => {
+      await inFlightRefresh?.catch(() => undefined);
+      await db
+        .delete(deploymentSecrets)
+        .where(eq(deploymentSecrets.name, SECRET_NAME));
+      refreshPromise = null;
+      cachedAccessToken = null;
+    })();
+  }
+
+  try {
+    await deletionPromise;
+  } finally {
+    deletionPromise = null;
+  }
 }
 
 export async function exchangeGiteaOAuthCode(input: {
@@ -166,7 +189,16 @@ export async function resolveGiteaOAuthAccessToken(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
 }): Promise<string | null> {
+  if (deletionPromise) {
+    await deletionPromise;
+    return null;
+  }
+  const generation = connectionGeneration;
   const connection = await readConnection();
+  if (generation !== connectionGeneration || deletionPromise) {
+    await deletionPromise;
+    return null;
+  }
   if (!connection || connection.status !== 'active') return null;
   if (
     !options?.forceRefresh &&
@@ -195,6 +227,7 @@ export async function resolveGiteaOAuthAccessToken(options?: {
       },
     );
     if (!response.ok) {
+      if (generation !== connectionGeneration) return null;
       await writeConnection({
         ...connection,
         status: 'reauthorization_required',
@@ -216,6 +249,7 @@ export async function resolveGiteaOAuthAccessToken(options?: {
       scopes: token.scope?.split(/\s+/).filter(Boolean) ?? connection.scopes,
       status: 'active' as const,
     };
+    if (generation !== connectionGeneration) return null;
     await writeConnection(next);
     cachedAccessToken = next.accessToken;
     return next.accessToken;

@@ -1800,9 +1800,9 @@ export function AutomationsSettings() {
 
         switch (data.outcome) {
           case 'launched':
-            toast.success(`${automationLabel} started a task.`, {
+            toast.success(`Running ${automationLabel} now`, {
               action: {
-                label: 'Open task',
+                label: 'View task',
                 onClick: () => window.open(`/task/${data.taskId}`, '_blank'),
               },
             });

@@ -144,6 +144,7 @@ vi.mock('../start-slack-app-mention', () => ({
 
 vi.mock('../router-debug', () => ({
   postRouterDebugMessage: vi.fn(),
+  postRouterFallbackDebugMessage: vi.fn(),
 }));
 
 vi.mock('../slack-messages', () => ({

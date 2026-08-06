@@ -362,6 +362,7 @@ async function runRoutingDecision(
           decision: {
             status: 'fallback',
             reason: built.fallbackReason,
+            cause: 'model_decision',
           },
           phase: responseResult.phase ?? 'fallback',
           model: routingModel,
@@ -408,6 +409,7 @@ async function runRoutingDecision(
         status: 'fallback',
         reason:
           error instanceof Error ? error.message : 'Unknown routing error',
+        cause: 'exception',
       },
       phase: 'fallback',
       model: routingModel,
@@ -499,6 +501,7 @@ export async function routeTask(
       status: 'fallback',
       reason:
         'Meta question answer was unavailable, and normal routing could not be resolved.',
+      cause: 'model_decision',
     };
     fallbackDecision.debug = {
       phase: 'fallback',
@@ -513,6 +516,7 @@ export async function routeTask(
         sourceType: context.source.type,
         model,
         phase: 'fallback',
+        cause: fallbackDecision.cause,
         toolsUsed,
         needsExternalLookup,
         confidence: null,
@@ -566,6 +570,7 @@ export async function routeTask(
           sourceType: context.source.type,
           model,
           phase,
+          cause: decision.cause ?? 'model_decision',
           toolsUsed,
           needsExternalLookup,
           confidence: null,
@@ -588,6 +593,7 @@ export async function routeGitHubTask(
     return {
       status: 'fallback',
       reason: 'routeGitHubTask requires a GitHub routing context.',
+      cause: 'exception',
     };
   }
 
@@ -647,6 +653,7 @@ export async function routeGitHubTask(
         sourceType: context.source.type,
         model: routingModel,
         phase: 'fallback',
+        cause: 'exception',
         toolsUsed: [],
         needsExternalLookup: null,
         confidence: null,
@@ -658,6 +665,7 @@ export async function routeGitHubTask(
     return {
       status: 'fallback',
       reason,
+      cause: 'exception',
       debug: {
         phase: 'fallback',
         toolsUsed: [],

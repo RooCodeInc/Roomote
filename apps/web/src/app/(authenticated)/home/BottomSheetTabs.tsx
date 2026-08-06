@@ -108,17 +108,13 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
   return (
     <div className="mx-auto w-full md:max-w-3xl rounded-t-xl overflow-clip">
       <div className="overflow-hidden">
-        <div
-          className={cn(
-            'flex divide-x-2 divide-background items-center text-sm font-medium transition-all bg-card',
-          )}
-        >
+        <div className="flex divide-x-2 divide-background items-center text-sm font-medium transition-all bg-card">
           <BasicTooltip content="Opt/Alt + T">
             <button
               type="button"
               onClick={() => onTabClick('recent')}
               className={cn(
-                'pl-4 pr-5 py-3 cursor-pointer font-semibold text-left transition-colors',
+                'pl-4 pr-5 py-3 cursor-pointer font-semibold text-left transition-colors text-nowrap',
                 activeTab === 'recent'
                   ? 'bg-foreground text-accent-foreground dark:bg-accent-foreground dark:text-card'
                   : 'text-muted-foreground/80 hover:text-accent-foreground',
@@ -133,7 +129,7 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
               type="button"
               onClick={() => onTabClick('pullRequests')}
               className={cn(
-                'px-5 py-3 cursor-pointer font-semibold text-left transition-colors',
+                'px-5 py-3 cursor-pointer font-semibold text-left transition-colors text-nowrap',
                 activeTab === 'pullRequests'
                   ? 'bg-foreground text-accent-foreground dark:bg-accent-foreground dark:text-card'
                   : 'text-muted-foreground/80 hover:text-accent-foreground',
@@ -143,17 +139,19 @@ export function BottomSheetTabs({ onExpandedChange }: BottomSheetTabsProps) {
             </button>
           </BasicTooltip>
 
-          <button
-            type="button"
-            onClick={closeSheet}
-            aria-label="Close bottom sheet"
-            className={cn(
-              'relative ml-auto mr-2 inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground/80 transition-all duration-500 delay-150 hover:text-foreground',
-              isExpanded ? 'top-0 opacity-100' : 'top-6 opacity-0',
-            )}
-          >
-            <X className="size-4" />
-          </button>
+          <div className="ml-auto flex min-w-0 items-center">
+            <button
+              type="button"
+              onClick={closeSheet}
+              aria-label="Close bottom sheet"
+              className={cn(
+                'relative mr-2 inline-flex size-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground/80 transition-all duration-500 delay-150 hover:text-foreground',
+                isExpanded ? 'top-0 opacity-100' : 'top-6 opacity-0',
+              )}
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
 
         <div

@@ -80,20 +80,27 @@ Create arbitrary scheduled agent runs with:
 - an optional **report destination** channel (Slack, Discord, Teams, or
   Telegram)
 
+Each automation card summarizes its cadence, environment, report destination,
+creator, and most recent run.
+
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
 9am.” Roomote previews the interpreted schedule before saving and asks for
 clarification rather than guessing when the recurrence itself is ambiguous.
 Custom schedules do not support seconds or cron macros.
 
-On each due tick, Roomote launches a normal task with that prompt in that
-environment. When a report destination is set, the run is anchored to that
-channel: Roomote's first message (the final result, or a blocker or question
-that needs input) starts a thread, later updates continue that same thread,
-and you can reply in the thread to talk to the task. There is no progress
-chatter in between. Without a destination, the run happens silently and its
-results appear only in the task view. Use **Run now** on an enabled
-automation to test it immediately.
+On each due tick, Roomote launches a normal task with that prompt in the selected
+environment. A run can skip or fail before task creation when its configuration
+or launch state prevents it from starting. When a report destination is set,
+the run is anchored to that channel: Roomote's first message (the final result,
+or a blocker or question that needs input) starts a thread, later updates
+continue that same thread, and you can reply in the thread to talk to the task.
+There is no progress chatter in between. Without a destination, the run happens
+silently and its results appear only in the task view.
+
+Use **Run now** on an enabled automation to test it immediately. Each card has
+its own run state, so starting one custom automation does not prevent you from
+running another.
 
 The deployment cap is 25 custom automations.
 
@@ -241,7 +248,9 @@ projects.
 
 **Triage Dependabot Alerts** scans open GitHub Dependabot alerts across your
 active repositories and suggests tightly scoped follow-up update tasks. It
-does not open PRs directly from the scheduled scan.
+does not open PRs directly from the scheduled scan. Follow-up remediation
+preserves the repository's dependency minimum-age and exclusion policies and
+uses only versions those policies allow.
 
 **Triage CodeQL Alerts** scans open GitHub code-scanning alerts (especially
 CodeQL findings) across your active repositories and launches tightly scoped

@@ -20,6 +20,7 @@ const {
   mockListConnectedCommunicationProviders,
   mockResolveCustomAutomationSchedule,
   mockRunCustomAutomationNow,
+  mockCaptureActivationCustomAutomationChanged,
 } = vi.hoisted(() => ({
   mockUsersFindFirst: vi.fn(),
   mockResolveActingUserIdOrNull: vi.fn(),
@@ -31,6 +32,7 @@ const {
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveCustomAutomationSchedule: vi.fn(),
   mockRunCustomAutomationNow: vi.fn(),
+  mockCaptureActivationCustomAutomationChanged: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -50,6 +52,11 @@ vi.mock('@roomote/sdk/server', () => ({
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
   resolveCustomAutomationSchedule: mockResolveCustomAutomationSchedule,
   runCustomAutomationNow: mockRunCustomAutomationNow,
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureActivationCustomAutomationChanged:
+    mockCaptureActivationCustomAutomationChanged,
 }));
 
 vi.mock('../../mcp/proxy-utils', () => ({
@@ -113,6 +120,31 @@ describe('custom-automations MCP routes', () => {
   });
 
   describe('POST / (create)', () => {
+    it('tracks creation with only the destination provider', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await postCreate(
+        app,
+        createBody({
+          targetProvider: 'slack',
+          targetChannelId: 'private-channel-id',
+        }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCaptureActivationCustomAutomationChanged).toHaveBeenCalledWith(
+        'created',
+        'slack',
+      );
+    });
+
     it('returns 400 with the message when the environment does not exist', async () => {
       const { app } = createApp();
       mockCreateCustomAutomation.mockRejectedValue(
@@ -206,6 +238,27 @@ describe('custom-automations MCP routes', () => {
       expect(res.status).toBe(500);
       expect(await res.json()).toEqual({ error: 'internal_server_error' });
       expect(onError).toHaveBeenCalledWith(unexpected, expect.anything());
+    });
+  });
+
+  describe('DELETE /:id', () => {
+    it('tracks deletion with only the persisted destination provider', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'automation-1',
+        name: 'Private automation name',
+        target: { provider: 'discord' },
+      });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'DELETE',
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockCaptureActivationCustomAutomationChanged).toHaveBeenCalledWith(
+        'deleted',
+        'discord',
+      );
     });
   });
 

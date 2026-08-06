@@ -280,6 +280,18 @@ assert(
   'caddy: Caddyfile must allow internal mode to remove wildcard on-demand TLS',
 );
 const caddyfile = read('deploy/caddy/Caddyfile');
+assert(
+  caddyfile.includes(
+    'path_regexp local_sandbox ^/_roomote-sandbox/([a-z0-9]+)(/.*)$',
+  ),
+  'caddy: app domain must route same-origin sandbox-server requests',
+);
+assert(
+  caddyfile.includes(
+    'header_up Host {re.local_sandbox.1}-sandbox-server.{$ROOMOTE_PREVIEW_DOMAIN}',
+  ),
+  'caddy: same-origin sandbox route must target the sandbox-server preview host',
+);
 const renderCaddyTlsMode = (values) =>
   caddyfile
     .replace('{$ROOMOTE_CADDY_LOCAL_CERTS:}', values.localCertificates)

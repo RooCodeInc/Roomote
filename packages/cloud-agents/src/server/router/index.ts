@@ -20,6 +20,7 @@ export type {
   RoutingResult,
   PlatformAnswerResult,
   RoutingDecision,
+  RoutingFallbackCause,
   FollowUpIntent,
   FollowUpClassification,
 } from './types';

@@ -4,6 +4,7 @@ const {
   mockEnsureAdoServiceHooksForRepositories,
   mockEnsureGiteaWebhooksForRepositories,
   mockEnsureGitLabWebhooksForProjects,
+  mockRemoveBitbucketWebhooksForRepositories,
   mockRemoveAdoServiceHooksForRepositories,
   mockRemoveGiteaWebhooksForRepositories,
   mockRemoveGitLabWebhooksForProjects,
@@ -22,12 +23,30 @@ const {
   mockDescribeAdoApiError,
   mockValidateGiteaToken,
   mockDeleteDeploymentEnvironmentVariables,
+  mockGetPersistedEnvironmentVariableValues,
+  mockDeleteGitLabOAuthConnection,
+  mockDeleteGiteaOAuthConnection,
+  mockDeleteBitbucketOAuthConnection,
+  mockGetGitLabOAuthConnection,
+  mockGetGiteaOAuthConnection,
+  mockGetBitbucketOAuthConnection,
+  mockClearGitLabDeploymentUserCache,
+  mockClearGiteaDeploymentUserCache,
+  mockClearBitbucketDeploymentUserCache,
   mockDisableGitHubAppCommand,
+  mockRepositoryRows,
+  mockPersistedEnvVarNames,
+  mockRepositoryFindMany,
+  mockTransaction,
+  mockTxUpdate,
+  mockTxDelete,
+  mockTxDeleteWhere,
   mockEnv,
 } = vi.hoisted(() => ({
   mockEnsureAdoServiceHooksForRepositories: vi.fn(),
   mockEnsureGiteaWebhooksForRepositories: vi.fn(),
   mockEnsureGitLabWebhooksForProjects: vi.fn(),
+  mockRemoveBitbucketWebhooksForRepositories: vi.fn(),
   mockRemoveAdoServiceHooksForRepositories: vi.fn(),
   mockRemoveGiteaWebhooksForRepositories: vi.fn(),
   mockRemoveGitLabWebhooksForProjects: vi.fn(),
@@ -46,7 +65,24 @@ const {
   mockDescribeAdoApiError: vi.fn(),
   mockValidateGiteaToken: vi.fn(),
   mockDeleteDeploymentEnvironmentVariables: vi.fn(),
+  mockGetPersistedEnvironmentVariableValues: vi.fn(),
+  mockDeleteGitLabOAuthConnection: vi.fn(),
+  mockDeleteGiteaOAuthConnection: vi.fn(),
+  mockDeleteBitbucketOAuthConnection: vi.fn(),
+  mockGetGitLabOAuthConnection: vi.fn(),
+  mockGetGiteaOAuthConnection: vi.fn(),
+  mockGetBitbucketOAuthConnection: vi.fn(),
+  mockClearGitLabDeploymentUserCache: vi.fn(),
+  mockClearGiteaDeploymentUserCache: vi.fn(),
+  mockClearBitbucketDeploymentUserCache: vi.fn(),
   mockDisableGitHubAppCommand: vi.fn(),
+  mockRepositoryRows: { rows: [] as unknown[] },
+  mockPersistedEnvVarNames: { names: [] as string[] },
+  mockRepositoryFindMany: vi.fn(),
+  mockTransaction: vi.fn(),
+  mockTxUpdate: vi.fn(),
+  mockTxDelete: vi.fn(),
+  mockTxDeleteWhere: vi.fn(),
   mockEnv: {
     R_APP_URL: 'https://roomote.example.com',
     R_PUBLIC_URL: undefined as string | undefined,
@@ -67,7 +103,18 @@ vi.mock('@roomote/ado', () => ({
   validateAdoToken: mockValidateAdoToken,
 }));
 
+vi.mock('@roomote/bitbucket', () => ({
+  clearBitbucketDeploymentUserCache: mockClearBitbucketDeploymentUserCache,
+  deleteBitbucketOAuthConnection: mockDeleteBitbucketOAuthConnection,
+  getBitbucketOAuthConnection: mockGetBitbucketOAuthConnection,
+  removeBitbucketWebhooksForRepositories:
+    mockRemoveBitbucketWebhooksForRepositories,
+}));
+
 vi.mock('@roomote/gitea', () => ({
+  clearGiteaDeploymentUserCache: mockClearGiteaDeploymentUserCache,
+  deleteGiteaOAuthConnection: mockDeleteGiteaOAuthConnection,
+  getGiteaOAuthConnection: mockGetGiteaOAuthConnection,
   ensureGiteaWebhooksForRepositories: mockEnsureGiteaWebhooksForRepositories,
   normalizeGiteaBaseUrl: (value: string) =>
     value.startsWith('http') ? value : `https://${value}`,
@@ -78,6 +125,9 @@ vi.mock('@roomote/gitea', () => ({
 }));
 
 vi.mock('@roomote/gitlab', () => ({
+  clearGitLabDeploymentUserCache: mockClearGitLabDeploymentUserCache,
+  deleteGitLabOAuthConnection: mockDeleteGitLabOAuthConnection,
+  getGitLabOAuthConnection: mockGetGitLabOAuthConnection,
   buildGitLabApiBaseUrl: (value: string) =>
     `${value.replace(/\/+$/, '')}/api/v4`,
   ensureGitLabWebhooksForProjects: mockEnsureGitLabWebhooksForProjects,
@@ -89,16 +139,34 @@ vi.mock('@roomote/gitlab', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: {
-    select: () => ({
-      from: () => Promise.resolve(mockEnvironmentMappingRows.rows),
-    }),
+  and: (...conditions: unknown[]) => ({ conditions }),
+  authAccounts: {
+    accountId: 'auth_accounts.account_id',
+    providerId: 'auth_accounts.provider_id',
   },
+  db: {
+    select: (columns: { name?: unknown }) => ({
+      from: () =>
+        Promise.resolve(
+          columns.name
+            ? mockPersistedEnvVarNames.names.map((name) => ({ name }))
+            : mockEnvironmentMappingRows.rows,
+        ),
+    }),
+    query: {
+      repositories: { findMany: mockRepositoryFindMany },
+    },
+    transaction: mockTransaction,
+  },
+  eq: (left: unknown, right: unknown) => ({ left, right }),
   environmentRepositoryMappings: {
     repositoryId: 'environment_repository_mappings.repository_id',
   },
   environmentVariables: {
     name: 'environment_variables.name',
+  },
+  repositories: {
+    sourceControlProvider: 'repositories.source_control_provider',
   },
   getDeploymentPrAction: vi.fn(),
   getDeploymentGitHubRoomoteMentionEnabled:
@@ -127,6 +195,8 @@ vi.mock('../environment-variables', () => ({
     mockUpsertDeploymentEnvironmentVariables,
   deleteDeploymentEnvironmentVariables:
     mockDeleteDeploymentEnvironmentVariables,
+  getPersistedEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
 }));
 
 vi.mock('../github/mutations', () => ({
@@ -135,7 +205,7 @@ vi.mock('../github/mutations', () => ({
 
 import {
   assertValidSourceControlConfigInput,
-  clearGitHubConfigCommand,
+  clearSourceControlConfigCommand,
   getGitHubRoomoteMentionCommand,
   setGitHubRoomoteMentionCommand,
   syncRepositoriesCommand,
@@ -192,6 +262,29 @@ describe('source-control commands', () => {
     mockEnv.R_PUBLIC_URL = undefined;
     mockEnv.TRPC_URL = 'http://localhost:3000/trpc';
     mockResolveDeploymentEnvVar.mockResolvedValue(null);
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
+    mockGetGitLabOAuthConnection.mockResolvedValue(null);
+    mockGetGiteaOAuthConnection.mockResolvedValue(null);
+    mockGetBitbucketOAuthConnection.mockResolvedValue(null);
+    mockRepositoryRows.rows = [];
+    mockPersistedEnvVarNames.names = [
+      'R_GITHUB_APP_ID',
+      'GITLAB_CLIENT_ID',
+      'GITEA_CLIENT_ID',
+      'ADO_ORGANIZATION',
+      'BITBUCKET_CLIENT_ID',
+    ];
+    mockRepositoryFindMany.mockImplementation(
+      async () => mockRepositoryRows.rows,
+    );
+    mockTxUpdate.mockReturnValue({
+      set: vi.fn(() => ({ where: vi.fn(async () => undefined) })),
+    });
+    mockTxDeleteWhere.mockResolvedValue(undefined);
+    mockTxDelete.mockReturnValue({ where: mockTxDeleteWhere });
+    mockTransaction.mockImplementation(async (callback) =>
+      callback({ update: mockTxUpdate, delete: mockTxDelete }),
+    );
     mockEnvironmentMappingRows.rows = [
       { repositoryId: 'ado-repo-row-1' },
       { repositoryId: 'gitea-repo-row-1' },
@@ -214,6 +307,7 @@ describe('source-control commands', () => {
     mockRemoveGiteaWebhooksForRepositories.mockResolvedValue([]);
     mockRemoveAdoServiceHooksForRepositories.mockResolvedValue([]);
     mockRemoveGitLabWebhooksForProjects.mockResolvedValue([]);
+    mockRemoveBitbucketWebhooksForRepositories.mockResolvedValue([]);
     mockEnsureGitLabWebhooksForProjects.mockResolvedValue([
       { status: 'created', repositoryFullName: 'acme/gitlab-app' },
     ]);
@@ -243,8 +337,12 @@ describe('source-control commands', () => {
   it('clears persisted GitHub credentials and deactivates stale installations', async () => {
     const auth = buildMockAuth();
 
-    await expect(clearGitHubConfigCommand(auth)).resolves.toEqual({
+    await expect(
+      clearSourceControlConfigCommand(auth, { provider: 'github' }),
+    ).resolves.toEqual({
       success: true,
+      provider: 'github',
+      warnings: [],
     });
 
     expect(mockDisableGitHubAppCommand).toHaveBeenCalledWith(auth);
@@ -267,10 +365,214 @@ describe('source-control commands', () => {
       error: 'Failed to disconnect GitHub.',
     });
 
-    await expect(clearGitHubConfigCommand(buildMockAuth())).rejects.toThrow(
-      'Failed to disconnect GitHub.',
-    );
+    await expect(
+      clearSourceControlConfigCommand(buildMockAuth(), { provider: 'github' }),
+    ).rejects.toThrow('Failed to disconnect GitHub.');
     expect(mockDeleteDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'gitlab',
+      mockRemoveGitLabWebhooksForProjects,
+      mockDeleteGitLabOAuthConnection,
+    ],
+    [
+      'gitea',
+      mockRemoveGiteaWebhooksForRepositories,
+      mockDeleteGiteaOAuthConnection,
+    ],
+    [
+      'bitbucket',
+      mockRemoveBitbucketWebhooksForRepositories,
+      mockDeleteBitbucketOAuthConnection,
+    ],
+    ['ado', mockRemoveAdoServiceHooksForRepositories, null],
+  ] as const)(
+    'removes %s hooks, credentials, and local configuration',
+    async (provider, removeHooks, deleteOAuth) => {
+      mockRepositoryRows.rows = [
+        {
+          id: `${provider}-repository-id`,
+          externalRepoId: `${provider}-external-id`,
+          fullName: 'acme/project/repository',
+          permissions: { projectId: 'ado-project-id' },
+        },
+      ];
+
+      await expect(
+        clearSourceControlConfigCommand(buildMockAuth(), { provider }),
+      ).resolves.toMatchObject({ success: true, provider, warnings: [] });
+
+      expect(removeHooks).toHaveBeenCalledOnce();
+      if (deleteOAuth) {
+        expect(deleteOAuth).toHaveBeenCalledOnce();
+      }
+      if (provider === 'gitlab') {
+        expect(mockClearGitLabDeploymentUserCache).toHaveBeenCalledOnce();
+      } else if (provider === 'gitea') {
+        expect(mockClearGiteaDeploymentUserCache).toHaveBeenCalledOnce();
+      } else if (provider === 'bitbucket') {
+        expect(mockClearBitbucketDeploymentUserCache).toHaveBeenCalledOnce();
+      }
+      expect(mockDeleteDeploymentEnvironmentVariables).toHaveBeenCalledOnce();
+      expect(mockTxUpdate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('returns hook cleanup failures as warnings while removing local configuration', async () => {
+    mockRepositoryRows.rows = [
+      {
+        id: 'gitlab-repository-id',
+        externalRepoId: '42',
+        fullName: 'acme/project',
+        permissions: {},
+      },
+    ];
+    mockRemoveGitLabWebhooksForProjects.mockResolvedValue([
+      {
+        repositoryFullName: 'acme/project',
+        status: 'failed',
+        error: 'GitLab denied webhook deletion.',
+      },
+    ]);
+
+    await expect(
+      clearSourceControlConfigCommand(buildMockAuth(), { provider: 'gitlab' }),
+    ).resolves.toEqual({
+      success: true,
+      provider: 'gitlab',
+      warnings: [
+        {
+          kind: 'webhook_cleanup',
+          repositoryId: 'gitlab-repository-id',
+          repositoryFullName: 'acme/project',
+          message: 'GitLab denied webhook deletion.',
+        },
+      ],
+    });
+    expect(mockDeleteDeploymentEnvironmentVariables).toHaveBeenCalledOnce();
+  });
+
+  it('deletes the exact persisted Azure DevOps delegated account', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      ADO_LINKED_ACCOUNT_ID: 'delegated-account-id',
+    });
+
+    await clearSourceControlConfigCommand(buildMockAuth(), { provider: 'ado' });
+
+    expect(mockTxDelete).toHaveBeenCalledOnce();
+    expect(mockTxDeleteWhere).toHaveBeenCalledWith({
+      conditions: [
+        { left: 'auth_accounts.provider_id', right: 'ado' },
+        {
+          left: 'auth_accounts.account_id',
+          right: 'delegated-account-id',
+        },
+      ],
+    });
+  });
+
+  it('does not remove provider state for runtime-only configuration', async () => {
+    mockPersistedEnvVarNames.names = [];
+
+    await expect(
+      clearSourceControlConfigCommand(buildMockAuth(), { provider: 'gitlab' }),
+    ).resolves.toEqual({
+      success: true,
+      provider: 'gitlab',
+      warnings: [],
+    });
+
+    expect(mockRepositoryFindMany).not.toHaveBeenCalled();
+    expect(mockRemoveGitLabWebhooksForProjects).not.toHaveBeenCalled();
+    expect(mockDeleteGitLabOAuthConnection).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'gitlab',
+      mockGetGitLabOAuthConnection,
+      mockRemoveGitLabWebhooksForProjects,
+      mockDeleteGitLabOAuthConnection,
+    ],
+    [
+      'gitea',
+      mockGetGiteaOAuthConnection,
+      mockRemoveGiteaWebhooksForRepositories,
+      mockDeleteGiteaOAuthConnection,
+    ],
+    [
+      'bitbucket',
+      mockGetBitbucketOAuthConnection,
+      mockRemoveBitbucketWebhooksForRepositories,
+      mockDeleteBitbucketOAuthConnection,
+    ],
+  ] as const)(
+    'removes a persisted %s OAuth connection when client credentials come from runtime configuration',
+    async (
+      provider,
+      getOAuthConnection,
+      removeHooks,
+      deleteOAuthConnection,
+    ) => {
+      mockPersistedEnvVarNames.names = [];
+      getOAuthConnection.mockResolvedValue({ accessToken: 'oauth-token' });
+      mockRepositoryRows.rows = [
+        {
+          id: `${provider}-repository-id`,
+          externalRepoId: `${provider}-external-id`,
+          fullName: 'acme/project/repository',
+          permissions: {},
+        },
+      ];
+
+      await expect(
+        clearSourceControlConfigCommand(buildMockAuth(), { provider }),
+      ).resolves.toMatchObject({ success: true, provider, warnings: [] });
+
+      expect(removeHooks).toHaveBeenCalledOnce();
+      expect(deleteOAuthConnection).toHaveBeenCalledOnce();
+      expect(mockTxUpdate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('returns OAuth cleanup failures as warnings while removing local configuration', async () => {
+    mockDeleteGitLabOAuthConnection.mockRejectedValueOnce(
+      new Error('OAuth secret deletion failed.'),
+    );
+
+    await expect(
+      clearSourceControlConfigCommand(buildMockAuth(), { provider: 'gitlab' }),
+    ).resolves.toEqual({
+      success: true,
+      provider: 'gitlab',
+      warnings: [
+        {
+          kind: 'oauth_cleanup',
+          message: 'OAuth secret deletion failed.',
+        },
+      ],
+    });
+    expect(mockTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('rejects non-admin configuration removal', async () => {
+    await expect(
+      clearSourceControlConfigCommand(buildMockAuth({ isAdmin: false }), {
+        provider: 'gitea',
+      }),
+    ).rejects.toThrow('Unauthorized');
+    expect(mockRepositoryFindMany).not.toHaveBeenCalled();
+  });
+
+  it('surfaces fatal database cleanup failures', async () => {
+    mockTransaction.mockRejectedValueOnce(new Error('database unavailable'));
+
+    await expect(
+      clearSourceControlConfigCommand(buildMockAuth(), { provider: 'gitea' }),
+    ).rejects.toThrow('database unavailable');
   });
 
   it('creates GitLab webhooks during the OAuth-triggered repository sync', async () => {

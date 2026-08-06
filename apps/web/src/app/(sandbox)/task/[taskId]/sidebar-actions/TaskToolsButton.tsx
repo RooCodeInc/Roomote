@@ -4,6 +4,7 @@ import { Fragment, memo } from 'react';
 import { toast } from 'sonner';
 
 import { useUser } from '@/hooks/useUser';
+import { generateClientUuid } from '@/lib/client-uuid';
 import { useTRPCClient } from '@/trpc/client';
 
 import {
@@ -59,7 +60,7 @@ function TaskToolsButtonBase({
           {separator && <DropdownMenuSeparator />}
           <DropdownMenuItem
             onClick={async () => {
-              const clientMessageId = globalThis.crypto.randomUUID();
+              const clientMessageId = generateClientUuid();
 
               try {
                 await trpcClient.sandboxSession.sendPrompt.mutate({

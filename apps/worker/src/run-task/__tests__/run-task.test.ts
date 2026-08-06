@@ -109,6 +109,15 @@ type FakeHarnessManager = EventEmitter & {
   dispose: ReturnType<typeof vi.fn>;
 };
 
+const ROOMOTE_SYSTEM_PROMPT_MOCK =
+  'You are Roomote, a software engineering teammate.';
+
+function withRoomoteSystemPrompt(instructions?: string): string {
+  return instructions
+    ? `${ROOMOTE_SYSTEM_PROMPT_MOCK}\n\n${instructions}`
+    : ROOMOTE_SYSTEM_PROMPT_MOCK;
+}
+
 vi.mock('@roomote/auth/client', () => ({
   validateToken: vi.fn(),
 }));
@@ -128,6 +137,7 @@ vi.mock('@roomote/cloud-agents', () => ({
     'triage-sentry',
   ],
   ROOMOTE_COMPACT_PROMPT: 'Default compaction prompt.',
+  ROOMOTE_SYSTEM_PROMPT: 'You are Roomote, a software engineering teammate.',
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
@@ -322,7 +332,7 @@ describe('runTask', () => {
     syncRuntimeGitAuthorMock.mockResolvedValue(undefined);
   });
 
-  it('does not pass a system prompt into the OpenCode harness', async () => {
+  it('delivers the Roomote system prompt through OpenCode developer instructions', async () => {
     await runTask({
       taskRun: {
         id: 150,
@@ -364,6 +374,9 @@ describe('runTask', () => {
         systemPromptContent: expect.anything(),
       }),
     );
+    expect(
+      createHarnessMock.mock.calls[0]?.[0]?.developerInstructionsContent,
+    ).toBe(ROOMOTE_SYSTEM_PROMPT_MOCK);
   });
 
   it('drops untrusted harness home overrides from the OpenCode runtime environment', async () => {
@@ -2844,12 +2857,14 @@ describe('runTask', () => {
       } as never,
     });
 
-    const expectedInstructions = [
-      '<environment-instructions>',
-      'Run tests before finishing',
-      'Sandbox details',
-      '</environment-instructions>',
-    ].join('\n');
+    const expectedInstructions = withRoomoteSystemPrompt(
+      [
+        '<environment-instructions>',
+        'Run tests before finishing',
+        'Sandbox details',
+        '</environment-instructions>',
+      ].join('\n'),
+    );
 
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2902,12 +2917,14 @@ describe('runTask', () => {
       } as never,
     });
 
-    const expectedInstructions = [
-      '<environment-instructions>',
-      'Run tests before finishing',
-      'Sandbox details',
-      '</environment-instructions>',
-    ].join('\n');
+    const expectedInstructions = withRoomoteSystemPrompt(
+      [
+        '<environment-instructions>',
+        'Run tests before finishing',
+        'Sandbox details',
+        '</environment-instructions>',
+      ].join('\n'),
+    );
 
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3140,17 +3157,19 @@ describe('runTask', () => {
       } as never,
     });
 
-    const expectedInstructions = [
-      '<environment-instructions>',
-      'Run tests before finishing',
-      '',
-      'Workspace readiness notice:',
-      'This task is starting before workspace readiness is fully settled. Some environment setup steps may still be running or may have reported warnings.',
-      'Acknowledge this politely if it affects the user request, and do not assume the environment is fully configured.',
-      '- Environment command "pnpm install" failed for owner/repo: Command failed with exit code 1',
-      'Sandbox details',
-      '</environment-instructions>',
-    ].join('\n');
+    const expectedInstructions = withRoomoteSystemPrompt(
+      [
+        '<environment-instructions>',
+        'Run tests before finishing',
+        '',
+        'Workspace readiness notice:',
+        'This task is starting before workspace readiness is fully settled. Some environment setup steps may still be running or may have reported warnings.',
+        'Acknowledge this politely if it affects the user request, and do not assume the environment is fully configured.',
+        '- Environment command "pnpm install" failed for owner/repo: Command failed with exit code 1',
+        'Sandbox details',
+        '</environment-instructions>',
+      ].join('\n'),
+    );
 
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3201,16 +3220,18 @@ describe('runTask', () => {
       } as never,
     });
 
-    const expectedInstructions = [
-      '<environment-instructions>',
-      'Organization-wide agent behavior:',
-      'Use short status updates unless the task is blocked.',
-      '',
-      'Environment-specific agent instructions:',
-      'Run tests before finishing.',
-      'Sandbox details',
-      '</environment-instructions>',
-    ].join('\n');
+    const expectedInstructions = withRoomoteSystemPrompt(
+      [
+        '<environment-instructions>',
+        'Organization-wide agent behavior:',
+        'Use short status updates unless the task is blocked.',
+        '',
+        'Environment-specific agent instructions:',
+        'Run tests before finishing.',
+        'Sandbox details',
+        '</environment-instructions>',
+      ].join('\n'),
+    );
 
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3269,14 +3290,16 @@ describe('runTask', () => {
       } as never,
     });
 
-    const expectedInstructions = [
-      'Workflow instructions',
-      '',
-      '<environment-instructions>',
-      'Run tests before finishing.',
-      'Sandbox details',
-      '</environment-instructions>',
-    ].join('\n');
+    const expectedInstructions = withRoomoteSystemPrompt(
+      [
+        'Workflow instructions',
+        '',
+        '<environment-instructions>',
+        'Run tests before finishing.',
+        'Sandbox details',
+        '</environment-instructions>',
+      ].join('\n'),
+    );
 
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3346,14 +3369,16 @@ describe('runTask', () => {
     const developerInstructions =
       createHarnessMock.mock.calls.at(-1)?.[0]?.developerInstructionsContent;
     expect(developerInstructions).toBe(
-      [
-        'Workflow instructions',
-        '',
-        '<environment-instructions>',
-        'Run tests before finishing.',
-        'Sandbox details',
-        '</environment-instructions>',
-      ].join('\n'),
+      withRoomoteSystemPrompt(
+        [
+          'Workflow instructions',
+          '',
+          '<environment-instructions>',
+          'Run tests before finishing.',
+          'Sandbox details',
+          '</environment-instructions>',
+        ].join('\n'),
+      ),
     );
     expect(developerInstructions).not.toContain(
       '/tmp/workspace/Roomote/example-app/AGENTS.md',
@@ -3712,7 +3737,7 @@ describe('runTask', () => {
 
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        developerInstructionsContent: undefined,
+        developerInstructionsContent: ROOMOTE_SYSTEM_PROMPT_MOCK,
         runtimeEnv: expect.objectContaining({
           R_MODEL: 'provider-id/model-id',
           R_SMALL_MODEL: 'provider-id/small-model-id',
@@ -3774,7 +3799,7 @@ describe('runTask', () => {
 
     expect(createHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        developerInstructionsContent: undefined,
+        developerInstructionsContent: ROOMOTE_SYSTEM_PROMPT_MOCK,
         runtimeEnv: expect.objectContaining({
           R_MODEL: 'openrouter/openai/gpt-5.4',
           R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',

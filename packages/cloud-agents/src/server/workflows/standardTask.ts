@@ -7,6 +7,7 @@ import {
   isSourceControlTaskSurface,
   PRODUCT_NAME,
 } from '@roomote/types';
+import { isRepoSkipped } from '@roomote/github';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 import {
@@ -198,6 +199,24 @@ export function standardTask({
   const sourceControlPlatformLabel = sourceControlProvider
     ? getSourceControlProviderLabel(sourceControlProvider)
     : 'GitHub/GitLab';
+  const taskRepoFullNames =
+    repoFullNames && repoFullNames.length > 0
+      ? repoFullNames
+      : isAllRepositoriesSelection
+        ? []
+        : [repo];
+  const skippedGitHubRepoFullNames =
+    sourceControlProvider === 'github'
+      ? taskRepoFullNames.filter((repoFullName) => isRepoSkipped(repoFullName))
+      : [];
+  const allKnownGitHubReposSkipped =
+    taskRepoFullNames.length > 0 &&
+    skippedGitHubRepoFullNames.length === taskRepoFullNames.length;
+  const skippedGitHubRepoNotice =
+    skippedGitHubRepoFullNames.length > 0
+      ? `
+    <rule>Automatic GitHub processing is disabled for ${skippedGitHubRepoFullNames.map((repoFullName) => `\`${repoFullName}\``).join(', ')}. Never include the self-review expectation note for a pull request delivered from one of those repositories, even when its draft state would otherwise qualify.</rule>`
+      : '';
   // When automatic Code Reviewer open/push hooks can fire for this deployment,
   // give the agent decision rules for the user-facing expectation note.
   // Do not key the final note solely on configured prAction: explicit `$create-pr`
@@ -208,7 +227,8 @@ export function standardTask({
     codeReviewsEnabled &&
     codeReviewReviewOnCommit &&
     deliverySkill !== 'push' &&
-    !isSourceControlTaskSurface(taskSurface);
+    !isSourceControlTaskSurface(taskSurface) &&
+    !allKnownGitHubReposSkipped;
   const draftAutoReviewStatus = codeReviewReviewDraftPrs
     ? 'enabled'
     : 'disabled';
@@ -322,7 +342,7 @@ ${buildGitHubMessageInstructions()}`
     <rule>Include the first-person expectation note only when automatic review can start for that delivered PR/MR: ready-for-review PRs qualify; draft PRs qualify only when draft automatic review is ${draftAutoReviewStatus} for this deployment. Judge from the PR you actually opened or refreshed (including after explicit \`$create-pr\` / \`$create-draft-pr\` overrides), not from the configured default delivery skill alone.</rule>
     <rule>When including the note, briefly say that you are doing a self-review on ${sourceControlPlatformLabel} and will follow up here with those results, so the user knows to expect another update after the self-review. Name the source-control platform (${sourceControlPlatformLabel}). Keep the note short and natural — for example after the PR link, add that you are doing a self-review on ${sourceControlPlatformLabel} and will share what you find. Do not mention separate agents, automated reviewer tasks, or internal review plumbing in that user-facing note.</rule>
     <rule>Do not perform that Code Reviewer self-review yourself in this task. Do not open a PR review, post inline review comments, invoke \`review-code\`/\`review-and-fix\` for that purpose, wait on a review to finish, or invent review findings. Your only duty here is the short set-expectation note when the delivered PR/MR is auto-review eligible; the platform handles the later self-review outside this task.</rule>
-    <rule>Skip this expectation note when the closeout has no PR or merge request link, when you are only refreshing without re-sharing the link, or when the delivered PR/MR is not auto-review eligible (including draft PRs while draft automatic review is disabled).</rule>
+    <rule>Skip this expectation note when the closeout has no PR or merge request link, when you are only refreshing without re-sharing the link, or when the delivered PR/MR is not auto-review eligible (including draft PRs while draft automatic review is disabled).</rule>${skippedGitHubRepoNotice}
   </code_review_self_review_closeout>`
       : '';
   const proofStep =

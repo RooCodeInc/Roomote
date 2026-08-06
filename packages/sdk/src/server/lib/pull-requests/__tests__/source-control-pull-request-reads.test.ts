@@ -355,6 +355,104 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     });
   });
 
+  it('keeps outdated GitHub review threads anchored on their original line', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const graphql = vi.fn().mockResolvedValue({
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [
+              {
+                id: 'PRRT_live',
+                isResolved: false,
+                isOutdated: false,
+                path: 'src/index.ts',
+                line: 12,
+                originalLine: 12,
+                comments: {
+                  nodes: [
+                    {
+                      databaseId: 1,
+                      author: { login: 'roomote-dev[bot]' },
+                      body: 'Missing error handling here.',
+                      createdAt: '2026-08-01T00:00:00Z',
+                      url: null,
+                    },
+                  ],
+                },
+              },
+              {
+                id: 'PRRT_outdated',
+                isResolved: false,
+                isOutdated: true,
+                path: 'src/index.ts',
+                line: null,
+                originalLine: 42,
+                comments: {
+                  nodes: [
+                    {
+                      databaseId: 2,
+                      author: { login: 'roomote-dev[bot]' },
+                      body: 'This comparison uses the wrong field.',
+                      createdAt: '2026-08-01T00:00:00Z',
+                      url: null,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      graphql,
+      paginate: vi.fn().mockResolvedValue([]),
+      rest: {
+        pulls: { listReviewComments: vi.fn() },
+        issues: { listComments: vi.fn() },
+      },
+    });
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        sourceControlProvider: 'github',
+      },
+    });
+
+    if (!('threads' in result)) {
+      throw new Error('Expected a comments result.');
+    }
+
+    expect(result.threads).toEqual([
+      expect.objectContaining({
+        id: 'PRRT_live',
+        path: 'src/index.ts',
+        line: 12,
+        outdated: false,
+      }),
+      expect.objectContaining({
+        id: 'PRRT_outdated',
+        path: 'src/index.ts',
+        line: 42,
+        outdated: true,
+      }),
+    ]);
+  });
+
   it('maps GitLab discussions into threads and issue comments', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
@@ -440,6 +538,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         resolved: true,
         path: 'src/index.ts',
         line: 12,
+        outdated: null,
         comments: [
           {
             id: '1',
@@ -466,6 +565,111 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         createdAt: null,
         url: null,
       },
+    ]);
+  });
+
+  it('anchors GitLab old-side diff notes with old_path and old_line', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 'discussion-old-side',
+          notes: [
+            {
+              id: 9,
+              type: 'DiffNote',
+              body: 'This deletion drops the retry path.',
+              resolvable: true,
+              resolved: false,
+              author: { username: 'reviewer' },
+              position: {
+                new_path: null,
+                new_line: null,
+                old_path: 'src/index.ts',
+                old_line: 17,
+              },
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 42,
+        sourceControlProvider: 'gitlab',
+      },
+      fetchImpl,
+    });
+
+    if (!('threads' in result)) {
+      throw new Error('Expected a comments result.');
+    }
+
+    expect(result.threads).toEqual([
+      expect.objectContaining({
+        id: 'discussion-old-side',
+        path: 'src/index.ts',
+        line: 17,
+      }),
+    ]);
+  });
+
+  it('anchors Bitbucket old-side comments with inline.from', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://bitbucket.org/acme/backend',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        values: [
+          {
+            id: 88,
+            content: { raw: 'This deletion removes the retry path.' },
+            user: { nickname: 'reviewer' },
+            inline: { path: 'src/index.ts', from: 21 },
+          },
+        ],
+      }),
+    );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'bitbucket',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 5,
+        sourceControlProvider: 'bitbucket',
+      },
+      fetchImpl,
+    });
+
+    if (!('threads' in result)) {
+      throw new Error('Expected a comments result.');
+    }
+
+    expect(result.threads).toEqual([
+      expect.objectContaining({
+        id: '88',
+        path: 'src/index.ts',
+        line: 21,
+      }),
     ]);
   });
 
@@ -530,6 +734,15 @@ describe('readSourceControlPullRequestForTaskRun', () => {
               },
             ],
           },
+          {
+            id: 14,
+            status: 'active',
+            threadContext: {
+              filePath: '/src/deleted.ts',
+              leftFileStart: { line: 13 },
+            },
+            comments: [{ id: 105, content: 'Keep this deletion visible.' }],
+          },
         ],
       }),
     );
@@ -568,6 +781,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         resolved: true,
         path: '/src/index.ts',
         line: 8,
+        outdated: null,
         comments: [
           {
             id: '100',
@@ -590,11 +804,28 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         resolved: false,
         path: '/src/other.ts',
         line: 3,
+        outdated: null,
         comments: [
           {
             id: '102',
             author: null,
             body: 'Still open.',
+            createdAt: null,
+            url: null,
+          },
+        ],
+      },
+      {
+        id: '14',
+        resolved: false,
+        path: '/src/deleted.ts',
+        line: 13,
+        outdated: null,
+        comments: [
+          {
+            id: '105',
+            author: null,
+            body: 'Keep this deletion visible.',
             createdAt: null,
             url: null,
           },

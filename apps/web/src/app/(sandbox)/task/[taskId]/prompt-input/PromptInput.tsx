@@ -61,6 +61,7 @@ import { TaskStatus } from './TaskStatus';
 
 const DRAFT_SAVE_DEBOUNCE_MS = 1_000;
 const KEEPALIVE_TOUCH_THROTTLE_MS = 10_000;
+const SANDBOX_CANCEL_TIMEOUT_MS = 10_000;
 
 export interface PromptInputHandle {
   focus: () => void;
@@ -120,6 +121,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const steeringQueuedMessageRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const runId = taskRun?.id;
+    const taskId = taskRun?.taskId;
 
     const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
       null,
@@ -357,18 +359,49 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       cancellingRef.current = true;
 
       try {
-        await client?.commands.cancelTask.mutate({
-          cancelledBy: {
-            ...(cancelledByName ? { name: cancelledByName } : {}),
-            source: 'web',
-          },
+        if (client) {
+          try {
+            // A dead transport does not always reject quickly (it can hang
+            // for minutes on an unresponsive upstream), so bound the live
+            // cancellation before falling back to the web API.
+            await Promise.race([
+              client.commands.cancelTask.mutate({
+                cancelledBy: {
+                  ...(cancelledByName ? { name: cancelledByName } : {}),
+                  source: 'web',
+                },
+              }),
+              new Promise((_, reject) =>
+                setTimeout(
+                  () => reject(new Error('sandbox cancelTask timed out')),
+                  SANDBOX_CANCEL_TIMEOUT_MS,
+                ),
+              ),
+            ]);
+            return;
+          } catch (error) {
+            console.error('[sandbox] cancelTask error:', error);
+          }
+        }
+
+        if (!taskId) {
+          return;
+        }
+
+        const result = await trpcClient.taskRuns.cancel.mutate({
+          taskId,
+          runId,
         });
+
+        if (!result.success) {
+          throw new Error(result.error);
+        }
       } catch (err) {
-        console.error('[sandbox] cancelTask error:', err);
+        console.error('[sandbox] cancelTask fallback error:', err);
       } finally {
         cancellingRef.current = false;
       }
-    }, [client, cancelledByName]);
+    }, [client, cancelledByName, runId, taskId, trpcClient]);
 
     const handleSubmit = useCallback(
       async (message: PromptInputMessage) => {

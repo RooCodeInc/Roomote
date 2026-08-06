@@ -25,6 +25,7 @@ const {
   removeOptimisticMessageMock,
   removeOptimisticQueuedMessageMock,
   sandboxSendPromptMutateMock,
+  taskRunCancelMutateMock,
   toastErrorMock,
   toggleVoiceDictationMock,
   useMutationMock,
@@ -59,6 +60,7 @@ const {
   removeOptimisticMessageMock: vi.fn(),
   removeOptimisticQueuedMessageMock: vi.fn(),
   sandboxSendPromptMutateMock: vi.fn(),
+  taskRunCancelMutateMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toggleVoiceDictationMock: vi.fn(),
   useMutationMock: vi.fn(),
@@ -248,15 +250,24 @@ vi.mock('./ContextUsage', () => ({
 vi.mock('./SubmitWithAttachments', () => ({
   SubmitWithAttachments: ({
     connected,
+    handleCancel,
+    isTaskRunning,
     prompt,
   }: {
     connected: boolean;
+    handleCancel: () => void;
+    isTaskRunning: boolean;
     prompt: string;
-  }) => (
-    <button type="submit" disabled={!connected || prompt.trim().length === 0}>
-      Send
-    </button>
-  ),
+  }) =>
+    isTaskRunning && !prompt.trim() ? (
+      <button type="button" onClick={handleCancel}>
+        Stop
+      </button>
+    ) : (
+      <button type="submit" disabled={!connected || prompt.trim().length === 0}>
+        Send
+      </button>
+    ),
 }));
 
 vi.mock('./TaskStatus', () => ({
@@ -320,6 +331,7 @@ describe('PromptInput', () => {
       },
     });
     sandboxSendPromptMutateMock.mockResolvedValue({ success: true });
+    taskRunCancelMutateMock.mockResolvedValue({ success: true });
     preparePromptAttachmentsMock.mockImplementation(async (input) => ({
       text: input.text,
     }));
@@ -327,6 +339,11 @@ describe('PromptInput', () => {
       sandboxSession: {
         sendPrompt: {
           mutate: sandboxSendPromptMutateMock,
+        },
+      },
+      taskRuns: {
+        cancel: {
+          mutate: taskRunCancelMutateMock,
         },
       },
     });
@@ -366,6 +383,144 @@ describe('PromptInput', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Connecting...');
     expect(screen.getByPlaceholderText(/Message agent/i)).toBeDisabled();
     expect(screen.queryByText('Task status')).not.toBeInTheDocument();
+  });
+
+  it('cancels through the web API when the sandbox client is disconnected', async () => {
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(42, { taskId: 'task-disconnected' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    await waitFor(() => {
+      expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
+        taskId: 'task-disconnected',
+        runId: 42,
+      });
+    });
+  });
+
+  it('falls back to the web API when sandbox cancellation fails', async () => {
+    const sandboxCancelMutateMock = vi
+      .fn()
+      .mockRejectedValue(new Error('WebSocket disconnected'));
+
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        cancelTask: { mutate: sandboxCancelMutateMock },
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(43, { taskId: 'task-fallback' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    await waitFor(() => {
+      expect(sandboxCancelMutateMock).toHaveBeenCalledTimes(1);
+      expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
+        taskId: 'task-fallback',
+        runId: 43,
+      });
+    });
+  });
+
+  it('falls back to the web API when sandbox cancellation hangs', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const sandboxCancelMutateMock = vi
+        .fn()
+        .mockImplementation(() => new Promise(() => {}));
+
+      useSandboxConnectedMock.mockReturnValue(true);
+      useSandboxConnectionStatusMock.mockReturnValue({
+        connected: true,
+        connectionError: false,
+        reconnect: vi.fn(),
+      });
+      useSandboxTaskPhaseMock.mockReturnValue('running');
+      useSandboxClientMock.mockReturnValue({
+        commands: {
+          cancelTask: { mutate: sandboxCancelMutateMock },
+          touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+        },
+      });
+
+      render(
+        <PromptInput
+          taskRun={createTaskRun(45, { taskId: 'task-hung' })}
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect(sandboxCancelMutateMock).toHaveBeenCalledTimes(1);
+      expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
+        taskId: 'task-hung',
+        runId: 45,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not call the web API when sandbox cancellation succeeds', async () => {
+    const sandboxCancelMutateMock = vi.fn().mockResolvedValue(undefined);
+
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        cancelTask: { mutate: sandboxCancelMutateMock },
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(44, { taskId: 'task-connected' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    await waitFor(() => {
+      expect(sandboxCancelMutateMock).toHaveBeenCalledTimes(1);
+    });
+    expect(taskRunCancelMutateMock).not.toHaveBeenCalled();
   });
 
   it('hides the connecting status when the transport already failed', () => {
