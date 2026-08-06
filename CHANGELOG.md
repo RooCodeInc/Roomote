@@ -26,6 +26,9 @@ This release expands source-control setup and review workflows, adds a direct ho
 - Keep OpenCode task sessions consistently identified as Roomote while preserving the current workflow and implementation guidance.
 - Explain when automatic Slack routing is temporarily unavailable instead of silently showing the workspace picker, while keeping sensitive provider errors out of user-facing messages.
 - Stop task closeouts from promising a follow-up self-review when every selected GitHub repository is excluded from automated processing.
+- Let administrators disconnect GitLab, Gitea, and Bitbucket OAuth connections when provider client credentials come from runtime configuration.
+- Preserve deleted-line review thread anchors on Bitbucket and Azure DevOps so later reviews can match and reply to existing inline comments.
+- Let sync reviews resolve Roomote-authored inline threads after verifying the flagged code was fixed, including when GitHub marks the original anchor outdated.
 
 ## 0.34.0 (2026-08-04)
 
