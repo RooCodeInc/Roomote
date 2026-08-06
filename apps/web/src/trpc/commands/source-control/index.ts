@@ -1167,7 +1167,19 @@ export async function clearSourceControlConfigCommand(
   const persistedEnvVarNames = new Set(
     await getPersistedEnvironmentVariableNames(),
   );
-  if (!envVarNames.some((name) => persistedEnvVarNames.has(name))) {
+  const hasPersistedEnvironmentVariables = envVarNames.some((name) =>
+    persistedEnvVarNames.has(name),
+  );
+  const hasPersistedOAuthConnection = hasPersistedEnvironmentVariables
+    ? false
+    : input.provider === 'gitlab'
+      ? Boolean(await GitLab.getGitLabOAuthConnection())
+      : input.provider === 'gitea'
+        ? Boolean(await Gitea.getGiteaOAuthConnection())
+        : input.provider === 'bitbucket'
+          ? Boolean(await Bitbucket.getBitbucketOAuthConnection())
+          : false;
+  if (!hasPersistedOAuthConnection && !hasPersistedEnvironmentVariables) {
     return {
       success: true as const,
       provider: input.provider,

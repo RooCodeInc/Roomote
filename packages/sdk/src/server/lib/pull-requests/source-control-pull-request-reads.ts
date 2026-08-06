@@ -396,6 +396,7 @@ const bitbucketCommentSchema = z
       .object({
         path: z.string().optional(),
         to: z.number().nullable().optional(),
+        from: z.number().nullable().optional(),
       })
       .nullable()
       .optional(),
@@ -475,6 +476,10 @@ const adoThreadListSchema = z.object({
           .object({
             filePath: z.string().nullable().optional(),
             rightFileStart: z
+              .object({ line: z.number().optional() })
+              .nullable()
+              .optional(),
+            leftFileStart: z
               .object({ line: z.number().optional() })
               .nullable()
               .optional(),
@@ -1618,7 +1623,7 @@ async function listBitbucketPullRequestComments({
       id: threadId,
       resolved: null,
       path: comment.inline?.path ?? null,
-      line: comment.inline?.to ?? null,
+      line: comment.inline?.to ?? comment.inline?.from ?? null,
       outdated: null,
       comments: [mapped],
     });
@@ -1788,7 +1793,10 @@ async function listAdoPullRequestComments({
       id: String(thread.id),
       resolved: mapAdoThreadResolution(thread.status ?? null),
       path: thread.threadContext?.filePath ?? null,
-      line: thread.threadContext?.rightFileStart?.line ?? null,
+      line:
+        thread.threadContext?.rightFileStart?.line ??
+        thread.threadContext?.leftFileStart?.line ??
+        null,
       outdated: null,
       comments,
     });
