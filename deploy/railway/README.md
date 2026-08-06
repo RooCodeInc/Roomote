@@ -416,6 +416,15 @@ domain, which requires a domain you control:
   controller, bullmq, Postgres, Redis, MinIO), while task execution bills
   through your sandbox provider (Modal/E2B/Daytona) and model usage bills
   through your model provider.
+- **Node memory is capped by default.** Railway bills memory on usage, and
+  an uncapped Node process lets collectable garbage accumulate for hours
+  before a full GC, inflating that usage several times over. The app image
+  therefore caps each Node service's V8 heap (`--max-old-space-size`):
+  768 MB for web and api, 512 MB for controller and bullmq, lowered to ~75%
+  of the container's memory when a cgroup limit is set. To override, set
+  `NODE_OPTIONS=--max-old-space-size=<MB>` on the service — an explicit
+  value always wins. Images published before this change need that variable
+  set manually to get the same effect.
 
 ## Auto-deploying every develop build (optional)
 
