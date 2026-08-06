@@ -72,13 +72,18 @@ export async function maybeCallRoomoteViaEmoji(params: {
     return true;
   }
 
+  const targetMessageText = targetMessage.text.trim();
+  const prompt = targetMessageText
+    ? `${configuration.prompt}\n\nSource message:\n${targetMessageText}`
+    : configuration.prompt;
+
   await handleMessageOrAppMentionEvent({
     context: params.context,
     event: {
       type: 'app_mention',
       channel: params.event.item.channel,
       user: params.event.user,
-      text: `<@${params.context.slackInstallation.botUserId}> ${configuration.prompt}`,
+      text: `<@${params.context.slackInstallation.botUserId}> ${prompt}`,
       ts: params.event.item.ts,
       thread_ts: targetMessage.thread_ts ?? targetMessage.ts,
     },

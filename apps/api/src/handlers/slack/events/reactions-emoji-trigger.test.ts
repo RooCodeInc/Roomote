@@ -63,7 +63,7 @@ describe('Slack emoji trigger', () => {
         type: 'app_mention',
         channel: 'C1',
         user: 'U1',
-        text: '<@UROOMOTE> Act on this\n\nAdditional instructions:\nPrioritize safety.',
+        text: '<@UROOMOTE> Act on this\n\nAdditional instructions:\nPrioritize safety.\n\nSource message:\nPlease investigate this.',
         ts: '1710000000.000100',
         thread_ts: '1710000000.000000',
       },
@@ -117,7 +117,9 @@ describe('Slack emoji trigger', () => {
     expect(mocks.handleMessage).toHaveBeenCalledTimes(1);
     expect(mocks.handleMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: expect.objectContaining({ text: '<@UROOMOTE> Act on this' }),
+        event: expect.objectContaining({
+          text: '<@UROOMOTE> Act on this\n\nSource message:\nA suggested task.',
+        }),
       }),
     );
   });
