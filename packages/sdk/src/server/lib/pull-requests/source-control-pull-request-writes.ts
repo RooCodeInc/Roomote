@@ -879,7 +879,11 @@ async function writeGitLabMergeRequest({
         throw anchorRejectionError(
           provider,
           input,
-          `GitLab could not map the position onto the merge request diff${await formatResponseBody(response)}; target a line changed in this merge request`,
+          `GitLab could not map the position onto the merge request diff${await formatResponseBody(response)}; target a line changed in this merge request${
+            positionPaths.warnings.length
+              ? `. ${positionPaths.warnings.join(' ')}`
+              : ''
+          }`,
         );
       }
 
@@ -898,7 +902,10 @@ async function writeGitLabMergeRequest({
         repository,
         threadId: String(discussion.id),
         commentId: firstNote ? String(firstNote.id) : null,
-        warnings: multiLineRangeWarnings(provider, input),
+        warnings: [
+          ...positionPaths.warnings,
+          ...multiLineRangeWarnings(provider, input),
+        ],
       });
     }
     case 'update_pull_request_comment': {
@@ -1101,6 +1108,8 @@ async function submitGitLabReview({
  * renamed files they differ and a same-path position is rejected. Scan the
  * merge request diff list for the entry matching the requested path by either
  * name, falling back to the same-path pair when the file cannot be found.
+ * When the runaway backstop ends the scan before the listing does, the
+ * fallback is surfaced explicitly through `warnings`.
  */
 async function resolveGitLabPositionPaths({
   fetchImpl,
@@ -1114,19 +1123,20 @@ async function resolveGitLabPositionPaths({
   tokenHeader: { name: string; value: string };
   mergeRequestPath: string;
   path: string;
-}): Promise<{ oldPath: string; newPath: string }> {
+}): Promise<{ oldPath: string; newPath: string; warnings: string[] }> {
   // Scan the complete diff listing (a page shorter than per_page ends it).
   // GitLab's own diff rendering hard-caps merge requests around 3,000
   // changed files, so this backstop is unreachable in practice and exists
-  // only as a runaway guard.
+  // only as a runaway guard against a misbehaving server.
   const maxPages = 50;
+  const perPage = 100;
 
   for (let page = 1; page <= maxPages; page++) {
     const response = await performRequest({
       fetchImpl,
       url: buildApiUrl(apiBaseUrl, `${mergeRequestPath}/diffs`, {
         page,
-        per_page: 100,
+        per_page: perPage,
       }),
       tokenHeader,
     });
@@ -1146,15 +1156,26 @@ async function resolveGitLabPositionPaths({
       return {
         oldPath: entry.old_path ?? path,
         newPath: entry.new_path ?? path,
+        warnings: [],
       };
     }
 
-    if (entries.length < 100) {
+    if (page === maxPages && entries.length === perPage) {
+      return {
+        oldPath: path,
+        newPath: path,
+        warnings: [
+          `The merge request diff listing exceeded ${maxPages * perPage} files before ${path} was found; rename resolution fell back to the request path, so an anchor on a renamed file may be rejected.`,
+        ],
+      };
+    }
+
+    if (entries.length < perPage) {
       break;
     }
   }
 
-  return { oldPath: path, newPath: path };
+  return { oldPath: path, newPath: path, warnings: [] };
 }
 
 async function createGitLabNote({

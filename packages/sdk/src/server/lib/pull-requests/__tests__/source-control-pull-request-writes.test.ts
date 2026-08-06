@@ -1101,6 +1101,61 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       expect(discussionBody.position.old_path).toBe('src/legacy/index.ts');
     });
 
+    it('surfaces an explicit warning when the diff scan backstop ends before the listing', async () => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://gitlab.com/acme/backend',
+      });
+      const fillerPage = Array.from({ length: 100 }, (_, i) => ({
+        old_path: `src/other-${i}.ts`,
+        new_path: `src/other-${i}.ts`,
+      }));
+      const fetchImpl = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/diffs')) {
+          return jsonResponse(fillerPage);
+        }
+        if (url.endsWith('/discussions')) {
+          return jsonResponse({ id: 'disc-9' }, 201);
+        }
+        return jsonResponse({
+          diff_refs: {
+            base_sha: 'base1',
+            start_sha: 'start1',
+            head_sha: 'head1',
+          },
+        });
+      });
+
+      const result = await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+        }),
+        input: {
+          action: 'create_pull_request_review_comment',
+          repositoryFullName: 'acme/backend',
+          prNumber: 42,
+          path: 'src/index.ts',
+          line: 42,
+          body: 'Missing error handling here.',
+          sourceControlProvider: 'gitlab',
+        },
+        fetchImpl,
+      });
+
+      const diffCalls = fetchImpl.mock.calls.filter(([url]) =>
+        String(url).includes('/diffs'),
+      );
+      expect(diffCalls).toHaveLength(50);
+      expect(result.warnings).toEqual([
+        expect.stringContaining(
+          'rename resolution fell back to the request path',
+        ),
+      ]);
+    });
+
     it('falls back to the same-path pair when the diff listing is unavailable', async () => {
       mockRepositoriesFindFirst.mockResolvedValue({
         installationId: null,
