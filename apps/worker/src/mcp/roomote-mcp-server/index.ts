@@ -1332,6 +1332,9 @@ if (shouldRegisterSlackThreadReplyTool()) {
         "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. " +
         chatReplyMarkdownGuidance +
         chatReplySourceLinkingGuidance +
+        (chatReplySurfaceLabel === 'Slack'
+          ? 'For custom automation reports, use the optional suggestions parameter only when the reply identifies a small set of independent, high-confidence actions that users may want Roomote to start as separate tasks. Suggestions are posted inside the originating thread. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work already being executed. '
+          : '') +
         'Write the message so its content clearly matches the selected purpose.',
       inputSchema: {
         purpose: z
@@ -1359,6 +1362,42 @@ if (shouldRegisterSlackThreadReplyTool()) {
           .describe(
             'Optional already-uploaded artifact IDs for images to attach.',
           ),
+        ...(chatReplySurfaceLabel === 'Slack'
+          ? {
+              suggestions: z
+                .array(
+                  z.object({
+                    title: z.string().min(1).max(140),
+                    brief: z.string().min(1).max(2000),
+                    category: z
+                      .enum([
+                        'bug',
+                        'security',
+                        'chore',
+                        'feature',
+                        'improvement',
+                      ])
+                      .optional(),
+                    priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+                    investigationContext: z
+                      .string()
+                      .min(1)
+                      .max(4000)
+                      .optional(),
+                    targetRepositoryFullName: z.string().min(1),
+                    targetEnvironmentId: z.string().uuid().optional(),
+                    workspaceReadiness: workspaceReadinessSchema.optional(),
+                    readinessMessage: z.string().min(1).max(500).optional(),
+                  }),
+                )
+                .min(1)
+                .max(5)
+                .optional()
+                .describe(
+                  'Optional independent actions to post as launchable cards inside this Slack thread. Use only for 1-5 high-confidence tasks that are not already being executed. Every suggestion must identify its target repository; include hidden investigation context when it will help the implementing agent.',
+                ),
+            }
+          : {}),
       },
       annotations: {
         readOnlyHint: false,
@@ -1389,6 +1428,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
           summary: params.message,
           imagePaths: params.imagePaths,
           imageArtifactIds: params.imageArtifactIds,
+          suggestions: 'suggestions' in params ? params.suggestions : undefined,
         },
         artifactConfig,
         roomoteConfig,

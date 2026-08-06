@@ -86,6 +86,7 @@ const taskSuggestionSchema = z.object({
 
 const submitTaskSuggestionsBodySchema = z.object({
   suggestions: z.array(taskSuggestionSchema).max(5),
+  delivery: z.literal('current_thread').optional(),
 });
 
 const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
@@ -145,6 +146,7 @@ type PreparedTaskSuggestion = {
 
 type TaskSuggestionType =
   | typeof SETUP_ONBOARDING_SUGGESTION_TYPE
+  | 'custom_automation'
   | 'suggested_tasks'
   | 'sentry_triage'
   | 'dependabot_triage'
@@ -571,6 +573,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
   createdByUserId: string | null;
   suggestionType: TaskSuggestionType;
   rootText: string;
+  existingRootMessageTs?: string;
   automationLabel?: string | null;
   automationSettingsHash?: string;
   historicalThreadFeedbackDebugSnippet?: string | null;
@@ -603,16 +606,21 @@ async function postTaskSuggestionsThreadToSlack(params: {
               .where(inArray(environments.id, targetEnvironmentIds))
           ).map((environment) => [environment.id, environment.name]),
         );
-  const rootMessage = params.automationSettingsHash
-    ? buildAutomationRootSummaryMessage({
-        summaryText: params.rootText,
-        automationSettingsHash: params.automationSettingsHash,
-      })
-    : { text: params.rootText };
-  const rootMessageTs = await slack.postMessage({
-    channel: params.slackChannelId,
-    ...rootMessage,
-  });
+  let rootMessageTs = params.existingRootMessageTs?.trim() || null;
+
+  if (!rootMessageTs) {
+    const rootMessage = params.automationSettingsHash
+      ? buildAutomationRootSummaryMessage({
+          summaryText: params.rootText,
+          automationSettingsHash: params.automationSettingsHash,
+        })
+      : { text: params.rootText };
+    rootMessageTs =
+      (await slack.postMessage({
+        channel: params.slackChannelId,
+        ...rootMessage,
+      })) ?? null;
+  }
 
   if (!rootMessageTs) {
     return null;
@@ -758,6 +766,60 @@ async function postTaskSuggestionsThreadToSlack(params: {
     rootMessageTs,
     trackedMessages: suggestionMessageRows.length,
   };
+}
+
+async function postCustomAutomationSuggestionsToSlack(params: {
+  sourceTaskId: string;
+  slackChannelId: string;
+  slackThreadTs: string;
+  createdByUserId: string | null;
+  suggestions: PersistedTaskSuggestion[];
+}): Promise<boolean> {
+  const [existingSuggestionCard] = await db
+    .select({ id: trackedMessages.id })
+    .from(trackedMessages)
+    .where(
+      and(
+        eq(trackedMessages.kind, 'suggestion_card'),
+        sql`${trackedMessages.metadata} ->> 'suggestionType' = 'custom_automation'`,
+        sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${params.sourceTaskId}:%`}`,
+      ),
+    )
+    .limit(1);
+
+  if (existingSuggestionCard) {
+    return true;
+  }
+
+  const slackInstallation = await db.query.slackInstallations.findFirst({
+    where: eq(slackInstallations.isActive, true),
+    columns: { botAccessToken: true },
+  });
+
+  if (!slackInstallation?.botAccessToken) {
+    return false;
+  }
+
+  const postResult = await postTaskSuggestionsThreadToSlack({
+    sourceTaskId: params.sourceTaskId,
+    slackBotAccessToken: slackInstallation.botAccessToken,
+    slackChannelId: params.slackChannelId,
+    createdByUserId: params.createdByUserId,
+    suggestionType: 'custom_automation',
+    rootText: '',
+    existingRootMessageTs: params.slackThreadTs,
+    suggestions: params.suggestions,
+    insertSuggestionMessages: async (suggestionMessageRows) => {
+      await db
+        .insert(trackedMessages)
+        .values(buildSlackSuggestionCardValues(suggestionMessageRows))
+        .onConflictDoNothing({
+          target: [trackedMessages.kind, trackedMessages.dedupeKey],
+        });
+    },
+  });
+
+  return Boolean(postResult && postResult.trackedMessages > 0);
 }
 
 async function postSetupTaskSuggestionsToSlack(params: {
@@ -1082,6 +1144,8 @@ export async function submitTaskSuggestions(
         columns: {
           initiatorUserId: true,
           initiatorAutomation: true,
+          slackChannelId: true,
+          slackThreadTs: true,
         },
       }),
       db.query.deploymentSettings.findFirst({
@@ -1095,7 +1159,17 @@ export async function submitTaskSuggestions(
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    if (run.payloadKind !== TaskPayloadKind.Scan) {
+    const isCurrentThreadDelivery =
+      parsedBody.data.delivery === 'current_thread';
+    const customAutomationId = (run.payload as { customAutomationId?: unknown })
+      .customAutomationId;
+    const isCustomAutomationThread =
+      run.payloadKind === TaskPayloadKind.StandardTask &&
+      isCurrentThreadDelivery &&
+      typeof customAutomationId === 'string' &&
+      customAutomationId.trim().length > 0;
+
+    if (run.payloadKind !== TaskPayloadKind.Scan && !isCustomAutomationThread) {
       return c.json({ error: 'Task is not a Suggested Tasks task' }, 400);
     }
 
@@ -1105,7 +1179,8 @@ export async function submitTaskSuggestions(
     );
     const createdByUserId =
       auth.userId ?? run.actingUserId ?? task?.initiatorUserId ?? null;
-    const isOnboardingTrigger = payload.trigger === 'onboarding';
+    const isOnboardingTrigger =
+      !isCustomAutomationThread && payload.trigger === 'onboarding';
 
     let candidateRepositories: ResolvedRepository[] = [];
 
@@ -1171,6 +1246,21 @@ export async function submitTaskSuggestions(
     const suggestions = isOnboardingTrigger
       ? preparedSuggestions
       : prioritizeScheduledSuggestions(preparedSuggestions);
+    const customSuggestionsMissingLaunchMetadata = isCustomAutomationThread
+      ? suggestions.filter(
+          (suggestion) => suggestion.targetRepositoryFullName === null,
+        )
+      : [];
+
+    if (customSuggestionsMissingLaunchMetadata.length > 0) {
+      return c.json(
+        {
+          error:
+            'Current-thread suggestions must include targetRepositoryFullName.',
+        },
+        400,
+      );
+    }
     const suggestionsMissingLaunchMetadata = isOnboardingTrigger
       ? []
       : suggestions.filter(
@@ -1260,6 +1350,35 @@ export async function submitTaskSuggestions(
 
       return insertedSuggestions.map(toPersistedTaskSuggestion);
     });
+
+    if (isCustomAutomationThread) {
+      if (!task?.slackChannelId || !task.slackThreadTs) {
+        return c.json(
+          { error: 'Task is not bound to an originating Slack thread.' },
+          400,
+        );
+      }
+
+      const delivered = await postCustomAutomationSuggestionsToSlack({
+        sourceTaskId: taskId,
+        slackChannelId: task.slackChannelId,
+        slackThreadTs: task.slackThreadTs,
+        createdByUserId,
+        suggestions: persistedSuggestions,
+      });
+
+      if (!delivered) {
+        return c.json(
+          { success: false, error: 'Failed to post task suggestions.' },
+          500,
+        );
+      }
+
+      return c.json({
+        success: true,
+        suggestionCount: persistedSuggestions.length,
+      });
+    }
 
     if (isOnboardingTrigger) {
       const slackDelivered = await postSetupTaskSuggestionsToSlack({

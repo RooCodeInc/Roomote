@@ -372,21 +372,24 @@ export async function manageSourceControlIssue(
 /**
  * Submit task suggestions for the current task via the platform API.
  */
+export type TaskSuggestionInput = {
+  title: string;
+  brief: string;
+  category?: SuggestionCategory;
+  priority?: SuggestionPriority;
+  investigationContext?: string;
+  targetRepositoryFullName?: string;
+  targetEnvironmentId?: string;
+  workspaceReadiness?: WorkspaceReadiness;
+  readinessMessage?: string;
+};
+
 export async function submitTaskSuggestions(
   config: RoomoteConfig,
   taskId: string,
   params: {
-    suggestions: Array<{
-      title: string;
-      brief: string;
-      category?: SuggestionCategory;
-      priority?: SuggestionPriority;
-      investigationContext?: string;
-      targetRepositoryFullName?: string;
-      targetEnvironmentId?: string;
-      workspaceReadiness?: WorkspaceReadiness;
-      readinessMessage?: string;
-    }>;
+    suggestions: TaskSuggestionInput[];
+    delivery?: 'current_thread';
   },
 ): Promise<SubmitTaskSuggestionsResponse> {
   return apiFetch(

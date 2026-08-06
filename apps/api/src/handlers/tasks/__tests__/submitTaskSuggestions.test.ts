@@ -14,6 +14,7 @@ const {
   mockTaskRunFindFirst,
   mockTaskFindFirst,
   mockDeploymentSettingsFindFirst,
+  mockSlackInstallationFindFirst,
   mockPostMessage,
   insertedWorkItemValues,
   insertedTrackedMessageValues,
@@ -21,6 +22,7 @@ const {
   mockTaskRunFindFirst: vi.fn(),
   mockTaskFindFirst: vi.fn(),
   mockDeploymentSettingsFindFirst: vi.fn(),
+  mockSlackInstallationFindFirst: vi.fn(),
   mockPostMessage: vi.fn(),
   insertedWorkItemValues: [] as Record<string, unknown>[],
   insertedTrackedMessageValues: [] as Record<string, unknown>[],
@@ -209,8 +211,13 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) =>
           mockDeploymentSettingsFindFirst(...args),
       },
+      slackInstallations: {
+        findFirst: (...args: unknown[]) =>
+          mockSlackInstallationFindFirst(...args),
+      },
     },
     select: () => createSelectBuilder(),
+    insert: (table: { _name?: string }) => createInsertBuilder(table),
     transaction: async (cb: (executor: typeof tx) => unknown) => cb(tx),
   },
 }));
@@ -246,11 +253,31 @@ function requestSuggestions(app: Hono<{ Variables: Variables }>) {
   );
 }
 
+function requestCurrentThreadSuggestions(app: Hono<{ Variables: Variables }>) {
+  return app.request(
+    new Request('http://localhost/tasks/task-1/task_suggestions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        delivery: 'current_thread',
+        suggestions: [
+          {
+            title: 'Fix the parser',
+            brief: 'Nil access is crashing the parser.',
+            targetRepositoryFullName: 'acme/app',
+          },
+        ],
+      }),
+    }),
+  );
+}
+
 describe('submitTaskSuggestions', () => {
   beforeEach(() => {
     mockTaskRunFindFirst.mockReset();
     mockTaskFindFirst.mockReset();
     mockDeploymentSettingsFindFirst.mockReset();
+    mockSlackInstallationFindFirst.mockReset();
     mockPostMessage.mockReset();
     insertedWorkItemValues.length = 0;
     insertedTrackedMessageValues.length = 0;
@@ -266,6 +293,9 @@ describe('submitTaskSuggestions', () => {
     let ts = 0;
     mockPostMessage.mockImplementation(async () => `ts-${++ts}`);
     mockDeploymentSettingsFindFirst.mockResolvedValue({ setupNewState: {} });
+    mockSlackInstallationFindFirst.mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+    });
     mockTaskRunFindFirst.mockResolvedValue({
       id: 1,
       payloadKind: TaskPayloadKind.Scan,
@@ -276,6 +306,87 @@ describe('submitTaskSuggestions', () => {
         notifySlack: true,
       },
     });
+  });
+
+  it('posts custom automation suggestions inside the task thread without a second root message', async () => {
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: 'user-1',
+      payload: {
+        repo: 'acme/app',
+        selectedRepositories: ['acme/app'],
+        customAutomationId: 'automation-1',
+      },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await requestCurrentThreadSuggestions(app);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      suggestionCount: 1,
+    });
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '111.222',
+      }),
+    );
+    expect(insertedTrackedMessageValues).toHaveLength(1);
+    expect(insertedTrackedMessageValues[0]).toMatchObject({
+      channelId: 'C123',
+      metadata: {
+        suggestionType: 'custom_automation',
+      },
+    });
+  });
+
+  it('rejects current-thread suggestions from non-automation standard tasks', async () => {
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: 'user-1',
+      payload: {
+        repo: 'acme/app',
+        selectedRepositories: ['acme/app'],
+      },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await requestCurrentThreadSuggestions(app);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Task is not a Suggested Tasks task',
+    });
+    expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
   it('posts to Slack and stamps automationKey for an automation-initiated scan with no user', async () => {

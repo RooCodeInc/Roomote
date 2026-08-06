@@ -8,6 +8,10 @@ import {
   validateSlackPostContent,
 } from './slack-post-helpers.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
+import {
+  submitTaskSuggestions,
+  type TaskSuggestionInput,
+} from './tasks-api-client.js';
 import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
 
 export async function handleSendChatReply(
@@ -16,6 +20,7 @@ export async function handleSendChatReply(
     summary?: string;
     imagePaths?: string[];
     imageArtifactIds?: string[];
+    suggestions?: TaskSuggestionInput[];
   },
   artifactConfig: ArtifactConfig,
   roomoteConfig: RoomoteConfig,
@@ -60,11 +65,39 @@ export async function handleSendChatReply(
       }),
     });
 
+    let suggestionCount: number | undefined;
+    let suggestionError: string | undefined;
+
+    if (input.suggestions && input.suggestions.length > 0) {
+      try {
+        const suggestionResult = await submitTaskSuggestions(
+          roomoteConfig,
+          input.taskId,
+          {
+            suggestions: input.suggestions,
+            delivery: 'current_thread',
+          },
+        );
+
+        if (suggestionResult.success) {
+          suggestionCount = suggestionResult.suggestionCount;
+        } else {
+          suggestionError =
+            suggestionResult.error ?? 'Failed to post task suggestions.';
+        }
+      } catch (error) {
+        suggestionError =
+          error instanceof Error ? error.message : String(error);
+      }
+    }
+
     return successResult({
       messageTs: reply.messageTs,
       ...(summary && { summary }),
       ...(uploadedArtifactIds.length > 0 && { uploadedArtifactIds }),
       ...(imageArtifactIds.length > 0 && { imageArtifactIds }),
+      ...(suggestionCount !== undefined && { suggestionCount }),
+      ...(suggestionError && { suggestionError }),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
