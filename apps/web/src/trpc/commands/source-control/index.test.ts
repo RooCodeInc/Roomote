@@ -23,6 +23,7 @@ const {
   mockDescribeAdoApiError,
   mockValidateGiteaToken,
   mockDeleteDeploymentEnvironmentVariables,
+  mockGetPersistedEnvironmentVariableNames,
   mockGetPersistedEnvironmentVariableValues,
   mockDeleteGitLabOAuthConnection,
   mockDeleteGiteaOAuthConnection,
@@ -62,6 +63,7 @@ const {
   mockDescribeAdoApiError: vi.fn(),
   mockValidateGiteaToken: vi.fn(),
   mockDeleteDeploymentEnvironmentVariables: vi.fn(),
+  mockGetPersistedEnvironmentVariableNames: vi.fn(),
   mockGetPersistedEnvironmentVariableValues: vi.fn(),
   mockDeleteGitLabOAuthConnection: vi.fn(),
   mockDeleteGiteaOAuthConnection: vi.fn(),
@@ -186,6 +188,8 @@ vi.mock('../environment-variables', () => ({
     mockUpsertDeploymentEnvironmentVariables,
   deleteDeploymentEnvironmentVariables:
     mockDeleteDeploymentEnvironmentVariables,
+  getPersistedEnvironmentVariableNames:
+    mockGetPersistedEnvironmentVariableNames,
   getPersistedEnvironmentVariableValues:
     mockGetPersistedEnvironmentVariableValues,
 }));
@@ -253,6 +257,9 @@ describe('source-control commands', () => {
     mockEnv.R_PUBLIC_URL = undefined;
     mockEnv.TRPC_URL = 'http://localhost:3000/trpc';
     mockResolveDeploymentEnvVar.mockResolvedValue(null);
+    mockGetPersistedEnvironmentVariableNames.mockImplementation(
+      async () => mockPersistedEnvVarNames.names,
+    );
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
     mockRepositoryRows.rows = [];
     mockPersistedEnvVarNames.names = [
@@ -478,6 +485,20 @@ describe('source-control commands', () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
+  it('recognizes persisted credentials stored under a provider alias', async () => {
+    mockPersistedEnvVarNames.names = ['GITLAB_TOKEN'];
+
+    await expect(
+      clearSourceControlConfigCommand(buildMockAuth(), { provider: 'gitlab' }),
+    ).resolves.toMatchObject({ success: true, provider: 'gitlab' });
+
+    expect(mockDeleteDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining(['GITLAB_TOKEN']),
+    );
+    expect(mockTransaction).toHaveBeenCalledOnce();
+  });
+
   it('returns OAuth cleanup failures as warnings while removing local configuration', async () => {
     mockDeleteGitLabOAuthConnection.mockRejectedValueOnce(
       new Error('OAuth secret deletion failed.'),
@@ -489,6 +510,47 @@ describe('source-control commands', () => {
       success: true,
       provider: 'gitlab',
       warnings: [
+        {
+          kind: 'oauth_cleanup',
+          message: 'OAuth secret deletion failed.',
+        },
+      ],
+    });
+    expect(mockTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('aggregates hook and OAuth cleanup warnings before removing local configuration', async () => {
+    mockRepositoryRows.rows = [
+      {
+        id: 'gitlab-repository-id',
+        externalRepoId: '42',
+        fullName: 'acme/project',
+        permissions: {},
+      },
+    ];
+    mockRemoveGitLabWebhooksForProjects.mockResolvedValue([
+      {
+        repositoryFullName: 'acme/project',
+        status: 'failed',
+        error: 'Webhook deletion failed.',
+      },
+    ]);
+    mockDeleteGitLabOAuthConnection.mockRejectedValueOnce(
+      new Error('OAuth secret deletion failed.'),
+    );
+
+    await expect(
+      clearSourceControlConfigCommand(buildMockAuth(), { provider: 'gitlab' }),
+    ).resolves.toEqual({
+      success: true,
+      provider: 'gitlab',
+      warnings: [
+        {
+          kind: 'webhook_cleanup',
+          repositoryId: 'gitlab-repository-id',
+          repositoryFullName: 'acme/project',
+          message: 'Webhook deletion failed.',
+        },
         {
           kind: 'oauth_cleanup',
           message: 'OAuth secret deletion failed.',
