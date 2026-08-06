@@ -84,7 +84,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Manage Custom Automations',
     description:
-      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
+      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
     inputSchema: {
       action: z.enum([
         'list',
@@ -99,7 +99,12 @@ roomoteMcpServer.registerTool(
         .optional()
         .describe('Required for update, delete, and run_now.'),
       name: z.string().optional(),
-      prompt: z.string().optional(),
+      prompt: z
+        .string()
+        .optional()
+        .describe(
+          'Automation instructions written in product language. When the user intends actionable or launchable follow-up tasks and the automation has both a chat report destination and an executable workspace, instruct it to post qualifying actions as launchable suggested tasks alongside the report; otherwise keep actions as report text. Do not mention internal tool names or parameters.',
+        ),
       enabled: z.boolean().optional(),
       schedule: z
         .string()

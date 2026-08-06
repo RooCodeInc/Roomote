@@ -150,6 +150,30 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('maps conversational automation intent to launchable suggested tasks', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      'manage_custom_automations',
+    );
+
+    expect(automationsTool.config.description).toContain(
+      'offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks',
+    );
+    expect(automationsTool.config.description).toContain(
+      'Do not expose runtime tool names or parameter syntax in the stored prompt.',
+    );
+    expect(automationsTool.config.description).toContain(
+      'A request only to summarize or list action items is not suggested-task intent.',
+    );
+    expect(automationsTool.config.description).toContain(
+      'Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work',
+    );
+    expect(
+      getInputSchemaField(automationsTool, 'prompt').description,
+    ).toContain('both a chat report destination and an executable workspace');
+  });
+
   it('guides existing product task URLs toward task inspection actions', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
