@@ -285,6 +285,9 @@ async function handleSuggestionCallback(input: {
       ...(suggestion.targetRepositoryFullName
         ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
         : []),
+      ...(suggestion.targetEnvironmentId
+        ? ['', `Target environment: ${suggestion.targetEnvironmentId}`]
+        : []),
       ...(suggestion.investigationContext
         ? ['', `Context: ${suggestion.investigationContext}`]
         : []),

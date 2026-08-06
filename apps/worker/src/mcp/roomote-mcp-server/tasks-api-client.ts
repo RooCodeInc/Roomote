@@ -390,6 +390,7 @@ export async function submitTaskSuggestions(
   params: {
     suggestions: TaskSuggestionInput[];
     delivery?: 'current_thread';
+    submissionKey?: string;
   },
 ): Promise<SubmitTaskSuggestionsResponse> {
   return apiFetch(

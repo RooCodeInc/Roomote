@@ -108,7 +108,11 @@ describe('handleReplyToSlackThread', () => {
     expect(submitTaskSuggestions).toHaveBeenCalledWith(
       roomoteConfig,
       'task-1',
-      { suggestions, delivery: 'current_thread' },
+      {
+        suggestions,
+        delivery: 'current_thread',
+        submissionKey: '111.222',
+      },
     );
     expect(JSON.parse(result.content[0]!.text)).toEqual({
       success: true,

@@ -158,11 +158,11 @@ Rules:
 - Do not treat a missing environment as a reason to avoid an otherwise strong repository-specific suggestion.
 - Do not return ideas that genuinely require cross-repository execution unless you can tie the launch target to one repository.
 - Each suggestion should cover a different subsystem, flow, or file area when possible.
-- Submit suggestions only with the submit_task_suggestions tool.
+- Finish with one \`send_chat_reply\` call: put the concise report summary in \`message\`, set \`purpose\` to \`closeout\`, and put the final structured actions in \`suggestions\` so they appear beneath that report in the originating conversation.
 - Aim for 5 distinct suggestions in priority order.
 - Return at most 5.
 - Only return fewer than 5 if you truly cannot find 5 high-signal findings that survive scrutiny.
-- Submit an empty list only if nothing survives the bar.
+- If nothing survives the bar, send the closeout report without \`suggestions\`.
 - Each submitted suggestion must use a short title and a concise brief covering the exact issue and user impact.
 - Each \`brief\` must stay within 2-3 sentences and include one concrete example scenario showing how the issue manifests in practice.
 - Each submitted suggestion must include:

@@ -69,25 +69,30 @@ export async function handleSendChatReply(
     let suggestionError: string | undefined;
 
     if (input.suggestions && input.suggestions.length > 0) {
-      try {
-        const suggestionResult = await submitTaskSuggestions(
-          roomoteConfig,
-          input.taskId,
-          {
-            suggestions: input.suggestions,
-            delivery: 'current_thread',
-          },
-        );
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          const suggestionResult = await submitTaskSuggestions(
+            roomoteConfig,
+            input.taskId,
+            {
+              suggestions: input.suggestions,
+              delivery: 'current_thread',
+              submissionKey: reply.messageTs,
+            },
+          );
 
-        if (suggestionResult.success) {
-          suggestionCount = suggestionResult.suggestionCount;
-        } else {
+          if (suggestionResult.success) {
+            suggestionCount = suggestionResult.suggestionCount;
+            suggestionError = undefined;
+            break;
+          }
+
           suggestionError =
             suggestionResult.error ?? 'Failed to post task suggestions.';
+        } catch (error) {
+          suggestionError =
+            error instanceof Error ? error.message : String(error);
         }
-      } catch (error) {
-        suggestionError =
-          error instanceof Error ? error.message : String(error);
       }
     }
 

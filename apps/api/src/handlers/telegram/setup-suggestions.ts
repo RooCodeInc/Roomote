@@ -162,6 +162,7 @@ export async function claimTelegramSuggestionLaunch(input: {
   brief: string | null;
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
+  targetEnvironmentId?: string | null;
   launchClaimedAt: Date;
 } | null> {
   // Scope: a suggestion card for this work item must have been posted in this
@@ -192,6 +193,7 @@ export async function claimTelegramSuggestionLaunch(input: {
     brief: claimed.brief,
     investigationContext: claimed.investigationContext,
     targetRepositoryFullName: claimed.targetRepositoryFullName,
+    targetEnvironmentId: claimed.targetEnvironmentId,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }

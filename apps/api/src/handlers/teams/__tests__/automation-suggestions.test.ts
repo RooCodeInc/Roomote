@@ -82,7 +82,10 @@ vi.mock('../../tasks/scheduled-suggestion-root-summary.js', () => ({
   buildScheduledSuggestionRootMessage: buildRootMessageMock,
 }));
 
-import { postScheduledSuggestionsToTeams } from '../automation-suggestions';
+import {
+  postCurrentThreadSuggestionsToTeams,
+  postScheduledSuggestionsToTeams,
+} from '../automation-suggestions';
 
 function buildSuggestion(id: string, title: string) {
   return {
@@ -117,6 +120,26 @@ describe('postScheduledSuggestionsToTeams', () => {
       summaryText: 'I triaged the latest Sentry issues.',
       actionFooterText: 'footer',
     });
+  });
+
+  it('posts current-thread suggestions to the bound conversation', async () => {
+    const delivered = await postCurrentThreadSuggestionsToTeams({
+      sourceTaskId: 'task-1',
+      createdByUserId: 'user-1',
+      conversationId: '19:bound@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      threadId: 'activity-root',
+      suggestions: [buildSuggestion('aaa', 'Fix crash')],
+    });
+
+    expect(delivered).toBe(true);
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: '19:bound@thread.tacv2',
+        threadId: 'activity-root',
+        text: expect.stringContaining('Fix crash'),
+      }),
+    );
   });
 
   it('posts one summary message with an automations link', async () => {

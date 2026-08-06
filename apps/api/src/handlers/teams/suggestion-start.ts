@@ -71,6 +71,7 @@ export type ClaimedTeamsSuggestion = {
   brief: string | null;
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
+  targetEnvironmentId?: string | null;
   launchClaimedAt: Date;
 };
 
@@ -109,6 +110,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
     .select({
       workItemId: trackedMessages.workItemId,
       messageTs: trackedMessages.messageTs,
+      threadTs: trackedMessages.threadTs,
       createdAt: trackedMessages.createdAt,
     })
     .from(trackedMessages)
@@ -121,7 +123,14 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       ),
     );
 
-  if (cards.length === 0) {
+  const inputThreadId = input.conversationId.split(';messageid=')[1] ?? null;
+  const matchingThreadCards = inputThreadId
+    ? cards.filter((card) => card.threadTs === inputThreadId)
+    : [];
+  const scopedCards =
+    matchingThreadCards.length > 0 ? matchingThreadCards : cards;
+
+  if (scopedCards.length === 0) {
     return { outcome: 'no_cards' };
   }
 
@@ -130,7 +139,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
   // the known workItemId suffix (intro ids may themselves contain ':').
   const groups = new Map<string, { createdAt: Date; workItemIds: string[] }>();
 
-  for (const card of cards) {
+  for (const card of scopedCards) {
     if (!card.workItemId || !card.messageTs) {
       continue;
     }
@@ -187,6 +196,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       brief: claimed.brief,
       investigationContext: claimed.investigationContext,
       targetRepositoryFullName: claimed.targetRepositoryFullName,
+      targetEnvironmentId: claimed.targetEnvironmentId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };
@@ -202,6 +212,9 @@ function buildTeamsSuggestionTaskPromptText(
     suggestion.brief ?? '',
     ...(suggestion.targetRepositoryFullName
       ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
+      : []),
+    ...(suggestion.targetEnvironmentId
+      ? ['', `Target environment: ${suggestion.targetEnvironmentId}`]
       : []),
     ...(suggestion.investigationContext
       ? ['', `Context: ${suggestion.investigationContext}`]

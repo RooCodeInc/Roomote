@@ -368,10 +368,7 @@ async function launchTaskSuggestionTaskFromReaction({
         workspaceDisplayName: matchingEnvironment.name,
       };
     }
-  } else if (
-    suggestionType === 'suggested_tasks' ||
-    suggestionType === 'custom_automation'
-  ) {
+  } else if (suggestionType === 'suggested_tasks') {
     const resolved = await resolveSuggestionLaunchWorkspaceFromMetadata({
       targetRepositoryFullName: workItem.targetRepositoryFullName,
       targetEnvironmentId: workItem.targetEnvironmentId,

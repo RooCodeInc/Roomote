@@ -131,14 +131,14 @@ vi.mock('./task-suggestion-reaction-contention.js', () => ({
 
 import { handleReactionAddedEvent } from './reactions';
 
-describe('custom automation suggestion reactions', () => {
+describe('chat reply suggestion reactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getConfiguration.mockResolvedValue(null);
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
       workItemId: 'work-item-1',
-      metadata: { suggestionType: 'custom_automation' },
+      metadata: { suggestionType: 'suggested_tasks' },
     });
     mocks.resolveWorkspace.mockResolvedValue({
       workspace: {
@@ -160,7 +160,7 @@ describe('custom automation suggestion reactions', () => {
     });
   });
 
-  it('starts and records a task when a user approves a custom automation suggestion', async () => {
+  it('starts and records a task when a user approves a chat reply suggestion', async () => {
     const slack = {
       postMessage: vi.fn(async () => 'seeded-thread-ts'),
       deleteMessage: vi.fn(async () => undefined),
