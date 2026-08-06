@@ -24,6 +24,7 @@ import {
 import type {
   QueuedTelegramCommunicationMessage,
   TelegramConversationRef,
+  TelegramWorkspaceSelection,
 } from './types.js';
 import { resumeCommunicationTaskFromSnapshot } from '@roomote/sdk/server/communication';
 
@@ -79,6 +80,7 @@ export async function startNewTelegramTask(input: {
   skipRoutingConfirmation?: boolean;
   /** Start a new task topic even when the command came from an older topic. */
   forceNewTopic?: boolean;
+  workspaceOverride?: TelegramWorkspaceSelection;
 }) {
   const needsPrivateTopicCapability =
     input.message.chat.type.toLowerCase() === 'private' &&
@@ -112,7 +114,10 @@ export async function startNewTelegramTask(input: {
   });
   const routingDecision = await routeTask(routingContext);
 
-  if (routingDecision.status === 'platform_answer') {
+  if (
+    routingDecision.status === 'platform_answer' &&
+    !input.workspaceOverride
+  ) {
     await postTelegramMessageBestEffort({
       chatId: input.metadata.communicationChannelId,
       threadId: input.metadata.communicationThreadId,
@@ -127,7 +132,10 @@ export async function startNewTelegramTask(input: {
     };
   }
 
-  if (!input.skipRoutingConfirmation) {
+  if (
+    !input.skipRoutingConfirmation &&
+    routingDecision.status !== 'platform_answer'
+  ) {
     const confirmation = await maybeRequestTelegramRoutingConfirmation({
       routingDecision,
       routingContext,
@@ -147,12 +155,13 @@ export async function startNewTelegramTask(input: {
   }
 
   const workspace =
-    routingDecision.status === 'routed'
+    input.workspaceOverride ??
+    (routingDecision.status === 'routed'
       ? await resolveTelegramWorkspace(routingDecision.result.workspace)
       : {
           repoForPayload: ALL_REPOSITORIES,
           workspaceDisplayName: 'all repos',
-        };
+        });
 
   if (!workspace) {
     throw new Error('Telegram task routing selected an unavailable workspace.');

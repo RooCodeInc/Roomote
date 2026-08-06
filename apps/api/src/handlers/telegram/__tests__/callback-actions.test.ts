@@ -18,6 +18,7 @@ const {
   postTelegramMessageBestEffortMock,
   releaseWorkItemClaimMock,
   resolveTelegramSenderUserIdMock,
+  resolveTelegramWorkspaceMock,
   startNewTelegramTaskMock,
 } = vi.hoisted(() => ({
   answerCallbackMock: vi.fn(),
@@ -28,6 +29,7 @@ const {
   postTelegramMessageBestEffortMock: vi.fn(),
   releaseWorkItemClaimMock: vi.fn(),
   resolveTelegramSenderUserIdMock: vi.fn(),
+  resolveTelegramWorkspaceMock: vi.fn(),
   startNewTelegramTaskMock: vi.fn(),
 }));
 
@@ -84,6 +86,10 @@ vi.mock('../task-orchestration.js', () => ({
   startNewTelegramTask: startNewTelegramTaskMock,
 }));
 
+vi.mock('../task-launch.js', () => ({
+  resolveTelegramWorkspace: resolveTelegramWorkspaceMock,
+}));
+
 import { handleTelegramCallbackQuery } from '../callback-actions.js';
 
 const WORK_ITEM_ID = 'work-item-1';
@@ -119,6 +125,11 @@ beforeEach(() => {
   cancelOrphanedWorkItemRunBestEffortMock.mockResolvedValue(
     'orphaned run canceled',
   );
+  resolveTelegramWorkspaceMock.mockResolvedValue({
+    environmentId: 'env-1',
+    repoForPayload: 'acme/app',
+    workspaceDisplayName: 'App',
+  });
 });
 
 describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
@@ -135,6 +146,35 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
         forceNewTopic: true,
         queuedMessage: expect.objectContaining({ threadTs: '44' }),
         metadata: expect.objectContaining({ communicationThreadId: '44' }),
+      }),
+    );
+  });
+
+  it('launches directly in the environment saved on the suggestion', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: 'env-1',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    startNewTelegramTaskMock.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(resolveTelegramWorkspaceMock).toHaveBeenCalledWith({
+      type: 'environment',
+      id: 'env-1',
+      name: 'env-1',
+    });
+    expect(startNewTelegramTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceOverride: expect.objectContaining({ environmentId: 'env-1' }),
       }),
     );
   });

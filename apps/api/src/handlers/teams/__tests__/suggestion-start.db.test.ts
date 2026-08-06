@@ -24,6 +24,7 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
     titles: string[];
     createdAt: Date;
     channelId?: string;
+    threadId?: string;
   }): Promise<string[]> {
     const channelId = params.channelId ?? conversationId;
     const rows = await db
@@ -47,6 +48,7 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
         kind: 'suggestion_card' as const,
         dedupeKey: `${channelId}:${params.introMessageId}:${workItemId}`,
         channelId,
+        ...(params.threadId ? { threadTs: params.threadId } : {}),
         messageTs: `${params.introMessageId}:${workItemId}`,
         workItemId,
         createdAt: params.createdAt,
@@ -195,6 +197,7 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
       introMessageId: 'intro-1',
       titles: ['Idea one'],
       createdAt: new Date(),
+      threadId: '1751234567890',
     });
 
     const resolution = await resolveAndClaimTeamsSuggestionStart({
@@ -209,5 +212,22 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
     }
 
     expect(resolution.suggestion.id).toBe(firstId);
+  });
+
+  it('does not select suggestion cards from another thread', async () => {
+    await seedSuggestionGroup({
+      introMessageId: 'intro-other',
+      titles: ['Other thread idea'],
+      createdAt: new Date(),
+      threadId: 'thread-other',
+    });
+
+    const resolution = await resolveAndClaimTeamsSuggestionStart({
+      conversationId,
+      threadId: 'thread-current',
+      ideaNumber: 1,
+    });
+
+    expect(resolution).toEqual({ outcome: 'no_cards' });
   });
 });

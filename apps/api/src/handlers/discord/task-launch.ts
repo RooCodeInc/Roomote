@@ -90,7 +90,7 @@ export type DiscordChannelContext = {
   isThread: boolean;
 };
 
-type DiscordWorkspaceSelection = {
+export type DiscordWorkspaceSelection = {
   environmentId?: string;
   repoForPayload: string;
   workspaceDisplayName: string;

@@ -102,6 +102,7 @@ type TeamsSuggestionStartResolution =
  */
 export async function resolveAndClaimTeamsSuggestionStart(input: {
   conversationId: string;
+  threadId?: string;
   ideaNumber: number;
 }): Promise<TeamsSuggestionStartResolution> {
   const conversationBase = stripTeamsMessageIdSuffix(input.conversationId);
@@ -123,12 +124,12 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       ),
     );
 
-  const inputThreadId = input.conversationId.split(';messageid=')[1] ?? null;
+  const inputThreadId =
+    input.threadId ?? input.conversationId.split(';messageid=')[1] ?? null;
   const matchingThreadCards = inputThreadId
     ? cards.filter((card) => card.threadTs === inputThreadId)
     : [];
-  const scopedCards =
-    matchingThreadCards.length > 0 ? matchingThreadCards : cards;
+  const scopedCards = inputThreadId ? matchingThreadCards : cards;
 
   if (scopedCards.length === 0) {
     return { outcome: 'no_cards' };

@@ -36,6 +36,7 @@ import {
   parseTelegramSuggestionCallbackData,
 } from './setup-suggestions.js';
 import { startNewTelegramTask } from './task-orchestration.js';
+import { resolveTelegramWorkspace } from './task-launch.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
 
 async function findCancelableTaskRun(runId: number, chatId: string) {
@@ -226,6 +227,16 @@ async function handleSuggestionLaunchCallback(params: {
   const claimedAt = suggestion.launchClaimedAt;
 
   try {
+    const workspaceOverride = suggestion.targetEnvironmentId
+      ? await resolveTelegramWorkspace({
+          type: 'environment',
+          id: suggestion.targetEnvironmentId,
+          name: suggestion.targetEnvironmentId,
+        })
+      : undefined;
+    if (suggestion.targetEnvironmentId && !workspaceOverride) {
+      throw new Error('The suggestion target environment is unavailable.');
+    }
     const started = await startNewTelegramTask({
       message,
       launchOwnerUserId: senderUserId,
@@ -239,6 +250,7 @@ async function handleSuggestionLaunchCallback(params: {
       // The button click already is the explicit start signal.
       skipRoutingConfirmation: true,
       forceNewTopic: true,
+      ...(workspaceOverride ? { workspaceOverride } : {}),
     });
 
     if (started.status === 'started') {

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   claimSuggestion: vi.fn(),
   startNewTask: vi.fn(),
   resolveChannel: vi.fn(),
+  resolveWorkspace: vi.fn(),
   finalizeWorkItem: vi.fn(),
   releaseWorkItem: vi.fn(),
 }));
@@ -46,6 +47,7 @@ vi.mock('../task-orchestration.js', () => ({
 }));
 vi.mock('../task-launch.js', () => ({
   resolveDiscordChannelContext: mocks.resolveChannel,
+  resolveDiscordWorkspace: mocks.resolveWorkspace,
   discordMetadataForChannel: vi.fn(),
 }));
 vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
@@ -60,6 +62,11 @@ describe('Discord component callbacks', () => {
     mocks.reply.mockResolvedValue({ messageId: 'response-1' });
     mocks.findMappedUser.mockResolvedValue('user-1');
     mocks.releaseWorkItem.mockResolvedValue(true);
+    mocks.resolveWorkspace.mockResolvedValue({
+      environmentId: 'env-1',
+      repoForPayload: 'acme/app',
+      workspaceDisplayName: 'App',
+    });
   });
 
   it('cancels an active run only when it belongs to the interaction channel', async () => {
@@ -309,6 +316,7 @@ describe('Discord component callbacks', () => {
       title: 'Fix the flaky login test',
       brief: null,
       targetRepositoryFullName: null,
+      targetEnvironmentId: 'env-1',
       investigationContext: null,
       launchClaimedAt: new Date(),
     });
@@ -348,8 +356,16 @@ describe('Discord component callbacks', () => {
     // instead of throwing and releasing the claim.
     expect(mocks.resolveChannel).not.toHaveBeenCalled();
     expect(mocks.startNewTask).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: dmChannel }),
+      expect.objectContaining({
+        channel: dmChannel,
+        workspaceOverride: expect.objectContaining({ environmentId: 'env-1' }),
+      }),
     );
+    expect(mocks.resolveWorkspace).toHaveBeenCalledWith({
+      type: 'environment',
+      id: 'env-1',
+      name: 'env-1',
+    });
     expect(mocks.releaseWorkItem).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({

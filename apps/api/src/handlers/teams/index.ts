@@ -39,6 +39,7 @@ import {
   environments,
   eq,
   microsoftAuthUserMappings,
+  releaseWorkItemClaim,
   resolveTeamsBotRuntimeCredentials,
   teamsInstallations,
   teamsUserMappings,
@@ -1262,6 +1263,7 @@ async function startNewTeamsTask(input: {
   mappedUserId: string;
   queuedMessage: QueuedTeamsCommunicationMessage;
   metadata: TeamsActivityCommunicationMetadata;
+  workspaceOverride?: TeamsWorkspaceSelection;
 }) {
   const launchUserId = input.mappedUserId;
   const threadHistory = await fetchTeamsThreadMessagesBestEffort({
@@ -1300,7 +1302,10 @@ async function startNewTeamsTask(input: {
   });
   const routingDecision = await routeTask(routingContext);
 
-  if (routingDecision.status === 'platform_answer') {
+  if (
+    routingDecision.status === 'platform_answer' &&
+    !input.workspaceOverride
+  ) {
     await postTeamsMessageBestEffort({
       conversationId: input.metadata.communicationChannelId,
       threadId: input.metadata.communicationThreadId,
@@ -1315,12 +1320,13 @@ async function startNewTeamsTask(input: {
   }
 
   const workspace =
-    routingDecision.status === 'routed'
+    input.workspaceOverride ??
+    (routingDecision.status === 'routed'
       ? await resolveTeamsWorkspace(routingDecision.result.workspace)
       : {
           repoForPayload: ALL_REPOSITORIES,
           workspaceDisplayName: 'all repos',
-        };
+        });
 
   if (!workspace) {
     throw new Error('Teams task routing selected an unavailable workspace.');
@@ -1800,6 +1806,9 @@ teams.post('/', async (c) => {
     if (suggestionIdeaNumber !== null) {
       const resolution = await resolveAndClaimTeamsSuggestionStart({
         conversationId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
         ideaNumber: suggestionIdeaNumber,
       });
 
@@ -1834,6 +1843,30 @@ teams.post('/', async (c) => {
       }
 
       if (resolution.outcome === 'claimed') {
+        const workspaceOverride = resolution.suggestion.targetEnvironmentId
+          ? await resolveTeamsWorkspace({
+              type: 'environment',
+              id: resolution.suggestion.targetEnvironmentId,
+              name: resolution.suggestion.targetEnvironmentId,
+            })
+          : undefined;
+        if (resolution.suggestion.targetEnvironmentId && !workspaceOverride) {
+          await releaseWorkItemClaim(db, {
+            id: resolution.suggestion.id,
+            claimedAt: resolution.suggestion.launchClaimedAt,
+          });
+          await postTeamsMessageBestEffort({
+            conversationId: metadata.communicationChannelId,
+            threadId: metadata.communicationThreadId,
+            serviceUrl: metadata.communicationServiceUrl,
+            text: 'That idea’s target environment is no longer available.',
+          });
+          return c.json({
+            ok: true,
+            queued: false,
+            reason: 'suggestion_environment_unavailable',
+          });
+        }
         const suggestionLaunch = await launchClaimedTeamsSuggestion({
           suggestion: resolution.suggestion,
           launchTask: (promptText) =>
@@ -1842,6 +1875,7 @@ teams.post('/', async (c) => {
               mappedUserId,
               queuedMessage: { ...queuedMessage!, text: promptText },
               metadata,
+              ...(workspaceOverride ? { workspaceOverride } : {}),
             }),
           postMessage: (text) =>
             postTeamsMessageBestEffort({

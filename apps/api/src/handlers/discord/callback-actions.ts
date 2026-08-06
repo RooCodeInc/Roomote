@@ -37,6 +37,7 @@ import type { DiscordChannelContext } from './task-launch.js';
 import {
   discordMetadataForChannel,
   resolveDiscordChannelContext,
+  resolveDiscordWorkspace,
 } from './task-launch.js';
 import { claimDiscordSuggestionLaunch } from './setup-suggestions.js';
 import { startNewDiscordTask } from './task-orchestration.js';
@@ -304,6 +305,16 @@ async function handleSuggestionCallback(input: {
       channel: launchChannel.channelId,
       turnPolicy: { reactionsAllowed: true },
     };
+    const workspaceOverride = suggestion.targetEnvironmentId
+      ? await resolveDiscordWorkspace({
+          type: 'environment',
+          id: suggestion.targetEnvironmentId,
+          name: suggestion.targetEnvironmentId,
+        })
+      : undefined;
+    if (suggestion.targetEnvironmentId && !workspaceOverride) {
+      throw new Error('The suggestion target environment is unavailable.');
+    }
     const started = await startNewDiscordTask({
       provider: input.provider,
       applicationId: input.applicationId,
@@ -316,6 +327,7 @@ async function handleSuggestionCallback(input: {
       }),
       channel: launchChannel,
       skipRoutingConfirmation: true,
+      ...(workspaceOverride ? { workspaceOverride } : {}),
     });
     if (started.status !== 'started') {
       await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt });
