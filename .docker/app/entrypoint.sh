@@ -61,17 +61,29 @@ apply_node_heap_cap() {
   # cgroup v1 reports "unlimited" as a page-rounded near-int64 number; the
   # derived_mb < cap_mb comparison below already treats it as no limit.
   self_v2="$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null | head -n 1)"
-  self_v1="$(grep -E '^[0-9]+:([^:]*,)?memory(,[^:]*)?:' /proc/self/cgroup 2>/dev/null | head -n 1 | cut -d: -f3)"
 
   limit_bytes=""
   if [ -n "$self_v2" ] && [ -r "/sys/fs/cgroup${self_v2}/memory.max" ]; then
     limit_bytes="$(cat "/sys/fs/cgroup${self_v2}/memory.max")"
   elif [ -r /sys/fs/cgroup/memory.max ]; then
     limit_bytes="$(cat /sys/fs/cgroup/memory.max)"
-  elif [ -n "$self_v1" ] && [ -r "/sys/fs/cgroup/memory${self_v1}/memory.limit_in_bytes" ]; then
-    limit_bytes="$(cat "/sys/fs/cgroup/memory${self_v1}/memory.limit_in_bytes")"
-  elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
-    limit_bytes="$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)"
+  else
+    self_v1="$(grep -E '^[0-9]+:([^:]*,)?memory(,[^:]*)?:' /proc/self/cgroup 2>/dev/null | head -n 1 | cut -d: -f3)"
+    # The v1 memory hierarchy can be co-mounted with other controllers at a
+    # combined path, so resolve its mount point from /proc/self/mountinfo
+    # (mountpoint is the 5th field before the " - " separator; filesystem
+    # type and super options are the 1st and 3rd after it).
+    v1_mount="$(awk -F' - ' '{
+      split($1, l, " "); split($2, r, " ");
+      if (r[1] == "cgroup" && ("," r[3] ",") ~ /,memory,/) { print l[5]; exit }
+    }' /proc/self/mountinfo 2>/dev/null || :)"
+    [ -n "$v1_mount" ] || v1_mount=/sys/fs/cgroup/memory
+
+    if [ -n "$self_v1" ] && [ -r "${v1_mount}${self_v1}/memory.limit_in_bytes" ]; then
+      limit_bytes="$(cat "${v1_mount}${self_v1}/memory.limit_in_bytes")"
+    elif [ -r "${v1_mount}/memory.limit_in_bytes" ]; then
+      limit_bytes="$(cat "${v1_mount}/memory.limit_in_bytes")"
+    fi
   fi
   case "$limit_bytes" in
     '' | *[!0-9]*) ;; # v2 "max" means unlimited; keep the service default
