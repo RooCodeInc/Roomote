@@ -837,4 +837,69 @@ describe('roomote MCP tool descriptions', () => {
       ],
     });
   });
+
+  it('forwards inline review comment anchor fields from manage_source_control tool params', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'create_pull_request_review_comment',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 12,
+          threadId: null,
+          commentId: '3001',
+          url: 'https://github.com/RooCodeInc/Roomote/pull/12#discussion_r3001',
+          applied: true,
+          warnings: [],
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    const result = await sourceControlTool.handler?.({
+      action: 'create_pull_request_review_comment',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      prNumber: 12,
+      path: 'src/index.ts',
+      line: 42,
+      side: 'RIGHT',
+      body: 'Missing error handling here.',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'create_pull_request_review_comment',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          prNumber: 12,
+          body: 'Missing error handling here.',
+          path: 'src/index.ts',
+          line: 42,
+          side: 'RIGHT',
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      content: [
+        {
+          type: 'text',
+          text: expect.stringContaining('"commentId":"3001"'),
+        },
+      ],
+    });
+  });
 });

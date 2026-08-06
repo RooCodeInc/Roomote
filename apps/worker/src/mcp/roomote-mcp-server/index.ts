@@ -729,6 +729,7 @@ roomoteMcpServer.registerTool(
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
       '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
+      '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
       '"resolve_pull_request_thread" to resolve or reopen a thread, and "submit_pull_request_review" to approve, request changes, or leave a review comment. ' +
       'Provider gaps are reported as warnings with applied:false instead of errors. ' +
       'For the PR diff, use local git against the returned SHAs instead of a provider CLI. ' +
@@ -742,6 +743,7 @@ roomoteMcpServer.registerTool(
           'list_pull_request_comments',
           'reply_to_pull_request_comment',
           'create_pull_request_comment',
+          'create_pull_request_review_comment',
           'resolve_pull_request_thread',
           'submit_pull_request_review',
           'update_pull_request_comment',
@@ -750,7 +752,7 @@ roomoteMcpServer.registerTool(
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -812,6 +814,38 @@ roomoteMcpServer.registerTool(
         .describe(
           'Required for submit_pull_request_review: the review outcome to submit.',
         ),
+      path: z
+        .string()
+        .optional()
+        .describe(
+          'Required for create_pull_request_review_comment: repository-relative path of the file the comment anchors to.',
+        ),
+      line: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Required for create_pull_request_review_comment: 1-based line number in the file version named by side. The line must be part of the current PR/MR diff; if the provider rejects the anchor, the call errors so you can correct the anchor and retry once, then fall back to carrying the finding in the review summary comment.',
+        ),
+      side: z
+        .enum(['LEFT', 'RIGHT'])
+        .optional()
+        .describe(
+          'Optional for create_pull_request_review_comment. RIGHT (default) anchors on the new version of the file (added or changed lines); LEFT anchors on the old version (deleted lines).',
+        ),
+      startLine: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Optional multi-line range start for create_pull_request_review_comment; must not exceed line. GitHub and Azure DevOps honor the range; other providers anchor to line and report a warning.',
+        ),
+      startSide: z
+        .enum(['LEFT', 'RIGHT'])
+        .optional()
+        .describe('Optional side for startLine on GitHub; defaults to side.'),
       sourceBranch: z
         .string()
         .optional()
@@ -882,6 +916,11 @@ roomoteMcpServer.registerTool(
         commentId: params.commentId,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
+        path: params.path,
+        line: params.line,
+        side: params.side,
+        startLine: params.startLine,
+        startSide: params.startSide,
         sourceBranch: params.sourceBranch,
         targetBranch: params.targetBranch,
         title: params.title,

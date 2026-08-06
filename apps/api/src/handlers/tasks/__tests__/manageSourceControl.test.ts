@@ -9,11 +9,13 @@ const {
   mockClaimLatestUserMessageForReplyQuote,
   mockFindTaskRunForSourceControlMutation,
   mockManageSourceControlIssueForTaskRun,
+  mockWriteSourceControlPullRequestForTaskRun,
 } = vi.hoisted(() => ({
   mockAssertTaskRunTokenTargetExists: vi.fn(),
   mockClaimLatestUserMessageForReplyQuote: vi.fn(),
   mockFindTaskRunForSourceControlMutation: vi.fn(),
   mockManageSourceControlIssueForTaskRun: vi.fn(),
+  mockWriteSourceControlPullRequestForTaskRun: vi.fn(),
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
@@ -26,6 +28,8 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   findTaskRunForSourceControlMutation: mockFindTaskRunForSourceControlMutation,
   manageSourceControlIssueForTaskRun: mockManageSourceControlIssueForTaskRun,
+  writeSourceControlPullRequestForTaskRun:
+    mockWriteSourceControlPullRequestForTaskRun,
 }));
 
 vi.mock('../../mcp/proxy-utils', async (importOriginal) => ({
@@ -100,6 +104,50 @@ describe('manageSourceControl', () => {
       input: expect.objectContaining({
         repositoryFullName: 'acme/backend',
         body: 'Fixed in the latest branch.',
+      }),
+    });
+  });
+
+  it('dispatches create_pull_request_review_comment to the write surface without reply quoting', async () => {
+    mockWriteSourceControlPullRequestForTaskRun.mockResolvedValue({
+      success: true,
+      action: 'create_pull_request_review_comment',
+      provider: 'github',
+      repositoryFullName: 'acme/frontend',
+      number: 55,
+      threadId: null,
+      commentId: '3001',
+      url: 'https://github.com/acme/frontend/pull/55#discussion_r3001',
+      applied: true,
+      warnings: [],
+    });
+
+    const response = await createApp().request('/task-1/source_control', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'create_pull_request_review_comment',
+        repositoryFullName: 'acme/frontend',
+        prNumber: 55,
+        path: 'src/index.ts',
+        line: 42,
+        side: 'RIGHT',
+        body: 'Missing error handling here.',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    // Inline review findings are agent-authored, so the pending user message
+    // must never be quoted above them even on a GitHub target with a body.
+    expect(mockClaimLatestUserMessageForReplyQuote).not.toHaveBeenCalled();
+    expect(mockWriteSourceControlPullRequestForTaskRun).toHaveBeenCalledWith({
+      taskRun: expect.objectContaining({ id: 123 }),
+      input: expect.objectContaining({
+        action: 'create_pull_request_review_comment',
+        path: 'src/index.ts',
+        line: 42,
+        side: 'RIGHT',
+        body: 'Missing error handling here.',
       }),
     });
   });

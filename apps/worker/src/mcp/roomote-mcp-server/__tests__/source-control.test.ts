@@ -285,4 +285,107 @@ describe('handleManageSourceControl issue actions', () => {
     });
     expect(tasksApiClient.manageSourceControlIssue).not.toHaveBeenCalled();
   });
+
+  it('forwards create_pull_request_review_comment anchor fields to the write surface', async () => {
+    vi.mocked(tasksApiClient.writeSourceControl).mockResolvedValueOnce({
+      success: true,
+      action: 'create_pull_request_review_comment',
+      provider: 'github',
+      repositoryFullName: 'acme/web',
+      number: 12,
+      threadId: null,
+      commentId: '3001',
+      url: 'https://github.com/acme/web/pull/12#discussion_r3001',
+      applied: true,
+      warnings: [],
+    } as never);
+
+    const result = await handleManageSourceControl(
+      {
+        action: 'create_pull_request_review_comment',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        path: '  src/index.ts  ',
+        line: 42,
+        side: 'RIGHT',
+        startLine: 40,
+        startSide: 'RIGHT',
+        body: 'Missing error handling here.',
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: true,
+      commentId: '3001',
+    });
+    expect(tasksApiClient.writeSourceControl).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      expect.objectContaining({
+        action: 'create_pull_request_review_comment',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        path: 'src/index.ts',
+        line: 42,
+        side: 'RIGHT',
+        startLine: 40,
+        startSide: 'RIGHT',
+        body: 'Missing error handling here.',
+      }),
+    );
+  });
+
+  it('requires path, a positive integer line, and a body for inline review comments', async () => {
+    const missingPath = await handleManageSourceControl(
+      {
+        action: 'create_pull_request_review_comment',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        line: 42,
+        body: 'Missing error handling here.',
+      },
+      config,
+      'task-1',
+    );
+    const badLine = await handleManageSourceControl(
+      {
+        action: 'create_pull_request_review_comment',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        path: 'src/index.ts',
+        line: 0,
+        body: 'Missing error handling here.',
+      },
+      config,
+      'task-1',
+    );
+    const missingBody = await handleManageSourceControl(
+      {
+        action: 'create_pull_request_review_comment',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        path: 'src/index.ts',
+        line: 42,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(missingPath.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: 'path is required for create_pull_request_review_comment',
+    });
+    expect(JSON.parse(badLine.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error:
+        'line is required for create_pull_request_review_comment and must be a positive integer',
+    });
+    expect(JSON.parse(missingBody.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: 'body is required for create_pull_request_review_comment',
+    });
+    expect(tasksApiClient.writeSourceControl).not.toHaveBeenCalled();
+  });
 });

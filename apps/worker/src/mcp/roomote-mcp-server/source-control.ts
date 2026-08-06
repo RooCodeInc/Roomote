@@ -17,6 +17,7 @@ type ManageSourceControlParams = {
     | 'list_pull_request_comments'
     | 'reply_to_pull_request_comment'
     | 'create_pull_request_comment'
+    | 'create_pull_request_review_comment'
     | 'resolve_pull_request_thread'
     | 'submit_pull_request_review'
     | 'update_pull_request_comment'
@@ -32,6 +33,11 @@ type ManageSourceControlParams = {
   commentId?: string;
   resolved?: boolean;
   reviewEvent?: 'approve' | 'request_changes' | 'comment';
+  path?: string;
+  line?: number;
+  side?: 'LEFT' | 'RIGHT';
+  startLine?: number;
+  startSide?: 'LEFT' | 'RIGHT';
   sourceBranch?: string;
   targetBranch?: string;
   title?: string;
@@ -173,10 +179,29 @@ export async function handleManageSourceControl(
     if (
       (params.action === 'reply_to_pull_request_comment' ||
         params.action === 'create_pull_request_comment' ||
+        params.action === 'create_pull_request_review_comment' ||
         params.action === 'update_pull_request_comment') &&
       !params.body?.trim()
     ) {
       return errorResult(`body is required for ${params.action}`);
+    }
+
+    if (params.action === 'create_pull_request_review_comment') {
+      if (!params.path?.trim()) {
+        return errorResult(
+          'path is required for create_pull_request_review_comment',
+        );
+      }
+
+      if (
+        typeof params.line !== 'number' ||
+        !Number.isInteger(params.line) ||
+        params.line <= 0
+      ) {
+        return errorResult(
+          'line is required for create_pull_request_review_comment and must be a positive integer',
+        );
+      }
     }
 
     if (
@@ -208,6 +233,7 @@ export async function handleManageSourceControl(
     // comment updates using the presence of threadId).
     const threadId = params.threadId?.trim() || undefined;
     const commentId = params.commentId?.trim() || undefined;
+    const path = params.path?.trim() || undefined;
 
     return jsonResult(
       await writeSourceControl(config, taskId, {
@@ -219,6 +245,11 @@ export async function handleManageSourceControl(
         body: params.body,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
+        path,
+        line: params.line,
+        side: params.side,
+        startLine: params.startLine,
+        startSide: params.startSide,
         sourceControlProvider: params.sourceControlProvider,
       }),
     );
