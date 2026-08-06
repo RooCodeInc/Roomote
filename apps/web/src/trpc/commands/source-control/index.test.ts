@@ -27,6 +27,9 @@ const {
   mockDeleteGitLabOAuthConnection,
   mockDeleteGiteaOAuthConnection,
   mockDeleteBitbucketOAuthConnection,
+  mockGetGitLabOAuthConnection,
+  mockGetGiteaOAuthConnection,
+  mockGetBitbucketOAuthConnection,
   mockClearGitLabDeploymentUserCache,
   mockClearGiteaDeploymentUserCache,
   mockClearBitbucketDeploymentUserCache,
@@ -66,6 +69,9 @@ const {
   mockDeleteGitLabOAuthConnection: vi.fn(),
   mockDeleteGiteaOAuthConnection: vi.fn(),
   mockDeleteBitbucketOAuthConnection: vi.fn(),
+  mockGetGitLabOAuthConnection: vi.fn(),
+  mockGetGiteaOAuthConnection: vi.fn(),
+  mockGetBitbucketOAuthConnection: vi.fn(),
   mockClearGitLabDeploymentUserCache: vi.fn(),
   mockClearGiteaDeploymentUserCache: vi.fn(),
   mockClearBitbucketDeploymentUserCache: vi.fn(),
@@ -100,6 +106,7 @@ vi.mock('@roomote/ado', () => ({
 vi.mock('@roomote/bitbucket', () => ({
   clearBitbucketDeploymentUserCache: mockClearBitbucketDeploymentUserCache,
   deleteBitbucketOAuthConnection: mockDeleteBitbucketOAuthConnection,
+  getBitbucketOAuthConnection: mockGetBitbucketOAuthConnection,
   removeBitbucketWebhooksForRepositories:
     mockRemoveBitbucketWebhooksForRepositories,
 }));
@@ -107,6 +114,7 @@ vi.mock('@roomote/bitbucket', () => ({
 vi.mock('@roomote/gitea', () => ({
   clearGiteaDeploymentUserCache: mockClearGiteaDeploymentUserCache,
   deleteGiteaOAuthConnection: mockDeleteGiteaOAuthConnection,
+  getGiteaOAuthConnection: mockGetGiteaOAuthConnection,
   ensureGiteaWebhooksForRepositories: mockEnsureGiteaWebhooksForRepositories,
   normalizeGiteaBaseUrl: (value: string) =>
     value.startsWith('http') ? value : `https://${value}`,
@@ -119,6 +127,7 @@ vi.mock('@roomote/gitea', () => ({
 vi.mock('@roomote/gitlab', () => ({
   clearGitLabDeploymentUserCache: mockClearGitLabDeploymentUserCache,
   deleteGitLabOAuthConnection: mockDeleteGitLabOAuthConnection,
+  getGitLabOAuthConnection: mockGetGitLabOAuthConnection,
   buildGitLabApiBaseUrl: (value: string) =>
     `${value.replace(/\/+$/, '')}/api/v4`,
   ensureGitLabWebhooksForProjects: mockEnsureGitLabWebhooksForProjects,
@@ -254,6 +263,9 @@ describe('source-control commands', () => {
     mockEnv.TRPC_URL = 'http://localhost:3000/trpc';
     mockResolveDeploymentEnvVar.mockResolvedValue(null);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
+    mockGetGitLabOAuthConnection.mockResolvedValue(null);
+    mockGetGiteaOAuthConnection.mockResolvedValue(null);
+    mockGetBitbucketOAuthConnection.mockResolvedValue(null);
     mockRepositoryRows.rows = [];
     mockPersistedEnvVarNames.names = [
       'R_GITHUB_APP_ID',
@@ -477,6 +489,54 @@ describe('source-control commands', () => {
     expect(mockDeleteGitLabOAuthConnection).not.toHaveBeenCalled();
     expect(mockTransaction).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'gitlab',
+      mockGetGitLabOAuthConnection,
+      mockRemoveGitLabWebhooksForProjects,
+      mockDeleteGitLabOAuthConnection,
+    ],
+    [
+      'gitea',
+      mockGetGiteaOAuthConnection,
+      mockRemoveGiteaWebhooksForRepositories,
+      mockDeleteGiteaOAuthConnection,
+    ],
+    [
+      'bitbucket',
+      mockGetBitbucketOAuthConnection,
+      mockRemoveBitbucketWebhooksForRepositories,
+      mockDeleteBitbucketOAuthConnection,
+    ],
+  ] as const)(
+    'removes a persisted %s OAuth connection when client credentials come from runtime configuration',
+    async (
+      provider,
+      getOAuthConnection,
+      removeHooks,
+      deleteOAuthConnection,
+    ) => {
+      mockPersistedEnvVarNames.names = [];
+      getOAuthConnection.mockResolvedValue({ accessToken: 'oauth-token' });
+      mockRepositoryRows.rows = [
+        {
+          id: `${provider}-repository-id`,
+          externalRepoId: `${provider}-external-id`,
+          fullName: 'acme/project/repository',
+          permissions: {},
+        },
+      ];
+
+      await expect(
+        clearSourceControlConfigCommand(buildMockAuth(), { provider }),
+      ).resolves.toMatchObject({ success: true, provider, warnings: [] });
+
+      expect(removeHooks).toHaveBeenCalledOnce();
+      expect(deleteOAuthConnection).toHaveBeenCalledOnce();
+      expect(mockTxUpdate).toHaveBeenCalledOnce();
+    },
+  );
 
   it('returns OAuth cleanup failures as warnings while removing local configuration', async () => {
     mockDeleteGitLabOAuthConnection.mockRejectedValueOnce(

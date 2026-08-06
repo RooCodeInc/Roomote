@@ -527,6 +527,53 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     ]);
   });
 
+  it('anchors Bitbucket old-side comments with inline.from', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://bitbucket.org/acme/backend',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        values: [
+          {
+            id: 88,
+            content: { raw: 'This deletion removes the retry path.' },
+            user: { nickname: 'reviewer' },
+            inline: { path: 'src/index.ts', from: 21 },
+          },
+        ],
+      }),
+    );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'bitbucket',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 5,
+        sourceControlProvider: 'bitbucket',
+      },
+      fetchImpl,
+    });
+
+    if (!('threads' in result)) {
+      throw new Error('Expected a comments result.');
+    }
+
+    expect(result.threads).toEqual([
+      expect.objectContaining({
+        id: '88',
+        path: 'src/index.ts',
+        line: 21,
+      }),
+    ]);
+  });
+
   it('maps Azure DevOps threads with resolution states', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
@@ -587,6 +634,15 @@ describe('readSourceControlPullRequestForTaskRun', () => {
                 commentType: 'system',
               },
             ],
+          },
+          {
+            id: 14,
+            status: 'active',
+            threadContext: {
+              filePath: '/src/deleted.ts',
+              leftFileStart: { line: 13 },
+            },
+            comments: [{ id: 105, content: 'Keep this deletion visible.' }],
           },
         ],
       }),
@@ -653,6 +709,21 @@ describe('readSourceControlPullRequestForTaskRun', () => {
             id: '102',
             author: null,
             body: 'Still open.',
+            createdAt: null,
+            url: null,
+          },
+        ],
+      },
+      {
+        id: '14',
+        resolved: false,
+        path: '/src/deleted.ts',
+        line: 13,
+        comments: [
+          {
+            id: '105',
+            author: null,
+            body: 'Keep this deletion visible.',
             createdAt: null,
             url: null,
           },
