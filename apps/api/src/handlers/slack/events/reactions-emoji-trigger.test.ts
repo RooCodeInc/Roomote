@@ -32,6 +32,7 @@ describe('Slack emoji trigger', () => {
       ts: '1710000000.000100',
       thread_ts: '1710000000.000000',
       text: 'Please investigate this.',
+      files: [{ id: 'F1', name: 'context.txt' }],
     });
     const context = {
       teamId: 'T1',
@@ -63,9 +64,11 @@ describe('Slack emoji trigger', () => {
         type: 'app_mention',
         channel: 'C1',
         user: 'U1',
-        text: '<@UROOMOTE> Act on this\n\nAdditional instructions:\nPrioritize safety.',
+        text: '<@UROOMOTE> Act on this\n\nAdditional instructions:\nPrioritize safety.\n\nMessage to act on:\nPlease investigate this.',
         ts: '1710000000.000100',
+        deliveryTs: '1710000001.000000',
         thread_ts: '1710000000.000000',
+        files: [{ id: 'F1', name: 'context.txt' }],
       },
     });
   });
@@ -117,7 +120,10 @@ describe('Slack emoji trigger', () => {
     expect(mocks.handleMessage).toHaveBeenCalledTimes(1);
     expect(mocks.handleMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: expect.objectContaining({ text: '<@UROOMOTE> Act on this' }),
+        event: expect.objectContaining({
+          text: '<@UROOMOTE> Act on this\n\nMessage to act on:\nA suggested task.',
+          deliveryTs: '1710000001.000000',
+        }),
       }),
     );
   });
