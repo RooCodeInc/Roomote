@@ -38,24 +38,60 @@ if [ -z "${S3_PRESIGN_ENDPOINT:-}" ] && [ -n "${ROOMOTE_MINIO_HOST:-}" ]; then
   export S3_PRESIGN_ENDPOINT="https://${ROOMOTE_MINIO_HOST}"
 fi
 
+# V8 sizes its default heap ceiling from the memory it can see, which in a
+# container is the host's total, not the container's limit. With that much
+# perceived headroom it defers full GCs for hours, so the long-running
+# services drift multiple GB above their ~300-400 MB working sets — billed
+# directly on usage-priced hosts — and a container memory cap OOM-kills the
+# process before V8 ever feels pressure. Cap old space explicitly instead:
+# an operator --max-old-space-size in NODE_OPTIONS always wins, and a
+# readable cgroup v2 memory limit lowers (never raises) the service default
+# to ~75% of the container's memory.
+apply_node_heap_cap() {
+  case "${NODE_OPTIONS:-}" in
+    *--max-old-space-size*) return 0 ;;
+  esac
+
+  cap_mb="$1"
+
+  if [ -r /sys/fs/cgroup/memory.max ]; then
+    limit_bytes="$(cat /sys/fs/cgroup/memory.max)"
+    case "$limit_bytes" in
+      '' | *[!0-9]*) ;; # "max" means unlimited; keep the service default
+      *)
+        derived_mb=$((limit_bytes / 1048576 * 3 / 4))
+        if [ "$derived_mb" -gt 0 ] && [ "$derived_mb" -lt "$cap_mb" ]; then
+          cap_mb="$derived_mb"
+        fi
+        ;;
+    esac
+  fi
+
+  export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--max-old-space-size=${cap_mb}"
+}
+
 case "$service" in
   web)
     # The Next.js standalone server binds to HOSTNAME; Docker's default
     # HOSTNAME env is the container id, so pin it to all interfaces.
     export HOSTNAME=0.0.0.0
     export PORT="${PORT:-3000}"
+    apply_node_heap_cap 768
     cd /roomote/apps/web
     exec /roomote/.docker/run-with-dotenvx.sh node server.js "$@"
     ;;
   api)
+    apply_node_heap_cap 768
     cd /roomote/apps/api
     exec /roomote/.docker/run-with-dotenvx.sh node dist/index.js "$@"
     ;;
   controller)
+    apply_node_heap_cap 512
     cd /roomote/apps/controller
     exec /roomote/.docker/run-with-dotenvx.sh node --import ./dist/instrument.js ./dist/index.js "$@"
     ;;
   bullmq)
+    apply_node_heap_cap 512
     cd /roomote/apps/bullmq
     exec /roomote/.docker/run-with-dotenvx.sh node dist/index.js "$@"
     ;;

@@ -207,3 +207,12 @@ deployment should let you:
   variables, setup commands, or tool versions to the environment.
 - **Chat messages do not reach Roomote.** Confirm the app is installed, invited
   to the channel, and using the current callback URL.
+- **Memory climbs for hours, or a service is OOM-killed under a container
+  memory limit.** Node sizes its heap from the memory it can see (the host's,
+  not the container's), so it defers garbage collection and lets memory drift
+  well above what the service needs; a container memory cap then kills the
+  process before Node ever feels pressure. Current app images cap each Node
+  service's heap by default (768 MB for web and api, 512 MB for controller and
+  bullmq, reduced to ~75% of the container's memory when a cgroup limit is
+  set). Set `NODE_OPTIONS=--max-old-space-size=<MB>` on a service to override
+  the default, or on older images to add the cap manually.
