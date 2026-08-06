@@ -530,7 +530,7 @@ function prioritizeScheduledSuggestions(
     ...bareRepo.slice(0, 2),
     ...launchLimited,
     ...bareRepo.slice(2),
-  ].slice(0, 5);
+  ];
 }
 
 function buildSuggestionSlackHeading(params: {

@@ -572,6 +572,43 @@ describe('submitTaskSuggestions', () => {
     });
   });
 
+  it('keeps mixed-readiness suggestion batches above the old limit of five', async () => {
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: 'suggest_ideas',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const suggestions = Array.from({ length: 6 }, (_, index) => ({
+      title: `Suggestion ${index + 1}`,
+      brief: `Action ${index + 1}.`,
+      targetRepositoryFullName: 'acme/app',
+      ...(index % 2 === 0
+        ? {
+            targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+            workspaceReadiness: 'environment_backed',
+          }
+        : { workspaceReadiness: 'bare_repo' }),
+    }));
+
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/task_suggestions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ suggestions }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(insertedWorkItemValues).toHaveLength(6);
+  });
+
   it('still posts and leaves automationKey null for a user-initiated scan', async () => {
     mockTaskFindFirst.mockResolvedValue({
       initiatorUserId: 'user-1',
