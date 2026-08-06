@@ -50,6 +50,24 @@ Local development commonly uses `R_PUBLIC_URL`. Production deployments
 usually derive callbacks from the public app URL configured by the installer or
 Compose environment.
 
+During setup, Roomote shows the exact callback URL for the selected provider.
+Copy that value into the provider application instead of constructing it by
+hand.
+
+## Remove a provider configuration
+
+Admins can remove any saved source-control provider from **Settings > Source
+Control**. Roomote first attempts to remove external webhooks, then deletes the
+saved database configuration and any provider OAuth connection, then disconnects
+that provider's synced repositories. Removing a delegated Azure DevOps
+configuration also unlinks the account used by that connection.
+
+Process environment variables are not removed. If the provider is configured
+through deployment environment variables, remove or replace those values in the
+deployment configuration too. Roomote reports warnings when an external hook or
+OAuth cleanup cannot be completed, so review those warnings before reconnecting
+the provider.
+
 ## Related setup
 
 - [Environment Variables](/environment-variables) lists source-control env vars.
