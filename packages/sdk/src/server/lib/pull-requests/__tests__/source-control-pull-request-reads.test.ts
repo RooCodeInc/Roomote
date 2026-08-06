@@ -355,6 +355,104 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     });
   });
 
+  it('keeps outdated GitHub review threads anchored on their original line', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const graphql = vi.fn().mockResolvedValue({
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [
+              {
+                id: 'PRRT_live',
+                isResolved: false,
+                isOutdated: false,
+                path: 'src/index.ts',
+                line: 12,
+                originalLine: 12,
+                comments: {
+                  nodes: [
+                    {
+                      databaseId: 1,
+                      author: { login: 'roomote-dev[bot]' },
+                      body: 'Missing error handling here.',
+                      createdAt: '2026-08-01T00:00:00Z',
+                      url: null,
+                    },
+                  ],
+                },
+              },
+              {
+                id: 'PRRT_outdated',
+                isResolved: false,
+                isOutdated: true,
+                path: 'src/index.ts',
+                line: null,
+                originalLine: 42,
+                comments: {
+                  nodes: [
+                    {
+                      databaseId: 2,
+                      author: { login: 'roomote-dev[bot]' },
+                      body: 'This comparison uses the wrong field.',
+                      createdAt: '2026-08-01T00:00:00Z',
+                      url: null,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      graphql,
+      paginate: vi.fn().mockResolvedValue([]),
+      rest: {
+        pulls: { listReviewComments: vi.fn() },
+        issues: { listComments: vi.fn() },
+      },
+    });
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        sourceControlProvider: 'github',
+      },
+    });
+
+    if (!('threads' in result)) {
+      throw new Error('Expected a comments result.');
+    }
+
+    expect(result.threads).toEqual([
+      expect.objectContaining({
+        id: 'PRRT_live',
+        path: 'src/index.ts',
+        line: 12,
+        outdated: false,
+      }),
+      expect.objectContaining({
+        id: 'PRRT_outdated',
+        path: 'src/index.ts',
+        line: 42,
+        outdated: true,
+      }),
+    ]);
+  });
+
   it('maps GitLab discussions into threads and issue comments', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
@@ -440,6 +538,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         resolved: true,
         path: 'src/index.ts',
         line: 12,
+        outdated: null,
         comments: [
           {
             id: '1',
@@ -626,6 +725,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         resolved: true,
         path: '/src/index.ts',
         line: 8,
+        outdated: null,
         comments: [
           {
             id: '100',
@@ -648,6 +748,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         resolved: false,
         path: '/src/other.ts',
         line: 3,
+        outdated: null,
         comments: [
           {
             id: '102',
