@@ -166,9 +166,12 @@ describe('roomote MCP tool descriptions', () => {
     expect(automationsTool.config.description).toContain(
       'A request only to summarize or list action items is not suggested-task intent.',
     );
+    expect(automationsTool.config.description).toContain(
+      'Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work',
+    );
     expect(
       getInputSchemaField(automationsTool, 'prompt').description,
-    ).toContain('launchable suggested tasks alongside the report');
+    ).toContain('both a chat report destination and an executable workspace');
   });
 
   it('guides existing product task URLs toward task inspection actions', async () => {
