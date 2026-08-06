@@ -53,6 +53,7 @@ export type {
   SlackPostMessageResult,
   SlackResponse,
   SlackEvent,
+  SlackTaskEntryMessage,
   SlackThreadMessage,
   SlackConversationMessage,
   SlackFunctionExecutionInput,

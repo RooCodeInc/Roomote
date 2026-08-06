@@ -17,6 +17,7 @@ import {
   teamsActivityToQueuedCommunicationMessage,
 } from '@roomote/communication/teams-activity';
 import { queueCommunicationMessage } from '@roomote/communication/messages';
+import { reactionTaskEntryToQueuedMessage } from '@roomote/communication/reaction-task-entry';
 import {
   buildAccountLinkPromptText,
   buildAccountLinkThreadReplyText,
@@ -66,7 +67,7 @@ import {
 } from '@roomote/cloud-agents/server';
 
 import { apiLogger } from '../../logging.js';
-import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
+import { resolveReactionTaskEntry } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
@@ -1650,7 +1651,7 @@ teams.post('/', async (c) => {
     );
   }
 
-  let activity = parsed.data;
+  const activity = parsed.data;
   const verificationError = await verifyTeamsWebhookAuthorization({
     authorizationHeader: c.req.header('authorization'),
     activity,
@@ -1679,54 +1680,53 @@ teams.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'bot_activity' });
   }
 
+  let reactionEntry = null;
   if (activity.type === 'messageReaction') {
-    let configuration: Awaited<
-      ReturnType<typeof getCallRoomoteViaEmojiConfiguration>
-    > = null;
     for (const reaction of activity.reactionsAdded ?? []) {
       if (!isTeamsNativeReactionType(reaction.type)) {
         continue;
       }
-      configuration = await getCallRoomoteViaEmojiConfiguration(reaction.type);
-      if (configuration) {
+      const targetMessageId = activity.replyToId?.trim() ?? '';
+      reactionEntry = await resolveReactionTaskEntry({
+        reaction: reaction.type,
+        requester: {
+          id: activity.from?.id ?? 'teams-user',
+          name: activity.from?.name ?? activity.from?.id ?? 'Teams user',
+        },
+        sourceEventId: activity.id ?? randomUUID(),
+        target: {
+          channelId: activity.conversation.id,
+          messageId: targetMessageId,
+          threadId: targetMessageId,
+        },
+      });
+      if (reactionEntry) {
+        if (!targetMessageId) {
+          return c.json({ ok: true, ignored: 'reaction_target_missing' });
+        }
         break;
       }
     }
 
-    if (!configuration) {
+    if (!reactionEntry) {
       return c.json({ ok: true, ignored: 'reaction_not_configured' });
     }
-
-    const targetMessageId = activity.replyToId?.trim();
-    if (!targetMessageId) {
-      return c.json({ ok: true, ignored: 'reaction_target_missing' });
-    }
-
-    const mentionName = activity.recipient?.name?.trim() || PRODUCT_NAME;
-    const mentionText = `<at>${mentionName}</at>`;
-    activity = {
-      ...activity,
-      type: 'message',
-      id: activity.id ?? randomUUID(),
-      text: `${mentionText} ${configuration.prompt}`,
-      replyToId: targetMessageId,
-      entities: [
-        {
-          type: 'mention',
-          text: mentionText,
-          mentioned: activity.recipient,
-        },
-      ],
-      reactionsAdded: undefined,
-    };
   }
 
   await persistTeamsInstallationFromActivity(activity);
 
   const mappedUserId = await findMappedTeamsUserId(activity);
-  let queuedMessage = teamsActivityToQueuedCommunicationMessage(activity, {
-    ...(mappedUserId ? { userId: mappedUserId } : {}),
-  }) as QueuedTeamsCommunicationMessage | null;
+  let queuedMessage = (
+    reactionEntry
+      ? reactionTaskEntryToQueuedMessage(
+          'teams',
+          reactionEntry,
+          mappedUserId ?? undefined,
+        )
+      : teamsActivityToQueuedCommunicationMessage(activity, {
+          ...(mappedUserId ? { userId: mappedUserId } : {}),
+        })
+  ) as QueuedTeamsCommunicationMessage | null;
 
   if (!queuedMessage) {
     return c.json({ ok: true, ignored: 'unsupported_activity' });
@@ -1748,7 +1748,7 @@ teams.post('/', async (c) => {
   });
 
   if (!activeRun) {
-    if (!isTeamsTaskEntryActivity(activity)) {
+    if (!reactionEntry && !isTeamsTaskEntryActivity(activity)) {
       // Replying to the bot in a thread it owns needs no @-mention unless
       // somebody else sent a message or was mentioned since the bot's last
       // message. Mirrors the Slack unmentioned thread-reply routing.

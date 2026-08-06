@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { QueuedCommunicationMessage } from '@roomote/types';
+import { reactionTaskEntrySchema } from './reaction-task-entry';
 
 export const discordUserSchema = z
   .object({
@@ -196,6 +197,7 @@ const discordReactionAddEnvelopeSchema = z
     eventType: z.literal('MESSAGE_REACTION_ADD'),
     payload: discordReactionAddSchema,
     receivedAt: z.string().datetime(),
+    reactionTaskEntry: reactionTaskEntrySchema.optional(),
   })
   .passthrough();
 

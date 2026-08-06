@@ -60,6 +60,7 @@ import type {
   SlackEvent,
   SlackInteractivePayload,
   SlackMessage,
+  SlackTaskEntryMessage,
   SlackThreadMessage,
 } from './types';
 import {
@@ -807,7 +808,7 @@ export async function showTaskConfiguration({
   processingReactionName,
   routingFailureNoticeText,
 }: {
-  event: SlackEvent;
+  event: SlackTaskEntryMessage;
   slackInstallation: SlackInstallation;
   userMapping: SlackUserMapping;
   slack: SlackNotifier;

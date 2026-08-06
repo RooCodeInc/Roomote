@@ -33,7 +33,7 @@ import {
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../../logging.js';
-import { getCallRoomoteViaEmojiConfiguration } from '../../call-roomote-via-emoji.js';
+import { resolveReactionTaskEntry } from '../../call-roomote-via-emoji.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../../tasks/orphaned-work-item-run.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
@@ -48,16 +48,25 @@ import {
   type TaskSuggestionReactionLaunchResult,
   type TaskSuggestionReactionState,
 } from './task-suggestion-reaction-contention.js';
-import { handleMessageOrAppMentionEvent } from './message-entry.js';
+import { handleSlackReactionTaskEntry } from './message-entry.js';
 
 export async function maybeCallRoomoteViaEmoji(params: {
   context: SlackWebhookContext;
   event: SlackReactionAddedEvent;
 }): Promise<boolean> {
-  const configuration = await getCallRoomoteViaEmojiConfiguration(
-    params.event.reaction,
-  );
-  if (!configuration) {
+  const entry = await resolveReactionTaskEntry({
+    reaction: params.event.reaction,
+    requester: {
+      id: params.event.user,
+      name: params.event.user,
+    },
+    sourceEventId: params.event.event_ts,
+    target: {
+      channelId: params.event.item.channel,
+      messageId: params.event.item.ts,
+    },
+  });
+  if (!entry) {
     return false;
   }
 
@@ -72,15 +81,14 @@ export async function maybeCallRoomoteViaEmoji(params: {
     return true;
   }
 
-  await handleMessageOrAppMentionEvent({
+  await handleSlackReactionTaskEntry({
     context: params.context,
-    event: {
-      type: 'app_mention',
-      channel: params.event.item.channel,
-      user: params.event.user,
-      text: `<@${params.context.slackInstallation.botUserId}> ${configuration.prompt}`,
-      ts: params.event.item.ts,
-      thread_ts: targetMessage.thread_ts ?? targetMessage.ts,
+    entry: {
+      ...entry,
+      target: {
+        ...entry.target,
+        threadId: targetMessage.thread_ts ?? targetMessage.ts,
+      },
     },
   });
 

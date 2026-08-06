@@ -9,6 +9,7 @@ vi.mock('@roomote/db/server', () => ({
 import {
   CALL_ROOMOTE_VIA_EMOJI_PROMPT,
   getCallRoomoteViaEmojiConfiguration,
+  resolveReactionTaskEntry,
 } from './call-roomote-via-emoji';
 
 describe('Call Roomote via emoji configuration', () => {
@@ -41,6 +42,36 @@ describe('Call Roomote via emoji configuration', () => {
       getCallRoomoteViaEmojiConfiguration('white_check_mark'),
     ).resolves.toMatchObject({
       prompt: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
+    });
+  });
+
+  it('returns the explicit task-entry contract for a configured reaction', async () => {
+    getAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      instructions: null,
+      settings: { emoji: 'white_check_mark' },
+    });
+
+    await expect(
+      resolveReactionTaskEntry({
+        reaction: 'white_check_mark',
+        requester: { id: 'provider-user-1', name: 'Ada Lovelace' },
+        sourceEventId: 'reaction-event-1',
+        target: {
+          channelId: 'channel-1',
+          messageId: 'message-1',
+          threadId: 'thread-1',
+        },
+      }),
+    ).resolves.toEqual({
+      prompt: 'Act on this',
+      requester: { id: 'provider-user-1', name: 'Ada Lovelace' },
+      sourceEventId: 'reaction-event-1',
+      target: {
+        channelId: 'channel-1',
+        messageId: 'message-1',
+        threadId: 'thread-1',
+      },
     });
   });
 

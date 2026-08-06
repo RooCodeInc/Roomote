@@ -269,7 +269,16 @@ vi.mock('../unmentioned-thread-reply.js', () => ({
 }));
 
 vi.mock('../../call-roomote-via-emoji.js', () => ({
-  getCallRoomoteViaEmojiConfiguration: callViaEmojiConfigMock,
+  resolveReactionTaskEntry: async (input: {
+    reaction: string;
+    requester: { id: string; name: string };
+    sourceEventId: string;
+    target: { channelId: string; messageId: string; threadId: string };
+  }) => {
+    const { reaction, ...entry } = input;
+    const configuration = await callViaEmojiConfigMock(reaction);
+    return configuration ? { ...entry, prompt: configuration.prompt } : null;
+  },
 }));
 
 import { teams } from '../index';
@@ -438,7 +447,7 @@ describe('Teams webhook handler', () => {
       77,
       expect.objectContaining({
         provider: 'teams',
-        text: 'Act on this Additional instructions: Prioritize safety.',
+        text: 'Act on this\n\nAdditional instructions:\nPrioritize safety.',
         ts: 'reaction-1',
         threadTs: 'activity-root',
       }),

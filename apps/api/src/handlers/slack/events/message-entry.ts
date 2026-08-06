@@ -1,4 +1,5 @@
 import { Env } from '@roomote/env';
+import type { ReactionTaskEntry } from '@roomote/communication/reaction-task-entry';
 import {
   AUTO_START_CHANNEL_CACHE_TTL_SECONDS,
   getRedis,
@@ -17,6 +18,8 @@ import {
   getSlackThreadReplyFooterMessageTs,
   isTargetSlackBotMessage,
   markSlackThreadExplicitMentionRequired,
+  postSlackAccountLinkThreadReply,
+  promptSlackAccountLink,
   resolveSlackReactionNames,
   showConnectAccount,
   showTaskConfiguration,
@@ -24,6 +27,7 @@ import {
   startAutoRoutedSlackTask,
   type SlackEvent,
   type SlackNotifier,
+  type SlackTaskEntryMessage,
   type SlackThreadMessage,
 } from '@roomote/slack';
 import {
@@ -84,6 +88,7 @@ import {
   mentionsSlackUserOtherThanBotWithoutMentioningBot,
 } from '../helpers/mention-routing.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+import { buildSlackReactionTaskEntryDispatch } from '../reaction-task-entry.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 import {
   compareNumericMessageIds,
@@ -156,7 +161,7 @@ async function runSlackAutoConfirm({
 }
 
 async function processNewTaskConfiguration(
-  event: SlackEvent,
+  event: SlackTaskEntryMessage,
   slackInstallation: SlackInstallation,
   userMapping: SlackUserMapping,
   slack: SlackNotifier,
@@ -577,7 +582,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
 }
 
 async function startNewTaskConfigurationWithLock(params: {
-  event: SlackEvent;
+  event: SlackTaskEntryMessage;
   slackInstallation: SlackInstallation;
   userMapping: SlackUserMapping;
   slack: SlackNotifier;
@@ -1466,6 +1471,149 @@ function startFastAgentResponse(params: {
   });
 }
 
+async function dispatchSlackTaskEntry(params: {
+  message: SlackTaskEntryMessage;
+  ackTimestamp: string;
+  slackInstallation: SlackInstallation;
+  userMapping: SlackUserMapping;
+  slack: SlackNotifier;
+  ackEmoji: string;
+  completionEmoji: string;
+  prefetchedThreadMessages?: SlackThreadMessage[];
+}): Promise<void> {
+  const {
+    message,
+    ackTimestamp,
+    slackInstallation,
+    userMapping,
+    slack,
+    ackEmoji,
+    completionEmoji,
+    prefetchedThreadMessages,
+  } = params;
+  const threadId = message.thread_ts || message.ts;
+
+  await slack.addReaction({
+    channel: message.channel,
+    timestamp: ackTimestamp,
+    name: ackEmoji,
+  });
+
+  const followUpRoute = await resolveSlackThreadFollowUpRoute({
+    threadId,
+    prefetchedActiveRun: null,
+  });
+  const startFreshTaskConfiguration = async (errorLogPrefix: string) => {
+    await startNewTaskConfigurationWithLock({
+      event: message,
+      slackInstallation,
+      userMapping,
+      slack,
+      threadId,
+      errorLogPrefix,
+      processingReactionName: ackEmoji,
+    }).catch((lockError) => {
+      console.error(
+        `❌ Failed to acquire routing lock for thread ${threadId}:`,
+        lockError instanceof Error ? lockError.message : String(lockError),
+      );
+    });
+  };
+
+  await dispatchSlackThreadFollowUp({
+    route: followUpRoute,
+    slack,
+    channel: message.channel,
+    threadId,
+    onActive: async (activeThreadRun) => {
+      apiLogger.debug(
+        `Found active task run ${activeThreadRun.id} for thread ${threadId} - queuing message for continuation`,
+      );
+
+      processActiveRunMessage(
+        message,
+        slack,
+        userMapping.userId,
+        activeThreadRun,
+        slackInstallation.botUserId,
+        prefetchedThreadMessages,
+      ).catch((error) => {
+        console.error(
+          `❌ Background processing failed for active task run ${activeThreadRun.id}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+    },
+    onResume: async (completedRun) => {
+      apiLogger.debug(
+        `[SlackWebhook] Found completed task run ${completedRun.id} with snapshot ${completedRun.snapshotId} for thread ${threadId} - creating SnapshotResume`,
+      );
+
+      void processSnapshotResume(
+        message,
+        slack,
+        completedRun,
+        threadId,
+        userMapping.userId,
+        ackEmoji,
+        completionEmoji,
+        slackInstallation.botUserId,
+      )
+        .then(async (handled) => {
+          if (handled) {
+            return;
+          }
+
+          apiLogger.debug(
+            `[SlackWebhook] Resume not handled for thread ${threadId} - falling back to new task configuration`,
+          );
+
+          await startFreshTaskConfiguration(
+            `❌ Background task configuration fallback failed for thread ${threadId}:`,
+          );
+        })
+        .catch(async (error) => {
+          if (isDeploymentReadOnlyError(error)) {
+            await slack.postMessage({
+              channel: message.channel,
+              thread_ts: threadId,
+              text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+              blocks: [
+                {
+                  type: 'markdown',
+                  text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+                },
+              ],
+            });
+            return;
+          }
+
+          console.error(
+            `❌ Background snapshot resume failed for thread ${threadId}:`,
+            error instanceof Error ? error.message : String(error),
+          );
+
+          await startFreshTaskConfiguration(
+            `❌ Background task configuration fallback failed for thread ${threadId}:`,
+          );
+        });
+
+      return { handled: true, value: undefined };
+    },
+    onFresh: async () => {
+      if (followUpRoute.kind === 'fresh') {
+        apiLogger.debug(
+          `No active task run found for thread ${threadId} - processing in background`,
+        );
+      }
+
+      await startFreshTaskConfiguration(
+        `❌ Background task configuration failed for thread ${threadId}:`,
+      );
+    },
+  });
+}
+
 async function handleSlackEntryEvent(params: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
@@ -1645,124 +1793,15 @@ async function handleSlackEntryEvent(params: {
     return;
   }
 
-  await slack.addReaction({
-    channel: event.channel,
-    timestamp: event.ts,
-    name: ackEmoji,
-  });
-
-  const followUpRoute = await resolveSlackThreadFollowUpRoute({
-    threadId,
-    prefetchedActiveRun: null,
-  });
-  const startFreshTaskConfiguration = async (errorLogPrefix: string) => {
-    await startNewTaskConfigurationWithLock({
-      event,
-      slackInstallation,
-      userMapping,
-      slack,
-      threadId,
-      errorLogPrefix,
-      processingReactionName: ackEmoji,
-    }).catch((lockError) => {
-      console.error(
-        `❌ Failed to acquire routing lock for thread ${threadId}:`,
-        lockError instanceof Error ? lockError.message : String(lockError),
-      );
-    });
-  };
-
-  await dispatchSlackThreadFollowUp({
-    route: followUpRoute,
+  await dispatchSlackTaskEntry({
+    message: event,
+    ackTimestamp: event.ts,
+    slackInstallation,
+    userMapping,
     slack,
-    channel: event.channel,
-    threadId,
-    onActive: async (activeThreadRun) => {
-      apiLogger.debug(
-        `Found active task run ${activeThreadRun.id} for thread ${threadId} - queuing message for continuation`,
-      );
-
-      processActiveRunMessage(
-        event,
-        slack,
-        userMapping.userId,
-        activeThreadRun,
-        slackInstallation.botUserId,
-        prefetchedThreadMessages,
-      ).catch((error) => {
-        console.error(
-          `❌ Background processing failed for active task run ${activeThreadRun.id}:`,
-          error instanceof Error ? error.message : String(error),
-        );
-      });
-    },
-    onResume: async (completedRun) => {
-      apiLogger.debug(
-        `[SlackWebhook] Found completed task run ${completedRun.id} with snapshot ${completedRun.snapshotId} for thread ${threadId} - creating SnapshotResume`,
-      );
-
-      void processSnapshotResume(
-        event,
-        slack,
-        completedRun,
-        threadId,
-        userMapping.userId,
-        ackEmoji,
-        completionEmoji,
-        slackInstallation.botUserId,
-      )
-        .then(async (handled) => {
-          if (handled) {
-            return;
-          }
-
-          apiLogger.debug(
-            `[SlackWebhook] Resume not handled for thread ${threadId} - falling back to new task configuration`,
-          );
-
-          await startFreshTaskConfiguration(
-            `❌ Background task configuration fallback failed for thread ${threadId}:`,
-          );
-        })
-        .catch(async (error) => {
-          if (isDeploymentReadOnlyError(error)) {
-            await slack.postMessage({
-              channel: event.channel,
-              thread_ts: threadId,
-              text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-              blocks: [
-                {
-                  type: 'markdown',
-                  text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-                },
-              ],
-            });
-            return;
-          }
-
-          console.error(
-            `❌ Background snapshot resume failed for thread ${threadId}:`,
-            error instanceof Error ? error.message : String(error),
-          );
-
-          await startFreshTaskConfiguration(
-            `❌ Background task configuration fallback failed for thread ${threadId}:`,
-          );
-        });
-
-      return { handled: true, value: undefined };
-    },
-    onFresh: async () => {
-      if (followUpRoute.kind === 'fresh') {
-        apiLogger.debug(
-          `No active task run found for thread ${threadId} - processing in background`,
-        );
-      }
-
-      await startFreshTaskConfiguration(
-        `❌ Background task configuration failed for thread ${threadId}:`,
-      );
-    },
+    ackEmoji,
+    completionEmoji,
+    prefetchedThreadMessages,
   });
 }
 
@@ -1856,5 +1895,46 @@ export async function handleMessageOrAppMentionEvent(params: {
     prefetchedThreadMessages: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.threadMessages
       : undefined,
+  });
+}
+
+export async function handleSlackReactionTaskEntry(params: {
+  entry: ReactionTaskEntry;
+  context: SlackWebhookContext;
+}): Promise<void> {
+  const { entry, context } = params;
+  const { ackEmoji, completionEmoji } = await resolveSlackReactionNames();
+  const { activeMapping: userMapping } = await lookupSlackUserMapping({
+    slackUserId: entry.requester.id,
+    teamId: context.teamId,
+  });
+  const threadId = entry.target.threadId ?? entry.target.messageId;
+
+  if (!userMapping) {
+    const promptResult = await promptSlackAccountLink({
+      slackUserId: entry.requester.id,
+      channel: entry.target.channelId,
+      threadTs: threadId,
+      originalText: entry.prompt,
+      slackInstallation: context.slackInstallation,
+      slack: context.slack,
+    });
+    await postSlackAccountLinkThreadReply({
+      slack: context.slack,
+      channel: entry.target.channelId,
+      threadTs: threadId,
+      slackUserId: entry.requester.id,
+      dmPromptSent: promptResult.dmPromptSent,
+    });
+    return;
+  }
+
+  await dispatchSlackTaskEntry({
+    ...buildSlackReactionTaskEntryDispatch(entry),
+    slackInstallation: context.slackInstallation,
+    userMapping,
+    slack: context.slack,
+    ackEmoji,
+    completionEmoji,
   });
 }
