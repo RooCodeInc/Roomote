@@ -96,7 +96,7 @@ const taskSuggestionSchema = z.object({
 });
 
 const submitTaskSuggestionsBodySchema = z.object({
-  suggestions: z.array(taskSuggestionSchema).max(5),
+  suggestions: z.array(taskSuggestionSchema).max(10),
   delivery: z.literal('current_thread').optional(),
   submissionKey: z.string().trim().min(1).max(200).optional(),
 });

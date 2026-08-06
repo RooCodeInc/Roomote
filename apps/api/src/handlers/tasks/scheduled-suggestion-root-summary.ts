@@ -21,7 +21,7 @@ export type RootSummarySuggestion = {
 
 /**
  * The Suggested Tasks (suggester) parent note must always be composed
- * deterministically from the structured submit_task_suggestions payload.
+ * deterministically from the structured suggestions payload.
  * Routing the parent note through a free-text model call lets raw model
  * narration (including harness output such as CLI run headers) become the
  * channel parent message, so the suggester never uses the generated summary.
