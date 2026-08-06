@@ -351,7 +351,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
       'minimax-m3': 'vercel/minimax/minimax-m3',
-      'mimo-v2-5': 'vercel/xiaomi/mimo-v2.5',
       'grok-4-5': 'vercel/xai/grok-4.5',
     }),
     // Vision is unset: the recommended coding model is multimodal, so image
@@ -636,7 +635,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'grok-4-5': 'opencode-go/grok-4.5',
       'kimi-k2-7-code': 'opencode-go/kimi-k2.7-code',
       'kimi-k3': 'opencode-go/kimi-k3',
-      'mimo-v2-5': 'opencode-go/mimo-v2.5',
       'minimax-m3': 'opencode-go/minimax-m3',
       'qwen3-8-max': 'opencode-go/qwen3.8-max',
     }),
