@@ -215,6 +215,13 @@ const gitLabDiscussionSchema = z
   })
   .passthrough();
 
+const gitLabMergeRequestDiffEntrySchema = z
+  .object({
+    old_path: z.string().optional(),
+    new_path: z.string().optional(),
+  })
+  .passthrough();
+
 const giteaCreatedCommentSchema = z
   .object({
     id: z.number().int(),
@@ -838,6 +845,14 @@ async function writeGitLabMergeRequest({
         );
       }
 
+      const positionPaths = await resolveGitLabPositionPaths({
+        fetchImpl,
+        apiBaseUrl,
+        tokenHeader,
+        mergeRequestPath,
+        path,
+      });
+
       const response = await performRequest({
         fetchImpl,
         method: 'POST',
@@ -850,8 +865,8 @@ async function writeGitLabMergeRequest({
             base_sha: diffRefs.base_sha,
             start_sha: diffRefs.start_sha,
             head_sha: diffRefs.head_sha,
-            new_path: path,
-            old_path: path,
+            new_path: positionPaths.newPath,
+            old_path: positionPaths.oldPath,
             ...(side === 'RIGHT' ? { new_line: line } : { old_line: line }),
           },
         },
@@ -1079,6 +1094,63 @@ async function submitGitLabReview({
     applied: !approveRejected,
     warnings,
   });
+}
+
+/**
+ * GitLab positions must carry the file's real old_path and new_path; for
+ * renamed files they differ and a same-path position is rejected. Scan the
+ * merge request diff list for the entry matching the requested path by either
+ * name, falling back to the same-path pair when the file cannot be found.
+ */
+async function resolveGitLabPositionPaths({
+  fetchImpl,
+  apiBaseUrl,
+  tokenHeader,
+  mergeRequestPath,
+  path,
+}: {
+  fetchImpl: FetchImpl;
+  apiBaseUrl: string;
+  tokenHeader: { name: string; value: string };
+  mergeRequestPath: string;
+  path: string;
+}): Promise<{ oldPath: string; newPath: string }> {
+  const maxPages = 5;
+
+  for (let page = 1; page <= maxPages; page++) {
+    const response = await performRequest({
+      fetchImpl,
+      url: buildApiUrl(apiBaseUrl, `${mergeRequestPath}/diffs`, {
+        page,
+        per_page: 100,
+      }),
+      tokenHeader,
+    });
+
+    if (response.status !== 200) {
+      break;
+    }
+
+    const entries = z
+      .array(gitLabMergeRequestDiffEntrySchema)
+      .parse(await response.json());
+    const entry = entries.find(
+      (candidate) => candidate.new_path === path || candidate.old_path === path,
+    );
+
+    if (entry) {
+      return {
+        oldPath: entry.old_path ?? path,
+        newPath: entry.new_path ?? path,
+      };
+    }
+
+    if (entries.length < 100) {
+      break;
+    }
+  }
+
+  return { oldPath: path, newPath: path };
 }
 
 async function createGitLabNote({

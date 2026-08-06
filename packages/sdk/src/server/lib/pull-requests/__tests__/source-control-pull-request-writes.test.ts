@@ -880,6 +880,11 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
           }),
         )
         .mockResolvedValueOnce(
+          jsonResponse([
+            { old_path: 'src/index.ts', new_path: 'src/index.ts' },
+          ]),
+        )
+        .mockResolvedValueOnce(
           jsonResponse({ id: 'disc-9', notes: [{ id: 601 }] }, 201),
         );
 
@@ -907,6 +912,11 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       );
       expect(fetchImpl).toHaveBeenNthCalledWith(
         2,
+        'https://gitlab.com/api/v4/projects/101/merge_requests/42/diffs?page=1&per_page=100',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(fetchImpl).toHaveBeenNthCalledWith(
+        3,
         'https://gitlab.com/api/v4/projects/101/merge_requests/42/discussions',
         expect.objectContaining({
           method: 'POST',
@@ -952,6 +962,11 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
             },
           }),
         )
+        .mockResolvedValueOnce(
+          jsonResponse([
+            { old_path: 'src/index.ts', new_path: 'src/index.ts' },
+          ]),
+        )
         .mockResolvedValueOnce(jsonResponse({ id: 'disc-9' }, 201));
 
       await writeSourceControlPullRequestForTaskRun({
@@ -973,10 +988,104 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       });
 
       const discussionBody = JSON.parse(
-        (fetchImpl.mock.calls[1]?.[1] as { body: string }).body,
+        (fetchImpl.mock.calls[2]?.[1] as { body: string }).body,
       ) as { position: Record<string, unknown> };
       expect(discussionBody.position.old_line).toBe(17);
       expect(discussionBody.position.new_line).toBeUndefined();
+    });
+
+    it('resolves the real old_path for renamed files from the merge request diffs', async () => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://gitlab.com/acme/backend',
+      });
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            diff_refs: {
+              base_sha: 'base1',
+              start_sha: 'start1',
+              head_sha: 'head1',
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse([
+            { old_path: 'src/legacy/index.ts', new_path: 'src/index.ts' },
+          ]),
+        )
+        .mockResolvedValueOnce(jsonResponse({ id: 'disc-9' }, 201));
+
+      await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+        }),
+        input: {
+          action: 'create_pull_request_review_comment',
+          repositoryFullName: 'acme/backend',
+          prNumber: 42,
+          path: 'src/index.ts',
+          line: 42,
+          body: 'Missing error handling here.',
+          sourceControlProvider: 'gitlab',
+        },
+        fetchImpl,
+      });
+
+      const discussionBody = JSON.parse(
+        (fetchImpl.mock.calls[2]?.[1] as { body: string }).body,
+      ) as { position: Record<string, unknown> };
+      expect(discussionBody.position.new_path).toBe('src/index.ts');
+      expect(discussionBody.position.old_path).toBe('src/legacy/index.ts');
+    });
+
+    it('falls back to the same-path pair when the diff listing is unavailable', async () => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://gitlab.com/acme/backend',
+      });
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            diff_refs: {
+              base_sha: 'base1',
+              start_sha: 'start1',
+              head_sha: 'head1',
+            },
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse({ message: 'nope' }, 500))
+        .mockResolvedValueOnce(jsonResponse({ id: 'disc-9' }, 201));
+
+      await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+        }),
+        input: {
+          action: 'create_pull_request_review_comment',
+          repositoryFullName: 'acme/backend',
+          prNumber: 42,
+          path: 'src/index.ts',
+          line: 42,
+          body: 'Missing error handling here.',
+          sourceControlProvider: 'gitlab',
+        },
+        fetchImpl,
+      });
+
+      const discussionBody = JSON.parse(
+        (fetchImpl.mock.calls[2]?.[1] as { body: string }).body,
+      ) as { position: Record<string, unknown> };
+      expect(discussionBody.position.new_path).toBe('src/index.ts');
+      expect(discussionBody.position.old_path).toBe('src/index.ts');
     });
 
     it('maps a GitLab 400 on discussions to a retryable anchor rejection', async () => {
@@ -996,6 +1105,11 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
               head_sha: 'head1',
             },
           }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse([
+            { old_path: 'src/index.ts', new_path: 'src/index.ts' },
+          ]),
         )
         .mockResolvedValueOnce(
           jsonResponse({ message: 'line_code must be a valid line code' }, 400),
@@ -1079,6 +1193,11 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
               head_sha: 'head1',
             },
           }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse([
+            { old_path: 'src/index.ts', new_path: 'src/index.ts' },
+          ]),
         )
         .mockResolvedValueOnce(jsonResponse({ id: 'disc-9' }, 201));
 
