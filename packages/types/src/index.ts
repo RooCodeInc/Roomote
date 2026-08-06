@@ -21,6 +21,7 @@ export * from './constants';
 export * from './deploy-marker';
 export * from './deployment-access-policy';
 export * from './environment-config';
+export * from './environment-management';
 export * from './reserved-mcp-env-vars';
 export * from './environment-definition-tasks';
 export * from './eval-harness-selection';

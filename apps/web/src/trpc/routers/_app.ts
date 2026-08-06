@@ -394,7 +394,11 @@ import {
 } from '../commands/product-releases';
 import { getStatuspageIncident } from '@roomote/slack';
 
-const standardTaskPayloadSchema = standardTaskSchema.shape.payload;
+const standardTaskPayloadSchema = standardTaskSchema.shape.payload.omit({
+  environmentDefinitionId: true,
+  environmentManagementMode: true,
+  verifiesEnvironmentId: true,
+});
 const stateRecordSchema = z.record(z.string());
 
 function assertAdmin(auth: { isAdmin: boolean }) {

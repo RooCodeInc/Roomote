@@ -224,6 +224,24 @@ const freshEnqueueInputSchema = z.object({
   prLinkage: taskPrLinkageSchema.optional(),
 });
 
+const userFreshEnqueueInputSchema = freshEnqueueInputSchema.superRefine(
+  (input, ctx) => {
+    const payload = input.task.payload as Record<string, unknown>;
+
+    if (
+      input.workflow === 'setup_onboarding' ||
+      payload.environmentManagementMode !== undefined ||
+      payload.verifiesEnvironmentId !== undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Environment management launches must use a trusted server launch path.',
+      });
+    }
+  },
+);
+
 /**
  * A resume attaches a new run to the source run's task. It never creates a
  * task and never re-attributes; the resumer becomes the run's actingUserId.
@@ -234,7 +252,7 @@ const resumeEnqueueInputSchema = z.object({
 });
 
 const enqueueTaskInputSchema = z.union([
-  freshEnqueueInputSchema,
+  userFreshEnqueueInputSchema,
   resumeEnqueueInputSchema,
 ]);
 

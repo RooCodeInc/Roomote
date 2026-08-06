@@ -937,6 +937,7 @@ export async function startEnvironmentDefinitionTaskCommand(
       type: TaskPayloadKind.StandardTask,
       payload: {
         ...workspacePayload,
+        environmentManagementMode: input.environmentId ? 'update' : 'create',
         ...(input.environmentId
           ? { environmentDefinitionId: input.environmentId }
           : {}),
@@ -1107,6 +1108,7 @@ export async function retryEnvironmentVerificationCommand(
             repo: ALL_REPOSITORIES,
             environmentId: environment.id,
             verifiesEnvironmentId: environment.id,
+            environmentManagementMode: 'verify',
             description: prompt,
           },
         },

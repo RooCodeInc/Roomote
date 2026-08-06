@@ -7,7 +7,11 @@ import {
   recordEnvironmentVerification,
   taskRuns,
 } from '@roomote/db/server';
-import { getEnvironmentDefinitionIdFromPayload } from '@roomote/types';
+import {
+  canPerformEnvironmentManagementAction,
+  getEnvironmentDefinitionIdFromPayload,
+  resolveEnvironmentManagementMode,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -81,7 +85,8 @@ async function resolveVerificationCaller(
 
   const taskRun = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, runId),
-    columns: { taskId: true, payload: true },
+    columns: { taskId: true, payload: true, payloadKind: true },
+    with: { task: { columns: { workflow: true } } },
   });
 
   if (!taskRun?.taskId) {
@@ -93,6 +98,16 @@ async function resolveVerificationCaller(
   }
 
   const payload = taskRun.payload as Record<string, unknown>;
+  const mode = resolveEnvironmentManagementMode({
+    payloadKind: taskRun.payloadKind,
+    payload,
+    workflow: taskRun.task.workflow,
+  });
+
+  if (!canPerformEnvironmentManagementAction(mode, 'record_verification')) {
+    return null;
+  }
+
   const marker = payload.verifiesEnvironmentId;
 
   const authorizedEnvironmentId =
