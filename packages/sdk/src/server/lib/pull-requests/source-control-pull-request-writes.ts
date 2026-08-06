@@ -1115,7 +1115,11 @@ async function resolveGitLabPositionPaths({
   mergeRequestPath: string;
   path: string;
 }): Promise<{ oldPath: string; newPath: string }> {
-  const maxPages = 5;
+  // Scan the complete diff listing (a page shorter than per_page ends it).
+  // GitLab's own diff rendering hard-caps merge requests around 3,000
+  // changed files, so this backstop is unreachable in practice and exists
+  // only as a runaway guard.
+  const maxPages = 50;
 
   for (let page = 1; page <= maxPages; page++) {
     const response = await performRequest({

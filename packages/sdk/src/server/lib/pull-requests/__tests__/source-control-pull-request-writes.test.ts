@@ -1043,6 +1043,64 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
       expect(discussionBody.position.old_path).toBe('src/legacy/index.ts');
     });
 
+    it('keeps scanning diff pages until the renamed file is found', async () => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://gitlab.com/acme/backend',
+      });
+      const fillerPage = Array.from({ length: 100 }, (_, i) => ({
+        old_path: `src/other-${i}.ts`,
+        new_path: `src/other-${i}.ts`,
+      }));
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            diff_refs: {
+              base_sha: 'base1',
+              start_sha: 'start1',
+              head_sha: 'head1',
+            },
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse(fillerPage))
+        .mockResolvedValueOnce(
+          jsonResponse([
+            { old_path: 'src/legacy/index.ts', new_path: 'src/index.ts' },
+          ]),
+        )
+        .mockResolvedValueOnce(jsonResponse({ id: 'disc-9' }, 201));
+
+      await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+        }),
+        input: {
+          action: 'create_pull_request_review_comment',
+          repositoryFullName: 'acme/backend',
+          prNumber: 42,
+          path: 'src/index.ts',
+          line: 42,
+          body: 'Missing error handling here.',
+          sourceControlProvider: 'gitlab',
+        },
+        fetchImpl,
+      });
+
+      expect(fetchImpl).toHaveBeenNthCalledWith(
+        3,
+        'https://gitlab.com/api/v4/projects/101/merge_requests/42/diffs?page=2&per_page=100',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      const discussionBody = JSON.parse(
+        (fetchImpl.mock.calls[3]?.[1] as { body: string }).body,
+      ) as { position: Record<string, unknown> };
+      expect(discussionBody.position.old_path).toBe('src/legacy/index.ts');
+    });
+
     it('falls back to the same-path pair when the diff listing is unavailable', async () => {
       mockRepositoriesFindFirst.mockResolvedValue({
         installationId: null,
