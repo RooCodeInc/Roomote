@@ -45,7 +45,7 @@ Structure guidance:
 - Use short, concise sentences. Keep each paragraph to 30 words or less. This is very important.
 - Limit to 4 paragraphs total.
 - The first paragraph should summarize the user's goals and motivation
-- The last paragraph should summmarize the final outcome
+- The last paragraph should summarize the final outcome
 - The middle paragraphs should cover key discussions and decisions
 - Don't use headings
 
