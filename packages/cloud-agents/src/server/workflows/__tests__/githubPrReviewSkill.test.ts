@@ -360,6 +360,29 @@ describe('review-code GitHub workflow paths', () => {
     expect(skillContent).toContain(
       '<scenario name="inline_comment_anchor_rejected">',
     );
+    for (const appendixName of [
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+    ]) {
+      const appendix = readAppendix(skillContent, appendixName);
+      expect(appendix).toContain(
+        'A thread whose `outdated` flag is true reports its original anchor line and means the flagged lines were changed by later commits',
+      );
+      expect(appendix).toContain(
+        'Match threads by file and line including threads whose `outdated` flag is true',
+      );
+    }
+    for (const appendixName of [
+      'review-github-pr',
+      'review-github-pr-with-approval',
+      'sync-github-pr-review',
+      'sync-github-pr-review-with-approval',
+    ]) {
+      const appendix = readAppendix(skillContent, appendixName);
+      expect(appendix).toContain(
+        'Treat a thread whose `outdated` flag is true as a weaker match for new findings',
+      );
+    }
     expect(skillContent).not.toContain('finding_without_thread_anchor');
     expect(skillContent).not.toContain(
       'no batch API for creating new line-anchored inline comments',
