@@ -311,6 +311,7 @@ export async function writeSourceControl(
     action:
       | 'reply_to_pull_request_comment'
       | 'create_pull_request_comment'
+      | 'create_pull_request_review_comment'
       | 'resolve_pull_request_thread'
       | 'submit_pull_request_review'
       | 'update_pull_request_comment';
@@ -321,6 +322,11 @@ export async function writeSourceControl(
     body?: string;
     resolved?: boolean;
     reviewEvent?: 'approve' | 'request_changes' | 'comment';
+    path?: string;
+    line?: number;
+    side?: 'LEFT' | 'RIGHT';
+    startLine?: number;
+    startSide?: 'LEFT' | 'RIGHT';
     sourceControlProvider?: SourceControlProvider;
   },
 ): Promise<SourceControlPullRequestReadResponse> {

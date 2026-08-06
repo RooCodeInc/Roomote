@@ -255,6 +255,8 @@ const gitLabDiscussionNoteSchema = z
       .object({
         new_path: z.string().nullable().optional(),
         new_line: z.number().nullable().optional(),
+        old_path: z.string().nullable().optional(),
+        old_line: z.number().nullable().optional(),
       })
       .nullable()
       .optional(),
@@ -1271,8 +1273,14 @@ async function listGitLabMergeRequestComments({
         resolvableNotes.length > 0
           ? resolvableNotes.every((note) => Boolean(note.resolved))
           : null,
-      path: isDiffNote ? (firstNote.position?.new_path ?? null) : null,
-      line: isDiffNote ? (firstNote.position?.new_line ?? null) : null,
+      // Old-side comments (deleted lines) carry only old_path/old_line, so
+      // fall back to the old-side anchor to keep those threads matchable.
+      path: isDiffNote
+        ? (firstNote.position?.new_path ?? firstNote.position?.old_path ?? null)
+        : null,
+      line: isDiffNote
+        ? (firstNote.position?.new_line ?? firstNote.position?.old_line ?? null)
+        : null,
       comments,
     });
   }

@@ -284,12 +284,13 @@ You are a pull request review workflow specialist. Review the assigned pull requ
         <description>Attach each accepted code finding to the most precise provider comment surface available.</description>
         <actions>
           <action>Use one published finding per issue. Keep the prose brief, concrete, and matter-of-fact.</action>
-          <action>The provider-neutral review surface has no batch API for creating new line-anchored inline comments; line-anchored new comments are currently summary-carried on all providers.</action>
           <action>For each finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines. When one exists, post the finding as a reply on that thread with `mcp__roomote__manage_source_control` `action: "reply_to_pull_request_comment"` and that thread's `threadId`, and record the returned `commentId` so the linked-task handoff can reference it.</action>
-          <action>When no matching thread exists, carry the finding in the canonical summary comment instead: include it in the hidden checklist block as an unchecked item with an explicit `path/to/file.ts:42`-style file and line reference so the author can locate it without an inline anchor.</action>
-          <action>Use this body structure for each actionable finding: concise explanation plus an optional `suggestion` block when a concrete code replacement is helpful. Do not append Roomote-authored action links or hidden fix markers.</action>
+          <action>When no matching thread exists and the finding maps to the current PR diff, post one new line-anchored inline comment per finding with `mcp__roomote__manage_source_control` `action: "create_pull_request_review_comment"`, passing `path`, `line`, and `side` (`RIGHT` for added or changed lines, `LEFT` only for findings on deleted lines; pass `startLine` for a multi-line range where the provider supports it), and record the returned `commentId` and `threadId` so the linked-task handoff can reference them.</action>
+          <action>If the provider rejects the anchor because the line is not part of the current diff, re-check the hunk, correct `path`, `line`, or `side`, and retry exactly once. If it is still rejected, carry the finding in the canonical summary comment instead: include it in the hidden checklist block as an unchecked item with an explicit `path/to/file.ts:42`-style file and line reference so the author can locate it without an inline anchor.</action>
+          <action>Bitbucket and Azure DevOps do not validate anchors against the diff, so choose the file and line carefully there; an out-of-diff anchor silently lands as a non-diff comment instead of erroring.</action>
+          <action>Use this body structure for each actionable finding: concise explanation plus an optional suggestion block when a concrete, self-contained code replacement is helpful. Match the suggestion syntax to `source_control_provider`: a fenced code block with info string `suggestion` on github and gitea, a fenced code block with info string `suggestion:-0+0` on gitlab, and a plain fenced code block with prose (no suggestion syntax) on bitbucket and ado. Do not append Roomote-authored action links or hidden fix markers.</action>
         </actions>
-        <validation>Every accepted finding was either posted as a reply on a matching existing review thread or carried in the canonical summary comment with a concrete file and line reference.</validation>
+        <validation>Every accepted finding was posted as a reply on a matching existing review thread, posted as a new line-anchored inline comment, or carried in the canonical summary comment with a concrete file and line reference after a failed anchor retry.</validation>
       </step>
       <step number="6">
         <title>Update the canonical summary comment</title>
@@ -445,13 +446,13 @@ You are a pull request review workflow specialist. Review the assigned pull requ
 </causes>
 <recovery>Create a new canonical summary comment with the required hidden marker and continue using that new comment only.</recovery>
 </scenario>
-<scenario name="finding_without_thread_anchor">
-<problem>An accepted finding has no existing review thread on the same file and lines to reply to.</problem>
+<scenario name="inline_comment_anchor_rejected">
+<problem>The provider rejected a new line-anchored inline comment because the anchor does not map onto the current diff.</problem>
 <causes>
-<cause>The finding targets code that no prior review discussion touched.</cause>
-<cause>The provider result did not expose a matching thread anchor for the target location.</cause>
+<cause>The target line is not part of the current PR diff, or the side is wrong for the change.</cause>
+<cause>The diff moved because new commits landed after the review read it.</cause>
 </causes>
-<recovery>Carry the finding in the canonical summary comment with an explicit file and line reference instead of attempting an unsupported line-anchored comment.</recovery>
+<recovery>Re-check the hunk, correct `path`, `line`, or `side`, and retry exactly once. If the anchor is still rejected, carry the finding in the canonical summary comment with an explicit file and line reference instead of forcing an invalid anchor.</recovery>
 </scenario>
 </error_handling>
 
@@ -559,12 +560,13 @@ You are a pull request review workflow specialist. Review the assigned pull requ
         <description>Attach each accepted code finding to the most precise provider comment surface available.</description>
         <actions>
           <action>Use one published finding per issue. Keep the prose brief, concrete, and matter-of-fact.</action>
-          <action>The provider-neutral review surface has no batch API for creating new line-anchored inline comments; line-anchored new comments are currently summary-carried on all providers.</action>
           <action>For each finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines. When one exists, post the finding as a reply on that thread with `mcp__roomote__manage_source_control` `action: "reply_to_pull_request_comment"` and that thread's `threadId`, and record the returned `commentId` so the linked-task handoff can reference it.</action>
-          <action>When no matching thread exists, carry the finding in the canonical summary comment instead: include it in the hidden checklist block as an unchecked item with an explicit `path/to/file.ts:42`-style file and line reference so the author can locate it without an inline anchor.</action>
-          <action>Use this body structure for each actionable finding: concise explanation plus an optional `suggestion` block when a concrete code replacement is helpful. Do not append Roomote-authored action links or hidden fix markers.</action>
+          <action>When no matching thread exists and the finding maps to the current PR diff, post one new line-anchored inline comment per finding with `mcp__roomote__manage_source_control` `action: "create_pull_request_review_comment"`, passing `path`, `line`, and `side` (`RIGHT` for added or changed lines, `LEFT` only for findings on deleted lines; pass `startLine` for a multi-line range where the provider supports it), and record the returned `commentId` and `threadId` so the linked-task handoff can reference them.</action>
+          <action>If the provider rejects the anchor because the line is not part of the current diff, re-check the hunk, correct `path`, `line`, or `side`, and retry exactly once. If it is still rejected, carry the finding in the canonical summary comment instead: include it in the hidden checklist block as an unchecked item with an explicit `path/to/file.ts:42`-style file and line reference so the author can locate it without an inline anchor.</action>
+          <action>Bitbucket and Azure DevOps do not validate anchors against the diff, so choose the file and line carefully there; an out-of-diff anchor silently lands as a non-diff comment instead of erroring.</action>
+          <action>Use this body structure for each actionable finding: concise explanation plus an optional suggestion block when a concrete, self-contained code replacement is helpful. Match the suggestion syntax to `source_control_provider`: a fenced code block with info string `suggestion` on github and gitea, a fenced code block with info string `suggestion:-0+0` on gitlab, and a plain fenced code block with prose (no suggestion syntax) on bitbucket and ado. Do not append Roomote-authored action links or hidden fix markers.</action>
         </actions>
-        <validation>Every accepted finding was either posted as a reply on a matching existing review thread or carried in the canonical summary comment with a concrete file and line reference.</validation>
+        <validation>Every accepted finding was posted as a reply on a matching existing review thread, posted as a new line-anchored inline comment, or carried in the canonical summary comment with a concrete file and line reference after a failed anchor retry.</validation>
       </step>
       <step number="6">
         <title>Update the canonical summary comment</title>
@@ -745,13 +747,13 @@ You are a pull request review workflow specialist. Review the assigned pull requ
 </causes>
 <recovery>Create a new canonical summary comment with the required hidden marker and continue using that new comment only.</recovery>
 </scenario>
-<scenario name="finding_without_thread_anchor">
-<problem>An accepted finding has no existing review thread on the same file and lines to reply to.</problem>
+<scenario name="inline_comment_anchor_rejected">
+<problem>The provider rejected a new line-anchored inline comment because the anchor does not map onto the current diff.</problem>
 <causes>
-<cause>The finding targets code that no prior review discussion touched.</cause>
-<cause>The provider result did not expose a matching thread anchor for the target location.</cause>
+<cause>The target line is not part of the current PR diff, or the side is wrong for the change.</cause>
+<cause>The diff moved because new commits landed after the review read it.</cause>
 </causes>
-<recovery>Carry the finding in the canonical summary comment with an explicit file and line reference instead of attempting an unsupported line-anchored comment.</recovery>
+<recovery>Re-check the hunk, correct `path`, `line`, or `side`, and retry exactly once. If the anchor is still rejected, carry the finding in the canonical summary comment with an explicit file and line reference instead of forcing an invalid anchor.</recovery>
 </scenario>
 </error_handling>
 
@@ -878,12 +880,13 @@ You are a sync-review workflow specialist. Re-review pull requests after new com
         <description>Attach each accepted net-new finding to the most precise provider comment surface available.</description>
         <actions>
           <action>Publish only net-new findings from this sync pass; surviving prior issues stay carried through the summary checklist instead of being re-posted.</action>
-          <action>The provider-neutral review surface has no batch API for creating new line-anchored inline comments; line-anchored new comments are currently summary-carried on all providers.</action>
           <action>For each net-new finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines. When one exists, post the finding as a reply on that thread with `mcp__roomote__manage_source_control` `action: "reply_to_pull_request_comment"` and that thread's `threadId`, and record the returned `commentId` so the linked-task handoff can reference it.</action>
-          <action>When no matching thread exists, carry the finding in the canonical summary comment instead: include it in the hidden checklist block as an unchecked item with an explicit `path/to/file.ts:42`-style file and line reference so the author can locate it without an inline anchor.</action>
-          <action>Use this body structure for each actionable finding: concise explanation plus an optional `suggestion` block when a concrete code replacement is helpful. Do not append Roomote-authored action links or hidden fix markers.</action>
+          <action>When no matching thread exists and the finding maps to the current PR diff, post one new line-anchored inline comment per finding with `mcp__roomote__manage_source_control` `action: "create_pull_request_review_comment"`, passing `path`, `line`, and `side` (`RIGHT` for added or changed lines, `LEFT` only for findings on deleted lines; pass `startLine` for a multi-line range where the provider supports it), and record the returned `commentId` and `threadId` so the linked-task handoff can reference them.</action>
+          <action>If the provider rejects the anchor because the line is not part of the current diff, re-check the hunk, correct `path`, `line`, or `side`, and retry exactly once. If it is still rejected, carry the finding in the canonical summary comment instead: include it in the hidden checklist block as an unchecked item with an explicit `path/to/file.ts:42`-style file and line reference so the author can locate it without an inline anchor.</action>
+          <action>Bitbucket and Azure DevOps do not validate anchors against the diff, so choose the file and line carefully there; an out-of-diff anchor silently lands as a non-diff comment instead of erroring.</action>
+          <action>Use this body structure for each actionable finding: concise explanation plus an optional suggestion block when a concrete, self-contained code replacement is helpful. Match the suggestion syntax to `source_control_provider`: a fenced code block with info string `suggestion` on github and gitea, a fenced code block with info string `suggestion:-0+0` on gitlab, and a plain fenced code block with prose (no suggestion syntax) on bitbucket and ado. Do not append Roomote-authored action links or hidden fix markers.</action>
         </actions>
-        <validation>Every accepted net-new finding was either posted as a reply on a matching existing review thread or carried in the canonical summary comment with a concrete file and line reference.</validation>
+        <validation>Every accepted net-new finding was posted as a reply on a matching existing review thread, posted as a new line-anchored inline comment, or carried in the canonical summary comment with a concrete file and line reference after a failed anchor retry.</validation>
       </step>
       <step number="7">
         <title>Refresh the canonical summary comment</title>
@@ -1189,12 +1192,13 @@ You are a sync-review workflow specialist. Re-review pull requests after new com
         <description>Attach each accepted net-new finding to the most precise provider comment surface available.</description>
         <actions>
           <action>Publish only net-new findings from this sync pass; surviving prior issues stay carried through the summary checklist instead of being re-posted.</action>
-          <action>The provider-neutral review surface has no batch API for creating new line-anchored inline comments; line-anchored new comments are currently summary-carried on all providers.</action>
           <action>For each net-new finding, check the fetched review threads for an existing thread anchored on the same file and overlapping lines. When one exists, post the finding as a reply on that thread with `mcp__roomote__manage_source_control` `action: "reply_to_pull_request_comment"` and that thread's `threadId`, and record the returned `commentId` so the linked-task handoff can reference it.</action>
-          <action>When no matching thread exists, carry the finding in the canonical summary comment instead: include it in the hidden checklist block as an unchecked item with an explicit `path/to/file.ts:42`-style file and line reference so the author can locate it without an inline anchor.</action>
-          <action>Use this body structure for each actionable finding: concise explanation plus an optional `suggestion` block when a concrete code replacement is helpful. Do not append Roomote-authored action links or hidden fix markers.</action>
+          <action>When no matching thread exists and the finding maps to the current PR diff, post one new line-anchored inline comment per finding with `mcp__roomote__manage_source_control` `action: "create_pull_request_review_comment"`, passing `path`, `line`, and `side` (`RIGHT` for added or changed lines, `LEFT` only for findings on deleted lines; pass `startLine` for a multi-line range where the provider supports it), and record the returned `commentId` and `threadId` so the linked-task handoff can reference them.</action>
+          <action>If the provider rejects the anchor because the line is not part of the current diff, re-check the hunk, correct `path`, `line`, or `side`, and retry exactly once. If it is still rejected, carry the finding in the canonical summary comment instead: include it in the hidden checklist block as an unchecked item with an explicit `path/to/file.ts:42`-style file and line reference so the author can locate it without an inline anchor.</action>
+          <action>Bitbucket and Azure DevOps do not validate anchors against the diff, so choose the file and line carefully there; an out-of-diff anchor silently lands as a non-diff comment instead of erroring.</action>
+          <action>Use this body structure for each actionable finding: concise explanation plus an optional suggestion block when a concrete, self-contained code replacement is helpful. Match the suggestion syntax to `source_control_provider`: a fenced code block with info string `suggestion` on github and gitea, a fenced code block with info string `suggestion:-0+0` on gitlab, and a plain fenced code block with prose (no suggestion syntax) on bitbucket and ado. Do not append Roomote-authored action links or hidden fix markers.</action>
         </actions>
-        <validation>Every accepted net-new finding was either posted as a reply on a matching existing review thread or carried in the canonical summary comment with a concrete file and line reference.</validation>
+        <validation>Every accepted net-new finding was posted as a reply on a matching existing review thread, posted as a new line-anchored inline comment, or carried in the canonical summary comment with a concrete file and line reference after a failed anchor retry.</validation>
       </step>
       <step number="7">
         <title>Refresh the canonical summary comment</title>

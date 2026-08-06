@@ -469,6 +469,64 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     ]);
   });
 
+  it('anchors GitLab old-side diff notes with old_path and old_line', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 'discussion-old-side',
+          notes: [
+            {
+              id: 9,
+              type: 'DiffNote',
+              body: 'This deletion drops the retry path.',
+              resolvable: true,
+              resolved: false,
+              author: { username: 'reviewer' },
+              position: {
+                new_path: null,
+                new_line: null,
+                old_path: 'src/index.ts',
+                old_line: 17,
+              },
+            },
+          ],
+        },
+      ]),
+    );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 42,
+        sourceControlProvider: 'gitlab',
+      },
+      fetchImpl,
+    });
+
+    if (!('threads' in result)) {
+      throw new Error('Expected a comments result.');
+    }
+
+    expect(result.threads).toEqual([
+      expect.objectContaining({
+        id: 'discussion-old-side',
+        path: 'src/index.ts',
+        line: 17,
+      }),
+    ]);
+  });
+
   it('maps Azure DevOps threads with resolution states', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
