@@ -1,6 +1,9 @@
 import {
+  advancePendingCommunicationRequestUserInputQuestion,
   buildDiscordAnsweredRequestUserInputText,
   buildDiscordCancelledRequestUserInputText,
+  buildDiscordRequestUserInputButtons,
+  buildDiscordRequestUserInputPromptText,
   getDiscordRequestUserInputCurrentQuestion,
   getPendingCommunicationRequestUserInput,
   clearPendingCommunicationRequestUserInput,
@@ -150,6 +153,93 @@ async function finalizeDiscordRequestUserInputAnswer(params: {
   return 'queued';
 }
 
+async function advanceDiscordRequestUserInputQuestion(params: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  channel: DiscordChannelContext;
+  pendingRequest: PendingCommunicationRequestUserInput;
+  answers: AcpRequestUserInputAnswers;
+  answerText: string;
+  interaction?: {
+    interaction: DiscordInteraction;
+    interactionDeferred: boolean;
+  };
+  replyToMessageId?: string;
+}): Promise<'advanced' | 'already_received'> {
+  const conversationId = conversationIdForChannel(params.channel);
+  const current = getDiscordRequestUserInputCurrentQuestion(
+    params.pendingRequest,
+  );
+  if (!current) {
+    return 'already_received';
+  }
+
+  const nextQuestionIndex = current.questionIndex + 1;
+  const advanced = await advancePendingCommunicationRequestUserInputQuestion(
+    'discord',
+    conversationId,
+    params.pendingRequest,
+    nextQuestionIndex,
+    params.answers,
+  );
+  if (!advanced) {
+    await postAlreadyReceivedNotice({
+      provider: params.provider,
+      applicationId: params.applicationId,
+      channel: params.channel,
+      interaction: params.interaction,
+      replyToMessageId: params.replyToMessageId,
+    });
+    return 'already_received';
+  }
+
+  const nextPrompt = {
+    requestId: params.pendingRequest.requestId,
+    questions: params.pendingRequest.questions,
+    currentQuestionIndex: nextQuestionIndex,
+  };
+  const nextPromptText = buildDiscordRequestUserInputPromptText(nextPrompt);
+  const nextPromptButtons = buildDiscordRequestUserInputButtons({
+    runId: params.pendingRequest.runId,
+    request: nextPrompt,
+  });
+  let rendered = false;
+
+  if (params.pendingRequest.promptMessageId) {
+    try {
+      await params.provider.editMessage({
+        channelId: conversationId,
+        messageId: params.pendingRequest.promptMessageId,
+        text: nextPromptText,
+        buttons: nextPromptButtons,
+      });
+      rendered = true;
+    } catch (error) {
+      apiLogger.warn(
+        `[discord.request_user_input] Failed to advance prompt message ${params.pendingRequest.promptMessageId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  await replyToDiscordEvent({
+    provider: params.provider,
+    applicationId: params.applicationId,
+    channel: params.channel,
+    ...(params.interaction ? { interaction: params.interaction } : {}),
+    ...(params.replyToMessageId
+      ? { replyToMessageId: params.replyToMessageId }
+      : {}),
+    text: rendered
+      ? `Picked: ${params.answerText}`
+      : `Picked: ${params.answerText}\n\n${nextPromptText}`,
+    ...(!rendered && nextPromptButtons ? { buttons: nextPromptButtons } : {}),
+    ...(params.interaction ? { ephemeral: true } : {}),
+  });
+  return 'advanced';
+}
+
 /**
  * Try to treat an inbound Discord message as an answer to a pending
  * request_user_input prompt. Returns true when the message was consumed.
@@ -190,8 +280,9 @@ export async function tryHandleDiscordRequestUserInputMessage(params: {
     return true;
   }
 
+  const current = getDiscordRequestUserInputCurrentQuestion(pendingRequest);
   const parsedReply = parseAcpRequestUserInputAnswerReply(
-    pendingRequest.questions,
+    current ? [current.question] : pendingRequest.questions,
     params.text,
   );
 
@@ -212,6 +303,44 @@ export async function tryHandleDiscordRequestUserInputMessage(params: {
       answerText: 'cancel',
       replyToMessageId: params.replyToMessageId,
       cancelled: true,
+    });
+    return true;
+  }
+
+  if (current && pendingRequest.questions.length > 1) {
+    const answers = {
+      ...(pendingRequest.answers ?? {}),
+      ...parsedReply.answers,
+    };
+    const nextQuestionIndex = current.questionIndex + 1;
+
+    if (nextQuestionIndex < pendingRequest.questions.length) {
+      await advanceDiscordRequestUserInputQuestion({
+        provider: params.provider,
+        applicationId: params.applicationId,
+        channel: params.channel,
+        pendingRequest,
+        answers,
+        answerText: Object.values(parsedReply.answers)
+          .flatMap((entry) => entry.answers)
+          .join(', '),
+        replyToMessageId: params.replyToMessageId,
+      });
+      return true;
+    }
+
+    await finalizeDiscordRequestUserInputAnswer({
+      provider: params.provider,
+      applicationId: params.applicationId,
+      channel: params.channel,
+      activeRunId: params.activeRun.id,
+      pendingRequest,
+      answers,
+      userId: params.userId,
+      answerText: Object.values(parsedReply.answers)
+        .flatMap((entry) => entry.answers)
+        .join(', '),
+      replyToMessageId: params.replyToMessageId,
     });
     return true;
   }
@@ -384,17 +513,20 @@ export async function tryHandleDiscordRequestUserInputCallback(params: {
   }
 
   const answers: AcpRequestUserInputAnswers = {
+    ...(pendingRequest.answers ?? {}),
     [current.question.id]: { answers: [option.label] },
   };
 
-  if (pendingRequest.questions.length !== 1) {
-    await replyToDiscordEvent({
+  const nextQuestionIndex = current.questionIndex + 1;
+  if (nextQuestionIndex < pendingRequest.questions.length) {
+    await advanceDiscordRequestUserInputQuestion({
       provider: params.provider,
       applicationId: params.applicationId,
       channel: params.channel,
+      pendingRequest,
+      answers,
+      answerText: option.label,
       interaction: interactionCtx,
-      text: 'Reply in the thread with one answer per line for multi-question prompts.',
-      ephemeral: true,
     });
     return true;
   }
