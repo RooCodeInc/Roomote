@@ -55,7 +55,6 @@ import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
-import { handleSubmitTaskSuggestions } from './submit-task-suggestions.js';
 import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
 import { getArtifactConfig, getRoomoteConfig } from './config.js';
@@ -507,7 +506,7 @@ function shouldRegisterPlatformIssueTool(): boolean {
   return Boolean(process.env.ROOMOTE_TASK_ID?.trim());
 }
 
-function shouldRegisterTaskSuggestionsTool(): boolean {
+function shouldRegisterAutomationWorkItemsTool(): boolean {
   return process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
 }
 
@@ -1098,118 +1097,7 @@ if (shouldRegisterPlatformIssueTool()) {
   );
 }
 
-function registerTaskSuggestionsTool(toolName: string) {
-  roomoteMcpServer.registerTool(
-    toolName,
-    {
-      title: 'Submit Task Suggestions',
-      description:
-        'Submit the final suggested tasks or actions discovered for the selected repositories. ' +
-        'Use this only after enough investigation. ' +
-        'Return up to 5 high-confidence, no-brainer suggestions that a user would likely want Roomote to start automatically.',
-      inputSchema: {
-        suggestions: z
-          .array(
-            z.object({
-              title: z
-                .string()
-                .min(1)
-                .max(140)
-                .describe('Short title for the suggested task'),
-              brief: z
-                .string()
-                .min(1)
-                .max(2000)
-                .describe(
-                  'Brief action-oriented description of the suggested task',
-                ),
-              category: z
-                .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
-                .optional()
-                .describe(
-                  'Optional suggestion category: bug, security, chore, feature, or improvement.',
-                ),
-              priority: z
-                .enum(['P0', 'P1', 'P2', 'P3'])
-                .optional()
-                .describe('Optional suggestion priority: P0, P1, P2, or P3.'),
-              investigationContext: z
-                .string()
-                .min(1)
-                .max(4000)
-                .optional()
-                .describe(
-                  'Optional hidden implementation context for the implementing agent. This is not shown to Slack users.',
-                ),
-              targetRepositoryFullName: z
-                .string()
-                .min(1)
-                .optional()
-                .describe(
-                  'Optional owner/repo launch target for this suggestion.',
-                ),
-              targetEnvironmentId: z
-                .string()
-                .uuid()
-                .optional()
-                .describe(
-                  'Optional environment UUID to use when this suggestion should launch into an environment-backed workspace.',
-                ),
-              workspaceReadiness: workspaceReadinessSchema
-                .optional()
-                .describe(
-                  'Optional readiness mode for this suggestion: environment_backed or bare_repo.',
-                ),
-              readinessMessage: z
-                .string()
-                .min(1)
-                .max(500)
-                .optional()
-                .describe(
-                  'Optional short readiness note for bare-repo launches.',
-                ),
-            }),
-          )
-          .max(5)
-          .describe('Ordered list of up to 5 suggested tasks to persist'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async (params): Promise<ToolResult> => {
-      const config = getRoomoteConfig();
-      if (!config) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
-      const taskId = process.env.ROOMOTE_TASK_ID;
-      if (!taskId?.trim()) {
-        return errorResult('ROOMOTE_TASK_ID environment variable not set');
-      }
-
-      const result = await handleSubmitTaskSuggestions(
-        {
-          taskId,
-          suggestions: params.suggestions,
-        },
-        config,
-      );
-
-      if (taskSuggestionResultHasSubmittedSuggestions(result)) {
-        hasSubmittedAutomationSlackSummary = true;
-      }
-
-      return result;
-    },
-  );
-}
-
-if (shouldRegisterTaskSuggestionsTool()) {
-  registerTaskSuggestionsTool('submit_task_suggestions');
+if (shouldRegisterAutomationWorkItemsTool()) {
   registerAutomationWorkItemsTool({
     server: roomoteMcpServer,
     toolName: 'submit_automation_work_items',
@@ -1332,6 +1220,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
         "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. " +
         chatReplyMarkdownGuidance +
         chatReplySourceLinkingGuidance +
+        'Use the optional suggestions parameter only when the reply identifies independent, high-confidence actions that users may want Roomote to start as separate tasks. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. ' +
         'Write the message so its content clearly matches the selected purpose.',
       inputSchema: {
         purpose: z
@@ -1358,6 +1247,28 @@ if (shouldRegisterSlackThreadReplyTool()) {
           .optional()
           .describe(
             'Optional already-uploaded artifact IDs for images to attach.',
+          ),
+        suggestions: z
+          .array(
+            z.object({
+              title: z.string().min(1).max(140),
+              brief: z.string().min(1).max(2000),
+              category: z
+                .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
+                .optional(),
+              priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+              investigationContext: z.string().min(1).max(4000).optional(),
+              targetRepositoryFullName: z.string().min(1),
+              targetEnvironmentId: z.string().uuid().optional(),
+              workspaceReadiness: workspaceReadinessSchema.optional(),
+              readinessMessage: z.string().min(1).max(500).optional(),
+            }),
+          )
+          .min(1)
+          .max(10)
+          .optional()
+          .describe(
+            `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Every suggestion must identify its target repository; include hidden investigation context when it will help the implementing agent.`,
           ),
       },
       annotations: {
@@ -1389,10 +1300,18 @@ if (shouldRegisterSlackThreadReplyTool()) {
           summary: params.message,
           imagePaths: params.imagePaths,
           imageArtifactIds: params.imageArtifactIds,
+          suggestions: params.suggestions,
         },
         artifactConfig,
         roomoteConfig,
       );
+
+      if (
+        params.suggestions &&
+        taskSuggestionResultHasSubmittedSuggestions(result)
+      ) {
+        hasSubmittedAutomationSlackSummary = true;
+      }
 
       recordSuccessfulSlackTurnSatisfactionResult(result, 'send_chat_reply', {
         replyPurpose: params.purpose,

@@ -269,13 +269,21 @@ describe('buildSuggestedTasksPrompt', () => {
     expect(prompt).toContain('aim for a diverse mix across categories');
     expect(prompt).toContain('CATEGORY DIVERSITY (mandatory)');
     expect(prompt).toContain(
-      'the final set of 5 suggestions must include at least 2 different categories',
+      'select every finding that clears the quality bar, ordered by priority, up to the maximum of 10',
     );
     expect(prompt).toContain('developer experience improvements');
     expect(prompt).toContain('performance opportunities');
     expect(prompt).toContain('missing or incomplete functionality');
     expect(prompt).toContain('test gaps');
     expect(prompt).toContain('observability and operational improvements');
+    expect(prompt).toContain('Finish with one `send_chat_reply` call');
+    expect(prompt).toContain(
+      'put the final structured actions in `suggestions`',
+    );
+    expect(prompt).not.toContain(
+      'Submit suggestions only with the submit_task_suggestions tool',
+    );
+    expect(prompt).toContain('Do not pad the list toward the maximum');
   });
 
   it('preserves the template interpolation slots in source', () => {

@@ -26,6 +26,7 @@ import {
   launchDiscordTask,
   resolveDiscordWorkspace,
   type DiscordChannelContext,
+  type DiscordWorkspaceSelection,
 } from './task-launch.js';
 import {
   fetchDiscordRepliedToMessageBestEffort,
@@ -97,6 +98,7 @@ export async function startNewDiscordTask(input: {
     initiator: TaskInitiator;
   };
   forceNewThread?: boolean;
+  workspaceOverride?: DiscordWorkspaceSelection;
   /**
    * True when the Discord intake path successfully pinned 👀 on the origin
    * message before calling into launch (soft-ack failures stay false).
@@ -263,7 +265,10 @@ export async function startNewDiscordTask(input: {
       apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
     });
     const routingDecision = await routeTask(routingContext);
-    if (routingDecision.status === 'platform_answer') {
+    if (
+      routingDecision.status === 'platform_answer' &&
+      !input.workspaceOverride
+    ) {
       // Auto-respond channels must not turn Roomote into a channel chatbot:
       // a question-shaped message that routes to a platform answer is skipped
       // silently (mirrors Slack's auto-routed path, which never posts answers).
@@ -322,12 +327,13 @@ export async function startNewDiscordTask(input: {
     }
 
     const workspace =
-      routingDecision.status === 'routed'
+      input.workspaceOverride ??
+      (routingDecision.status === 'routed'
         ? await resolveDiscordWorkspace(routingDecision.result.workspace)
         : {
             repoForPayload: ALL_REPOSITORIES,
             workspaceDisplayName: 'all repos',
-          };
+          });
     if (!workspace) {
       throw new Error(
         'Discord task routing selected an unavailable workspace.',

@@ -81,6 +81,7 @@ vi.mock('../../tasks/scheduled-suggestion-root-summary.js', () => ({
 }));
 
 import {
+  postCurrentThreadSuggestionsToTelegram,
   postScheduledSuggestionsToTelegram,
   SUGGEST_IDEAS_TELEGRAM_TOPIC_NAME,
 } from '../automation-suggestions';
@@ -122,6 +123,26 @@ describe('postScheduledSuggestionsToTelegram', () => {
       actionFooterText: 'footer',
     });
     selectLimitMock.mockResolvedValue([]);
+  });
+
+  it('posts current-thread suggestions without creating a topic', async () => {
+    const delivered = await postCurrentThreadSuggestionsToTelegram({
+      sourceTaskId: 'task-1',
+      createdByUserId: 'user-1',
+      chatId: '8846357662',
+      threadId: '88',
+      suggestions: [buildSuggestion('aaa', 'Fix crash')],
+    });
+
+    expect(delivered).toBe(true);
+    expect(createTelegramForumTopicBestEffortMock).not.toHaveBeenCalled();
+    expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: '8846357662',
+        threadId: '88',
+        buttons: [[expect.objectContaining({ callbackData: 'idea:aaa' })]],
+      }),
+    );
   });
 
   it('posts one summary message with start buttons per suggestion', async () => {

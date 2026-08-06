@@ -117,8 +117,7 @@ const TASK_SUGGESTION_REACTION_MAX_ATTEMPTS = Math.ceil(
 
 /**
  * Reaction-launchable suggestion types tracked on the suggestion_card's
- * `metadata.suggestionType`. Only setup-onboarding and suggested-tasks
- * cards launch from a reaction.
+ * `metadata.suggestionType`.
  */
 function getLaunchableSuggestionType(
   metadata: Record<string, unknown> | null | undefined,

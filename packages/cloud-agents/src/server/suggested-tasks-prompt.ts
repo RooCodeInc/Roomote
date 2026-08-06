@@ -142,8 +142,8 @@ Investigation method:
 - RANKING PHASE (mandatory, after investigation):
   - rank all candidate findings together in a single pass.
   - apply editorial filtering and adversarial verification only after the full candidate set is collected.
-  - CATEGORY DIVERSITY (mandatory): the final set of 5 suggestions must include at least 2 different categories (from: bug, security, chore, feature, improvement). Avoid submitting a batch that is entirely bugs or entirely one category. If all top findings happen to be bugs, actively look for the best non-bug findings (improvements, features, chores) to include. A good target mix is roughly 2-3 bugs/security findings and 2-3 improvement/feature/chore findings, but quality still comes first — do not include low-quality findings just for diversity.
-  - select the top 5 only from the combined verified pool.
+  - CATEGORY DIVERSITY (mandatory): when the final set contains multiple suggestions, include at least 2 different categories (from: bug, security, chore, feature, improvement) when the verified findings support that mix. Avoid returning an entirely single-category batch just because those candidates were found first, but never include low-quality findings for diversity.
+  - select every finding that clears the quality bar, ordered by priority, up to the maximum of 10.
   - repository weighting must come only from the task's stated prioritization criteria such as user-facing importance, operator impact, and validation strength.
 - your role is investigator and editor: identify what is worth checking, inspect the code, verify the evidence, then decide which findings meet the bar.
 
@@ -158,11 +158,9 @@ Rules:
 - Do not treat a missing environment as a reason to avoid an otherwise strong repository-specific suggestion.
 - Do not return ideas that genuinely require cross-repository execution unless you can tie the launch target to one repository.
 - Each suggestion should cover a different subsystem, flow, or file area when possible.
-- Submit suggestions only with the submit_task_suggestions tool.
-- Aim for 5 distinct suggestions in priority order.
-- Return at most 5.
-- Only return fewer than 5 if you truly cannot find 5 high-signal findings that survive scrutiny.
-- Submit an empty list only if nothing survives the bar.
+- Finish with one \`send_chat_reply\` call: put the concise report summary in \`message\`, set \`purpose\` to \`closeout\`, and put the final structured actions in \`suggestions\` so they appear beneath that report in the originating conversation.
+- Return all distinct, high-signal findings that survive scrutiny in priority order, up to a maximum of 10. Do not pad the list toward the maximum.
+- If nothing survives the bar, send the closeout report without \`suggestions\`.
 - Each submitted suggestion must use a short title and a concise brief covering the exact issue and user impact.
 - Each \`brief\` must stay within 2-3 sentences and include one concrete example scenario showing how the issue manifests in practice.
 - Each submitted suggestion must include:
