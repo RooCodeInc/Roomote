@@ -82,6 +82,12 @@ are still required so Roomote can refresh the connection in background jobs.
 This mode uses the same app registration. Grant the linked user the required
 Azure DevOps organization, project, and repository access.
 
+Add the web redirect URI shown by Roomote to the app registration:
+
+```text
+<public-url>/api/auth/oauth2/callback/ado
+```
+
 The linked account can be reconnected or replaced later in Settings. Switching
 to PAT or service-principal mode removes the inactive credential path from the
 deployment configuration.

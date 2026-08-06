@@ -19,9 +19,14 @@ Use `<public-url>` below for your stable public Roomote URL.
 Create a dedicated Gitea bot or service-account user and give it access to the
 organizations or repositories Roomote should use. New deployments use a Gitea
 1.23+ OAuth application and a dedicated service account. Create the application
-with the redirect URI shown by Roomote and authorize it with the scopes
-`read:user`, `read:repository`, `write:repository`, `write:issue`, and
-`read:organization`.
+with the redirect URI shown by Roomote:
+
+```text
+<public-url>/api/source-control/gitea/oauth/callback
+```
+
+Authorize it with the scopes `read:user`, `read:repository`,
+`write:repository`, `write:issue`, and `read:organization`.
 
 If Roomote should configure webhooks automatically, the service account also
 needs repository admin access for the synced repositories.

@@ -78,4 +78,10 @@ start from the dashboard, choose the environment yourself or use **Auto** when
 you want Roomote to route the task. Linear can also suggest an environment from
 issue context.
 
+If a Slack request is ambiguous, Roomote shows the environment picker so you can
+choose where the task should run. If automatic routing is temporarily
+unavailable, the picker includes a warning instead of silently falling back.
+Choose an environment to continue; if the warning persists, ask an admin to
+check the deployment's inference provider.
+
 For more detail, see [Environments](/environments).
