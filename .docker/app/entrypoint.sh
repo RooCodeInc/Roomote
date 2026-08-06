@@ -45,7 +45,7 @@ fi
 # directly on usage-priced hosts — and a container memory cap OOM-kills the
 # process before V8 ever feels pressure. Cap old space explicitly instead:
 # an operator --max-old-space-size in NODE_OPTIONS always wins, and a
-# readable cgroup v2 memory limit lowers (never raises) the service default
+# readable cgroup memory limit lowers (never raises) the service default
 # to ~75% of the container's memory.
 apply_node_heap_cap() {
   case "${NODE_OPTIONS:-}" in
@@ -54,18 +54,23 @@ apply_node_heap_cap() {
 
   cap_mb="$1"
 
+  limit_bytes=""
   if [ -r /sys/fs/cgroup/memory.max ]; then
     limit_bytes="$(cat /sys/fs/cgroup/memory.max)"
-    case "$limit_bytes" in
-      '' | *[!0-9]*) ;; # "max" means unlimited; keep the service default
-      *)
-        derived_mb=$((limit_bytes / 1048576 * 3 / 4))
-        if [ "$derived_mb" -gt 0 ] && [ "$derived_mb" -lt "$cap_mb" ]; then
-          cap_mb="$derived_mb"
-        fi
-        ;;
-    esac
+  elif [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
+    # cgroup v1 reports "unlimited" as a page-rounded near-int64 number;
+    # the derived_mb < cap_mb comparison below already treats it as no limit.
+    limit_bytes="$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)"
   fi
+  case "$limit_bytes" in
+    '' | *[!0-9]*) ;; # v2 "max" means unlimited; keep the service default
+    *)
+      derived_mb=$((limit_bytes / 1048576 * 3 / 4))
+      if [ "$derived_mb" -gt 0 ] && [ "$derived_mb" -lt "$cap_mb" ]; then
+        cap_mb="$derived_mb"
+      fi
+      ;;
+  esac
 
   export NODE_OPTIONS="${NODE_OPTIONS:+${NODE_OPTIONS} }--max-old-space-size=${cap_mb}"
 }
