@@ -40,7 +40,6 @@ RUN apt-get update \
     build-essential \
     python3 \
     locales \
-    xvfb \
     fontconfig \
     fonts-noto-core \
     fonts-noto-color-emoji \
@@ -269,7 +268,7 @@ RUN sudo apt-get update \
 
 # Shared with WORKER_RUNTIME_SCHEMA_VERSION in @roomote/types. Local builds
 # pass this explicitly; the default keeps direct/release Docker builds labeled.
-ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=4
+ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=5
 LABEL dev.roomote.worker-image.schema-version="${ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION}"
 
 WORKDIR /sandbox
