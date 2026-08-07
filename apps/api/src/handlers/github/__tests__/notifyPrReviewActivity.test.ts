@@ -81,6 +81,7 @@ const pullRequest = {
   number: 42,
   html_url: 'https://github.com/owner/repo/pull/42',
 };
+const reviewHeadSha = 'f0c89ce4';
 
 function reviewPayload(review: {
   body?: string | null;
@@ -92,6 +93,7 @@ function reviewPayload(review: {
     pull_request: pullRequest,
     review: {
       body: review.body ?? null,
+      commit_id: reviewHeadSha,
       state: review.state ?? 'approved',
       html_url: 'https://github.com/owner/repo/pull/42#pullrequestreview-1000',
       user: review.login === null ? null : { login: review.login ?? 'alice' },
@@ -109,6 +111,7 @@ function reviewCommentPayload(comment: {
     pull_request: pullRequest,
     comment: {
       body: comment.body ?? 'Looks off to me',
+      commit_id: reviewHeadSha,
       in_reply_to_id: comment.inReplyToId,
       html_url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
       user: comment.login === null ? null : { login: comment.login ?? 'alice' },
@@ -130,6 +133,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       event: {
         kind: 'review',
         authorLogin: 'alice',
+        reviewHeadSha,
         reviewState: 'changes_requested',
         url: 'https://github.com/owner/repo/pull/42#pullrequestreview-1000',
       },
@@ -181,6 +185,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       event: {
         kind: 'review_comment',
         authorLogin: 'bob',
+        reviewHeadSha,
         url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
       },
     });
@@ -246,6 +251,7 @@ describe('queuePrReviewActivityNotification', () => {
       event: {
         kind: 'review',
         authorLogin: 'alice',
+        reviewHeadSha,
         reviewState: 'approved',
         url: 'https://github.com/owner/repo/pull/42#pullrequestreview-1000',
       },
@@ -366,6 +372,7 @@ describe('buildPrReviewSummaryNotification', () => {
       event: {
         kind: 'review_summary',
         authorLogin: 'roomote[bot]',
+        reviewHeadSha,
         summary: '1 minor doc note; no blocking issues.',
         url: 'https://github.com/owner/repo/pull/42#issuecomment-99',
         roomoteAuthored: true,

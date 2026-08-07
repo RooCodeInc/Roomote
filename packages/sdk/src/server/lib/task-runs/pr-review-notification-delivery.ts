@@ -3,13 +3,18 @@ import {
   REVIEW_STATUS_START_MARKER,
   REVIEW_SUMMARY_MARKER,
   getMarkedSection,
+  isReviewInProgressStatusLine,
 } from '@roomote/cloud-agents/server';
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
 } from '@roomote/cloud-agents/server/non-task-provider-usage';
 import type { TaskRun } from '@roomote/db/server';
-import { createTaskRunGitHubToken, getOctokit } from '@roomote/github';
+import {
+  Schemas as GitHubSchemas,
+  createTaskRunGitHubToken,
+  getOctokit,
+} from '@roomote/github';
 import { setLatestSlackBotReply, trackSlackBotReply } from '@roomote/slack';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -65,6 +70,7 @@ export type PrReviewTriageContext = {
   unresolvedThreadCount: number | null;
   latestReviewStatus: string | null;
   latestReviewSummaryComment: string | null;
+  latestTerminalReviewSummaryHeadSha: string | null;
   /**
    * Per-check CI state for the PR head, when available. Fed into the
    * triage LLM so the chat message can mention CI naturally.
@@ -527,6 +533,12 @@ function sanitizeReviewStatus(status: string): string {
     .slice(0, MAX_REVIEW_STATUS_LENGTH);
 }
 
+function getReviewSummaryHeadSha(body: string): string | null {
+  return (
+    body.match(/<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i)?.[1] ?? null
+  );
+}
+
 async function fetchPrDiscussionSignals({
   taskRun,
   repository,
@@ -551,14 +563,20 @@ async function fetchPrDiscussionSignals({
       unresolvedThreadCount: null,
       latestReviewStatus: null,
       latestReviewSummaryComment: null,
+      latestTerminalReviewSummaryHeadSha: null,
     };
   }
 
   let latestReviewStatus: string | null = null;
   let latestReviewSummaryComment: string | null = null;
+  let latestTerminalReviewSummaryHeadSha: string | null = null;
 
   for (const comment of result.issueComments) {
-    if (!comment.body.trimStart().startsWith(REVIEW_SUMMARY_MARKER)) {
+    if (
+      !comment.author ||
+      !GitHubSchemas.isRoomoteGitHubLogin(comment.author) ||
+      !comment.body.trimStart().startsWith(REVIEW_SUMMARY_MARKER)
+    ) {
       continue;
     }
 
@@ -570,6 +588,11 @@ async function fetchPrDiscussionSignals({
 
     if (status?.trim()) {
       latestReviewStatus = sanitizeReviewStatus(status);
+      latestTerminalReviewSummaryHeadSha = isReviewInProgressStatusLine(
+        status.trim().split('\n')[0] ?? '',
+      )
+        ? null
+        : getReviewSummaryHeadSha(comment.body);
     }
 
     latestReviewSummaryComment = comment.body.trim();
@@ -584,6 +607,7 @@ async function fetchPrDiscussionSignals({
     ).length,
     latestReviewStatus,
     latestReviewSummaryComment,
+    latestTerminalReviewSummaryHeadSha,
   };
 }
 
@@ -618,6 +642,7 @@ export async function gatherPrReviewTriageContext({
           unresolvedThreadCount: null,
           latestReviewStatus: null,
           latestReviewSummaryComment: null,
+          latestTerminalReviewSummaryHeadSha: null,
         };
       }
     })(),
@@ -792,12 +817,25 @@ export async function preparePrReviewNotificationDelivery({
     prNumber: request.prNumber,
     sourceControlProvider: request.sourceControlProvider,
   });
+  const eventsToTriage = context.latestTerminalReviewSummaryHeadSha
+    ? events.filter(
+        (event) =>
+          event.kind === 'review_summary' ||
+          !event.roomoteAuthored ||
+          event.reviewHeadSha !== context.latestTerminalReviewSummaryHeadSha,
+      )
+    : events;
+
+  if (eventsToTriage.length === 0) {
+    return { post: false, reason: 'not_worth_notifying' };
+  }
+
   const triage = await triagePrReviewActivity({
     taskId: request.taskId,
     repository: request.repository,
     prNumber: request.prNumber,
     prUrl: request.prUrl,
-    events,
+    events: eventsToTriage,
     context,
     sourceControlProvider: request.sourceControlProvider,
   });
