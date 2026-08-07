@@ -536,24 +536,22 @@ describe('prReviewNotificationJob', () => {
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
-  it('defers during follow-up turns on a live sandbox (Idle status with a running phase)', async () => {
+  it('posts at the deferral cap when the run is idle even if its runtime phase is stale', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
-      payload: {},
+      payload: { channel: 'C123' },
       slackThreadTs: '111.222',
       sourceRunId: null,
       status: RunStatus.Idle,
       taskPhase: 'running',
     });
 
-    await prReviewNotificationJob(makeJob() as never);
+    await prReviewNotificationJob(makeJob({ deferrals: 3 }) as never);
 
-    expect(mockSchedule).toHaveBeenCalledWith({
-      request: expect.objectContaining({ deferrals: 1 }),
-      delayMs: 5000,
-    });
-    expect(mockConsumePending).not.toHaveBeenCalled();
-    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockSchedule).not.toHaveBeenCalled();
+    expect(mockConsumePending).toHaveBeenCalled();
+    expect(mockPrepareDelivery).toHaveBeenCalled();
+    expect(mockStickyFooterPost).toHaveBeenCalled();
   });
 
   it('drops pending activity without posting when the deferral cap is reached while still running', async () => {

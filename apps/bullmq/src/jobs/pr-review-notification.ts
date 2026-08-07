@@ -35,7 +35,7 @@ import {
 } from '@roomote/slack';
 import {
   buildPrReviewActionCallbackData,
-  isTaskExecutingTurn,
+  isActivelyRunningTask,
 } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
@@ -240,11 +240,10 @@ export const prReviewNotificationJob = async (
     return;
   }
 
-  // The notification only posts while the owning task is idle. Hold it while
-  // the task is actively working, and once the deferral cap is reached (the
-  // task has effectively been running for the whole pending-events window),
-  // drop the pending feedback instead of posting mid-run.
-  if (isTaskExecutingTurn(latestJob.status, latestJob.taskPhase)) {
+  // This is an out-of-band conversation message, not an injected agent turn.
+  // Use the same active/idle contract as the task UI so a stale `running`
+  // phase on an already-idle run cannot suppress review feedback indefinitely.
+  if (isActivelyRunningTask(latestJob.status, latestJob.taskPhase)) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
       await schedulePrReviewNotificationJob({
         request: { ...data, deferrals: data.deferrals + 1 },
