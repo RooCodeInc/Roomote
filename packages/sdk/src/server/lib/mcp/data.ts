@@ -478,7 +478,7 @@ export async function getValidAccessToken(
         // stale token forever (there is no other feedback channel for a
         // broken deployment-scoped connection). Transient failures (5xx,
         // network) still fall through with the stale token below.
-        if (customTarget && isDefinitiveOAuthRejection(message)) {
+        if (customTarget && isDefinitiveOAuthRejection(error)) {
           await db
             .update(mcpConnections)
             .set({ authStatus: 'error', updatedAt: new Date() })

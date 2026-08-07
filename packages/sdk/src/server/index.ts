@@ -314,6 +314,7 @@ export {
   generateCodeChallenge,
   generateState,
   exchangeCodeForTokens,
+  OAuthTokenRequestError,
   type OAuthRequestOptions,
 } from './lib/mcp/oauth';
 

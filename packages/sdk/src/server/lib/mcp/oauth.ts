@@ -24,6 +24,40 @@ import type {
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_TOKEN_ENDPOINT_AUTH_METHOD = 'client_secret_post';
 
+/**
+ * Token-endpoint failure carrying the structured RFC 6749 §5.2 error code
+ * when the server returned one. Callers classify failures (for example
+ * "is this grant definitively dead?") on `oauthErrorCode`, never on
+ * message wording.
+ */
+export class OAuthTokenRequestError extends Error {
+  readonly oauthErrorCode: string | null;
+
+  constructor(message: string, oauthErrorCode: string | null) {
+    super(message);
+    this.name = 'OAuthTokenRequestError';
+    this.oauthErrorCode = oauthErrorCode;
+  }
+}
+
+function parseOAuthErrorCode(bodyText: string): string | null {
+  try {
+    const body: unknown = JSON.parse(bodyText);
+
+    if (
+      body &&
+      typeof body === 'object' &&
+      typeof (body as { error?: unknown }).error === 'string'
+    ) {
+      return (body as { error: string }).error;
+    }
+  } catch {
+    // Non-JSON error body (HTML error page, plain text): no code.
+  }
+
+  return null;
+}
+
 export interface OAuthRequestOptions {
   /**
    * Fetch used for every protocol request. Custom-server flows pass an
@@ -449,7 +483,10 @@ export async function exchangeCodeForTokens(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Token exchange failed: ${errorText}`);
+    throw new OAuthTokenRequestError(
+      `Token exchange failed: ${errorText}`,
+      parseOAuthErrorCode(errorText),
+    );
   }
 
   const tokens: OAuthTokens = await response.json();
@@ -492,7 +529,10 @@ export async function refreshOAuthToken(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Token refresh failed: ${errorText}`);
+    throw new OAuthTokenRequestError(
+      `Token refresh failed: ${errorText}`,
+      parseOAuthErrorCode(errorText),
+    );
   }
 
   const tokens: OAuthTokens = await response.json();

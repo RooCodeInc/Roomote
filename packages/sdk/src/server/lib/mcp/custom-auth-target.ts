@@ -8,7 +8,11 @@ import {
 } from '@roomote/types';
 
 import { createGuardedFetch } from '../safe-fetch';
-import { discoverOAuthEndpoints, type OAuthRequestOptions } from './oauth';
+import {
+  discoverOAuthEndpoints,
+  OAuthTokenRequestError,
+  type OAuthRequestOptions,
+} from './oauth';
 
 /**
  * OAuth context for a deployment custom MCP server, resolved from its
@@ -107,12 +111,23 @@ export async function ensureCustomMcpServerMetadata(
   return metadata;
 }
 
+/** RFC 6749 §5.2 codes that mean the grant or client itself is dead. */
+const DEFINITIVE_OAUTH_ERROR_CODES: ReadonlySet<string> = new Set([
+  'invalid_grant',
+  'invalid_client',
+]);
+
 /**
  * True when a token-endpoint failure means the grant itself is dead
  * (revoked, expired beyond recovery, or the client is no longer valid), as
  * opposed to a transient outage where retrying with the stale token is the
- * kinder behavior.
+ * kinder behavior. Decided on the structured error code the token endpoint
+ * returned; a 5xx, proxy error page, or network failure never qualifies.
  */
-export function isDefinitiveOAuthRejection(message: string): boolean {
-  return /invalid_grant|invalid_client/i.test(message);
+export function isDefinitiveOAuthRejection(error: unknown): boolean {
+  return (
+    error instanceof OAuthTokenRequestError &&
+    error.oauthErrorCode !== null &&
+    DEFINITIVE_OAUTH_ERROR_CODES.has(error.oauthErrorCode)
+  );
 }
