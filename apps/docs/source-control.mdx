@@ -40,6 +40,20 @@ After setup, verify that Roomote can:
 - clone the repository inside a task sandbox
 - push a branch or open a reviewable change when the task finishes
 
+## Pull request review comments
+
+When **Review Code** finds an issue on a changed line, Roomote posts the finding
+as an inline comment on GitHub, GitLab, Gitea, Bitbucket, and Azure DevOps. It
+replies to an existing thread when the provider supports threaded replies and
+the same lines are already under discussion. On Gitea, that reply becomes a
+pull request comment that references the original thread. Roomote can anchor
+new findings to added, changed, or deleted lines.
+
+If a provider rejects an inline location, Roomote retries with the current diff
+and then includes the finding with a file and line reference in the review
+summary. On later sync reviews, Roomote resolves its inline thread when the
+flagged issue is clearly fixed and the provider supports thread resolution.
+
 ## Public URLs
 
 Use the same deployment URL across source-control callbacks and webhooks. If
