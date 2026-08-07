@@ -57,9 +57,9 @@ arguments, and environment variables you configure. Two things to know:
   environment values are visible inside the sandbox at runtime, exactly like
   environment-scoped stdio servers.
 - Environment values can reference
-  [deployment environment variables](/settings#deployment-environment-variables)
-  with `${VAR}` syntax. References to Roomote runtime credentials are
-  rejected at save time.
+  [deployment environment variables](/environment-variables) with `${VAR}`
+  syntax. References to Roomote runtime credentials are rejected at save
+  time.
 
 The sandbox image ships `node`, `npx`, `uvx`, and `python`, so
 `npx -y <package>` style servers work out of the box.
