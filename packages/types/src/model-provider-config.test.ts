@@ -553,7 +553,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(googleProvider).toMatchObject({
       label: 'Google Gemini',
       envVarName: 'GEMINI_API_KEY',
-      defaultRoomoteModel: 'google/gemini-3.1-pro-preview',
+      defaultRoomoteModel: 'google/gemini-3.6-flash',
     });
   });
 
@@ -994,6 +994,15 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     ).toEqual({
       ...createEmptyDeploymentModelConfig(),
       roomoteModel: 'xai/grok-4.5',
+    });
+  });
+
+  it('recommends Gemini Flash for every Google Gemini role', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(getSetupModelProvider('google')),
+    ).toEqual({
+      ...createEmptyDeploymentModelConfig(),
+      roomoteModel: 'google/gemini-3.6-flash',
     });
   });
 

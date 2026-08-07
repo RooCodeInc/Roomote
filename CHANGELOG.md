@@ -2,6 +2,24 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.36.1 (2026-08-07)
+
+This release improves compatibility across MCP and Anthropic integrations, tightens automation suggestions, and refreshes Gemini recommendations.
+
+### Highlights
+
+- Configure per-tool controls for streamable HTTP MCP servers that require session initialization.
+- Run Anthropic-backed model and tool calls without unsupported schema constraints causing failures.
+- Keep launchable task suggestions limited to automations that explicitly request them.
+- Use Gemini 3.6 Flash consistently for newly recommended Google Gemini task roles.
+
+### Patch changes
+
+- Discover tools from streamable HTTP MCP servers that require session initialization and negotiated protocol headers, restoring per-tool controls for strict servers.
+- Keep launchable task suggestions limited to automation runs that explicitly request them, so normal user conversations no longer show unrelated follow-up task prompts.
+- Recommend Gemini 3.6 Flash consistently across Google Gemini task roles and remove Gemini 3.1 Pro Preview from newly recommended model lists.
+- Prevent Anthropic-backed model and tool calls from failing on unsupported JSON Schema constraints while preserving the same local output validation.
+
 ## 0.36.0 (2026-08-07)
 
 This release adds deployment-wide custom MCP servers, makes suggested tasks easier to launch from chat, and gives automations private delivery options across communication providers alongside reliability improvements.

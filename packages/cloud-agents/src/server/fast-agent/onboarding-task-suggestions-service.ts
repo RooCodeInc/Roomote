@@ -21,14 +21,48 @@ const onboardingTaskSuggestionBatchSchema = z
       .array(
         z
           .object({
-            title: z.string().trim().min(1).max(120),
-            brief: z.string().trim().min(1).max(4_000),
+            title: z
+              .string()
+              .trim()
+              .describe('A non-empty title of at most 120 characters.'),
+            brief: z
+              .string()
+              .trim()
+              .describe('A non-empty brief of at most 4,000 characters.'),
           })
           .strict(),
       )
-      .length(ONBOARDING_TASK_SUGGESTION_COUNT),
+      .describe(
+        `Exactly ${ONBOARDING_TASK_SUGGESTION_COUNT} task suggestions.`,
+      ),
   })
-  .strict();
+  .strict()
+  .superRefine(({ suggestions }, context) => {
+    if (suggestions.length !== ONBOARDING_TASK_SUGGESTION_COUNT) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['suggestions'],
+        message: `Exactly ${ONBOARDING_TASK_SUGGESTION_COUNT} suggestions are required.`,
+      });
+    }
+
+    suggestions.forEach((suggestion, index) => {
+      if (suggestion.title.length === 0 || suggestion.title.length > 120) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['suggestions', index, 'title'],
+          message: 'Title must contain 1 to 120 characters.',
+        });
+      }
+      if (suggestion.brief.length === 0 || suggestion.brief.length > 4_000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['suggestions', index, 'brief'],
+          message: 'Brief must contain 1 to 4,000 characters.',
+        });
+      }
+    });
+  });
 
 const ONBOARDING_SUGGESTION_BRIEF_LABELS = [
   'Goal',
