@@ -1226,6 +1226,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
         chatReplyMarkdownGuidance +
         chatReplySourceLinkingGuidance +
         'Use the optional suggestions parameter only when the reply identifies independent, high-confidence actions that users may want Roomote to start as separate tasks. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. ' +
+        'When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. ' +
         'Write the message so its content clearly matches the selected purpose.',
       inputSchema: {
         purpose: z
@@ -1306,6 +1307,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
           imagePaths: params.imagePaths,
           imageArtifactIds: params.imageArtifactIds,
           suggestions: params.suggestions,
+          chatReplySurface: chatReplySurfaceLabel,
         },
         artifactConfig,
         roomoteConfig,
