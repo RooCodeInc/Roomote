@@ -202,12 +202,38 @@ export function collectCustomMcpReservedReferences(
   return Array.from(new Set(strings.flatMap(collectReservedEnvReferences)));
 }
 
-export const customMcpServerInputSchema = z
+function addReservedReferenceIssue(
+  ctx: z.RefinementCtx,
+  serverName: string,
+  strings: string[],
+): void {
+  const reserved = collectCustomMcpReservedReferences(strings);
+
+  if (reserved.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        `Custom MCP server '${serverName}' references reserved ` +
+        `${PRODUCT_NAME} runtime environment variables ` +
+        `(${reserved.join(', ')}). Define your own deployment environment ` +
+        `variable under a different name and reference that instead.`,
+    });
+  }
+}
+
+export const MAX_CUSTOM_MCP_STDIO_ARGS = 32;
+export const MAX_CUSTOM_MCP_STDIO_ENV_VARS = 16;
+
+export const customMcpRemoteServerInputSchema = z
   .object({
+    transport: z.literal('remote'),
     name: customMcpServerNameSchema,
     url: z.string().min(1).max(MAX_CUSTOM_MCP_URL_LENGTH),
     authType: customMcpServerAuthTypeSchema,
     headers: customMcpServerHeadersSchema.optional(),
+    manualClientId: z.string().max(512).optional(),
+    manualClientSecret: z.string().max(4096).optional(),
+    oauthResourceIndicatorDisabled: z.boolean().optional(),
   })
   .superRefine((server, ctx) => {
     const urlError = validateCustomMcpServerUrl(server.url);
@@ -228,22 +254,72 @@ export const customMcpServerInputSchema = z
       });
     }
 
-    const reserved = collectCustomMcpReservedReferences([
+    if (
+      server.authType !== 'oauth' &&
+      (server.manualClientId || server.manualClientSecret)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['manualClientId'],
+        message: 'Client credentials are only allowed with OAuth.',
+      });
+    }
+
+    addReservedReferenceIssue(ctx, server.name, [
       server.name,
       server.url,
       ...Object.entries(server.headers ?? {}).flat(),
     ]);
-
-    if (reserved.length > 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          `Custom MCP server '${server.name}' references reserved ` +
-          `${PRODUCT_NAME} runtime environment variables ` +
-          `(${reserved.join(', ')}). Define your own deployment environment ` +
-          `variable under a different name and reference that instead.`,
-      });
-    }
   });
 
+export const customMcpStdioServerInputSchema = z
+  .object({
+    transport: z.literal('stdio'),
+    name: customMcpServerNameSchema,
+    stdio: customMcpServerStdioConfigSchema,
+  })
+  .superRefine((server, ctx) => {
+    if ((server.stdio.args?.length ?? 0) > MAX_CUSTOM_MCP_STDIO_ARGS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stdio', 'args'],
+        message: `At most ${MAX_CUSTOM_MCP_STDIO_ARGS} arguments are allowed.`,
+      });
+    }
+
+    const envEntries = Object.entries(server.stdio.env ?? {});
+
+    if (envEntries.length > MAX_CUSTOM_MCP_STDIO_ENV_VARS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['stdio', 'env'],
+        message: `At most ${MAX_CUSTOM_MCP_STDIO_ENV_VARS} environment variables are allowed.`,
+      });
+    }
+
+    // The schema-attached superRefine on environmentMcpServersSchema does not
+    // protect this write path; reserved references must be rejected here
+    // explicitly. Names and values both flow into sandbox config text.
+    addReservedReferenceIssue(ctx, server.name, [
+      server.name,
+      server.stdio.command,
+      ...(server.stdio.args ?? []),
+      ...envEntries.flat(),
+    ]);
+  });
+
+// A plain union rather than discriminatedUnion: the members carry superRefine
+// effects, which discriminatedUnion does not accept. The `transport` literal
+// still discriminates in practice.
+export const customMcpServerInputSchema = z.union([
+  customMcpRemoteServerInputSchema,
+  customMcpStdioServerInputSchema,
+]);
+
+export type CustomMcpRemoteServerInput = z.infer<
+  typeof customMcpRemoteServerInputSchema
+>;
+export type CustomMcpStdioServerInput = z.infer<
+  typeof customMcpStdioServerInputSchema
+>;
 export type CustomMcpServerInput = z.infer<typeof customMcpServerInputSchema>;

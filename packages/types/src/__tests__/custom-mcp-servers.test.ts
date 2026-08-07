@@ -8,6 +8,7 @@ import {
 } from '../custom-mcp-servers';
 
 const validServer = {
+  transport: 'remote' as const,
   name: 'internal-tools',
   url: 'https://mcp.example.com/mcp',
   authType: 'static_headers' as const,
@@ -23,12 +24,49 @@ describe('customMcpServerInputSchema', () => {
 
   it('accepts a no-auth server without headers', () => {
     const result = customMcpServerInputSchema.safeParse({
+      transport: 'remote',
       name: 'public-server',
       url: 'https://mcp.example.com',
       authType: 'none',
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it('accepts a stdio server', () => {
+    const result = customMcpServerInputSchema.safeParse({
+      transport: 'stdio',
+      name: 'local-tools',
+      stdio: {
+        command: 'npx',
+        args: ['-y', '@example/mcp-server'],
+        env: { EXAMPLE_TOKEN: '${MY_DEPLOYMENT_VAR}' },
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects reserved env references in stdio config', () => {
+    const result = customMcpServerInputSchema.safeParse({
+      transport: 'stdio',
+      name: 'local-tools',
+      stdio: {
+        command: 'npx',
+        env: { TOKEN: '{env:ROOMOTE_CLOUD_TOKEN}' },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects client credentials on non-oauth servers', () => {
+    const result = customMcpServerInputSchema.safeParse({
+      ...validServer,
+      manualClientId: 'client-1',
+    });
+
+    expect(result.success).toBe(false);
   });
 
   it('rejects headers on a non-header auth type', () => {
