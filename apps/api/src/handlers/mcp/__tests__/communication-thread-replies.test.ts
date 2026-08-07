@@ -122,6 +122,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/slack', () => ({
   resolveSlackThreadLinkedPr: vi.fn(),
+  resolveSlackThreadLinkedPrs: vi.fn(),
   resolveSlackThreadLivePreviewUrl: vi.fn(),
 }));
 

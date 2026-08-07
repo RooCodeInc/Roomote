@@ -1,5 +1,5 @@
 import type { SlackBlock } from '@roomote/types';
-import { resolveThreadReplyLinkedPr } from '@roomote/communication';
+import { resolveThreadReplyLinkedPrs } from '@roomote/communication';
 
 import type { SlackNotifier } from './slack-notifier';
 
@@ -12,19 +12,26 @@ export function buildAutomationRootFooterBlocks(params: {
   automationLabel: string;
   taskUrl?: string | null;
   linkedPrUrl?: string | null;
+  linkedPrUrls?: string[];
 }): SlackBlock[] {
   const actionElements: Record<string, unknown>[] = [];
 
-  if (params.linkedPrUrl) {
+  const linkedPrUrls = params.linkedPrUrls?.length
+    ? params.linkedPrUrls
+    : params.linkedPrUrl
+      ? [params.linkedPrUrl]
+      : [];
+
+  for (const [index, linkedPrUrl] of linkedPrUrls.entries()) {
     actionElements.push({
       type: 'button',
       action_id: 'late_bound_automation_view_pr',
       text: {
         type: 'plain_text',
-        text: 'See PR',
+        text: linkedPrUrls.length === 1 ? 'See PR' : `See PR ${index + 1}`,
         emoji: false,
       },
-      url: params.linkedPrUrl,
+      url: linkedPrUrl,
     });
   }
 
@@ -97,7 +104,7 @@ export async function refreshAutomationRootFooter(params: {
     return false;
   }
 
-  const linkedPr = await resolveThreadReplyLinkedPr({
+  const linkedPrs = await resolveThreadReplyLinkedPrs({
     taskId: params.taskId ?? null,
     prRepo: params.prRepo ?? null,
     prNumber: params.prNumber ?? null,
@@ -115,7 +122,7 @@ export async function refreshAutomationRootFooter(params: {
           ...buildAutomationRootFooterBlocks({
             automationLabel: params.automationLabel,
             taskUrl: params.taskUrl ?? null,
-            linkedPrUrl: linkedPr?.prUrl ?? null,
+            linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
           }),
         ],
       },

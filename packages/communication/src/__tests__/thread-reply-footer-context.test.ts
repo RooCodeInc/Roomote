@@ -2,11 +2,13 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 const {
   findFirstMock,
+  findManyMock,
   taskRunFindFirstMock,
   environmentFindFirstMock,
   resolveEffectivePreviewRuntimeConfigMock,
 } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
+  findManyMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
   resolveEffectivePreviewRuntimeConfigMock: vi.fn(),
@@ -17,6 +19,7 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       taskPullRequests: {
         findFirst: findFirstMock,
+        findMany: findManyMock,
       },
       taskRuns: {
         findFirst: taskRunFindFirstMock,
@@ -66,6 +69,7 @@ describe('thread reply footer context', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     findFirstMock.mockResolvedValue(null);
+    findManyMock.mockResolvedValue([]);
     taskRunFindFirstMock.mockResolvedValue(null);
     environmentFindFirstMock.mockResolvedValue(null);
     resolveEffectivePreviewRuntimeConfigMock.mockResolvedValue({

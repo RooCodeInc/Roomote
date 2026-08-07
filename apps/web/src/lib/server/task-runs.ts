@@ -35,7 +35,61 @@ type TaskPullRequestLink = {
   taskId: string;
   repository: string;
   prNumber: number;
+  prUrl?: string;
   sourceControlProvider: SourceControlProvider;
+};
+
+export const getTaskPullRequestsByTaskId = async (
+  taskIds: string[],
+): Promise<
+  Record<
+    string,
+    Array<Pick<TaskPullRequestLink, 'repository' | 'prNumber' | 'prUrl'>>
+  >
+> => {
+  if (taskIds.length === 0) {
+    return {};
+  }
+
+  const results = await db
+    .select({
+      taskId: taskPullRequests.taskId,
+      repository: taskPullRequests.repository,
+      prNumber: taskPullRequests.prNumber,
+      prUrl: taskPullRequests.prUrl,
+    })
+    .from(taskPullRequests)
+    .where(
+      and(
+        inArray(taskPullRequests.taskId, taskIds),
+        isNotNull(taskPullRequests.repository),
+        isNotNull(taskPullRequests.prNumber),
+      ),
+    )
+    .orderBy(taskPullRequests.taskId, desc(taskPullRequests.detectedAt));
+
+  const pullRequestsByTask = new Map<
+    string,
+    Array<Pick<TaskPullRequestLink, 'repository' | 'prNumber' | 'prUrl'>>
+  >();
+
+  for (const row of results) {
+    if (!row.repository || row.prNumber === null) {
+      continue;
+    }
+
+    const pullRequests = pullRequestsByTask.get(row.taskId) ?? [];
+    if (!pullRequests.some((pr) => pr.prUrl === row.prUrl)) {
+      pullRequests.push({
+        repository: row.repository,
+        prNumber: row.prNumber,
+        prUrl: row.prUrl ?? undefined,
+      });
+      pullRequestsByTask.set(row.taskId, pullRequests);
+    }
+  }
+
+  return Object.fromEntries(pullRequestsByTask);
 };
 
 export const getLatestTaskPullRequestsByTaskId = async (

@@ -219,6 +219,7 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
   const footerText = buildSlackThreadFooterText({
     taskUrl,
     linkedPr: replyOnly ? null : footerContext.linkedPr,
+    linkedPrs: replyOnly ? undefined : footerContext.linkedPrs,
     livePreviewUrl: replyOnly ? null : footerContext.livePreviewUrl,
     explicitMentionRequired: footerContext.explicitMentionRequired,
   });

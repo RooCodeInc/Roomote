@@ -35,6 +35,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
   const repo = taskRun?.payload?.repo;
   const prRepo = taskRun?.prRepo;
   const prNumber = taskRun?.prNumber;
+  const pullRequests = taskRun?.pullRequests ?? [];
 
   const badges = [
     (environmentId || repo) && (
@@ -45,14 +46,26 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
         iconClassName="text-muted-foreground"
       />
     ),
-    prRepo && prNumber && (
-      <PullRequestBadge
-        key="pr"
-        repo={prRepo}
-        prNumber={prNumber}
-        iconClassName="text-muted-foreground"
-      />
-    ),
+    ...(pullRequests.length > 0
+      ? pullRequests.map((pullRequest) => (
+          <PullRequestBadge
+            key={`pr:${pullRequest.repository}:${pullRequest.prNumber}`}
+            repo={pullRequest.repository}
+            prNumber={pullRequest.prNumber}
+            url={pullRequest.prUrl}
+            iconClassName="text-muted-foreground"
+          />
+        ))
+      : prRepo && prNumber
+        ? [
+            <PullRequestBadge
+              key="pr"
+              repo={prRepo}
+              prNumber={prNumber}
+              iconClassName="text-muted-foreground"
+            />,
+          ]
+        : []),
   ].filter(Boolean);
 
   const updateTaskTitle = useMutation(trpc.tasks.updateTitle.mutationOptions());
