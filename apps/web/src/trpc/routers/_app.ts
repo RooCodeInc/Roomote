@@ -218,6 +218,7 @@ import {
   deleteCustomMcpServerCommand,
   disconnectCustomMcpServerCommand,
   getCustomMcpAvailabilityCommand,
+  listCustomMcpServerToolsCommand,
   listCustomMcpServersCommand,
   setCustomMcpServerDisabledToolsCommand,
   setCustomMcpServerEnabledCommand,
@@ -1625,6 +1626,12 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setCustomMcpServerDisabledToolsCommand(auth, input),
+      ),
+
+    listTools: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        listCustomMcpServerToolsCommand(auth, input),
       ),
 
     connect: protectedProcedure

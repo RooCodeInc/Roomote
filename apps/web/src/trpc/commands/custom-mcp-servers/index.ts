@@ -4,12 +4,16 @@ import {
   customMcpServers,
   db,
   eq,
+  isNull,
   mcpConnections,
 } from '@roomote/db/server';
-import { encrypt } from '@roomote/db/encryption';
+import { decrypt, encrypt } from '@roomote/db/encryption';
+import { getValidAccessToken } from '@roomote/sdk/server';
+import { safeFetch } from '@roomote/sdk/server/safe-fetch';
 import {
   MAX_CUSTOM_MCP_SERVERS,
   customMcpConnectionId,
+  parseMcpJsonRpcPayload,
   type CustomMcpRemoteServerInput,
   type CustomMcpServerInput,
   type CustomMcpStdioServerInput,
@@ -329,6 +333,180 @@ export async function deleteCustomMcpServerCommand(
   );
 
   return { deleted: true };
+}
+
+type ListedCustomMcpTool = {
+  name: string;
+  description: string | null;
+  enabled: boolean;
+};
+
+async function callCustomMcpServer(input: {
+  url: string;
+  headers: Record<string, string>;
+  method: string;
+  params: unknown;
+  sessionId?: string | null;
+  requestId: number;
+}): Promise<{
+  payload: unknown;
+  sessionId: string | null;
+  response: Response;
+}> {
+  const response = await safeFetch(input.url, {
+    allowedPrivateCidrs: Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS,
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      ...(input.sessionId ? { 'mcp-session-id': input.sessionId } : {}),
+      ...input.headers,
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: input.requestId,
+      method: input.method,
+      params: input.params,
+    }),
+  });
+
+  const bodyText = await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `Custom MCP server request '${input.method}' failed (${response.status} ${response.statusText})`,
+    );
+  }
+
+  return {
+    payload: parseMcpJsonRpcPayload(
+      bodyText,
+      response.headers.get('content-type'),
+    ),
+    sessionId: response.headers.get('mcp-session-id'),
+    response,
+  };
+}
+
+/**
+ * List the tools a custom remote server exposes, flagged with the stored
+ * deny-list state. The fetch runs control-plane-side through the SSRF guard
+ * with the server's real credentials (which never reach the browser).
+ */
+export async function listCustomMcpServerToolsCommand(
+  auth: UserAuthSuccess,
+  input: { id: string },
+): Promise<{ tools: ListedCustomMcpTool[] }> {
+  assertAdmin(auth);
+  assertCustomMcpEnabled();
+
+  const server = await db.query.customMcpServers.findFirst({
+    where: eq(customMcpServers.id, input.id),
+  });
+
+  if (!server) {
+    throw new Error('Custom MCP server not found.');
+  }
+
+  if (!server.url || server.stdio) {
+    throw new Error(
+      'Local (stdio) servers run inside the task sandbox; their tools cannot be listed from Settings.',
+    );
+  }
+
+  const headers: Record<string, string> = {};
+
+  if (server.authType === 'static_headers' && server.headers) {
+    for (const [name, encryptedValue] of Object.entries(server.headers)) {
+      headers[name] = decrypt(encryptedValue);
+    }
+  } else if (server.authType === 'oauth') {
+    const connection = await db.query.mcpConnections.findFirst({
+      where: and(
+        eq(mcpConnections.mcpId, customMcpConnectionId(server.id)),
+        isNull(mcpConnections.userId),
+      ),
+      columns: { id: true },
+    });
+
+    const accessToken = connection
+      ? await getValidAccessToken(connection.id, server.url)
+      : null;
+
+    if (!accessToken) {
+      throw new Error(
+        `'${server.name}' needs to be connected before tools can be managed.`,
+      );
+    }
+
+    headers['authorization'] = `Bearer ${accessToken}`;
+  }
+
+  // Streamable-http servers may require an initialized session before
+  // answering tools/list; try the session-less call first and fall back.
+  let toolsPayload: unknown;
+
+  try {
+    const direct = await callCustomMcpServer({
+      url: server.url,
+      headers,
+      method: 'tools/list',
+      params: {},
+      requestId: 1,
+    });
+    toolsPayload = direct.payload;
+  } catch {
+    const initialized = await callCustomMcpServer({
+      url: server.url,
+      headers,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'Roomote', version: '1.0.0' },
+      },
+      requestId: 1,
+    });
+
+    const listed = await callCustomMcpServer({
+      url: server.url,
+      headers,
+      method: 'tools/list',
+      params: {},
+      sessionId: initialized.sessionId,
+      requestId: 2,
+    });
+    toolsPayload = listed.payload;
+  }
+
+  const result =
+    toolsPayload && typeof toolsPayload === 'object' && 'result' in toolsPayload
+      ? (toolsPayload as { result?: { tools?: unknown } }).result
+      : undefined;
+
+  if (!result || !Array.isArray(result.tools)) {
+    throw new Error(
+      `'${server.name}' did not return a tool list. Check that the URL points at a streamable-HTTP MCP endpoint.`,
+    );
+  }
+
+  const disabled = new Set(server.disabledTools ?? []);
+
+  return {
+    tools: result.tools
+      .filter(
+        (tool): tool is { name: string; description?: string } =>
+          Boolean(tool) &&
+          typeof tool === 'object' &&
+          typeof (tool as { name?: unknown }).name === 'string',
+      )
+      .map((tool) => ({
+        name: tool.name,
+        description:
+          typeof tool.description === 'string' ? tool.description : null,
+        enabled: !disabled.has(tool.name),
+      })),
+  };
 }
 
 /**
