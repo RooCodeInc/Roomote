@@ -22,6 +22,17 @@ describe('handleManageCustomAutomations', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it('lists enabled automation model choices', async () => {
+    await handleManageCustomAutomations({ action: 'list_models' }, config);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.example.com/api/mcp/custom-automations/models',
+    );
+    expect(request.method).toBe('GET');
+  });
+
   it('sends only fields supplied for an update', async () => {
     await handleManageCustomAutomations(
       {
