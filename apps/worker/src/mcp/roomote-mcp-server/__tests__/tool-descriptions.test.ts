@@ -113,6 +113,17 @@ function getInputSchemaField(
   return field!;
 }
 
+function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
+  let current = schema;
+
+  while (current instanceof z.ZodOptional || current instanceof z.ZodEffects) {
+    current =
+      current instanceof z.ZodOptional ? current.unwrap() : current.innerType();
+  }
+
+  return current;
+}
+
 describe('roomote MCP tool descriptions', () => {
   afterEach(() => {
     process.env = { ...originalEnv };
@@ -225,7 +236,7 @@ describe('roomote MCP tool descriptions', () => {
       'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
     );
     expect(limitField.description).toBe(
-      'Max results for search (default 20, max 100) or max latest messages for get_messages (max 1000)',
+      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
     );
   });
 
@@ -370,7 +381,7 @@ describe('roomote MCP tool descriptions', () => {
       'When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction.',
     );
     expect(messageField.description).toBe(
-      "Markdown text to post in the Slack thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.",
+      "Non-empty Markdown text to post in the Slack thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.",
     );
     expect(getInputSchemaField(replyTool, 'purpose').description).toBe(
       'The lifecycle purpose for this Slack-visible reply. Choose ack for the first visible response before work that will not post to Slack, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.',
@@ -379,13 +390,13 @@ describe('roomote MCP tool descriptions', () => {
     expect(replyTool.config.inputSchema.questions).toBeUndefined();
     expect(replyTool.config.inputSchema.suggestedNextSteps).toBeUndefined();
     expect(getInputSchemaField(replyTool, 'suggestions').description).toBe(
-      'Optional independent actions to post inside the originating Slack conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.',
+      'Optional list of 1 to 10 independent actions to post inside the originating Slack conversation. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.',
     );
     const suggestionItem = (
-      replyTool.config.inputSchema.suggestions as unknown as {
-        unwrap: () => { element: { shape: Record<string, unknown> } };
-      }
-    ).unwrap().element;
+      unwrapSchema(
+        replyTool.config.inputSchema.suggestions as unknown as z.ZodTypeAny,
+      ) as z.ZodArray<z.ZodObject<z.ZodRawShape>>
+    ).element;
     expect(Object.keys(suggestionItem.shape)).toEqual([
       'title',
       'brief',
@@ -416,7 +427,7 @@ describe('roomote MCP tool descriptions', () => {
       'send_chat_reaction_emoji',
     );
     expect(messageField.description).toContain(
-      'Markdown text to post in the Teams thread.',
+      'Non-empty Markdown text to post in the Teams thread.',
     );
     expect(getInputSchemaField(replyTool, 'purpose').description).toContain(
       'Teams-visible reply',
@@ -444,10 +455,10 @@ describe('roomote MCP tool descriptions', () => {
     });
     const replyTool = getRegisteredTool(registeredTools, 'send_chat_reply');
     const suggestionItem = (
-      replyTool.config.inputSchema.suggestions as unknown as {
-        unwrap: () => { element: { shape: Record<string, unknown> } };
-      }
-    ).unwrap().element;
+      unwrapSchema(
+        replyTool.config.inputSchema.suggestions as unknown as z.ZodTypeAny,
+      ) as z.ZodArray<z.ZodObject<z.ZodRawShape>>
+    ).element;
 
     expect(Object.keys(suggestionItem.shape)).toEqual([
       'title',
@@ -488,7 +499,7 @@ describe('roomote MCP tool descriptions', () => {
       'send_chat_reaction_emoji',
     );
     expect(messageField.description).toContain(
-      'Markdown text to post in the Telegram thread.',
+      'Non-empty Markdown text to post in the Telegram thread.',
     );
     expect(getInputSchemaField(replyTool, 'purpose').description).toContain(
       'Telegram-visible reply',
@@ -744,10 +755,10 @@ describe('roomote MCP tool descriptions', () => {
       'Slack channel ID, channel name, or Slack channel mention that contains the target message',
     );
     expect(getInputSchemaField(reactionTool, 'messageTs').description).toBe(
-      'Slack message timestamp for the message to react to',
+      'Non-empty Slack message timestamp for the message to react to',
     );
     expect(getInputSchemaField(reactionTool, 'name').description).toBe(
-      'Slack emoji name without surrounding colons, for example eyes or white_check_mark',
+      'Non-empty Slack emoji name without surrounding colons, for example eyes or white_check_mark',
     );
   });
 
@@ -766,7 +777,7 @@ describe('roomote MCP tool descriptions', () => {
       'Slack-visible: adds an emoji reaction to the latest Slack user message for the active task session. Use this for fast acknowledgements or emoji-only answers only when the latest user turn itself came from Slack and the reaction should target that same message automatically, without looking up a channel or message timestamp first. Follow the current chat turn policy for whether this shortcut is available.',
     );
     expect(getInputSchemaField(reactionTool, 'name').description).toBe(
-      'Emoji name without surrounding colons, for example eyes or thumbsup',
+      'Non-empty emoji name without surrounding colons, for example eyes or thumbsup',
     );
   });
 
@@ -782,7 +793,7 @@ describe('roomote MCP tool descriptions', () => {
       `Slack-visible: posts a lifecycle reply in the originating Slack thread. Choose the current Slack turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the Slack turn open. Use it again on later Slack turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. Supports the modern Slack Markdown contract from the Slack instructions. Use rich Markdown when it improves scanability. When the reply mentions actionable code references, follow the Slack prompt source-linking rule. Use the optional suggestions parameter only when the reply identifies independent, high-confidence actions that users may want Roomote to start as separate tasks. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. Write the message so its content clearly matches the selected purpose.`,
     );
     expect(getInputSchemaField(chatReplyTool, 'message').description).toBe(
-      "Markdown text to post in the Slack thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.",
+      "Non-empty Markdown text to post in the Slack thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.",
     );
     expect(getInputSchemaField(chatReplyTool, 'purpose').description).toBe(
       'The lifecycle purpose for this Slack-visible reply. Choose ack for the first visible response before work that will not post to Slack, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.',

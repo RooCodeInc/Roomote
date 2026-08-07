@@ -17,10 +17,31 @@ const GENERAL_CHANNEL_NAME = 'general';
 const slackQuestionChannelSuggestionSchema = z
   .object({
     suggestedChannelIds: z
-      .array(z.string().trim().min(1))
-      .max(MAX_SLACK_QUESTION_CHANNEL_SUGGESTIONS),
+      .array(z.string().trim().describe('A non-empty Slack channel ID.'))
+      .describe(
+        `Up to ${MAX_SLACK_QUESTION_CHANNEL_SUGGESTIONS} non-empty Slack channel IDs.`,
+      ),
   })
-  .strict();
+  .strict()
+  .superRefine(({ suggestedChannelIds }, context) => {
+    if (suggestedChannelIds.length > MAX_SLACK_QUESTION_CHANNEL_SUGGESTIONS) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['suggestedChannelIds'],
+        message: `At most ${MAX_SLACK_QUESTION_CHANNEL_SUGGESTIONS} channel IDs are allowed.`,
+      });
+    }
+
+    suggestedChannelIds.forEach((channelId, index) => {
+      if (channelId.length === 0) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['suggestedChannelIds', index],
+          message: 'Channel IDs must be non-empty.',
+        });
+      }
+    });
+  });
 
 const SLACK_QUESTION_CHANNEL_SUGGESTION_SYSTEM_PROMPT = `You choose Slack channels for an AI coding assistant invite.
 Return only channel IDs from the provided list.

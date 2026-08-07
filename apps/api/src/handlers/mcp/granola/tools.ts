@@ -12,6 +12,9 @@ const TOOL_ANNOTATIONS = {
   readOnlyHint: true,
 } as const;
 
+const folderIdPattern = /^fol_[a-zA-Z0-9]{14}$/;
+const noteIdPattern = /^not_[a-zA-Z0-9]{14}$/;
+
 const paginationSchema = {
   cursor: z
     .string()
@@ -20,17 +23,18 @@ const paginationSchema = {
   page_size: z
     .number()
     .int()
-    .min(1)
-    .max(30)
+    .refine((value) => value >= 1 && value <= 30, {
+      message: 'Page size must be between 1 and 30.',
+    })
     .optional()
-    .describe(
-      'Maximum results per page. Granola defaults to 10 and caps at 30.',
-    ),
+    .describe('Results per page from 1 to 30. Granola defaults to 10.'),
 } as const;
 
 const dateFilterSchema = z
   .string()
-  .min(1)
+  .refine((value) => value.length > 0, {
+    message: 'Date filter must be non-empty.',
+  })
   .optional()
   .describe(
     'An ISO 8601 date or date-time, for example 2026-01-27 or 2026-01-27T15:30:00Z.',
@@ -69,7 +73,9 @@ function registerListNotesTool(
         ),
         folder_id: z
           .string()
-          .regex(/^fol_[a-zA-Z0-9]{14}$/)
+          .refine((value) => folderIdPattern.test(value), {
+            message: 'Folder ID must match fol_ followed by 14 alphanumerics.',
+          })
           .optional()
           .describe(
             'Return notes in this folder and its child folders. Use list_folders to discover IDs.',
@@ -118,8 +124,10 @@ function registerGetNoteTool(
       inputSchema: {
         note_id: z
           .string()
-          .regex(/^not_[a-zA-Z0-9]{14}$/)
-          .describe('The Granola note ID.'),
+          .refine((value) => noteIdPattern.test(value), {
+            message: 'Note ID must match not_ followed by 14 alphanumerics.',
+          })
+          .describe('The Granola note ID: not_ followed by 14 alphanumerics.'),
         include: z
           .literal('transcript')
           .optional()

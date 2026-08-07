@@ -78,6 +78,20 @@ export const roomoteMcpServer = new McpServer({
 
 let hasSubmittedAutomationSlackSummary = false;
 const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);
+const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
+  message: 'Value must be non-empty.',
+});
+const boundedNonEmptyStringSchema = (maximumLength: number) =>
+  z
+    .string()
+    .refine((value) => value.length > 0 && value.length <= maximumLength, {
+      message: `Value must contain 1 to ${maximumLength} characters.`,
+    });
+const uuidStringSchema = z
+  .string()
+  .refine((value) => z.string().uuid().safeParse(value).success, {
+    message: 'Value must be a UUID.',
+  });
 
 roomoteMcpServer.registerTool(
   'manage_custom_automations',
@@ -204,12 +218,9 @@ roomoteMcpServer.registerTool(
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
       'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
-      html: z
-        .string()
-        .min(1)
-        .describe(
-          'Compact HTML fragment or full document to display, including inline SVG. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
-        ),
+      html: nonEmptyStringSchema.describe(
+        'Non-empty compact HTML fragment or full document to display, including inline SVG. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
+      ),
       title: z
         .string()
         .optional()
@@ -581,11 +592,12 @@ const manageTasksInputSchema = {
   limit: z
     .number()
     .int()
-    .min(1)
-    .max(1000)
+    .refine((value) => value >= 1 && value <= 1000, {
+      message: 'Limit must be between 1 and 1,000.',
+    })
     .optional()
     .describe(
-      'Max results for search (default 20, max 100) or max latest messages for get_messages (max 1000)',
+      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
     ),
   cursor: z
     .string()
@@ -772,18 +784,22 @@ roomoteMcpServer.registerTool(
       prNumber: z
         .number()
         .int()
-        .positive()
+        .refine((value) => value > 0, {
+          message: 'Pull request number must be positive.',
+        })
         .optional()
         .describe(
-          'Required for single-PR/MR actions; unused by issue actions, create_or_update_pull_request, and list_pull_requests.',
+          'Positive pull request number required for single-PR/MR actions; unused by issue actions, create_or_update_pull_request, and list_pull_requests.',
         ),
       issueNumber: z
         .number()
         .int()
-        .positive()
+        .refine((value) => value > 0, {
+          message: 'Issue number must be positive.',
+        })
         .optional()
         .describe(
-          'Required for get_issue, list_issue_comments, and create_issue_comment.',
+          'Positive issue number required for get_issue, list_issue_comments, and create_issue_comment.',
         ),
       state: z
         .literal('open')
@@ -794,11 +810,12 @@ roomoteMcpServer.registerTool(
       limit: z
         .number()
         .int()
-        .positive()
-        .max(200)
+        .refine((value) => value >= 1 && value <= 200, {
+          message: 'Limit must be between 1 and 200.',
+        })
         .optional()
         .describe(
-          'Optional cap for list_pull_requests on how many pull requests to return (default 100, max 200).',
+          'Optional list_pull_requests result limit from 1 to 200 (default 100).',
         ),
       threadId: z
         .string()
@@ -833,7 +850,9 @@ roomoteMcpServer.registerTool(
       line: z
         .number()
         .int()
-        .positive()
+        .refine((value) => value > 0, {
+          message: 'Line number must be positive.',
+        })
         .optional()
         .describe(
           'Required for create_pull_request_review_comment: 1-based line number in the file version named by side. The line must be part of the current PR/MR diff; if the provider rejects the anchor, the call errors so you can correct the anchor and retry once, then fall back to carrying the finding in the review summary comment.',
@@ -847,7 +866,9 @@ roomoteMcpServer.registerTool(
       startLine: z
         .number()
         .int()
-        .positive()
+        .refine((value) => value > 0, {
+          message: 'Start line must be positive.',
+        })
         .optional()
         .describe(
           'Optional multi-line range start for create_pull_request_review_comment; must not exceed line. GitHub and Azure DevOps honor the range; other providers anchor to line and report a warning.',
@@ -1211,24 +1232,42 @@ if (shouldRegisterSlackThreadReplyTool()) {
     process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
   const chatReplySuggestionSchema = usesPinnedSuggestionContract
     ? z.object({
-        title: z.string().min(1).max(140),
-        brief: z.string().min(1).max(2000),
+        title: boundedNonEmptyStringSchema(140).describe(
+          'Non-empty suggestion title of at most 140 characters.',
+        ),
+        brief: boundedNonEmptyStringSchema(2000).describe(
+          'Non-empty suggestion brief of at most 2,000 characters.',
+        ),
         category: z
           .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
           .optional(),
         priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
-        investigationContext: z.string().min(1).max(4000).optional(),
-        targetRepositoryFullName: z.string().min(1),
-        targetEnvironmentId: z.string().uuid().optional(),
+        investigationContext: boundedNonEmptyStringSchema(4000)
+          .optional()
+          .describe(
+            'Optional non-empty investigation context of at most 4,000 characters.',
+          ),
+        targetRepositoryFullName: nonEmptyStringSchema.describe(
+          'Non-empty target repository full name.',
+        ),
+        targetEnvironmentId: uuidStringSchema
+          .optional()
+          .describe('Optional target environment UUID.'),
         workspaceReadiness: workspaceReadinessSchema.optional(),
-        readinessMessage: z.string().min(1).max(500).optional(),
+        readinessMessage: boundedNonEmptyStringSchema(500)
+          .optional()
+          .describe(
+            'Optional non-empty readiness message of at most 500 characters.',
+          ),
       })
     : z.object({
-        title: z.string().min(1).max(140),
-        brief: z.string().min(1).max(2000),
-        targetRepositoryFullName: z
-          .string()
-          .min(1)
+        title: boundedNonEmptyStringSchema(140).describe(
+          'Non-empty suggestion title of at most 140 characters.',
+        ),
+        brief: boundedNonEmptyStringSchema(2000).describe(
+          'Non-empty suggestion brief of at most 2,000 characters.',
+        ),
+        targetRepositoryFullName: nonEmptyStringSchema
           .optional()
           .describe(
             'Repository full name for org-wide runs. Required when the task workspace covers all repositories.',
@@ -1267,14 +1306,11 @@ if (shouldRegisterSlackThreadReplyTool()) {
           .describe(
             `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
           ),
-        message: z
-          .string()
-          .min(1)
-          .describe(
-            `Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. ` +
-              "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
-              chatReplyMessageMarkdownGuidance,
-          ),
+        message: nonEmptyStringSchema.describe(
+          `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. ` +
+            "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
+            chatReplyMessageMarkdownGuidance,
+        ),
         imagePaths: z
           .array(z.string())
           .optional()
@@ -1289,13 +1325,18 @@ if (shouldRegisterSlackThreadReplyTool()) {
           ),
         suggestions: z
           .array(chatReplySuggestionSchema)
-          .min(1)
-          .max(10)
+          .refine(
+            (suggestions) =>
+              suggestions.length >= 1 && suggestions.length <= 10,
+            {
+              message: 'Provide between 1 and 10 suggestions.',
+            },
+          )
           .optional()
           .describe(
             usesPinnedSuggestionContract
-              ? `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
-              : `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.`,
+              ? `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
+              : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.`,
           ),
       },
       annotations: {
@@ -1577,12 +1618,9 @@ if (shouldRegisterChannelPostTool()) {
             : []),
         ].join(' '),
         inputSchema: {
-          name: z
-            .string()
-            .min(1)
-            .describe(
-              'Emoji name without surrounding colons, for example eyes or thumbsup',
-            ),
+          name: nonEmptyStringSchema.describe(
+            'Non-empty emoji name without surrounding colons, for example eyes or thumbsup',
+          ),
         },
         annotations: {
           readOnlyHint: false,
@@ -1632,16 +1670,12 @@ if (shouldRegisterChannelPostTool()) {
           .describe(
             'Slack channel ID, channel name, or Slack channel mention that contains the target message',
           ),
-        messageTs: z
-          .string()
-          .min(1)
-          .describe('Slack message timestamp for the message to react to'),
-        name: z
-          .string()
-          .min(1)
-          .describe(
-            'Slack emoji name without surrounding colons, for example eyes or white_check_mark',
-          ),
+        messageTs: nonEmptyStringSchema.describe(
+          'Non-empty Slack message timestamp for the message to react to',
+        ),
+        name: nonEmptyStringSchema.describe(
+          'Non-empty Slack emoji name without surrounding colons, for example eyes or white_check_mark',
+        ),
       },
       annotations: {
         readOnlyHint: false,
